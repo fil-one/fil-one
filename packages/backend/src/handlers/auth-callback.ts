@@ -84,11 +84,9 @@ async function baseHandler(
     refresh_token?: string;
   };
 
-  // FIL-112: while teardown is still deleting the Auth0 user, a deleted
-  // account's Auth0 SSO session can silently re-authenticate. Never mint
-  // session cookies for a tombstoned identity — without this the SPA loops
-  // forever: /me returns 401 ACCOUNT_DELETED, the client redirects to /login,
-  // SSO re-issues tokens, and the callback lands it back in the app.
+  // FIL-112: until teardown deletes the Auth0 user, SSO can silently
+  // re-authenticate a deleted account, looping the SPA between /login and a
+  // 401 ACCOUNT_DELETED /me. Never mint cookies for a tombstoned identity.
   if (await isTombstonedIdentity(id_token, domain, secrets.AUTH0_CLIENT_ID)) {
     return redirect(`${origin}/account-deleted`, [
       makeClearCookieHeader(OAUTH_STATE_COOKIE),
@@ -112,16 +110,13 @@ async function baseHandler(
 }
 
 /**
- * True when the token's sub maps to a tombstoned (deleted) identity row.
- * The signature is verified against the tenant JWKS before the sub is
- * trusted. Fails open on verification/DynamoDB errors: login must not gain
- * a hard dependency here — the check only ever adds a restriction, and the
- * auth middleware's own tombstone gate still backstops this path.
+ * True when the token's sub (signature-verified first) maps to a tombstoned
+ * identity row. Fails open on verify/DynamoDB errors so login gains no hard
+ * dependency here — the auth middleware's own tombstone gate backstops it.
  *
- * Eventually-consistent read — an accepted sub-second staleness window.
- * Resurrection is independently blocked by the `attribute_not_exists(pk)`
- * transact condition against the retained SUB# identity row in the auth
- * middleware's onboarding transaction (createNewUserAndOrg).
+ * Eventually-consistent read (accepted sub-second staleness); resurrection is
+ * independently blocked by the `attribute_not_exists(pk)` transact condition
+ * against the retained SUB# row in createNewUserAndOrg.
  */
 async function isTombstonedIdentity(
   idToken: string,

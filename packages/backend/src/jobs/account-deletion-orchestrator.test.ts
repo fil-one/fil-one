@@ -21,7 +21,7 @@ const lambdaMock = mockClient(LambdaClient);
 
 process.env.ACCOUNT_DELETION_WORKER_FUNCTION_NAME = 'account-deletion-worker';
 
-import { handler } from './account-deletion-reconciler.js';
+import { handler } from './account-deletion-orchestrator.js';
 
 function deletionRecord(orgId: string, overrides?: Record<string, unknown>) {
   const item: Record<string, unknown> = {
@@ -42,7 +42,7 @@ function deletionRecord(orgId: string, overrides?: Record<string, unknown>) {
   return marshall(item);
 }
 
-describe('account-deletion-reconciler', () => {
+describe('account-deletion-orchestrator', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
@@ -210,7 +210,7 @@ describe('account-deletion-reconciler', () => {
     try {
       await handler();
 
-      expect(logSpy).toHaveBeenCalledWith('[account-deletion-reconciler] Reconcile complete', {
+      expect(logSpy).toHaveBeenCalledWith('[account-deletion-orchestrator] Reconcile complete', {
         incomplete: 2,
         stale: 2,
         reinvoked: 1,

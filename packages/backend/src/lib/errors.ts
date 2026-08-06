@@ -70,11 +70,8 @@ export class TrialEntitlementError extends Error {
   }
 }
 
-// Thrown by the auth middleware when the authenticated sub's identity row is
-// tombstoned (`deleted: true`) after self-serve account deletion (FIL-112).
-// Callers translate it to a 401 ACCOUNT_DELETED with cleared cookies; it must
-// never fall through to the new-user creation path, which would silently
-// resurrect a deleted account into a fresh org.
+// Identity row is tombstoned (`deleted: true`) after account deletion (FIL-112).
+// Callers translate it to 401 ACCOUNT_DELETED with cleared cookies.
 export class AccountDeletedError extends Error {
   constructor(message = 'Account has been deleted', options?: ErrorOptions) {
     super(message, options);

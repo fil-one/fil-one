@@ -2,11 +2,10 @@ import { DELETION_CODE_TTL_MINUTES, Stage, senderAddress } from '@filone/shared'
 import { Resource } from 'sst';
 
 /**
- * Send the account-deletion verification code. Uses the SendGrid API directly
- * (all other product email is sent by Auth0 through the same SendGrid account
- * and sender, so no extra sender verification is needed). The SendGridApiKey
- * secret only exists on staging/production — on ephemeral dev stages the code
- * is logged instead so the flow stays testable.
+ * Send the account-deletion verification code. SendGrid direct: Auth0 already
+ * sends all other product email through the same account and sender, so no
+ * extra verification is needed. The secret only exists on staging/production —
+ * dev stages log the code instead so the flow stays testable.
  */
 export async function sendDeletionCodeEmail(params: {
   to: string;

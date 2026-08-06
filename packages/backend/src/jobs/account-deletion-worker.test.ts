@@ -26,7 +26,7 @@ describe('account-deletion-worker handler', () => {
     expect(mockRunAccountDeletion).not.toHaveBeenCalled();
   });
 
-  it('propagates teardown failures so the Lambda async retry / reconciler re-drives', async () => {
+  it('propagates teardown failures so the Lambda async retry / orchestrator re-drives', async () => {
     mockRunAccountDeletion.mockRejectedValue(new Error('stripe is down'));
 
     await expect(handler({ orgId: 'org-1' })).rejects.toThrow('stripe is down');

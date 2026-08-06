@@ -6,7 +6,7 @@ import type {
   Context,
 } from 'aws-lambda';
 import { GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
-import { jwtVerify, type createRemoteJWKSet } from 'jose';
+import { jwtVerify } from 'jose';
 import { Resource } from 'sst';
 import type { UserInfo } from '../lib/user-context.js';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
@@ -25,7 +25,12 @@ import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { deriveOrgName } from '../lib/suggest-org-name.js';
 import { ensureTrialEntitlement } from '../lib/trial-entitlement.js';
-import { exchangeAndVerifyRefreshToken, getJWKS, type NewTokens } from '../lib/token-refresh.js';
+import {
+  exchangeAndVerifyRefreshToken,
+  getJWKS,
+  type JWKS,
+  type NewTokens,
+} from '../lib/token-refresh.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -77,10 +82,7 @@ function unauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder().status(401).body<ErrorResponse>({ message: 'Unauthorized' }).build();
 }
 
-/**
- * 401 for tombstoned identities (FIL-112): the session's cookies are cleared
- * so the client stops presenting tokens for an account that no longer exists.
- */
+/** 401 for tombstoned identities (FIL-112); clears cookies to end the session. */
 function accountDeletedResponse(): APIGatewayProxyStructuredResultV2 {
   const builder = new ResponseBuilder().status(401).body<ErrorResponse>({
     message: 'Account has been deleted',
@@ -147,7 +149,7 @@ async function extractIdTokenClaims({
   issuer,
 }: {
   idToken: string | undefined;
-  jwks: ReturnType<typeof createRemoteJWKSet>;
+  jwks: JWKS;
   clientId: string;
   issuer: string;
 }): Promise<IdTokenClaims> {
@@ -234,14 +236,11 @@ async function resolveUserAndOrg(
     }),
   );
 
-  // Tombstoned identity (FIL-112 account deletion): reject before the
-  // userId/orgId check so a deleted user's still-valid tokens can neither
-  // operate on remnants nor fall through to createNewUserAndOrg below and
-  // resurrect the account as a fresh org.
-  // Eventually-consistent read — an accepted sub-second staleness window.
-  // Resurrection is independently blocked by the `attribute_not_exists(pk)`
-  // transact condition against the retained SUB# identity row in
-  // createNewUserAndOrg's onboarding transaction.
+  // Tombstoned identity (FIL-112): reject before the userId/orgId check so
+  // valid tokens can't fall through to createNewUserAndOrg. This read is
+  // eventually consistent (accepted sub-second staleness); resurrection is
+  // independently blocked by createNewUserAndOrg's `attribute_not_exists(pk)`
+  // transact condition against the retained SUB# row.
   if (result.Item?.deleted?.BOOL === true) {
     throw new AccountDeletedError();
   }
@@ -391,7 +390,7 @@ async function tryValidateAccessToken({
   request: AuthMiddlewareRequest;
   accessToken: string;
   idToken: string | undefined;
-  jwks: ReturnType<typeof createRemoteJWKSet>;
+  jwks: JWKS;
   audience: string;
   issuer: string;
   clientId: string;
@@ -412,8 +411,7 @@ async function tryValidateAccessToken({
     });
     return true;
   } catch (err) {
-    // Not a token problem — the identity is tombstoned. Let it surface so the
-    // before hook returns 401 ACCOUNT_DELETED instead of trying a refresh.
+    // Not a token problem — surface it instead of falling back to a refresh.
     if (err instanceof AccountDeletedError) throw err;
     console.warn(failureLabel, { error: err });
     return false;
@@ -454,8 +452,8 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
     try {
       return await authenticate(request);
     } catch (err) {
-      // Any auth path (access token, refresh exchange, fallback) that reaches
-      // a tombstoned identity ends the session here — no retry can succeed.
+      // Any auth path reaching a tombstoned identity ends the session — no
+      // retry can succeed.
       if (err instanceof AccountDeletedError) return accountDeletedResponse();
       throw err;
     }
@@ -572,10 +570,8 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
     )._forceTokenRefresh;
 
     if (forceRefresh && request.internal.refreshToken) {
-      // Same verification gate as the before hook: the minted access token's
-      // signature is checked before any cookie is set. A failed exchange or
-      // verification keeps the previous semantics — no fresh cookies, the
-      // handler response goes out unchanged.
+      // Same verification gate as the before hook; on failure no fresh cookies
+      // are set and the handler response goes out unchanged.
       const domain = process.env.AUTH0_DOMAIN!;
       const refreshed = await exchangeAndVerifyRefreshToken({
         refreshToken: request.internal.refreshToken,

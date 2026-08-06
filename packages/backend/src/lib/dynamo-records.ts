@@ -249,6 +249,9 @@ export const OrgDeletionStatus = {
 
 export type OrgDeletionStatusValue = (typeof OrgDeletionStatus)[keyof typeof OrgDeletionStatus];
 
+/** What started a teardown: the user confirming in-app, or Stripe deleting the customer. */
+export type OrgDeletionReason = 'self_serve' | 'stripe_customer_deleted';
+
 /** Snapshot of an org member captured when deletion is confirmed. */
 export interface OrgDeletionMember {
   userId: string;
@@ -286,7 +289,10 @@ export interface OrgDeletionRecord {
    */
   status: string;
   requestedAt: string; // ISO-8601
+  /** Confirming admin, or the `stripe-webhook` sentinel when Stripe triggered it. */
   requestedByUserId: string;
+  /** What triggered the teardown; absent on records written before FIL-112's webhook path. */
+  reason?: OrgDeletionReason;
   members: OrgDeletionMember[];
   /**
    * Region-generic tenant snapshot: orchestrator id → tenant id for every
@@ -295,20 +301,11 @@ export interface OrgDeletionRecord {
    * tenant-id shape written going forward.
    */
   tenantIds?: Record<string, string>;
-  /** @deprecated Legacy snapshot field, read for in-flight records only — no longer written. */
-  auroraTenantId?: string;
-  /** @deprecated Legacy snapshot field, read for in-flight records only — no longer written. */
-  fthTenantId?: string;
-  /** @deprecated Legacy single-customer snapshot (first member's), still written for in-flight readers — prefer {@link billingCustomers}. */
-  stripeCustomerId?: string;
-  /** @deprecated Legacy single-customer snapshot (first member's), still written for in-flight readers — prefer {@link billingCustomers}. */
-  subscriptionId?: string;
   /**
    * Every member billing customer found at confirm time. One entry per org
    * when the one-customer-per-org invariant holds; if it is ever violated,
    * the extras' Stripe pointers must not be destroyed by the CUSTOMER# purge
-   * — teardown cancels/redacts each entry. Absent on legacy records, whose
-   * single top-level fields are read instead.
+   * — teardown cancels/redacts each entry.
    */
   billingCustomers?: OrgDeletionBillingCustomer[];
   /**
@@ -317,7 +314,7 @@ export interface OrgDeletionRecord {
    * the same job instead of creating duplicates.
    */
   stripeRedactionJobId?: string;
-  /** Worker invocations so far; the reconciler alerts past a threshold. */
+  /** Worker invocations so far; the orchestrator alerts past a threshold. */
   attemptCount: number;
   updatedAt: string; // ISO-8601
 }

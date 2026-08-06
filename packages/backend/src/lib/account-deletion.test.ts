@@ -44,13 +44,26 @@ vi.mock('./service-orchestrator-registry.js', () => ({
 }));
 
 const mockSubscriptionsCancel = vi.fn();
+const mockSubscriptionsList = vi.fn();
 const mockRawRequest = vi.fn();
 vi.mock('./stripe-client.js', () => ({
   getStripeClient: () => ({
-    subscriptions: { cancel: mockSubscriptionsCancel },
+    subscriptions: {
+      cancel: mockSubscriptionsCancel,
+      list: (...args: unknown[]) => mockSubscriptionsList(...args),
+    },
     rawRequest: (...args: unknown[]) => mockRawRequest(...args),
   }),
 }));
+
+/** Stripe's auto-paginating list result, as the SDK returns it to `for await`. */
+function stripeList(subscriptions: { id: string; status: string }[]) {
+  return {
+    async *[Symbol.asyncIterator]() {
+      yield* subscriptions;
+    },
+  };
+}
 
 const mockGetOrgProfile = vi.fn();
 vi.mock('./org-profile.js', () => ({
@@ -71,11 +84,11 @@ const ddbMock = mockClient(DynamoDBClient);
 process.env.FILONE_STAGE = 'test';
 
 import {
-  assertPurgeTargetAllowed,
+  assertPurgeablePk,
   batchDelete,
   runAccountDeletion,
-  BILLING_PURGE_ALLOWLIST,
-  USER_INFO_PURGE_ALLOWLIST,
+  PURGEABLE_BILLING_PK_PREFIXES,
+  PURGEABLE_USER_INFO_PK_PREFIXES,
 } from './account-deletion.js';
 import { OrgDeletionStatus } from './dynamo-records.js';
 
@@ -89,9 +102,8 @@ function deletionItem(status: string, overrides?: Record<string, unknown>) {
     requestedAt: '2026-07-10T00:00:00.000Z',
     requestedByUserId: 'user-1',
     members: [{ userId: 'user-1', sub: 'auth0|sub-1' }],
-    auroraTenantId: 'aurora-t-1',
-    stripeCustomerId: 'cus_1',
-    subscriptionId: 'sub_1',
+    tenantIds: { aurora: 'aurora-t-1' },
+    billingCustomers: [{ stripeCustomerId: 'cus_1', subscriptionId: 'sub_1' }],
     attemptCount: 0,
     updatedAt: '2026-07-10T00:00:00.000Z',
     ...overrides,
@@ -121,27 +133,23 @@ function setupHappyMocks(status: string) {
   mockGetRegionsWithTenantIdsForOrg.mockResolvedValue([]);
   mockDeleteAuth0User.mockResolvedValue(undefined);
   mockSubscriptionsCancel.mockResolvedValue({});
+  mockSubscriptionsList.mockImplementation(({ customer }: { customer: string }) =>
+    stripeList([{ id: `sub_${customer.slice('cus_'.length)}`, status: 'active' }]),
+  );
   mockDropIndex.mockResolvedValue(undefined);
   mockDeleteTenant.mockResolvedValue(undefined);
   stubRedactionJob();
 }
 
-/**
- * Happy-path Redaction Jobs API: create → validate → GET reports `ready` →
- * run. Instant validation, so a single teardown pass completes redaction.
- */
-function stubRedactionJob(statusOnGet = 'ready') {
+/** Happy-path Redaction Jobs API — the full lifecycle lives in stripe-redaction.test.ts. */
+function stubRedactionJob() {
   mockRawRequest.mockImplementation((method: string, path: string) => {
     if (method === 'POST' && path === '/v1/privacy/redaction_jobs') {
       return Promise.resolve({ id: 'prj_1', status: 'created' });
     }
-    if (method === 'GET') return Promise.resolve({ id: 'prj_1', status: statusOnGet });
+    if (method === 'GET') return Promise.resolve({ id: 'prj_1', status: 'ready' });
     return Promise.resolve({ id: 'prj_1' });
   });
-}
-
-function rawRequestCalls() {
-  return mockRawRequest.mock.calls.map(([method, path]) => `${method} ${path}`);
 }
 
 /** UpdateItem calls that write the terminal DONE status. */
@@ -151,43 +159,43 @@ function doneWrites() {
     .filter((c) => c.args[0].input.ExpressionAttributeValues?.[':done']?.S === 'DONE');
 }
 
-describe('assertPurgeTargetAllowed (purge blast-radius guard)', () => {
+describe('assertPurgeablePk (purge blast-radius guard)', () => {
   it('refuses to delete the EMAIL_NORM# trial-claim record, which must survive account deletion (FIL-422)', () => {
     expect(() =>
-      assertPurgeTargetAllowed('EMAIL_NORM#user@gmail.com', USER_INFO_PURGE_ALLOWLIST),
-    ).toThrow(/outside the allowlist/);
+      assertPurgeablePk('EMAIL_NORM#user@gmail.com', PURGEABLE_USER_INFO_PK_PREFIXES),
+    ).toThrow(/outside the purgeable prefixes/);
   });
 
   it('permits deletion of keys under an allowlisted prefix', () => {
     for (const pk of ['ORG#abc', 'USER#u-1', 'SUB#auth0|x', 'RAGKEYHASH#deadbeef']) {
-      expect(() => assertPurgeTargetAllowed(pk, USER_INFO_PURGE_ALLOWLIST)).not.toThrow();
+      expect(() => assertPurgeablePk(pk, PURGEABLE_USER_INFO_PK_PREFIXES)).not.toThrow();
     }
   });
 
   it('is not fooled by prefix collisions: ORGANIZATION# is not ORG#', () => {
-    // The allowlist prefixes end in '#' precisely so a longer key family
-    // sharing the leading letters can never slip through the guard.
-    expect(() => assertPurgeTargetAllowed('ORGANIZATION#abc', USER_INFO_PURGE_ALLOWLIST)).toThrow(
-      /outside the allowlist/,
+    // The prefixes end in '#' precisely so a longer key family sharing the
+    // leading letters can never slip through the guard.
+    expect(() => assertPurgeablePk('ORGANIZATION#abc', PURGEABLE_USER_INFO_PK_PREFIXES)).toThrow(
+      /outside the purgeable prefixes/,
     );
   });
 
   it('billing allowlist: permits CUSTOMER# and DELETION_CHALLENGE# rows only', () => {
-    expect(() => assertPurgeTargetAllowed('CUSTOMER#u-1', BILLING_PURGE_ALLOWLIST)).not.toThrow();
+    expect(() => assertPurgeablePk('CUSTOMER#u-1', PURGEABLE_BILLING_PK_PREFIXES)).not.toThrow();
     expect(() =>
-      assertPurgeTargetAllowed('DELETION_CHALLENGE#org-1', BILLING_PURGE_ALLOWLIST),
+      assertPurgeablePk('DELETION_CHALLENGE#org-1', PURGEABLE_BILLING_PK_PREFIXES),
     ).not.toThrow();
   });
 
   it('billing allowlist: refuses EMAIL_NORM# (trial claims) and ORG# tombstones, which must outlive the account', () => {
     expect(() =>
-      assertPurgeTargetAllowed('EMAIL_NORM#user@gmail.com', BILLING_PURGE_ALLOWLIST),
-    ).toThrow(/outside the allowlist/);
-    expect(() => assertPurgeTargetAllowed('ORG_TOMBSTONE#org-1', BILLING_PURGE_ALLOWLIST)).toThrow(
-      /outside the allowlist/,
+      assertPurgeablePk('EMAIL_NORM#user@gmail.com', PURGEABLE_BILLING_PK_PREFIXES),
+    ).toThrow(/outside the purgeable prefixes/);
+    expect(() => assertPurgeablePk('ORG_TOMBSTONE#org-1', PURGEABLE_BILLING_PK_PREFIXES)).toThrow(
+      /outside the purgeable prefixes/,
     );
-    expect(() => assertPurgeTargetAllowed('ORG#org-1', BILLING_PURGE_ALLOWLIST)).toThrow(
-      /outside the allowlist/,
+    expect(() => assertPurgeablePk('ORG#org-1', PURGEABLE_BILLING_PK_PREFIXES)).toThrow(
+      /outside the purgeable prefixes/,
     );
   });
 });
@@ -218,7 +226,7 @@ describe('batchDelete', () => {
     expect(sends[1].args[0].input.RequestItems!.TestTable[0].DeleteRequest!.Key!.sk.S).toBe(KEY.sk);
   });
 
-  it('caps the retries and throws on exhaustion so the reconciler re-drives', async () => {
+  it('caps the retries and throws on exhaustion so the orchestrator re-drives', async () => {
     ddbMock.on(BatchWriteItemCommand).resolves(unprocessed);
 
     await expect(batchDelete('TestTable', [KEY], { retries: 2, minTimeout: 0 })).rejects.toThrow(
@@ -285,27 +293,16 @@ describe('runAccountDeletion', () => {
     expect(tombstone.pk.S).toBe(`ORG_TOMBSTONE#${ORG_ID}`);
     expect(tombstone.stripeCustomerId?.S).toBe('cus_1');
     expect(tombstone.ttl).toBeUndefined();
+    expect(tombstone.stripeCustomerIds).toBeUndefined();
     expect(Object.keys(tombstone)).not.toContain('members');
 
-    // Customer PII redacted after the cancel: create → validate → run, with
-    // the job id persisted so a retry advances this job rather than minting
-    // a duplicate.
+    // Redaction handed the snapshotted customers to lib/stripe-redaction.ts,
+    // whose job lifecycle is covered by its own suite.
     expect(mockRawRequest).toHaveBeenCalledWith('POST', '/v1/privacy/redaction_jobs', {
       objects: { customers: ['cus_1'] },
     });
-    expect(rawRequestCalls()).toEqual([
-      'POST /v1/privacy/redaction_jobs',
-      'POST /v1/privacy/redaction_jobs/prj_1/validate',
-      'GET /v1/privacy/redaction_jobs/prj_1',
-      'POST /v1/privacy/redaction_jobs/prj_1/run',
-    ]);
-    const jobIdWrites = ddbMock
-      .commandCalls(UpdateItemCommand)
-      .filter((c) => c.args[0].input.UpdateExpression?.includes('stripeRedactionJobId'));
-    expect(jobIdWrites).toHaveLength(1);
-    expect(jobIdWrites[0].args[0].input.ExpressionAttributeValues?.[':jobId']?.S).toBe('prj_1');
 
-    // attemptCount bumped for the reconciler's stuck gauge.
+    // attemptCount bumped for the orchestrator's stuck gauge.
     const bumps = ddbMock
       .commandCalls(UpdateItemCommand)
       .filter((c) => c.args[0].input.UpdateExpression?.includes('attemptCount'));
@@ -375,62 +372,6 @@ describe('runAccountDeletion', () => {
     expect(doneWrites()).toHaveLength(1);
   });
 
-  it('leaves a not-yet-ready redaction job pending (record stays non-DONE) and advances it on re-entry without re-creating', async () => {
-    setupHappyMocks(OrgDeletionStatus.Pending);
-    // Validation still running when this pass checks the job.
-    stubRedactionJob('validating');
-
-    const err = (await runAccountDeletion(ORG_ID).catch((e: unknown) => e)) as AggregateError;
-    expect(err).toBeInstanceOf(AggregateError);
-    expect(err.errors.map(String).join('\n')).toMatch(/not ready yet/);
-    expect(doneWrites()).toHaveLength(0);
-
-    // Re-entry: the record now carries the persisted job id — the job is
-    // fetched and run, never re-created.
-    ddbMock
-      .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
-      .resolves({
-        Item: deletionItem(OrgDeletionStatus.Pending, { stripeRedactionJobId: 'prj_1' }),
-      });
-    mockRawRequest.mockClear();
-    stubRedactionJob('ready');
-
-    await runAccountDeletion(ORG_ID);
-
-    expect(rawRequestCalls()).toEqual([
-      'GET /v1/privacy/redaction_jobs/prj_1',
-      'POST /v1/privacy/redaction_jobs/prj_1/run',
-    ]);
-    expect(doneWrites()).toHaveLength(1);
-  });
-
-  it('treats an already redacting/succeeded job as done on re-entry', async () => {
-    setupHappyMocks(OrgDeletionStatus.Pending);
-    ddbMock
-      .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
-      .resolves({
-        Item: deletionItem(OrgDeletionStatus.Pending, { stripeRedactionJobId: 'prj_1' }),
-      });
-    stubRedactionJob('redacting');
-
-    await runAccountDeletion(ORG_ID);
-
-    expect(rawRequestCalls()).toEqual(['GET /v1/privacy/redaction_jobs/prj_1']);
-    expect(doneWrites()).toHaveLength(1);
-  });
-
-  it('tolerates a missing or already-redacted customer at job creation', async () => {
-    setupHappyMocks(OrgDeletionStatus.Pending);
-    mockRawRequest.mockRejectedValue(
-      Object.assign(new Error('No such customer'), { code: 'resource_missing' }),
-    );
-
-    await runAccountDeletion(ORG_ID);
-
-    expect(rawRequestCalls()).toEqual(['POST /v1/privacy/redaction_jobs']);
-    expect(doneWrites()).toHaveLength(1);
-  });
-
   it('re-applies the deletion fences at teardown start (confirm handler may have crashed before writing them)', async () => {
     setupHappyMocks(OrgDeletionStatus.Pending);
 
@@ -484,7 +425,7 @@ describe('runAccountDeletion', () => {
     expect(doneWrites()).toHaveLength(1);
   });
 
-  it('touches updatedAt on every attemptCount bump so a live worker never looks stale to the reconciler', async () => {
+  it('touches updatedAt on every attemptCount bump so a live worker never looks stale to the orchestrator', async () => {
     setupHappyMocks(OrgDeletionStatus.Pending);
 
     await runAccountDeletion(ORG_ID);
@@ -497,152 +438,18 @@ describe('runAccountDeletion', () => {
     expect(bumps[0].args[0].input.ExpressionAttributeValues?.[':now']?.S).toBeDefined();
   });
 
-  it('persists the redaction job id conditionally and defers to a concurrently stored id', async () => {
-    setupHappyMocks(OrgDeletionStatus.Pending);
-    // Initial record read: no job id. Re-read after the conditional failure:
-    // another worker has stored prj_stored in the meantime.
-    ddbMock
-      .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
-      .resolvesOnce({ Item: deletionItem(OrgDeletionStatus.Pending) })
-      .resolves({
-        Item: deletionItem(OrgDeletionStatus.Pending, { stripeRedactionJobId: 'prj_stored' }),
-      });
-    ddbMock
-      .on(UpdateItemCommand, {
-        ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(stripeRedactionJobId)',
-      })
-      .rejects(new ConditionalCheckFailedException({ message: 'exists', $metadata: {} }));
-    mockRawRequest.mockImplementation((method: string, path: string) => {
-      if (method === 'POST' && path === '/v1/privacy/redaction_jobs') {
-        return Promise.resolve({ id: 'prj_mine', status: 'created' });
-      }
-      if (method === 'GET') return Promise.resolve({ id: 'prj_stored', status: 'ready' });
-      return Promise.resolve({ id: 'prj_stored' });
-    });
-
-    await runAccountDeletion(ORG_ID);
-
-    // The losing worker's own job (prj_mine) is never validated or driven —
-    // the stored job's lifecycle is advanced instead.
-    expect(rawRequestCalls()).toEqual([
-      'POST /v1/privacy/redaction_jobs',
-      'GET /v1/privacy/redaction_jobs/prj_stored',
-      'POST /v1/privacy/redaction_jobs/prj_stored/run',
-    ]);
-    expect(doneWrites()).toHaveLength(1);
-  });
-
-  it('writes the redaction job id with an attribute_not_exists condition', async () => {
-    setupHappyMocks(OrgDeletionStatus.Pending);
-
-    await runAccountDeletion(ORG_ID);
-
-    const jobIdWrites = ddbMock
-      .commandCalls(UpdateItemCommand)
-      .filter((c) => c.args[0].input.UpdateExpression?.includes('stripeRedactionJobId'));
-    expect(jobIdWrites).toHaveLength(1);
-    expect(jobIdWrites[0].args[0].input.ConditionExpression).toBe(
-      'attribute_exists(pk) AND attribute_not_exists(stripeRedactionJobId)',
-    );
-  });
-
-  it('recovers the existing redaction job on an already-in-a-redaction-job conflict instead of skipping', async () => {
-    setupHappyMocks(OrgDeletionStatus.Pending);
-    // A previous pass created a job but crashed before persisting its id.
-    mockRawRequest.mockImplementation((method: string, path: string) => {
-      if (method === 'POST' && path === '/v1/privacy/redaction_jobs') {
-        return Promise.reject(
-          Object.assign(new Error('Customer cus_1 is already included in a redaction job.'), {
-            type: 'invalid_request_error',
-          }),
-        );
-      }
-      if (method === 'GET' && path === '/v1/privacy/redaction_jobs') {
-        return Promise.resolve({
-          data: [
-            { id: 'prj_dead', status: 'canceled', objects: { customers: ['cus_1'] } },
-            { id: 'prj_other', status: 'ready', objects: { customers: ['cus_9'] } },
-            { id: 'prj_live', status: 'ready', objects: { customers: ['cus_1'] } },
-          ],
-        });
-      }
-      if (method === 'GET') return Promise.resolve({ id: 'prj_live', status: 'ready' });
-      return Promise.resolve({ id: 'prj_live' });
-    });
-
-    await runAccountDeletion(ORG_ID);
-
-    // The live job containing the customer is recovered (terminal/other-
-    // customer jobs skipped), persisted, and driven to run.
-    expect(rawRequestCalls()).toEqual([
-      'POST /v1/privacy/redaction_jobs',
-      'GET /v1/privacy/redaction_jobs',
-      'GET /v1/privacy/redaction_jobs/prj_live',
-      'POST /v1/privacy/redaction_jobs/prj_live/run',
-    ]);
-    const jobIdWrites = ddbMock
-      .commandCalls(UpdateItemCommand)
-      .filter((c) => c.args[0].input.UpdateExpression?.includes('stripeRedactionJobId'));
-    expect(jobIdWrites).toHaveLength(1);
-    expect(jobIdWrites[0].args[0].input.ExpressionAttributeValues?.[':jobId']?.S).toBe('prj_live');
-    expect(doneWrites()).toHaveLength(1);
-  });
-
-  it('stays non-DONE when the conflicting redaction job cannot be found in the list', async () => {
-    setupHappyMocks(OrgDeletionStatus.Pending);
-    mockRawRequest.mockImplementation((method: string, path: string) => {
-      if (method === 'POST' && path === '/v1/privacy/redaction_jobs') {
-        return Promise.reject(new Error('Customer cus_1 is already included in a redaction job.'));
-      }
-      return Promise.resolve({ data: [] });
-    });
-
-    const err = (await runAccountDeletion(ORG_ID).catch((e: unknown) => e)) as AggregateError;
-    expect(err).toBeInstanceOf(AggregateError);
-    expect(err.errors.map(String).join('\n')).toMatch(/no live job containing them was found/);
-    expect(doneWrites()).toHaveLength(0);
-  });
-
-  it('no longer treats a message-only "already redacted" error as success (must be resource_missing)', async () => {
-    setupHappyMocks(OrgDeletionStatus.Pending);
-    // No Stripe error code — message sniffing alone must not count as done.
-    mockRawRequest.mockRejectedValue(new Error('This customer was already redacted elsewhere'));
-
-    const err = (await runAccountDeletion(ORG_ID).catch((e: unknown) => e)) as AggregateError;
-    expect(err).toBeInstanceOf(AggregateError);
-    expect(doneWrites()).toHaveLength(0);
-  });
-
   it('skips redaction when the snapshot has no Stripe customer', async () => {
     setupHappyMocks(OrgDeletionStatus.Pending);
     ddbMock
       .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
       .resolves({
-        Item: deletionItem(OrgDeletionStatus.Pending, {
-          stripeCustomerId: undefined,
-          subscriptionId: undefined,
-        }),
+        Item: deletionItem(OrgDeletionStatus.Pending, { billingCustomers: undefined }),
       });
 
     await runAccountDeletion(ORG_ID);
 
     expect(mockRawRequest).not.toHaveBeenCalled();
     expect(doneWrites()).toHaveLength(1);
-  });
-
-  it('surfaces a failed redaction job so the stuck gauge catches it', async () => {
-    setupHappyMocks(OrgDeletionStatus.Pending);
-    ddbMock
-      .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
-      .resolves({
-        Item: deletionItem(OrgDeletionStatus.Pending, { stripeRedactionJobId: 'prj_1' }),
-      });
-    stubRedactionJob('failed');
-
-    const err = (await runAccountDeletion(ORG_ID).catch((e: unknown) => e)) as AggregateError;
-    expect(err).toBeInstanceOf(AggregateError);
-    expect(err.errors.map(String).join('\n')).toMatch(/unexpected status "failed"/);
-    expect(doneWrites()).toHaveLength(0);
   });
 
   it('cancels and redacts EVERY snapshotted billing customer, not just the first', async () => {
@@ -676,20 +483,64 @@ describe('runAccountDeletion', () => {
     expect(doneWrites()).toHaveLength(1);
   });
 
-  it('falls back to the legacy single billing fields on records without billingCustomers', async () => {
-    // deletionItem carries only top-level stripeCustomerId/subscriptionId.
+  it('cancels subscriptions Stripe reports live, including ones created after the snapshot', async () => {
     setupHappyMocks(OrgDeletionStatus.Pending);
+    mockSubscriptionsList.mockReturnValue(
+      stripeList([
+        { id: 'sub_1', status: 'active' },
+        { id: 'sub_late', status: 'trialing' },
+        { id: 'sub_gone', status: 'canceled' },
+        { id: 'sub_dead', status: 'incomplete_expired' },
+      ]),
+    );
 
     await runAccountDeletion(ORG_ID);
 
-    expect(mockSubscriptionsCancel).toHaveBeenCalledWith('sub_1');
-    expect(mockRawRequest).toHaveBeenCalledWith('POST', '/v1/privacy/redaction_jobs', {
-      objects: { customers: ['cus_1'] },
+    expect(mockSubscriptionsList).toHaveBeenCalledWith({
+      customer: 'cus_1',
+      status: 'all',
+      limit: 100,
     });
-    const tombstone = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
-    expect(tombstone.stripeCustomerId?.S).toBe('cus_1');
-    expect(tombstone.stripeCustomerIds).toBeUndefined();
+    expect(mockSubscriptionsCancel.mock.calls.flat()).toEqual(['sub_1', 'sub_late']);
+  });
+
+  it('falls back to the snapshotted subscriptionId when the entry has no customer id', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
+      .resolves({
+        Item: deletionItem(OrgDeletionStatus.Pending, {
+          billingCustomers: [{ subscriptionId: 'sub_orphan' }],
+        }),
+      });
+
+    await runAccountDeletion(ORG_ID);
+
+    expect(mockSubscriptionsList).not.toHaveBeenCalled();
+    expect(mockSubscriptionsCancel).toHaveBeenCalledWith('sub_orphan');
+  });
+
+  it('treats a deleted Stripe customer as nothing to cancel (customer.deleted trigger)', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    mockSubscriptionsList.mockImplementation(() => {
+      throw Object.assign(new Error('No such customer'), { code: 'resource_missing' });
+    });
+
+    await runAccountDeletion(ORG_ID);
+
+    expect(mockSubscriptionsCancel).not.toHaveBeenCalled();
     expect(doneWrites()).toHaveLength(1);
+  });
+
+  it('propagates a non-resource_missing subscriptions.list failure', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    mockSubscriptionsList.mockImplementation(() => {
+      throw new Error('stripe is down');
+    });
+
+    const err = (await runAccountDeletion(ORG_ID).catch((e: unknown) => e)) as AggregateError;
+    expect(err).toBeInstanceOf(AggregateError);
+    expect(doneWrites()).toHaveLength(0);
   });
 
   it('treats already-canceled Stripe subscriptions as success', async () => {
@@ -781,16 +632,6 @@ describe('runAccountDeletion', () => {
     await runAccountDeletion(ORG_ID);
 
     expect(mockDeleteTenant).toHaveBeenCalledWith('snap-t-9');
-  });
-
-  it('falls back to the legacy per-orchestrator snapshot fields for in-flight records', async () => {
-    setupHappyMocks(OrgDeletionStatus.Pending);
-    mockGetOrgProfile.mockResolvedValue(undefined);
-    // deletionItem carries legacy auroraTenantId: 'aurora-t-1' and no tenantIds.
-
-    await runAccountDeletion(ORG_ID);
-
-    expect(mockDeleteTenant).toHaveBeenCalledWith('aurora-t-1');
   });
 
   it('purges the RAGKEYHASH lookup rows (credential-hash residue) before the ORG# partition delete', async () => {

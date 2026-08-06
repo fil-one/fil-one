@@ -1,11 +1,13 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { getAuthSecrets } from './auth-secrets.js';
 
+export type JWKS = ReturnType<typeof createRemoteJWKSet>;
+
 // Module-level JWKS cache — reused across Lambda warm starts. Shared by the
 // auth middleware and the auth-callback handler.
-let cachedJWKS: ReturnType<typeof createRemoteJWKSet> | null = null;
+let cachedJWKS: JWKS | null = null;
 
-export function getJWKS(domain: string): ReturnType<typeof createRemoteJWKSet> {
+export function getJWKS(domain: string): JWKS {
   if (cachedJWKS) return cachedJWKS;
   cachedJWKS = createRemoteJWKSet(new URL(`https://${domain}/.well-known/jwks.json`));
   return cachedJWKS;
@@ -54,12 +56,9 @@ export async function exchangeRefreshToken(refreshToken: string): Promise<NewTok
 }
 
 /**
- * Exchange the refresh token AND verify the minted access token's signature
- * before its sub is trusted. The exchange response came from Auth0's token
- * endpoint over TLS, but decoded-only claims are never trusted — the same
- * signature gate the auth middleware applies to cookie-supplied tokens. A
- * verification failure is treated like a failed refresh (returns null, no
- * cookies are minted) rather than a 5xx.
+ * Exchange the refresh token and verify the minted access token's signature
+ * before trusting its sub — decoded-only claims are never trusted, even from
+ * Auth0's token endpoint. Verification failure is treated as a failed refresh.
  */
 export async function exchangeAndVerifyRefreshToken({
   refreshToken,
@@ -68,7 +67,7 @@ export async function exchangeAndVerifyRefreshToken({
   issuer,
 }: {
   refreshToken: string;
-  jwks: ReturnType<typeof createRemoteJWKSet>;
+  jwks: JWKS;
   audience: string;
   issuer: string;
 }): Promise<{ tokens: NewTokens; sub: string } | null> {

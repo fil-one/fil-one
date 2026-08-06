@@ -202,20 +202,17 @@ export interface ServiceOrchestrator {
   updateTenantStatus(tenantId: string, status: TenantStatus): Promise<void>;
 
   /**
-   * Permanently deletes the org's tenant on this orchestrator — every
-   * upstream resource it owns (buckets, objects, access keys) plus the
-   * FilOne-held tenant secrets in SSM. Implementations first force the
-   * tenant to `disabled` when the upstream API requires it, and MUST be
-   * idempotent: an already-deleted tenant (or already-deleted secret) is
-   * success, so account-deletion re-runs converge. That idempotency must come
-   * from the upstream's own repeat-delete success, never from tolerating a
-   * not-found error: a reference that fails to resolve is not evidence the
-   * tenant is gone — it is equally a misrouted baseUrl or a wrong-scope token,
-   * for which every reference fails — so implementations MUST fail rather than
-   * fall through to deleting the FilOne-held secrets. Orchestrators without a
-   * remote tenant-deletion API perform the strongest teardown available
-   * (disable + secret deletion) and log the required manual follow-up.
-   * Only the account-deletion teardown may call this.
+   * Permanently deletes the org's tenant — every upstream resource it owns
+   * (buckets, objects, access keys) plus the FilOne-held secrets in SSM. Only
+   * the account-deletion teardown may call this.
+   *
+   * Implementations force the tenant to `disabled` first when the upstream
+   * requires it, and MUST take their idempotency from the upstream's own
+   * repeat-delete success — never by tolerating a not-found, which signals an
+   * unresolvable ref rather than a deleted tenant. Orchestrators with no
+   * remote delete perform the strongest teardown available and log the manual
+   * follow-up. Probe evidence:
+   * `docs/architectural-decisions/2026-08-tenant-deletion-semantics.md`.
    */
   deleteTenant(tenantId: string): Promise<void>;
 

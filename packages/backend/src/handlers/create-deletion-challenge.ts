@@ -17,10 +17,8 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { requireMfaIfEnrolled } from '../middleware/require-mfa.js';
 
 /**
- * Issue the email verification challenge for account deletion (FIL-112).
- * No subscription guard: users in grace/canceled state must still be able
- * to delete their account. authMiddleware's verified-email default holds —
- * the code is only ever sent to the verified address.
+ * Issue the email verification challenge for account deletion (FIL-112). No
+ * subscription guard — grace/canceled users must still be able to delete.
  */
 export async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { orgId, userId, email } = getUserInfo(event);
@@ -31,8 +29,8 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
       .build();
   }
 
-  // Same admin gate as the confirm endpoint — a non-admin must not be able
-  // to trigger deletion codes at the admins' inboxes.
+  // Same admin gate as the confirm endpoint — a non-admin must not be able to
+  // trigger deletion codes at the admins' inboxes.
   if (!(await isOrgAdmin(orgId, userId))) {
     return new ResponseBuilder()
       .status(403)
@@ -40,8 +38,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
       .build();
   }
 
-  // Deletion already confirmed — idempotent success, no new code is issued
-  // or emailed. The client shows the in-progress state instead of a code step.
+  // Already confirmed — idempotent success, no new code issued or emailed.
   if (await readDeletionRecord(orgId)) {
     return new ResponseBuilder()
       .status(200)

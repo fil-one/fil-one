@@ -1,32 +1,14 @@
-import {
-  ConditionalCheckFailedException,
-  GetItemCommand,
-  PutItemCommand,
-  QueryCommand,
-  type AttributeValue,
-} from '@aws-sdk/client-dynamodb';
-import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
-import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { DeleteAccountResponse, ErrorResponse } from '@filone/shared';
 import { ApiErrorCode, CSRF_COOKIE_NAME, DeleteAccountSchema } from '@filone/shared';
-import { Resource } from 'sst';
-import { getAuthSecrets } from '../lib/auth-secrets.js';
+import { startAccountDeletion } from '../lib/account-deletion-start.js';
+import { revokeRefreshToken } from '../lib/auth0-revoke.js';
 import { parseCookies } from '../lib/cookies.js';
-import { getDynamoClient } from '../lib/ddb-client.js';
 import { verifyDeletionChallenge } from '../lib/deletion-challenge.js';
-import { applyDeletionGuards } from '../lib/deletion-guards.js';
-import {
-  DeletionKeys,
-  OrgDeletionStatus,
-  type OrgDeletionMember,
-  type OrgDeletionRecord,
-} from '../lib/dynamo-records.js';
 import { isOrgAdmin } from '../lib/org-membership.js';
 import { getOrgProfile } from '../lib/org-profile.js';
-import { getRegionsWithTenantIds } from '../lib/region-helpers.js';
 import { COOKIE_NAMES, makeClearAuthCookies, ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -34,16 +16,12 @@ import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { requireMfaIfEnrolled } from '../middleware/require-mfa.js';
-import type { AccountDeletionWorkerPayload } from '../jobs/account-deletion-worker.js';
-
-const dynamo = getDynamoClient();
-const lambda = new LambdaClient({});
 
 /**
  * Confirm account deletion (FIL-112). Validates the typed org name and the
  * emailed verification code, snapshots everything the async teardown worker
  * needs, kills every member session, and responds success immediately — the
- * worker (plus the reconciler cron) finishes the teardown in the background.
+ * worker (plus the orchestrator cron) finishes the teardown in the background.
  * No subscription guard: grace/canceled users must still be able to delete.
  */
 export async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
@@ -83,161 +61,16 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     );
   }
 
-  const members = await snapshotMembers(orgId);
-  const billing = await snapshotBilling(members);
+  await startAccountDeletion(orgId, { requestedByUserId: userId, reason: 'self_serve' });
 
-  // Region-generic tenant snapshot: one entry per orchestrator with a tenant
-  // id on the profile, keyed by orchestrator id, derived from the profile
-  // already fetched above. Raw resolution (not readiness-gated): a tenant
-  // whose setup is still mid-flight must be torn down too, so the snapshot
-  // has to see it. A new region added to the registry is picked up here
-  // automatically.
-  const tenantIds = Object.fromEntries(
-    getRegionsWithTenantIds(orgProfile).map(({ orchestrator, tenantId }) => [
-      orchestrator.id,
-      tenantId,
-    ]),
+  // Best-effort: the worker deletes the Auth0 user shortly after, which
+  // invalidates every other device's refresh token too.
+  await revokeRefreshToken(
+    parseCookies(event.cookies)[COOKIE_NAMES.REFRESH_TOKEN],
+    '[delete-account]',
   );
-
-  const record: OrgDeletionRecord = {
-    pk: DeletionKeys.deletionPk(orgId),
-    sk: DeletionKeys.deletionSk(),
-    status: OrgDeletionStatus.Pending,
-    requestedAt: new Date().toISOString(),
-    requestedByUserId: userId,
-    members,
-    tenantIds,
-    ...billing,
-    attemptCount: 0,
-    updatedAt: new Date().toISOString(),
-  };
-
-  try {
-    await dynamo.send(
-      new PutItemCommand({
-        TableName: Resource.UserInfoTable.name,
-        Item: marshall(record),
-        ConditionExpression: 'attribute_not_exists(pk)',
-      }),
-    );
-  } catch (err) {
-    // Deletion already confirmed earlier — idempotent re-confirm. The guards
-    // below re-apply harmlessly and the worker invoke resumes the teardown.
-    if (!(err instanceof ConditionalCheckFailedException)) throw err;
-  }
-  await applyDeletionGuards(orgId, members);
-
-  await revokeRefreshToken(event);
-  await invokeWorker(orgId);
 
   return successResponse();
-}
-
-/**
- * MEMBER# rows → {userId, sub} pairs (sub resolved via USER#/PROFILE). The
- * query is paginated — a silently truncated member list would leave the
- * missing members' Auth0 users alive after teardown — and the per-member
- * profile reads run in parallel.
- */
-async function snapshotMembers(orgId: string): Promise<OrgDeletionMember[]> {
-  const userIds: string[] = [];
-  let lastEvaluatedKey: Record<string, AttributeValue> | undefined;
-  do {
-    const result = await dynamo.send(
-      new QueryCommand({
-        TableName: Resource.UserInfoTable.name,
-        KeyConditionExpression: 'pk = :pk AND begins_with(sk, :member)',
-        ExpressionAttributeValues: marshall({ ':pk': `ORG#${orgId}`, ':member': 'MEMBER#' }),
-        ...(lastEvaluatedKey ? { ExclusiveStartKey: lastEvaluatedKey } : {}),
-      }),
-    );
-    userIds.push(...(result.Items ?? []).map((item) => item.sk!.S!.slice('MEMBER#'.length)));
-    lastEvaluatedKey = result.LastEvaluatedKey;
-  } while (lastEvaluatedKey);
-
-  return Promise.all(
-    userIds.map(async (memberUserId): Promise<OrgDeletionMember> => {
-      const profile = await dynamo.send(
-        new GetItemCommand({
-          TableName: Resource.UserInfoTable.name,
-          Key: marshall({ pk: `USER#${memberUserId}`, sk: 'PROFILE' }),
-        }),
-      );
-      const sub = profile.Item?.sub?.S;
-      return { userId: memberUserId, ...(sub ? { sub } : {}) };
-    }),
-  );
-}
-
-/**
- * EVERY member billing record with Stripe references is snapshotted (reads
- * in parallel, members order). The one-customer-per-org invariant makes this
- * normally a single entry, but if it is ever violated the extras' CUSTOMER#
- * rows still get purged — their Stripe pointers must survive on the snapshot
- * so teardown cancels/redacts each of them. The legacy single top-level
- * fields keep carrying the first entry for in-flight readers.
- */
-async function snapshotBilling(
-  members: OrgDeletionMember[],
-): Promise<Pick<OrgDeletionRecord, 'stripeCustomerId' | 'subscriptionId' | 'billingCustomers'>> {
-  const rows = await Promise.all(
-    members.map((member) =>
-      dynamo.send(
-        new GetItemCommand({
-          TableName: Resource.BillingTable.name,
-          Key: marshall({ pk: `CUSTOMER#${member.userId}`, sk: 'SUBSCRIPTION' }),
-        }),
-      ),
-    ),
-  );
-  const billingCustomers = rows
-    .map(({ Item }) => ({
-      ...(Item?.stripeCustomerId?.S ? { stripeCustomerId: Item.stripeCustomerId.S } : {}),
-      ...(Item?.subscriptionId?.S ? { subscriptionId: Item.subscriptionId.S } : {}),
-    }))
-    .filter((customer) => customer.stripeCustomerId || customer.subscriptionId);
-  if (billingCustomers.length === 0) return {};
-  if (billingCustomers.length > 1) {
-    console.warn('[delete-account] Multiple member billing customers found (invariant violation)', {
-      count: billingCustomers.length,
-    });
-  }
-  return { ...billingCustomers[0], billingCustomers };
-}
-
-/**
- * Best-effort revocation of this session's refresh token at Auth0 (same as
- * logout). The worker deletes the Auth0 user shortly after, which invalidates
- * every other device's refresh token too.
- */
-async function revokeRefreshToken(event: AuthenticatedEvent): Promise<void> {
-  const refreshToken = parseCookies(event.cookies)[COOKIE_NAMES.REFRESH_TOKEN];
-  if (!refreshToken) return;
-  const secrets = getAuthSecrets();
-  try {
-    await fetch(`https://${process.env.AUTH0_DOMAIN!}/oauth/revoke`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: secrets.AUTH0_CLIENT_ID,
-        client_secret: secrets.AUTH0_CLIENT_SECRET,
-        token: refreshToken,
-      }).toString(),
-    });
-  } catch (err) {
-    console.warn('[delete-account] Refresh token revocation failed', { error: err });
-  }
-}
-
-async function invokeWorker(orgId: string): Promise<void> {
-  const payload: AccountDeletionWorkerPayload = { orgId };
-  await lambda.send(
-    new InvokeCommand({
-      FunctionName: process.env.ACCOUNT_DELETION_WORKER_FUNCTION_NAME!,
-      InvocationType: 'Event',
-      Payload: Buffer.from(JSON.stringify(payload)),
-    }),
-  );
 }
 
 function errorResponse(
