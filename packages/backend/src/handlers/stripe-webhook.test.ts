@@ -188,6 +188,17 @@ function regionSyncFailure(cause: Error) {
   ];
 }
 
+// The authoritative user→org mapping the teardown paths cross-check the
+// Stripe-derived billing orgId against.
+function setupUserProfile(orgId: string | null) {
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: `USER#${MOCK_USER_ID}` }, sk: { S: 'PROFILE' } },
+    })
+    .resolves(orgId ? { Item: marshall({ orgId }) } : { Item: undefined });
+}
+
 function setupAuroraTenantResolution() {
   ddbMock
     .on(GetItemCommand, {
@@ -197,6 +208,7 @@ function setupAuroraTenantResolution() {
     .resolves({
       Item: marshall({ pk: `CUSTOMER#${MOCK_USER_ID}`, sk: 'SUBSCRIPTION', orgId: MOCK_ORG_ID }),
     });
+  setupUserProfile(MOCK_ORG_ID);
   ddbMock
     .on(GetItemCommand, {
       TableName: 'UserInfoTable',
@@ -229,6 +241,16 @@ describe('stripe-webhook handler', () => {
       .commandCalls(PutItemCommand)
       .map((call) => call.args[0].input)
       .filter((input) => input.Item?.sk?.S === 'DELETION');
+  }
+
+  /** The billing-record cancel writes closeOutDeletedCustomer made, if any. */
+  function billingCancelUpdates() {
+    return ddbMock
+      .commandCalls(UpdateItemCommand)
+      .map((call) => call.args[0].input)
+      .filter(
+        (input) => input.ExpressionAttributeValues?.[':status']?.S === SubscriptionStatus.Canceled,
+      );
   }
 
   function teardownEmissions(): MetricEvent[] {
@@ -897,7 +919,7 @@ describe('stripe-webhook handler', () => {
         });
       });
 
-      it('warns and starts nothing when no org can be resolved', async () => {
+      it('warns, starts nothing and still cancels the billing record when no org resolves', async () => {
         setupStripeEvent('customer.subscription.deleted', mockSubscription());
         setupDeletedCustomerRetrieve();
 
@@ -905,6 +927,7 @@ describe('stripe-webhook handler', () => {
 
         expect(deletionRecordPuts()).toHaveLength(0);
         expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
+        expect(billingCancelUpdates()).toHaveLength(1);
         expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
       });
     });
@@ -1060,7 +1083,7 @@ describe('stripe-webhook handler', () => {
       });
     });
 
-    it('warns and starts nothing when no org can be resolved', async () => {
+    it('warns, starts nothing and still cancels the billing record when no org resolves', async () => {
       setupStripeEvent('customer.deleted', mockCustomerObject());
       // No setupAuroraTenantResolution: the billing record carries no orgId.
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -1071,8 +1094,99 @@ describe('stripe-webhook handler', () => {
       expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
       expect(teardownEmissions()).toHaveLength(0);
       expect(warn.mock.calls.flat().join(' ')).toContain('no teardown started');
+      // Close-out still runs so the record does not linger until the daily sweep.
+      const cancels = billingCancelUpdates();
+      expect(cancels).toHaveLength(1);
+      expect(cancels[0].TableName).toBe(TABLE_NAME);
+      expect(cancels[0].Key).toEqual({
+        pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
+        sk: { S: 'SUBSCRIPTION' },
+      });
+      expect(cancels[0].ConditionExpression).toBe(DELETION_GUARD);
+      // No org means no tenant to look up, so no region is touched.
+      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
       warn.mockRestore();
+    });
+
+    // The billing orgId is backfilled from Stripe customer metadata with
+    // if_not_exists, so a wrong value is never corrected — an irreversible
+    // teardown must never run on one that USER#/PROFILE disagrees with.
+    describe('org cross-check against USER#/PROFILE', () => {
+      it('proceeds with the teardown when the profile orgId matches', async () => {
+        setupStripeEvent('customer.deleted', mockCustomerObject());
+        setupAuroraTenantResolution();
+
+        await handler(buildWebhookEvent('{}'));
+
+        const profileReads = ddbMock
+          .commandCalls(GetItemCommand)
+          .map((c) => c.args[0].input)
+          .filter((i) => i.Key?.pk?.S === `USER#${MOCK_USER_ID}` && i.Key?.sk?.S === 'PROFILE');
+        expect(profileReads).toHaveLength(1);
+        expect(profileReads[0].TableName).toBe('UserInfoTable');
+        expect(profileReads[0].ConsistentRead).toBe(true);
+        expect(deletionRecordPuts()).toHaveLength(1);
+        expect(teardownEmissions()).toHaveLength(1);
+      });
+
+      it('refuses the teardown and logs loudly when the profile orgId differs', async () => {
+        setupStripeEvent('customer.deleted', mockCustomerObject());
+        setupAuroraTenantResolution();
+        setupUserProfile('a-completely-different-org');
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const result = await handler(buildWebhookEvent('{}'));
+
+        expect(deletionRecordPuts()).toHaveLength(0);
+        expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
+        expect(teardownEmissions()).toHaveLength(0);
+        const logged = error.mock.calls.map((c) => JSON.stringify(c)).join(' ');
+        expect(logged).toContain(MOCK_ORG_ID);
+        expect(logged).toContain('a-completely-different-org');
+        expect(logged).toContain(MOCK_USER_ID);
+        // Close-out still runs, and never against the mismatched org.
+        expect(billingCancelUpdates()).toHaveLength(1);
+        expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+        expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+        error.mockRestore();
+      });
+
+      it('refuses the teardown when the USER#/PROFILE row is missing', async () => {
+        setupStripeEvent('customer.deleted', mockCustomerObject());
+        setupAuroraTenantResolution();
+        setupUserProfile(null);
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const result = await handler(buildWebhookEvent('{}'));
+
+        expect(deletionRecordPuts()).toHaveLength(0);
+        expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
+        expect(teardownEmissions()).toHaveLength(0);
+        expect(error).toHaveBeenCalled();
+        expect(billingCancelUpdates()).toHaveLength(1);
+        expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+        error.mockRestore();
+      });
+
+      // Both webhook entry points into the teardown must be guarded.
+      it('refuses the subscription.deleted backstop teardown on a mismatch too', async () => {
+        setupStripeEvent('customer.subscription.deleted', mockSubscription());
+        setupDeletedCustomerRetrieve();
+        setupAuroraTenantResolution();
+        setupUserProfile('a-completely-different-org');
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const result = await handler(buildWebhookEvent('{}'));
+
+        expect(deletionRecordPuts()).toHaveLength(0);
+        expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
+        expect(teardownEmissions()).toHaveLength(0);
+        expect(error).toHaveBeenCalled();
+        expect(billingCancelUpdates()).toHaveLength(1);
+        expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+        error.mockRestore();
+      });
     });
   });
 

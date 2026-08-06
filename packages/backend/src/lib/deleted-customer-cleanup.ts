@@ -37,6 +37,41 @@ export async function resolveOrgIdFromSubscription(userId: string): Promise<stri
 }
 
 /**
+ * Cross-checks a billing-derived orgId against the authoritative USER#/PROFILE
+ * mapping, which is written from the authenticated session at onboarding and
+ * never from Stripe metadata. The billing orgId is backfilled from that
+ * metadata with if_not_exists, so a value once learned from wrong or stale
+ * metadata is never corrected — and an irreversible teardown must not run on
+ * it. A missing profile or a mismatch is a data-integrity fault, so it is
+ * logged at error level and the caller must refuse.
+ */
+export async function verifyOrgMatchesUserProfile(
+  userId: string,
+  billingOrgId: string,
+): Promise<boolean> {
+  const profileResult = await dynamo.send(
+    new GetItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: {
+        pk: { S: `USER#${userId}` },
+        sk: { S: 'PROFILE' },
+      },
+      ProjectionExpression: 'orgId',
+      ConsistentRead: true,
+    }),
+  );
+  const profileOrgId = profileResult.Item?.orgId?.S ?? null;
+  if (profileOrgId !== billingOrgId) {
+    console.error(
+      '[deleted-customer-cleanup] Billing orgId does not match the USER#/PROFILE orgId — refusing teardown',
+      { userId, billingOrgId, profileOrgId },
+    );
+    return false;
+  }
+  return true;
+}
+
+/**
  * Closes out billing state for a Stripe customer that no longer exists:
  * disables the tenant in every provisioned region, then marks the billing
  * record canceled (no grace period).

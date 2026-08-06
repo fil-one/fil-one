@@ -16,7 +16,11 @@ import { Resource } from 'sst';
 import { startAccountDeletion } from '../lib/account-deletion-start.js';
 import { sendGuardedBillingUpdate } from '../lib/deletion-guard.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { resolveOrgIdFromSubscription } from '../lib/deleted-customer-cleanup.js';
+import {
+  closeOutDeletedCustomer,
+  resolveOrgIdFromSubscription,
+  verifyOrgMatchesUserProfile,
+} from '../lib/deleted-customer-cleanup.js';
 import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
@@ -234,20 +238,39 @@ async function updatePaymentMethod(
 
 /**
  * A gone Stripe customer tears the whole account down (FIL-112) — the worker
- * disables every region and purges the data, so there is no local close-out
- * here. Idempotent, so a webhook replay is safe; a throw returns 500 and Stripe
- * retries (there is no cron fallback for canceled records).
+ * disables every region and purges the data, so there is no local close-out on
+ * that path. Idempotent, so a webhook replay is safe; a throw returns 500 and
+ * Stripe retries (there is no cron fallback for canceled records).
+ *
+ * The billing orgId is Stripe-metadata-derived, so it is cross-checked against
+ * USER#/PROFILE first. Without a verified org nothing is torn down, and the
+ * pre-teardown close-out runs instead so the record does not linger
+ * non-canceled until the next daily usage-reporting sweep.
  */
 async function startTeardownForDeletedCustomer(
-  orgId: string,
+  userId: string,
+  orgId: string | null,
   context: Record<string, string>,
 ): Promise<void> {
+  if (!orgId || !(await verifyOrgMatchesUserProfile(userId, orgId))) {
+    console.warn(
+      '[stripe-webhook] No verified org — closing out the billing record, no teardown started',
+      { userId, billingOrgId: orgId, ...context },
+    );
+    const { outcomes } = await closeOutDeletedCustomer({
+      userId,
+      orgId: null,
+      retry: WEBHOOK_STATUS_SYNC_RETRY,
+    });
+    assertRegionSyncSucceeded(outcomes);
+    return;
+  }
   await startAccountDeletion(orgId, {
     requestedByUserId: 'stripe-webhook',
     reason: 'stripe_customer_deleted',
   });
   emitWebhookAccountDeletionStarted();
-  console.warn('[stripe-webhook] Account teardown started', { orgId, ...context });
+  console.warn('[stripe-webhook] Account teardown started', { orgId, userId, ...context });
 }
 
 async function handleCustomerDeleted(customer: Stripe.Customer): Promise<void> {
@@ -260,15 +283,9 @@ async function handleCustomerDeleted(customer: Stripe.Customer): Promise<void> {
     );
   }
 
-  const orgId = await resolveOrgIdFromSubscription(userId);
-  if (!orgId) {
-    console.warn('[stripe-webhook] customer.deleted: no org resolved, no teardown started', {
-      userId,
-      customerId: customer.id,
-    });
-    return;
-  }
-  await startTeardownForDeletedCustomer(orgId, { userId, customerId: customer.id });
+  await startTeardownForDeletedCustomer(userId, await resolveOrgIdFromSubscription(userId), {
+    customerId: customer.id,
+  });
 }
 
 async function handleSubscriptionUpdate(
@@ -384,16 +401,7 @@ async function handleSubscriptionDeleted(
         `[stripe-webhook] subscription.deleted for deleted customer ${customerId} has no metadata.userId; cannot close out billing record`,
       );
     }
-    const orgId = await resolveOrgIdFromSubscription(userId);
-    if (!orgId) {
-      console.warn(
-        '[stripe-webhook] subscription.deleted for a deleted customer: no org resolved, no teardown started',
-        { userId, customerId, subscriptionId: subscription.id },
-      );
-      return;
-    }
-    await startTeardownForDeletedCustomer(orgId, {
-      userId,
+    await startTeardownForDeletedCustomer(userId, await resolveOrgIdFromSubscription(userId), {
       customerId,
       subscriptionId: subscription.id,
     });
