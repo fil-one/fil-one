@@ -7,7 +7,7 @@ export interface AccountDeletionWorkerPayload {
 /**
  * Async teardown worker for self-serve account deletion (FIL-112). Invoked
  * Event-style by the delete-account handler right after the user confirms,
- * and re-invoked by the reconciler cron for records that stall. There is no
+ * and re-invoked by the orchestrator cron for records that stall. There is no
  * per-step state machine: every teardown in runAccountDeletion is idempotent,
  * so each invocation simply re-runs ALL of them; a throw here (surfaced to
  * Lambda's async retry) means the whole pass is re-driven until the record

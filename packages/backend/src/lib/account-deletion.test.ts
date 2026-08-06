@@ -218,7 +218,7 @@ describe('batchDelete', () => {
     expect(sends[1].args[0].input.RequestItems!.TestTable[0].DeleteRequest!.Key!.sk.S).toBe(KEY.sk);
   });
 
-  it('caps the retries and throws on exhaustion so the reconciler re-drives', async () => {
+  it('caps the retries and throws on exhaustion so the orchestrator re-drives', async () => {
     ddbMock.on(BatchWriteItemCommand).resolves(unprocessed);
 
     await expect(batchDelete('TestTable', [KEY], { retries: 2, minTimeout: 0 })).rejects.toThrow(
@@ -305,7 +305,7 @@ describe('runAccountDeletion', () => {
     expect(jobIdWrites).toHaveLength(1);
     expect(jobIdWrites[0].args[0].input.ExpressionAttributeValues?.[':jobId']?.S).toBe('prj_1');
 
-    // attemptCount bumped for the reconciler's stuck gauge.
+    // attemptCount bumped for the orchestrator's stuck gauge.
     const bumps = ddbMock
       .commandCalls(UpdateItemCommand)
       .filter((c) => c.args[0].input.UpdateExpression?.includes('attemptCount'));
@@ -484,7 +484,7 @@ describe('runAccountDeletion', () => {
     expect(doneWrites()).toHaveLength(1);
   });
 
-  it('touches updatedAt on every attemptCount bump so a live worker never looks stale to the reconciler', async () => {
+  it('touches updatedAt on every attemptCount bump so a live worker never looks stale to the orchestrator', async () => {
     setupHappyMocks(OrgDeletionStatus.Pending);
 
     await runAccountDeletion(ORG_ID);

@@ -43,7 +43,7 @@ const lambda = new LambdaClient({});
  * Confirm account deletion (FIL-112). Validates the typed org name and the
  * emailed verification code, snapshots everything the async teardown worker
  * needs, kills every member session, and responds success immediately — the
- * worker (plus the reconciler cron) finishes the teardown in the background.
+ * worker (plus the orchestrator cron) finishes the teardown in the background.
  * No subscription guard: grace/canceled users must still be able to delete.
  */
 export async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {

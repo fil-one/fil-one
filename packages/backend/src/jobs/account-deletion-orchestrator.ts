@@ -71,11 +71,11 @@ export async function handler(): Promise<void> {
       reinvoked += 1;
     } catch (error) {
       failed += 1;
-      console.error('[account-deletion-reconciler] Failed to re-invoke worker', { orgId, error });
+      console.error('[account-deletion-orchestrator] Failed to re-invoke worker', { orgId, error });
     }
   }
 
-  console.log('[account-deletion-reconciler] Reconcile complete', {
+  console.log('[account-deletion-orchestrator] Reconcile complete', {
     incomplete: incomplete.length,
     stale: stale.length,
     reinvoked,
@@ -93,7 +93,7 @@ function isStale(record: IncompleteDeletion, now: number): boolean {
   const updatedAtMs = new Date(record.updatedAt).getTime();
   if (Number.isNaN(updatedAtMs)) {
     console.warn(
-      '[account-deletion-reconciler] Record has an unparseable updatedAt; treating as stale',
+      '[account-deletion-orchestrator] Record has an unparseable updatedAt; treating as stale',
       {
         pk: record.pk,
         updatedAt: record.updatedAt,
@@ -122,7 +122,7 @@ async function scanIncompleteDeletions(): Promise<IncompleteDeletion[]> {
       new ScanCommand({
         TableName: Resource.UserInfoTable.name,
         // begins_with(pk, :orgPrefix) keeps any future non-ORG row that
-        // happens to carry an sk of DELETION out of the reconciler (same
+        // happens to carry an sk of DELETION out of the orchestrator (same
         // pattern as lib/stuck-tenant-metric.ts).
         FilterExpression: 'begins_with(pk, :orgPrefix) AND sk = :deletion AND #s <> :done',
         // Trim the returned payload to what the handler actually reads.

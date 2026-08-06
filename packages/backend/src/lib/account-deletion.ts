@@ -61,7 +61,7 @@ export function assertPurgeTargetAllowed(pk: string, allowlist: readonly string[
  * idempotent and snapshot-driven, so each invocation simply runs ALL of them
  * concurrently, then purges the DDB records and marks the record DONE. A
  * failure anywhere leaves the record non-DONE and throws after everything
- * settles, so Lambda's async retry / the reconciler cron re-drives the whole
+ * settles, so Lambda's async retry / the orchestrator cron re-drives the whole
  * (idempotent) teardown. Concurrent invocations are harmless for the same
  * reason.
  *
@@ -221,7 +221,7 @@ interface StripeRedactionJobList {
  * redacting → succeeded. Validation is asynchronous, so a single pass may
  * find the job short of `ready`; the job id is persisted on the DELETION
  * record at creation, and a not-yet-ready job throws so the record stays
- * non-DONE and the Lambda retry / reconciler advances the SAME job (never a
+ * non-DONE and the Lambda retry / orchestrator advances the SAME job (never a
  * duplicate) on the next pass. `redacting`/`succeeded` count as done —
  * redaction is irreversible once running.
  */
@@ -621,7 +621,7 @@ async function markDone(orgId: string): Promise<void> {
 
 /**
  * Per-pass liveness bump: `updatedAt` is touched alongside the attempt count
- * because the reconciler treats a stale `updatedAt` as "worker died — re-
+ * because the orchestrator treats a stale `updatedAt` as "worker died — re-
  * drive"; a live worker mid-teardown must never look stale to it.
  */
 async function bumpAttemptCount(orgId: string): Promise<void> {
@@ -703,7 +703,7 @@ async function scanRagKeys(orgId: string): Promise<{ pk: string; sk: string }[]>
 // UnprocessedItems means DynamoDB is shedding load — retry with exponential
 // backoff + jitter instead of hammering it in a tight loop, and give up after
 // ~5 attempts (the thrown error keeps the record non-DONE, so the Lambda
-// retry / reconciler re-drives the idempotent purge later).
+// retry / orchestrator re-drives the idempotent purge later).
 const BATCH_DELETE_RETRY: RetryOptions = { retries: 4, minTimeout: 100, randomize: true };
 
 /**

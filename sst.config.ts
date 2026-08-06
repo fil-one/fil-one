@@ -1034,9 +1034,9 @@ export default $config({
       function: ragIndexerOrchestrator.arn,
     });
 
-    // ── Account deletion (FIL-112): worker + reconciler ─────────────
+    // ── Account deletion (FIL-112): worker + orchestrator ───────────
     // Async teardown for self-serve account deletion. The delete-account
-    // route Event-invokes the worker; the reconciler cron re-drives records
+    // route Event-invokes the worker; the orchestrator cron re-drives records
     // whose worker died mid-teardown and emits StuckAccountDeletionCount.
     const accountDeletionWorker = createFn('AccountDeletionWorker', {
       handler: 'packages/backend/src/jobs/account-deletion-worker.handler',
@@ -1066,8 +1066,8 @@ export default $config({
       ],
     });
 
-    const accountDeletionReconciler = createFn('AccountDeletionReconciler', {
-      handler: 'packages/backend/src/jobs/account-deletion-reconciler.handler',
+    const accountDeletionOrchestrator = createFn('AccountDeletionOrchestrator', {
+      handler: 'packages/backend/src/jobs/account-deletion-orchestrator.handler',
       link: [userInfoTable],
       environment: {
         ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
@@ -1082,11 +1082,11 @@ export default $config({
       ],
     });
 
-    new sst.aws.CronV2('AccountDeletionReconcilerCron', {
+    new sst.aws.CronV2('AccountDeletionOrchestratorCron', {
       // run every 12 hours, offset from the usage (07/19), grace (08/20),
       // drift (10/22), and RAG (03/09/15/21) crons.
       schedule: 'cron(0 5/12 * * ? *)',
-      function: accountDeletionReconciler.arn,
+      function: accountDeletionOrchestrator.arn,
     });
 
     addRoute({

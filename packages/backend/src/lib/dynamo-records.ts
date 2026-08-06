@@ -317,7 +317,7 @@ export interface OrgDeletionRecord {
    * the same job instead of creating duplicates.
    */
   stripeRedactionJobId?: string;
-  /** Worker invocations so far; the reconciler alerts past a threshold. */
+  /** Worker invocations so far; the orchestrator alerts past a threshold. */
   attemptCount: number;
   updatedAt: string; // ISO-8601
 }
