@@ -103,6 +103,17 @@ describe('subscription-drift-checker', () => {
     expect(outOfSyncLogs(logSpy)).toHaveLength(0);
   });
 
+  it('scan excludes records under the account-deletion guard (deletionRequestedAt)', async () => {
+    ddbMock.on(ScanCommand).resolves({ Items: [] });
+
+    await handler();
+
+    // A tenant the account-deletion worker is disabling would otherwise read
+    // as drift against its still-active subscription record.
+    const scanInput = ddbMock.commandCalls(ScanCommand)[0].args[0].input;
+    expect(scanInput.FilterExpression).toContain('attribute_not_exists(deletionRequestedAt)');
+  });
+
   it('emits no out_of_sync log when the tenant is active', async () => {
     ddbMock.on(ScanCommand).resolves({ Items: [activeBillingItem()] });
     aurora.getTenantStatus.mockResolvedValue({ kind: 'ok', status: 'active' });

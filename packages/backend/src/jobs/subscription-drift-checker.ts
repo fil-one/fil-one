@@ -94,7 +94,10 @@ async function scanActiveSubscriptions(billingTableName: string): Promise<Active
     const result = await dynamo.send(
       new ScanCommand({
         TableName: billingTableName,
-        FilterExpression: 'sk = :sk AND subscriptionStatus = :active',
+        // Records with deletionRequestedAt belong to the account-deletion
+        // worker (FIL-112); a tenant it is tearing down is not drift.
+        FilterExpression:
+          'sk = :sk AND subscriptionStatus = :active AND attribute_not_exists(deletionRequestedAt)',
         ExpressionAttributeValues: {
           ':sk': { S: 'SUBSCRIPTION' },
           ':active': { S: SubscriptionStatus.Active },

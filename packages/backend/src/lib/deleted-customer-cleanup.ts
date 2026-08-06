@@ -48,9 +48,8 @@ export async function resolveOrgIdFromSubscription(userId: string): Promise<stri
  * assertRegionSyncSucceeded → 500 → Stripe retries; usage worker: heal-failed
  * audit → retried on the next daily run).
  *
- * `billingCanceled` is false when the record was absent or the FIL-112
- * deletion guard rejected the write (org mid-teardown) — callers must not
- * treat the customer as dunning-canceled in that case.
+ * `billingCanceled` is false when the record was absent or the deletion guard
+ * rejected the write — callers must not report a dunning cancellation then.
  */
 export async function closeOutDeletedCustomer(params: {
   userId: string;
@@ -85,18 +84,15 @@ export async function closeOutDeletedCustomer(params: {
           ':status': { S: SubscriptionStatus.Canceled },
           ':now': { S: now },
         },
-        // FIL-112 deletion guard: while an account teardown is in flight, our
-        // own subscriptions.cancel echoes back as webhook events — this write
-        // must not touch a record the teardown owns (or upsert it back after
-        // the purge).
+        // A teardown's own subscriptions.cancel echoes back here as a webhook;
+        // this write must not touch (or re-upsert) a record it owns.
         ConditionExpression: DELETION_GUARD,
       }),
     );
   } catch (err) {
     if (err instanceof ConditionalCheckFailedException) {
       // Customer without a billing record (created outside the app, record
-      // already removed, or org mid-deletion) — nothing to cancel; do not
-      // fail the caller.
+      // already removed, or org mid-deletion) — nothing to cancel.
       console.warn('[deleted-customer-cleanup] No billing record to cancel or org mid-deletion', {
         userId,
       });

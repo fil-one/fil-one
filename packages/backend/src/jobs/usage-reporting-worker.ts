@@ -465,11 +465,9 @@ async function reconcileDeletedCustomer(params: {
   }
 
   if (!billingCanceled) {
-    // The regions synced, but the FIL-112 deletion guard rejected the billing
-    // cancel (record absent or org mid-teardown): the account-deletion flow
-    // owns the record now, so this run did NOT reconcile it — the log and
-    // audit row must not claim otherwise. Not out of sync in the retry
-    // sense: the teardown finishes the job.
+    // Regions synced but the guard rejected the billing cancel: this run did
+    // NOT reconcile the record, so the audit row must not claim it did. Not
+    // outOfSync — the teardown that owns the record finishes the job.
     console.warn(
       '[usage-worker] Deleted-customer cleanup skipped the billing cancel (record missing or org mid-deletion)',
       {

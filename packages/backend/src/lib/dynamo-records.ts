@@ -289,12 +289,6 @@ export interface OrgDeletionRecord {
    * tenant-id shape written going forward.
    */
   tenantIds?: Record<string, string>;
-  /** @deprecated Legacy snapshot field, read for in-flight records only — no longer written. */
-  auroraTenantId?: string;
-  /** @deprecated Legacy snapshot field, read for in-flight records only — no longer written. */
-  fthTenantId?: string;
-  stripeCustomerId?: string;
-  subscriptionId?: string;
   /**
    * Stripe Redaction Job driving the customer's PII erasure, persisted at
    * creation so retries advance the same job instead of creating duplicates.
