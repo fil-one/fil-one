@@ -232,34 +232,43 @@ describe('deleteTenant', () => {
     expect(ssmDeletes).toEqual([consoleKeyParam]);
   });
 
-  it('treats an already-deleted tenant (404s) as success and still deletes the SSM parameter', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    mockSetStatus.mockResolvedValue(fail(404, 'gone'));
-    mockDeleteTenant.mockResolvedValue(fail(404, 'gone'));
-    ssmMock.on(DeleteParameterCommand).resolves({});
-
-    await orchestrator.deleteTenant(tenantId);
-
-    expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(1);
-    // The contract defines idempotent deletion via 204; an undocumented 404
-    // may be a misrouted baseUrl/gateway, so it must be flagged loudly.
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('misrouted'),
-      expect.objectContaining({
-        orchestratorId: 'forge',
-        tenantId,
-        baseUrl: 'https://api.example.com',
-      }),
-    );
-  });
-
-  it('does not warn about a 404 misroute when the DELETE succeeds', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  it('converges on a re-run, because the contract makes DELETE idempotent', async () => {
+    // Where idempotency actually comes from: the contract answers 204 for a
+    // tenant that is already gone, so the teardown's second pass repeats the
+    // same 204s rather than relying on any tolerated error.
     stubHappyDeletion();
 
     await orchestrator.deleteTenant(tenantId);
+    await orchestrator.deleteTenant(tenantId);
 
-    expect(warnSpy).not.toHaveBeenCalled();
+    expect(mockDeleteTenant).toHaveBeenCalledTimes(2);
+    expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(2);
+  });
+
+  it('throws on a 404 from the delete and leaves the SSM parameter alone', async () => {
+    mockSetStatus.mockResolvedValue(noContent());
+    mockDeleteTenant.mockResolvedValue(fail(404, 'gone'));
+    ssmMock.on(DeleteParameterCommand).resolves({});
+
+    // 404 is not a documented outcome of this DELETE, so it means the ref did
+    // not resolve — a misrouted baseUrl or a gateway answering for the wrong
+    // service — not that the tenant is gone. Forge shares one endpoint across
+    // regions, which is exactly where that misroute happens.
+    await expect(orchestrator.deleteTenant(tenantId)).rejects.toThrow(
+      `Failed to delete forge tenant ${tenantId}`,
+    );
+    expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(0);
+  });
+
+  it('throws on a 404 from the pre-deletion disable and never attempts the delete', async () => {
+    mockSetStatus.mockResolvedValue(fail(404, 'gone'));
+    ssmMock.on(DeleteParameterCommand).resolves({});
+
+    await expect(orchestrator.deleteTenant(tenantId)).rejects.toThrow(
+      `Failed to disable forge tenant ${tenantId} before deletion`,
+    );
+    expect(mockDeleteTenant).not.toHaveBeenCalled();
+    expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(0);
   });
 
   it('tolerates an already-deleted SSM parameter (idempotent re-run)', async () => {
