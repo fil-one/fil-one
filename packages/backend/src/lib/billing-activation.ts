@@ -12,13 +12,9 @@ import {
 const dynamo = getDynamoClient();
 
 /**
- * Persists the activated subscription onto the billing record. Guarded by the
- * FIL-112 {@link DELETION_GUARD}: an in-flight activation must not re-create
- * or re-activate a record the account teardown owns. Returns false when the
- * guard rejects the write (record purged or org mid-deletion) — the caller
- * must then skip tenant unlocks. The record is guaranteed to exist on the
- * happy path (the handler 400s earlier without one), so `attribute_exists(pk)`
- * only trips when the teardown purged it mid-request.
+ * Returns false when {@link DELETION_GUARD} rejects the write — the caller must
+ * then skip tenant unlocks. The handler 400s earlier on a missing record, so
+ * that only happens when a teardown claimed or purged it mid-request.
  */
 export async function saveBillingRecord(
   userId: string,
