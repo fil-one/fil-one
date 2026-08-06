@@ -924,23 +924,8 @@ export default $config({
       handler: 'create-portal-session',
       extraEnv: { WEBSITE_URL: siteUrl },
     });
-    addRoute({
-      method: 'POST',
-      routePath: '/api/stripe/webhook',
-      handler: 'stripe-webhook',
-      extraEnv: {
-        ...orchestratorEnv,
-        STRIPE_WEBHOOK_SECRET_SSM_PATH: $interpolate`/filone/${$app.stage}/stripe-webhook-secret`,
-      },
-      permissions: [
-        {
-          actions: ['ssm:GetParameter'],
-          resources: [
-            $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/stripe-webhook-secret`,
-          ],
-        },
-      ],
-    });
+    // The Stripe webhook route is declared further down: customer.deleted
+    // starts an account teardown, so it needs the deletion worker's name/ARN.
 
     // ── Usage reporting (cron-based) ────────────────────────────────
     const usageWorker = createFn('UsageReportingWorker', {
@@ -1035,8 +1020,12 @@ export default $config({
     });
 
     // ── Account deletion (FIL-112): worker ──────────────────────────
-    // Async teardown for self-serve account deletion. The delete-account
-    // route Event-invokes the worker.
+    // Async teardown. The delete-account route and the Stripe
+    // customer.deleted webhook both Event-invoke the worker.
+
+    // Payloads whose async retries are all exhausted land here instead of
+    // vanishing silently; alarm on depth and re-drive by hand.
+    const accountDeletionDlq = new sst.aws.Queue('AccountDeletionDlq');
     const accountDeletionWorker = createFn('AccountDeletionWorker', {
       handler: 'packages/backend/src/jobs/account-deletion-worker.handler',
       link: [
@@ -1052,8 +1041,11 @@ export default $config({
         ...mgmtRuntimeResources,
       ],
       environment: { ...orchestratorEnv, AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+      // 900 s is Lambda's ceiling — a teardown that outgrows it must resume on
+      // a later pass (Lambda's async retry / the deletion orchestrator cron),
+      // never by raising this.
       timeout: '900 seconds',
-      memory: '512 MB',
+      memory: '1024 MB',
       permissions: [
         ...ragPermissions,
         {
@@ -1062,7 +1054,13 @@ export default $config({
           actions: ['ssm:GetParameter', 'ssm:DeleteParameter'],
           resources: [auroraApiKeySsmArn, ...orchestratorS3KeySsmArns],
         },
+        { actions: ['sqs:SendMessage'], resources: [accountDeletionDlq.arn] },
       ],
+    });
+
+    new aws.lambda.FunctionEventInvokeConfig('AccountDeletionWorkerOnFailure', {
+      functionName: accountDeletionWorker.name,
+      destinationConfig: { onFailure: { destination: accountDeletionDlq.arn } },
     });
 
     addRoute({
@@ -1090,6 +1088,28 @@ export default $config({
           actions: ['lambda:InvokeFunction'],
           resources: [accountDeletionWorker.arn],
         },
+      ],
+      timeout: '30 seconds',
+    });
+
+    addRoute({
+      method: 'POST',
+      routePath: '/api/stripe/webhook',
+      handler: 'stripe-webhook',
+      extraEnv: {
+        ...orchestratorEnv,
+        STRIPE_WEBHOOK_SECRET_SSM_PATH: $interpolate`/filone/${$app.stage}/stripe-webhook-secret`,
+        // customer.deleted starts the account teardown (FIL-112).
+        ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
+      },
+      permissions: [
+        {
+          actions: ['ssm:GetParameter'],
+          resources: [
+            $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/stripe-webhook-secret`,
+          ],
+        },
+        { actions: ['lambda:InvokeFunction'], resources: [accountDeletionWorker.arn] },
       ],
       timeout: '30 seconds',
     });
