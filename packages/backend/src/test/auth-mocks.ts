@@ -7,13 +7,10 @@ import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 import { buildEvent } from './lambda-test-utilities.js';
 
 /**
- * Shared scaffolding for HANDLER-level tests that exercise the full middy
- * stack (httpHeaderNormalizer → authMiddleware → csrfMiddleware → step-up
- * gates → errorHandler) instead of calling `baseHandler` directly.
- *
- * The `vi.mock(...)` calls themselves MUST stay in each test file (vitest
- * hoists them), but their module shapes are shared here — use the async
- * factory form so the helper import is resolved before the factory runs:
+ * Shared scaffolding for tests that drive a handler through the full middy
+ * stack instead of calling `baseHandler` directly. The `vi.mock(...)` calls
+ * must stay in each test file (vitest hoists them); only the module shapes
+ * live here, so use the async factory form:
  *
  *   const mockJwtVerify = vi.fn();
  *   vi.mock('jose', async () =>
@@ -42,11 +39,9 @@ export function authSecretsMockModule() {
 }
 
 /**
- * Module factory for `vi.mock('../lib/auth0-management.js', ...)` covering
- * what the step-up middlewares import: `getMfaEnrollments` plus the REAL
- * `MFA_GUARDIAN_TYPES` Set (the gate calls `.has` on it) pulled from the
- * actual module so the mock can never drift from it. Pass `extras` for any
- * further exports the handler under test consumes.
+ * Module factory for `vi.mock('../lib/auth0-management.js', ...)`. Re-exports
+ * the REAL `MFA_GUARDIAN_TYPES` so the mock can't drift from it; `extras`
+ * covers any further exports the handler under test consumes.
  */
 export async function auth0ManagementMockModule(
   mockGetMfaEnrollments: Mock,
@@ -63,9 +58,8 @@ export async function auth0ManagementMockModule(
 }
 
 /**
- * Request event as the full middy stack sees it: auth cookies plus the
- * matching CSRF cookie/header pair. No `userInfo` is pre-injected —
- * authMiddleware resolves it from the mocked identity row.
+ * Request event as the middy stack sees it: auth cookies plus a matching CSRF
+ * pair. No `userInfo` — authMiddleware resolves it from the mocked identity row.
  */
 export function buildAuthenticatedEvent(params?: {
   method?: string;
@@ -83,17 +77,16 @@ export function buildAuthenticatedEvent(params?: {
     rawPath: params?.rawPath ?? '/test',
   });
   event.headers['x-csrf-token'] = TEST_CSRF_TOKEN;
-  // userInfo is populated by authMiddleware at runtime — the cast reflects
-  // the shape the middy stack's handler type expects.
+  // The cast is the shape the middy handler type expects; authMiddleware
+  // populates userInfo at runtime.
   return event as unknown as APIGatewayProxyEventV2 & AuthenticatedEvent;
 }
 
 /**
- * authMiddleware's two jwtVerify resolutions (access token, then ID token)
- * and the SUB#/IDENTITY + ORG#/PROFILE reads it performs. `idTokenPayload`
- * drives the OIDC claims the step-up gates read (e.g. `{ amr: ['pwd'] }`).
- * Requires `process.env.AUTH0_DOMAIN`/`AUTH0_AUDIENCE` to be set by the test
- * file before the handler module is imported.
+ * authMiddleware's two jwtVerify resolutions (access token, then ID token) and
+ * its SUB#/IDENTITY + ORG#/PROFILE reads. `idTokenPayload` drives the claims
+ * the step-up gates read (e.g. `{ amr: ['pwd'] }`). The test file must set
+ * `AUTH0_DOMAIN`/`AUTH0_AUDIENCE` before importing the handler module.
  */
 export function setupAuthMocks(params: {
   ddbMock: AwsClientStub<DynamoDBClient>;
@@ -120,8 +113,8 @@ export function setupAuthMocks(params: {
       Item: {
         userId: { S: params.userId },
         orgId: { S: params.orgId },
-        // Established user: skips the login-side trial-entitlement backfill
-        // write, which would otherwise show up in PutItem assertions.
+        // Established user: skips the trial-entitlement backfill write, which
+        // would otherwise show up in PutItem assertions.
         emailEntitlementClaimed: { BOOL: true },
       },
     });

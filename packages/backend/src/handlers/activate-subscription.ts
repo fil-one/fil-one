@@ -130,8 +130,8 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
 
   // 6. Persist billing record and unlock the tenant on every orchestrator.
   const saveArgs = { userId, orgId, subscription, paymentMethodId, mappedStatus };
-  const guardResponse = await persistBillingAndUnlock(saveArgs);
-  if (guardResponse) return guardResponse;
+  const deletionGuardResponse = await persistBillingAndUnlock(saveArgs);
+  if (deletionGuardResponse) return deletionGuardResponse;
 
   const response: ActivateSubscriptionResponse = {
     subscription: {

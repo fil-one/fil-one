@@ -295,20 +295,11 @@ export interface OrgDeletionRecord {
    * tenant-id shape written going forward.
    */
   tenantIds?: Record<string, string>;
-  /** @deprecated Legacy snapshot field, read for in-flight records only — no longer written. */
-  auroraTenantId?: string;
-  /** @deprecated Legacy snapshot field, read for in-flight records only — no longer written. */
-  fthTenantId?: string;
-  /** @deprecated Legacy single-customer snapshot (first member's), still written for in-flight readers — prefer {@link billingCustomers}. */
-  stripeCustomerId?: string;
-  /** @deprecated Legacy single-customer snapshot (first member's), still written for in-flight readers — prefer {@link billingCustomers}. */
-  subscriptionId?: string;
   /**
    * Every member billing customer found at confirm time. One entry per org
    * when the one-customer-per-org invariant holds; if it is ever violated,
    * the extras' Stripe pointers must not be destroyed by the CUSTOMER# purge
-   * — teardown cancels/redacts each entry. Absent on legacy records, whose
-   * single top-level fields are read instead.
+   * — teardown cancels/redacts each entry.
    */
   billingCustomers?: OrgDeletionBillingCustomer[];
   /**
