@@ -95,6 +95,17 @@ export interface FilOneOrchestratorConfig {
 // partially configured (which would surface as a dead-end BucketConfigurationError).
 const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
 
+// The contract requires the tenant to be `disabled` before deletion and 409s
+// otherwise. A 409 is NOT a disable that hasn't landed yet: the contract calls
+// DELETE synchronous and setting the same status twice a no-op 204, so there is
+// no propagation window. It means a competing writer set the tenant back to
+// `active` between our two calls — today that is the trial lock enforcer in
+// usage-reporting-worker, whose scan is not fenced by the deletion guard. Each
+// attempt re-disables, so the retry budget is what lets us outlast that write.
+// Retrying the pair also covers the 5xx the contract mandates when cleanup
+// fails partway through ("the tenant must remain deletable on retry").
+const TENANT_DELETE_RETRY = { retries: 3 } as const;
+
 export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): ServiceOrchestrator {
   const client = resolveClient(config);
   const setupDeps: TenantSetupDeps = {
@@ -158,22 +169,23 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
       // the ref did not resolve — a misrouted baseUrl or a gateway answering
       // for the wrong service — and must fail before the SSM credentials
       // below are destroyed for a tenant that is still live upstream.
-      await disableTenantForDeletion(client, config.id, tenantId);
-      let result = await deleteTenantsByTenantId({
-        client,
-        path: { tenantId },
-        throwOnError: false,
-      });
-      if (result.response?.status === 409) {
-        // The disable hadn't taken effect yet — disable again, retry once.
+      // Each attempt re-disables, so a tenant re-activated mid-sequence is
+      // closed again before the next DELETE. The SDK reports failures in
+      // `result` rather than throwing, so wrap them here to make them visible
+      // to pRetry; the last one is what surfaces when the budget is spent.
+      await pRetry(async () => {
         await disableTenantForDeletion(client, config.id, tenantId);
-        result = await deleteTenantsByTenantId({ client, path: { tenantId }, throwOnError: false });
-      }
-      if (result.error) {
-        throw new Error(`Failed to delete ${config.id} tenant ${tenantId}`, {
-          cause: result.error,
+        const result = await deleteTenantsByTenantId({
+          client,
+          path: { tenantId },
+          throwOnError: false,
         });
-      }
+        if (result.error) {
+          throw new Error(`Failed to delete ${config.id} tenant ${tenantId}`, {
+            cause: result.error,
+          });
+        }
+      }, TENANT_DELETE_RETRY);
       await deleteConsoleS3Credentials({
         orchestratorId: config.id,
         stage: config.stage,

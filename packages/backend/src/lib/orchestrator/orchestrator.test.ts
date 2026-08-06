@@ -214,6 +214,27 @@ describe('deleteTenant', () => {
     ssmMock.on(DeleteParameterCommand).resolves({});
   }
 
+  // deleteTenant retries the disable+delete pair on any failure
+  // (TENANT_DELETE_RETRY), so a test that drives a failing attempt has to drain
+  // the backoff instead of waiting it out in real time. Resolves to the error
+  // when deletion rejects, or undefined when it eventually succeeds.
+  async function deleteTenantDrainingRetries(): Promise<unknown> {
+    vi.useFakeTimers();
+    try {
+      const settled = orchestrator.deleteTenant(tenantId).then(
+        () => undefined,
+        (err: unknown) => err,
+      );
+      await vi.runAllTimersAsync();
+      return await settled;
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  // 1 initial attempt + TENANT_DELETE_RETRY's 3 retries.
+  const ATTEMPTS = 4;
+
   it('disables the tenant, deletes it, then deletes the console-key SSM parameter', async () => {
     stubHappyDeletion();
 
@@ -254,9 +275,10 @@ describe('deleteTenant', () => {
     // not resolve — a misrouted baseUrl or a gateway answering for the wrong
     // service — not that the tenant is gone. Forge shares one endpoint across
     // regions, which is exactly where that misroute happens.
-    await expect(orchestrator.deleteTenant(tenantId)).rejects.toThrow(
-      `Failed to delete forge tenant ${tenantId}`,
-    );
+    const err = await deleteTenantDrainingRetries();
+
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toContain(`Failed to delete forge tenant ${tenantId}`);
     expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(0);
   });
 
@@ -264,7 +286,9 @@ describe('deleteTenant', () => {
     mockSetStatus.mockResolvedValue(fail(404, 'gone'));
     ssmMock.on(DeleteParameterCommand).resolves({});
 
-    await expect(orchestrator.deleteTenant(tenantId)).rejects.toThrow(
+    const err = await deleteTenantDrainingRetries();
+
+    expect((err as Error).message).toContain(
       `Failed to disable forge tenant ${tenantId} before deletion`,
     );
     expect(mockDeleteTenant).not.toHaveBeenCalled();
@@ -281,46 +305,55 @@ describe('deleteTenant', () => {
     await expect(orchestrator.deleteTenant(tenantId)).resolves.toBeUndefined();
   });
 
-  it('re-disables and retries once on 409 (tenant not disabled yet)', async () => {
+  it('re-disables and retries on 409 (someone re-activated the tenant)', async () => {
     mockSetStatus.mockResolvedValue(noContent());
     mockDeleteTenant
       .mockResolvedValueOnce(fail(409, 'not disabled'))
       .mockResolvedValue(noContent());
     ssmMock.on(DeleteParameterCommand).resolves({});
 
-    await orchestrator.deleteTenant(tenantId);
+    // The re-disable is the point of the retry: a competing writer that flipped
+    // the tenant back to active is undone before the next DELETE.
+    expect(await deleteTenantDrainingRetries()).toBeUndefined();
 
     expect(mockSetStatus).toHaveBeenCalledTimes(2);
     expect(mockDeleteTenant).toHaveBeenCalledTimes(2);
     expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(1);
   });
 
-  it('throws on a persistent 409 and leaves the SSM parameter alone', async () => {
+  it('throws once the retry budget is spent on 409s', async () => {
     mockSetStatus.mockResolvedValue(noContent());
     mockDeleteTenant.mockResolvedValue(fail(409, 'not disabled'));
 
-    await expect(orchestrator.deleteTenant(tenantId)).rejects.toThrow(
-      `Failed to delete forge tenant ${tenantId}`,
-    );
+    const err = await deleteTenantDrainingRetries();
+
+    expect((err as Error).message).toContain(`Failed to delete forge tenant ${tenantId}`);
+    expect(mockDeleteTenant).toHaveBeenCalledTimes(ATTEMPTS);
     expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(0);
   });
 
-  it('throws when the deletion fails, leaving the SSM parameter for the retry', async () => {
+  it('retries a 5xx too, then leaves the SSM parameter for the next teardown pass', async () => {
     mockSetStatus.mockResolvedValue(noContent());
     mockDeleteTenant.mockResolvedValue(fail(500, 'boom'));
 
-    await expect(orchestrator.deleteTenant(tenantId)).rejects.toThrow(
-      `Failed to delete forge tenant ${tenantId}`,
-    );
+    // The contract mandates a 5xx when cleanup fails partway through, and says
+    // the tenant must remain deletable on retry.
+    const err = await deleteTenantDrainingRetries();
+
+    expect((err as Error).message).toContain(`Failed to delete forge tenant ${tenantId}`);
+    expect(mockDeleteTenant).toHaveBeenCalledTimes(ATTEMPTS);
     expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(0);
   });
 
   it('throws when the pre-deletion disable fails', async () => {
     mockSetStatus.mockResolvedValue(fail(500, 'boom'));
 
-    await expect(orchestrator.deleteTenant(tenantId)).rejects.toThrow(
+    const err = await deleteTenantDrainingRetries();
+
+    expect((err as Error).message).toContain(
       `Failed to disable forge tenant ${tenantId} before deletion`,
     );
+    expect(mockSetStatus).toHaveBeenCalledTimes(ATTEMPTS);
     expect(mockDeleteTenant).not.toHaveBeenCalled();
   });
 });
