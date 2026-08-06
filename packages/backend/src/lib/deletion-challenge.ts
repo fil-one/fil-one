@@ -31,11 +31,9 @@ function challengeKey(orgId: string) {
 }
 
 /**
- * Issue (or re-issue) the org's deletion verification code. One live code per
- * org: a successful re-issue replaces the previous code and resets the verify
- * attempts, but the send count carries across the row's TTL window so codes
- * cannot be requested more than {@link MAX_SENDS_PER_WINDOW} times per hour,
- * with a {@link RESEND_COOLDOWN_SECONDS} cooldown between sends.
+ * Issue (or re-issue) the org's deletion code. One live code per org: re-issue
+ * resets the verify attempts, but the send count carries across the row's TTL
+ * window to cap sends at {@link MAX_SENDS_PER_WINDOW} per hour.
  */
 export async function createDeletionChallenge(orgId: string): Promise<CreateChallengeResult> {
   const now = new Date();
@@ -46,16 +44,12 @@ export async function createDeletionChallenge(orgId: string): Promise<CreateChal
   const salt = randomBytes(16).toString('hex');
   const expiresAt = new Date(now.getTime() + DELETION_CODE_TTL_MINUTES * 60 * 1000).toISOString();
   const cooldownCutoff = new Date(now.getTime() - RESEND_COOLDOWN_SECONDS * 1000).toISOString();
-  // Phase 2 may clamp this to the live row's TTL window end (see below).
   let issuedExpiresAt = expiresAt;
 
-  // The send counter lives on the row being replaced, so the rate limit is a
-  // pair of atomic conditional updates. DynamoDB's TTL janitor deletes expired
-  // rows lazily (possibly hours late), so an expired row must never keep
-  // blocking sends: phase 1 reclaims it (fresh window, sendCount reset to 1),
-  // and only a physically live window falls through to phase 2, where the
-  // cooldown and send budget apply and the window anchor (`ttl`/`createdAt`)
-  // is preserved.
+  // Two atomic conditional updates, because the send counter lives on the row
+  // being replaced. DynamoDB's TTL janitor deletes expired rows lazily (hours
+  // late), so phase 1 must reclaim a lapsed row rather than let it keep
+  // blocking sends; only a live window reaches phase 2's cooldown/budget.
   try {
     // Phase 1 — start a fresh window: no row, or the row's TTL has lapsed.
     await getDynamoClient().send(
@@ -82,17 +76,15 @@ export async function createDeletionChallenge(orgId: string): Promise<CreateChal
     );
   } catch (err) {
     if (!(err instanceof ConditionalCheckFailedException)) throw err;
-    // The TTL janitor may delete the row as soon as its window ends, so a
-    // resent code must never claim to outlive the row: clamp the stated
-    // expiry to min(now + code TTL, window end).
+    // The row can vanish at window end, so a resent code must never claim to
+    // outlive it: clamp the stated expiry to min(now + code TTL, window end).
     const liveRow = err.Item ? unmarshall(err.Item) : undefined;
     const windowEndMs = typeof liveRow?.ttl === 'number' ? liveRow.ttl * 1000 : undefined;
     if (windowEndMs !== undefined && windowEndMs < new Date(expiresAt).getTime()) {
       issuedExpiresAt = new Date(windowEndMs).toISOString();
     }
-    // Phase 2 — resend within the live window: cooldown elapsed and send
-    // budget remaining. The `#ttl > :nowEpoch` guard keeps this from racing a
-    // concurrent phase-1 reclaim onto a stale window.
+    // Phase 2 — resend within the live window. The `#ttl > :nowEpoch` guard
+    // keeps this from racing a concurrent phase-1 reclaim onto a stale window.
     try {
       await getDynamoClient().send(
         new UpdateItemCommand({
@@ -135,10 +127,7 @@ export async function createDeletionChallenge(orgId: string): Promise<CreateChal
   };
 }
 
-/**
- * Build the rate-limited outcome from the rejected row: after the cooldown
- * when send budget remains, otherwise when the row's TTL window ends.
- */
+/** Retry-after from the rejected row: cooldown end, or window end if out of budget. */
 function rateLimitedResult(err: ConditionalCheckFailedException, now: Date): CreateChallengeResult {
   const existing = err.Item ? unmarshall(err.Item) : undefined;
   const lastSentMs = existing?.lastSentAt
@@ -154,10 +143,8 @@ function rateLimitedResult(err: ConditionalCheckFailedException, now: Date): Cre
 }
 
 /**
- * Verify a submitted code. An attempt is consumed atomically BEFORE the hash
- * comparison so parallel guesses cannot exceed {@link MAX_VERIFY_ATTEMPTS};
- * once the row is locked or expired every call returns 'expired_or_locked'.
- * A matching code deletes the row (single-use).
+ * Verify a submitted code. The attempt is consumed atomically BEFORE the hash
+ * comparison so parallel guesses cannot exceed {@link MAX_VERIFY_ATTEMPTS}.
  */
 export async function verifyDeletionChallenge(
   orgId: string,
@@ -192,9 +179,8 @@ export async function verifyDeletionChallenge(
     return 'invalid';
   }
 
-  // Single-use: a verified code cannot be replayed. The conditional delete
-  // makes consumption atomic — if a concurrent verify already consumed the
-  // row, this call must not also report success.
+  // Single-use: the conditional delete makes consumption atomic, so a
+  // concurrent verify that already consumed the row wins and this one fails.
   try {
     await getDynamoClient().send(
       new DeleteItemCommand({
