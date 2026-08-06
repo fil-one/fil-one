@@ -79,6 +79,18 @@ describe('usage-reporting-orchestrator', () => {
     expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
   });
 
+  it('scan excludes records under the account-deletion guard (deletionRequestedAt)', async () => {
+    ddbMock.on(ScanCommand).resolves({ Items: [] });
+
+    await handler();
+
+    // Trial lock enforcement in the worker writes 'active' for an org under its
+    // limits, which would 409 the teardown's tenant DELETE. Excluding the record
+    // here is what keeps this cron from fighting the account-deletion worker.
+    const scanInput = ddbMock.commandCalls(ScanCommand)[0].args[0].input;
+    expect(scanInput.FilterExpression).toContain('attribute_not_exists(deletionRequestedAt)');
+  });
+
   it('invokes worker for a single tenant', async () => {
     ddbMock.on(ScanCommand).resolves({ Items: [subscriptionItem('org-1')] });
     mockOrgNames(['org-1']);
