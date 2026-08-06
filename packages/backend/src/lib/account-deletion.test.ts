@@ -44,13 +44,26 @@ vi.mock('./service-orchestrator-registry.js', () => ({
 }));
 
 const mockSubscriptionsCancel = vi.fn();
+const mockSubscriptionsList = vi.fn();
 const mockRawRequest = vi.fn();
 vi.mock('./stripe-client.js', () => ({
   getStripeClient: () => ({
-    subscriptions: { cancel: mockSubscriptionsCancel },
+    subscriptions: {
+      cancel: mockSubscriptionsCancel,
+      list: (...args: unknown[]) => mockSubscriptionsList(...args),
+    },
     rawRequest: (...args: unknown[]) => mockRawRequest(...args),
   }),
 }));
+
+/** Stripe's auto-paginating list result, as the SDK returns it to `for await`. */
+function stripeList(subscriptions: { id: string; status: string }[]) {
+  return {
+    async *[Symbol.asyncIterator]() {
+      yield* subscriptions;
+    },
+  };
+}
 
 const mockGetOrgProfile = vi.fn();
 vi.mock('./org-profile.js', () => ({
@@ -120,6 +133,9 @@ function setupHappyMocks(status: string) {
   mockGetRegionsWithTenantIdsForOrg.mockResolvedValue([]);
   mockDeleteAuth0User.mockResolvedValue(undefined);
   mockSubscriptionsCancel.mockResolvedValue({});
+  mockSubscriptionsList.mockImplementation(({ customer }: { customer: string }) =>
+    stripeList([{ id: `sub_${customer.slice('cus_'.length)}`, status: 'active' }]),
+  );
   mockDropIndex.mockResolvedValue(undefined);
   mockDeleteTenant.mockResolvedValue(undefined);
   stubRedactionJob();
@@ -465,6 +481,66 @@ describe('runAccountDeletion', () => {
     expect(tombstone.stripeCustomerId?.S).toBe('cus_1');
     expect(unmarshall(tombstone).stripeCustomerIds).toEqual(['cus_1', 'cus_2']);
     expect(doneWrites()).toHaveLength(1);
+  });
+
+  it('cancels subscriptions Stripe reports live, including ones created after the snapshot', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    mockSubscriptionsList.mockReturnValue(
+      stripeList([
+        { id: 'sub_1', status: 'active' },
+        { id: 'sub_late', status: 'trialing' },
+        { id: 'sub_gone', status: 'canceled' },
+        { id: 'sub_dead', status: 'incomplete_expired' },
+      ]),
+    );
+
+    await runAccountDeletion(ORG_ID);
+
+    expect(mockSubscriptionsList).toHaveBeenCalledWith({
+      customer: 'cus_1',
+      status: 'all',
+      limit: 100,
+    });
+    expect(mockSubscriptionsCancel.mock.calls.flat()).toEqual(['sub_1', 'sub_late']);
+  });
+
+  it('falls back to the snapshotted subscriptionId when the entry has no customer id', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
+      .resolves({
+        Item: deletionItem(OrgDeletionStatus.Pending, {
+          billingCustomers: [{ subscriptionId: 'sub_orphan' }],
+        }),
+      });
+
+    await runAccountDeletion(ORG_ID);
+
+    expect(mockSubscriptionsList).not.toHaveBeenCalled();
+    expect(mockSubscriptionsCancel).toHaveBeenCalledWith('sub_orphan');
+  });
+
+  it('treats a deleted Stripe customer as nothing to cancel (customer.deleted trigger)', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    mockSubscriptionsList.mockImplementation(() => {
+      throw Object.assign(new Error('No such customer'), { code: 'resource_missing' });
+    });
+
+    await runAccountDeletion(ORG_ID);
+
+    expect(mockSubscriptionsCancel).not.toHaveBeenCalled();
+    expect(doneWrites()).toHaveLength(1);
+  });
+
+  it('propagates a non-resource_missing subscriptions.list failure', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    mockSubscriptionsList.mockImplementation(() => {
+      throw new Error('stripe is down');
+    });
+
+    const err = (await runAccountDeletion(ORG_ID).catch((e: unknown) => e)) as AggregateError;
+    expect(err).toBeInstanceOf(AggregateError);
+    expect(doneWrites()).toHaveLength(0);
   });
 
   it('treats already-canceled Stripe subscriptions as success', async () => {

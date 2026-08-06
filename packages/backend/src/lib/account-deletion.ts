@@ -120,16 +120,17 @@ async function cancelStripeAndWriteTombstone(
 ): Promise<void> {
   const customers = record.billingCustomers ?? [];
 
-  for (const { subscriptionId } of customers) {
-    if (!subscriptionId) continue;
-    try {
-      await getStripeClient().subscriptions.cancel(subscriptionId);
-    } catch (err) {
-      if (!isStripeAlreadyCanceled(err)) throw err;
-      console.warn('[account-deletion] Subscription already canceled/missing', {
-        orgId,
-        subscriptionId,
-      });
+  for (const customer of customers) {
+    for (const subscriptionId of await cancellableSubscriptionIds(orgId, customer)) {
+      try {
+        await getStripeClient().subscriptions.cancel(subscriptionId);
+      } catch (err) {
+        if (!isStripeAlreadyCanceled(err)) throw err;
+        console.warn('[account-deletion] Subscription already canceled/missing', {
+          orgId,
+          subscriptionId,
+        });
+      }
     }
   }
 
@@ -150,6 +151,46 @@ async function cancelStripeAndWriteTombstone(
   );
 
   await redactStripeCustomers(orgId, record, customerIds);
+}
+
+/** Stripe statuses a subscription can never leave — nothing left to cancel. */
+const TERMINAL_SUBSCRIPTION_STATUSES: ReadonlySet<string> = new Set([
+  'canceled',
+  'incomplete_expired',
+]);
+
+/**
+ * Asks Stripe for the customer's live subscriptions rather than trusting the
+ * confirm-time snapshot: one created after the snapshot (see
+ * handlers/activate-subscription.ts) would otherwise bill a deleted account
+ * forever. Falls back to the snapshotted id only when the entry has no customer
+ * id. A `resource_missing` means the customer itself is gone (the
+ * customer.deleted trigger), and Stripe already cancelled its subscriptions.
+ */
+async function cancellableSubscriptionIds(
+  orgId: string,
+  customer: OrgDeletionBillingCustomer,
+): Promise<string[]> {
+  if (!customer.stripeCustomerId) {
+    return customer.subscriptionId ? [customer.subscriptionId] : [];
+  }
+  const ids: string[] = [];
+  try {
+    for await (const subscription of getStripeClient().subscriptions.list({
+      customer: customer.stripeCustomerId,
+      status: 'all',
+      limit: 100,
+    })) {
+      if (!TERMINAL_SUBSCRIPTION_STATUSES.has(subscription.status)) ids.push(subscription.id);
+    }
+  } catch (err) {
+    if ((err as { code?: string }).code !== 'resource_missing') throw err;
+    console.warn('[account-deletion] Stripe customer already deleted; nothing to cancel', {
+      orgId,
+      stripeCustomerId: customer.stripeCustomerId,
+    });
+  }
+  return ids;
 }
 
 function billingCustomerIds(customers: OrgDeletionBillingCustomer[]): string[] {

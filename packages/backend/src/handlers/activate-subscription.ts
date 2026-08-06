@@ -167,11 +167,11 @@ async function persistBillingAndUnlock(params: {
       orgId,
     });
     // createOrUpdateSubscription already mutated Stripe before the guard
-    // rejected. When the stored status was grace_period/canceled that
-    // mutation created a brand-NEW subscription, which the teardown (which
-    // cancels only the snapshotted subscriptionId) would never cancel —
-    // billing a deleted account forever. Best-effort cancel it here;
-    // failures are logged and swallowed so the 410 still reaches the client.
+    // rejected. When the stored status was grace_period/canceled that mutation
+    // created a brand-NEW subscription. The teardown lists the customer's live
+    // subscriptions, so it normally catches this one too — cancel it here in
+    // case its Stripe step has already run; failures are logged and swallowed
+    // so the 410 still reaches the client.
     try {
       await getStripeClient().subscriptions.cancel(subscription.id);
       console.log('[activate-subscription] Canceled subscription activated mid-deletion', {
