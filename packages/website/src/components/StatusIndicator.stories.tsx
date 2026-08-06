@@ -12,7 +12,7 @@ function createSeededQueryClient(status: string) {
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
   const summary: InstatusSummary = {
-    page: { name: 'Fil One', url: 'https://fil-one.instatus.com', status },
+    page: { name: 'Fil One', url: 'https://status.fil.one', status },
   };
   client.setQueryData(queryKeys.instatusSummary, summary);
   return client;
