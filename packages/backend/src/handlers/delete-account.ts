@@ -1,22 +1,14 @@
-import { ConditionalCheckFailedException, PutItemCommand } from '@aws-sdk/client-dynamodb';
-import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
-import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { DeleteAccountResponse, ErrorResponse } from '@filone/shared';
 import { ApiErrorCode, CSRF_COOKIE_NAME, DeleteAccountSchema } from '@filone/shared';
-import { Resource } from 'sst';
+import { startAccountDeletion } from '../lib/account-deletion-start.js';
 import { revokeRefreshToken } from '../lib/auth0-revoke.js';
 import { parseCookies } from '../lib/cookies.js';
-import { getDynamoClient } from '../lib/ddb-client.js';
 import { verifyDeletionChallenge } from '../lib/deletion-challenge.js';
-import { applyDeletionGuards } from '../lib/deletion-guards.js';
-import { snapshotBilling, snapshotMembers } from '../lib/deletion-snapshot.js';
-import { DeletionKeys, OrgDeletionStatus, type OrgDeletionRecord } from '../lib/dynamo-records.js';
 import { isOrgAdmin } from '../lib/org-membership.js';
 import { getOrgProfile } from '../lib/org-profile.js';
-import { getRegionsWithTenantIds } from '../lib/region-helpers.js';
 import { COOKIE_NAMES, makeClearAuthCookies, ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -24,10 +16,6 @@ import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { requireMfaIfEnrolled } from '../middleware/require-mfa.js';
-import type { AccountDeletionWorkerPayload } from '../jobs/account-deletion-worker.js';
-
-const dynamo = getDynamoClient();
-const lambda = new LambdaClient({});
 
 /**
  * Confirm account deletion (FIL-112). Validates the typed org name and the
@@ -73,45 +61,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     );
   }
 
-  const members = await snapshotMembers(orgId);
-  const billing = await snapshotBilling(members);
-
-  // Raw resolution, not readiness-gated: a tenant whose setup is still
-  // mid-flight must be torn down too, so the snapshot has to see it.
-  const tenantIds = Object.fromEntries(
-    getRegionsWithTenantIds(orgProfile).map(({ orchestrator, tenantId }) => [
-      orchestrator.id,
-      tenantId,
-    ]),
-  );
-
-  const record: OrgDeletionRecord = {
-    pk: DeletionKeys.deletionPk(orgId),
-    sk: DeletionKeys.deletionSk(),
-    status: OrgDeletionStatus.Pending,
-    requestedAt: new Date().toISOString(),
-    requestedByUserId: userId,
-    members,
-    tenantIds,
-    ...billing,
-    attemptCount: 0,
-    updatedAt: new Date().toISOString(),
-  };
-
-  try {
-    await dynamo.send(
-      new PutItemCommand({
-        TableName: Resource.UserInfoTable.name,
-        Item: marshall(record),
-        ConditionExpression: 'attribute_not_exists(pk)',
-      }),
-    );
-  } catch (err) {
-    // Deletion already confirmed earlier — idempotent re-confirm. The guards
-    // below re-apply harmlessly and the worker invoke resumes the teardown.
-    if (!(err instanceof ConditionalCheckFailedException)) throw err;
-  }
-  await applyDeletionGuards(orgId, members);
+  await startAccountDeletion(orgId, { requestedByUserId: userId, reason: 'self_serve' });
 
   // Best-effort: the worker deletes the Auth0 user shortly after, which
   // invalidates every other device's refresh token too.
@@ -119,20 +69,8 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     parseCookies(event.cookies)[COOKIE_NAMES.REFRESH_TOKEN],
     '[delete-account]',
   );
-  await invokeWorker(orgId);
 
   return successResponse();
-}
-
-async function invokeWorker(orgId: string): Promise<void> {
-  const payload: AccountDeletionWorkerPayload = { orgId };
-  await lambda.send(
-    new InvokeCommand({
-      FunctionName: process.env.ACCOUNT_DELETION_WORKER_FUNCTION_NAME!,
-      InvocationType: 'Event',
-      Payload: Buffer.from(JSON.stringify(payload)),
-    }),
-  );
 }
 
 function errorResponse(

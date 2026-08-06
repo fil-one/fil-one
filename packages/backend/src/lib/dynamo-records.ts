@@ -249,6 +249,9 @@ export const OrgDeletionStatus = {
 
 export type OrgDeletionStatusValue = (typeof OrgDeletionStatus)[keyof typeof OrgDeletionStatus];
 
+/** What started a teardown: the user confirming in-app, or Stripe deleting the customer. */
+export type OrgDeletionReason = 'self_serve' | 'stripe_customer_deleted';
+
 /** Snapshot of an org member captured when deletion is confirmed. */
 export interface OrgDeletionMember {
   userId: string;
@@ -286,7 +289,10 @@ export interface OrgDeletionRecord {
    */
   status: string;
   requestedAt: string; // ISO-8601
+  /** Confirming admin, or the `stripe-webhook` sentinel when Stripe triggered it. */
   requestedByUserId: string;
+  /** What triggered the teardown; absent on records written before FIL-112's webhook path. */
+  reason?: OrgDeletionReason;
   members: OrgDeletionMember[];
   /**
    * Region-generic tenant snapshot: orchestrator id → tenant id for every
