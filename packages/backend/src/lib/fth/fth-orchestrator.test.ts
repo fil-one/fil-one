@@ -107,6 +107,27 @@ describe('fthOrchestrator.deleteTenant', () => {
     return new FthNotFoundError('not found', undefined);
   }
 
+  // deleteTenant retries the disable+delete pair on any failure
+  // (TENANT_DELETE_RETRY), so a test that drives a failing attempt has to drain
+  // the backoff instead of waiting it out in real time. Resolves to the error
+  // when deletion rejects, or undefined when it eventually succeeds.
+  async function deleteTenantDrainingRetries(): Promise<unknown> {
+    vi.useFakeTimers();
+    try {
+      const settled = fthOrchestrator.deleteTenant(fthClientId).then(
+        () => undefined,
+        (err: unknown) => err,
+      );
+      await vi.runAllTimersAsync();
+      return await settled;
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  // 1 initial attempt + TENANT_DELETE_RETRY's 3 retries.
+  const ATTEMPTS = 4;
+
   it('disables the client, deletes it, then deletes the console-key SSM parameter', async () => {
     mockUpdateClientStatus.mockResolvedValue(undefined);
     mockFthClient.deleteClient.mockResolvedValue(undefined);
@@ -146,9 +167,10 @@ describe('fthOrchestrator.deleteTenant', () => {
     // A 404 means the ref never resolved — a misrouted baseUrl or wrong-scope
     // token — not that the client is gone. Deleting the console key here would
     // strand a client that is still live upstream.
-    await expect(fthOrchestrator.deleteTenant(fthClientId)).rejects.toThrow(
-      `Failed to delete FTH tenant ${fthClientId}`,
-    );
+    const err = await deleteTenantDrainingRetries();
+
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toContain(`Failed to delete FTH tenant ${fthClientId}`);
     expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(0);
   });
 
@@ -156,57 +178,65 @@ describe('fthOrchestrator.deleteTenant', () => {
     mockUpdateClientStatus.mockRejectedValue(notFound());
     ssmMock.on(DeleteParameterCommand).resolves({});
 
-    await expect(fthOrchestrator.deleteTenant(fthClientId)).rejects.toThrow(
+    const err = await deleteTenantDrainingRetries();
+
+    expect((err as Error).message).toContain(
       `Failed to disable FTH tenant ${fthClientId} before deletion`,
     );
     expect(mockFthClient.deleteClient).not.toHaveBeenCalled();
     expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(0);
   });
 
-  it('re-disables and retries once on a 409 conflict (client not disabled yet)', async () => {
+  it('re-disables and retries on a 409 conflict (someone re-activated the client)', async () => {
     mockUpdateClientStatus.mockResolvedValue(undefined);
     mockFthClient.deleteClient
       .mockRejectedValueOnce(new FthConflictError('not disabled', undefined))
       .mockResolvedValue(undefined);
     ssmMock.on(DeleteParameterCommand).resolves({});
 
-    await fthOrchestrator.deleteTenant(fthClientId);
+    // The re-disable is the point of the retry: a competing writer that flipped
+    // the client back to active is undone before the next DELETE.
+    expect(await deleteTenantDrainingRetries()).toBeUndefined();
 
     expect(mockUpdateClientStatus).toHaveBeenCalledTimes(2);
     expect(mockFthClient.deleteClient).toHaveBeenCalledTimes(2);
     expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(1);
   });
 
-  it('throws a wrapped error on a persistent 409 and leaves the SSM parameter alone', async () => {
+  it('throws a wrapped error once the retry budget is spent on 409s', async () => {
     mockUpdateClientStatus.mockResolvedValue(undefined);
     mockFthClient.deleteClient.mockRejectedValue(new FthConflictError('not disabled', undefined));
     ssmMock.on(DeleteParameterCommand).resolves({});
 
+    const err = await deleteTenantDrainingRetries();
+
     // Wrapped like the shared orchestrator — not the raw FthConflictError.
-    await expect(fthOrchestrator.deleteTenant(fthClientId)).rejects.toThrow(
-      `Failed to delete FTH tenant ${fthClientId}`,
-    );
-    expect(mockFthClient.deleteClient).toHaveBeenCalledTimes(2);
+    expect((err as Error).message).toContain(`Failed to delete FTH tenant ${fthClientId}`);
+    expect(mockFthClient.deleteClient).toHaveBeenCalledTimes(ATTEMPTS);
     expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(0);
   });
 
-  it('throws on any other deletion failure and leaves the SSM parameter for the retry', async () => {
+  it('retries a 5xx too, then leaves the SSM parameter for the next teardown pass', async () => {
     mockUpdateClientStatus.mockResolvedValue(undefined);
     mockFthClient.deleteClient.mockRejectedValue(new FthApiError(500, 'boom', undefined));
     ssmMock.on(DeleteParameterCommand).resolves({});
 
-    await expect(fthOrchestrator.deleteTenant(fthClientId)).rejects.toThrow(
-      `Failed to delete FTH tenant ${fthClientId}`,
-    );
+    const err = await deleteTenantDrainingRetries();
+
+    expect((err as Error).message).toContain(`Failed to delete FTH tenant ${fthClientId}`);
+    expect(mockFthClient.deleteClient).toHaveBeenCalledTimes(ATTEMPTS);
     expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(0);
   });
 
   it('throws when the pre-deletion disable fails', async () => {
     mockUpdateClientStatus.mockRejectedValue(new FthApiError(500, 'boom', undefined));
 
-    await expect(fthOrchestrator.deleteTenant(fthClientId)).rejects.toThrow(
+    const err = await deleteTenantDrainingRetries();
+
+    expect((err as Error).message).toContain(
       `Failed to disable FTH tenant ${fthClientId} before deletion`,
     );
+    expect(mockUpdateClientStatus).toHaveBeenCalledTimes(ATTEMPTS);
     expect(mockFthClient.deleteClient).not.toHaveBeenCalled();
   });
 
