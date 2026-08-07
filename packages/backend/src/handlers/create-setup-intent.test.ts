@@ -2,9 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
   ConditionalCheckFailedException,
+  DeleteItemCommand,
   DynamoDBClient,
   GetItemCommand,
   PutItemCommand,
+  UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 
 // ---------------------------------------------------------------------------
@@ -23,6 +25,7 @@ vi.mock('../lib/stripe-client.js', () => ({
 vi.mock('sst', () => ({
   Resource: {
     BillingTable: { name: 'BillingTable' },
+    UserInfoTable: { name: 'UserInfoTable' },
     StripePublishableKey: { value: 'pk_test_123' },
   },
 }));
@@ -49,10 +52,16 @@ describe('create-setup-intent baseHandler', () => {
     vi.clearAllMocks();
     mockCustomersCreate.mockResolvedValue({ id: 'cus_test_123' });
     mockSetupIntentsCreate.mockResolvedValue({ client_secret: 'seti_test_secret_abc' });
+    // Live identity for the FIL-112 tombstone checks (top pre-check + post-write).
+    ddbMock
+      .on(GetItemCommand, { TableName: 'UserInfoTable' })
+      .resolves({ Item: { userId: { S: USER_ID } } });
+    ddbMock.on(DeleteItemCommand).resolves({});
+    ddbMock.on(UpdateItemCommand).resolves({});
   });
 
   it('persists only the Stripe customer mapping and never grants a trial (first-time)', async () => {
-    ddbMock.on(GetItemCommand).resolves({}); // no existing billing record
+    ddbMock.on(GetItemCommand, { TableName: 'BillingTable' }).resolves({}); // no existing billing record
     ddbMock.on(PutItemCommand).resolves({});
 
     const result = await baseHandler(setupIntentEvent());
@@ -82,7 +91,7 @@ describe('create-setup-intent baseHandler', () => {
   it('stamps userId and orgId on the Stripe customer (first-time)', async () => {
     // Webhook writers backfill orgId onto billing records from this metadata;
     // without it, webhook-born records are skipped by every lifecycle job.
-    ddbMock.on(GetItemCommand).resolves({});
+    ddbMock.on(GetItemCommand, { TableName: 'BillingTable' }).resolves({});
     ddbMock.on(PutItemCommand).resolves({});
 
     await baseHandler(setupIntentEvent());
@@ -94,7 +103,7 @@ describe('create-setup-intent baseHandler', () => {
   });
 
   it('stamps userId and orgId on the Stripe customer (existing record without one)', async () => {
-    ddbMock.on(GetItemCommand).resolves({
+    ddbMock.on(GetItemCommand, { TableName: 'BillingTable' }).resolves({
       Item: { pk: { S: `CUSTOMER#${USER_ID}` }, sk: { S: 'SUBSCRIPTION' } },
     });
 
@@ -110,7 +119,7 @@ describe('create-setup-intent baseHandler', () => {
     // The entitlement path won the race and already wrote the record, so the
     // conditional PutItem fails. We must not fail the request — keep going and
     // return the SetupIntent.
-    ddbMock.on(GetItemCommand).resolves({}); // first-time branch
+    ddbMock.on(GetItemCommand, { TableName: 'BillingTable' }).resolves({}); // first-time branch
     ddbMock.on(PutItemCommand).rejects(
       new ConditionalCheckFailedException({
         message: 'The conditional request failed',
@@ -125,10 +134,74 @@ describe('create-setup-intent baseHandler', () => {
   });
 
   it('rethrows non-conditional DynamoDB errors', async () => {
-    ddbMock.on(GetItemCommand).resolves({});
+    ddbMock.on(GetItemCommand, { TableName: 'BillingTable' }).resolves({});
     ddbMock.on(PutItemCommand).rejects(new Error('Service unavailable'));
 
     await expect(baseHandler(setupIntentEvent())).rejects.toThrow('Service unavailable');
     expect(mockSetupIntentsCreate).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // FIL-112 deletion races
+  // -------------------------------------------------------------------------
+
+  it('returns 410 without minting a Stripe customer when the identity is tombstoned', async () => {
+    ddbMock
+      .on(GetItemCommand, { TableName: 'UserInfoTable' })
+      .resolves({ Item: { userId: { S: USER_ID }, deleted: { BOOL: true } } });
+
+    const result = await baseHandler(setupIntentEvent());
+
+    expect(result).toMatchObject({ statusCode: 410 });
+    expect(mockCustomersCreate).not.toHaveBeenCalled();
+    expect(mockSetupIntentsCreate).not.toHaveBeenCalled();
+  });
+
+  it('returns 410 and no SetupIntent when the deletion guard rejects the mapping update', async () => {
+    // Existing record without a stripeCustomerId; teardown claimed the record
+    // between the read and this write.
+    ddbMock.on(GetItemCommand, { TableName: 'BillingTable' }).resolves({
+      Item: { pk: { S: `CUSTOMER#${USER_ID}` }, sk: { S: 'SUBSCRIPTION' } },
+    });
+    ddbMock.on(UpdateItemCommand).rejects(
+      new ConditionalCheckFailedException({
+        message: 'The conditional request failed',
+        $metadata: {},
+      }),
+    );
+
+    const result = await baseHandler(setupIntentEvent());
+
+    expect(result).toMatchObject({ statusCode: 410 });
+    expect(mockSetupIntentsCreate).not.toHaveBeenCalled();
+
+    const input = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
+    expect(input.ConditionExpression).toBe(
+      'attribute_exists(pk) AND attribute_not_exists(deletionRequestedAt)',
+    );
+  });
+
+  it('compensates the record and returns 410 when deletion lands after the write', async () => {
+    // Live at the top pre-check, tombstoned by the post-write verification.
+    ddbMock.reset();
+    ddbMock.on(GetItemCommand, { TableName: 'BillingTable' }).resolves({});
+    ddbMock
+      .on(GetItemCommand, { TableName: 'UserInfoTable' })
+      .resolvesOnce({ Item: { userId: { S: USER_ID } } })
+      .resolves({ Item: { deleted: { BOOL: true } } });
+    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(DeleteItemCommand).resolves({});
+
+    const result = await baseHandler(setupIntentEvent());
+
+    expect(result).toMatchObject({ statusCode: 410 });
+    expect(mockSetupIntentsCreate).not.toHaveBeenCalled();
+
+    const deleteCalls = ddbMock.commandCalls(DeleteItemCommand);
+    expect(deleteCalls).toHaveLength(1);
+    expect(deleteCalls[0].args[0].input).toMatchObject({
+      TableName: 'BillingTable',
+      Key: { pk: { S: `CUSTOMER#${USER_ID}` }, sk: { S: 'SUBSCRIPTION' } },
+    });
   });
 });

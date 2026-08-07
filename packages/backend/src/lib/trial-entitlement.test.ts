@@ -106,6 +106,7 @@ describe('ensureTrialEntitlement', () => {
       userId: 'user-1',
       orgId: 'org-1',
       email: 'User+tag@gmail.com',
+      userInfo: { sub: 'auth0|sub-1' },
     });
 
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);

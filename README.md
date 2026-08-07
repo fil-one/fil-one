@@ -443,7 +443,9 @@ enforces with its 403 `SUBSCRIPTION_INACTIVE`. See
 
 **Webhook endpoints are created and managed automatically during deploy.** The deploy-time setup Lambda creates the Stripe webhook endpoint with the correct URL for the deployed domain and stores the signing secret in AWS SSM Parameter Store. No manual configuration needed.
 
-Events registered: `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `customer.subscription.trial_will_end`, `invoice.payment_succeeded`, `invoice.payment_failed`
+Events registered: `customer.updated`, `customer.deleted`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `customer.subscription.trial_will_end`, `invoice.payment_succeeded`, `invoice.payment_failed`, `invoice.finalized`, `invoice.finalization_failed`
+
+This list mirrors `WEBHOOK_EVENTS` in `packages/backend/src/jobs/stack-setup/setup-integrations.ts`; changing it requires bumping the `SetupStack` `Version` in the root `sst.config.ts` for existing stages to pick it up.
 
 Run this command to delete all webhooks created by PR preview deployments (including hooks from active pull requests):
 
