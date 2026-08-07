@@ -264,17 +264,16 @@ export interface OrgDeletionMember {
   sub?: string;
 }
 
-/** One member's Stripe billing references snapshotted onto the DELETION record. */
-export interface OrgDeletionBillingCustomer {
-  stripeCustomerId?: string;
-  subscriptionId?: string;
-}
-
 /**
  * Resumable state record for the account-deletion worker (FIL-112). Written by
  * the delete-account handler at confirm time; snapshots everything the worker
- * needs (tenant ids, member subs, Stripe ids) so teardown can finish even
- * after the source rows are purged. Survives the purge as the audit record.
+ * needs (tenant ids, member subs) so teardown can finish even after the source
+ * rows are purged. Survives the purge as the audit record.
+ *
+ * Deliberately carries NO Stripe customer snapshot: a confirm-time snapshot
+ * cannot see a customer minted inside the deletion race windows, which left
+ * that customer's PII in Stripe forever. Teardown discovers the org's Stripe
+ * customer live instead — see lib/billing-customer-discovery.ts.
  *
  * UserInfoTable — pk: ORG#{orgId}, sk: DELETION
  */
@@ -302,16 +301,8 @@ export interface OrgDeletionRecord {
    */
   tenantIds?: Record<string, string>;
   /**
-   * Every member billing customer found at confirm time. One entry per org
-   * when the one-customer-per-org invariant holds; if it is ever violated,
-   * the extras' Stripe pointers must not be destroyed by the CUSTOMER# purge
-   * — teardown cancels/redacts each entry.
-   */
-  billingCustomers?: OrgDeletionBillingCustomer[];
-  /**
-   * Stripe Redaction Job driving the customers' PII erasure (one job covers
-   * every snapshotted customer), persisted at creation so retries advance
-   * the same job instead of creating duplicates.
+   * Stripe Redaction Job driving the org customer's PII erasure, persisted at
+   * creation so retries advance the same job instead of creating duplicates.
    */
   stripeRedactionJobId?: string;
   /** Worker invocations so far; the orchestrator alerts past a threshold. */
@@ -330,9 +321,8 @@ export interface OrgTombstoneRecord {
   pk: string;
   sk: string;
   orgId: string;
+  /** The org's Stripe customer, 1:1 by domain; absent when it never had one. */
   stripeCustomerId?: string;
-  /** Every snapshotted customer id, written only when there is more than one. */
-  stripeCustomerIds?: string[];
   deletedAt: string; // ISO-8601
 }
 

@@ -1,6 +1,5 @@
 import {
   ConditionalCheckFailedException,
-  GetItemCommand,
   PutItemCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
@@ -9,6 +8,7 @@ import { getDynamoClient } from './ddb-client.js';
 import { createBillingTrial } from './create-billing-trial.js';
 import { normalizeEmailForEntitlement } from './email-normalization.js';
 import { TrialEntitlementError } from './errors.js';
+import { isIdentityTombstoned } from './identity-tombstone.js';
 
 /**
  * FIL-112 deletion race: the middleware's tombstone gate ran earlier on an
@@ -16,19 +16,17 @@ import { TrialEntitlementError } from './errors.js';
  * side effect. Without it a login racing deletion could (a) claim the
  * EMAIL_NORM# key (retained by design, FIL-422) with no trial granted, locking
  * the email out of future trials, or (b) mint a Stripe trial after teardown's
- * billing snapshot, which teardown would never cancel. Residual window is the
- * read→Stripe gap; that trial self-cancels (missing_payment_method: 'cancel').
+ * billing snapshot, which teardown would never cancel.
+ *
+ * The residual window is now just tombstone read → PutItem of the trial row:
+ * createBillingTrial writes that row before it touches Stripe, then re-verifies
+ * against the tombstone and compensates (deletes the row) if the identity died
+ * in between. The only residue is a crash between that Put and the Stripe
+ * calls, which leaves a local-only 30-day trial row with no Stripe customer or
+ * subscription behind it. That row is never resumed — it simply self-expires
+ * through the existing trial → grace → canceled lifecycle, which runs entirely
+ * off the stored trialEndsAt and needs no Stripe involvement.
  */
-async function isIdentityLive(sub: string): Promise<boolean> {
-  const identity = await getDynamoClient().send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: { pk: { S: `SUB#${sub}` }, sk: { S: 'IDENTITY' } },
-      ConsistentRead: true,
-    }),
-  );
-  return identity.Item?.deleted?.BOOL !== true && Boolean(identity.Item?.userId?.S);
-}
 
 export interface EnsureTrialEntitlementParams {
   sub: string;
@@ -53,7 +51,7 @@ export async function ensureTrialEntitlement({
 
   const tableName = Resource.UserInfoTable.name;
 
-  if (!(await isIdentityLive(sub))) {
+  if (await isIdentityTombstoned({ sub })) {
     console.warn('[trial-entitlement] Identity deleted or missing — skipping trial claim', {
       userId,
       orgId,
@@ -102,7 +100,7 @@ export async function ensureTrialEntitlement({
   let entitled = false;
   if (ownerUserId === userId) {
     try {
-      await createBillingTrial({ userId, orgId, email });
+      await createBillingTrial({ userId, orgId, email, userInfo: { sub } });
       entitled = true;
     } catch (error) {
       console.error('[trial-entitlement] Failed to create billing trial', {

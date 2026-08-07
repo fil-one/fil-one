@@ -1,6 +1,7 @@
 import {
   BatchWriteItemCommand,
   DeleteItemCommand,
+  GetItemCommand,
   PutItemCommand,
   QueryCommand,
   ScanCommand,
@@ -12,6 +13,7 @@ import pRetry, { type Options as RetryOptions } from 'p-retry';
 import { S3VectorsStore } from '@filone/rag-shared';
 import { Resource } from 'sst';
 import { deleteAuth0User } from './auth0-management.js';
+import { discoverBillingCustomer } from './billing-customer-discovery.js';
 import { getDynamoClient } from './ddb-client.js';
 import { deleteDeletionChallenge } from './deletion-challenge.js';
 import { applyDeletionGuards } from './deletion-guards.js';
@@ -20,7 +22,6 @@ import {
   DeletionKeys,
   OrgDeletionStatus,
   RAGKeys,
-  type OrgDeletionBillingCustomer,
   type OrgDeletionRecord,
   type OrgTombstoneRecord,
 } from './dynamo-records.js';
@@ -65,6 +66,10 @@ export function assertPurgeablePk(pk: string, prefixes: readonly string[]): void
  * (idempotent) teardown. Concurrent invocations are harmless for the same
  * reason.
  *
+ * Stripe runs TWICE — once alongside the other externals and once after the
+ * purge — because its customer discovery is index-lagged; see the second call
+ * site below.
+ *
  * `record.status` is read as a plain string: legacy records may still carry
  * an old intermediate status (KEYS_REVOKED, TENANTS_DISABLED, ...) — anything
  * that is not DONE means "in progress, run everything".
@@ -86,9 +91,15 @@ export async function runAccountDeletion(orgId: string): Promise<void> {
 
   // The external teardowns are independent — run them concurrently and only
   // fail after all settle, so one vendor/region outage doesn't block the rest.
+  let firstPassCustomerId: string | undefined;
   const externals: { name: string; run: () => Promise<void> }[] = [
     { name: 'regions', run: () => deleteAllRegions(orgId, record) },
-    { name: 'stripe', run: () => cancelStripeAndWriteTombstone(orgId, record) },
+    {
+      name: 'stripe',
+      run: async () => {
+        firstPassCustomerId = await cancelStripeAndWriteTombstone(orgId, record);
+      },
+    },
     { name: 'auth0', run: () => deleteAuth0Users(record) },
     { name: 'rag', run: () => purgeRagData(orgId) },
   ];
@@ -106,6 +117,16 @@ export async function runAccountDeletion(orgId: string): Promise<void> {
   }
 
   await purgeRecords(orgId, record);
+
+  // Second Stripe pass — NOT redundant. Stripe Search indexes writes with a
+  // lag (~25s, measured 2026-08-07), so the first pass is blind to a customer
+  // minted in the seconds before the confirm. Everything above (regions +
+  // Auth0 + RAG + the purge) takes comfortably longer than that lag, which is
+  // precisely what makes this pass see what the first could not. Do NOT drop
+  // it because the first pass "usually" finds everything — the case it misses
+  // is the unredacted-PII bug this design exists to close.
+  await cancelStripeAndWriteTombstone(orgId, record, { customerId: firstPassCustomerId });
+
   await markDone(orgId);
   console.warn('[account-deletion] Teardown complete', { orgId });
 }
@@ -114,14 +135,61 @@ export async function runAccountDeletion(orgId: string): Promise<void> {
 // External teardowns — each idempotent
 // ---------------------------------------------------------------------------
 
+/**
+ * Cancel the org's Stripe billing, tombstone the customer reference and queue
+ * its PII redaction. The customer is discovered LIVE from Stripe metadata
+ * rather than read off the DELETION record: a confirm-time snapshot cannot see
+ * a customer minted inside the deletion race windows, and that customer's PII
+ * would then survive in Stripe forever (see billing-customer-discovery.ts).
+ *
+ * Idempotent, and run twice per teardown.
+ *
+ * @param prior the first pass's discovery result. Present ONLY on the second
+ *   pass, where it marks a newly-visible customer as a late (race-window) find
+ *   worth shouting about.
+ * @returns the discovered customer id, if any.
+ */
 async function cancelStripeAndWriteTombstone(
   orgId: string,
   record: OrgDeletionRecord,
-): Promise<void> {
-  const customers = record.billingCustomers ?? [];
+  prior?: { customerId?: string },
+): Promise<string | undefined> {
+  const { customerId, extraCustomerIds } = await discoverBillingCustomer(orgId, record.members);
+  const allCustomerIds = customerId ? [customerId, ...extraCustomerIds] : extraCustomerIds;
 
-  for (const customer of customers) {
-    for (const subscriptionId of await cancellableSubscriptionIds(orgId, customer)) {
+  if (prior && customerId && customerId !== prior.customerId) {
+    console.warn(
+      '[account-deletion] Late Stripe customer discovered after purge — a trial/customer was ' +
+        'minted inside the deletion race window',
+      { orgId, customerId },
+    );
+  }
+
+  // EVERY discovered customer is swept, extras included: even in the anomalous
+  // multi-customer case billing must stop.
+  await cancelAllSubscriptions(orgId, allCustomerIds);
+
+  // The org ↔ customer relationship is 1:1 by domain, so the tombstone and the
+  // redaction job are single-customer. Extras mean that invariant broke: stop
+  // here rather than silently pick one to redact and strand the others'
+  // PII. The record stays non-DONE, so the orchestrator re-drives it and the
+  // stuck gauge surfaces it for manual redaction.
+  if (extraCustomerIds.length > 0) {
+    throw new Error(
+      `multiple Stripe customers discovered for org ${orgId} (${allCustomerIds.join(', ')}); ` +
+        'single-customer teardown cannot redact them all — manual follow-up required',
+    );
+  }
+
+  await writeTombstone(orgId, customerId);
+  await redactStripeCustomers(orgId, record, customerId);
+  return customerId;
+}
+
+/** Cancel every live subscription of every given customer; already-gone is success. */
+async function cancelAllSubscriptions(orgId: string, customerIds: string[]): Promise<void> {
+  for (const customerId of customerIds) {
+    for (const subscriptionId of await cancellableSubscriptionIds(orgId, customerId)) {
       try {
         await getStripeClient().subscriptions.cancel(subscriptionId);
       } catch (err) {
@@ -133,24 +201,48 @@ async function cancelStripeAndWriteTombstone(
       }
     }
   }
+}
 
-  // The Stripe CUSTOMER objects are kept (finance/audit needs the
-  // references), but their PII is erased via a Redaction Job; this PII-free
-  // tombstone preserves the customer ids across the purge.
-  const customerIds = billingCustomerIds(customers);
+/**
+ * The Stripe CUSTOMER object is kept (finance/audit needs the reference) while
+ * its PII is erased via a Redaction Job, so this PII-free tombstone preserves
+ * the customer id across the purge.
+ *
+ * A tombstone already naming a DIFFERENT customer is never silently
+ * overwritten: that would strand the previously-recorded customer with no
+ * pointer left to redact it by. Throwing keeps the record non-DONE for the
+ * re-drive / manual follow-up. A pass that discovers nothing leaves an
+ * existing id in place rather than erasing it.
+ */
+async function writeTombstone(orgId: string, customerId: string | undefined): Promise<void> {
+  const key = { pk: DeletionKeys.tombstonePk(orgId), sk: DeletionKeys.tombstoneSk() };
+  const existing = await dynamo.send(
+    new GetItemCommand({
+      TableName: Resource.BillingTable.name,
+      Key: marshall(key),
+      ConsistentRead: true,
+    }),
+  );
+  const existingCustomerId = existing.Item
+    ? (unmarshall(existing.Item) as OrgTombstoneRecord).stripeCustomerId
+    : undefined;
+  if (existingCustomerId && customerId && existingCustomerId !== customerId) {
+    throw new Error(
+      `Org ${orgId} tombstone already records Stripe customer ${existingCustomerId} but discovery ` +
+        `found ${customerId}; refusing to overwrite — manual follow-up required`,
+    );
+  }
+
+  const recordedCustomerId = customerId ?? existingCustomerId;
   const tombstone: OrgTombstoneRecord = {
-    pk: DeletionKeys.tombstonePk(orgId),
-    sk: DeletionKeys.tombstoneSk(),
+    ...key,
     orgId,
-    ...(customerIds.length > 0 ? { stripeCustomerId: customerIds[0] } : {}),
-    ...(customerIds.length > 1 ? { stripeCustomerIds: customerIds } : {}),
+    ...(recordedCustomerId ? { stripeCustomerId: recordedCustomerId } : {}),
     deletedAt: new Date().toISOString(),
   };
   await dynamo.send(
     new PutItemCommand({ TableName: Resource.BillingTable.name, Item: marshall(tombstone) }),
   );
-
-  await redactStripeCustomers(orgId, record, customerIds);
 }
 
 /** Stripe statuses a subscription can never leave — nothing left to cancel. */
@@ -160,24 +252,17 @@ const TERMINAL_SUBSCRIPTION_STATUSES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Asks Stripe for the customer's live subscriptions rather than trusting the
- * confirm-time snapshot: one created after the snapshot (see
- * handlers/activate-subscription.ts) would otherwise bill a deleted account
- * forever. Falls back to the snapshotted id only when the entry has no customer
- * id. A `resource_missing` means the customer itself is gone (the
- * customer.deleted trigger), and Stripe already cancelled its subscriptions.
+ * Asks Stripe for the customer's live subscriptions: one created during the
+ * deletion race window (see handlers/activate-subscription.ts) would otherwise
+ * bill a deleted account forever. A `resource_missing` means the customer
+ * itself is gone (the customer.deleted trigger), and Stripe already cancelled
+ * its subscriptions.
  */
-async function cancellableSubscriptionIds(
-  orgId: string,
-  customer: OrgDeletionBillingCustomer,
-): Promise<string[]> {
-  if (!customer.stripeCustomerId) {
-    return customer.subscriptionId ? [customer.subscriptionId] : [];
-  }
+async function cancellableSubscriptionIds(orgId: string, customerId: string): Promise<string[]> {
   const ids: string[] = [];
   try {
     for await (const subscription of getStripeClient().subscriptions.list({
-      customer: customer.stripeCustomerId,
+      customer: customerId,
       status: 'all',
       limit: 100,
     })) {
@@ -187,16 +272,10 @@ async function cancellableSubscriptionIds(
     if ((err as { code?: string }).code !== 'resource_missing') throw err;
     console.warn('[account-deletion] Stripe customer already deleted; nothing to cancel', {
       orgId,
-      stripeCustomerId: customer.stripeCustomerId,
+      stripeCustomerId: customerId,
     });
   }
   return ids;
-}
-
-function billingCustomerIds(customers: OrgDeletionBillingCustomer[]): string[] {
-  return customers
-    .map((c) => c.stripeCustomerId)
-    .filter((id): id is string => typeof id === 'string');
 }
 
 /**

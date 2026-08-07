@@ -1,6 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  ConditionalCheckFailedException,
+  DeleteItemCommand,
+  DynamoDBClient,
+  GetItemCommand,
+  PutItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
@@ -24,6 +31,7 @@ vi.mock('./stripe-client.js', () => ({
 vi.mock('sst', () => ({
   Resource: {
     BillingTable: { name: 'BillingTable' },
+    UserInfoTable: { name: 'UserInfoTable' },
     StripeSecretKey: { value: 'sk_test_fake' },
     StripePriceId: { value: 'price_test_fake' },
   },
@@ -32,6 +40,9 @@ vi.mock('sst', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 import { createBillingTrial } from './create-billing-trial.js';
+
+const USER_INFO = { sub: 'auth0|sub-1' };
+const BILLING_KEY = { pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } };
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -43,7 +54,13 @@ describe('createBillingTrial', () => {
     vi.clearAllMocks();
 
     // Default: no existing billing record, so the guard falls through.
-    ddbMock.on(GetItemCommand).resolves({});
+    ddbMock.on(GetItemCommand, { TableName: 'BillingTable' }).resolves({});
+    // Default: a live identity for the FIL-112 post-write verification.
+    ddbMock
+      .on(GetItemCommand, { TableName: 'UserInfoTable' })
+      .resolves({ Item: { userId: { S: 'user-1' } } });
+    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(DeleteItemCommand).resolves({});
     ddbMock.on(UpdateItemCommand).resolves({});
 
     mockCustomersCreate.mockResolvedValue({ id: 'cus_test_123' });
@@ -56,7 +73,12 @@ describe('createBillingTrial', () => {
   });
 
   it('creates Stripe customer, subscription, and DynamoDB trial record', async () => {
-    await createBillingTrial({ userId: 'user-1', orgId: 'org-1', email: 'test@example.com' });
+    await createBillingTrial({
+      userId: 'user-1',
+      orgId: 'org-1',
+      email: 'test@example.com',
+      userInfo: USER_INFO,
+    });
 
     // Verify Stripe customer creation
     expect(mockCustomersCreate).toHaveBeenCalledWith(
@@ -100,7 +122,7 @@ describe('createBillingTrial', () => {
     // upserting a partial record (status, no stripeCustomerId). The write must
     // be an unconditional update so the customer mapping is stored anyway — a
     // conditional put would silently no-op and lose it forever.
-    await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
+    await createBillingTrial({ userId: 'user-1', orgId: 'org-1', userInfo: USER_INFO });
 
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
     expect(updateCalls).toHaveLength(1);
@@ -114,7 +136,7 @@ describe('createBillingTrial', () => {
   it('does not overwrite a subscription status written by a webhook', async () => {
     // A webhook may have already advanced the status (e.g. to active);
     // if_not_exists keeps the fresher webhook value.
-    await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
+    await createBillingTrial({ userId: 'user-1', orgId: 'org-1', userInfo: USER_INFO });
 
     const input = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
     expect(input.UpdateExpression).toContain(
@@ -126,7 +148,7 @@ describe('createBillingTrial', () => {
   });
 
   it('sets trial_end to 30 days from now', async () => {
-    await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
+    await createBillingTrial({ userId: 'user-1', orgId: 'org-1', userInfo: USER_INFO });
 
     const trialEnd = mockSubscriptionsCreate.mock.calls[0][0].trial_end;
     const nowUnix = Math.floor(Date.now() / 1000);
@@ -138,7 +160,7 @@ describe('createBillingTrial', () => {
   });
 
   it('passes undefined email when not provided', async () => {
-    await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
+    await createBillingTrial({ userId: 'user-1', orgId: 'org-1', userInfo: USER_INFO });
 
     expect(mockCustomersCreate).toHaveBeenCalledWith(
       { email: undefined, metadata: { userId: 'user-1', orgId: 'org-1' } },
@@ -147,11 +169,16 @@ describe('createBillingTrial', () => {
   });
 
   it('returns early without touching Stripe when a billing record already exists', async () => {
-    ddbMock.on(GetItemCommand).resolves({
+    ddbMock.on(GetItemCommand, { TableName: 'BillingTable' }).resolves({
       Item: { pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } },
     });
 
-    await createBillingTrial({ userId: 'user-1', orgId: 'org-1', email: 'test@example.com' });
+    await createBillingTrial({
+      userId: 'user-1',
+      orgId: 'org-1',
+      email: 'test@example.com',
+      userInfo: USER_INFO,
+    });
 
     // Guarded before any Stripe side effects — this is what prevents duplicate
     // customers/subscriptions on re-invocation past Stripe's idempotency window.
@@ -171,11 +198,11 @@ describe('createBillingTrial', () => {
   it('propagates Stripe customer creation errors', async () => {
     mockCustomersCreate.mockRejectedValue(new Error('Stripe API error'));
 
-    await expect(createBillingTrial({ userId: 'user-1', orgId: 'org-1' })).rejects.toThrow(
-      'Stripe API error',
-    );
+    await expect(
+      createBillingTrial({ userId: 'user-1', orgId: 'org-1', userInfo: USER_INFO }),
+    ).rejects.toThrow('Stripe API error');
 
-    // Should not attempt subscription or DynamoDB
+    // The early trial row is already written; only the Stripe fill-in is skipped.
     expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
@@ -183,11 +210,11 @@ describe('createBillingTrial', () => {
   it('propagates Stripe subscription creation errors', async () => {
     mockSubscriptionsCreate.mockRejectedValue(new Error('Subscription failed'));
 
-    await expect(createBillingTrial({ userId: 'user-1', orgId: 'org-1' })).rejects.toThrow(
-      'Subscription failed',
-    );
+    await expect(
+      createBillingTrial({ userId: 'user-1', orgId: 'org-1', userInfo: USER_INFO }),
+    ).rejects.toThrow('Subscription failed');
 
-    // Customer was created but DynamoDB should not have been called
+    // Customer was created but the Stripe fill-in write never ran.
     expect(mockCustomersCreate).toHaveBeenCalledOnce();
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
@@ -195,8 +222,120 @@ describe('createBillingTrial', () => {
   it('propagates unexpected DynamoDB errors', async () => {
     ddbMock.on(UpdateItemCommand).rejects(new Error('Service unavailable'));
 
-    await expect(createBillingTrial({ userId: 'user-1', orgId: 'org-1' })).rejects.toThrow(
-      'Service unavailable',
+    await expect(
+      createBillingTrial({ userId: 'user-1', orgId: 'org-1', userInfo: USER_INFO }),
+    ).rejects.toThrow('Service unavailable');
+  });
+
+  // -------------------------------------------------------------------------
+  // FIL-112: write the record first, then verify the identity survived
+  // -------------------------------------------------------------------------
+
+  it('writes a complete trialing record BEFORE any Stripe call', async () => {
+    // Deletion-guarded webhook writers (attribute_exists(pk)) silently drop
+    // their writes when no record exists. Writing first closes that hole for
+    // the duration of the two Stripe round-trips.
+    let putsWhenStripeWasCalled = -1;
+    mockCustomersCreate.mockImplementation(() => {
+      putsWhenStripeWasCalled = ddbMock.commandCalls(PutItemCommand).length;
+      return Promise.resolve({ id: 'cus_test_123' });
+    });
+
+    await createBillingTrial({ userId: 'user-1', orgId: 'org-1', userInfo: USER_INFO });
+
+    expect(putsWhenStripeWasCalled).toBe(1);
+
+    const putCalls = ddbMock.commandCalls(PutItemCommand);
+    expect(putCalls).toHaveLength(1);
+
+    const input = putCalls[0].args[0].input;
+    expect(input.TableName).toBe('BillingTable');
+    expect(input.ConditionExpression).toBe('attribute_not_exists(pk)');
+
+    const item = input.Item!;
+    expect(item.pk).toEqual({ S: 'CUSTOMER#user-1' });
+    expect(item.sk).toEqual({ S: 'SUBSCRIPTION' });
+    expect(item.orgId).toEqual({ S: 'org-1' });
+    expect(item.subscriptionStatus).toEqual({ S: SubscriptionStatus.Trialing });
+    expect(item.trialStartedAt?.S).toEqual(expect.any(String));
+    expect(item.trialEndsAt?.S).toEqual(expect.any(String));
+
+    const identityGets = ddbMock
+      .commandCalls(GetItemCommand)
+      .filter((c) => c.args[0].input.TableName === 'UserInfoTable');
+    expect(identityGets).toHaveLength(1);
+  });
+
+  it('compensates the early row and skips Stripe when the identity is tombstoned', async () => {
+    ddbMock
+      .on(GetItemCommand, { TableName: 'UserInfoTable' })
+      .resolves({ Item: { userId: { S: 'user-1' }, deleted: { BOOL: true } } });
+
+    await expect(
+      createBillingTrial({ userId: 'user-1', orgId: 'org-1', userInfo: USER_INFO }),
+    ).resolves.toBeUndefined();
+
+    const deleteCalls = ddbMock.commandCalls(DeleteItemCommand);
+    expect(deleteCalls).toHaveLength(1);
+    expect(deleteCalls[0].args[0].input).toMatchObject({
+      TableName: 'BillingTable',
+      Key: BILLING_KEY,
+    });
+    expect(mockCustomersCreate).not.toHaveBeenCalled();
+    expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+  });
+
+  it('treats a missing identity row as tombstoned and compensates', async () => {
+    // The deletion-confirm handler upserts the SUB# row, so an absent row means
+    // the identity never existed.
+    ddbMock.on(GetItemCommand, { TableName: 'UserInfoTable' }).resolves({});
+
+    await createBillingTrial({ userId: 'user-1', orgId: 'org-1', userInfo: USER_INFO });
+
+    expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1);
+    expect(mockCustomersCreate).not.toHaveBeenCalled();
+    expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
+  });
+
+  it('returns cleanly without touching Stripe when the record is created concurrently', async () => {
+    ddbMock.on(PutItemCommand).rejects(
+      new ConditionalCheckFailedException({
+        message: 'The conditional request failed',
+        $metadata: {},
+      }),
     );
+
+    await expect(
+      createBillingTrial({ userId: 'user-1', orgId: 'org-1', userInfo: USER_INFO }),
+    ).resolves.toBeUndefined();
+
+    expect(mockCustomersCreate).not.toHaveBeenCalled();
+    expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
+  });
+
+  it('keeps the final write unconditional and if_not_exists-guarded on status', async () => {
+    // Pinned: adding a ConditionExpression here would lose the Stripe pointers
+    // at the writer instead of letting the resurrection sweep reconcile them.
+    await createBillingTrial({ userId: 'user-1', orgId: 'org-1', userInfo: USER_INFO });
+
+    const input = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
+    expect(input.ConditionExpression).toBeUndefined();
+    expect(input.UpdateExpression).toContain(
+      'subscriptionStatus = if_not_exists(subscriptionStatus, :status)',
+    );
+  });
+
+  it('uses the same trial window in the early row and the final write', async () => {
+    await createBillingTrial({ userId: 'user-1', orgId: 'org-1', userInfo: USER_INFO });
+
+    const putItem = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+    const values =
+      ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input.ExpressionAttributeValues!;
+
+    expect(putItem.trialEndsAt).toEqual(values[':trialEndsAt']);
+    expect(putItem.trialStartedAt).toEqual(values[':trialStartedAt']);
   });
 });

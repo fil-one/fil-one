@@ -420,17 +420,78 @@ describe('stripe-webhook handler', () => {
           sk: { S: 'SUBSCRIPTION' },
         },
         UpdateExpression:
-          'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now REMOVE gracePeriodEndsAt, canceledAt',
+          'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now, stripeCustomerId = if_not_exists(stripeCustomerId, :stripeCustomerId) REMOVE gracePeriodEndsAt, canceledAt',
         ExpressionAttributeValues: {
           ':subId': { S: MOCK_SUBSCRIPTION_ID },
           ':status': { S: 'active' },
           ':periodStart': { S: new Date(1600000000 * 1000).toISOString() },
           ':periodEnd': { S: new Date(1700000000 * 1000).toISOString() },
           ':now': { S: expect.any(String) },
+          ':stripeCustomerId': { S: MOCK_CUSTOMER_ID },
         },
         ConditionExpression: DELETION_GUARD,
       });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('backfills stripeCustomerId with if_not_exists using the subscription customer id', async () => {
+      setupStripeEvent('customer.subscription.created', mockSubscription());
+
+      await handler(buildWebhookEvent('{}'));
+
+      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updateCalls).toHaveLength(1);
+      const input = updateCalls[0].args[0].input;
+      expect(input.UpdateExpression).toContain(
+        'stripeCustomerId = if_not_exists(stripeCustomerId, :stripeCustomerId)',
+      );
+      expect(input.ExpressionAttributeValues![':stripeCustomerId']).toEqual({
+        S: MOCK_CUSTOMER_ID,
+      });
+    });
+
+    it('backfills trial window with if_not_exists when trial_start/trial_end are set', async () => {
+      const trialStart = 1650000000;
+      const trialEnd = 1655000000;
+      setupStripeEvent(
+        'customer.subscription.created',
+        mockSubscription({ trial_start: trialStart, trial_end: trialEnd }),
+      );
+
+      await handler(buildWebhookEvent('{}'));
+
+      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updateCalls).toHaveLength(1);
+      const input = updateCalls[0].args[0].input;
+      expect(input.UpdateExpression).toContain(
+        'trialStartedAt = if_not_exists(trialStartedAt, :trialStartedAt)',
+      );
+      expect(input.UpdateExpression).toContain(
+        'trialEndsAt = if_not_exists(trialEndsAt, :trialEndsAt)',
+      );
+      expect(input.ExpressionAttributeValues![':trialStartedAt']).toEqual({
+        S: new Date(trialStart * 1000).toISOString(),
+      });
+      expect(input.ExpressionAttributeValues![':trialEndsAt']).toEqual({
+        S: new Date(trialEnd * 1000).toISOString(),
+      });
+    });
+
+    it('omits trial window backfill clauses when trial_start/trial_end are null', async () => {
+      setupStripeEvent(
+        'customer.subscription.created',
+        mockSubscription({ trial_start: null, trial_end: null }),
+      );
+
+      await handler(buildWebhookEvent('{}'));
+
+      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updateCalls).toHaveLength(1);
+      const input = updateCalls[0].args[0].input;
+      expect(input.UpdateExpression).not.toContain('trialStartedAt');
+      expect(input.UpdateExpression).not.toContain('trialEndsAt');
+      expect(input.ExpressionAttributeValues![':trialStartedAt']).toBeUndefined();
+      expect(input.ExpressionAttributeValues![':trialEndsAt']).toBeUndefined();
     });
 
     it('falls back to customer.metadata.userId when subscription metadata empty', async () => {
@@ -624,13 +685,14 @@ describe('stripe-webhook handler', () => {
           sk: { S: 'SUBSCRIPTION' },
         },
         UpdateExpression:
-          'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now REMOVE gracePeriodEndsAt, canceledAt',
+          'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now, stripeCustomerId = if_not_exists(stripeCustomerId, :stripeCustomerId) REMOVE gracePeriodEndsAt, canceledAt',
         ExpressionAttributeValues: {
           ':subId': { S: MOCK_SUBSCRIPTION_ID },
           ':status': { S: 'active' },
           ':periodStart': { S: new Date(1600000000 * 1000).toISOString() },
           ':periodEnd': { S: new Date(1700000000 * 1000).toISOString() },
           ':now': { S: expect.any(String) },
+          ':stripeCustomerId': { S: MOCK_CUSTOMER_ID },
         },
         ConditionExpression: DELETION_GUARD,
       });

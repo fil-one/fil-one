@@ -1,16 +1,19 @@
 import {
   ConditionalCheckFailedException,
+  DeleteItemCommand,
   GetItemCommand,
   PutItemCommand,
-  UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
+import { ApiErrorCode } from '@filone/shared';
 import type { CreateSetupIntentResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import { sendGuardedBillingUpdate } from '../lib/deletion-guard.js';
+import { isIdentityTombstoned } from '../lib/identity-tombstone.js';
 import { getStripeClient } from '../lib/stripe-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -21,11 +24,24 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
 const dynamo = getDynamoClient();
 
+function accountDeletedResponse(): APIGatewayProxyResultV2 {
+  return new ResponseBuilder()
+    .status(410)
+    .body({ message: 'Account has been deleted', code: ApiErrorCode.ACCOUNT_DELETED })
+    .build();
+}
+
 // Exported for unit testing (without the auth/csrf middleware chain).
 export async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
-  const { userId, email, orgId } = getUserInfo(event);
+  const { sub, userId, email, orgId } = getUserInfo(event);
   const tableName = Resource.BillingTable.name;
   const stripe = getStripeClient();
+
+  // FIL-112 cheap pre-check: this handler mints a Stripe customer BEFORE its
+  // DB write, so without it a deleted identity leaves a live Stripe customer
+  // behind on every retry. The post-write verification further down is what
+  // actually closes the race; this only keeps the common case clean.
+  if (await isIdentityTombstoned({ sub })) return accountDeletedResponse();
 
   // 1. Check if customer already exists in billing table
   const existing = await dynamo.send(
@@ -46,6 +62,9 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
       stripeCustomerId = record.stripeCustomerId as string;
     } else {
       // Create Stripe customer and update record (without clobbering existing fields)
+      // Audit note: neither stripe.customers.create site in this handler passes
+      // an idempotency key, so a retried request mints a duplicate customer.
+      // Tracked as a separate follow-up; not changed here.
       const customer = await stripe.customers.create({
         email: email ?? undefined,
         // orgId included so webhook writers can backfill it onto records that
@@ -54,8 +73,11 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
       });
       stripeCustomerId = customer.id;
 
-      await dynamo.send(
-        new UpdateItemCommand({
+      // Deletion-guarded (FIL-112): the record may have been purged or claimed
+      // by teardown since the read above. Guard rejection means the account is
+      // going away — don't mint a SetupIntent against it.
+      const updated = await sendGuardedBillingUpdate(
+        {
           TableName: tableName,
           Key: {
             pk: { S: `CUSTOMER#${userId}` },
@@ -66,8 +88,10 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
             ':cid': { S: stripeCustomerId },
             ':now': { S: new Date().toISOString() },
           },
-        }),
+        },
+        { handler: 'create-setup-intent', userId, orgId },
       );
+      if (!updated) return accountDeletedResponse();
     }
   } else {
     // First time — create the Stripe customer and persist only the customer
@@ -97,6 +121,22 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     } catch (err) {
       // A record already exists
       if (!(err instanceof ConditionalCheckFailedException)) throw err;
+    }
+
+    // FIL-112 post-write verification: the tombstone is armed strictly before
+    // teardown purges billing, so seeing it now means the record we just wrote
+    // is a resurrection. Delete it.
+    if (await isIdentityTombstoned({ sub })) {
+      await dynamo.send(
+        new DeleteItemCommand({
+          TableName: tableName,
+          Key: { pk: { S: `CUSTOMER#${userId}` }, sk: { S: 'SUBSCRIPTION' } },
+        }),
+      );
+      // A request that raced past the top check still orphans the Stripe
+      // customer created above; teardown's metadata-based discovery sweeps it
+      // (both create sites here stamp metadata { userId, orgId }).
+      return accountDeletedResponse();
     }
   }
 
