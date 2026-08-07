@@ -4,7 +4,7 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.js';
 import { applyDeletionGuards } from './deletion-guards.js';
-import { snapshotBilling, snapshotMembers } from './deletion-snapshot.js';
+import { snapshotMembers } from './deletion-snapshot.js';
 import {
   DeletionKeys,
   OrgDeletionStatus,
@@ -30,8 +30,11 @@ export async function startAccountDeletion(
   orgId: string,
   opts: { requestedByUserId: string; reason: OrgDeletionReason },
 ): Promise<void> {
+  // Members only: the Stripe customer is deliberately NOT snapshotted here.
+  // A confirm-time snapshot is blind to a customer minted inside the deletion
+  // race windows, so teardown discovers it live from Stripe metadata instead
+  // (lib/billing-customer-discovery.ts) — over exactly these members.
   const members = await snapshotMembers(orgId);
-  const billing = await snapshotBilling(members);
 
   // Raw resolution, not readiness-gated: a tenant whose setup is still
   // mid-flight must be torn down too, so the snapshot has to see it.
@@ -52,7 +55,6 @@ export async function startAccountDeletion(
     reason: opts.reason,
     members,
     tenantIds,
-    ...billing,
     attemptCount: 0,
     updatedAt: now,
   };

@@ -143,12 +143,6 @@ function setupHappyMocks() {
     .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: `MEMBER#${USER_ID}` } } })
     .resolves({ Item: marshall({ role: OrgRole.Admin }) });
   putBatchGetRow('UserInfoTable', { pk: `USER#${USER_ID}`, sk: 'PROFILE', sub: SUB });
-  putBatchGetRow('BillingTable', {
-    pk: `CUSTOMER#${USER_ID}`,
-    sk: 'SUBSCRIPTION',
-    stripeCustomerId: 'cus_1',
-    subscriptionId: 'sub_1',
-  });
   stubBatchGet();
   ddbMock.on(QueryCommand).resolves({
     Items: [marshall({ pk: `ORG#${ORG_ID}`, sk: `MEMBER#${USER_ID}` })],
@@ -216,9 +210,11 @@ describe('delete-account baseHandler', () => {
     expect(put.ConditionExpression).toBe('attribute_not_exists(pk)');
     expect(put.Item!.sk.S).toBe('DELETION');
     expect(put.Item!.status.S).toBe('PENDING');
-    expect(unmarshall(put.Item!).billingCustomers).toEqual([
-      { stripeCustomerId: 'cus_1', subscriptionId: 'sub_1' },
-    ]);
+    // No Stripe snapshot is taken: a confirm-time one is blind to customers
+    // minted in the deletion race windows, so teardown discovers them live
+    // from Stripe metadata over these members instead.
+    expect(unmarshall(put.Item!).billingCustomers).toBeUndefined();
+    expect(unmarshall(put.Item!).members).toEqual([{ userId: USER_ID, sub: SUB }]);
 
     // Region-generic tenant snapshot: EVERY orchestrator provisioned for the
     // org must appear in the written tenantIds map, keyed by orchestrator id —
@@ -325,7 +321,7 @@ describe('delete-account baseHandler', () => {
     }
   });
 
-  it('snapshots EVERY member billing customer when the one-customer-per-org invariant is violated', async () => {
+  it("never reads or snapshots the members' billing rows — teardown discovers Stripe live", async () => {
     ddbMock.on(QueryCommand).resolves({
       Items: [
         marshall({ pk: `ORG#${ORG_ID}`, sk: `MEMBER#${USER_ID}` }),
@@ -345,14 +341,17 @@ describe('delete-account baseHandler', () => {
     expect(result.statusCode).toBe(200);
     const put = ddbMock.commandCalls(PutItemCommand)[0].args[0].input;
     const written = unmarshall(put.Item!) as {
-      billingCustomers?: { stripeCustomerId?: string; subscriptionId?: string }[];
+      billingCustomers?: unknown;
+      members: { userId: string }[];
     };
-    // Every member's Stripe pointers are captured, in members order, so
-    // teardown can cancel and redact each of them.
-    expect(written.billingCustomers).toEqual([
-      { stripeCustomerId: 'cus_1', subscriptionId: 'sub_1' },
-      { stripeCustomerId: 'cus_2', subscriptionId: 'sub_2' },
-    ]);
+    // The Stripe pointers on the CUSTOMER# rows are deliberately ignored: the
+    // record carries only the members that teardown's metadata search sweeps.
+    expect(written.billingCustomers).toBeUndefined();
+    expect(written.members.map((m) => m.userId)).toEqual([USER_ID, 'user-2']);
+    const batchGetTables = ddbMock
+      .commandCalls(BatchGetItemCommand)
+      .flatMap((c) => Object.keys(c.args[0].input.RequestItems!));
+    expect(batchGetTables).not.toContain('BillingTable');
   });
 
   it('degrades gracefully on a re-confirm after teardown purged the org profile (400 name mismatch)', async () => {

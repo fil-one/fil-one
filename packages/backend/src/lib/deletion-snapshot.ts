@@ -3,7 +3,7 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.js';
 import { batchGet } from './dynamo-batch-get.js';
-import type { OrgDeletionBillingCustomer, OrgDeletionMember } from './dynamo-records.js';
+import type { OrgDeletionMember } from './dynamo-records.js';
 
 const dynamo = getDynamoClient();
 
@@ -47,40 +47,4 @@ async function queryMemberUserIds(orgId: string): Promise<string[]> {
     lastEvaluatedKey = result.LastEvaluatedKey;
   } while (lastEvaluatedKey);
   return userIds;
-}
-
-/**
- * EVERY member billing record with Stripe references is snapshotted, in
- * members order. The one-customer-per-org invariant makes this normally a
- * single entry, but if it is ever violated the extras' CUSTOMER# rows still
- * get purged — their Stripe pointers must survive on the snapshot so teardown
- * cancels/redacts each of them.
- */
-export async function snapshotBilling(
-  members: OrgDeletionMember[],
-): Promise<{ billingCustomers?: OrgDeletionBillingCustomer[] }> {
-  const rows = await batchGet(
-    Resource.BillingTable.name,
-    members.map((member) => ({ pk: `CUSTOMER#${member.userId}`, sk: 'SUBSCRIPTION' })),
-  );
-  const rowByPk = new Map(rows.map((row) => [row.pk, row]));
-  const billingCustomers = members
-    .map((member) => rowByPk.get(`CUSTOMER#${member.userId}`))
-    .map((row) => {
-      const stripeCustomerId = stringAttr(row, 'stripeCustomerId');
-      const subscriptionId = stringAttr(row, 'subscriptionId');
-      return {
-        ...(stripeCustomerId ? { stripeCustomerId } : {}),
-        ...(subscriptionId ? { subscriptionId } : {}),
-      };
-    })
-    .filter((customer) => customer.stripeCustomerId ?? customer.subscriptionId);
-  if (billingCustomers.length === 0) return {};
-  if (billingCustomers.length > 1) {
-    console.warn(
-      '[deletion-snapshot] Multiple member billing customers found (invariant violation)',
-      { count: billingCustomers.length },
-    );
-  }
-  return { billingCustomers };
 }

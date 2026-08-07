@@ -171,20 +171,39 @@ function getCustomerIdString(customer: string | Stripe.Customer | Stripe.Deleted
   return typeof customer === 'string' ? customer : customer.id;
 }
 
+type BackfillClause = { clause: string; values: Record<string, { S: string }> };
+
 /**
  * Records predating the orgId field are invisible to every lifecycle job (usage
  * reporting, drift checking, grace enforcement all skip records lacking one).
  * Backfill from Stripe metadata whenever it is in hand — if_not_exists so a
  * known-good stored value is never clobbered.
  */
-function orgIdBackfill(orgId: string | undefined): {
-  clause: string;
-  values: Record<string, { S: string }>;
-} {
+function orgIdBackfill(orgId: string | undefined): BackfillClause {
   if (!orgId) return { clause: '', values: {} };
   return {
     clause: ', orgId = if_not_exists(orgId, :orgId)',
     values: { ':orgId': { S: orgId } },
+  };
+}
+
+/**
+ * A record whose trial was created by createBillingTrial but whose final
+ * write never landed gets promoted out of its initial status by this
+ * webhook and would then never get its trial window from anywhere else;
+ * without trialEndsAt the subscription guard's lazy trial→grace transition
+ * never fires and the account trials forever. Backfill from the subscription
+ * whenever it is in hand — if_not_exists so createBillingTrial's own values
+ * always win.
+ */
+function trialWindowBackfill(subscription: Stripe.Subscription): BackfillClause {
+  const { trial_start: start, trial_end: end } = subscription;
+  if (typeof start !== 'number' || typeof end !== 'number') return { clause: '', values: {} };
+  const iso = (unixSeconds: number) => new Date(unixSeconds * 1000).toISOString();
+  return {
+    clause:
+      ', trialStartedAt = if_not_exists(trialStartedAt, :trialStartedAt), trialEndsAt = if_not_exists(trialEndsAt, :trialEndsAt)',
+    values: { ':trialStartedAt': { S: iso(start) }, ':trialEndsAt': { S: iso(end) } },
   };
 }
 
@@ -357,7 +376,9 @@ async function updateBillingRecord({
   mappedStatus,
   orgId,
 }: UpdateBillingRecordParams): Promise<void> {
+  const stripeCustomerId = getCustomerIdString(subscription.customer);
   const backfill = orgIdBackfill(orgId);
+  const trialBackfill = trialWindowBackfill(subscription);
   await sendGuardedBillingUpdate(
     {
       TableName: tableName,
@@ -365,7 +386,11 @@ async function updateBillingRecord({
         pk: { S: `CUSTOMER#${userId}` },
         sk: { S: 'SUBSCRIPTION' },
       },
-      UpdateExpression: `SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now${backfill.clause} REMOVE gracePeriodEndsAt, canceledAt`,
+      // stripeCustomerId uses if_not_exists rather than a plain SET: it only fills the
+      // gap when createBillingTrial's final write never landed, since that write's
+      // unconditional SET always wins otherwise. A plain SET here would let a delayed
+      // webhook replay clobber a newer customer id (the past-24h duplicate-customer case).
+      UpdateExpression: `SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now, stripeCustomerId = if_not_exists(stripeCustomerId, :stripeCustomerId)${backfill.clause}${trialBackfill.clause} REMOVE gracePeriodEndsAt, canceledAt`,
       ExpressionAttributeValues: {
         ':subId': { S: subscription.id },
         ':status': { S: mappedStatus },
@@ -376,7 +401,9 @@ async function updateBillingRecord({
           S: new Date((subscription.items.data[0]?.current_period_start ?? 0) * 1000).toISOString(),
         },
         ':now': { S: new Date().toISOString() },
+        ':stripeCustomerId': { S: stripeCustomerId },
         ...backfill.values,
+        ...trialBackfill.values,
       },
     },
     { userId, subscriptionId: subscription.id, event: 'subscription.created/updated' },
