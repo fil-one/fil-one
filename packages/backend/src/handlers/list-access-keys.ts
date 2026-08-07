@@ -4,10 +4,10 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { AccessKey, GranularPermission, ListAccessKeysResponse } from '@filone/shared';
-import { S3Region } from '@filone/shared';
+import { S3Region, isSupportedRegion } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
+import { ResponseBuilder, unsupportedRegionResponse } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -19,30 +19,54 @@ export async function baseHandler(
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const { orgId } = getUserInfo(event);
   const bucketFilter = event.queryStringParameters?.bucket;
+  // Optional: callers that omit `region` get keys from every region, which is what
+  // the API keys page lists.
+  const regionFilter = event.queryStringParameters?.region;
 
-  const queryInput: ConstructorParameters<typeof QueryCommand>[0] = {
-    TableName: Resource.UserInfoTable.name,
-    KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
-    ExpressionAttributeValues: {
-      ':pk': { S: `ORG#${orgId}` },
-      ':skPrefix': { S: 'ACCESSKEY#' },
-    },
+  if (regionFilter && !isSupportedRegion(regionFilter, process.env.FILONE_STAGE!)) {
+    return unsupportedRegionResponse(regionFilter);
+  }
+
+  const values: Record<string, { S: string }> = {
+    ':pk': { S: `ORG#${orgId}` },
+    ':skPrefix': { S: 'ACCESSKEY#' },
   };
+  const names: Record<string, string> = {};
+  const filters: string[] = [];
 
   // When a bucket filter is provided, only return keys that have access to that bucket:
   // either keys with bucketScope = 'all' or keys that include the bucket in their buckets list.
   if (bucketFilter) {
-    queryInput.FilterExpression = 'bucketScope = :all OR contains(buckets, :bucket)';
-    queryInput.ExpressionAttributeValues = {
-      ...queryInput.ExpressionAttributeValues,
-      ':all': { S: 'all' },
-      ':bucket': { S: bucketFilter },
-    };
+    filters.push('(bucketScope = :all OR contains(buckets, :bucket))');
+    values[':all'] = { S: 'all' };
+    values[':bucket'] = { S: bucketFilter };
   }
 
+  // Access keys are region-scoped: a key created in one region cannot operate on
+  // buckets in another — not even a key scoped to all buckets, since "all buckets"
+  // only spans the key's own region. `region` is a DynamoDB reserved word, hence #region.
+  if (regionFilter) {
+    // Rows written before regions existed carry no `region` attribute and belong to
+    // eu-west-1, matching the fallback applied when mapping rows below.
+    filters.push(
+      regionFilter === S3Region.EuWest1
+        ? '(#region = :region OR attribute_not_exists(#region))'
+        : '#region = :region',
+    );
+    names['#region'] = 'region';
+    values[':region'] = { S: regionFilter };
+  }
+
+  const queryInput: ConstructorParameters<typeof QueryCommand>[0] = {
+    TableName: Resource.UserInfoTable.name,
+    KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
+    ExpressionAttributeValues: values,
+    ...(filters.length > 0 && { FilterExpression: filters.join(' AND ') }),
+    ...(Object.keys(names).length > 0 && { ExpressionAttributeNames: names }),
+  };
+
   // Attribute a 500 from this handler: on its own the error names neither the org nor
-  // whether the conditional bucket-filter branch was in play, which is the only thing
-  // that varies the query shape.
+  // the filters in play, which are the only thing that varies the query shape.
   let result;
   try {
     result = await getDynamoClient().send(new QueryCommand(queryInput));
@@ -50,7 +74,7 @@ export async function baseHandler(
     console.error('[list-access-keys] Access key query failed', {
       orgId,
       bucketFilter: bucketFilter ?? null,
-      filtered: Boolean(bucketFilter),
+      regionFilter: regionFilter ?? null,
       error,
     });
     throw error;
