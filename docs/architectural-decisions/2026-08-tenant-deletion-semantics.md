@@ -25,7 +25,7 @@ tolerance**.
 
 The only way the probe ever produced a 404 was a ref that never resolved at all — a misrouted
 `baseUrl`, a wrong-scope token, or a gateway answering for the wrong service. Those faults make
-*every* ref unresolvable, so reading 404 as "already deleted" would fall through and destroy the SSM
+_every_ ref unresolvable, so reading 404 as "already deleted" would fall through and destroy the SSM
 credentials of a client that is still live upstream, leaving an orphaned tenant nobody can reach.
 
 **Implementations MUST fail on 404**, at both the pre-deletion PATCH and the DELETE. Idempotency
