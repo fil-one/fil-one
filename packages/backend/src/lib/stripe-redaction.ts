@@ -25,8 +25,9 @@ interface StripeRedactionJobList {
 }
 
 /**
- * Redact the canceled customers' PII via Stripe's Redaction Jobs API (one job
- * covers every snapshotted customer). The pinned SDK (22.0.2) has no
+ * Redact the canceled customer's PII via Stripe's Redaction Jobs API. The org
+ * ↔ Stripe customer relationship is 1:1 by domain, so exactly one customer is
+ * redacted per teardown. The pinned SDK (22.0.2) has no
  * `privacy.redactionJobs` namespace, so the REST endpoints are driven through
  * `stripe.rawRequest`.
  *
@@ -41,13 +42,13 @@ interface StripeRedactionJobList {
 export async function redactStripeCustomers(
   orgId: string,
   record: OrgDeletionRecord,
-  customerIds: string[],
+  customerId: string | undefined,
 ): Promise<void> {
-  if (customerIds.length === 0) return;
+  if (!customerId) return;
 
   let jobId = record.stripeRedactionJobId;
   if (!jobId) {
-    const established = await establishRedactionJob(orgId, customerIds);
+    const established = await establishRedactionJob(orgId, customerId);
     if (!established) return; // customer missing — nothing to redact
     jobId = established;
     record.stripeRedactionJobId = jobId;
@@ -57,31 +58,31 @@ export async function redactStripeCustomers(
 }
 
 /**
- * Create the customers' redaction job and persist its id — or, when Stripe
- * reports a customer is already in another (live) redaction job, recover and
+ * Create the customer's redaction job and persist its id — or, when Stripe
+ * reports the customer is already in another (live) redaction job, recover and
  * persist THAT job's id so its lifecycle gets driven instead of the redaction
  * being skipped. Returns `null` only when the customer no longer exists.
  */
-async function establishRedactionJob(orgId: string, customerIds: string[]): Promise<string | null> {
+async function establishRedactionJob(orgId: string, customerId: string): Promise<string | null> {
   let created: StripeRedactionJob | undefined;
   try {
     created = await stripeRawRequest<StripeRedactionJob>('POST', '/v1/privacy/redaction_jobs', {
-      objects: { customers: customerIds },
+      objects: { customers: [customerId] },
     });
   } catch (err) {
     if (!isCustomerRedactable(err)) {
       console.warn('[stripe-redaction] Stripe customer already redacted/missing', {
         orgId,
-        customerIds,
+        customerId,
       });
       return null;
     }
     if (!isRedactionJobConflict(err)) throw err;
-    // A customer is already in another redaction job (e.g. a previous pass
+    // The customer is already in another redaction job (e.g. a previous pass
     // created one but crashed before persisting its id). That job is NOT
     // complete — recover its id and drive ITS lifecycle instead of skipping
     // redaction, or the original job sits unvalidated forever.
-    return persistRedactionJobId(orgId, await findRedactionJobIdForCustomers(orgId, customerIds));
+    return persistRedactionJobId(orgId, await findRedactionJobIdForCustomer(orgId, customerId));
   }
 
   // Persist may lose against a concurrent worker — the stored id wins, and
@@ -95,15 +96,12 @@ async function establishRedactionJob(orgId: string, customerIds: string[]): Prom
 }
 
 /**
- * Recover the id of the live redaction job that already contains one of the
- * customers (create returned a job-conflict). Terminal jobs (failed/canceled)
- * are skipped — they no longer block a new job, so they can't be the
- * conflicting one.
+ * Recover the id of the live redaction job that already contains the customer
+ * (create returned a job-conflict). Terminal jobs (failed/canceled) are
+ * skipped — they no longer block a new job, so they can't be the conflicting
+ * one.
  */
-async function findRedactionJobIdForCustomers(
-  orgId: string,
-  customerIds: string[],
-): Promise<string> {
+async function findRedactionJobIdForCustomer(orgId: string, customerId: string): Promise<string> {
   const jobs = await stripeRawRequest<StripeRedactionJobList>('GET', '/v1/privacy/redaction_jobs', {
     limit: 100,
   });
@@ -111,12 +109,12 @@ async function findRedactionJobIdForCustomers(
     (job) =>
       job.status !== 'failed' &&
       job.status !== 'canceled' &&
-      (job.objects?.customers ?? []).some((c) => customerIds.includes(c)),
+      (job.objects?.customers ?? []).includes(customerId),
   );
   if (!match) {
     throw new Error(
-      `Stripe reported customer(s) ${customerIds.join(', ')} (org ${orgId}) are already in a ` +
-        'redaction job, but no live job containing them was found; the next teardown pass retries',
+      `Stripe reported customer ${customerId} (org ${orgId}) is already in a redaction job, but ` +
+        'no live job containing them was found; the next teardown pass retries',
     );
   }
   return match.id;

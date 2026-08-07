@@ -45,6 +45,7 @@ vi.mock('./service-orchestrator-registry.js', () => ({
 
 const mockSubscriptionsCancel = vi.fn();
 const mockSubscriptionsList = vi.fn();
+const mockCustomersSearch = vi.fn();
 const mockRawRequest = vi.fn();
 vi.mock('./stripe-client.js', () => ({
   getStripeClient: () => ({
@@ -52,6 +53,7 @@ vi.mock('./stripe-client.js', () => ({
       cancel: mockSubscriptionsCancel,
       list: (...args: unknown[]) => mockSubscriptionsList(...args),
     },
+    customers: { search: (...args: unknown[]) => mockCustomersSearch(...args) },
     rawRequest: (...args: unknown[]) => mockRawRequest(...args),
   }),
 }));
@@ -63,6 +65,20 @@ function stripeList(subscriptions: { id: string; status: string }[]) {
       yield* subscriptions;
     },
   };
+}
+
+/** The same shape for `customers.search`, which teardown discovers through. */
+function stripeSearch(hits: { id: string; metadata?: Record<string, string> }[]) {
+  return {
+    async *[Symbol.asyncIterator]() {
+      yield* hits;
+    },
+  };
+}
+
+/** A Stripe customer hit carrying the metadata both creation paths stamp. */
+function customerHit(id: string, orgId: string = ORG_ID) {
+  return { id, metadata: { userId: 'user-1', orgId } };
 }
 
 const mockGetOrgProfile = vi.fn();
@@ -103,7 +119,6 @@ function deletionItem(status: string, overrides?: Record<string, unknown>) {
     requestedByUserId: 'user-1',
     members: [{ userId: 'user-1', sub: 'auth0|sub-1' }],
     tenantIds: { aurora: 'aurora-t-1' },
-    billingCustomers: [{ stripeCustomerId: 'cus_1', subscriptionId: 'sub_1' }],
     attemptCount: 0,
     updatedAt: '2026-07-10T00:00:00.000Z',
     ...overrides,
@@ -120,6 +135,10 @@ function setupHappyMocks(status: string) {
   ddbMock
     .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
     .resolves({ Item: deletionItem(status) });
+  // No tombstone yet — the mismatch guard reads it before every write.
+  ddbMock
+    .on(GetItemCommand, { Key: { pk: { S: `ORG_TOMBSTONE#${ORG_ID}` }, sk: { S: 'TOMBSTONE' } } })
+    .resolves({});
   ddbMock.on(UpdateItemCommand).resolves({});
   ddbMock.on(DeleteItemCommand).resolves({});
   ddbMock.on(BatchWriteItemCommand).resolves({});
@@ -136,6 +155,8 @@ function setupHappyMocks(status: string) {
   mockSubscriptionsList.mockImplementation(({ customer }: { customer: string }) =>
     stripeList([{ id: `sub_${customer.slice('cus_'.length)}`, status: 'active' }]),
   );
+  // The org's single Stripe customer, as live metadata search reports it.
+  mockCustomersSearch.mockReturnValue(stripeSearch([customerHit('cus_1')]));
   mockDropIndex.mockResolvedValue(undefined);
   mockDeleteTenant.mockResolvedValue(undefined);
   stubRedactionJob();
@@ -286,17 +307,19 @@ describe('runAccountDeletion', () => {
     expect(mockDeleteAuth0User).toHaveBeenCalledWith('auth0|sub-1');
     expect(ddbMock.commandCalls(ScanCommand).length).toBeGreaterThan(0); // RAG purge
 
-    // Tombstone written to BillingTable without PII and without a ttl.
+    // Tombstone written to BillingTable without PII and without a ttl — once
+    // per Stripe pass (the post-purge pass re-writes the same singleton id).
     const puts = ddbMock.commandCalls(PutItemCommand);
-    expect(puts).toHaveLength(1);
+    expect(puts).toHaveLength(2);
     const tombstone = puts[0].args[0].input.Item!;
     expect(tombstone.pk.S).toBe(`ORG_TOMBSTONE#${ORG_ID}`);
     expect(tombstone.stripeCustomerId?.S).toBe('cus_1');
     expect(tombstone.ttl).toBeUndefined();
+    // The plural snapshot field is gone: the relationship is 1:1 by domain.
     expect(tombstone.stripeCustomerIds).toBeUndefined();
     expect(Object.keys(tombstone)).not.toContain('members');
 
-    // Redaction handed the snapshotted customers to lib/stripe-redaction.ts,
+    // Redaction handed the discovered customer to lib/stripe-redaction.ts,
     // whose job lifecycle is covered by its own suite.
     expect(mockRawRequest).toHaveBeenCalledWith('POST', '/v1/privacy/redaction_jobs', {
       objects: { customers: ['cus_1'] },
@@ -438,48 +461,14 @@ describe('runAccountDeletion', () => {
     expect(bumps[0].args[0].input.ExpressionAttributeValues?.[':now']?.S).toBeDefined();
   });
 
-  it('skips redaction when the snapshot has no Stripe customer', async () => {
+  it('skips redaction when discovery finds no Stripe customer', async () => {
     setupHappyMocks(OrgDeletionStatus.Pending);
-    ddbMock
-      .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
-      .resolves({
-        Item: deletionItem(OrgDeletionStatus.Pending, { billingCustomers: undefined }),
-      });
+    mockCustomersSearch.mockReturnValue(stripeSearch([]));
 
     await runAccountDeletion(ORG_ID);
 
     expect(mockRawRequest).not.toHaveBeenCalled();
-    expect(doneWrites()).toHaveLength(1);
-  });
-
-  it('cancels and redacts EVERY snapshotted billing customer, not just the first', async () => {
-    setupHappyMocks(OrgDeletionStatus.Pending);
-    ddbMock
-      .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
-      .resolves({
-        Item: deletionItem(OrgDeletionStatus.Pending, {
-          billingCustomers: [
-            { stripeCustomerId: 'cus_1', subscriptionId: 'sub_1' },
-            { stripeCustomerId: 'cus_2', subscriptionId: 'sub_2' },
-          ],
-        }),
-      });
-
-    await runAccountDeletion(ORG_ID);
-
-    // Both subscriptions canceled.
-    expect(mockSubscriptionsCancel).toHaveBeenCalledWith('sub_1');
-    expect(mockSubscriptionsCancel).toHaveBeenCalledWith('sub_2');
-
-    // ONE redaction job covering both customers.
-    expect(mockRawRequest).toHaveBeenCalledWith('POST', '/v1/privacy/redaction_jobs', {
-      objects: { customers: ['cus_1', 'cus_2'] },
-    });
-
-    // Tombstone preserves every customer pointer.
-    const tombstone = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
-    expect(tombstone.stripeCustomerId?.S).toBe('cus_1');
-    expect(unmarshall(tombstone).stripeCustomerIds).toEqual(['cus_1', 'cus_2']);
+    expect(mockSubscriptionsList).not.toHaveBeenCalled();
     expect(doneWrites()).toHaveLength(1);
   });
 
@@ -501,23 +490,14 @@ describe('runAccountDeletion', () => {
       status: 'all',
       limit: 100,
     });
-    expect(mockSubscriptionsCancel.mock.calls.flat()).toEqual(['sub_1', 'sub_late']);
-  });
-
-  it('falls back to the snapshotted subscriptionId when the entry has no customer id', async () => {
-    setupHappyMocks(OrgDeletionStatus.Pending);
-    ddbMock
-      .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
-      .resolves({
-        Item: deletionItem(OrgDeletionStatus.Pending, {
-          billingCustomers: [{ subscriptionId: 'sub_orphan' }],
-        }),
-      });
-
-    await runAccountDeletion(ORG_ID);
-
-    expect(mockSubscriptionsList).not.toHaveBeenCalled();
-    expect(mockSubscriptionsCancel).toHaveBeenCalledWith('sub_orphan');
+    // Both Stripe passes sweep, so each live subscription is cancelled twice
+    // (idempotent — the second cancel is an already-canceled no-op in Stripe).
+    expect(mockSubscriptionsCancel.mock.calls.flat()).toEqual([
+      'sub_1',
+      'sub_late',
+      'sub_1',
+      'sub_late',
+    ]);
   });
 
   it('treats a deleted Stripe customer as nothing to cancel (customer.deleted trigger)', async () => {
@@ -719,5 +699,149 @@ describe('runAccountDeletion', () => {
     expect(mockDropIndex).toHaveBeenCalledWith(ORG_ID, 'eu-west-1', 'my-bucket');
     // NotFound swallowed → the run still completed.
     expect(doneWrites()).toHaveLength(1);
+  });
+});
+
+describe('runAccountDeletion — live Stripe customer discovery', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /** The tombstone writes, newest last. */
+  function tombstoneWrites() {
+    return ddbMock
+      .commandCalls(PutItemCommand)
+      .filter((c) => c.args[0].input.Item?.pk?.S === `ORG_TOMBSTONE#${ORG_ID}`);
+  }
+
+  it('cancels and redacts a customer that exists ONLY in Stripe — no record field ever held it', async () => {
+    // The bug this replaces: a customer minted inside the deletion race window
+    // is invisible to any confirm-time snapshot, so its PII survived forever.
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    mockCustomersSearch.mockReturnValue(stripeSearch([customerHit('cus_racer')]));
+
+    await runAccountDeletion(ORG_ID);
+
+    expect(mockCustomersSearch).toHaveBeenCalledWith({
+      query: "metadata['userId']:'user-1'",
+      limit: 100,
+    });
+    expect(mockSubscriptionsList).toHaveBeenCalledWith({
+      customer: 'cus_racer',
+      status: 'all',
+      limit: 100,
+    });
+    expect(mockSubscriptionsCancel).toHaveBeenCalledWith('sub_racer');
+    expect(mockRawRequest).toHaveBeenCalledWith('POST', '/v1/privacy/redaction_jobs', {
+      objects: { customers: ['cus_racer'] },
+    });
+    expect(tombstoneWrites()[0].args[0].input.Item!.stripeCustomerId?.S).toBe('cus_racer');
+    expect(doneWrites()).toHaveLength(1);
+  });
+
+  it('never touches a customer whose metadata names another org', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    mockCustomersSearch.mockReturnValue(
+      stripeSearch([customerHit('cus_foreign', 'org-other'), customerHit('cus_1')]),
+    );
+
+    await runAccountDeletion(ORG_ID);
+
+    const sweptCustomers = mockSubscriptionsList.mock.calls.map(
+      (args) => (args[0] as { customer: string }).customer,
+    );
+    expect(sweptCustomers).not.toContain('cus_foreign');
+    expect(sweptCustomers).toContain('cus_1');
+    expect(mockSubscriptionsCancel.mock.calls.flat()).not.toContain('sub_foreign');
+    expect(mockRawRequest).toHaveBeenCalledWith('POST', '/v1/privacy/redaction_jobs', {
+      objects: { customers: ['cus_1'] },
+    });
+  });
+
+  it('fails the run when discovery fails — no snapshot to fall back to, so the record stays non-DONE', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    mockCustomersSearch.mockImplementation(() => {
+      throw new Error('stripe search is down');
+    });
+
+    const err = (await runAccountDeletion(ORG_ID).catch((e: unknown) => e)) as AggregateError;
+
+    expect(err).toBeInstanceOf(AggregateError);
+    expect(err.errors.map(String).join('\n')).toMatch(/Stripe customer search failed/);
+    expect(mockSubscriptionsCancel).not.toHaveBeenCalled();
+    expect(doneWrites()).toHaveLength(0);
+  });
+
+  it('the post-purge second pass catches a customer the index-lagged first pass could not see', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    // Stripe Search indexes writes ~25s behind: the first pass sees nothing,
+    // the post-purge pass sees the customer minted just before the confirm.
+    mockCustomersSearch
+      .mockReturnValueOnce(stripeSearch([]))
+      .mockReturnValue(stripeSearch([customerHit('cus_late')]));
+
+    await runAccountDeletion(ORG_ID);
+
+    expect(mockSubscriptionsCancel).toHaveBeenCalledWith('sub_late');
+    expect(mockRawRequest).toHaveBeenCalledWith('POST', '/v1/privacy/redaction_jobs', {
+      objects: { customers: ['cus_late'] },
+    });
+    // The first pass tombstoned nothing; the second records the late customer.
+    const tombstones = tombstoneWrites();
+    expect(tombstones[0].args[0].input.Item!.stripeCustomerId).toBeUndefined();
+    expect(tombstones[1].args[0].input.Item!.stripeCustomerId?.S).toBe('cus_late');
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('minted inside the deletion race window'),
+      { orgId: ORG_ID, customerId: 'cus_late' },
+    );
+    expect(doneWrites()).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it('multiple discovered customers: cancels ALL of them, then refuses to finish', async () => {
+    // The org ↔ customer relationship is 1:1 by domain. If it ever breaks,
+    // billing must still stop everywhere — but a single-customer tombstone and
+    // redaction job cannot represent the extras, so the run must not complete.
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    mockCustomersSearch.mockReturnValue(stripeSearch([customerHit('cus_1'), customerHit('cus_2')]));
+
+    const err = (await runAccountDeletion(ORG_ID).catch((e: unknown) => e)) as AggregateError;
+
+    expect(mockSubscriptionsCancel).toHaveBeenCalledWith('sub_1');
+    expect(mockSubscriptionsCancel).toHaveBeenCalledWith('sub_2');
+    expect(err.errors.map(String).join('\n')).toMatch(
+      /multiple Stripe customers discovered for org org-1 \(cus_1, cus_2\)/,
+    );
+    // Nothing was tombstoned or redacted — a human picks the survivor.
+    expect(tombstoneWrites()).toHaveLength(0);
+    expect(mockRawRequest).not.toHaveBeenCalled();
+    expect(doneWrites()).toHaveLength(0);
+  });
+
+  it('refuses to swap a tombstone that already records a different customer', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: `ORG_TOMBSTONE#${ORG_ID}` }, sk: { S: 'TOMBSTONE' } } })
+      .resolves({
+        Item: marshall({
+          pk: `ORG_TOMBSTONE#${ORG_ID}`,
+          sk: 'TOMBSTONE',
+          orgId: ORG_ID,
+          stripeCustomerId: 'cus_old',
+          deletedAt: '2026-07-10T00:00:00.000Z',
+        }),
+      });
+    mockCustomersSearch.mockReturnValue(stripeSearch([customerHit('cus_new')]));
+
+    const err = (await runAccountDeletion(ORG_ID).catch((e: unknown) => e)) as AggregateError;
+
+    expect(err.errors.map(String).join('\n')).toMatch(
+      /tombstone already records Stripe customer cus_old but discovery found cus_new/,
+    );
+    // The old pointer survives — overwriting it would strand cus_old
+    // unredactable.
+    expect(tombstoneWrites()).toHaveLength(0);
+    expect(doneWrites()).toHaveLength(0);
   });
 });
