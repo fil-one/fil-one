@@ -1067,7 +1067,9 @@ export default $config({
 
     const accountDeletionOrchestrator = createFn('AccountDeletionOrchestrator', {
       handler: 'packages/backend/src/jobs/account-deletion-orchestrator.handler',
-      link: [userInfoTable],
+      // billingTable: the resurrection sweep (FIL-112) checks
+      // CUSTOMER#{userId}/SUBSCRIPTION existence for DONE orgs' members.
+      link: [billingTable, userInfoTable],
       environment: {
         ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
       },

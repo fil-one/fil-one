@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, ScanCommand } from '@aws-sdk/client-dynamodb';
+import { BatchGetItemCommand, DynamoDBClient, ScanCommand } from '@aws-sdk/client-dynamodb';
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { type MetricEvent, reportMetric } from '../lib/metrics.js';
@@ -8,6 +8,7 @@ import { type MetricEvent, reportMetric } from '../lib/metrics.js';
 vi.mock('sst', () => ({
   Resource: {
     UserInfoTable: { name: 'UserInfoTable' },
+    BillingTable: { name: 'BillingTable' },
   },
 }));
 
@@ -42,12 +43,22 @@ function deletionRecord(orgId: string, overrides?: Record<string, unknown>) {
   return marshall(item);
 }
 
+/** A DONE deletion record — the shape the resurrection sweep reads. */
+function doneRecord(orgId: string, overrides?: Record<string, unknown>) {
+  return deletionRecord(orgId, {
+    status: 'DONE',
+    members: [{ userId: `user-${orgId}` }],
+    ...overrides,
+  });
+}
+
 describe('account-deletion-orchestrator', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
     lambdaMock.reset();
     lambdaMock.on(InvokeCommand).resolves({});
+    ddbMock.on(BatchGetItemCommand).resolves({ Responses: { BillingTable: [] } });
   });
 
   it('re-invokes the worker for stale incomplete deletions', async () => {
@@ -102,18 +113,17 @@ describe('account-deletion-orchestrator', () => {
     expect(emitted?.StuckAccountDeletionCount).toBe(1);
   });
 
-  it('excludes DONE and non-ORG records via the scan filter and projects only what it reads', async () => {
+  it('excludes only non-ORG records via the scan filter (DONE records now come back too) and projects only what it reads', async () => {
     ddbMock.on(ScanCommand).resolves({ Items: [] });
 
     await handler();
 
     const scan = ddbMock.commandCalls(ScanCommand)[0].args[0].input;
-    expect(scan.FilterExpression).toBe(
-      'begins_with(pk, :orgPrefix) AND sk = :deletion AND #s <> :done',
-    );
+    expect(scan.FilterExpression).toBe('begins_with(pk, :orgPrefix) AND sk = :deletion');
     expect(scan.ExpressionAttributeValues?.[':orgPrefix']).toEqual({ S: 'ORG#' });
-    expect(scan.ExpressionAttributeValues?.[':done']).toEqual({ S: 'DONE' });
-    expect(scan.ProjectionExpression).toBe('pk, updatedAt, attemptCount');
+    expect(scan.ExpressionAttributeValues?.[':done']).toBeUndefined();
+    expect(scan.ProjectionExpression).toBe('pk, updatedAt, attemptCount, #s, #m');
+    expect(scan.ExpressionAttributeNames).toEqual({ '#s': 'status', '#m': 'members' });
   });
 
   it('pages the scan via LastEvaluatedKey and reconciles records from every page', async () => {
@@ -221,5 +231,141 @@ describe('account-deletion-orchestrator', () => {
       logSpy.mockRestore();
       errorSpy.mockRestore();
     }
+  });
+
+  it('does not re-invoke a DONE record whose members have no surviving billing rows', async () => {
+    ddbMock.on(ScanCommand).resolves({ Items: [doneRecord('org-done')] });
+    ddbMock.on(BatchGetItemCommand).resolves({ Responses: { BillingTable: [] } });
+
+    await handler();
+
+    expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
+    const emitted = reportMetricMock.mock.calls
+      .map(([e]) => e as MetricEvent)
+      .find((e) => 'ResurrectedAccountDeletionCount' in e);
+    expect(emitted?.ResurrectedAccountDeletionCount).toBe(0);
+  });
+
+  it('warns and re-invokes the worker for a DONE record with a surviving member billing row', async () => {
+    ddbMock.on(ScanCommand).resolves({ Items: [doneRecord('org-resurrected')] });
+    ddbMock.on(BatchGetItemCommand).resolves({
+      Responses: {
+        BillingTable: [marshall({ pk: 'CUSTOMER#user-org-resurrected', sk: 'SUBSCRIPTION' })],
+      },
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      await handler();
+
+      const invoke = lambdaMock.commandCalls(InvokeCommand)[0].args[0].input;
+      expect(JSON.parse(new TextDecoder().decode(invoke.Payload as Uint8Array))).toEqual({
+        orgId: 'org-resurrected',
+      });
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('resurrected after completed teardown'),
+        expect.objectContaining({
+          orgId: 'org-resurrected',
+          userIds: ['user-org-resurrected'],
+        }),
+      );
+      const emitted = reportMetricMock.mock.calls
+        .map(([e]) => e as MetricEvent)
+        .find((e) => 'ResurrectedAccountDeletionCount' in e);
+      expect(emitted?.ResurrectedAccountDeletionCount).toBe(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('re-invokes both a stale non-DONE record and a resurrected DONE record from a mixed scan', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [deletionRecord('org-stale'), doneRecord('org-resurrected')],
+    });
+    ddbMock.on(BatchGetItemCommand).resolves({
+      Responses: {
+        BillingTable: [marshall({ pk: 'CUSTOMER#user-org-resurrected', sk: 'SUBSCRIPTION' })],
+      },
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      await handler();
+
+      const orgIds = lambdaMock.commandCalls(InvokeCommand).map(
+        (c) =>
+          (
+            JSON.parse(new TextDecoder().decode(c.args[0].input.Payload as Uint8Array)) as {
+              orgId: string;
+            }
+          ).orgId,
+      );
+      expect(orgIds.sort()).toEqual(['org-resurrected', 'org-stale']);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('logs and skips a DONE org when its billing lookup fails, without aborting other orgs', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [doneRecord('org-failing'), doneRecord('org-ok')],
+    });
+    ddbMock
+      .on(BatchGetItemCommand, {
+        RequestItems: {
+          BillingTable: {
+            Keys: [marshall({ pk: 'CUSTOMER#user-org-failing', sk: 'SUBSCRIPTION' })],
+          },
+        },
+      })
+      .rejects(new Error('DynamoDB unavailable'));
+    ddbMock
+      .on(BatchGetItemCommand, {
+        RequestItems: {
+          BillingTable: { Keys: [marshall({ pk: 'CUSTOMER#user-org-ok', sk: 'SUBSCRIPTION' })] },
+        },
+      })
+      .resolves({
+        Responses: {
+          BillingTable: [marshall({ pk: 'CUSTOMER#user-org-ok', sk: 'SUBSCRIPTION' })],
+        },
+      });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      await handler();
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to check for resurrected billing rows'),
+        expect.objectContaining({ orgId: 'org-failing' }),
+      );
+      const orgIds = lambdaMock.commandCalls(InvokeCommand).map(
+        (c) =>
+          (
+            JSON.parse(new TextDecoder().decode(c.args[0].input.Payload as Uint8Array)) as {
+              orgId: string;
+            }
+          ).orgId,
+      );
+      expect(orgIds).toEqual(['org-ok']);
+    } finally {
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  }, 10000);
+
+  it('skips a DONE record with empty or missing members gracefully', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        doneRecord('org-empty', { members: [] }),
+        doneRecord('org-missing', { members: undefined }),
+      ],
+    });
+
+    await handler();
+
+    expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(BatchGetItemCommand)).toHaveLength(0);
   });
 });
