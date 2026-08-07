@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 
 import type { AccessKey } from '@filone/shared';
+import { S3Region } from '@filone/shared';
 
 import { BucketAccessTab } from './BucketAccessTab';
 
@@ -15,6 +16,7 @@ const mockKeys: AccessKey[] = [
     permissions: ['read', 'write', 'list'],
     bucketScope: 'specific',
     buckets: ['my-bucket'],
+    region: S3Region.UsEast1,
   },
   {
     id: '2',
@@ -25,6 +27,7 @@ const mockKeys: AccessKey[] = [
     permissions: ['read', 'list'],
     bucketScope: 'specific',
     buckets: ['my-bucket'],
+    region: S3Region.UsEast1,
   },
 ];
 
@@ -34,7 +37,7 @@ const meta: Meta<typeof BucketAccessTab> = {
   args: {
     bucketName: 'my-bucket',
     s3Endpoint: 'https://s3.filone.org',
-    region: 'us-east-1',
+    region: S3Region.UsEast1,
     onCreateOpen: () => {},
   },
 };

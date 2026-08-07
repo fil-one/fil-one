@@ -44,7 +44,8 @@ export const queryKeys = {
   // ['access-keys'] is the prefix — invalidateQueries on this key also invalidates
   // all bucket-scoped access key queries (prefix match).
   accessKeys: ['access-keys'] as const,
-  bucketAccessKeys: (bucketName: string) => ['access-keys', bucketName] as const,
+  bucketAccessKeys: (bucketName: string, region: S3Region) =>
+    ['access-keys', bucketName, region] as const,
   bucketAnalytics: (bucketName: string, region: S3Region) =>
     ['bucket-analytics', bucketName, region] as const,
   instatusSummary: ['instatus-summary'] as const,

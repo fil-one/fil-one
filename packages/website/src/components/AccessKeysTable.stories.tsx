@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 
 import type { AccessKey } from '@filone/shared';
+import { S3Region } from '@filone/shared';
 
 import { AccessKeysTable } from './AccessKeysTable';
 
@@ -22,6 +23,7 @@ const mockKeys: AccessKey[] = [
     status: 'active',
     permissions: ['read', 'write', 'list'],
     bucketScope: 'all',
+    region: S3Region.EuWest1,
   },
   {
     id: '2',
@@ -32,6 +34,7 @@ const mockKeys: AccessKey[] = [
     permissions: ['read', 'list'],
     bucketScope: 'specific',
     buckets: ['backups', 'archives'],
+    region: S3Region.UsEast1,
   },
   {
     id: '3',
@@ -42,6 +45,7 @@ const mockKeys: AccessKey[] = [
     status: 'inactive',
     permissions: ['read'],
     bucketScope: 'all',
+    region: S3Region.EuWest1,
   },
 ];
 
@@ -65,6 +69,7 @@ const keysWithBucketPermissions: AccessKey[] = [
     ],
     granularPermissions: ['GetObjectVersion', 'PutObjectRetention'],
     bucketScope: 'all',
+    region: S3Region.UsEast1,
   },
   {
     id: '11',
@@ -75,6 +80,7 @@ const keysWithBucketPermissions: AccessKey[] = [
     permissions: ['read', 'list', 'GetBucketVersioning', 'GetBucketObjectLockConfiguration'],
     bucketScope: 'specific',
     buckets: ['backups'],
+    region: S3Region.EuWest1,
   },
 ];
 
@@ -102,6 +108,7 @@ export const Empty: Story = {
 export const WithBucketsAndPermissions: Story = {
   args: {
     keys: mockKeys,
+    showRegion: true,
     showBuckets: true,
     showPermissions: true,
   },
