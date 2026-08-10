@@ -10,6 +10,7 @@ const queryData: { me?: unknown; billing?: unknown; usage?: unknown } = {};
 
 vi.mock('../lib/query-client.js', () => ({
   queryKeys: { me: ['me'], billing: ['billing'], usage: ['usage'] },
+  USAGE_STALE_TIME: 5 * 60_000,
 }));
 
 vi.mock('@tanstack/react-query', () => ({
@@ -35,6 +36,7 @@ vi.mock('@filone/shared', () => ({
     PastDue: 'past_due',
     Active: 'active',
     GracePeriod: 'grace_period',
+    Inactive: 'inactive',
   },
   getUsageLimits: vi.fn(() => ({
     storageLimitBytes: 1000,
@@ -102,6 +104,20 @@ describe('useSidebarData', () => {
       setQueries({ billing: { subscription: { status: 'past_due' } } });
       const { result } = renderHook(() => useSidebarData());
       expect(result.current.isPastDue).toBe(true);
+    });
+
+    it('flags inactive subscriptions (no entitlement)', () => {
+      setQueries({ billing: { subscription: { status: 'inactive' } } });
+      const { result } = renderHook(() => useSidebarData());
+      expect(result.current.isInactive).toBe(true);
+      expect(result.current.isTrialing).toBe(false);
+      expect(result.current.isPastDue).toBe(false);
+    });
+
+    it('does not flag inactive while billing is still loading', () => {
+      setQueries({});
+      const { result } = renderHook(() => useSidebarData());
+      expect(result.current.isInactive).toBe(false);
     });
 
     it('computes graceDays + label when gracePeriodEndsAt is set', () => {

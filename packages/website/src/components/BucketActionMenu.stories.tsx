@@ -20,5 +20,5 @@ const meta: Meta<typeof BucketActionMenu> = {
 export default meta;
 type Story = StoryObj<typeof BucketActionMenu>;
 
-/** Closed menu — click the kebab to reveal the Disable action. */
+/** Closed menu: click the kebab to reveal the Stop-indexing action. */
 export const Default: Story = {};

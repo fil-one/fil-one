@@ -15,7 +15,6 @@ import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import type { StripePriceDetails, SubscriptionRecord } from '../lib/dynamo-records.js';
-import { TRIAL_DURATION_DAYS } from '@filone/shared/src/constants.js';
 
 const dynamo = getDynamoClient();
 
@@ -40,12 +39,36 @@ export async function baseHandler(
     ? (unmarshall(billingResult.Item) as SubscriptionRecord)
     : null;
 
-  // 2. If no billing record → trial state
-  if (!billingRecord || !billingRecord.stripeCustomerId) {
-    return buildTrialResponse(billingRecord, userId, billingTableName);
+  // 2. No record, or a record without a status (e.g. the customer mapping
+  // written by create-setup-intent) → not entitled. This read model must report
+  // the same truth as the subscription guard, never synthesize a trial;
+  // entitlement is granted only by ensureTrialEntitlement.
+  const storedStatus = billingRecord?.subscriptionStatus;
+  if (!billingRecord || !storedStatus) {
+    return inactiveResponse(billingRecord);
   }
 
-  // 3. Has Stripe customer — fetch subscription details (payment method + price)
+  // 3. Status but no Stripe customer (webhook-born or legacy records) → report
+  // the stored status; there is no customer to look up, so no Stripe call.
+  // The minimum still comes from the cached price snapshot when the record
+  // carries one — the same source the Stripe-unreachable path reads. Only a
+  // record with no snapshot at all reports no minimum, and that is factual:
+  // with no Stripe customer there is no subscription to bill a minimum on.
+  if (!billingRecord.stripeCustomerId) {
+    const currentStatus = await evaluateStatusTransitions(
+      billingRecord,
+      storedStatus,
+      userId,
+      billingTableName,
+    );
+    const response = buildBillingResponse(billingRecord, currentStatus, {
+      paymentMethod: cachedPaymentMethod(billingRecord),
+      monthlyMinimumCents: deriveMonthlyMinimumCents(billingRecord.stripePrice),
+    });
+    return new ResponseBuilder().status(200).body(response).build();
+  }
+
+  // 4. Has Stripe customer — fetch subscription details (payment method + price)
   const stripeDetails = await resolveStripeSubscriptionDetails(
     billingRecord,
     userId,
@@ -61,65 +84,34 @@ export async function baseHandler(
       .build();
   }
 
-  const currentStatus = await evaluateStatusTransitions(billingRecord, userId, billingTableName);
+  const currentStatus = await evaluateStatusTransitions(
+    billingRecord,
+    storedStatus,
+    userId,
+    billingTableName,
+  );
 
   const response = buildBillingResponse(billingRecord, currentStatus, stripeDetails);
   return new ResponseBuilder().status(200).body(response).build();
 }
 
-async function buildTrialResponse(
+/**
+ * The account holds no entitlement: no billing record, or a record with no
+ * subscription status. Reports `planId: none, status: inactive` — the read
+ * counterpart of the guard's SUBSCRIPTION_INACTIVE 403. Deliberately no
+ * `trialEndsAt` (there is no trial to promise a date for), no Stripe call, and
+ * no DynamoDB write. A cached card is still reported so the console can offer
+ * it once the user picks a plan.
+ */
+function inactiveResponse(
   billingRecord: SubscriptionRecord | null,
-  userId: string,
-  billingTableName: string,
-): Promise<APIGatewayProxyStructuredResultV2> {
-  const trialEndsAt =
-    billingRecord?.trialEndsAt ??
-    new Date(Date.now() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000).toISOString();
-
-  // Lazy eval: if trialing and trial has expired → transition to grace_period
-  if (
-    billingRecord?.subscriptionStatus === SubscriptionStatus.Trialing &&
-    billingRecord.trialEndsAt &&
-    new Date(billingRecord.trialEndsAt).getTime() < Date.now()
-  ) {
-    const gracePeriodEndsAt = new Date(
-      new Date(billingRecord.trialEndsAt).getTime() + 7 * 24 * 60 * 60 * 1000,
-    ).toISOString();
-
-    await dynamo.send(
-      new UpdateItemCommand({
-        TableName: billingTableName,
-        Key: {
-          pk: { S: `CUSTOMER#${userId}` },
-          sk: { S: 'SUBSCRIPTION' },
-        },
-        UpdateExpression:
-          'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
-        ExpressionAttributeValues: {
-          ':status': { S: SubscriptionStatus.GracePeriod },
-          ':grace': { S: gracePeriodEndsAt },
-          ':now': { S: new Date().toISOString() },
-        },
-      }),
-    );
-
-    const response: BillingInfo = {
-      subscription: {
-        planId: PlanId.FreeTrial,
-        status: SubscriptionStatus.GracePeriod,
-        trialEndsAt: billingRecord.trialEndsAt,
-        gracePeriodEndsAt,
-      },
-    };
-    return new ResponseBuilder().status(200).body(response).build();
-  }
-
+): APIGatewayProxyStructuredResultV2 {
   const response: BillingInfo = {
     subscription: {
-      planId: PlanId.FreeTrial,
-      status: SubscriptionStatus.Trialing,
-      trialEndsAt,
+      planId: PlanId.None,
+      status: SubscriptionStatus.Inactive,
     },
+    ...(billingRecord ? { paymentMethod: cachedPaymentMethod(billingRecord) } : {}),
   };
   return new ResponseBuilder().status(200).body(response).build();
 }
@@ -329,10 +321,11 @@ async function cacheStripePrice(
 
 async function evaluateStatusTransitions(
   billingRecord: SubscriptionRecord,
+  storedStatus: SubscriptionStatus,
   userId: string,
   billingTableName: string,
 ): Promise<SubscriptionStatus> {
-  let currentStatus = billingRecord.subscriptionStatus ?? SubscriptionStatus.Trialing;
+  let currentStatus = storedStatus;
 
   // Lazy eval: trial expired → grace_period
   if (

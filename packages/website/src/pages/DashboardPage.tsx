@@ -27,7 +27,7 @@ import type { RecentActivity } from '@filone/shared';
 
 import { getUsage, getBilling, getActivity } from '../lib/api.js';
 import { daysUntil, formatDateTime, timeAgo } from '../lib/time.js';
-import { queryKeys } from '../lib/query-client.js';
+import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -39,6 +39,8 @@ function planDisplayName(planId: PlanId): string {
       return 'Free trial';
     case PlanId.PayAsYouGo:
       return 'Pay As You Go';
+    case PlanId.None:
+      return 'No plan';
     default:
       return 'Unknown';
   }
@@ -56,8 +58,14 @@ function statusBadgeProps(status: SubscriptionStatus): { label: string; color: B
       return { label: 'Canceled', color: 'red' };
     case SubscriptionStatus.GracePeriod:
       return { label: 'Grace Period', color: 'amber' };
-    default:
-      return { label: status, color: 'grey' };
+    case SubscriptionStatus.Inactive:
+      return { label: 'No plan', color: 'grey' };
+    default: {
+      // A new SubscriptionStatus member must fail the typecheck here rather
+      // than silently render the raw enum string as a badge.
+      const _never: never = status;
+      return { label: String(_never), color: 'grey' };
+    }
   }
 }
 
@@ -97,6 +105,7 @@ export function DashboardPage() {
   const { data: usage, isPending: usagePending } = useQuery({
     queryKey: queryKeys.usage,
     queryFn: getUsage,
+    staleTime: USAGE_STALE_TIME,
   });
 
   const { data: billing, isPending: billingPending } = useQuery({
@@ -117,6 +126,11 @@ export function DashboardPage() {
 
   const isTrialing = billing.subscription.status === SubscriptionStatus.Trialing;
   const isActivePaid = billing.subscription.status === SubscriptionStatus.Active;
+  const isInactive = billing.subscription.status === SubscriptionStatus.Inactive;
+  // Positive check for paid-plan copy (pricing, cost estimate): planId `none`
+  // and the trial both stay excluded, instead of inferring "paid" from
+  // !isTrialing.
+  const isPayAsYouGo = billing.subscription.planId === PlanId.PayAsYouGo;
   const trialDaysLeft =
     isTrialing && billing.subscription.trialEndsAt
       ? daysUntil(billing.subscription.trialEndsAt)
@@ -285,14 +299,19 @@ export function DashboardPage() {
             {isTrialing && (
               <p className="mt-0.5 text-[11px] text-zinc-500">1 TB storage &amp; egress included</p>
             )}
-            {!isTrialing && (
+            {isInactive && (
+              <p className="mt-0.5 text-[11px] text-zinc-500">
+                Choose a plan to start storing data
+              </p>
+            )}
+            {isPayAsYouGo && (
               <p className="mt-0.5 text-[11px] text-zinc-500">$4.99/TB · no egress fees</p>
             )}
           </div>
           <div>
-            {isTrialing ? (
+            {isTrialing || isInactive ? (
               <AppLink href="/billing" className="text-[12px]">
-                Upgrade
+                {isInactive ? 'Choose a plan' : 'Upgrade'}
               </AppLink>
             ) : (
               <AppLink href="/billing" className="text-[12px]">
@@ -315,9 +334,8 @@ export function DashboardPage() {
               {isTrialing && <span className="text-[13px] text-zinc-500">/ 1 TB</span>}
             </div>
           </div>
-          {isTrialing ? (
-            <ProgressBar value={storagePct} size="sm" label="Storage usage" />
-          ) : (
+          {isTrialing && <ProgressBar value={storagePct} size="sm" label="Storage usage" />}
+          {isPayAsYouGo && (
             <div className="flex items-center justify-between border-t border-zinc-200 pt-3">
               <span className="text-[11px] text-zinc-500">Est. monthly cost</span>
               <span className="text-[13px] font-medium text-zinc-900">
@@ -340,9 +358,8 @@ export function DashboardPage() {
               {isTrialing && <span className="text-[13px] text-zinc-500">/ 2 TB</span>}
             </div>
           </div>
-          {isTrialing ? (
-            <ProgressBar value={egressPct} size="sm" label="Egress usage" />
-          ) : (
+          {isTrialing && <ProgressBar value={egressPct} size="sm" label="Egress usage" />}
+          {isPayAsYouGo && (
             <div className="flex items-center border-t border-zinc-200 pt-3">
               <span className="text-[11px] text-zinc-500">No egress fees · unlimited</span>
             </div>

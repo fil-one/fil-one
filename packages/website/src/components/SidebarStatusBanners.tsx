@@ -15,6 +15,7 @@ export type StatusBannersProps = {
   graceDays: number | null;
   graceEndsLabel: string | undefined;
   isPastDue: boolean;
+  isInactive: boolean;
   showTestIds: boolean;
 };
 
@@ -30,6 +31,7 @@ export function StatusBanners({
   graceDays,
   graceEndsLabel,
   isPastDue,
+  isInactive,
   showTestIds,
 }: StatusBannersProps) {
   return (
@@ -65,6 +67,26 @@ export function StatusBanners({
                 className="w-full justify-center"
               >
                 Upgrade
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!collapsed && isInactive && (
+        <div className="border-t border-zinc-200 px-3 py-3">
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+            <p className="text-xs font-medium text-zinc-900">No active plan</p>
+            <p className="mt-1 text-xs text-zinc-500">Choose a plan to start storing data.</p>
+            <div className="mt-3">
+              <Button
+                id={showTestIds ? 'sidebar-choose-plan-button' : undefined}
+                variant="primary"
+                size="sm"
+                href="/billing"
+                className="w-full justify-center"
+              >
+                Choose a plan
               </Button>
             </div>
           </div>

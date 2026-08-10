@@ -47,7 +47,7 @@ const meta: Meta<typeof BucketDrawer> = {
   title: 'Components/BucketDrawer',
   component: BucketDrawer,
   decorators: [(Story) => withProviders(() => <Story />)],
-  args: { bucket, onClose: () => {} },
+  args: { bucket, onClose: () => {}, onStopIndexing: () => {} },
 };
 
 export default meta;

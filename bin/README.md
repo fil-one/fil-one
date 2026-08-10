@@ -86,10 +86,11 @@ aws iam list-roles --query 'length(Roles)' --output text
 
 ## Other Scripts
 
-| Script                      | Purpose                                      |
-| --------------------------- | -------------------------------------------- |
-| `tail-logs.sh`              | Tail CloudWatch logs for a Lambda function   |
-| `tail-tenant-setup-logs.sh` | Tail logs for the Aurora tenant setup Lambda |
-| `reset-db.ts`               | Reset the Aurora database for a stage        |
-| `aurora-s3-env.ts`          | Print Aurora S3 environment variables        |
-| `aurora-demo.ts`            | Demo script for Aurora S3 operations         |
+| Script                         | Purpose                                          |
+| ------------------------------ | ------------------------------------------------ |
+| `tail-logs.sh`                 | Tail CloudWatch logs for a Lambda function       |
+| `tail-tenant-setup-logs.sh`    | Tail logs for the Aurora tenant setup Lambda     |
+| `reset-db.ts`                  | Reset the Aurora database for a stage            |
+| `reset-region-provisioning.ts` | Un-provision one region for every org in a stage |
+| `aurora-s3-env.ts`             | Print Aurora S3 environment variables            |
+| `aurora-demo.ts`               | Demo script for Aurora S3 operations             |

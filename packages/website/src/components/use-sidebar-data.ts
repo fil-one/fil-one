@@ -1,18 +1,23 @@
 import { useQuery } from '@tanstack/react-query';
 import { SubscriptionStatus, getUsageLimits } from '@filone/shared';
 import { getBilling, getMe, getUsage } from '../lib/api.js';
-import { queryKeys } from '../lib/query-client.js';
+import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { daysUntil, formatDateTime } from '../lib/time.js';
 
 export function useSidebarData() {
   const { data: me } = useQuery({ queryKey: queryKeys.me, queryFn: () => getMe() });
   const { data: billing } = useQuery({ queryKey: queryKeys.billing, queryFn: getBilling });
-  const { data: usage } = useQuery({ queryKey: queryKeys.usage, queryFn: getUsage });
+  const { data: usage } = useQuery({
+    queryKey: queryKeys.usage,
+    queryFn: getUsage,
+    staleTime: USAGE_STALE_TIME,
+  });
 
   const displayName = me?.name || me?.email || 'User';
   const isTrialing = billing?.subscription.status === SubscriptionStatus.Trialing;
   const isPastDue = billing?.subscription.status === SubscriptionStatus.PastDue;
   const isActivePaid = billing?.subscription.status === SubscriptionStatus.Active;
+  const isInactive = billing?.subscription.status === SubscriptionStatus.Inactive;
   const trialDays =
     isTrialing && billing?.subscription.trialEndsAt
       ? daysUntil(billing.subscription.trialEndsAt)
@@ -42,6 +47,7 @@ export function useSidebarData() {
     initial: displayName.charAt(0).toUpperCase(),
     isTrialing,
     isPastDue,
+    isInactive,
     trialDays,
     trialEndsLabel,
     graceDays,

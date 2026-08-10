@@ -65,9 +65,27 @@ function getDynamoClient(): DynamoDBClient {
 
 export async function resetBillingState(role: Role, userId: string): Promise<void> {
   const { status, extra } = DESIRED_STATE[role];
+  await patchSubscription(role, userId, { subscriptionStatus: status, ...extra });
+}
+
+// Marks the subscription active regardless of the role's desired state, so
+// write-gated operations succeed for roles the tests otherwise keep in a
+// write-blocked state (`unpaid` is `past_due`, which the subscription guard
+// rejects with 403 GRACE_PERIOD_WRITE_BLOCKED). Callers must restore the role's
+// own state with `resetBillingState` afterwards. Reuses the `paid` state so the
+// two definitions cannot drift apart.
+export async function activateSubscription(role: Role, userId: string): Promise<void> {
+  const { status, extra } = DESIRED_STATE.paid;
+  await patchSubscription(role, userId, { subscriptionStatus: status, ...extra });
+}
+
+async function patchSubscription(
+  role: Role,
+  userId: string,
+  attributes: Record<string, string>,
+): Promise<void> {
   const fields: Record<string, string> = {
-    subscriptionStatus: status,
-    ...extra,
+    ...attributes,
     updatedAt: new Date().toISOString(),
   };
 
