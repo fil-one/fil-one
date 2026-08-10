@@ -326,8 +326,12 @@ export async function deleteAuroraAccessKey({
   console.log(`Aurora access key "${auroraKeyId}" deleted for tenant ${tenantId}`);
 }
 
-/** The SSM parameter aurora-tenant-setup stashes the tenant's portal API key under. */
-function portalApiKeySsmPath(stage: string, tenantId: string): string {
+/**
+ * The SSM parameter aurora-tenant-setup stashes the tenant's portal API key
+ * under. Exported so the teardown can name it verbatim in the operator-facing
+ * message that asks for it to be deleted by hand.
+ */
+export function portalApiKeySsmPath(stage: string, tenantId: string): string {
   return `/filone/${stage}/aurora-portal/tenant-api-key/${tenantId}`;
 }
 

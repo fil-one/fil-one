@@ -1,4 +1,4 @@
-import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { convertToAttr, unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
@@ -8,6 +8,7 @@ import type { BillingInfo, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import type Stripe from 'stripe';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import { sendGuardedBillingUpdate } from '../lib/deletion-guard.js';
 import { getStripeClient } from '../lib/stripe-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -298,13 +299,21 @@ function toDecimalString(value: Stripe.Price['unit_amount_decimal']): string | n
   return value == null ? null : String(value);
 }
 
+/**
+ * Refreshes the cached price snapshot. Deletion-guarded (FIL-112): the write is
+ * upsert-capable and follows a Stripe round-trip, so the read-then-write window
+ * is wide enough for the account teardown's purge to land in between —
+ * unconditioned, this cache write would resurrect the billing record it just
+ * deleted. A guard rejection only costs a stale cache entry for a record that is
+ * on its way out, so it is a skip, not an error.
+ */
 async function cacheStripePrice(
   price: StripePriceDetails,
   userId: string,
   billingTableName: string,
 ): Promise<void> {
-  await dynamo.send(
-    new UpdateItemCommand({
+  await sendGuardedBillingUpdate(
+    {
       TableName: billingTableName,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -315,7 +324,8 @@ async function cacheStripePrice(
         ':price': convertToAttr(price, { removeUndefinedValues: true }),
         ':now': { S: new Date().toISOString() },
       },
-    }),
+    },
+    { source: 'get-billing.cacheStripePrice', userId },
   );
 }
 
@@ -337,8 +347,12 @@ async function evaluateStatusTransitions(
       new Date(billingRecord.trialEndsAt).getTime() + 7 * 24 * 60 * 60 * 1000,
     ).toISOString();
 
-    await dynamo.send(
-      new UpdateItemCommand({
+    // Deletion-guarded (FIL-112): same upsert-capable lazy transition as
+    // middleware/subscription-guard.ts. A guard rejection is a skip — the
+    // response still reports grace_period, which is the read model this record
+    // has already earned; only the persistence is declined.
+    await sendGuardedBillingUpdate(
+      {
         TableName: billingTableName,
         Key: {
           pk: { S: `CUSTOMER#${userId}` },
@@ -351,7 +365,8 @@ async function evaluateStatusTransitions(
           ':grace': { S: gracePeriodEndsAt },
           ':now': { S: new Date().toISOString() },
         },
-      }),
+      },
+      { source: 'get-billing.evaluateStatusTransitions', userId },
     );
     currentStatus = SubscriptionStatus.GracePeriod;
     billingRecord.gracePeriodEndsAt = gracePeriodEndsAt;

@@ -11,15 +11,11 @@
 // "fully provisioned, console credentials stashed in SSM".
 
 import { format } from 'node:util';
-import {
-  ConditionalCheckFailedException,
-  GetItemCommand,
-  UpdateItemCommand,
-} from '@aws-sdk/client-dynamodb';
+import { ConditionalCheckFailedException, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand, PutParameterCommand } from '@aws-sdk/client-ssm';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../ddb-client.js';
-import { assertOrgNotDeleting } from '../org-profile.js';
+import { assertOrgNotDeleting, getOrgProfile } from '../org-profile.js';
 import {
   deleteTenantsByTenantIdAccessKeysByAccessKeyId,
   getTenantsByTenantIdAccessKeys,
@@ -94,19 +90,15 @@ async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise
   const tenantIdAttribute = `${id}TenantId`;
   const key = { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } };
 
-  const existing = await dynamo.send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: key,
-      ConsistentRead: true,
-    }),
-  );
+  // Strongly consistent: `deleting` is mutable, so an eventually-consistent
+  // read could still show a live org for one whose teardown has started.
+  const existing = await getOrgProfile(orgId, { consistent: true });
   // Checked BEFORE the existing-tenant early return: once the org is being
   // deleted, even an already-provisioned tenant id must not be handed back
   // to callers that would then act on the doomed tenant.
-  assertOrgNotDeleting(existing.Item, orgId);
+  assertOrgNotDeleting(existing, orgId);
 
-  const existingTenantId = existing.Item?.[tenantIdAttribute]?.S;
+  const existingTenantId = existing?.[tenantIdAttribute]?.S;
   if (existingTenantId) {
     return existingTenantId;
   }
@@ -164,14 +156,17 @@ async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise
     );
   } catch (err) {
     if (err instanceof ConditionalCheckFailedException) {
-      // The upstream tenant created above is now unreferenced. If the
-      // PROFILE row still exists, the teardown's late-region re-check will
-      // sweep it; if the row was already purged, this error must be
-      // surfaced so the tenant is cleaned up manually.
+      // The upstream tenant created above is now unreferenced, and nothing
+      // will ever find it: the write that just failed IS the write of
+      // `${id}TenantId`, and the teardown's late-region re-check resolves its
+      // targets exclusively from PROFILE tenant-id attributes. The console
+      // key was stashed in SSM before this write, so it leaks alongside the
+      // live tenant. Both need a human.
       throw new Error(
         `Org ${orgId} is deleting or purged; refusing to persist ${id} tenant ${orgId}. ` +
-          `The just-created upstream tenant is swept by the teardown's late-region re-check ` +
-          `if the profile still exists; otherwise it needs manual cleanup.`,
+          `MANUAL CLEANUP REQUIRED: no PROFILE attribute references this tenant, so no ` +
+          `teardown sweep can reach it. Delete upstream ${id} tenant ${orgId} and the SSM ` +
+          `parameter ${consoleKeySsmPath(deps, orgId)}.`,
         { cause: err },
       );
     }
