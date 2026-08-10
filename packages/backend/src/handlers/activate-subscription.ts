@@ -13,6 +13,7 @@ import {
 } from '@filone/shared';
 import type { ActivateSubscriptionResponse } from '@filone/shared';
 import { Resource } from 'sst';
+import { accountDeletedResponse } from '../lib/account-deleted-response.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.js';
 import { saveBillingRecord, unlockAllProvisionedRegions } from '../lib/billing-activation.js';
@@ -230,14 +231,6 @@ async function resolveActivatableRecord(userId: string, orgId: string): Promise<
   }
 
   return { record, stripeCustomerId };
-}
-
-/** The single ACCOUNT_DELETED shape this handler returns, pre-check and post-guard alike. */
-function accountDeletedResponse(): APIGatewayProxyResultV2 {
-  return new ResponseBuilder()
-    .status(410)
-    .body({ message: 'Account has been deleted', code: ApiErrorCode.ACCOUNT_DELETED })
-    .build();
 }
 
 async function getCustomerBillingRecord(

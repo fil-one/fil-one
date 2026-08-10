@@ -71,7 +71,10 @@ export class TrialEntitlementError extends Error {
 }
 
 // Identity row is tombstoned (`deleted: true`) after account deletion (FIL-112).
-// Callers translate it to 401 ACCOUNT_DELETED with cleared cookies.
+// Callers translate it via `accountDeletedResponse` in
+// lib/account-deleted-response.ts — 410 ACCOUNT_DELETED, with cleared cookies
+// on the auth path. 410 is the single status for this code across the API; see
+// that module for why.
 export class AccountDeletedError extends Error {
   constructor(message = 'Account has been deleted', options?: ErrorOptions) {
     super(message, options);

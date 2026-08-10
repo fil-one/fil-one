@@ -8,9 +8,9 @@ import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import { ApiErrorCode } from '@filone/shared';
 import type { CreateSetupIntentResponse } from '@filone/shared';
 import { Resource } from 'sst';
+import { accountDeletedResponse } from '../lib/account-deleted-response.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { sendGuardedBillingUpdate } from '../lib/deletion-guard.js';
 import { isIdentityTombstoned } from '../lib/identity-tombstone.js';
@@ -23,13 +23,6 @@ import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
 const dynamo = getDynamoClient();
-
-function accountDeletedResponse(): APIGatewayProxyResultV2 {
-  return new ResponseBuilder()
-    .status(410)
-    .body({ message: 'Account has been deleted', code: ApiErrorCode.ACCOUNT_DELETED })
-    .build();
-}
 
 // Exported for unit testing (without the auth/csrf middleware chain).
 export async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {

@@ -86,7 +86,7 @@ async function baseHandler(
 
   // FIL-112: until teardown deletes the Auth0 user, SSO can silently
   // re-authenticate a deleted account, looping the SPA between /login and a
-  // 401 ACCOUNT_DELETED /me. Never mint cookies for a tombstoned identity.
+  // 410 ACCOUNT_DELETED /me. Never mint cookies for a tombstoned identity.
   if (await isTombstonedIdentity(id_token, domain, secrets.AUTH0_CLIENT_ID)) {
     return redirect(`${origin}/account-deleted`, [
       makeClearCookieHeader(OAUTH_STATE_COOKIE),

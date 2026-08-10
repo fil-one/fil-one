@@ -57,13 +57,22 @@ export async function getOrgProfile(
 }
 
 /**
+ * The fence-B predicate (FIL-112), in one place so every reader agrees on what
+ * "deleting" means. Only ever call this on a profile fetched with
+ * `{ consistent: true }` — see the read-semantics note above.
+ */
+export function isOrgDeleting(orgProfile: OrgProfileItem | undefined): boolean {
+  return orgProfile?.deleting?.BOOL === true;
+}
+
+/**
  * Account deletion in progress (FIL-112): never provision against an org
  * being torn down — a tenant setup racing the teardown would orphan a live
  * tenant. Every orchestrator's tenant-setup path must call this right after
  * its `getOrgProfile(orgId, { consistent: true })`.
  */
 export function assertOrgNotDeleting(orgProfile: OrgProfileItem | undefined, orgId: string): void {
-  if (orgProfile?.deleting?.BOOL === true) {
+  if (isOrgDeleting(orgProfile)) {
     throw new Error(`Org ${orgId} is being deleted; refusing tenant setup`);
   }
 }

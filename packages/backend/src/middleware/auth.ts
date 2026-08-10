@@ -14,11 +14,11 @@ import type { ErrorResponse } from '@filone/shared';
 import {
   COOKIE_NAMES,
   TOKEN_MAX_AGE,
-  makeClearAuthCookies,
   makeCookieHeader,
   makeHintCookieHeader,
   ResponseBuilder,
 } from '../lib/response-builder.js';
+import { accountDeletedResponse } from '../lib/account-deleted-response.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { AccountDeletedError } from '../lib/errors.js';
 import { OrgSetupStatus } from '../lib/org-setup-status.js';
@@ -80,18 +80,6 @@ import { CSRF_COOKIE_NAME } from '@filone/shared';
 
 function unauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder().status(401).body<ErrorResponse>({ message: 'Unauthorized' }).build();
-}
-
-/** 401 for tombstoned identities (FIL-112); clears cookies to end the session. */
-function accountDeletedResponse(): APIGatewayProxyStructuredResultV2 {
-  const builder = new ResponseBuilder().status(401).body<ErrorResponse>({
-    message: 'Account has been deleted',
-    code: ApiErrorCode.ACCOUNT_DELETED,
-  });
-  for (const cookie of makeClearAuthCookies(CSRF_COOKIE_NAME)) {
-    builder.addCookie(cookie);
-  }
-  return builder.build();
 }
 
 function emailNotVerifiedResponse(): APIGatewayProxyStructuredResultV2 {
@@ -454,7 +442,9 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
     } catch (err) {
       // Any auth path reaching a tombstoned identity ends the session — no
       // retry can succeed.
-      if (err instanceof AccountDeletedError) return accountDeletedResponse();
+      // 410 + cleared cookies: the identity is tombstoned, so the session is
+      // ended here and the client is told the account is gone for good.
+      if (err instanceof AccountDeletedError) return accountDeletedResponse({ clearSession: true });
       throw err;
     }
   };
