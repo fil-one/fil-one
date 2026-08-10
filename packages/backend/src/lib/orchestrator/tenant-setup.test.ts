@@ -199,6 +199,15 @@ describe('ensureTenantReady', () => {
         error: expect.stringContaining(`Org ${orgId} is deleting or purged`),
       }),
     );
+
+    // The failed write IS the write of `${id}TenantId`, so nothing references
+    // the live upstream tenant and no teardown sweep can ever reach it. The
+    // message must say so and point at the leaked console-key parameter,
+    // rather than promising a self-heal that cannot happen.
+    const logged = errorSpy.mock.calls[0]?.[1] as { error: string };
+    expect(logged.error).toContain('MANUAL CLEANUP REQUIRED');
+    expect(logged.error).toContain(ssmPath);
+    expect(logged.error).not.toMatch(/swept by/);
   });
 
   it('scopes the SSM path and PROFILE attribute per id', async () => {
