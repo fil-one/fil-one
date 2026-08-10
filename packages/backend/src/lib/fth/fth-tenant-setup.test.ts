@@ -179,6 +179,14 @@ describe('ensureTenantReady', () => {
         error: expect.stringContaining(`Org ${orgId} is deleting or purged`),
       }),
     );
+
+    // The failed write IS the write of `fthTenantId`, so no sweep can reach
+    // the orphaned client; the message must demand manual cleanup and name the
+    // console-key parameter that leaked with it.
+    const logged = errorSpy.mock.calls[0]?.[1] as { error: string };
+    expect(logged.error).toContain('MANUAL CLEANUP REQUIRED');
+    expect(logged.error).toContain('/filone/test/fth-s3/access-key/');
+    expect(logged.error).not.toMatch(/swept by/);
   });
 
   it('returns null when setup throws', async () => {

@@ -1,10 +1,6 @@
 import assert from 'node:assert';
 import { format } from 'node:util';
-import {
-  ConditionalCheckFailedException,
-  GetItemCommand,
-  UpdateItemCommand,
-} from '@aws-sdk/client-dynamodb';
+import { ConditionalCheckFailedException, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, PutParameterCommand, GetParameterCommand } from '@aws-sdk/client-ssm';
 import { getDynamoClient } from '../ddb-client.js';
 import { Resource } from 'sst';
@@ -17,7 +13,7 @@ import {
 import { ACCESS_KEY_PERMISSIONS, ErrorResponse } from '@filone/shared';
 import { createAuroraAccessKey } from './aurora-portal.js';
 import { reportMetric } from '../metrics.js';
-import { assertOrgNotDeleting } from '../org-profile.js';
+import { assertOrgNotDeleting, getOrgProfile } from '../org-profile.js';
 import { OrgSetupStatus, isOrgSetupComplete } from '../org-setup-status.js';
 import { scanAndEmitStuckTenantCount } from '../stuck-tenant-metric.js';
 import { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
@@ -86,18 +82,13 @@ export async function processTenantSetup(orgId: string): Promise<{ auroraTenantI
     sk: { S: 'PROFILE' },
   } satisfies OrgProfileKey;
 
-  const { Item: orgProfile } = await dynamo.send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: orgProfileKey,
-      // Strong consistency: a prior invocation may have advanced auroraSetupStatus
-      // milliseconds ago. An eventually-consistent read could see the old
-      // status and re-run a step that's already done, widening every race
-      // window. ConditionalCheckFailedException on the subsequent write would
-      // still keep us correct, but at the cost of wasted Aurora calls.
-      ConsistentRead: true,
-    }),
-  );
+  // Strong consistency: a prior invocation may have advanced auroraSetupStatus
+  // milliseconds ago. An eventually-consistent read could see the old
+  // status and re-run a step that's already done, widening every race
+  // window. ConditionalCheckFailedException on the subsequent write would
+  // still keep us correct, but at the cost of wasted Aurora calls. The
+  // `deleting` fence read below has no such fallback and requires it outright.
+  const orgProfile = await getOrgProfile(orgId, { consistent: true });
 
   if (!orgProfile) {
     throw new Error(`Org profile not found for org ${orgId}`);
@@ -168,21 +159,19 @@ async function createTenant(
 
   if (result === 'lost-race') {
     // Either a concurrent invocation already advanced the status, or the
-    // deletion guard tripped (see orchestrator/tenant-setup.ts). Re-read to
-    // tell the two apart rather than relying on Aurora's 409 handler.
-    const { Item } = await dynamo.send(
-      new GetItemCommand({
-        TableName: Resource.UserInfoTable.name,
-        Key: orgProfileKey,
-        ConsistentRead: true,
-      }),
-    );
+    // deletion guard tripped (see orchestrator/tenant-setup.ts). Re-read
+    // strongly consistently to tell the two apart rather than relying on
+    // Aurora's 409 handler.
+    const Item = await getOrgProfile(orgId, { consistent: true });
     if (!Item || Item.deleting?.BOOL === true) {
-      // The Aurora tenant created above is now unreferenced.
+      // The Aurora tenant created above is now unreferenced and unreachable
+      // by any sweep: the failed write IS the write of `auroraTenantId`, and
+      // the teardown's late-region re-check resolves targets only from
+      // PROFILE tenant-id attributes.
       throw new Error(
         `Org ${orgId} is deleting or purged; refusing to persist Aurora tenant ${auroraTenantId}. ` +
-          `The just-created Aurora tenant is swept by the teardown's late-region re-check ` +
-          `if the profile still exists; otherwise it needs manual cleanup.`,
+          `MANUAL CLEANUP REQUIRED: no PROFILE attribute references this tenant, so no ` +
+          `teardown sweep can reach it. Delete Aurora tenant ${auroraTenantId} in the backoffice.`,
       );
     }
     const persistedId = Item.auroraTenantId?.S;
