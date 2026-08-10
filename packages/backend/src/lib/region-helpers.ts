@@ -55,10 +55,20 @@ export function getRegionsWithTenantIds(
     .filter((t): t is ProvisionedRegion => t !== null);
 }
 
-/** Async wrapper of {@link getRegionsWithTenantIds} that reads the profile itself. */
+/**
+ * Async wrapper of {@link getRegionsWithTenantIds} that reads the profile
+ * itself, STRONGLY CONSISTENTLY. Every caller is a teardown path — the
+ * deletion-start tenant-id snapshot (reached from the user's confirm AND from
+ * the Stripe `customer.deleted` webhook) and the purge's late-region re-check —
+ * and a stale read does not fail safe there: it reports "no tenant in this region",
+ * the region is skipped, and the profile (the only pointer to the tenant id) is
+ * then purged and the deletion marked DONE, leaking a live upstream tenant. The
+ * eventual consistency that is correct for setup flows inverts here; see the
+ * read-semantics note in org-profile.ts.
+ */
 export async function getRegionsWithTenantIdsForOrg(orgId: string): Promise<ProvisionedRegion[]> {
   if (getAvailableOrchestrators().length === 0) return [];
-  return getRegionsWithTenantIds(await getOrgProfile(orgId));
+  return getRegionsWithTenantIds(await getOrgProfile(orgId, { consistent: true }));
 }
 
 export interface RegionSyncOutcome {

@@ -1,5 +1,6 @@
 import {
   BatchWriteItemCommand,
+  ConditionalCheckFailedException,
   DeleteItemCommand,
   GetItemCommand,
   PutItemCommand,
@@ -33,6 +34,7 @@ import {
   type ProvisionedRegion,
 } from './region-helpers.js';
 import { getAvailableOrchestrators } from './service-orchestrator-registry.js';
+import { settleAll } from './settle-all.js';
 import { getStripeClient } from './stripe-client.js';
 import { redactStripeCustomers } from './stripe-redaction.js';
 
@@ -61,6 +63,74 @@ export function assertPurgeablePk(pk: string, prefixes: readonly string[]): void
 }
 
 /**
+ * Stripe Search indexes writes with a lag (~25s, measured 2026-08-07). A
+ * customer minted inside the deletion race is therefore invisible to discovery
+ * until this long after IT WAS CREATED — which is why the wait below is
+ * anchored on `purgedAt` (the instant minting became impossible) and not on
+ * `requestedAt`. Anchoring on the request only bounds the mint that happens at
+ * the very instant of the request: on a large org whose pass runs for minutes,
+ * an in-flight request that beat the fence can mint a customer near the END of
+ * the pass, long after a requestedAt-based margin has "elapsed", and the
+ * discovery that follows is then still inside the lag.
+ */
+const STRIPE_SEARCH_LAG_MARGIN_MS = 60_000;
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Block until {@link STRIPE_SEARCH_LAG_MARGIN_MS} has passed since the purge
+ * completed, so the post-purge discovery pass can see a customer minted in the
+ * deletion race and `markDone` cannot make the record inert with that
+ * customer's PII still in Stripe.
+ *
+ * Waited out IN-PASS rather than thrown as a retry: this is the ordinary
+ * ending of a HEALTHY teardown, and a throw would emit a Lambda `Errors`
+ * datapoint (what Grafana alerts on), burn an async retry, inflate
+ * `attemptCount` toward the reconciler's stuck threshold, refresh the staleness
+ * window, and re-run every external teardown and the whole purge a second time.
+ *
+ * The anchor is stamped as the LAST step of the purge and read back in the same
+ * pass, so a FIRST pass always waits the full margin — every healthy deletion,
+ * whatever the org's size. Purge duration cannot count against the wait,
+ * because the anchor is set after the purge, not before it. Only a re-drive
+ * (whose stored `purgedAt` is already old) waits less, and a legacy/corrupt one
+ * waits zero. The margin is therefore ADDITIVE to the pass: headroom against
+ * the 900s Lambda budget is 900s - 60s. Convergence is unaffected either way —
+ * a first pass killed at the 900s timeout re-drives with `purgedAt` already
+ * stored, and that pass waits zero.
+ *
+ * A missing or unparseable `purgedAt` is treated as "old enough" rather than
+ * hard-failing: legacy DELETION records predate this field (see
+ * dynamo-records.ts), and wedging their teardown forever is strictly worse than
+ * running a discovery pass that may be early.
+ */
+async function waitOutStripeSearchLag(orgId: string, record: OrgDeletionRecord): Promise<void> {
+  const purgedAtMs = Date.parse(record.purgedAt ?? '');
+  if (Number.isNaN(purgedAtMs)) {
+    console.warn(
+      '[account-deletion] DELETION record carries no usable purgedAt; treating the Stripe ' +
+        'search-index lag as already elapsed',
+      { orgId, purgedAt: record.purgedAt },
+    );
+    return;
+  }
+  const elapsedMs = Date.now() - purgedAtMs;
+  if (elapsedMs >= STRIPE_SEARCH_LAG_MARGIN_MS) return;
+  // Clamped to the margin: a `purgedAt` in the future (clock skew between the
+  // Lambda that stamped it and this one) must never park the pass for longer
+  // than the wait it is standing in for.
+  const remainingMs = Math.min(
+    STRIPE_SEARCH_LAG_MARGIN_MS - elapsedMs,
+    STRIPE_SEARCH_LAG_MARGIN_MS,
+  );
+  console.warn(
+    "[account-deletion] Waiting out Stripe's search-index lag before the post-purge discovery pass",
+    { orgId, remainingMs, clockSkewed: elapsedMs < 0 },
+  );
+  await sleep(remainingMs);
+}
+
+/**
  * Run (or resume) the teardown for an org whose deletion was confirmed.
  * Driven by the ORG#{orgId}/DELETION record written by the delete-account
  * handler. There is no per-step state machine: every external teardown is
@@ -71,9 +141,15 @@ export function assertPurgeablePk(pk: string, prefixes: readonly string[]): void
  * (idempotent) teardown. Concurrent invocations are harmless for the same
  * reason.
  *
- * Stripe runs TWICE — once alongside the other externals and once after the
- * purge — because its customer discovery is index-lagged; see the second call
- * site below.
+ * One pass is therefore: bump the attempt count, re-apply the fences, settle
+ * all four external teardowns, purge the DDB records and stamp `purgedAt`,
+ * wait out Stripe's search-index lag — the full 60s margin on a first pass,
+ * since `purgedAt` was stamped moments earlier; only a re-drive finds it
+ * already elapsed — run Stripe discovery a SECOND time, then mark DONE. Stripe runs
+ * twice because its customer discovery is index-lagged; see the second call
+ * site below. The in-pass wait is deliberate — deferring to a retry instead
+ * would double every external teardown and the whole purge; see
+ * {@link waitOutStripeSearchLag}.
  *
  * `record.status` is read as a plain string: legacy records may still carry
  * an old intermediate status (KEYS_REVOKED, TENANTS_DISABLED, ...) — anything
@@ -108,28 +184,18 @@ export async function runAccountDeletion(orgId: string): Promise<void> {
     { name: 'auth0', run: () => deleteAuth0Users(record) },
     { name: 'rag', run: () => purgeRagData(orgId) },
   ];
-  const results = await Promise.allSettled(externals.map(({ run }) => run()));
-  const failures = results
-    .map((result, i) => ({ result, name: externals[i].name }))
-    .filter(
-      (f): f is { result: PromiseRejectedResult; name: string } => f.result.status === 'rejected',
-    );
-  if (failures.length > 0) {
-    throw new AggregateError(
-      failures.map((f) => f.result.reason),
-      `Account teardown failed for org ${orgId} in: ${failures.map((f) => f.name).join(', ')}`,
-    );
-  }
+  await settleAll(externals, (names) => `Account teardown failed for org ${orgId} in: ${names}`);
 
   await purgeRecords(orgId, record);
 
-  // Second Stripe pass — NOT redundant. Stripe Search indexes writes with a
-  // lag (~25s, measured 2026-08-07), so the first pass is blind to a customer
-  // minted in the seconds before the confirm. Everything above (regions +
-  // Auth0 + RAG + the purge) takes comfortably longer than that lag, which is
-  // precisely what makes this pass see what the first could not. Do NOT drop
-  // it because the first pass "usually" finds everything — the case it misses
-  // is the unredacted-PII bug this design exists to close.
+  // Second Stripe pass — NOT redundant. Stripe Search indexes writes with a lag
+  // (~25s, measured 2026-08-07), so the first pass is blind to a customer minted
+  // in the deletion race. What makes this pass able to see what the first could
+  // not is the wait below, NOT the elapsed teardown work: a small org finishes
+  // well inside the lag window. Do NOT drop this pass because the first
+  // "usually" finds everything — the case it misses is the unredacted-PII bug
+  // this design exists to close.
+  await waitOutStripeSearchLag(orgId, record);
   await cancelStripeAndWriteTombstone(orgId, record, { customerId: firstPassCustomerId });
 
   await markDone(orgId);
@@ -218,9 +284,64 @@ async function cancelAllSubscriptions(orgId: string, customerIds: string[]): Pro
  * pointer left to redact it by. Throwing keeps the record non-DONE for the
  * re-drive / manual follow-up. A pass that discovers nothing leaves an
  * existing id in place rather than erasing it.
+ *
+ * The read below is only a snapshot — {@link tombstoneCondition} is what
+ * actually holds that invariant against two overlapping workers (whose
+ * discovery calls can straddle the Stripe index lag and so disagree). Losing
+ * that race is only an error when the two passes genuinely disagree: a pass
+ * that discovered nothing accepts the winner's tombstone (see the catch).
  */
 async function writeTombstone(orgId: string, customerId: string | undefined): Promise<void> {
   const key = { pk: DeletionKeys.tombstonePk(orgId), sk: DeletionKeys.tombstoneSk() };
+  const current = await readTombstone(key);
+  if (current?.stripeCustomerId && customerId && current.stripeCustomerId !== customerId) {
+    throw new Error(
+      `Org ${orgId} tombstone already records Stripe customer ${current.stripeCustomerId} but ` +
+        `discovery found ${customerId}; refusing to overwrite — manual follow-up required`,
+    );
+  }
+
+  const recordedCustomerId = customerId ?? current?.stripeCustomerId;
+  // Already exactly right — skip the write rather than re-stamping `deletedAt`
+  // on every pass. That field is the audit answer to "when was this org
+  // deleted?", so it must keep naming the first pass, not the last.
+  if (current && current.stripeCustomerId === recordedCustomerId) return;
+
+  const tombstone: OrgTombstoneRecord = {
+    ...key,
+    orgId,
+    ...(recordedCustomerId ? { stripeCustomerId: recordedCustomerId } : {}),
+    deletedAt: current?.deletedAt ?? new Date().toISOString(),
+  };
+  try {
+    await dynamo.send(
+      new PutItemCommand({
+        TableName: Resource.BillingTable.name,
+        Item: marshall(tombstone),
+        ...tombstoneCondition(recordedCustomerId),
+      }),
+    );
+  } catch (err) {
+    if (!(err instanceof ConditionalCheckFailedException)) throw err;
+    // A pass that discovered NOTHING had nothing to write, so an overlapping
+    // worker that landed a customer id first has strictly the better tombstone:
+    // accept it instead of failing this whole pass over a benign upgrade. Only
+    // a genuine disagreement (or a still-id-less tombstone, which means the
+    // condition failed for a reason we do not understand) is fatal.
+    if (recordedCustomerId === undefined && (await readTombstone(key))?.stripeCustomerId) return;
+    throw new Error(
+      `Org ${orgId} tombstone was written concurrently while this pass was recording Stripe ` +
+        `customer ${recordedCustomerId ?? '(none discovered)'}; refusing to overwrite — ` +
+        'the next teardown pass re-reads it',
+    );
+  }
+}
+
+/** Strongly-consistent read of the org's tombstone; absent reads as undefined. */
+async function readTombstone(key: {
+  pk: string;
+  sk: string;
+}): Promise<OrgTombstoneRecord | undefined> {
   const existing = await dynamo.send(
     new GetItemCommand({
       TableName: Resource.BillingTable.name,
@@ -228,26 +349,24 @@ async function writeTombstone(orgId: string, customerId: string | undefined): Pr
       ConsistentRead: true,
     }),
   );
-  const existingCustomerId = existing.Item
-    ? (unmarshall(existing.Item) as OrgTombstoneRecord).stripeCustomerId
-    : undefined;
-  if (existingCustomerId && customerId && existingCustomerId !== customerId) {
-    throw new Error(
-      `Org ${orgId} tombstone already records Stripe customer ${existingCustomerId} but discovery ` +
-        `found ${customerId}; refusing to overwrite — manual follow-up required`,
-    );
-  }
+  return existing.Item ? (unmarshall(existing.Item) as OrgTombstoneRecord) : undefined;
+}
 
-  const recordedCustomerId = customerId ?? existingCustomerId;
-  const tombstone: OrgTombstoneRecord = {
-    ...key,
-    orgId,
-    ...(recordedCustomerId ? { stripeCustomerId: recordedCustomerId } : {}),
-    deletedAt: new Date().toISOString(),
+/**
+ * The tombstone's write condition. A tombstone that names a customer may never
+ * be replaced — neither by one naming a different customer nor by one naming
+ * none at all, which is the case the check-then-write above cannot see and
+ * which would destroy the last pointer to redact by. Upgrading a tombstone that
+ * names NO customer to one that does is allowed: that is the post-purge pass
+ * recording a late (race-window) find, and it strands nothing.
+ */
+function tombstoneCondition(recordedCustomerId: string | undefined) {
+  const noNamedCustomer = 'attribute_not_exists(pk) OR attribute_not_exists(stripeCustomerId)';
+  if (!recordedCustomerId) return { ConditionExpression: noNamedCustomer };
+  return {
+    ConditionExpression: `${noNamedCustomer} OR stripeCustomerId = :id`,
+    ExpressionAttributeValues: marshall({ ':id': recordedCustomerId }),
   };
-  await dynamo.send(
-    new PutItemCommand({ TableName: Resource.BillingTable.name, Item: marshall(tombstone) }),
-  );
 }
 
 /** Stripe statuses a subscription can never leave — nothing left to cancel. */
@@ -343,9 +462,7 @@ async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<v
   const lateRegions = await getRegionsWithTenantIdsForOrg(orgId);
   if (lateRegions.length > 0) {
     await snapshotTenantIdsOnDeletionRecord(orgId, record, lateRegions);
-    for (const { orchestrator, tenantId } of lateRegions) {
-      await orchestrator.deleteTenant(tenantId);
-    }
+    await deleteTenantsInRegions(orgId, lateRegions, 'Late-region');
   }
 
   // ONE SNAPSHOT drives both deletes below, and that — not the order — is what
@@ -417,6 +534,45 @@ async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<v
   }
 
   await deleteDeletionChallenge(orgId);
+
+  await stampPurgedAt(orgId, record);
+}
+
+/**
+ * Record the instant the purge finished — the anchor
+ * {@link waitOutStripeSearchLag} measures from, and the best available one: the
+ * fences are re-applied at the top of every pass and the purge has just run, so
+ * from here on every writer that CONSULTS the fence is refused. It is not an
+ * absolute cutoff: a request that read the profile before the fence landed can
+ * still mint a Stripe customer after this instant, bounded by API Gateway's 29s
+ * request timeout. A 60s margin against a ~25s index lag leaves ~35s of slack,
+ * which covers that tail today — but the slack is what makes it hold, so the
+ * margin cannot be cut toward the lag without re-opening the gap.
+ * `requestedAt` is a far worse anchor: a request that beat the fence can mint
+ * at any point up to here.
+ *
+ * `if_not_exists` keeps the EARLIEST purge across passes: the fences were
+ * already up then, so a re-drive must not restart the wait. Persisted (rather
+ * than kept in memory) for exactly that reason.
+ */
+async function stampPurgedAt(orgId: string, record: OrgDeletionRecord): Promise<void> {
+  const purgedAt = record.purgedAt ?? new Date().toISOString();
+  await dynamo.send(
+    new UpdateItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: marshall({ pk: DeletionKeys.deletionPk(orgId), sk: DeletionKeys.deletionSk() }),
+      UpdateExpression: 'SET purgedAt = if_not_exists(purgedAt, :purgedAt), updatedAt = :now',
+      ConditionExpression: 'attribute_exists(pk)',
+      ExpressionAttributeValues: marshall({
+        ':purgedAt': purgedAt,
+        ':now': new Date().toISOString(),
+      }),
+    }),
+  );
+  // Keep the in-memory record in step for the wait below. A concurrent worker
+  // that stamped first wins in DynamoDB; using our own (later) value here only
+  // ever waits longer, never less.
+  record.purgedAt = purgedAt;
 }
 
 /**
@@ -424,9 +580,30 @@ async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<v
  * already-deleted tenants are success — so re-runs after a crash converge.
  */
 async function deleteAllRegions(orgId: string, record: OrgDeletionRecord): Promise<void> {
-  for (const { orchestrator, tenantId } of await resolveRegionTargets(orgId, record)) {
-    await orchestrator.deleteTenant(tenantId);
-  }
+  await deleteTenantsInRegions(orgId, await resolveRegionTargets(orgId, record), 'Region');
+}
+
+/**
+ * Tear down a set of regional tenants, attempting EVERY one before the group
+ * fails, matching how {@link runAccountDeletion} treats its external teardowns.
+ * A sequential loop let one region's throw skip all the rest, and an
+ * orchestrator that throws whenever it cannot confirm the tenant reached
+ * DISABLED (Aurora) makes that an ordinary occurrence, not a rare one. Used by
+ * both teardown sites — the main region sweep and the purge's late-region
+ * re-check.
+ */
+async function deleteTenantsInRegions(
+  orgId: string,
+  targets: ProvisionedRegion[],
+  phase: 'Region' | 'Late-region',
+): Promise<void> {
+  await settleAll(
+    targets.map(({ orchestrator, tenantId }) => ({
+      name: orchestrator.id,
+      run: () => orchestrator.deleteTenant(tenantId),
+    })),
+    (names) => `${phase} teardown failed for org ${orgId} in: ${names}`,
+  );
 }
 
 /**
@@ -436,12 +613,19 @@ async function deleteAllRegions(orgId: string, record: OrgDeletionRecord): Promi
  * (`getRegionsWithTenantIds`), not readiness-gated: a tenant whose setup is
  * still mid-flight exists upstream and must be deleted too, or its remote
  * resources and SSM secrets leak forever.
+ *
+ * The profile read is strongly consistent. Eventual consistency is safe for the
+ * write-once tenant ids everywhere else (see org-profile.ts), but not here: a
+ * stale read reports "no tenant in this region", the region is skipped, the
+ * non-empty read short-circuits the snapshot fallback below, and the profile —
+ * the only pointer to the tenant id — is then purged and the record marked
+ * DONE, leaking a live upstream tenant we keep paying for.
  */
 async function resolveRegionTargets(
   orgId: string,
   record: OrgDeletionRecord,
 ): Promise<ProvisionedRegion[]> {
-  const profile = await getOrgProfile(orgId);
+  const profile = await getOrgProfile(orgId, { consistent: true });
   if (profile) return getRegionsWithTenantIds(profile);
 
   const snapshot = record.tenantIds ?? {};

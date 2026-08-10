@@ -71,10 +71,15 @@ export async function baseHandler(
   // path compensates by revoking what it just minted.
   //
   // This is a check, not the fence, and it is deliberately the WEAKER of the
-  // two: it reads a missing profile as healthy. That is fine — a purged org has
-  // no tenant either, so `ensureTenantReady` below cannot resolve one (tenant
-  // setup's own `attribute_exists(pk)` condition refuses to re-create it), and
-  // the fenced write would refuse regardless. What matters is that the two
+  // two: it reads a missing profile as healthy. That is survivable — a purged
+  // org has no tenant either, so `ensureTenantReady` below cannot return one
+  // (tenant setup's `attribute_exists(pk)` condition refuses to RECORD one on a
+  // purged profile), and the fenced write would refuse regardless. Note what
+  // that leaves behind: tenant setup creates the upstream tenant first and only
+  // then fails to persist it (lib/orchestrator/tenant-setup.ts:147), so this
+  // path leaks an orphan upstream tenant rather than short-circuiting — the
+  // known orphan finding (M3 in PR-STACK-REVIEW-539-497.md), not something the
+  // pre-check closes. What matters here is that the two
   // agree on `deleting: false`: if the fence rejected what this accepts, we
   // would mint upstream and then compensate by revoking a healthy org's key.
   const orgProfile = await getOrgProfile(orgId, { consistent: true });

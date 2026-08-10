@@ -19,8 +19,9 @@ export interface GetOrgProfileOptions {
    * Issue a strongly-consistent read. **Required** for callers that gate on a
    * *fail-open* attribute — above all the `deleting` fence (FIL-112), where a
    * stale read means provisioning against, or handing credentials to, an org
-   * whose teardown has already started. See the read-semantics note below for
-   * why mutability alone is not the test.
+   * whose teardown has already started — and for teardown's own tenant-id
+   * resolution, where a stale read leaks the tenant instead. See the
+   * read-semantics note below for why mutability alone is not the test.
    */
   consistent?: boolean;
 }
@@ -40,6 +41,11 @@ export interface GetOrgProfileOptions {
 //   idempotent. It can never report a tenant that is not there, nor a wrong
 //   tenant id. `auroraSetupStatus` is mutable and is read this way from every
 //   `isTenantReady` call site; that is correct, not a gap to be closed.
+//   Teardown is the exception, because the safe direction is reversed there:
+//   "not provisioned yet" means "skip this region", and the profile it was
+//   read from is deleted moments later, so the tenant id is unrecoverable.
+//   `getRegionsWithTenantIdsForOrg` and the teardown's own region resolution
+//   therefore read consistently (FIL-112).
 // - **Fail-open → strongly consistent is required.** `deleting` is *absent*
 //   until the teardown starts, so a stale read answers "not deleting" for an
 //   org that is already being torn down, and the caller proceeds. There is no

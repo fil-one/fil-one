@@ -305,8 +305,22 @@ export interface OrgDeletionRecord {
    * creation so retries advance the same job instead of creating duplicates.
    */
   stripeRedactionJobId?: string;
+  /**
+   * When the record purge first completed — i.e. when the fences and the purge
+   * were both done and no writer could still mint a Stripe customer for this
+   * org. The teardown waits out Stripe's search-index lag from HERE, not from
+   * `requestedAt`, so it must survive across passes; the earliest value wins.
+   * Absent on legacy records and until the first purge completes.
+   */
+  purgedAt?: string;
   /** Worker invocations so far; the reconciler alerts past a threshold. */
   attemptCount: number;
+  /**
+   * Last user-triggered re-drive of the teardown worker, written by
+   * `claimDeletionRedrive` to throttle them. Never a liveness signal — see
+   * `lib/deletion-record.ts`.
+   */
+  lastRedriveAt?: string;
   updatedAt: string; // ISO-8601
 }
 

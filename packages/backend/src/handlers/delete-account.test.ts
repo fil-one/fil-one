@@ -369,6 +369,37 @@ describe('delete-account baseHandler', () => {
     expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
   });
 
+  it('a guard failure still leaves the teardown scheduled', async () => {
+    // The dead end this pins: the challenge is consumed before the guards are
+    // written, so a guard failure used to throw with the one-time code burned,
+    // sessions possibly killed, and NOTHING scheduled — and the challenge
+    // endpoint refuses to issue another code once a DELETION record exists.
+    ddbMock
+      .on(UpdateItemCommand, { Key: { pk: { S: `SUB#${SUB}` }, sk: { S: 'IDENTITY' } } })
+      .rejects(new Error('dynamo is down'));
+
+    await expect(baseHandler(makeEvent())).rejects.toThrow(/Deletion start incomplete/);
+
+    expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(1);
+  });
+
+  it('a failed worker invoke still leaves the org FENCED', async () => {
+    // The mirror-image dead end, and the worse one: ordering the invoke first
+    // meant a throttled/denied invoke threw with the code burned and the org
+    // completely UNFENCED — live sessions, unfenced billing writers, tenant
+    // setup still permitted — while the challenge endpoint refuses to issue
+    // another code. Neither step may gate the other.
+    lambdaMock.on(InvokeCommand).rejects(new Error('AccessDeniedException'));
+
+    await expect(baseHandler(makeEvent())).rejects.toThrow(/Deletion start incomplete/);
+
+    // Fence C (the session tombstone) landed anyway.
+    const identityWrites = ddbMock
+      .commandCalls(UpdateItemCommand)
+      .filter((c) => c.args[0].input.Key?.pk?.S === `SUB#${SUB}`);
+    expect(identityWrites).toHaveLength(1);
+  });
+
   it('is idempotent: a re-confirm after the record exists still invokes the worker', async () => {
     ddbMock
       .on(PutItemCommand)

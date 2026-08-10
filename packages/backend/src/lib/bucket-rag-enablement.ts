@@ -184,8 +184,9 @@ export interface BucketTelemetryUpdate {
  * enablement rows, so post-purge it is already a no-op. It would also import a
  * new failure mode onto a path contracted to be best-effort: a transaction
  * cancelled by contention on `ORG#/PROFILE` is not a conditional-check failure,
- * so it would escape this catch and fail the whole bucket
- * (jobs/rag-indexer-helpers.ts). The writer that matters — the one that can
+ * so once `sendFencedWrite`'s retry budget was exhausted it would escape this
+ * catch and fail the whole bucket (jobs/rag-indexer-helpers.ts). The writer
+ * that matters — the one that can
  * re-create a row and re-animate the indexer — is `setBucketRagEnablement`.
  * */
 export async function updateBucketTelemetry(

@@ -248,6 +248,68 @@ describe('redactStripeCustomers', () => {
     );
   });
 
+  it('pages the redaction-job list to find a conflicting job past the first page', async () => {
+    // Jobs are account-wide and one is created per org deletion, so the list
+    // grows past a single page after ~100 deletions. Unpaginated, the live
+    // conflicting job fell off page 1, the throw fired on every retry, and that
+    // teardown wedged permanently.
+    const page1 = Array.from({ length: 100 }, (_, i) => ({
+      id: `prj_p1_${i}`,
+      status: 'ready',
+      objects: { customers: [`cus_other_${i}`] },
+    }));
+    mockRawRequest.mockImplementation(
+      (method: string, path: string, params?: Record<string, unknown>) => {
+        if (method === 'POST' && path === '/v1/privacy/redaction_jobs') {
+          return Promise.reject(
+            new Error('Customer cus_1 is already included in a redaction job.'),
+          );
+        }
+        if (method === 'GET' && path === '/v1/privacy/redaction_jobs') {
+          return params?.starting_after
+            ? Promise.resolve({
+                data: [{ id: 'prj_live', status: 'ready', objects: { customers: ['cus_1'] } }],
+                has_more: false,
+              })
+            : Promise.resolve({ data: page1, has_more: true });
+        }
+        if (method === 'GET') return Promise.resolve({ id: 'prj_live', status: 'ready' });
+        return Promise.resolve({ id: 'prj_live' });
+      },
+    );
+
+    await redactStripeCustomers(ORG_ID, deletionRecord(), CUSTOMER);
+
+    // Page 2 was requested with the last id of page 1 as the cursor.
+    const listCalls = mockRawRequest.mock.calls.filter(
+      ([method, path]) => method === 'GET' && path === '/v1/privacy/redaction_jobs',
+    );
+    expect(listCalls).toHaveLength(2);
+    expect(listCalls[0][2]).toEqual({ limit: 100 });
+    expect(listCalls[1][2]).toEqual({ limit: 100, starting_after: 'prj_p1_99' });
+    expect(jobIdWrites()[0].args[0].input.ExpressionAttributeValues?.[':jobId']?.S).toBe(
+      'prj_live',
+    );
+  });
+
+  it('fails loudly rather than concluding "not found" when the page walk is exhausted', async () => {
+    // Stripe says a live job contains the customer, so an exhausted walk is an
+    // unanswered question, never an answer of "no such job".
+    mockRawRequest.mockImplementation((method: string, path: string) => {
+      if (method === 'POST' && path === '/v1/privacy/redaction_jobs') {
+        return Promise.reject(new Error('Customer cus_1 is already included in a redaction job.'));
+      }
+      return Promise.resolve({
+        data: [{ id: 'prj_x', status: 'ready', objects: { customers: ['cus_other'] } }],
+        has_more: true,
+      });
+    });
+
+    await expect(redactStripeCustomers(ORG_ID, deletionRecord(), CUSTOMER)).rejects.toThrow(
+      /was not found within 100 pages/,
+    );
+  });
+
   it('throws when the conflicting job cannot be found in the list', async () => {
     mockRawRequest.mockImplementation((method: string, path: string) => {
       if (method === 'POST' && path === '/v1/privacy/redaction_jobs') {

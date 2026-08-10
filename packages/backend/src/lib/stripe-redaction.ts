@@ -22,7 +22,22 @@ interface StripeRedactionJob {
 
 interface StripeRedactionJobList {
   data?: StripeRedactionJob[];
+  /** Stripe's cursor-pagination flag: more pages exist after this one. */
+  has_more?: boolean;
 }
+
+/** Jobs per page of the redaction-job list; 100 is Stripe's maximum. */
+const REDACTION_JOB_PAGE_SIZE = 100;
+
+/**
+ * Pages the redaction-job list will walk before giving up. Jobs are
+ * account-wide and one is created per org deletion, so the list grows without
+ * bound and the conflicting job can sit arbitrarily deep. This bounds the walk
+ * (~10k jobs) rather than the search: past it we throw instead of concluding
+ * "not found", because a silent not-found would report a live conflicting job
+ * as absent.
+ */
+const REDACTION_JOB_MAX_PAGES = 100;
 
 /**
  * Redact the canceled customer's PII via Stripe's Redaction Jobs API. The org
@@ -100,24 +115,48 @@ async function establishRedactionJob(orgId: string, customerId: string): Promise
  * (create returned a job-conflict). Terminal jobs (failed/canceled) are
  * skipped — they no longer block a new job, so they can't be the conflicting
  * one.
+ *
+ * Paged via Stripe's `has_more`/`starting_after` cursor. The SDK's
+ * auto-paginating iterator is not available here: the pinned version has no
+ * `privacy.redactionJobs` namespace, so this list goes through `rawRequest`.
+ * A single unpaginated page silently stopped finding the conflicting job once
+ * the account passed its page size, and every retry then threw — wedging that
+ * teardown permanently.
  */
 async function findRedactionJobIdForCustomer(orgId: string, customerId: string): Promise<string> {
-  const jobs = await stripeRawRequest<StripeRedactionJobList>('GET', '/v1/privacy/redaction_jobs', {
-    limit: 100,
-  });
-  const match = (jobs.data ?? []).find(
-    (job) =>
-      job.status !== 'failed' &&
-      job.status !== 'canceled' &&
-      (job.objects?.customers ?? []).includes(customerId),
-  );
-  if (!match) {
-    throw new Error(
-      `Stripe reported customer ${customerId} (org ${orgId}) is already in a redaction job, but ` +
-        'no live job containing them was found; the next teardown pass retries',
+  let startingAfter: string | undefined;
+  for (let page = 0; page < REDACTION_JOB_MAX_PAGES; page++) {
+    const jobs = await stripeRawRequest<StripeRedactionJobList>(
+      'GET',
+      '/v1/privacy/redaction_jobs',
+      {
+        limit: REDACTION_JOB_PAGE_SIZE,
+        ...(startingAfter ? { starting_after: startingAfter } : {}),
+      },
     );
+    const data = jobs.data ?? [];
+    const match = data.find(
+      (job) =>
+        job.status !== 'failed' &&
+        job.status !== 'canceled' &&
+        (job.objects?.customers ?? []).includes(customerId),
+    );
+    if (match) return match.id;
+    if (!jobs.has_more || data.length === 0) {
+      throw new Error(
+        `Stripe reported customer ${customerId} (org ${orgId}) is already in a redaction job, but ` +
+          'no live job containing them was found; the next teardown pass retries',
+      );
+    }
+    startingAfter = data[data.length - 1].id;
   }
-  return match.id;
+  // Never conclude "not found" from an exhausted walk: Stripe says a live job
+  // contains this customer, so failing loudly is the only honest answer.
+  throw new Error(
+    `Stripe reported customer ${customerId} (org ${orgId}) is already in a redaction job, but it ` +
+      `was not found within ${REDACTION_JOB_MAX_PAGES} pages of the redaction-job list; ` +
+      'manual follow-up required',
+  );
 }
 
 /** GET the job's current status and take the one legal step toward `succeeded`. */

@@ -466,7 +466,7 @@ describe('getRegionsWithTenantIdsForOrg', () => {
     vi.clearAllMocks();
   });
 
-  it('reads the profile once and resolves raw tenant ids from it', async () => {
+  it('reads the profile once, STRONGLY CONSISTENTLY, and resolves raw tenant ids from it', async () => {
     const aurora = fakeOrchestrator('aurora', { ready: false });
     mockGetAvailableOrchestrators.mockReturnValue([aurora]);
     const midSetupProfile = {
@@ -478,7 +478,9 @@ describe('getRegionsWithTenantIdsForOrg', () => {
     const result = await getRegionsWithTenantIdsForOrg('org-1');
 
     expect(result).toEqual([{ orchestrator: aurora, tenantId: 'aurora-mid-setup' }]);
-    expect(mockGetOrgProfile.mock.calls).toEqual([['org-1']]);
+    // Both callers are teardown paths: a stale read skips the region, and the
+    // profile — the only pointer to the tenant id — is purged right after.
+    expect(mockGetOrgProfile.mock.calls).toEqual([['org-1', { consistent: true }]]);
   });
 
   it('does not fetch the PROFILE row when no orchestrator is available', async () => {

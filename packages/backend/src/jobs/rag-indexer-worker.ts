@@ -240,7 +240,6 @@ interface RegionIndexStats {
  * each requested bucket's vector index. Returns aggregated stats (buckets and
  * objects reconciled/failed). Per-bucket failures are isolated (logged,
  * counted, and skipped) so they do not abort the region.
- *
  */
 async function indexRegion(args: IndexRegionArgs): Promise<RegionIndexStats> {
   const { orgId, region, tenantId, bucketNames, vectorStore, deadlineEpochMs } = args;

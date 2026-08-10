@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ApiErrorCode } from '@filone/shared';
 
@@ -26,8 +27,10 @@ vi.mock('../lib/auth0-management.js', async () =>
 );
 
 const mockReadDeletionRecord = vi.fn();
+const mockClaimDeletionRedrive = vi.fn();
 vi.mock('../lib/deletion-record.js', () => ({
   readDeletionRecord: (orgId: string) => mockReadDeletionRecord(orgId),
+  claimDeletionRedrive: (orgId: string) => mockClaimDeletionRedrive(orgId),
 }));
 
 const mockCreateChallenge = vi.fn();
@@ -51,9 +54,11 @@ vi.mock('../lib/org-membership.js', () => ({
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
+const lambdaMock = mockClient(LambdaClient);
 
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
+process.env.ACCOUNT_DELETION_WORKER_FUNCTION_NAME = 'account-deletion-worker';
 
 import { baseHandler, handler } from './create-deletion-challenge.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
@@ -77,8 +82,11 @@ function makeEvent(email?: string | null) {
 describe('create-deletion-challenge baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    lambdaMock.reset();
+    lambdaMock.on(InvokeCommand).resolves({});
     mockIsOrgAdmin.mockResolvedValue(true);
     mockReadDeletionRecord.mockResolvedValue(undefined);
+    mockClaimDeletionRedrive.mockResolvedValue(true);
     mockGetOrgProfile.mockResolvedValue({ name: { S: 'Acme Corp' } });
     mockCreateChallenge.mockResolvedValue({
       outcome: 'created',
@@ -110,7 +118,12 @@ describe('create-deletion-challenge baseHandler', () => {
     expect(mockSendEmail).not.toHaveBeenCalled();
   });
 
-  it('returns 200 deletion_in_progress without issuing a code when a deletion already exists', async () => {
+  it('returns 200 deletion_in_progress without issuing a code, and re-drives the teardown', async () => {
+    // No new code is issued once a deletion exists. Re-invoking the idempotent
+    // worker here is what makes a deletion that was never SCHEDULED (a failed
+    // invoke, or a crash between consuming the code and invoking) recoverable
+    // by a user retry — the only window this route can still be reached in,
+    // since a fenced org's sessions are all answered 410.
     mockReadDeletionRecord.mockResolvedValue({ status: 'PENDING' });
 
     const result = (await baseHandler(makeEvent())) as APIGatewayProxyStructuredResultV2;
@@ -119,6 +132,53 @@ describe('create-deletion-challenge baseHandler', () => {
     expect(JSON.parse(result.body!)).toEqual({ outcome: 'deletion_in_progress' });
     expect(mockCreateChallenge).not.toHaveBeenCalled();
     expect(mockSendEmail).not.toHaveBeenCalled();
+
+    const invokes = lambdaMock.commandCalls(InvokeCommand);
+    expect(invokes).toHaveLength(1);
+    const invoke = invokes[0].args[0].input;
+    expect(invoke.FunctionName).toBe('account-deletion-worker');
+    expect(invoke.InvocationType).toBe('Event');
+    expect(JSON.parse(new TextDecoder().decode(invoke.Payload as Uint8Array))).toEqual({
+      orgId: ORG_ID,
+    });
+  });
+
+  it('still reports deletion_in_progress when the re-invoke fails, rather than a generic 500', async () => {
+    // `deletion_in_progress` is typed as a SUCCESS outcome and the endpoint is
+    // documented as idempotent. A 500 here makes the website render its generic
+    // server-error string — telling a user whose account is being deleted that
+    // something unrelated went wrong. The failure is logged instead.
+    mockReadDeletionRecord.mockResolvedValue({ status: 'PENDING' });
+    lambdaMock.on(InvokeCommand).rejects(new Error('lambda is down'));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const result = (await baseHandler(makeEvent())) as APIGatewayProxyStructuredResultV2;
+
+    expect(result.statusCode).toBe(200);
+    expect(JSON.parse(result.body!)).toEqual({ outcome: 'deletion_in_progress' });
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it('throttles the re-invoke: a click inside the cooldown schedules nothing', async () => {
+    // Each invoke spawns a 900s / 1024MB worker, and this branch short-circuits
+    // ahead of the code endpoint's own 5/hr limiter, so it needs a cooldown of
+    // its own or a held-down button fans out workers.
+    mockReadDeletionRecord.mockResolvedValue({ status: 'PENDING' });
+    mockClaimDeletionRedrive.mockResolvedValue(false);
+
+    const result = (await baseHandler(makeEvent())) as APIGatewayProxyStructuredResultV2;
+
+    expect(result.statusCode).toBe(200);
+    expect(JSON.parse(result.body!)).toEqual({ outcome: 'deletion_in_progress' });
+    expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
+  });
+
+  it('does not invoke the worker when no deletion has been confirmed yet', async () => {
+    await baseHandler(makeEvent());
+
+    expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
+    expect(mockClaimDeletionRedrive).not.toHaveBeenCalled();
   });
 
   it('returns 429 with resendAvailableAt when rate limited, without sending email', async () => {
