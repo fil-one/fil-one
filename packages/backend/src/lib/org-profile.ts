@@ -127,17 +127,19 @@ export class OrgDeletingError extends Error {
  *   and the only deleter is the teardown's `purgeRecords`. A missing profile
  *   therefore means purged — refusing is the intent, not an outage.
  * - `OR deleting = :notDeleting` — `isOrgDeleting` tests `deleting === true`,
- *   so a literal `deleting: false` (what an ops unwedge would write) reads as
- *   healthy. Without this half the fence would disagree with every reader; for
- *   `create-access-key` that combination is the worst one, since its pre-check
- *   would pass, the credential would be minted upstream, and the compensating
- *   revoke would then destroy a healthy org's key.
+ *   so a literal `deleting: false` (what a hand-rolled ops edit would write)
+ *   reads as healthy. Without this half the fence would disagree with every
+ *   reader; for `create-access-key` that combination is the worst one, since
+ *   its pre-check would pass, the credential would be minted upstream, and the
+ *   compensating revoke would then destroy a healthy org's key.
  *
- * DEPENDENCY (FIL-112): `deleting = true` is written in exactly one place
- * (lib/deletion-guards.ts) and NOTHING clears it today, so an org wedged by a
- * failed teardown is permanently refused by every fence below. A supported
- * unwedge — which is why `deleting = false` is accepted above — lands with the
- * deletion reconciler.
+ * The supported unwedge (FIL-112) is `clearOrgDeletionFence` in
+ * lib/deletion-guards.ts, driven by the deletion reconciler. It **REMOVEs**
+ * the attribute rather than setting it to `false`, because
+ * `lib/orchestrator/tenant-setup.ts`, `lib/fth/fth-tenant-setup.ts` and
+ * `lib/aurora/aurora-tenant-setup.ts` condition their tenant-id write on
+ * `attribute_not_exists(deleting)` — a literal `false` would satisfy this
+ * check while leaving tenant setup refused forever.
  */
 export function orgNotDeletingCheck(orgId: string): TransactWriteItem {
   return {

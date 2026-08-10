@@ -1067,9 +1067,11 @@ export default $config({
 
     const accountDeletionOrchestrator = createFn('AccountDeletionOrchestrator', {
       handler: 'packages/backend/src/jobs/account-deletion-orchestrator.handler',
-      // billingTable: the resurrection sweep (FIL-112) checks
-      // CUSTOMER#{userId}/SUBSCRIPTION existence for DONE orgs' members.
-      link: [billingTable, userInfoTable],
+      // The resurrection sweep (FIL-112) reads all three: CUSTOMER#/SUBSCRIPTION
+      // rows on billingTable, the ORG# partition and RAGKEYHASH# lookups on
+      // userInfoTable, and per-bucket RAG enablement rows on ragIndexerTable.
+      // The fence unwedge writes ORG#/PROFILE on userInfoTable.
+      link: [billingTable, ragIndexerTable, userInfoTable],
       environment: {
         ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
       },

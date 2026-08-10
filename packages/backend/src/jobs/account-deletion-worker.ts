@@ -2,6 +2,15 @@ import { runAccountDeletion } from '../lib/account-deletion.js';
 
 export interface AccountDeletionWorkerPayload {
   orgId: string;
+  /**
+   * Run a pass even though the DELETION record is already DONE (FIL-112).
+   * Set only by the orchestrator's resurrection sweep, which has just observed
+   * residue for this org from after the teardown completed — rows that came
+   * back, or a resurrected customer's Redaction Job still unfinished. Without it
+   * `runAccountDeletion` short-circuits on DONE and the invocation does
+   * nothing at all — see the DONE early-return there.
+   */
+  resweep?: boolean;
 }
 
 /**
@@ -9,9 +18,19 @@ export interface AccountDeletionWorkerPayload {
  * Event-style by the delete-account handler right after the user confirms,
  * and re-invoked by the orchestrator cron for records that stall. There is no
  * per-step state machine: every teardown in runAccountDeletion is idempotent,
- * so each invocation simply re-runs ALL of them; a throw here (surfaced to
- * Lambda's async retry) means the whole pass is re-driven until the record
- * is marked DONE.
+ * so each invocation simply re-runs ALL of them.
+ *
+ * A throw is surfaced to Lambda's async retry, which is bounded (2 attempts).
+ * What re-drives the pass after that depends on which kind of pass it was, and
+ * the difference matters:
+ *
+ * - **Ordinary teardown** — the throw leaves the record non-DONE, so the
+ *   orchestrator's stale re-drive keeps coming back until it is marked DONE.
+ * - **Resweep** (`resweep: true`) — the record is ALREADY DONE and a failure
+ *   never moves it back, so nothing here re-drives it. The orchestrator's
+ *   resurrection sweep does, for as long as the org still presents residue —
+ *   including the residue a resweep cannot purge, an unfinished Stripe
+ *   Redaction Job (see lib/deletion-resurrection-sweep.ts).
  */
 export async function handler(event: AccountDeletionWorkerPayload): Promise<void> {
   const { orgId } = event;
@@ -23,7 +42,7 @@ export async function handler(event: AccountDeletionWorkerPayload): Promise<void
   }
 
   try {
-    await runAccountDeletion(orgId);
+    await runAccountDeletion(orgId, { resweep: event.resweep === true });
   } catch (err) {
     // Only genuine failures reach here. A healthy pass that has to wait out
     // Stripe's search-index lag waits IN-PASS (see waitOutStripeSearchLag) and

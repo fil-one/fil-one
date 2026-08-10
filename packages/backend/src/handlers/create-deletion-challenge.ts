@@ -52,11 +52,13 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   // handler needs a challenge code and this endpoint refuses to mint another
   // while a DELETION record exists, so nothing else re-drives it.
   //
-  // This re-drives a teardown; it does not unwedge an org. `deleting = true` is
-  // written in exactly one place (lib/deletion-guards.ts) and nothing clears it,
-  // so an org whose teardown keeps failing stays fenced against access-key and
-  // RAG-key creation, RAG toggling and tenant re-activation. A supported
-  // unwedge lands with the deletion reconciler (FIL-112).
+  // This re-drives a teardown; it does not unwedge an org. `deleting = true`
+  // stays on while a DELETION record exists, so an org whose teardown keeps
+  // failing stays fenced against access-key and RAG-key creation, RAG toggling
+  // and tenant re-activation — which is the intent while a deletion is in
+  // flight. The supported unwedge is `clearOrgDeletionFence`, driven by the
+  // deletion reconciler for orgs carrying the flag with NO deletion record
+  // (jobs/account-deletion-orchestrator.ts).
   if (await readDeletionRecord(orgId)) {
     await redriveTeardown(orgId);
     return new ResponseBuilder()

@@ -176,9 +176,94 @@ function stubRedactionJob() {
     if (method === 'POST' && path === '/v1/privacy/redaction_jobs') {
       return Promise.resolve({ id: 'prj_1', status: 'created' });
     }
-    if (method === 'GET') return Promise.resolve({ id: 'prj_1', status: 'ready' });
+    if (method === 'GET') {
+      return Promise.resolve({ id: 'prj_1', status: 'ready', objects: { customers: ['cus_1'] } });
+    }
     return Promise.resolve({ id: 'prj_1' });
   });
+}
+
+const ORIGINAL_CUSTOMER = 'cus_original';
+const RESURRECTED_CUSTOMER = 'cus_resurrected';
+
+/**
+ * The state a teardown that ACTUALLY COMPLETED leaves behind, which is the only
+ * state a resweep ever runs against — and which `setupHappyMocks(Done)` does
+ * NOT produce. That fixture is a pre-purge record with the status flipped: no
+ * `stripeRedactionJobId`, no tombstone. A real completed teardown always wrote
+ * the tombstone and the redaction job BEFORE markDone, and for any org that
+ * ever had a customer that tombstone names the ORIGINAL one — so every resweep
+ * meets a tombstone/discovery disagreement by construction. Testing against the
+ * unrealistic fixture is exactly what hid the fact that a resweep threw before
+ * the purge and could never converge.
+ *
+ * @param discovered what Stripe's live metadata search reports NOW.
+ */
+function setupCompletedTeardownMocks(discovered: string[]) {
+  setupHappyMocks(OrgDeletionStatus.Done);
+  ddbMock
+    .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
+    .resolves({
+      Item: deletionItem(OrgDeletionStatus.Done, { stripeRedactionJobId: 'prj_original' }),
+    });
+  ddbMock
+    .on(GetItemCommand, { Key: { pk: { S: `ORG_TOMBSTONE#${ORG_ID}` }, sk: { S: 'TOMBSTONE' } } })
+    .resolves({
+      Item: marshall({
+        pk: `ORG_TOMBSTONE#${ORG_ID}`,
+        sk: 'TOMBSTONE',
+        orgId: ORG_ID,
+        stripeCustomerId: ORIGINAL_CUSTOMER,
+        deletedAt: '2026-07-10T00:00:00.000Z',
+      }),
+    });
+  // mockImplementation, not mockReturnValue: a search result is a one-shot
+  // async iterable, so a shared instance would leave the teardown's SECOND
+  // Stripe pass reading an exhausted iterator and discovering nothing.
+  mockCustomersSearch.mockImplementation(() =>
+    stripeSearch(discovered.map((id) => customerHit(id))),
+  );
+  stubResweepRedactionJobs();
+}
+
+/** `prj_original` covers ONLY the original customer; anyone else needs a new job. */
+function stubResweepRedactionJobs(newJobStatus = 'ready') {
+  mockRawRequest.mockImplementation((method: string, path: string) => {
+    if (path === '/v1/privacy/redaction_jobs/prj_original') {
+      return Promise.resolve({
+        id: 'prj_original',
+        status: 'ready',
+        objects: { customers: [ORIGINAL_CUSTOMER] },
+      });
+    }
+    if (method === 'POST' && path === '/v1/privacy/redaction_jobs') {
+      return Promise.resolve({ id: 'prj_new', status: 'created' });
+    }
+    if (method === 'GET') {
+      return Promise.resolve({
+        id: 'prj_new',
+        status: newJobStatus,
+        objects: { customers: [RESURRECTED_CUSTOMER] },
+      });
+    }
+    return Promise.resolve({ id: 'prj_new' });
+  });
+}
+
+/** BillingTable key deletes issued by the purge. */
+function billingDeletes() {
+  return ddbMock
+    .commandCalls(DeleteItemCommand)
+    .map((c) => c.args[0].input)
+    .filter((input) => input.TableName === 'BillingTable')
+    .map((input) => unmarshall(input.Key!));
+}
+
+/** Redaction jobs created this pass, by the customers they were asked to cover. */
+function createdRedactionJobCustomers(): string[][] {
+  return mockRawRequest.mock.calls
+    .filter(([method, path]) => method === 'POST' && path === '/v1/privacy/redaction_jobs')
+    .map(([, , params]) => (params as { objects: { customers: string[] } }).objects.customers);
 }
 
 /** UpdateItem calls that write the terminal DONE status. */
@@ -283,8 +368,8 @@ describe('runAccountDeletion', () => {
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
-  it('is a no-op when already DONE: a re-invocation runs no externals', async () => {
-    setupHappyMocks(OrgDeletionStatus.Done);
+  it('is a no-op when already DONE and NOT re-sweeping: an ordinary re-invocation runs no externals', async () => {
+    setupCompletedTeardownMocks([ORIGINAL_CUSTOMER]);
 
     await runAccountDeletion(ORG_ID);
 
@@ -293,6 +378,157 @@ describe('runAccountDeletion', () => {
     expect(mockDeleteAuth0User).not.toHaveBeenCalled();
     // Not even an attemptCount bump.
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+  });
+
+  // Every resweep runs against a record a teardown ACTUALLY finished: a
+  // tombstone naming the original customer and a stored redaction job id. The
+  // three shapes below are the complete set the resurrection can present, and
+  // the first two are the ones that used to throw before purgeRecords ever ran
+  // — the zombie row survived, the record stayed DONE, and the sweep re-threw
+  // every 12h forever.
+  describe('resweep of a genuinely completed teardown', () => {
+    it('case 1 — original customer STILL discoverable alongside the new one: purges, and redacts the new customer', async () => {
+      // Discovery returns two customers, so the 1:1 invariant reads as broken
+      // and the multi-customer guard used to throw out of settleAll.
+      setupCompletedTeardownMocks([ORIGINAL_CUSTOMER, RESURRECTED_CUSTOMER]);
+
+      await runAccountDeletion(ORG_ID, { resweep: true });
+
+      expect(billingDeletes()).toContainEqual({ pk: 'CUSTOMER#user-1', sk: 'SUBSCRIPTION' });
+      // Billing stopped on BOTH, and the resurrected customer got its own job.
+      expect(mockSubscriptionsCancel).toHaveBeenCalledWith('sub_original');
+      expect(mockSubscriptionsCancel).toHaveBeenCalledWith('sub_resurrected');
+      expect(createdRedactionJobCustomers()).toContainEqual([RESURRECTED_CUSTOMER]);
+      expect(doneWrites()).toHaveLength(1);
+    });
+
+    it('case 2 — original customer no longer discoverable (its metadata was redacted): purges, and redacts the new customer', async () => {
+      // Only the resurrected customer comes back, so discovery disagrees with
+      // the tombstone and the mismatch guard used to throw.
+      setupCompletedTeardownMocks([RESURRECTED_CUSTOMER]);
+
+      await runAccountDeletion(ORG_ID, { resweep: true });
+
+      expect(billingDeletes()).toContainEqual({ pk: 'CUSTOMER#user-1', sk: 'SUBSCRIPTION' });
+      expect(mockSubscriptionsCancel).toHaveBeenCalledWith('sub_resurrected');
+      // The stored job covers the ORIGINAL customer, so it must not be reused.
+      expect(createdRedactionJobCustomers()).toContainEqual([RESURRECTED_CUSTOMER]);
+      expect(doneWrites()).toHaveLength(1);
+    });
+
+    it('case 2 — the tombstone keeps naming the original customer, and the new one is recorded for audit', async () => {
+      setupCompletedTeardownMocks([RESURRECTED_CUSTOMER]);
+
+      await runAccountDeletion(ORG_ID, { resweep: true });
+
+      // Never overwritten: that would strand the original with no pointer left
+      // to redact it by. It is the DELETION record that carries the new one.
+      const tombstoneWrites = ddbMock
+        .commandCalls(PutItemCommand)
+        .filter((c) => c.args[0].input.Item?.pk?.S === `ORG_TOMBSTONE#${ORG_ID}`);
+      expect(tombstoneWrites).toHaveLength(0);
+
+      const audit = ddbMock
+        .commandCalls(UpdateItemCommand)
+        .map((c) => c.args[0].input)
+        .filter((input) => input.UpdateExpression?.includes('resurrectedStripeCustomerIds'));
+      expect(audit.length).toBeGreaterThan(0);
+      // list_append over if_not_exists, never a SET from an in-memory snapshot:
+      // two overlapping resweeps that each found a different customer would
+      // otherwise drop one, and this list is what the sweep re-drives by.
+      expect(audit[0].UpdateExpression).toContain(
+        'list_append(if_not_exists(resurrectedStripeCustomerIds, :empty), :new)',
+      );
+      expect(unmarshall(audit[0].ExpressionAttributeValues!)[':new']).toEqual([
+        RESURRECTED_CUSTOMER,
+      ]);
+    });
+
+    it('case 3 — a DynamoDB row with no Stripe customer behind it: purges and re-marks DONE', async () => {
+      setupCompletedTeardownMocks([]);
+
+      await runAccountDeletion(ORG_ID, { resweep: true });
+
+      expect(billingDeletes()).toContainEqual({ pk: 'CUSTOMER#user-1', sk: 'SUBSCRIPTION' });
+      expect(createdRedactionJobCustomers()).toHaveLength(0);
+      expect(doneWrites()).toHaveLength(1);
+    });
+
+    it('runs the same full pass a live teardown does — not a purge-only path', async () => {
+      // The writer that resurrects a CUSTOMER# row (createBillingTrial) also
+      // mints a live Stripe customer + trial subscription, so deleting the
+      // DynamoDB row alone would leave a deleted account billing.
+      setupCompletedTeardownMocks([RESURRECTED_CUSTOMER]);
+
+      await runAccountDeletion(ORG_ID, { resweep: true });
+
+      expect(mockDeleteTenant).toHaveBeenCalledWith('aurora-t-1');
+      expect(mockDeleteAuth0User).toHaveBeenCalledWith('auth0|sub-1');
+      expect(ddbMock.commandCalls(ScanCommand).length).toBeGreaterThan(0); // RAG purge
+    });
+
+    it('redacts a customer an earlier resweep recorded even once discovery can no longer see it', async () => {
+      // Redaction nulls the `metadata.userId` discovery searches on, so a job
+      // caught mid-lifecycle becomes invisible to discovery exactly when it
+      // starts working. Driving only what discovery returns would leave the
+      // sweep re-driving this org forever for a customer nothing ever touches.
+      setupCompletedTeardownMocks([]);
+      ddbMock
+        .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
+        .resolves({
+          Item: deletionItem(OrgDeletionStatus.Done, {
+            stripeRedactionJobId: 'prj_original',
+            resurrectedStripeCustomerIds: ['cus_ghost'],
+          }),
+        });
+
+      await runAccountDeletion(ORG_ID, { resweep: true });
+
+      expect(createdRedactionJobCustomers()).toContainEqual(['cus_ghost']);
+      expect(mockSubscriptionsCancel).toHaveBeenCalledWith('sub_ghost');
+      // Already recorded, so nothing is appended a second time.
+      const audit = ddbMock
+        .commandCalls(UpdateItemCommand)
+        .map((c) => c.args[0].input)
+        .filter((input) => input.UpdateExpression?.includes('resurrectedStripeCustomerIds'));
+      expect(audit).toHaveLength(0);
+    });
+
+    it('does not cry "late find" about a customer the FIRST pass was already looking at', async () => {
+      // When pass 1's Stripe surface throws, it has no finding to hand pass 2.
+      // Inventing an empty one made every held Stripe failure warn that a
+      // customer had been minted inside the deletion race window — a false
+      // alarm, on a destructive path, about a customer found all along.
+      setupCompletedTeardownMocks([RESURRECTED_CUSTOMER]);
+      stubResweepRedactionJobs('validating'); // both passes throw
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      try {
+        await expect(runAccountDeletion(ORG_ID, { resweep: true })).rejects.toThrow();
+
+        expect(warnSpy).not.toHaveBeenCalledWith(
+          expect.stringContaining('Late Stripe customer discovered after purge'),
+          expect.anything(),
+        );
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('purges the DynamoDB residue even when the Stripe half fails, then throws loudly', async () => {
+      // A permanent silent loop is worse than a purge plus a distinct alarm:
+      // whatever Stripe needs, the zombie rows must stop coming back.
+      setupCompletedTeardownMocks([RESURRECTED_CUSTOMER]);
+      stubResweepRedactionJobs('validating'); // new job not ready — throws
+
+      await expect(runAccountDeletion(ORG_ID, { resweep: true })).rejects.toThrow(
+        /purged its resurrected records but could not finish the Stripe half/,
+      );
+
+      expect(billingDeletes()).toContainEqual({ pk: 'CUSTOMER#user-1', sk: 'SUBSCRIPTION' });
+      // The record was already DONE; nothing re-stamps it on a failed pass.
+      expect(doneWrites()).toHaveLength(0);
+    });
   });
 
   it('runs every external teardown, purges the records, and marks DONE', async () => {

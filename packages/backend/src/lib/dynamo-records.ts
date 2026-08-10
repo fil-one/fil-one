@@ -45,6 +45,12 @@ export interface StripePriceDetails {
 export interface SubscriptionRecord {
   pk: string;
   sk: string;
+  /**
+   * The org this billing record belongs to, stamped by
+   * `lib/create-billing-trial.ts` on both the customer and the subscription
+   * write. Absent on rows written before it did.
+   */
+  orgId?: string;
   stripeCustomerId?: string;
   subscriptionStatus?: SubscriptionStatus;
   subscriptionId?: string;
@@ -303,8 +309,46 @@ export interface OrgDeletionRecord {
   /**
    * Stripe Redaction Job driving the org customer's PII erasure, persisted at
    * creation so retries advance the same job instead of creating duplicates.
+   *
+   * @deprecated Superseded by {@link stripeRedactionJobIds}, which says WHICH
+   *   customer each job covers. Still written by no one and still read: records
+   *   in flight when that change shipped carry only this field. Whether it
+   *   covers a given customer is resolved from Stripe, not assumed — see
+   *   `lib/stripe-redaction.ts`.
    */
   stripeRedactionJobId?: string;
+  /**
+   * Stripe customer id → the Redaction Job erasing that customer's PII. Keyed
+   * by customer because a teardown can face more than one: a resurrection
+   * (`createBillingTrial` landing after the purge) mints a NEW customer, and
+   * redacting it must not be short-circuited by the job covering the original.
+   */
+  stripeRedactionJobIds?: Record<string, string>;
+  /**
+   * Stripe customers discovered by a resweep that the tombstone does not name —
+   * i.e. minted AFTER this org's teardown completed. Durable audit trail for
+   * the follow-up, kept on the record that is retained forever. Non-empty means
+   * a fence gap let a writer resurrect billing for a deleted account.
+   *
+   * APPENDED to, never overwritten, so two overlapping resweeps cannot drop
+   * each other's finding — which means it may hold duplicates. Every reader
+   * dedupes; see {@link pendingRedactionCustomerIds}.
+   */
+  resurrectedStripeCustomerIds?: string[];
+  /**
+   * Stripe customer id → the TERMINAL status its Redaction Job reached. Only
+   * terminal values are ever written, so an entry means "Stripe will not move
+   * this job again"; a resurrected customer with no entry still needs driving.
+   *
+   * This is what gives a resweep's Stripe tail a durable driver. A resweep
+   * purges the org's DynamoDB residue — which is the evidence the resurrection
+   * sweep otherwise works from — so once the purge succeeds, an unfinished
+   * redaction job would be driven only by Lambda's two bounded async retries
+   * and then by nothing at all, leaving the resurrected customer's PII in
+   * Stripe forever. Keyed here, the sweep re-drives the org from the record
+   * alone. See {@link pendingRedactionCustomerIds}.
+   */
+  stripeRedactionJobStatuses?: Record<string, string>;
   /**
    * When the record purge first completed — the fences were up and the purge
    * was done, so from here on every writer that consults the fence is refused.
@@ -324,6 +368,66 @@ export interface OrgDeletionRecord {
    */
   lastRedriveAt?: string;
   updatedAt: string; // ISO-8601
+}
+
+/**
+ * Redaction-job statuses Stripe never moves a job out of. `redacting` counts:
+ * redaction is irreversible once it starts. `unavailable` is OURS, not
+ * Stripe's — the customer no longer exists, so there is nothing left to redact
+ * and no later pass could do anything different.
+ *
+ * Anything else (`created`, `validating`, `ready`, or a status Stripe adds
+ * later) is deliberately non-terminal: the sweep keeps re-driving the org until
+ * the job lands in this set, so a status we do not understand errs toward
+ * driving it rather than toward silently giving up on the erasure.
+ */
+export const TERMINAL_REDACTION_STATUSES: ReadonlySet<string> = new Set([
+  'succeeded',
+  'redacting',
+  'failed',
+  'canceled',
+  'unavailable',
+]);
+
+/**
+ * The terminal statuses that mean the PII was NOT erased. Terminal stops the
+ * re-drive loop, so these have to be surfaced instead — the orchestrator emits
+ * `DeletionRedactionFailedCount` for them.
+ */
+export const FAILED_REDACTION_STATUSES: ReadonlySet<string> = new Set(['failed', 'canceled']);
+
+/** The {@link OrgDeletionRecord} fields the two predicates below read. */
+export type RedactionProgress = Pick<
+  OrgDeletionRecord,
+  'resurrectedStripeCustomerIds' | 'stripeRedactionJobStatuses'
+>;
+
+/**
+ * Resurrected Stripe customers whose Redaction Job has not reached a terminal
+ * status — the record's own answer to "is this org's Stripe tail still
+ * outstanding?", and the resurrection sweep's only durable driver for it.
+ *
+ * Deduped, because `resurrectedStripeCustomerIds` is appended to rather than
+ * overwritten.
+ *
+ * Only RESURRECTED customers are tracked. The original customer's redaction is
+ * driven by the ordinary teardown, whose record stays non-DONE until it
+ * settles; a resweep's record is already DONE, so nothing else is left to keep
+ * the org being re-driven.
+ */
+export function pendingRedactionCustomerIds(record: RedactionProgress): string[] {
+  const statuses = record.stripeRedactionJobStatuses ?? {};
+  return [...new Set(record.resurrectedStripeCustomerIds ?? [])].filter(
+    (customerId) => !TERMINAL_REDACTION_STATUSES.has(statuses[customerId] ?? ''),
+  );
+}
+
+/** Resurrected customers whose redaction ended terminally WITHOUT erasing the PII. */
+export function failedRedactionCustomerIds(record: RedactionProgress): string[] {
+  const statuses = record.stripeRedactionJobStatuses ?? {};
+  return [...new Set(record.resurrectedStripeCustomerIds ?? [])].filter((customerId) =>
+    FAILED_REDACTION_STATUSES.has(statuses[customerId] ?? ''),
+  );
 }
 
 /**

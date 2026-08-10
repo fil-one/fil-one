@@ -59,7 +59,14 @@ function stubRedactionJob(statusOnGet = 'ready') {
     if (method === 'POST' && path === '/v1/privacy/redaction_jobs') {
       return Promise.resolve({ id: 'prj_1', status: 'created' });
     }
-    if (method === 'GET') return Promise.resolve({ id: 'prj_1', status: statusOnGet });
+    // Real jobs report the objects they cover; the stored-id path checks it.
+    if (method === 'GET') {
+      return Promise.resolve({
+        id: 'prj_1',
+        status: statusOnGet,
+        objects: { customers: [CUSTOMER] },
+      });
+    }
     return Promise.resolve({ id: 'prj_1' });
   });
 }
@@ -71,7 +78,19 @@ function rawRequestCalls() {
 function jobIdWrites() {
   return ddbMock
     .commandCalls(UpdateItemCommand)
-    .filter((c) => c.args[0].input.UpdateExpression?.includes('stripeRedactionJobId'));
+    .filter((c) => c.args[0].input.UpdateExpression?.includes('stripeRedactionJobIds.#cid'));
+}
+
+/** Terminal redaction statuses persisted on the DELETION record this pass. */
+function statusWrites(): { customerId?: string; status?: string }[] {
+  return ddbMock
+    .commandCalls(UpdateItemCommand)
+    .map((c) => c.args[0].input)
+    .filter((input) => input.UpdateExpression?.includes('stripeRedactionJobStatuses.#cid'))
+    .map((input) => ({
+      customerId: input.ExpressionAttributeNames?.['#cid'],
+      status: input.ExpressionAttributeValues?.[':status']?.S,
+    }));
 }
 
 describe('redactStripeCustomers', () => {
@@ -84,14 +103,14 @@ describe('redactStripeCustomers', () => {
   });
 
   it('is a no-op when discovery found no customer', async () => {
-    await redactStripeCustomers(ORG_ID, deletionRecord(), undefined);
+    await redactStripeCustomers(ORG_ID, deletionRecord(), []);
 
     expect(mockRawRequest).not.toHaveBeenCalled();
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
   it("creates the job for the org's customer, persists its id, validates and runs it", async () => {
-    await redactStripeCustomers(ORG_ID, deletionRecord(), CUSTOMER);
+    await redactStripeCustomers(ORG_ID, deletionRecord(), [CUSTOMER]);
 
     expect(mockRawRequest).toHaveBeenCalledWith('POST', '/v1/privacy/redaction_jobs', {
       objects: { customers: ['cus_1'] },
@@ -107,17 +126,20 @@ describe('redactStripeCustomers', () => {
   });
 
   it('writes the job id with an attribute_not_exists condition', async () => {
-    await redactStripeCustomers(ORG_ID, deletionRecord(), CUSTOMER);
+    await redactStripeCustomers(ORG_ID, deletionRecord(), [CUSTOMER]);
 
     expect(jobIdWrites()[0].args[0].input.ConditionExpression).toBe(
-      'attribute_exists(pk) AND attribute_not_exists(stripeRedactionJobId)',
+      'attribute_exists(pk) AND attribute_not_exists(stripeRedactionJobIds.#cid)',
     );
+    // Keyed by the customer the job covers, so a second customer discovered by
+    // a resweep gets its OWN job instead of reading as "already have one".
+    expect(jobIdWrites()[0].args[0].input.ExpressionAttributeNames?.['#cid']).toBe(CUSTOMER);
   });
 
   it('throws on a not-yet-ready job, then advances the SAME job on re-entry without re-creating', async () => {
     stubRedactionJob('validating');
 
-    await expect(redactStripeCustomers(ORG_ID, deletionRecord(), CUSTOMER)).rejects.toThrow(
+    await expect(redactStripeCustomers(ORG_ID, deletionRecord(), [CUSTOMER])).rejects.toThrow(
       /not ready yet/,
     );
 
@@ -125,11 +147,9 @@ describe('redactStripeCustomers', () => {
     mockRawRequest.mockClear();
     stubRedactionJob('ready');
 
-    await redactStripeCustomers(
-      ORG_ID,
-      deletionRecord({ stripeRedactionJobId: 'prj_1' }),
+    await redactStripeCustomers(ORG_ID, deletionRecord({ stripeRedactionJobId: 'prj_1' }), [
       CUSTOMER,
-    );
+    ]);
 
     expect(rawRequestCalls()).toEqual([
       'GET /v1/privacy/redaction_jobs/prj_1',
@@ -140,13 +160,81 @@ describe('redactStripeCustomers', () => {
   it('treats an already redacting/succeeded job as done on re-entry', async () => {
     stubRedactionJob('redacting');
 
-    await redactStripeCustomers(
-      ORG_ID,
-      deletionRecord({ stripeRedactionJobId: 'prj_1' }),
+    await redactStripeCustomers(ORG_ID, deletionRecord({ stripeRedactionJobId: 'prj_1' }), [
       CUSTOMER,
-    );
+    ]);
 
     expect(rawRequestCalls()).toEqual(['GET /v1/privacy/redaction_jobs/prj_1']);
+  });
+
+  it('does NOT let a stored job covering a different customer short-circuit this one (resweep)', async () => {
+    // The resurrection case: the completed teardown stored a job for cus_1, and
+    // a post-purge createBillingTrial minted cus_2. Keying job ids by customer
+    // is what stops cus_2 reading as "already redacted" — the old single-slot
+    // `stripeRedactionJobId` made every resweep skip the new customer entirely,
+    // so its PII stayed in Stripe forever.
+    mockRawRequest.mockImplementation((method: string, path: string) => {
+      if (path === '/v1/privacy/redaction_jobs/prj_1') {
+        return Promise.resolve({ id: 'prj_1', status: 'ready', objects: { customers: ['cus_1'] } });
+      }
+      if (method === 'POST' && path === '/v1/privacy/redaction_jobs') {
+        return Promise.resolve({ id: 'prj_2', status: 'created' });
+      }
+      if (method === 'GET') {
+        return Promise.resolve({ id: 'prj_2', status: 'ready', objects: { customers: ['cus_2'] } });
+      }
+      return Promise.resolve({ id: 'prj_2' });
+    });
+
+    await redactStripeCustomers(ORG_ID, deletionRecord({ stripeRedactionJobId: 'prj_1' }), [
+      'cus_2',
+    ]);
+
+    expect(mockRawRequest).toHaveBeenCalledWith('POST', '/v1/privacy/redaction_jobs', {
+      objects: { customers: ['cus_2'] },
+    });
+    expect(rawRequestCalls()).toEqual([
+      // The stored (legacy, un-keyed) id is checked against Stripe rather than
+      // assumed to cover whoever is being redacted.
+      'GET /v1/privacy/redaction_jobs/prj_1',
+      'POST /v1/privacy/redaction_jobs',
+      'POST /v1/privacy/redaction_jobs/prj_2/validate',
+      'GET /v1/privacy/redaction_jobs/prj_2',
+      'POST /v1/privacy/redaction_jobs/prj_2/run',
+    ]);
+    expect(jobIdWrites()[0].args[0].input.ExpressionAttributeNames?.['#cid']).toBe('cus_2');
+  });
+
+  it('attempts every customer even when the first one throws', async () => {
+    // A permanently failed job on the original customer must not leave a
+    // resurrected customer with no redaction job at all.
+    mockRawRequest.mockImplementation((method: string, path: string) => {
+      if (path === '/v1/privacy/redaction_jobs/prj_bad') {
+        return Promise.resolve({
+          id: 'prj_bad',
+          status: 'failed',
+          objects: { customers: ['cus_1'] },
+        });
+      }
+      if (method === 'POST' && path === '/v1/privacy/redaction_jobs') {
+        return Promise.resolve({ id: 'prj_2', status: 'created' });
+      }
+      if (method === 'GET') {
+        return Promise.resolve({ id: 'prj_2', status: 'ready', objects: { customers: ['cus_2'] } });
+      }
+      return Promise.resolve({ id: 'prj_2' });
+    });
+
+    await expect(
+      redactStripeCustomers(
+        ORG_ID,
+        deletionRecord({ stripeRedactionJobIds: { cus_1: 'prj_bad' } }),
+        ['cus_1', 'cus_2'],
+      ),
+    ).rejects.toThrow(/unexpected status "failed"/);
+
+    // cus_2 still got its own job created and driven to run.
+    expect(rawRequestCalls()).toContain('POST /v1/privacy/redaction_jobs/prj_2/run');
   });
 
   it('tolerates a missing customer at job creation', async () => {
@@ -154,7 +242,7 @@ describe('redactStripeCustomers', () => {
       Object.assign(new Error('No such customer'), { code: 'resource_missing' }),
     );
 
-    await redactStripeCustomers(ORG_ID, deletionRecord(), CUSTOMER);
+    await redactStripeCustomers(ORG_ID, deletionRecord(), [CUSTOMER]);
 
     expect(rawRequestCalls()).toEqual(['POST /v1/privacy/redaction_jobs']);
     expect(jobIdWrites()).toHaveLength(0);
@@ -163,7 +251,7 @@ describe('redactStripeCustomers', () => {
   it('does not treat a message-only "already redacted" error as success (must be resource_missing)', async () => {
     mockRawRequest.mockRejectedValue(new Error('This customer was already redacted elsewhere'));
 
-    await expect(redactStripeCustomers(ORG_ID, deletionRecord(), CUSTOMER)).rejects.toThrow(
+    await expect(redactStripeCustomers(ORG_ID, deletionRecord(), [CUSTOMER])).rejects.toThrow(
       /already redacted elsewhere/,
     );
   });
@@ -172,21 +260,28 @@ describe('redactStripeCustomers', () => {
     // Another worker stored prj_stored between our create and our write.
     ddbMock
       .on(UpdateItemCommand, {
-        ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(stripeRedactionJobId)',
+        ConditionExpression:
+          'attribute_exists(pk) AND attribute_not_exists(stripeRedactionJobIds.#cid)',
       })
       .rejects(new ConditionalCheckFailedException({ message: 'exists', $metadata: {} }));
     ddbMock
       .on(GetItemCommand)
-      .resolves({ Item: deletionItem({ stripeRedactionJobId: 'prj_stored' }) });
+      .resolves({ Item: deletionItem({ stripeRedactionJobIds: { [CUSTOMER]: 'prj_stored' } }) });
     mockRawRequest.mockImplementation((method: string, path: string) => {
       if (method === 'POST' && path === '/v1/privacy/redaction_jobs') {
         return Promise.resolve({ id: 'prj_mine', status: 'created' });
       }
-      if (method === 'GET') return Promise.resolve({ id: 'prj_stored', status: 'ready' });
+      if (method === 'GET') {
+        return Promise.resolve({
+          id: 'prj_stored',
+          status: 'ready',
+          objects: { customers: [CUSTOMER] },
+        });
+      }
       return Promise.resolve({ id: 'prj_stored' });
     });
 
-    await redactStripeCustomers(ORG_ID, deletionRecord(), CUSTOMER);
+    await redactStripeCustomers(ORG_ID, deletionRecord(), [CUSTOMER]);
 
     // The losing worker's own job (prj_mine) is never validated or driven —
     // the stored job's lifecycle is advanced instead.
@@ -200,12 +295,13 @@ describe('redactStripeCustomers', () => {
   it('throws when the conditional write fails but no stored id can be re-read', async () => {
     ddbMock
       .on(UpdateItemCommand, {
-        ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(stripeRedactionJobId)',
+        ConditionExpression:
+          'attribute_exists(pk) AND attribute_not_exists(stripeRedactionJobIds.#cid)',
       })
       .rejects(new ConditionalCheckFailedException({ message: 'exists', $metadata: {} }));
     ddbMock.on(GetItemCommand).resolves({ Item: undefined });
 
-    await expect(redactStripeCustomers(ORG_ID, deletionRecord(), CUSTOMER)).rejects.toThrow(
+    await expect(redactStripeCustomers(ORG_ID, deletionRecord(), [CUSTOMER])).rejects.toThrow(
       /no stored id was found on re-read/,
     );
   });
@@ -229,11 +325,17 @@ describe('redactStripeCustomers', () => {
           ],
         });
       }
-      if (method === 'GET') return Promise.resolve({ id: 'prj_live', status: 'ready' });
+      if (method === 'GET') {
+        return Promise.resolve({
+          id: 'prj_live',
+          status: 'ready',
+          objects: { customers: [CUSTOMER] },
+        });
+      }
       return Promise.resolve({ id: 'prj_live' });
     });
 
-    await redactStripeCustomers(ORG_ID, deletionRecord(), CUSTOMER);
+    await redactStripeCustomers(ORG_ID, deletionRecord(), [CUSTOMER]);
 
     // The live job containing the customer is recovered (terminal/other-
     // customer jobs skipped), persisted, and driven to run.
@@ -273,12 +375,18 @@ describe('redactStripeCustomers', () => {
               })
             : Promise.resolve({ data: page1, has_more: true });
         }
-        if (method === 'GET') return Promise.resolve({ id: 'prj_live', status: 'ready' });
+        if (method === 'GET') {
+          return Promise.resolve({
+            id: 'prj_live',
+            status: 'ready',
+            objects: { customers: [CUSTOMER] },
+          });
+        }
         return Promise.resolve({ id: 'prj_live' });
       },
     );
 
-    await redactStripeCustomers(ORG_ID, deletionRecord(), CUSTOMER);
+    await redactStripeCustomers(ORG_ID, deletionRecord(), [CUSTOMER]);
 
     // Page 2 was requested with the last id of page 1 as the cursor.
     const listCalls = mockRawRequest.mock.calls.filter(
@@ -305,7 +413,7 @@ describe('redactStripeCustomers', () => {
       });
     });
 
-    await expect(redactStripeCustomers(ORG_ID, deletionRecord(), CUSTOMER)).rejects.toThrow(
+    await expect(redactStripeCustomers(ORG_ID, deletionRecord(), [CUSTOMER])).rejects.toThrow(
       /was not found within 100 pages/,
     );
   });
@@ -318,7 +426,7 @@ describe('redactStripeCustomers', () => {
       return Promise.resolve({ data: [] });
     });
 
-    await expect(redactStripeCustomers(ORG_ID, deletionRecord(), CUSTOMER)).rejects.toThrow(
+    await expect(redactStripeCustomers(ORG_ID, deletionRecord(), [CUSTOMER])).rejects.toThrow(
       /no live job containing them was found/,
     );
   });
@@ -327,7 +435,88 @@ describe('redactStripeCustomers', () => {
     stubRedactionJob('failed');
 
     await expect(
-      redactStripeCustomers(ORG_ID, deletionRecord({ stripeRedactionJobId: 'prj_1' }), CUSTOMER),
+      redactStripeCustomers(ORG_ID, deletionRecord({ stripeRedactionJobId: 'prj_1' }), [CUSTOMER]),
     ).rejects.toThrow(/unexpected status "failed"/);
+  });
+
+  // A resweep's record is already DONE and its purge deletes the rows the
+  // resurrection sweep detects orgs by, so these persisted statuses are the
+  // only thing that keeps an unfinished job being driven — and the only thing
+  // that ever stops the driving. See lib/deletion-resurrection-sweep.ts.
+  describe('terminal status persistence', () => {
+    it('records `redacting` the moment it runs the job, not on some later pass', async () => {
+      await redactStripeCustomers(ORG_ID, deletionRecord(), [CUSTOMER]);
+
+      expect(statusWrites()).toEqual([{ customerId: CUSTOMER, status: 'redacting' }]);
+    });
+
+    it('records an already-succeeded job', async () => {
+      stubRedactionJob('succeeded');
+
+      await redactStripeCustomers(ORG_ID, deletionRecord({ stripeRedactionJobId: 'prj_1' }), [
+        CUSTOMER,
+      ]);
+
+      expect(statusWrites()).toEqual([{ customerId: CUSTOMER, status: 'succeeded' }]);
+    });
+
+    it('records nothing while the job is still short of `ready`', async () => {
+      stubRedactionJob('validating');
+
+      await expect(
+        redactStripeCustomers(ORG_ID, deletionRecord({ stripeRedactionJobId: 'prj_1' }), [
+          CUSTOMER,
+        ]),
+      ).rejects.toThrow(/not ready yet/);
+
+      // Non-terminal: the org must keep being re-driven.
+      expect(statusWrites()).toEqual([]);
+    });
+
+    it('records a terminal FAILURE — the loop has to stop, the gauge takes over', async () => {
+      stubRedactionJob('failed');
+
+      await expect(
+        redactStripeCustomers(ORG_ID, deletionRecord({ stripeRedactionJobId: 'prj_1' }), [
+          CUSTOMER,
+        ]),
+      ).rejects.toThrow(/unexpected status "failed"/);
+
+      expect(statusWrites()).toEqual([{ customerId: CUSTOMER, status: 'failed' }]);
+    });
+
+    it('does NOT record a status it does not recognise: unknown is not terminal', async () => {
+      stubRedactionJob('some_new_stripe_status');
+
+      await expect(
+        redactStripeCustomers(ORG_ID, deletionRecord({ stripeRedactionJobId: 'prj_1' }), [
+          CUSTOMER,
+        ]),
+      ).rejects.toThrow(/unexpected status "some_new_stripe_status"/);
+
+      expect(statusWrites()).toEqual([]);
+    });
+
+    it('records `unavailable` for a customer Stripe no longer has', async () => {
+      // Nothing left to redact and no later pass could differ, so this has to
+      // be terminal or the org is re-driven for it forever.
+      mockRawRequest.mockRejectedValue(
+        Object.assign(new Error('No such customer'), { code: 'resource_missing' }),
+      );
+
+      await redactStripeCustomers(ORG_ID, deletionRecord(), [CUSTOMER]);
+
+      expect(statusWrites()).toEqual([{ customerId: CUSTOMER, status: 'unavailable' }]);
+    });
+
+    it('says which record is missing instead of throwing a bare ConditionalCheckFailedException', async () => {
+      ddbMock
+        .on(UpdateItemCommand)
+        .rejects(new ConditionalCheckFailedException({ message: 'gone', $metadata: {} }));
+
+      await expect(redactStripeCustomers(ORG_ID, deletionRecord(), [CUSTOMER])).rejects.toThrow(
+        /rejected redaction job id prj_1 for customer cus_1 but no stored id was found on re-read/,
+      );
+    });
   });
 });

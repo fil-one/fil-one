@@ -17,7 +17,15 @@ describe('account-deletion-worker handler', () => {
 
     await handler({ orgId: 'org-1' });
 
-    expect(mockRunAccountDeletion).toHaveBeenCalledWith('org-1');
+    expect(mockRunAccountDeletion).toHaveBeenCalledWith('org-1', { resweep: false });
+  });
+
+  it('forwards the resweep flag, which is what gets the pass past the DONE early-return', async () => {
+    mockRunAccountDeletion.mockResolvedValue(undefined);
+
+    await handler({ orgId: 'org-1', resweep: true });
+
+    expect(mockRunAccountDeletion).toHaveBeenCalledWith('org-1', { resweep: true });
   });
 
   it('throws on a payload without orgId so the async invoke fails loudly (retry/DLQ visibility)', async () => {

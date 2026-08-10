@@ -1,9 +1,6 @@
 import {
   BatchWriteItemCommand,
-  ConditionalCheckFailedException,
   DeleteItemCommand,
-  GetItemCommand,
-  PutItemCommand,
   QueryCommand,
   ScanCommand,
   UpdateItemCommand,
@@ -24,9 +21,9 @@ import {
   OrgDeletionStatus,
   RAGKeys,
   type OrgDeletionRecord,
-  type OrgTombstoneRecord,
 } from './dynamo-records.js';
 import { getOrgProfile } from './org-profile.js';
+import { writeOrgTombstone } from './org-tombstone.js';
 import { RagApiKeyKeys } from './rag-api-keys.js';
 import {
   getRegionsWithTenantIds,
@@ -130,6 +127,38 @@ async function waitOutStripeSearchLag(orgId: string, record: OrgDeletionRecord):
   await sleep(remainingMs);
 }
 
+export interface RunAccountDeletionOptions {
+  /**
+   * Run a full pass even though the DELETION record is already DONE (FIL-112).
+   *
+   * Set only by the orchestrator's resurrection sweep, which has just observed
+   * rows for this org that came back after the purge. Without it the DONE
+   * early-return below makes such an invocation a guaranteed no-op, so the
+   * zombie rows are re-detected and re-alarmed on every 12-hourly run and never
+   * removed.
+   *
+   * The pass is the SAME one a live teardown runs, not a narrower purge: the
+   * writer that can resurrect a `CUSTOMER#` row is `createBillingTrial`, which
+   * also mints a live Stripe customer and trial subscription, so deleting the
+   * DynamoDB row alone would leave a deleted account billing and its PII
+   * un-redacted.
+   *
+   * It is NOT simply "the same pass with the early-return skipped". Two of the
+   * teardown's guards — the multi-customer refusal and the tombstone-mismatch
+   * refusal — are correct as fatal errors on a FIRST teardown and wrong here:
+   * a completed teardown always left a tombstone naming the ORIGINAL customer,
+   * so a resurrection that minted a new one trips one guard or the other by
+   * construction. Left fatal, they threw before the purge on every single
+   * resweep and the zombie rows were never removed. Under `resweep` they become
+   * expected findings — recorded on the DELETION record, reported, and given
+   * their OWN redaction job (established here; driven to completion across
+   * passes, which is what `resurrectedStripeCustomerIds` +
+   * `stripeRedactionJobStatuses` exist to keep happening) — so the DynamoDB
+   * residue always converges. See {@link cancelStripeAndWriteTombstone}.
+   */
+  resweep?: boolean;
+}
+
 /**
  * Run (or resume) the teardown for an org whose deletion was confirmed.
  * Driven by the ORG#{orgId}/DELETION record written by the delete-account
@@ -140,6 +169,13 @@ async function waitOutStripeSearchLag(orgId: string, record: OrgDeletionRecord):
  * settles, so Lambda's async retry / the orchestrator cron re-drives the whole
  * (idempotent) teardown. Concurrent invocations are harmless for the same
  * reason.
+ *
+ * "Re-runnable" is not the same as "never refuses": two Stripe guards
+ * (multi-customer discovery, tombstone mismatch) are deliberately FATAL on a
+ * first teardown, because resolving either automatically would strand a
+ * customer's PII with no pointer left to redact it by. They stop the pass
+ * rather than guess. A resweep relaxes exactly those two — see
+ * {@link RunAccountDeletionOptions}.
  *
  * One pass is therefore: bump the attempt count, re-apply the fences, settle
  * all four external teardowns, purge the DDB records and stamp `purgedAt`,
@@ -154,14 +190,45 @@ async function waitOutStripeSearchLag(orgId: string, record: OrgDeletionRecord):
  * `record.status` is read as a plain string: legacy records may still carry
  * an old intermediate status (KEYS_REVOKED, TENANTS_DISABLED, ...) — anything
  * that is not DONE means "in progress, run everything".
+ *
+ * A `resweep` pass is the one exception to "a failure leaves the record
+ * non-DONE": that record is already DONE and this code never moves a status
+ * backwards, so a resweep that throws leaves it DONE. Being re-detected next
+ * run is NOT by itself convergence — a deterministic failure re-detected every
+ * 12h forever is just a silent loop — so a resweep is ordered so that the
+ * DynamoDB purge cannot be skipped by a Stripe problem: the Stripe half's
+ * failure is held, the purge runs, and the pass then throws at the very end.
+ * That leaves the residue gone, the Lambda `Errors` datapoint Grafana alerts on
+ * raised, and any Stripe follow-up visible rather than swallowed.
+ *
+ * Purging the residue does, however, delete the evidence the resurrection sweep
+ * detects orgs BY, so the held Stripe failure needs a driver that outlives it.
+ * That driver is the record itself: a resurrected customer is written to
+ * `resurrectedStripeCustomerIds` and its redaction outcome to
+ * `stripeRedactionJobStatuses`, and the sweep re-drives any DONE org whose
+ * resurrected customers have no terminal status yet — every data surface clean
+ * or not. See `pendingRedactionCustomerIds` in dynamo-records.ts.
+ *
+ * @param options.resweep run the pass even when the record is DONE. See
+ *   {@link RunAccountDeletionOptions}.
  */
-export async function runAccountDeletion(orgId: string): Promise<void> {
+export async function runAccountDeletion(
+  orgId: string,
+  options: RunAccountDeletionOptions = {},
+): Promise<void> {
   const record = await readDeletionRecord(orgId);
   if (!record) {
     console.warn('[account-deletion] No deletion record; nothing to do', { orgId });
     return;
   }
-  if (record.status === OrgDeletionStatus.Done) return;
+  if (record.status === OrgDeletionStatus.Done && !options.resweep) return;
+  if (record.status === OrgDeletionStatus.Done) {
+    console.warn(
+      '[account-deletion] Re-sweeping an org whose teardown already completed — rows were ' +
+        'observed after the purge',
+      { orgId, purgedAt: record.purgedAt },
+    );
+  }
 
   await bumpAttemptCount(orgId);
 
@@ -170,16 +237,46 @@ export async function runAccountDeletion(orgId: string): Promise<void> {
   // Re-applying the (idempotent) fences here closes that gap on every pass.
   await applyDeletionGuards(orgId, record.members);
 
+  const resweep = options.resweep === true;
+  // On a resweep the DynamoDB purge is the part that MUST converge, so a Stripe
+  // failure is held here and re-thrown after the purge rather than aborting the
+  // pass before it. On a first teardown nothing is held: the record is still
+  // non-DONE and the ordinary re-drive is the right answer.
+  //
+  // ONLY the Stripe surface is held, and the asymmetry is the point. Its
+  // failures on a resweep are DETERMINISTIC — the redaction lifecycle needs a
+  // later pass, or a customer needs manual follow-up — so retrying alone never
+  // clears them and the residue would sit there forever. A region/auth0/RAG
+  // failure is a transient outage that the next run genuinely does fix, and
+  // purging the org's rows while one of them is still half-torn-down would
+  // throw away the state that teardown re-reads.
+  const held: unknown[] = [];
+  const holdOnResweep = async (run: () => Promise<void>): Promise<void> => {
+    if (!resweep) return run();
+    try {
+      await run();
+    } catch (err) {
+      held.push(err);
+    }
+  };
+
   // The external teardowns are independent — run them concurrently and only
   // fail after all settle, so one vendor/region outage doesn't block the rest.
-  let firstPassCustomerId: string | undefined;
+  //
+  // Assigned only if the first Stripe pass COMPLETES. A pass that threw
+  // discovered nothing it can vouch for, and handing the second pass a
+  // `{ customerId: undefined }` from it made every such run cry "minted inside
+  // the deletion race window" about a customer that had been there all along.
+  let firstPass: { customerId?: string } | undefined;
   const externals: { name: string; run: () => Promise<void> }[] = [
     { name: 'regions', run: () => deleteAllRegions(orgId, record) },
     {
       name: 'stripe',
-      run: async () => {
-        firstPassCustomerId = await cancelStripeAndWriteTombstone(orgId, record);
-      },
+      run: () =>
+        holdOnResweep(async () => {
+          const customerId = await cancelStripeAndWriteTombstone(orgId, record, { resweep });
+          firstPass = { customerId };
+        }),
     },
     { name: 'auth0', run: () => deleteAuth0Users(record) },
     { name: 'rag', run: () => purgeRagData(orgId) },
@@ -196,7 +293,17 @@ export async function runAccountDeletion(orgId: string): Promise<void> {
   // "usually" finds everything — the case it misses is the unredacted-PII bug
   // this design exists to close.
   await waitOutStripeSearchLag(orgId, record);
-  await cancelStripeAndWriteTombstone(orgId, record, { customerId: firstPassCustomerId });
+  await holdOnResweep(async () => {
+    await cancelStripeAndWriteTombstone(orgId, record, { prior: firstPass, resweep });
+  });
+
+  if (held.length > 0) {
+    throw new AggregateError(
+      held,
+      `Re-sweep of org ${orgId} purged its resurrected records but could not finish the Stripe ` +
+        'half; manual follow-up may be required',
+    );
+  }
 
   await markDone(orgId);
   console.warn('[account-deletion] Teardown complete', { orgId });
@@ -215,20 +322,51 @@ export async function runAccountDeletion(orgId: string): Promise<void> {
  *
  * Idempotent, and run twice per teardown.
  *
- * @param prior the first pass's discovery result. Present ONLY on the second
- *   pass, where it marks a newly-visible customer as a late (race-window) find
- *   worth shouting about.
+ * On a RESWEEP the 1:1 invariant is expected to be broken, not violated: a
+ * completed teardown always tombstoned the customer it found, so a resurrection
+ * that minted a new one presents either as an extra customer or as a tombstone
+ * naming someone else. Refusing on either — correct on a first teardown, where
+ * it stops the pass from stranding PII with no pointer to redact by — made
+ * every resweep throw before {@link purgeRecords} and the zombie rows survive
+ * forever. So under `resweep` the extras are cancelled, recorded on the audit
+ * record and given their OWN redaction job (keyed by customer, so the original
+ * customer's job cannot short-circuit them), and the tombstone keeps naming the
+ * customer it already named. Establishing that job is all one pass owes; a job
+ * short of `ready` is driven to completion by later passes, which the
+ * resurrection sweep keeps arriving until every recorded customer's job reports
+ * a terminal status (`pendingRedactionCustomerIds`, dynamo-records.ts).
+ *
+ * A resweep also sweeps every customer already recorded on the record, not just
+ * what discovery returns. Discovery searches Stripe for `metadata.userId`, and
+ * redaction nulls that metadata — so a job caught mid-lifecycle would become
+ * undriveable exactly once it started working, and the org would be re-driven
+ * for it forever.
+ *
+ * @param opts.prior the first pass's discovery result. Present ONLY on the
+ *   second pass, and only when the first pass actually COMPLETED — including
+ *   when it completed having found nothing, which is exactly the case a late
+ *   find matters most. It marks a newly-visible customer as a late
+ *   (race-window) find worth shouting about; a first pass that threw has no
+ *   finding to compare against, and inventing one turned every held Stripe
+ *   failure into a false alarm on a destructive path.
+ * @param opts.resweep this is a post-completion re-sweep; see above.
  * @returns the discovered customer id, if any.
  */
 async function cancelStripeAndWriteTombstone(
   orgId: string,
   record: OrgDeletionRecord,
-  prior?: { customerId?: string },
+  opts: { prior?: { customerId?: string }; resweep?: boolean } = {},
 ): Promise<string | undefined> {
   const { customerId, extraCustomerIds } = await discoverBillingCustomer(orgId, record.members);
-  const allCustomerIds = customerId ? [customerId, ...extraCustomerIds] : extraCustomerIds;
+  const discovered = customerId ? [customerId, ...extraCustomerIds] : extraCustomerIds;
+  // On a resweep, add back every customer an earlier resweep already recorded:
+  // see the discovery/redaction note above. Deduped, because
+  // `resurrectedStripeCustomerIds` is appended to and may repeat an id.
+  const allCustomerIds = opts.resweep
+    ? [...new Set([...discovered, ...(record.resurrectedStripeCustomerIds ?? [])])]
+    : discovered;
 
-  if (prior && customerId && customerId !== prior.customerId) {
+  if (opts.prior && customerId && customerId !== opts.prior.customerId) {
     console.warn(
       '[account-deletion] Late Stripe customer discovered after purge — a trial/customer was ' +
         'minted inside the deletion race window',
@@ -240,21 +378,78 @@ async function cancelStripeAndWriteTombstone(
   // multi-customer case billing must stop.
   await cancelAllSubscriptions(orgId, allCustomerIds);
 
-  // The org ↔ customer relationship is 1:1 by domain, so the tombstone and the
-  // redaction job are single-customer. Extras mean that invariant broke: stop
-  // here rather than silently pick one to redact and strand the others'
-  // PII. The record stays non-DONE, so the orchestrator re-drives it and the
-  // stuck gauge surfaces it for manual redaction.
-  if (extraCustomerIds.length > 0) {
+  // The org ↔ customer relationship is 1:1 by domain, so a first teardown's
+  // tombstone and redaction job are single-customer. Extras mean that invariant
+  // broke: stop here rather than silently pick one to redact and strand the
+  // others' PII. The record stays non-DONE, so the orchestrator re-drives it
+  // and the stuck gauge surfaces it for manual redaction.
+  if (extraCustomerIds.length > 0 && !opts.resweep) {
     throw new Error(
       `multiple Stripe customers discovered for org ${orgId} (${allCustomerIds.join(', ')}); ` +
         'single-customer teardown cannot redact them all — manual follow-up required',
     );
   }
 
-  await writeTombstone(orgId, customerId);
-  await redactStripeCustomers(orgId, record, customerId);
+  const tombstoned = await writeOrgTombstone(orgId, customerId, opts.resweep === true);
+  if (opts.resweep) {
+    await recordResurrectedCustomers(orgId, record, allCustomerIds, tombstoned);
+  }
+  // Every discovered customer is redacted, not just the tombstoned one: on a
+  // resweep the un-tombstoned ones are precisely the resurrected PII.
+  await redactStripeCustomers(orgId, record, allCustomerIds);
   return customerId;
+}
+
+/**
+ * Persist every customer a resweep found that the tombstone does not name —
+ * the durable audit trail for the follow-up, on the record that is retained
+ * forever. Written instead of throwing: the throw kept the residue in DynamoDB
+ * and told nobody which customer to look at.
+ *
+ * APPENDED, never re-SET from an in-memory snapshot. This list is what the
+ * resurrection sweep re-drives the org by, so losing an entry loses a
+ * customer's erasure — and a `SET` computed from a snapshot read at the top of
+ * the pass is last-writer-wins, so two overlapping resweeps that each found a
+ * different customer would drop one. `list_append` over `if_not_exists` merges
+ * them instead. The cost is that the list may repeat an id when both passes
+ * find the same one; every reader dedupes.
+ *
+ * Skipped entirely when this pass has nothing new to add.
+ */
+async function recordResurrectedCustomers(
+  orgId: string,
+  record: OrgDeletionRecord,
+  discovered: string[],
+  tombstonedCustomerId: string | undefined,
+): Promise<void> {
+  const known = new Set(record.resurrectedStripeCustomerIds ?? []);
+  const fresh = [...new Set(discovered)].filter(
+    (id) => id !== tombstonedCustomerId && !known.has(id),
+  );
+  if (fresh.length === 0) return;
+
+  console.error(
+    '[account-deletion] Re-sweep found Stripe customer(s) minted AFTER this org was deleted — a ' +
+      'fence gap let billing come back. They are cancelled and each gets its own redaction job, ' +
+      'driven to completion across passes; the tombstone keeps naming the original customer',
+    { orgId, resurrected: fresh, tombstonedCustomerId },
+  );
+  await dynamo.send(
+    new UpdateItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: marshall({ pk: DeletionKeys.deletionPk(orgId), sk: DeletionKeys.deletionSk() }),
+      UpdateExpression:
+        'SET resurrectedStripeCustomerIds = ' +
+        'list_append(if_not_exists(resurrectedStripeCustomerIds, :empty), :new), updatedAt = :now',
+      ConditionExpression: 'attribute_exists(pk)',
+      ExpressionAttributeValues: marshall({
+        ':empty': [],
+        ':new': fresh,
+        ':now': new Date().toISOString(),
+      }),
+    }),
+  );
+  record.resurrectedStripeCustomerIds = [...(record.resurrectedStripeCustomerIds ?? []), ...fresh];
 }
 
 /** Cancel every live subscription of every given customer; already-gone is success. */
@@ -272,101 +467,6 @@ async function cancelAllSubscriptions(orgId: string, customerIds: string[]): Pro
       }
     }
   }
-}
-
-/**
- * The Stripe CUSTOMER object is kept (finance/audit needs the reference) while
- * its PII is erased via a Redaction Job, so this PII-free tombstone preserves
- * the customer id across the purge.
- *
- * A tombstone already naming a DIFFERENT customer is never silently
- * overwritten: that would strand the previously-recorded customer with no
- * pointer left to redact it by. Throwing keeps the record non-DONE for the
- * re-drive / manual follow-up. A pass that discovers nothing leaves an
- * existing id in place rather than erasing it.
- *
- * The read below is only a snapshot — {@link tombstoneCondition} is what
- * actually holds that invariant against two overlapping workers (whose
- * discovery calls can straddle the Stripe index lag and so disagree). Losing
- * that race is only an error when the two passes genuinely disagree: a pass
- * that discovered nothing accepts the winner's tombstone (see the catch).
- */
-async function writeTombstone(orgId: string, customerId: string | undefined): Promise<void> {
-  const key = { pk: DeletionKeys.tombstonePk(orgId), sk: DeletionKeys.tombstoneSk() };
-  const current = await readTombstone(key);
-  if (current?.stripeCustomerId && customerId && current.stripeCustomerId !== customerId) {
-    throw new Error(
-      `Org ${orgId} tombstone already records Stripe customer ${current.stripeCustomerId} but ` +
-        `discovery found ${customerId}; refusing to overwrite — manual follow-up required`,
-    );
-  }
-
-  const recordedCustomerId = customerId ?? current?.stripeCustomerId;
-  // Already exactly right — skip the write rather than re-stamping `deletedAt`
-  // on every pass. That field is the audit answer to "when was this org
-  // deleted?", so it must keep naming the first pass, not the last.
-  if (current && current.stripeCustomerId === recordedCustomerId) return;
-
-  const tombstone: OrgTombstoneRecord = {
-    ...key,
-    orgId,
-    ...(recordedCustomerId ? { stripeCustomerId: recordedCustomerId } : {}),
-    deletedAt: current?.deletedAt ?? new Date().toISOString(),
-  };
-  try {
-    await dynamo.send(
-      new PutItemCommand({
-        TableName: Resource.BillingTable.name,
-        Item: marshall(tombstone),
-        ...tombstoneCondition(recordedCustomerId),
-      }),
-    );
-  } catch (err) {
-    if (!(err instanceof ConditionalCheckFailedException)) throw err;
-    // A pass that discovered NOTHING had nothing to write, so an overlapping
-    // worker that landed a customer id first has strictly the better tombstone:
-    // accept it instead of failing this whole pass over a benign upgrade. Only
-    // a genuine disagreement (or a still-id-less tombstone, which means the
-    // condition failed for a reason we do not understand) is fatal.
-    if (recordedCustomerId === undefined && (await readTombstone(key))?.stripeCustomerId) return;
-    throw new Error(
-      `Org ${orgId} tombstone was written concurrently while this pass was recording Stripe ` +
-        `customer ${recordedCustomerId ?? '(none discovered)'}; refusing to overwrite — ` +
-        'the next teardown pass re-reads it',
-    );
-  }
-}
-
-/** Strongly-consistent read of the org's tombstone; absent reads as undefined. */
-async function readTombstone(key: {
-  pk: string;
-  sk: string;
-}): Promise<OrgTombstoneRecord | undefined> {
-  const existing = await dynamo.send(
-    new GetItemCommand({
-      TableName: Resource.BillingTable.name,
-      Key: marshall(key),
-      ConsistentRead: true,
-    }),
-  );
-  return existing.Item ? (unmarshall(existing.Item) as OrgTombstoneRecord) : undefined;
-}
-
-/**
- * The tombstone's write condition. A tombstone that names a customer may never
- * be replaced — neither by one naming a different customer nor by one naming
- * none at all, which is the case the check-then-write above cannot see and
- * which would destroy the last pointer to redact by. Upgrading a tombstone that
- * names NO customer to one that does is allowed: that is the post-purge pass
- * recording a late (race-window) find, and it strands nothing.
- */
-function tombstoneCondition(recordedCustomerId: string | undefined) {
-  const noNamedCustomer = 'attribute_not_exists(pk) OR attribute_not_exists(stripeCustomerId)';
-  if (!recordedCustomerId) return { ConditionExpression: noNamedCustomer };
-  return {
-    ConditionExpression: `${noNamedCustomer} OR stripeCustomerId = :id`,
-    ExpressionAttributeValues: marshall({ ':id': recordedCustomerId }),
-  };
 }
 
 /** Stripe statuses a subscription can never leave — nothing left to cancel. */
