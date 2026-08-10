@@ -1,12 +1,19 @@
 import { QueryClient } from '@tanstack/react-query';
-import { type S3Region } from '@filone/shared';
+import { ApiErrorCode, type S3Region } from '@filone/shared';
 
 export const ME_STALE_TIME = 10 * 60_000;
 
 const NO_RETRY_STATUSES = new Set([401, 403]);
 
+// FIL-112: ACCOUNT_DELETED is matched by code, not by its 410 status — 410 also
+// carries "the deletion code expired", a distinct condition. A retry is wasted
+// either way: every emitter of this code keeps emitting it for as long as the
+// condition holds, so an immediate second attempt gets the same answer.
+const NO_RETRY_CODES = new Set<string>([ApiErrorCode.ACCOUNT_DELETED]);
+
 export function defaultRetry(failureCount: number, error: unknown): boolean {
-  const status = (error as { status?: number })?.status;
+  const { status, code } = (error ?? {}) as { status?: number; code?: string };
+  if (code !== undefined && NO_RETRY_CODES.has(code)) return false;
   if (status !== undefined && NO_RETRY_STATUSES.has(status)) return false;
   return failureCount < 1;
 }

@@ -36,9 +36,59 @@ export function logout(): void {
 }
 
 /**
+ * The session/identity probe, and nothing else. `/me/profile`,
+ * `/me/preferences`, `/me/change-password` and `/me/resend-verification` are
+ * ordinary endpoints and are deliberately excluded — only the bare `/me`, with
+ * or without a query string, reports on the identity itself.
+ */
+function isSessionProbe(path: string): boolean {
+  return path === '/me' || path.startsWith('/me?');
+}
+
+/**
+ * FIL-112: raise ACCOUNT_DELETED, and — only when the *session probe* is what
+ * returned it — send the browser to the static confirmation page. Redirecting
+ * to /login instead would loop forever, because the Auth0 SSO session silently
+ * re-authenticates the tombstoned identity.
+ *
+ * The navigation is scoped on purpose, and the discriminator is narrower than
+ * the code's name suggests. ACCOUNT_DELETED does not mean "this account is
+ * gone" on every endpoint: several backend handlers emit it off the `deleting`
+ * fence, which an org can carry with no deletion ever having completed (see
+ * `lib/deletion-guards.ts`, whose unwedge helper exists for exactly that
+ * state). Navigating on those would evict a live, paying user onto a page
+ * telling them their account is gone while their session still works. So what
+ * this function acts on is only ever: *the session probe said the identity is
+ * gone*.
+ *
+ * A genuinely tombstoned session still reaches the page — the auth middleware
+ * answers ACCOUNT_DELETED for every request, so the SPA's next `/me` refetch
+ * produces the navigation.
+ *
+ * Every path throws, probe or not, so `query-client` refuses to retry and a
+ * non-probe caller renders an inline error instead.
+ *
+ * Keyed on the error code, never on the status: the backend emits this from
+ * one shared helper as 410, and 410 is also in use for an expired deletion
+ * code, so the status alone cannot identify the condition.
+ */
+function throwAccountDeleted(status: number, fromSessionProbe: boolean): never {
+  if (fromSessionProbe && !isRedirecting) {
+    isRedirecting = true;
+    window.location.href = '/account-deleted';
+  }
+  throw Object.assign(new Error('Account has been deleted'), {
+    status,
+    code: ApiErrorCode.ACCOUNT_DELETED,
+  });
+}
+
+/**
  * Wrapper around fetch for all Fil.one API calls.
  * - Always sends HttpOnly auth cookies via credentials: 'include'
  * - Redirects to Auth0 login on 401
+ * - Throws on any ACCOUNT_DELETED response, and redirects to /account-deleted
+ *   when it was the session probe that returned it
  */
 // eslint-disable-next-line complexity/complexity
 export async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -58,26 +108,26 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
     headers,
   });
 
+  // Checked ahead of every status-specific branch below, so the condition is
+  // handled whatever status carries it. `clone()` leaves the body unread for
+  // those branches.
+  if (!response.ok) {
+    const body = (await response
+      .clone()
+      .json()
+      .catch(() => ({}))) as { code?: string };
+    if (body.code === ApiErrorCode.ACCOUNT_DELETED) {
+      throwAccountDeleted(response.status, isSessionProbe(path));
+    }
+  }
+
   if (response.status === 401) {
     const body = (await response
       .clone()
       .json()
-      .catch(() => ({}))) as Partial<StepUpRequiredResponse> & { code?: string };
+      .catch(() => ({}))) as Partial<StepUpRequiredResponse>;
     if (body.error === 'step_up_required') {
       throw new StepUpRequiredError();
-    }
-    // FIL-112: a deleted account must land on the static confirmation page.
-    // Redirecting to /login instead would loop forever while the Auth0 SSO
-    // session silently re-authenticates the tombstoned identity.
-    if (body.code === ApiErrorCode.ACCOUNT_DELETED) {
-      if (!isRedirecting) {
-        isRedirecting = true;
-        window.location.href = '/account-deleted';
-      }
-      throw Object.assign(new Error('Account has been deleted'), {
-        status: 401,
-        code: ApiErrorCode.ACCOUNT_DELETED,
-      });
     }
     redirectToLogin();
     // Throw so the caller's promise chain stops — the page is navigating away

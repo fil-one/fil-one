@@ -5,9 +5,10 @@ import { IconBox } from '../components/IconBox';
 import { Link } from '../components/Link';
 
 /**
- * Static post-deletion confirmation (FIL-112). Unauthenticated by design:
- * the session cookies were cleared by the delete response, so this page
- * must not fetch /me or render any app chrome.
+ * Static post-deletion confirmation (FIL-112). Unauthenticated by design: the
+ * session cookies are cleared on some routes here (the auth middleware and
+ * auth-callback) but not on others, so this page must not fetch /me or render
+ * any app chrome either way — it cannot depend on the session being gone.
  */
 export function AccountDeletedPage() {
   return (

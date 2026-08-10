@@ -21,10 +21,18 @@ export type DeleteAccountModalProps = {
 type Step = 'confirm' | 'code';
 
 function deleteErrorMessage(err: unknown): string {
-  const status = (err as { status?: number }).status;
+  // Branch on the error code, never the bare status: the backend answers 410
+  // for both an expired deletion code and ACCOUNT_DELETED, so a status test
+  // would tell a user whose account is already gone to request a new code.
   const code = (err as { code?: string }).code;
-  if (status === 410 || code === ApiErrorCode.DELETION_CODE_EXPIRED_OR_LOCKED) {
+  if (code === ApiErrorCode.DELETION_CODE_EXPIRED_OR_LOCKED) {
     return 'That code has expired or been locked. Request a new one.';
+  }
+  if (code === ApiErrorCode.ACCOUNT_DELETED) {
+    // lib/api.ts scopes its /account-deleted navigation to the session probe
+    // (/me), which this endpoint is not — so this message is what the user
+    // actually reads, inline, until their next /me refetch moves them on.
+    return 'This account has already been deleted.';
   }
   return err instanceof Error ? err.message : 'Failed to delete the account';
 }
@@ -57,8 +65,35 @@ function useDeleteAccountFlow(orgName: string, typedName: string, code: string) 
   // accidental Escape doesn't strand a valid code behind the confirm step
   // (whose send button sits under the resend cooldown).
   const [challengeIssued, setChallengeIssued] = useState(false);
+  // The org name that unlocked the first send, snapshotted because the live
+  // `typedName` cannot be trusted at submit time: every close clears it, and a
+  // reopen while a challenge is live lands on the code step, which renders no
+  // name input. The delete payload uses this instead.
+  //
+  // A stale snapshot is a usability problem, never a safety one: the server
+  // re-checks the submitted name against the org it is about to delete and
+  // answers 400 "Organization name does not match" on any mismatch
+  // (`handlers/delete-account.ts:44`), so a wrong name deletes nothing. The
+  // effect below exists only so the user is not stranded by that rejection.
+  const [confirmedOrgName, setConfirmedOrgName] = useState('');
   const [resendAvailableAt, setResendAvailableAt] = useState<string | null>(null);
   const resendSecondsLeft = useResendCountdown(resendAvailableAt);
+
+  // The org is renameable from the same page and the same mounted subtree:
+  // SettingsPage renders the company-name form above this modal and keeps the
+  // modal mounted across close/reopen, so a snapshot can outlive the name it
+  // captured. Submitting it would earn a 400 on a step that renders no name
+  // input, with `challengeIssued` never resetting — recoverable only by
+  // reloading the page. Drop the snapshot and return to the confirm step,
+  // which is the one step that can capture the new name.
+  useEffect(() => {
+    if (confirmedOrgName !== '' && confirmedOrgName !== orgName) {
+      setConfirmedOrgName('');
+      setChallengeIssued(false);
+      setStep('confirm');
+      setCodeError('The organization name changed. Confirm the new name to continue.');
+    }
+  }, [orgName, confirmedOrgName]);
 
   const challengeMutation = useMutation({
     mutationFn: requestDeletionChallenge,
@@ -69,6 +104,10 @@ function useDeleteAccountFlow(orgName: string, typedName: string, code: string) 
         setCodeError('Account deletion is already in progress.');
         return;
       }
+      // Keep the first snapshot: only the first send passes the org-name gate,
+      // and a resend fired from the code step can see an already-cleared
+      // `typedName`, which would otherwise overwrite it with an empty string.
+      setConfirmedOrgName((previous) => previous || typedName.trim());
       setChallengeIssued(true);
       setResendAvailableAt(challenge.resendAvailableAt);
       setCodeError(null);
@@ -85,7 +124,7 @@ function useDeleteAccountFlow(orgName: string, typedName: string, code: string) 
   });
 
   const deleteMutation = useMutation({
-    mutationFn: () => deleteAccount({ code, orgName: typedName.trim() }),
+    mutationFn: () => deleteAccount({ code, orgName: confirmedOrgName }),
     onSuccess: () => {
       // Cookies are already cleared by the response; discard all client state
       // and hard-navigate so nothing refetches against the dead session.

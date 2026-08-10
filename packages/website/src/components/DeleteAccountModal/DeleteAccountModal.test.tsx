@@ -14,6 +14,7 @@ vi.mock('../../lib/api.js', () => ({
 import { DeleteAccountModal } from '.';
 
 const ORG_NAME = 'Acme Corp';
+const RENAMED_ORG = 'Acme Inc';
 
 function renderModal(props?: Partial<Parameters<typeof DeleteAccountModal>[0]>) {
   const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
@@ -28,20 +29,41 @@ function sendCodeButton() {
   return screen.getByRole('button', { name: /send verification code/i });
 }
 
-/** Renders the modal with a controllable `open` prop for close/reopen tests. */
+/**
+ * Renders the modal with controllable `open` and `orgName` props, mirroring
+ * SettingsPage: the modal stays mounted across close/reopen, and the org name
+ * it receives can change under it (the company-name form lives on the same
+ * page).
+ */
 function renderReopenableModal() {
   const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
-  const ui = (open: boolean) => (
+  let open = true;
+  let orgName = ORG_NAME;
+  const ui = () => (
     <QueryClientProvider client={client}>
-      <DeleteAccountModal open={open} onClose={() => {}} orgName={ORG_NAME} />
+      <DeleteAccountModal open={open} onClose={() => {}} orgName={orgName} />
     </QueryClientProvider>
   );
-  const view = render(ui(true));
+  const view = render(ui());
+  const rerender = () => view.rerender(ui());
   return {
-    closeAndReopen() {
+    close() {
       fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
-      view.rerender(ui(false));
-      view.rerender(ui(true));
+      open = false;
+      rerender();
+    },
+    reopen() {
+      open = true;
+      rerender();
+    },
+    closeAndReopen() {
+      this.close();
+      this.reopen();
+    },
+    /** Rename the org without unmounting the modal, as SettingsPage does. */
+    renameOrgTo(next: string) {
+      orgName = next;
+      rerender();
     },
   };
 }
@@ -158,6 +180,58 @@ describe('DeleteAccountModal', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Incorrect verification code')).toBeInTheDocument();
+    });
+  });
+
+  it('does not blame an expired code when the 410 is ACCOUNT_DELETED', async () => {
+    // Both conditions arrive as 410; only the code distinguishes them.
+    mockDeleteAccount.mockRejectedValue(
+      Object.assign(new Error('Account has been deleted'), {
+        status: 410,
+        code: ApiErrorCode.ACCOUNT_DELETED,
+      }),
+    );
+    renderModal();
+    fireEvent.change(screen.getByLabelText(`Type "${ORG_NAME}" to continue`), {
+      target: { value: ORG_NAME },
+    });
+    fireEvent.click(sendCodeButton());
+    await waitFor(() => screen.getByLabelText(/enter the 6-digit code/i));
+
+    fireEvent.change(screen.getByLabelText(/enter the 6-digit code/i), {
+      target: { value: '123456' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /permanently delete account/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('This account has already been deleted.')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/request a new one/i)).not.toBeInTheDocument();
+  });
+
+  it('still reports an expired deletion code by its own error code', async () => {
+    mockDeleteAccount.mockRejectedValue(
+      Object.assign(new Error('Verification code expired'), {
+        status: 410,
+        code: ApiErrorCode.DELETION_CODE_EXPIRED_OR_LOCKED,
+      }),
+    );
+    renderModal();
+    fireEvent.change(screen.getByLabelText(`Type "${ORG_NAME}" to continue`), {
+      target: { value: ORG_NAME },
+    });
+    fireEvent.click(sendCodeButton());
+    await waitFor(() => screen.getByLabelText(/enter the 6-digit code/i));
+
+    fireEvent.change(screen.getByLabelText(/enter the 6-digit code/i), {
+      target: { value: '123456' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /permanently delete account/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('That code has expired or been locked. Request a new one.'),
+      ).toBeInTheDocument();
     });
   });
 
@@ -294,7 +368,92 @@ describe('DeleteAccountModal close/reopen', () => {
     fireEvent.change(screen.getByLabelText(/enter the 6-digit code/i), {
       target: { value: '123456' },
     });
-    expect(screen.getByRole('button', { name: /permanently delete account/i })).toBeEnabled();
+    const deleteButton = screen.getByRole('button', { name: /permanently delete account/i });
+    expect(deleteButton).toBeEnabled();
+
+    // The close cleared the typed name and the code step renders no name
+    // input, so the payload must come from the name confirmed before the
+    // send — otherwise the server rejects an empty orgName and this flow
+    // dead-ends with no way back to the confirm step.
+    mockDeleteAccount.mockResolvedValue({ message: 'Account deleted' });
+    fireEvent.click(deleteButton);
+    await waitFor(() => {
+      expect(mockDeleteAccount).toHaveBeenCalledWith({ code: '123456', orgName: ORG_NAME });
+    });
+  });
+
+  it('keeps the confirmed org name in the delete payload when a resend follows a reopen', async () => {
+    // No cooldown, so the resend affordance is clickable without timer travel.
+    mockRequestChallenge.mockResolvedValue({
+      outcome: 'challenge_created',
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      resendAvailableAt: null,
+    });
+    const modal = renderReopenableModal();
+    fireEvent.change(screen.getByLabelText(`Type "${ORG_NAME}" to continue`), {
+      target: { value: ORG_NAME },
+    });
+    fireEvent.click(sendCodeButton());
+    await waitFor(() => screen.getByLabelText(/enter the 6-digit code/i));
+
+    modal.closeAndReopen();
+
+    // Resending from the code step re-runs the challenge success path while
+    // the typed name is cleared; the snapshot must survive it.
+    fireEvent.click(screen.getByRole('button', { name: /^resend code$/i }));
+    await waitFor(() => expect(mockRequestChallenge).toHaveBeenCalledTimes(2));
+
+    mockDeleteAccount.mockResolvedValue({ message: 'Account deleted' });
+    fireEvent.change(screen.getByLabelText(/enter the 6-digit code/i), {
+      target: { value: '123456' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /permanently delete account/i }));
+    await waitFor(() => {
+      expect(mockDeleteAccount).toHaveBeenCalledWith({ code: '123456', orgName: ORG_NAME });
+    });
+  });
+
+  it('drops a snapshot the org rename invalidated instead of dead-ending on the code step', async () => {
+    // No cooldown, so the re-confirm can send again without timer travel.
+    mockRequestChallenge.mockResolvedValue({
+      outcome: 'challenge_created',
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      resendAvailableAt: null,
+    });
+    const modal = renderReopenableModal();
+    fireEvent.change(screen.getByLabelText(`Type "${ORG_NAME}" to continue`), {
+      target: { value: ORG_NAME },
+    });
+    fireEvent.click(sendCodeButton());
+    await waitFor(() => screen.getByLabelText(/enter the 6-digit code/i));
+
+    // Escape out, then rename the org in the settings form above the modal.
+    // The modal never unmounts, so the snapshot outlives the name it captured;
+    // submitting it earns a 400 on a step with no name input to correct it.
+    modal.close();
+    modal.renameOrgTo(RENAMED_ORG);
+    modal.reopen();
+
+    expect(screen.queryByLabelText(/enter the 6-digit code/i)).not.toBeInTheDocument();
+    expect(
+      screen.getByText('The organization name changed. Confirm the new name to continue.'),
+    ).toBeInTheDocument();
+
+    // The confirm step now gates on the NEW name, and the payload follows it.
+    fireEvent.change(screen.getByLabelText(`Type "${RENAMED_ORG}" to continue`), {
+      target: { value: RENAMED_ORG },
+    });
+    fireEvent.click(sendCodeButton());
+    await waitFor(() => screen.getByLabelText(/enter the 6-digit code/i));
+
+    mockDeleteAccount.mockResolvedValue({ message: 'Account deleted' });
+    fireEvent.change(screen.getByLabelText(/enter the 6-digit code/i), {
+      target: { value: '123456' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /permanently delete account/i }));
+    await waitFor(() => {
+      expect(mockDeleteAccount).toHaveBeenCalledWith({ code: '123456', orgName: RENAMED_ORG });
+    });
   });
 
   it('still requires the org-name confirmation before the FIRST send after close and reopen', () => {
