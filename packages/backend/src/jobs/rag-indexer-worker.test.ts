@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockClient } from 'aws-sdk-client-mock';
+import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { marshall } from '@aws-sdk/util-dynamodb';
 import type { Context } from 'aws-lambda';
 import type { S3ClientContext } from '../lib/s3-client.js';
 import type { ProvisionedRegion } from '../lib/region-helpers.js';
@@ -18,8 +21,10 @@ vi.mock('sst', () => ({
   },
 }));
 
+const ddbMock = mockClient(DynamoDBClient);
+
 const {
-  mockGetProvisionedRegions,
+  mockGetProvisionedRegionsFromProfile,
   mockGetOrchestratorForRegion,
   mockCreateS3Client,
   mockIndexBucket,
@@ -27,7 +32,7 @@ const {
   mockUpdateBucketTelemetry,
   fakeS3Client,
 } = vi.hoisted(() => ({
-  mockGetProvisionedRegions: vi.fn(),
+  mockGetProvisionedRegionsFromProfile: vi.fn(),
   mockGetOrchestratorForRegion: vi.fn(),
   mockCreateS3Client: vi.fn(),
   mockIndexBucket: vi.fn(),
@@ -37,7 +42,7 @@ const {
 }));
 
 vi.mock('../lib/region-helpers.js', () => ({
-  getProvisionedRegions: mockGetProvisionedRegions,
+  getProvisionedRegionsFromProfile: mockGetProvisionedRegionsFromProfile,
 }));
 
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
@@ -91,14 +96,20 @@ function provisioned(orchestrator: ReturnType<typeof makeOrchestrator>, tenantId
   return { orchestrator, tenantId } as unknown as ProvisionedRegion;
 }
 
+/** The `ORG#{orgId}/PROFILE` item the worker's fence-B read returns. */
+function profileItem(over: Record<string, unknown> = {}) {
+  return marshall({ pk: 'ORG#org-1', sk: 'PROFILE', ...over });
+}
+
 /**
- * Wire both region mocks from one provisioned-region list: `getProvisionedRegions`
- * returns them (so the worker can resolve each region's tenant), and
- * `getOrchestratorForRegion` resolves a region back to its orchestrator (used to
- * build that region's S3 client). In these tests the two are the same object.
+ * Wire both region mocks from one provisioned-region list:
+ * `getProvisionedRegionsFromProfile` returns them (so the worker can resolve
+ * each region's tenant from the profile it read), and `getOrchestratorForRegion`
+ * resolves a region back to its orchestrator (used to build that region's S3
+ * client). In these tests the two are the same object.
  */
 function useRegions(regions: ProvisionedRegion[]) {
-  mockGetProvisionedRegions.mockResolvedValue(regions);
+  mockGetProvisionedRegionsFromProfile.mockReturnValue(regions);
   mockGetOrchestratorForRegion.mockImplementation((region: S3Region) => {
     const match = regions.find((r) => r.orchestrator.region === region);
     if (!match) throw new Error(`no orchestrator registered for region ${region}`);
@@ -128,6 +139,8 @@ const reportedMetrics = (): MetricEvent[] => reportMetricMock.mock.calls.map(([e
 describe('rag-indexer-worker', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    ddbMock.reset();
+    ddbMock.on(GetItemCommand).resolves({ Item: profileItem() });
     mockCreateS3Client.mockReturnValue(fakeS3Client);
     mockUpdateBucketTelemetry.mockResolvedValue(undefined);
     mockIndexBucket.mockResolvedValue({
@@ -140,12 +153,76 @@ describe('rag-indexer-worker', () => {
   });
 
   it('skips when the org is not provisioned in any region', async () => {
-    mockGetProvisionedRegions.mockResolvedValue([]);
+    mockGetProvisionedRegionsFromProfile.mockReturnValue([]);
 
     await handler(payload([{ region: S3Region.EuWest1, bucketName: 'b1' }]), AMPLE_CONTEXT);
 
     expect(mockCreateS3Client).not.toHaveBeenCalled();
     expect(mockIndexBucket).not.toHaveBeenCalled();
+  });
+
+  it('reads the profile strongly-consistently and refuses the whole run when the org is deleting', async () => {
+    const aurora = makeOrchestrator('aurora', S3Region.EuWest1);
+    useRegions([provisioned(aurora, 'tenant-a')]);
+    ddbMock.on(GetItemCommand).resolves({ Item: profileItem({ deleting: true }) });
+
+    await handler(payload([{ region: S3Region.EuWest1, bucketName: 'b1' }]), AMPLE_CONTEXT);
+
+    // Nothing at all runs: no S3 client, and above all no indexBucket, whose
+    // manifest/checkpoint writes are unconditional and would re-create rows the
+    // teardown's purge just swept.
+    expect(mockIndexBucket).not.toHaveBeenCalled();
+    expect(mockCreateS3Client).not.toHaveBeenCalled();
+    expect(mockUpdateBucketTelemetry).not.toHaveBeenCalled();
+
+    // Fail-open attribute: a stale read would answer "not deleting".
+    expect(ddbMock.commandCalls(GetItemCommand)[0]?.args[0].input).toMatchObject({
+      Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
+      ConsistentRead: true,
+    });
+  });
+
+  it('re-takes the deleting check per region and abandons the rest of the run', async () => {
+    // Regions run serially inside a 900s invocation, so the up-front check can
+    // be many minutes stale by the time a later region starts. In that window
+    // indexBucket does not just write bookkeeping rows: it re-creates the S3
+    // Vectors index the teardown dropped and re-embeds the deleted user's text.
+    const aurora = makeOrchestrator('aurora', S3Region.EuWest1);
+    const fth = makeOrchestrator('fth', S3Region.UsEast1);
+    useRegions([provisioned(aurora, 'tenant-a'), provisioned(fth, 'tenant-f')]);
+    // Healthy for the up-front check and the first region; deleting thereafter.
+    ddbMock
+      .on(GetItemCommand)
+      .resolvesOnce({ Item: profileItem() })
+      .resolvesOnce({ Item: profileItem() })
+      .resolves({ Item: profileItem({ deleting: true }) });
+
+    await handler(
+      payload([
+        { region: S3Region.EuWest1, bucketName: 'b1' },
+        { region: S3Region.UsEast1, bucketName: 'b2' },
+      ]),
+      AMPLE_CONTEXT,
+    );
+
+    // The first region ran; the second never started.
+    expect(mockIndexBucket).toHaveBeenCalledOnce();
+    expect(mockIndexBucket.mock.calls[0][0]).toMatchObject({ bucketName: 'b1' });
+    expect(fth.getS3ClientContext).not.toHaveBeenCalled();
+    // Every re-check is strongly consistent — the flag fails open.
+    for (const call of ddbMock.commandCalls(GetItemCommand)) {
+      expect(call.args[0].input).toMatchObject({ ConsistentRead: true });
+    }
+  });
+
+  it('indexes normally when the profile carries no deleting flag', async () => {
+    const aurora = makeOrchestrator('aurora', S3Region.EuWest1);
+    useRegions([provisioned(aurora, 'tenant-a')]);
+    ddbMock.on(GetItemCommand).resolves({ Item: profileItem({ deleting: false }) });
+
+    await handler(payload([{ region: S3Region.EuWest1, bucketName: 'b1' }]), AMPLE_CONTEXT);
+
+    expect(mockIndexBucket).toHaveBeenCalledOnce();
   });
 
   it('builds an S3 client from the orchestrator context for the bucket region', async () => {
@@ -154,7 +231,7 @@ describe('rag-indexer-worker', () => {
 
     await handler(payload([{ region: S3Region.EuWest1, bucketName: 'b1' }]), AMPLE_CONTEXT);
 
-    expect(mockGetProvisionedRegions).toHaveBeenCalledWith('org-1');
+    expect(mockGetProvisionedRegionsFromProfile).toHaveBeenCalledWith(profileItem());
     expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith(S3Region.EuWest1);
     expect(aurora.getS3ClientContext).toHaveBeenCalledWith('tenant-a');
     expect(mockCreateS3Client).toHaveBeenCalledWith(S3_CTX);
@@ -492,7 +569,9 @@ describe('rag-indexer-worker', () => {
   });
 
   it('emits a worker-invocation failure metric and rethrows when the handler throws', async () => {
-    mockGetProvisionedRegions.mockRejectedValue(new Error('region lookup failed'));
+    mockGetProvisionedRegionsFromProfile.mockImplementation(() => {
+      throw new Error('region lookup failed');
+    });
 
     await expect(
       handler(payload([{ region: S3Region.EuWest1, bucketName: 'b1' }]), AMPLE_CONTEXT),

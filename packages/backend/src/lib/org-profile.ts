@@ -1,4 +1,11 @@
-import { GetItemCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
+import {
+  GetItemCommand,
+  TransactWriteItemsCommand,
+  TransactionCanceledException,
+  type AttributeValue,
+  type TransactWriteItem,
+} from '@aws-sdk/client-dynamodb';
+import pRetry, { type Options as RetryOptions } from 'p-retry';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.js';
 
@@ -60,6 +67,10 @@ export async function getOrgProfile(
  * The fence-B predicate (FIL-112), in one place so every reader agrees on what
  * "deleting" means. Only ever call this on a profile fetched with
  * `{ consistent: true }` — see the read-semantics note above.
+ *
+ * A *missing* profile reads as "not deleting" here; the write-side fence
+ * ({@link orgNotDeletingCheck}) deliberately does NOT, because the two answer
+ * different questions — see its doc comment.
  */
 export function isOrgDeleting(orgProfile: OrgProfileItem | undefined): boolean {
   return orgProfile?.deleting?.BOOL === true;
@@ -75,4 +86,126 @@ export function assertOrgNotDeleting(orgProfile: OrgProfileItem | undefined, org
   if (isOrgDeleting(orgProfile)) {
     throw new Error(`Org ${orgId} is being deleted; refusing tenant setup`);
   }
+}
+
+/** Raised by {@link sendFencedWrite} when fence B rejected the write. */
+export class OrgDeletingError extends Error {
+  readonly orgId: string;
+
+  constructor(orgId: string) {
+    super(`Org ${orgId} is being deleted; refusing write`);
+    this.name = 'OrgDeletingError';
+    this.orgId = orgId;
+  }
+}
+
+/**
+ * Fence B expressed as a transaction pre-condition. It lives on a *different
+ * item* than anything its callers write (`ORG#{orgId}/PROFILE`), and a
+ * DynamoDB `ConditionExpression` can only ever evaluate against the item being
+ * written — so no caller, however simple, can express this as its own
+ * condition. That, not the shape of the caller's write, is why a transaction is
+ * needed: the biggest caller (`handlers/create-access-key.ts`) is a
+ * single-item, same-table Put.
+ *
+ * **The predicate mirrors {@link isOrgDeleting} — plus item existence.** The
+ * profile must exist AND must not be flagged:
+ *
+ * - `attribute_exists(pk)` — DynamoDB evaluates `attribute_not_exists(deleting)`
+ *   against a *missing* item as TRUE, so without this the fence passes once
+ *   `purgeRecords` has deleted the PROFILE row and every fenced writer could
+ *   resurrect a purged account. Requiring the row is safe: `ORG#/PROFILE` is
+ *   created by `createNewUserAndOrg` (middleware/auth.ts) inside the SAME
+ *   `TransactWriteItems` as the `SUB#/IDENTITY` row that is the only path to
+ *   the `orgId`, so there is no window in which a live org can be missing it,
+ *   and the only deleter is the teardown's `purgeRecords`. A missing profile
+ *   therefore means purged — refusing is the intent, not an outage.
+ * - `OR deleting = :notDeleting` — `isOrgDeleting` tests `deleting === true`,
+ *   so a literal `deleting: false` (what an ops unwedge would write) reads as
+ *   healthy. Without this half the fence would disagree with every reader; for
+ *   `create-access-key` that combination is the worst one, since its pre-check
+ *   would pass, the credential would be minted upstream, and the compensating
+ *   revoke would then destroy a healthy org's key.
+ *
+ * DEPENDENCY (FIL-112): `deleting = true` is written in exactly one place
+ * (lib/deletion-guards.ts) and NOTHING clears it today, so an org wedged by a
+ * failed teardown is permanently refused by every fence below. A supported
+ * unwedge — which is why `deleting = false` is accepted above — lands with the
+ * deletion reconciler.
+ */
+export function orgNotDeletingCheck(orgId: string): TransactWriteItem {
+  return {
+    ConditionCheck: {
+      TableName: Resource.UserInfoTable.name,
+      Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+      ConditionExpression:
+        'attribute_exists(pk) AND (attribute_not_exists(deleting) OR deleting = :notDeleting)',
+      ExpressionAttributeValues: { ':notDeleting': { BOOL: false } },
+    },
+  };
+}
+
+/**
+ * A `ConditionCheck` participates fully in the transaction, so a concurrent
+ * write to `ORG#{orgId}/PROFILE` — tenant setup persisting a tenant id, the
+ * deletion guards arming the flag, update-profile renaming the org — cancels
+ * the WHOLE transaction with `TransactionConflict`, a failure class that did
+ * not exist for these writers when they were plain `PutItem`s. It is transient
+ * by definition (the loser of an optimistic race), and every fenced write is
+ * idempotent, so retry it a couple of times rather than surfacing a 500 for
+ * "someone renamed the org while you created a key". Three attempts at ~50ms
+ * is enough for the contended-single-item case and still bounded well inside
+ * an API Gateway budget.
+ */
+const FENCED_WRITE_RETRY: RetryOptions = { retries: 2, minTimeout: 50, randomize: true };
+
+/**
+ * Send `writes` in one transaction, gated on fence B. The check is always item
+ * 0, so a cancellation is attributable: only `CancellationReasons[0]` being a
+ * `ConditionalCheckFailed` means the fence rejected, and that becomes an
+ * {@link OrgDeletingError}. A `TransactionConflict` is retried (see
+ * {@link FENCED_WRITE_RETRY}); anything else — a caller's own condition,
+ * capacity — is re-thrown untouched, unchanged from before the fence existed.
+ *
+ * The transaction is what makes this a fence rather than a check-then-write:
+ * the guarded writes and the fence evaluation commit or fail together, so a
+ * teardown arming `deleting` concurrently cannot land between them.
+ */
+export async function sendFencedWrite(
+  orgId: string,
+  writes: TransactWriteItem[],
+  retry: RetryOptions = FENCED_WRITE_RETRY,
+): Promise<void> {
+  try {
+    await pRetry(
+      () =>
+        getDynamoClient().send(
+          new TransactWriteItemsCommand({ TransactItems: [orgNotDeletingCheck(orgId), ...writes] }),
+        ),
+      { ...retry, shouldRetry: ({ error }) => isTransactionConflict(error) },
+    );
+  } catch (err) {
+    if (isFenceRejection(err)) throw new OrgDeletingError(orgId);
+    throw err;
+  }
+}
+
+function isFenceRejection(err: unknown): boolean {
+  return (
+    err instanceof TransactionCanceledException &&
+    err.CancellationReasons?.[0]?.Code === 'ConditionalCheckFailed'
+  );
+}
+
+/**
+ * A cancellation caused by contention on one of the transaction's items —
+ * overwhelmingly `ORG#{orgId}/PROFILE`, the item the fence adds. Never the
+ * fence *rejecting*: that is `ConditionalCheckFailed` on item 0.
+ */
+function isTransactionConflict(err: unknown): boolean {
+  return (
+    err instanceof TransactionCanceledException &&
+    !isFenceRejection(err) &&
+    (err.CancellationReasons ?? []).some((reason) => reason.Code === 'TransactionConflict')
+  );
 }

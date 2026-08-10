@@ -1,6 +1,6 @@
 import pRetry, { type Options as RetryOptions } from 'p-retry';
 import { getAvailableOrchestrators } from './service-orchestrator-registry.js';
-import { getOrgProfile, type OrgProfileItem } from './org-profile.js';
+import { getOrgProfile, isOrgDeleting, type OrgProfileItem } from './org-profile.js';
 import type { ServiceOrchestrator } from './service-orchestrator.js';
 import type { TenantStatus } from '@filone/shared/src/api/tenants.js';
 
@@ -64,8 +64,27 @@ export async function getRegionsWithTenantIdsForOrg(orgId: string): Promise<Prov
 export interface RegionSyncOutcome {
   orchestratorId: string;
   tenantId: string;
-  outcome: 'updated' | 'in-sync' | 'skipped' | 'not-found' | 'error';
+  /** `refused` = fence B blocked a re-activation; see {@link RegionSyncResult}. */
+  outcome: 'updated' | 'in-sync' | 'skipped' | 'not-found' | 'error' | 'refused';
   cause?: unknown;
+}
+
+export interface RegionSyncResult {
+  /** One entry per provisioned region. Empty when the org has no tenants yet. */
+  outcomes: RegionSyncOutcome[];
+  /**
+   * Fence B (FIL-112) refused a re-activation because the org is being deleted.
+   * Callers that log success after {@link assertRegionSyncSucceeded} must
+   * consult this — `refused` is deliberately not an `error` (nothing failed,
+   * and re-driving would not help), so the assert lets it through.
+   *
+   * It is an ORG-level flag rather than a predicate over `outcomes` on purpose:
+   * an org being deleted may have no provisioned regions at all, and any
+   * `outcomes.some(...)` test then answers "not refused" for the very org the
+   * fence just refused — which is how a deleting org came to be logged as
+   * "Tenant unlocked".
+   */
+  refusedForDeletion: boolean;
 }
 
 // Re-raises per-region sync failures as a single error. Callers that need a
@@ -103,18 +122,64 @@ export const WEBHOOK_STATUS_SYNC_RETRY: RetryOptions = { retries: 1, minTimeout:
 // when it differs. A region that fails to update still differs on the next
 // run, so partial failures self-heal. Never throws — per-region failures are
 // reported as `error` outcomes so callers can record them.
+//
+// FIL-112: `desired === 'active'` is fenced on the org's `deleting` flag, and
+// only that direction — `disabled`/`write-locked` are what teardown wants and
+// must keep working (the deleted-customer close-out and the grace-period
+// enforcer both drive them). Three callers can otherwise re-activate a tenant
+// the teardown just disabled: the usage worker's `enforceTenantLocks` for an
+// under-limit org, `invoice.payment_succeeded` in the Stripe webhook, and
+// `unlockAllProvisionedRegions` on activation. That is not merely untidy:
+// Aurora's teardown fails fatally when it cannot confirm the tenant is
+// DISABLED, so a re-activation can wedge the deletion permanently — which
+// means indefinitely retaining a deleted user's data.
+//
+// The fence read is strongly consistent (`deleting` is absent until teardown
+// starts, so a stale read fails open) and costs no extra request: it replaces
+// the profile read `getProvisionedRegions` was already doing. This is the READ
+// side of fence B, so — unlike the write-side `orgNotDeletingCheck`, which
+// requires the row — it is meaningful only while the PROFILE row exists: once
+// the purge deletes it this reads nothing. That is harmless here, because the
+// same read then resolves no provisioned region, so there is no tenant left to
+// re-activate.
 export async function syncTenantStatusInProvisionedRegions(
   orgId: string,
   desired: TenantStatus,
   retry: RetryOptions = STATUS_SYNC_RETRY,
-): Promise<RegionSyncOutcome[]> {
-  const ready = await getProvisionedRegions(orgId);
+): Promise<RegionSyncResult> {
+  if (getAvailableOrchestrators().length === 0) {
+    return { outcomes: [], refusedForDeletion: false };
+  }
 
-  return Promise.all(
-    ready.map(({ orchestrator, tenantId }) =>
-      syncRegionTenantStatus({ orgId, orchestrator, tenantId, desired, retry }),
+  const reactivating = desired === 'active';
+  const orgProfile = await getOrgProfile(orgId, reactivating ? { consistent: true } : {});
+  const ready = getProvisionedRegionsFromProfile(orgProfile);
+
+  if (reactivating && isOrgDeleting(orgProfile)) {
+    console.warn('[region-helpers] Refusing tenant re-activation: org deletion in progress', {
+      orgId,
+      regions: ready.map(({ orchestrator }) => orchestrator.id),
+    });
+    // The flag, not the outcomes, is the refusal signal: `ready` is empty for an
+    // org that never provisioned a tenant, and that org is still refused.
+    return {
+      outcomes: ready.map(({ orchestrator, tenantId }) => ({
+        orchestratorId: orchestrator.id,
+        tenantId,
+        outcome: 'refused' as const,
+      })),
+      refusedForDeletion: true,
+    };
+  }
+
+  return {
+    outcomes: await Promise.all(
+      ready.map(({ orchestrator, tenantId }) =>
+        syncRegionTenantStatus({ orgId, orchestrator, tenantId, desired, retry }),
+      ),
     ),
-  );
+    refusedForDeletion: false,
+  };
 }
 
 async function syncRegionTenantStatus({

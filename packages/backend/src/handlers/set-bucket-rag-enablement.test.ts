@@ -18,7 +18,8 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getOrchestratorForRegion: (...args: unknown[]) => mockGetOrchestratorForRegion(...args),
 }));
 
-vi.mock('../lib/org-profile.js', () => ({
+vi.mock('../lib/org-profile.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/org-profile.js')>()),
   getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
 }));
 
@@ -56,6 +57,7 @@ import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrat
 import { S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import type { BucketRAGEnablementRecord } from '../lib/dynamo-records.js';
+import { OrgDeletingError } from '../lib/org-profile.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -208,6 +210,23 @@ describe('set-bucket-rag-enablement baseHandler', () => {
     expect(result.statusCode).toBe(503);
     expect(orch.getBucket).not.toHaveBeenCalled();
     expect(mockSetEnablement).not.toHaveBeenCalled();
+  });
+
+  it('returns 410 ACCOUNT_DELETED when fence B refuses the enablement write (FIL-112)', async () => {
+    // The lib throws when the transaction's ConditionCheck rejects; an
+    // `enabled: true` row written now would re-animate the indexer for an org
+    // whose teardown is under way.
+    mockSetEnablement.mockRejectedValue(new OrgDeletingError('org-1'));
+
+    const result = await baseHandler(event({ enabled: true }));
+
+    expect(result.statusCode).toBe(410);
+    expect(JSON.parse(result.body ?? '{}')).toMatchObject({ code: 'ACCOUNT_DELETED' });
+  });
+
+  it('propagates a non-fence failure from the enablement write', async () => {
+    mockSetEnablement.mockRejectedValue(new Error('throttled'));
+    await expect(baseHandler(event({ enabled: true }))).rejects.toThrow('throttled');
   });
 });
 

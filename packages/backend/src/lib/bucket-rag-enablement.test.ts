@@ -4,7 +4,8 @@ import {
   ConditionalCheckFailedException,
   DynamoDBClient,
   GetItemCommand,
-  PutItemCommand,
+  TransactWriteItemsCommand,
+  TransactionCanceledException,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
@@ -12,6 +13,8 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 vi.mock('sst', () => ({
   Resource: {
     RagIndexerTable: { name: 'RagIndexerTable' },
+    // The FIL-112 fence-B ConditionCheck reads ORG#{orgId}/PROFILE here.
+    UserInfoTable: { name: 'UserInfoTable' },
   },
 }));
 
@@ -24,6 +27,7 @@ import {
   updateBucketTelemetry,
 } from './bucket-rag-enablement.js';
 import type { BucketRAGEnablementRecord } from './dynamo-records.js';
+import { OrgDeletingError } from './org-profile.js';
 import { S3Region } from '@filone/shared';
 
 function record(over: Partial<BucketRAGEnablementRecord> = {}): BucketRAGEnablementRecord {
@@ -67,7 +71,7 @@ describe('setBucketRagEnablement', () => {
   beforeEach(() => ddbMock.reset());
 
   it('creates a new active record with zeroed telemetry when none exists', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
 
     const result = await setBucketRagEnablement({
       region: S3Region.EuWest1,
@@ -84,11 +88,11 @@ describe('setBucketRagEnablement', () => {
     expect(result.filesIndexed).toBe(0);
     expect(result.indexSize).toBe(0);
     expect(result.createdAt).toBe(result.updatedAt);
-    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(1);
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
   });
 
   it('flips status to disabled while preserving telemetry + createdAt', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
     const existing = record({ filesIndexed: 99, indexSize: 5000 });
 
     const result = await setBucketRagEnablement({
@@ -105,6 +109,95 @@ describe('setBucketRagEnablement', () => {
     expect(result.lastSyncedAt).toBe('2026-06-22T12:00:00Z');
     expect(result.createdAt).toBe('2026-06-01T00:00:00Z');
     expect(result.updatedAt).not.toBe('2026-06-01T00:00:00Z');
+  });
+
+  it('fences the write on the org profile deleting flag (item 0 of the transaction)', async () => {
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+    await setBucketRagEnablement({
+      region: S3Region.EuWest1,
+      bucketName: 'bucket-1',
+      orgId: 'org-1',
+      enabled: true,
+      existing: undefined,
+    });
+
+    const items = ddbMock.commandCalls(TransactWriteItemsCommand)[0]!.args[0].input.TransactItems!;
+    expect(items).toHaveLength(2);
+    expect(items[0].ConditionCheck).toEqual({
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
+      ConditionExpression:
+        'attribute_exists(pk) AND (attribute_not_exists(deleting) OR deleting = :notDeleting)',
+      ExpressionAttributeValues: { ':notDeleting': { BOOL: false } },
+    });
+    expect(items[1].Put?.TableName).toBe('RagIndexerTable');
+  });
+
+  it('throws OrgDeletingError instead of re-creating an ACTIVE enablement row for a deleting org', async () => {
+    // This is the self-sustaining writer: an `enabled: true` row landing after
+    // the purge is scanned by the indexer orchestrator, which fans out and
+    // re-animates the whole indexer for a deleted org.
+    ddbMock.on(TransactWriteItemsCommand).rejects(
+      new TransactionCanceledException({
+        message: 'cancelled',
+        $metadata: {},
+        CancellationReasons: [{ Code: 'ConditionalCheckFailed' }, { Code: 'None' }],
+      }),
+    );
+
+    await expect(
+      setBucketRagEnablement({
+        region: S3Region.EuWest1,
+        bucketName: 'bucket-1',
+        orgId: 'org-1',
+        enabled: true,
+        existing: undefined,
+      }),
+    ).rejects.toBeInstanceOf(OrgDeletingError);
+  });
+
+  it('is fenced when DISABLING too, so no row is re-created either way', async () => {
+    ddbMock.on(TransactWriteItemsCommand).rejects(
+      new TransactionCanceledException({
+        message: 'cancelled',
+        $metadata: {},
+        CancellationReasons: [{ Code: 'ConditionalCheckFailed' }, { Code: 'None' }],
+      }),
+    );
+
+    await expect(
+      setBucketRagEnablement({
+        region: S3Region.EuWest1,
+        bucketName: 'bucket-1',
+        orgId: 'org-1',
+        enabled: false,
+        existing: undefined,
+      }),
+    ).rejects.toBeInstanceOf(OrgDeletingError);
+  });
+
+  it('rethrows a persistent non-fence cancellation untouched (after the bounded retry)', async () => {
+    // TransactionConflict is retried by sendFencedWrite — the fence made every
+    // write contend on ORG#/PROFILE — but a persistent one still surfaces as
+    // the original error, never as OrgDeletingError.
+    ddbMock.on(TransactWriteItemsCommand).rejects(
+      new TransactionCanceledException({
+        message: 'cancelled',
+        $metadata: {},
+        CancellationReasons: [{ Code: 'None' }, { Code: 'TransactionConflict' }],
+      }),
+    );
+
+    await expect(
+      setBucketRagEnablement({
+        region: S3Region.EuWest1,
+        bucketName: 'bucket-1',
+        orgId: 'org-1',
+        enabled: true,
+        existing: undefined,
+      }),
+    ).rejects.toBeInstanceOf(TransactionCanceledException);
   });
 });
 
@@ -171,7 +264,7 @@ describe('setBucketRagEnablement (sync-state + lastSyncError preservation)', () 
   beforeEach(() => ddbMock.reset());
 
   it('preserves a stored lastSyncError when toggling enablement', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
     const existing = record({ status: 'active', syncState: 'error', lastSyncError: 'boom' });
 
     const result = await setBucketRagEnablement({
@@ -186,7 +279,7 @@ describe('setBucketRagEnablement (sync-state + lastSyncError preservation)', () 
   });
 
   it('preserves the indexer-owned syncState when toggling enablement (decoupled)', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
     const existing = record({ status: 'active', syncState: 'syncing' });
 
     // Disabling enablement must not disturb the indexer's sync progress.
@@ -319,6 +412,19 @@ describe('updateBucketTelemetry', () => {
     await expect(
       updateBucketTelemetry('org-1', S3Region.EuWest1, 'gone', { syncState: 'syncing' }),
     ).resolves.toBeUndefined();
+  });
+
+  it('is NOT fenced on the org deleting flag — one UpdateItem, no transaction', async () => {
+    // Deliberate (FIL-112): this is the indexer's hot path, the fence would cost
+    // a two-item transaction per bucket per run, and it adds no coverage the
+    // row's own attribute_exists(pk) does not already give — the teardown
+    // deletes the enablement rows, so post-purge this is already a no-op.
+    ddbMock.on(UpdateItemCommand).resolves({});
+
+    await updateBucketTelemetry('org-1', S3Region.EuWest1, 'bucket-1', { syncState: 'syncing' });
+
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
   });
 
   it('rethrows non-conditional DynamoDB failures', async () => {

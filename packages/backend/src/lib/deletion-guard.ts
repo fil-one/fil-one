@@ -35,12 +35,16 @@ import { reportMetric } from './metrics.js';
  * - `handlers/create-setup-intent.ts` — the `stripeCustomerId` upsert is
  *   unconditioned and the sibling Put is create-only, so both can land after a
  *   purge. Closed by the session/tombstone work.
+ *
+ * Closed elsewhere, NOT by this attribute — do not read the list above as the
+ * whole deletion story:
  * - BillingTable `ORG#{orgId}/USAGE_REPORT#` (`jobs/usage-reporting-worker.ts`)
- *   — unconditioned, and not covered by the teardown's purge prefixes at all.
- * - Every non-BillingTable surface (access keys, RAG keys, bucket rows), which
- *   **will be** fenced on the org profile's `deleting` flag rather than on this
- *   attribute (a later batch); today they are unfenced — that flag has no
- *   reader outside tenant setup.
+ *   is now written through `sendFencedWrite` (fence B) and purged by the
+ *   teardown (`PURGEABLE_BILLING_PK_PREFIXES` includes `ORG#`).
+ * - The non-BillingTable surfaces (access keys, RAG keys, bucket RAG enablement)
+ *   are fenced on the org profile's `deleting` flag via
+ *   `lib/org-profile.ts` `orgNotDeletingCheck` / `sendFencedWrite`, not on this
+ *   attribute. That flag now has readers well outside tenant setup.
  *
  * Nothing in this branch *writes* `deletionRequestedAt` — the teardown that
  * sets it lands further up the stack — so here the condition reduces to

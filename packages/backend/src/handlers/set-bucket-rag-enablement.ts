@@ -4,7 +4,8 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { BucketRagEnablementResponse, ErrorResponse } from '@filone/shared';
 import { S3_REGION, SetBucketRagEnabledSchema, isSupportedRegion } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
-import { getOrgProfile } from '../lib/org-profile.js';
+import { accountDeletedResponse } from '../lib/account-deleted-response.js';
+import { getOrgProfile, OrgDeletingError } from '../lib/org-profile.js';
 import {
   ResponseBuilder,
   tenantNotReadyResponse,
@@ -95,13 +96,21 @@ export async function baseHandler(
     );
   }
 
-  const record = await setBucketRagEnablement({
-    region,
-    bucketName,
-    orgId,
-    enabled,
-    existing: owned,
-  });
+  let record;
+  try {
+    record = await setBucketRagEnablement({ region, bucketName, orgId, enabled, existing: owned });
+  } catch (err) {
+    // FIL-112 fence B rejected the write: the org's teardown is under way, so
+    // an enablement row written now would be resurrected data (and, when
+    // `enabled`, would re-animate the indexer for a deleted org).
+    if (!(err instanceof OrgDeletingError)) throw err;
+    console.warn('[set-bucket-rag-enablement] Refusing the write: org deletion in progress', {
+      orgId,
+      region,
+      bucketName,
+    });
+    return accountDeletedResponse();
+  }
 
   return new ResponseBuilder()
     .status(200)

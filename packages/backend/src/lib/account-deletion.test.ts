@@ -10,6 +10,7 @@ import {
   QueryCommand,
   ScanCommand,
   UpdateItemCommand,
+  type BatchWriteItemCommandInput,
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 
@@ -201,21 +202,22 @@ describe('assertPurgeablePk (purge blast-radius guard)', () => {
     );
   });
 
-  it('billing allowlist: permits CUSTOMER# and DELETION_CHALLENGE# rows only', () => {
+  it('billing allowlist: permits CUSTOMER#, DELETION_CHALLENGE# and ORG# rows only', () => {
     expect(() => assertPurgeablePk('CUSTOMER#u-1', PURGEABLE_BILLING_PK_PREFIXES)).not.toThrow();
     expect(() =>
       assertPurgeablePk('DELETION_CHALLENGE#org-1', PURGEABLE_BILLING_PK_PREFIXES),
     ).not.toThrow();
+    // The usage-reporting worker's audit rows; previously unpurgeable, so they
+    // outlived the deletion until their 365-day TTL.
+    expect(() => assertPurgeablePk('ORG#org-1', PURGEABLE_BILLING_PK_PREFIXES)).not.toThrow();
   });
 
-  it('billing allowlist: refuses EMAIL_NORM# (trial claims) and ORG# tombstones, which must outlive the account', () => {
+  it('billing allowlist: refuses EMAIL_NORM# (trial claims) and the ORG_TOMBSTONE#, which must outlive the account', () => {
     expect(() =>
       assertPurgeablePk('EMAIL_NORM#user@gmail.com', PURGEABLE_BILLING_PK_PREFIXES),
     ).toThrow(/outside the purgeable prefixes/);
+    // The trailing '#' on 'ORG#' is what keeps the tombstone out of reach.
     expect(() => assertPurgeablePk('ORG_TOMBSTONE#org-1', PURGEABLE_BILLING_PK_PREFIXES)).toThrow(
-      /outside the purgeable prefixes/,
-    );
-    expect(() => assertPurgeablePk('ORG#org-1', PURGEABLE_BILLING_PK_PREFIXES)).toThrow(
       /outside the purgeable prefixes/,
     );
   });
@@ -288,7 +290,7 @@ describe('runAccountDeletion', () => {
 
   it('runs every external teardown, purges the records, and marks DONE', async () => {
     setupHappyMocks(OrgDeletionStatus.Pending);
-    ddbMock.on(QueryCommand).resolves({
+    ddbMock.on(QueryCommand, { TableName: 'UserInfoTable' }).resolves({
       // purgeRecords org partition query — includes an ACCESSKEY# row, whose
       // upstream key died with the tenant (no per-key revocation anymore).
       Items: [
@@ -614,29 +616,137 @@ describe('runAccountDeletion', () => {
     expect(mockDeleteTenant).toHaveBeenCalledWith('snap-t-9');
   });
 
-  it('purges the RAGKEYHASH lookup rows (credential-hash residue) before the ORG# partition delete', async () => {
+  it('purges the RAGKEYHASH lookup rows BEFORE the ORG# partition delete, from the same snapshot', async () => {
     setupHappyMocks(OrgDeletionStatus.Pending);
-    // The RAGKEY#-prefixed query purgeRagKeyHashRows issues.
-    ddbMock
-      .on(QueryCommand, {
-        ExpressionAttributeValues: marshall({ ':pk': `ORG#${ORG_ID}`, ':skPrefix': 'RAGKEY#' }),
-      })
-      .resolves({
-        Items: [
-          marshall({ pk: `ORG#${ORG_ID}`, sk: 'RAGKEY#key-1', tokenHash: 'hash-1' }),
-          marshall({ pk: `ORG#${ORG_ID}`, sk: 'RAGKEY#key-2', tokenHash: 'hash-2' }),
-        ],
-      });
+    // One partition query feeds both deletes. Deriving the hashes from the SAME
+    // snapshot that drives the partition delete is what removes the orphan
+    // window: a key created between two separate queries used to have its
+    // RAGKEY# row swept while its lookup row survived forever.
+    ddbMock.on(QueryCommand, { TableName: 'UserInfoTable' }).resolves({
+      Items: [
+        marshall({ pk: `ORG#${ORG_ID}`, sk: 'PROFILE' }),
+        marshall({ pk: `ORG#${ORG_ID}`, sk: 'RAGKEY#key-1', tokenHash: 'hash-1' }),
+        marshall({ pk: `ORG#${ORG_ID}`, sk: 'RAGKEY#key-2', tokenHash: 'hash-2' }),
+      ],
+    });
 
     await runAccountDeletion(ORG_ID);
 
-    const userInfoDeletes = ddbMock
+    const userInfoBatches = ddbMock
+      .commandCalls(BatchWriteItemCommand)
+      .map((c) =>
+        (c.args[0].input.RequestItems?.UserInfoTable ?? []).map((r) =>
+          unmarshall(r.DeleteRequest!.Key!),
+        ),
+      )
+      .filter((batch) => batch.length > 0);
+
+    const flat = userInfoBatches.flat();
+    expect(flat).toContainEqual({ pk: 'RAGKEYHASH#hash-1', sk: 'LOOKUP' });
+    expect(flat).toContainEqual({ pk: 'RAGKEYHASH#hash-2', sk: 'LOOKUP' });
+
+    // Ordering: the lookup delete precedes the partition delete, for crash
+    // convergence. batchDelete throws once its retries are exhausted, and a
+    // re-drive re-queries the partition — so if the partition went first, an
+    // interrupted purge would leave a RAGKEYHASH# row that NO later pass could
+    // ever find again (its only pointer, the RAGKEY# row's tokenHash, is gone).
+    // This way an interruption leaves an unusable key, swept next pass.
+    const lookupBatch = userInfoBatches.findIndex((batch) =>
+      batch.some((key) => key.pk === 'RAGKEYHASH#hash-1'),
+    );
+    const partitionBatch = userInfoBatches.findIndex((batch) =>
+      batch.some((key) => key.sk === 'RAGKEY#key-1'),
+    );
+    expect(lookupBatch).toBeGreaterThanOrEqual(0);
+    expect(partitionBatch).toBeGreaterThan(lookupBatch);
+    expect(doneWrites()).toHaveLength(1);
+  });
+
+  it('leaves no unreachable RAGKEYHASH row when the partition delete is interrupted', async () => {
+    // The regression this pins: batchDelete throws on exhausted UnprocessedItems
+    // (throttling — most likely on the biggest orgs), and mid-purge interruption
+    // is the expected model for a 900s teardown. Whatever the partition delete
+    // fails to remove must still be re-derivable on the next pass, which means
+    // the credential hashes have to be gone first.
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    ddbMock.on(QueryCommand, { TableName: 'UserInfoTable' }).resolves({
+      Items: [
+        marshall({ pk: `ORG#${ORG_ID}`, sk: 'RAGKEY#key-1', tokenHash: 'hash-1' }),
+        marshall({ pk: `ORG#${ORG_ID}`, sk: 'ACCESSKEY#k' }),
+      ],
+    });
+    // The ORG# partition chunk is shed for good (throttling); everything else
+    // is accepted. batchDelete gives up after its retries and throws.
+    ddbMock.on(BatchWriteItemCommand).callsFake((input: BatchWriteItemCommandInput) => {
+      const requests = input.RequestItems?.UserInfoTable ?? [];
+      const isOrgPartition = requests.some(
+        (r) => unmarshall(r.DeleteRequest!.Key!).pk === `ORG#${ORG_ID}`,
+      );
+      return isOrgPartition ? { UnprocessedItems: input.RequestItems } : {};
+    });
+
+    vi.useFakeTimers();
+    const run = runAccountDeletion(ORG_ID);
+    const assertion = expect(run).rejects.toThrow();
+    await vi.runAllTimersAsync();
+    await assertion;
+    vi.useRealTimers();
+
+    // The lookup rows are gone even though the purge did not finish, so the
+    // re-drive never needs the tokenHash it can no longer read.
+    const deleted = ddbMock
       .commandCalls(BatchWriteItemCommand)
       .flatMap((c) => c.args[0].input.RequestItems?.UserInfoTable ?? [])
       .map((r) => unmarshall(r.DeleteRequest!.Key!));
-    expect(userInfoDeletes).toContainEqual({ pk: 'RAGKEYHASH#hash-1', sk: 'LOOKUP' });
-    expect(userInfoDeletes).toContainEqual({ pk: 'RAGKEYHASH#hash-2', sk: 'LOOKUP' });
-    expect(doneWrites()).toHaveLength(1);
+    expect(deleted).toContainEqual({ pk: 'RAGKEYHASH#hash-1', sk: 'LOOKUP' });
+    // And the record is NOT marked done, so the reconciler re-drives.
+    expect(doneWrites()).toHaveLength(0);
+  });
+
+  it('purges the BillingTable ORG# usage-audit rows, leaving the tombstone partition alone', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    ddbMock.on(QueryCommand, { TableName: 'BillingTable' }).resolves({
+      Items: [
+        marshall({ pk: `ORG#${ORG_ID}`, sk: 'USAGE_REPORT#2026-08-01' }),
+        marshall({ pk: `ORG#${ORG_ID}`, sk: 'USAGE_REPORT#2026-08-02' }),
+      ],
+    });
+
+    await runAccountDeletion(ORG_ID);
+
+    const billingDeletes = ddbMock
+      .commandCalls(BatchWriteItemCommand)
+      .flatMap((c) => c.args[0].input.RequestItems?.BillingTable ?? [])
+      .map((r) => unmarshall(r.DeleteRequest!.Key!));
+    expect(billingDeletes).toEqual([
+      { pk: `ORG#${ORG_ID}`, sk: 'USAGE_REPORT#2026-08-01' },
+      { pk: `ORG#${ORG_ID}`, sk: 'USAGE_REPORT#2026-08-02' },
+    ]);
+    // The ORG_TOMBSTONE# partition is never queried and never batch-deleted.
+    expect(
+      ddbMock
+        .commandCalls(QueryCommand)
+        .map((c) => unmarshall(c.args[0].input.ExpressionAttributeValues!)[':pk']),
+    ).not.toContain(`ORG_TOMBSTONE#${ORG_ID}`);
+  });
+
+  it('scopes the BillingTable purge to USAGE_REPORT# rows rather than the whole partition', async () => {
+    // This is an unrecoverable delete. Querying the bare `ORG#{orgId}` partition
+    // would silently pull any future row written there into its scope; a row
+    // that should be purged has to be added to the prefix deliberately.
+    setupHappyMocks(OrgDeletionStatus.Pending);
+
+    await runAccountDeletion(ORG_ID);
+
+    const billingQuery = ddbMock
+      .commandCalls(QueryCommand)
+      .map((c) => c.args[0].input)
+      .find((input) => input.TableName === 'BillingTable');
+    expect(billingQuery?.KeyConditionExpression).toBe('pk = :pk AND begins_with(sk, :skPrefix)');
+    expect(unmarshall(billingQuery!.ExpressionAttributeValues!)).toEqual({
+      ':pk': `ORG#${ORG_ID}`,
+      ':skPrefix': 'USAGE_REPORT#',
+    });
   });
 
   it('purges all RAG rows (bucket + checkpoint prefixes) with a single table scan', async () => {

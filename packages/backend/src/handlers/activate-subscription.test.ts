@@ -140,7 +140,10 @@ describe('activate-subscription handler', () => {
     mockSetupIntentsList.mockResolvedValue({
       data: [{ status: 'succeeded', payment_method: 'pm_test_789' }],
     });
-    mockSyncTenantStatusInProvisionedRegions.mockResolvedValue([]);
+    mockSyncTenantStatusInProvisionedRegions.mockResolvedValue({
+      outcomes: [],
+      refusedForDeletion: false,
+    });
   });
 
   it('updates existing trial subscription when subscriptionId exists', async () => {

@@ -99,8 +99,10 @@ export async function closeOutDeletedCustomer(params: {
   if (!orgId) {
     console.warn('[deleted-customer-cleanup] No orgId — skipping tenant status sync', { userId });
   }
+  // `disabled` is never refused by fence B (teardown needs it), so only the
+  // per-region outcomes matter here.
   const outcomes = orgId
-    ? await syncTenantStatusInProvisionedRegions(orgId, 'disabled', retry)
+    ? (await syncTenantStatusInProvisionedRegions(orgId, 'disabled', retry)).outcomes
     : [];
   if (outcomes.some((o) => o.outcome === 'error')) return { outcomes, billingCanceled: false };
 

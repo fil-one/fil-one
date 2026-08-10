@@ -11,7 +11,8 @@
 import type { Context } from 'aws-lambda';
 import { Resource } from 'sst';
 import { S3VectorsStore, type VectorStore } from '@filone/rag-shared';
-import { getProvisionedRegions } from '../lib/region-helpers.js';
+import { getProvisionedRegionsFromProfile } from '../lib/region-helpers.js';
+import { getOrgProfile, isOrgDeleting } from '../lib/org-profile.js';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { createS3Client } from '../lib/s3-client.js';
 import { updateBucketTelemetry } from '../lib/bucket-rag-enablement.js';
@@ -64,7 +65,41 @@ export async function handler(
   let regionFailures = 0;
 
   try {
-    const regions = await getProvisionedRegions(orgId);
+    // FIL-112 fence B, checked ONCE per invocation. The indexer's per-object
+    // writes (rag-indexer-manifest's MANIFEST# and CHECKPOINT# Puts) are
+    // unconditional and would happily re-create rows the teardown's purge just
+    // swept, so the whole org's run is refused instead of fencing each write: a
+    // strongly-consistent profile read inside a per-object batch loop would be
+    // pathological. Strongly consistent because `deleting` is absent until
+    // teardown starts (see the read-semantics note in lib/org-profile.ts), and
+    // it doubles as the profile this invocation resolves its regions from, so
+    // it costs no extra read.
+    //
+    // Residual, stated plainly, because it is larger than "some rows get
+    // re-created". This is a check, not a fence. It is re-taken once per region
+    // (see the region loop below) but not per bucket or per page, and the
+    // buckets run SERIALLY inside a 900s invocation — Lambda's ceiling — so a
+    // deletion confirmed just after a region's check is invisible for up to
+    // that region's remaining share of ~15 minutes. In that window this worker
+    // does not merely write manifest/checkpoint rows: `indexBucket` calls
+    // `vectorStore.ensureIndex(...)` (jobs/rag-indexer-helpers.ts), which
+    // RE-CREATES the S3 Vectors index the teardown just dropped, and
+    // `upsertChunks` then writes vectors whose metadata carries the deleted
+    // user's RAW DOCUMENT TEXT (packages/rag-shared/src/s3-vectors-store.ts).
+    // That is re-embedded deleted content, not just bookkeeping. Closing it
+    // fully needs a per-bucket or per-page re-read. What bounds the damage is
+    // `setBucketRagEnablement` being fenced: once the purge has swept the
+    // enablement rows the orchestrator stops fanning out here, so the exposure
+    // is one in-flight invocation, not a self-sustaining loop — and the
+    // reconciler re-drives the purge.
+    const orgProfile = await getOrgProfile(orgId, { consistent: true });
+    if (isOrgDeleting(orgProfile)) {
+      console.warn(`${LOG} Org deletion in progress, skipping indexing`, { orgId });
+      emitWorkerInvocation('success', Date.now() - start, { regionsProcessed, regionFailures });
+      return;
+    }
+
+    const regions = getProvisionedRegionsFromProfile(orgProfile);
     if (regions.length === 0) {
       console.warn(`${LOG} Org not provisioned in any available region, skipping`, { orgId });
       emitWorkerInvocation('success', Date.now() - start, { regionsProcessed, regionFailures });
@@ -89,6 +124,22 @@ export async function handler(
           bucketCount: bucketNames.length,
         });
         continue;
+      }
+
+      // FIL-112: re-take the check per region. Regions run serially inside a
+      // 900s invocation, so by the time the last one starts the up-front check
+      // can be many minutes stale — long enough to re-create a dropped vector
+      // index and re-embed the deleted user's text. One strongly-consistent
+      // GetItem per region is negligible against a region's indexing work
+      // (a per-object read would not be). Abandon the whole run, not just this
+      // region: the org is gone for every remaining region too.
+      if (isOrgDeleting(await getOrgProfile(orgId, { consistent: true }))) {
+        console.warn(`${LOG} Org deletion confirmed mid-run, abandoning remaining regions`, {
+          orgId,
+          region,
+          regionsProcessed,
+        });
+        break;
       }
 
       try {
@@ -189,6 +240,7 @@ interface RegionIndexStats {
  * each requested bucket's vector index. Returns aggregated stats (buckets and
  * objects reconciled/failed). Per-bucket failures are isolated (logged,
  * counted, and skipped) so they do not abort the region.
+ *
  */
 async function indexRegion(args: IndexRegionArgs): Promise<RegionIndexStats> {
   const { orgId, region, tenantId, bucketNames, vectorStore, deadlineEpochMs } = args;

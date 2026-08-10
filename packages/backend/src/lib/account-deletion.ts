@@ -46,7 +46,12 @@ const dynamo = getDynamoClient();
  * colliding with a longer key family (`ORG#` never matches `ORGANIZATION#`).
  */
 export const PURGEABLE_USER_INFO_PK_PREFIXES = ['ORG#', 'USER#', 'SUB#', 'RAGKEYHASH#'] as const;
-export const PURGEABLE_BILLING_PK_PREFIXES = ['CUSTOMER#', 'DELETION_CHALLENGE#'] as const;
+// `ORG#` covers the usage-reporting worker's BillingTable `ORG#{orgId}` /
+// `USAGE_REPORT#{date}` audit rows. They were previously outside this list, so
+// nothing purged them and they survived a completed deletion until their
+// 365-day TTL. The trailing `#` keeps this away from `ORG_TOMBSTONE#`, the
+// PII-free customer reference that must OUTLIVE the purge.
+export const PURGEABLE_BILLING_PK_PREFIXES = ['CUSTOMER#', 'DELETION_CHALLENGE#', 'ORG#'] as const;
 
 /** Blast-radius guard: refuses any purge target outside the purgeable prefixes. */
 export function assertPurgeablePk(pk: string, prefixes: readonly string[]): void {
@@ -343,19 +348,42 @@ async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<v
     }
   }
 
-  // The RAGKEYHASH# lookup rows live OUTSIDE the org partition and are only
-  // findable through the RAGKEY# rows — delete them first, while those rows
-  // still point at them.
-  await purgeRagKeyHashRows(orgId);
+  // ONE SNAPSHOT drives both deletes below, and that — not the order — is what
+  // removes the orphan window. The RAGKEYHASH# lookup rows live OUTSIDE the org
+  // partition and are findable only through the RAGKEY# rows' `tokenHash`, so
+  // two separate queries left a hole: a create-rag-api-key transaction
+  // committing between them wrote a RAGKEY# row the partition delete then swept
+  // while its lookup row, never seen by the earlier sweep, survived forever.
+  // Sharing the snapshot closes that: every RAGKEY# row this pass deletes has
+  // its lookup deleted too, and a key created after the snapshot keeps BOTH
+  // rows (never a half pair) for the fence and the reconciler to handle.
+  const orgRows = await queryOrgRows(orgId);
+
+  // Given one snapshot, the order is chosen for CRASH-CONVERGENCE. `batchDelete`
+  // throws once its retries are exhausted on UnprocessedItems — most likely on
+  // the largest orgs — and the 900s teardown is expected to be interrupted and
+  // resume on a later pass (see the timeout note in sst.config.ts). A re-drive
+  // re-queries the partition, so anything deleted from it is no longer a pointer
+  // to anything else. Hashes therefore go FIRST: a crash mid-purge leaves a
+  // RAGKEY# row with no lookup — an unusable key, swept next pass — instead of
+  // a credential hash no later pass could ever find again. (The reverse order
+  // would strand it forever, which is exactly what purgeRagKeyHashRows exists to
+  // prevent.) The window this leaves — a key created between the two deletes —
+  // is already closed by fence B: PROFILE still exists here carrying
+  // `deleting = true`, re-armed every pass by applyDeletionGuards, so
+  // create-rag-api-key is refused outright.
+  await purgeRagKeyHashRows(orgRows);
 
   // The ACCESSKEY# rows go with the rest of the partition: their upstream keys
   // died with the tenant, so no per-key orchestrator revocation is needed.
-  const orgRows = await queryOrgRows(orgId);
   const orgKeys = orgRows
     .filter((row) => row.sk !== DeletionKeys.deletionSk())
     .map((row) => ({ pk: row.pk as string, sk: row.sk as string }));
   for (const key of orgKeys) assertPurgeablePk(key.pk, PURGEABLE_USER_INFO_PK_PREFIXES);
   await batchDelete(Resource.UserInfoTable.name, orgKeys);
+
+  // BillingTable `ORG#{orgId}` — the usage-reporting worker's audit rows.
+  await purgeBillingOrgRows(orgId);
 
   for (const member of record.members) {
     const userKey = { pk: `USER#${member.userId}`, sk: 'PROFILE' };
@@ -503,10 +531,15 @@ async function bumpAttemptCount(orgId: string): Promise<void> {
  * the RAGKEY# rows but not the hash lookups — credential-hash residue that
  * would survive an erasure request forever — so derive each lookup pk from
  * the RAGKEY# rows' stored `tokenHash` and delete them explicitly.
+ *
+ * Takes the partition snapshot the caller already fetched rather than
+ * re-querying: sharing one snapshot with the partition delete is what makes the
+ * pairing exact, and running before it is what makes a crash between the two
+ * recoverable (see the note at the call site).
  */
-async function purgeRagKeyHashRows(orgId: string): Promise<void> {
-  const ragKeyRows = await queryOrgRows(orgId, RagApiKeyKeys.orgSkPrefix());
-  const lookupKeys = ragKeyRows
+async function purgeRagKeyHashRows(orgRows: Record<string, unknown>[]): Promise<void> {
+  const lookupKeys = orgRows
+    .filter((row) => typeof row.sk === 'string' && row.sk.startsWith(RagApiKeyKeys.orgSkPrefix()))
     .map((row) => row.tokenHash)
     .filter((tokenHash): tokenHash is string => typeof tokenHash === 'string')
     .map((tokenHash) => ({ pk: RagApiKeyKeys.lookupPk(tokenHash), sk: RagApiKeyKeys.lookupSk() }));
@@ -514,19 +547,53 @@ async function purgeRagKeyHashRows(orgId: string): Promise<void> {
   await batchDelete(Resource.UserInfoTable.name, lookupKeys);
 }
 
-/** Paged Query of the org partition, optionally filtered to an sk prefix. */
-async function queryOrgRows(orgId: string, skPrefix?: string): Promise<Record<string, unknown>[]> {
+/** The only sk the teardown claims from the BillingTable `ORG#` partition. */
+const USAGE_REPORT_SK_PREFIX = 'USAGE_REPORT#';
+
+/**
+ * Delete the org's BillingTable `ORG#{orgId}` audit rows — the usage-reporting
+ * worker's `USAGE_REPORT#{date}` items. Nothing else in the teardown touches
+ * this partition (the per-member sweep below handles `CUSTOMER#`), so without
+ * this the rows outlive the deletion until their TTL. The
+ * `ORG_TOMBSTONE#{orgId}` record is a different partition and is untouched.
+ *
+ * The sk prefix is part of the contract, not an optimization: this is an
+ * unrecoverable delete, and querying the bare partition would silently pull any
+ * future `ORG#{orgId}` row into its scope the moment someone adds one. A row
+ * that should be purged has to be added here deliberately.
+ */
+async function purgeBillingOrgRows(orgId: string): Promise<void> {
+  const rows = await queryPartition(
+    Resource.BillingTable.name,
+    `ORG#${orgId}`,
+    USAGE_REPORT_SK_PREFIX,
+  );
+  const keys = rows.map((row) => ({ pk: row.pk as string, sk: row.sk as string }));
+  for (const key of keys) assertPurgeablePk(key.pk, PURGEABLE_BILLING_PK_PREFIXES);
+  await batchDelete(Resource.BillingTable.name, keys);
+}
+
+/** Paged Query of the org's UserInfoTable partition. */
+async function queryOrgRows(orgId: string): Promise<Record<string, unknown>[]> {
+  return queryPartition(Resource.UserInfoTable.name, `ORG#${orgId}`);
+}
+
+/** Paged Query of a partition, optionally narrowed to an sk prefix. */
+async function queryPartition(
+  tableName: string,
+  pk: string,
+  skPrefix?: string,
+): Promise<Record<string, unknown>[]> {
   const rows: Record<string, unknown>[] = [];
   let lastEvaluatedKey: Record<string, AttributeValue> | undefined;
   do {
     const result = await dynamo.send(
       new QueryCommand({
-        TableName: Resource.UserInfoTable.name,
+        TableName: tableName,
         KeyConditionExpression: skPrefix ? 'pk = :pk AND begins_with(sk, :skPrefix)' : 'pk = :pk',
-        ExpressionAttributeValues: marshall({
-          ':pk': `ORG#${orgId}`,
-          ...(skPrefix ? { ':skPrefix': skPrefix } : {}),
-        }),
+        ExpressionAttributeValues: marshall(
+          skPrefix ? { ':pk': pk, ':skPrefix': skPrefix } : { ':pk': pk },
+        ),
         ...(lastEvaluatedKey ? { ExclusiveStartKey: lastEvaluatedKey } : {}),
       }),
     );
