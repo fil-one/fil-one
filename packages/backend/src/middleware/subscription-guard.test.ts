@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  ConditionalCheckFailedException,
+  DynamoDBClient,
+  GetItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { ApiErrorCode } from '@filone/shared';
@@ -25,9 +30,15 @@ vi.mock('../lib/trial-entitlement.js', () => ({
   ensureTrialEntitlement: vi.fn(),
 }));
 
+const mockReportMetric = vi.fn();
+vi.mock('../lib/metrics.js', () => ({
+  reportMetric: (...args: unknown[]) => mockReportMetric(...args),
+}));
+
 const ddbMock = mockClient(DynamoDBClient);
 
 import { subscriptionGuardMiddleware, AccessLevel } from './subscription-guard.js';
+import { DELETION_GUARD } from '../lib/deletion-guard.js';
 import { ensureTrialEntitlement } from '../lib/trial-entitlement.js';
 import { SubscriptionStatus } from '@filone/shared';
 
@@ -51,6 +62,7 @@ describe('subscriptionGuardMiddleware', () => {
   beforeEach(() => {
     ddbMock.reset();
     vi.restoreAllMocks();
+    mockReportMetric.mockClear();
   });
 
   it('allows when no billing record exists and the user is entitled to a trial', async () => {
@@ -200,7 +212,85 @@ describe('subscriptionGuardMiddleware', () => {
         ':grace': { S: expect.any(String) },
         ':now': { S: expect.any(String) },
       },
+      // FIL-112: the lazy transition is upsert-capable, so it must never
+      // re-create a billing record the account teardown already purged.
+      ConditionExpression: DELETION_GUARD,
     });
+  });
+
+  function expiredTrialWithDeclinedPersist() {
+    ddbMock.on(GetItemCommand).resolves(
+      billingItem({
+        pk: `CUSTOMER#${USER_ID}`,
+        sk: 'SUBSCRIPTION',
+        subscriptionStatus: SubscriptionStatus.Trialing,
+        trialEndsAt: new Date(Date.now() - 1000).toISOString(),
+      }),
+    );
+    // The teardown claimed or purged the record between the read and the write.
+    ddbMock.on(UpdateItemCommand).rejects(
+      new ConditionalCheckFailedException({
+        message: 'The conditional request failed',
+        $metadata: {},
+      }),
+    );
+  }
+
+  it('blocks the request (inactive) when the deletion guard declines the trial → grace write', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expiredTrialWithDeclinedPersist();
+
+    const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
+    const result = await before(
+      buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid' } })),
+    );
+
+    // A rejection is a skip, not a 5xx — but it is NOT a licence to continue on
+    // the in-memory grace_period. The only writers that can decline this are the
+    // teardown and deleted-customer-cleanup, so the request must fail closed.
+    expectErrorResponse(result, 403, {
+      message:
+        'Your subscription is not active. Please contact support or update your payment method.',
+      code: ApiErrorCode.SUBSCRIPTION_INACTIVE,
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('org mid-deletion'),
+      expect.objectContaining({ source: 'subscription-guard', userId: USER_ID }),
+    );
+    expect(mockReportMetric).toHaveBeenCalledTimes(1);
+    expect(mockReportMetric.mock.calls[0][0]).toMatchObject({
+      _aws: {
+        CloudWatchMetrics: [
+          {
+            Namespace: 'FilOne',
+            Dimensions: [[]],
+            Metrics: [{ Name: 'BillingDeletionGuardRejected', Unit: 'Count' }],
+          },
+        ],
+      },
+      source: 'subscription-guard',
+      BillingDeletionGuardRejected: 1,
+    });
+  });
+
+  it('blocks READ access too when the guard declines — grace_period would unlock shareable presigns', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expiredTrialWithDeclinedPersist();
+
+    const event = buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid' } });
+    const { before } = subscriptionGuardMiddleware(AccessLevel.Read);
+    const result = await before(buildMiddyRequest(event));
+
+    // Falling through on the in-memory grace_period would ALLOW this read, and
+    // handlers/presign.ts gates shareable getObject URLs on `trialing` only — so
+    // an account mid-deletion would walk away with a time-limited public URL to
+    // bucket data that outlives the request.
+    expectErrorResponse(result, 403, {
+      message:
+        'Your subscription is not active. Please contact support or update your payment method.',
+      code: ApiErrorCode.SUBSCRIPTION_INACTIVE,
+    });
+    expect(event.requestContext.subscriptionStatus).not.toBe(SubscriptionStatus.GracePeriod);
   });
 
   it('blocks write access during grace period', async () => {

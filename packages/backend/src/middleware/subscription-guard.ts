@@ -1,4 +1,4 @@
-import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import type { MiddlewareObj, Request } from '@middy/core';
 import type {
@@ -10,6 +10,7 @@ import type {
 import { ApiErrorCode, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import { sendGuardedBillingUpdate } from '../lib/deletion-guard.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import { ensureTrialEntitlement } from '../lib/trial-entitlement.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -78,7 +79,8 @@ async function runSubscriptionGuard(
 
   if (status === SubscriptionStatus.Trialing) {
     const transitioned = await transitionExpiredTrial(record, userId, tableName);
-    if (!transitioned) return; // Trial still active
+    if (transitioned === 'still-trialing') return; // Trial still active
+    if (transitioned === 'declined') return buildInactiveResponse();
     status = transitioned;
     event.requestContext.subscriptionStatus = status;
   }
@@ -102,24 +104,45 @@ async function runSubscriptionGuard(
 }
 
 /**
+ * Outcome of the lazy trial→grace transition: the trial is still running, the
+ * record moved to grace_period, or the deletion guard refused the write.
+ */
+type TrialTransition = SubscriptionStatus.GracePeriod | 'still-trialing' | 'declined';
+
+/**
  * If the trial has expired, transition the record to grace_period and mutate
  * `record.gracePeriodEndsAt` in place so the caller can continue processing
- * as a grace-period record. Returns the new status, or null if still trialing.
+ * as a grace-period record.
+ *
+ * The write is deletion-guarded (FIL-112): this update is upsert-capable and
+ * runs on effectively every guarded request, so unconditioned it would
+ * re-create a billing record the account teardown just purged.
+ *
+ * A rejection returns `'declined'` and the caller must block the request
+ * outright — it must NOT fall through on the in-memory grace_period. Promoting
+ * `trialing → grace_period` in memory is not uniformly more restrictive:
+ * `handlers/presign.ts` blocks shareable presigned getObject URLs for
+ * `trialing` only, so continuing on grace_period would hand a time-limited
+ * public URL to bucket data — one that outlives the request — to an account
+ * mid-deletion. The record existed at the ConsistentRead milliseconds earlier
+ * and only the teardown and `deleted-customer-cleanup` can remove it or set
+ * `deletionRequestedAt`, so a rejection here is an unambiguous deletion signal
+ * with no false-positive cost.
  */
 async function transitionExpiredTrial(
   record: Record<string, unknown>,
   userId: string,
   tableName: string,
-): Promise<SubscriptionStatus.GracePeriod | null> {
+): Promise<TrialTransition> {
   const trialEndsAt = record.trialEndsAt as string | undefined;
   if (!trialEndsAt || new Date(trialEndsAt).getTime() >= Date.now()) {
-    return null;
+    return 'still-trialing';
   }
 
   // Lazy transition: trial expired → grace_period
   const gracePeriodEndsAt = addDays(new Date(trialEndsAt), TRIAL_GRACE_DAYS).toISOString();
-  await dynamo.send(
-    new UpdateItemCommand({
+  const persisted = await sendGuardedBillingUpdate(
+    {
       TableName: tableName,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -132,8 +155,11 @@ async function transitionExpiredTrial(
         ':grace': { S: gracePeriodEndsAt },
         ':now': { S: new Date().toISOString() },
       },
-    }),
+    },
+    { source: 'subscription-guard', userId },
   );
+  if (!persisted) return 'declined';
+
   record.gracePeriodEndsAt = gracePeriodEndsAt;
   return SubscriptionStatus.GracePeriod;
 }

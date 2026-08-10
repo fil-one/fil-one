@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  ConditionalCheckFailedException,
+  DynamoDBClient,
+  GetItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { PlanId, SubscriptionStatus } from '@filone/shared';
 
@@ -31,6 +36,7 @@ vi.mock('../lib/stripe-client.js', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler } from './get-billing.js';
+import { DELETION_GUARD } from '../lib/deletion-guard.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
@@ -580,6 +586,89 @@ describe('get-billing baseHandler', () => {
 
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
     expect(updateCalls).toHaveLength(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // FIL-112 — both writers on this read path are upsert-capable, so an
+  // unconditioned write would recreate a billing record the account teardown
+  // already purged. A guard rejection is a skip: the read model still answers.
+  // -------------------------------------------------------------------------
+
+  it('fences the cached-price refresh with the deletion guard', async () => {
+    ddbMock.on(GetItemCommand).resolves(activeRecordWith());
+    ddbMock.on(UpdateItemCommand).resolves({});
+    mockSubscriptionsRetrieve.mockResolvedValue(stripeSubscription(TIERED_PRICE));
+
+    await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const priceWrites = ddbMock
+      .commandCalls(UpdateItemCommand)
+      .filter((call) => String(call.args[0].input.UpdateExpression).includes('stripePrice'));
+    expect(priceWrites).toHaveLength(1);
+    expect(priceWrites[0].args[0].input).toMatchObject({ ConditionExpression: DELETION_GUARD });
+  });
+
+  it('still serves billing details when the deletion guard rejects the price-cache write', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    ddbMock.on(GetItemCommand).resolves(activeRecordWith());
+    ddbMock.on(UpdateItemCommand).rejects(
+      new ConditionalCheckFailedException({
+        message: 'The conditional request failed',
+        $metadata: {},
+      }),
+    );
+    mockSubscriptionsRetrieve.mockResolvedValue(stripeSubscription(TIERED_PRICE));
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    expect(result.statusCode).toBe(200);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('org mid-deletion'),
+      expect.objectContaining({ source: 'get-billing.cacheStripePrice' }),
+    );
+  });
+
+  it('fences the lazy trial → grace_period transition with the deletion guard', async () => {
+    ddbMock.on(GetItemCommand).resolves(
+      subscriptionItem({
+        subscriptionStatus: SubscriptionStatus.Trialing,
+        trialEndsAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      }),
+    );
+    ddbMock.on(UpdateItemCommand).resolves({});
+
+    await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls[0].args[0].input).toMatchObject({ ConditionExpression: DELETION_GUARD });
+  });
+
+  it('still reports grace_period when the deletion guard rejects the transition write', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const expiredTrialEndsAt = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    ddbMock.on(GetItemCommand).resolves(
+      subscriptionItem({
+        subscriptionStatus: SubscriptionStatus.Trialing,
+        trialEndsAt: expiredTrialEndsAt,
+      }),
+    );
+    ddbMock.on(UpdateItemCommand).rejects(
+      new ConditionalCheckFailedException({
+        message: 'The conditional request failed',
+        $metadata: {},
+      }),
+    );
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(String(result.body));
+    expect(body.subscription.status).toBe(SubscriptionStatus.GracePeriod);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('org mid-deletion'),
+      expect.objectContaining({ source: 'get-billing.evaluateStatusTransitions' }),
+    );
   });
 
   it('reports expired grace_period as canceled but does NOT persist the transition', async () => {
