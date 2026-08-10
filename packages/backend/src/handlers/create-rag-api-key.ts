@@ -1,4 +1,3 @@
-import { TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
@@ -6,7 +5,8 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { CreateRagApiKeySchema } from '@filone/shared';
 import type { CreateRagApiKeyResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
-import { getDynamoClient } from '../lib/ddb-client.js';
+import { accountDeletedResponse } from '../lib/account-deleted-response.js';
+import { OrgDeletingError, sendFencedWrite } from '../lib/org-profile.js';
 import {
   RagApiKeyKeys,
   generateRagKeyToken,
@@ -68,43 +68,57 @@ export async function baseHandler(
 
   // Both rows or neither: the ORG record (listing/ownership) and the hash
   // LOOKUP row (bearer-auth entry point) must never diverge.
-  await getDynamoClient().send(
-    new TransactWriteItemsCommand({
-      TransactItems: [
-        {
-          Put: {
-            TableName: Resource.UserInfoTable.name,
-            Item: marshall({
-              pk: RagApiKeyKeys.orgPk(orgId),
-              sk: RagApiKeyKeys.orgSk(keyId),
-              keyName,
-              keyPrefix,
-              tokenHash,
-              bucketScope,
-              ...(buckets ? { buckets } : {}),
-              createdBy: userId,
-              ...(creatorEmail ? { creatorEmail } : {}),
-              createdAt,
-            }),
-            ConditionExpression: 'attribute_not_exists(pk)',
-          },
+  //
+  // FIL-112: the transaction is additionally fenced on the org's `deleting`
+  // flag (sendFencedWrite). Without it, `attribute_not_exists(pk)` — which only
+  // stops key-id collisions — lets a request authenticated just before the
+  // deletion confirm mint a WORKING bearer credential into a partition the
+  // teardown has already purged. Fencing here (rather than pre-checking) keeps
+  // the credential and the fence in one atomic commit. The fence requires the
+  // PROFILE row to exist as well as to be unflagged, so it covers the whole
+  // window: `deleting = true` at confirm, and the purged-profile state after —
+  // see the coverage note on orgNotDeletingCheck.
+  try {
+    await sendFencedWrite(orgId, [
+      {
+        Put: {
+          TableName: Resource.UserInfoTable.name,
+          Item: marshall({
+            pk: RagApiKeyKeys.orgPk(orgId),
+            sk: RagApiKeyKeys.orgSk(keyId),
+            keyName,
+            keyPrefix,
+            tokenHash,
+            bucketScope,
+            ...(buckets ? { buckets } : {}),
+            createdBy: userId,
+            ...(creatorEmail ? { creatorEmail } : {}),
+            createdAt,
+          }),
+          ConditionExpression: 'attribute_not_exists(pk)',
         },
-        {
-          Put: {
-            TableName: Resource.UserInfoTable.name,
-            Item: marshall({
-              pk: RagApiKeyKeys.lookupPk(tokenHash),
-              sk: RagApiKeyKeys.lookupSk(),
-              orgId,
-              keyId,
-              createdAt,
-            }),
-            ConditionExpression: 'attribute_not_exists(pk)',
-          },
+      },
+      {
+        Put: {
+          TableName: Resource.UserInfoTable.name,
+          Item: marshall({
+            pk: RagApiKeyKeys.lookupPk(tokenHash),
+            sk: RagApiKeyKeys.lookupSk(),
+            orgId,
+            keyId,
+            createdAt,
+          }),
+          ConditionExpression: 'attribute_not_exists(pk)',
         },
-      ],
-    }),
-  );
+      },
+    ]);
+  } catch (err) {
+    if (!(err instanceof OrgDeletingError)) throw err;
+    console.warn('[create-rag-api-key] Refusing to mint a key: org deletion in progress', {
+      orgId,
+    });
+    return accountDeletedResponse();
+  }
 
   return new ResponseBuilder()
     .status(201)

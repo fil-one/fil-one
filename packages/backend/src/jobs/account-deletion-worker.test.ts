@@ -29,6 +29,25 @@ describe('account-deletion-worker handler', () => {
   it('propagates teardown failures so the Lambda async retry / orchestrator re-drives', async () => {
     mockRunAccountDeletion.mockRejectedValue(new Error('stripe is down'));
 
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
     await expect(handler({ orgId: 'org-1' })).rejects.toThrow('stripe is down');
+
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it('a healthy pass emits no Lambda Errors datapoint, even though it waits on Stripe', async () => {
+    // The wait for Stripe's search-index lag happens IN-PASS (see
+    // waitOutStripeSearchLag). If it were deferred by throwing, every healthy
+    // deletion would produce an `Errors` datapoint — the metric the Grafana
+    // MetricStream alerts on — and burn an async retry per teardown.
+    mockRunAccountDeletion.mockResolvedValue(undefined);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await handler({ orgId: 'org-1' });
+
+    expect(error).not.toHaveBeenCalled();
+    error.mockRestore();
   });
 });

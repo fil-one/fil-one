@@ -5,8 +5,13 @@ vi.mock('./service-orchestrator-registry.js', () => ({
   getAvailableOrchestrators: (...args: unknown[]) => mockGetAvailableOrchestrators(...args),
 }));
 
-const mockGetOrgProfile = vi.fn(async (orgId: string) => fakeOrgProfile(orgId));
-vi.mock('./org-profile.js', () => ({
+const mockGetOrgProfile = vi.fn<(orgId: string) => Promise<OrgProfileItem | undefined>>(
+  async (orgId: string) => fakeOrgProfile(orgId),
+);
+// Only the read is stubbed — `isOrgDeleting` stays real so the fence is
+// exercised as the predicate every other fence-B reader uses.
+vi.mock('./org-profile.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./org-profile.js')>()),
   getOrgProfile: (...args: unknown[]) => mockGetOrgProfile(...(args as [string])),
 }));
 
@@ -21,11 +26,15 @@ import {
   WEBHOOK_STATUS_SYNC_RETRY,
   type RegionSyncOutcome,
 } from './region-helpers.js';
+import type { OrgProfileItem } from './org-profile.js';
 import { fakeOrchestrator, fakeOrgProfile } from '../test/fake-orchestrator.js';
 
 describe('syncTenantStatusInProvisionedRegions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // clearAllMocks clears calls, not implementations — restore the default
+    // "org is alive" profile so a fence test cannot leak into the next one.
+    mockGetOrgProfile.mockImplementation(async (orgId: string) => fakeOrgProfile(orgId));
   });
 
   afterEach(() => {
@@ -57,7 +66,7 @@ describe('syncTenantStatusInProvisionedRegions', () => {
 
     const result = await syncTenantStatusInProvisionedRegions('org-1', 'write-locked');
 
-    expect(result).toEqual([
+    expect(result.outcomes).toEqual([
       { orchestratorId: 'aurora', tenantId: 'aurora:org-1', outcome: 'in-sync' },
       { orchestratorId: 'fth', tenantId: 'fth:org-1', outcome: 'updated' },
     ]);
@@ -70,7 +79,7 @@ describe('syncTenantStatusInProvisionedRegions', () => {
 
     const result = await syncTenantStatusInProvisionedRegions('org-1', 'disabled');
 
-    expect(result).toEqual([
+    expect(result.outcomes).toEqual([
       { orchestratorId: 'fth', tenantId: 'fth:org-1', outcome: 'not-found' },
     ]);
   });
@@ -100,7 +109,7 @@ describe('syncTenantStatusInProvisionedRegions', () => {
 
     const result = await syncTenantStatusInProvisionedRegions('org-1', 'write-locked');
 
-    expect(result).toEqual([
+    expect(result.outcomes).toEqual([
       { orchestratorId: 'aurora', tenantId: 'aurora:org-1', outcome: 'skipped' },
     ]);
   });
@@ -112,6 +121,94 @@ describe('syncTenantStatusInProvisionedRegions', () => {
     await syncTenantStatusInProvisionedRegions('org-1', 'active');
 
     expect(aurora.updateTenantStatus).toHaveBeenCalledWith('aurora:org-1', 'active');
+  });
+
+  describe('FIL-112 fence B — re-activation only', () => {
+    /** Make the profile read report an org whose teardown has started. */
+    function orgIsDeleting(orgId = 'org-1') {
+      mockGetOrgProfile.mockResolvedValue({ ...fakeOrgProfile(orgId), deleting: { BOOL: true } });
+    }
+
+    it('refuses to re-activate a deleting org and reports `refused` per region', async () => {
+      // Aurora's teardown fails fatally when it cannot confirm DISABLED, so a
+      // re-activation here can wedge the whole deletion permanently.
+      const aurora = fakeOrchestrator('aurora', { status: 'disabled' });
+      mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+      orgIsDeleting();
+
+      const result = await syncTenantStatusInProvisionedRegions('org-1', 'active');
+
+      expect(aurora.updateTenantStatus).not.toHaveBeenCalled();
+      expect(aurora.getTenantStatus).not.toHaveBeenCalled();
+      expect(result.outcomes).toEqual([
+        { orchestratorId: 'aurora', tenantId: 'aurora:org-1', outcome: 'refused' },
+      ]);
+      expect(result.refusedForDeletion).toBe(true);
+    });
+
+    it('reports the refusal for a deleting org with NO provisioned region', async () => {
+      // The refusal must be an org-level fact, not a property of the per-region
+      // outcomes: an org that never provisioned a tenant produces none, so any
+      // `outcomes.some(o => o.outcome === 'refused')` test answers "not refused"
+      // and the caller goes on to log "Tenant unlocked" for a deleting org.
+      mockGetAvailableOrchestrators.mockReturnValue([fakeOrchestrator('aurora', { ready: false })]);
+      orgIsDeleting();
+
+      const result = await syncTenantStatusInProvisionedRegions('org-1', 'active');
+
+      expect(result.outcomes).toEqual([]);
+      expect(result.refusedForDeletion).toBe(true);
+    });
+
+    it('reads the profile strongly-consistently when re-activating (the flag fails open)', async () => {
+      mockGetAvailableOrchestrators.mockReturnValue([fakeOrchestrator('aurora')]);
+
+      await syncTenantStatusInProvisionedRegions('org-1', 'active');
+
+      expect(mockGetOrgProfile).toHaveBeenCalledWith('org-1', { consistent: true });
+    });
+
+    it('still DISABLES a deleting org — teardown depends on it', async () => {
+      const aurora = fakeOrchestrator('aurora', { status: 'active' });
+      mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+      orgIsDeleting();
+
+      const result = await syncTenantStatusInProvisionedRegions('org-1', 'disabled');
+
+      expect(aurora.updateTenantStatus).toHaveBeenCalledWith('aurora:org-1', 'disabled');
+      expect(result.refusedForDeletion).toBe(false);
+    });
+
+    it('still WRITE-LOCKS a deleting org (the grace-period enforcer path)', async () => {
+      const aurora = fakeOrchestrator('aurora', { status: 'active' });
+      mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+      orgIsDeleting();
+
+      await syncTenantStatusInProvisionedRegions('org-1', 'write-locked');
+
+      expect(aurora.updateTenantStatus).toHaveBeenCalledWith('aurora:org-1', 'write-locked');
+    });
+
+    it('re-activates normally when the org is not deleting', async () => {
+      const aurora = fakeOrchestrator('aurora', { status: 'disabled' });
+      mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+
+      const result = await syncTenantStatusInProvisionedRegions('org-1', 'active');
+
+      expect(aurora.updateTenantStatus).toHaveBeenCalledWith('aurora:org-1', 'active');
+      expect(result.refusedForDeletion).toBe(false);
+    });
+
+    it('a refused sync is not an error — assertRegionSyncSucceeded lets it through', async () => {
+      mockGetAvailableOrchestrators.mockReturnValue([fakeOrchestrator('aurora')]);
+      orgIsDeleting();
+
+      const result = await syncTenantStatusInProvisionedRegions('org-1', 'active');
+
+      // Nothing failed and re-driving would not help, so callers must branch on
+      // `refusedForDeletion` rather than on a thrown error.
+      expect(() => assertRegionSyncSucceeded(result.outcomes)).not.toThrow();
+    });
   });
 
   it('escalates a write-locked tenant to disabled', async () => {
@@ -148,7 +245,7 @@ describe('syncTenantStatusInProvisionedRegions', () => {
     await vi.runAllTimersAsync();
     const result = await promise;
 
-    expect(result).toMatchObject([
+    expect(result.outcomes).toMatchObject([
       { orchestratorId: 'aurora', tenantId: 'aurora:org-1', outcome: 'error' },
     ]);
     expect(aurora.getTenantStatus).toHaveBeenCalledTimes(4);
@@ -179,7 +276,7 @@ describe('syncTenantStatusInProvisionedRegions', () => {
     await vi.runAllTimersAsync();
     const result = await promise;
 
-    expect(result).toEqual([
+    expect(result.outcomes).toEqual([
       { orchestratorId: 'fth', tenantId: 'fth:org-1', outcome: 'error', cause: updateError },
     ]);
     expect(fth.updateTenantStatus).toHaveBeenCalledTimes(4);
@@ -197,7 +294,9 @@ describe('syncTenantStatusInProvisionedRegions', () => {
     await vi.runAllTimersAsync();
     const result = await promise;
 
-    expect(result).toEqual([{ orchestratorId: 'fth', tenantId: 'fth:org-1', outcome: 'updated' }]);
+    expect(result.outcomes).toEqual([
+      { orchestratorId: 'fth', tenantId: 'fth:org-1', outcome: 'updated' },
+    ]);
   });
 
   it('honors a tighter retry override (1 initial + 1 retry)', async () => {
@@ -367,7 +466,7 @@ describe('getRegionsWithTenantIdsForOrg', () => {
     vi.clearAllMocks();
   });
 
-  it('reads the profile once and resolves raw tenant ids from it', async () => {
+  it('reads the profile once, STRONGLY CONSISTENTLY, and resolves raw tenant ids from it', async () => {
     const aurora = fakeOrchestrator('aurora', { ready: false });
     mockGetAvailableOrchestrators.mockReturnValue([aurora]);
     const midSetupProfile = {
@@ -379,7 +478,9 @@ describe('getRegionsWithTenantIdsForOrg', () => {
     const result = await getRegionsWithTenantIdsForOrg('org-1');
 
     expect(result).toEqual([{ orchestrator: aurora, tenantId: 'aurora-mid-setup' }]);
-    expect(mockGetOrgProfile.mock.calls).toEqual([['org-1']]);
+    // Both callers are teardown paths: a stale read skips the region, and the
+    // profile — the only pointer to the tenant id — is purged right after.
+    expect(mockGetOrgProfile.mock.calls).toEqual([['org-1', { consistent: true }]]);
   });
 
   it('does not fetch the PROFILE row when no orchestrator is available', async () => {

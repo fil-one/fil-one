@@ -149,7 +149,7 @@ async function cancelSubscriptionAndDisableTenant(
   now: Date,
 ): Promise<CandidateOutcome> {
   assertRegionSyncSucceeded(
-    await syncTenantStatusInProvisionedRegions(candidate.orgId, 'disabled'),
+    (await syncTenantStatusInProvisionedRegions(candidate.orgId, 'disabled')).outcomes,
   );
   // A teardown can claim (or purge) the record after the scan filtered it in;
   // an unconditional write would then upsert a zombie {pk, sk, canceled} row.
@@ -180,7 +180,7 @@ async function cancelSubscriptionAndDisableTenant(
 // lock calls are skipped and a tenant that is already `disabled` is never
 // downgraded back to `write-locked`.
 async function ensureTenantWriteLocked(candidate: Candidate): Promise<CandidateOutcome> {
-  const outcomes = await syncTenantStatusInProvisionedRegions(candidate.orgId, 'write-locked');
+  const { outcomes } = await syncTenantStatusInProvisionedRegions(candidate.orgId, 'write-locked');
 
   if (outcomes.length === 0) {
     console.warn('[grace-period-enforcer] No ready tenant on any orchestrator, skipping', {

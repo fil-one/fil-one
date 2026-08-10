@@ -79,7 +79,18 @@ export async function saveBillingRecord(
 // has none there, so this is a no-op for orchestrators the org never used.
 export async function unlockAllProvisionedRegions(orgId: string): Promise<void> {
   try {
-    assertRegionSyncSucceeded(await syncTenantStatusInProvisionedRegions(orgId, 'active'));
+    const { outcomes, refusedForDeletion } = await syncTenantStatusInProvisionedRegions(
+      orgId,
+      'active',
+    );
+    assertRegionSyncSucceeded(outcomes);
+    // Fence B refused the unlock (FIL-112): report that, never "unlocked".
+    if (refusedForDeletion) {
+      console.warn('[billing-activation] Tenant unlock refused: org deletion in progress', {
+        orgId,
+      });
+      return;
+    }
     console.log('[billing-activation] Tenant unlocked', { orgId });
   } catch (error) {
     console.error('[billing-activation] Failed to unlock tenant', {

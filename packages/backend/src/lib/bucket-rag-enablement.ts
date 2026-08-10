@@ -1,7 +1,6 @@
 import {
   ConditionalCheckFailedException,
   GetItemCommand,
-  PutItemCommand,
   UpdateItemCommand,
   type AttributeValue,
 } from '@aws-sdk/client-dynamodb';
@@ -9,6 +8,7 @@ import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import type { BucketRagEnablementResponse, S3Region } from '@filone/shared';
 import { getDynamoClient } from './ddb-client.js';
+import { sendFencedWrite } from './org-profile.js';
 import {
   RAGKeys,
   type BucketRAGEnablementRecord,
@@ -55,6 +55,15 @@ export async function getBucketRagEnablement(
  * orchestrator can group RAG-enabled buckets by org without a second lookup (see
  * dynamo-records). `status` (enablement) is decoupled from `syncState` (sync
  * progress): toggling enablement never disturbs the indexer's sync state.
+ *
+ * FIL-112: fenced on the org's `deleting` flag, and this is the load-bearing
+ * one of the RAG fences. The row is self-sustaining — an `enabled: true` write
+ * landing after the teardown's purge re-creates an ACTIVE enablement row, which
+ * `jobs/rag-indexer-orchestrator.ts` scans and fans out on, re-animating the
+ * indexer (and every manifest/checkpoint row it writes) for a deleted org.
+ * Throws {@link OrgDeletingError}; the handler maps that to 410 ACCOUNT_DELETED.
+ * Both directions are fenced, not just `enabled: true`: a disable write would
+ * still re-create the row, and refusing outright keeps one code path.
  */
 export async function setBucketRagEnablement(args: {
   region: S3Region;
@@ -82,12 +91,14 @@ export async function setBucketRagEnablement(args: {
     updatedAt: now,
   };
 
-  await dynamo.send(
-    new PutItemCommand({
-      TableName: Resource.RagIndexerTable.name,
-      Item: marshall(record, { removeUndefinedValues: true }),
-    }),
-  );
+  await sendFencedWrite(orgId, [
+    {
+      Put: {
+        TableName: Resource.RagIndexerTable.name,
+        Item: marshall(record, { removeUndefinedValues: true }),
+      },
+    },
+  ]);
 
   return record;
 }
@@ -163,6 +174,20 @@ export interface BucketTelemetryUpdate {
  * A `ConditionExpression` (`attribute_exists(pk)`) guards against writing telemetry when the
  * enablement row was never created (bucket never enabled) or was deleted — so the update is
  * a safe no-op otherwise.
+ *
+ * FIL-112: deliberately NOT fenced on the org's `deleting` flag, for the same
+ * reason `touchRagKeyLastUsed` is not. The fence would have to be a two-item
+ * transaction (the flag lives on UserInfoTable) — ~4x the write cost on the
+ * indexer's hot path, once per bucket per run — and it buys nothing this row's
+ * own `attribute_exists(pk)` does not already provide: this writer can only
+ * update an existing row, never create one, and the teardown deletes the
+ * enablement rows, so post-purge it is already a no-op. It would also import a
+ * new failure mode onto a path contracted to be best-effort: a transaction
+ * cancelled by contention on `ORG#/PROFILE` is not a conditional-check failure,
+ * so once `sendFencedWrite`'s retry budget was exhausted it would escape this
+ * catch and fail the whole bucket (jobs/rag-indexer-helpers.ts). The writer
+ * that matters — the one that can
+ * re-create a row and re-animate the indexer — is `setBucketRagEnablement`.
  * */
 export async function updateBucketTelemetry(
   orgId: string,

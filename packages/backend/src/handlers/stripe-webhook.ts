@@ -479,13 +479,12 @@ async function handleSubscriptionDeleted(
   try {
     const orgId = await resolveOrgIdFromSubscription(userId);
     if (orgId) {
-      assertRegionSyncSucceeded(
-        await syncTenantStatusInProvisionedRegions(
-          orgId,
-          'write-locked',
-          WEBHOOK_STATUS_SYNC_RETRY,
-        ),
+      const { outcomes } = await syncTenantStatusInProvisionedRegions(
+        orgId,
+        'write-locked',
+        WEBHOOK_STATUS_SYNC_RETRY,
       );
+      assertRegionSyncSucceeded(outcomes);
       console.log('[stripe-webhook] Tenant write-locked', { userId, orgId });
     }
   } catch (error) {
@@ -541,15 +540,21 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
 
   // Best-effort: re-enable the tenant on every orchestrator if recovering from
   // PastDue/GracePeriod. If this fails, the tenant may remain locked until
-  // manual intervention.
-  // Accepted TOCTOU: a teardown can claim the record after the guard above
-  // passed; the transiently re-activated tenant converges when it is deleted.
+  // manual intervention. The sync itself now refuses to re-activate an org
+  // whose deletion has started (FIL-112 fence B), which is what previously made
+  // this path able to undo — and, via Aurora's disabled-verification, wedge — a
+  // teardown. The TOCTOU is narrowed, not closed: a deletion confirmed between
+  // the sync's profile read and its orchestrator call still re-activates
+  // transiently, and that tenant converges only when it is deleted.
   try {
     const orgId = await resolveOrgIdFromSubscription(userId);
-    if (orgId) {
-      assertRegionSyncSucceeded(
-        await syncTenantStatusInProvisionedRegions(orgId, 'active', WEBHOOK_STATUS_SYNC_RETRY),
-      );
+    if (!orgId) return;
+    const retry = WEBHOOK_STATUS_SYNC_RETRY;
+    const out = await syncTenantStatusInProvisionedRegions(orgId, 'active', retry);
+    assertRegionSyncSucceeded(out.outcomes);
+    // Silent when refused: region-helpers already logged the refusal, and
+    // claiming "re-activated" here would be false.
+    if (!out.refusedForDeletion) {
       console.log('[stripe-webhook] Tenant re-activated', { userId, orgId });
     }
   } catch (error) {

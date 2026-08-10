@@ -4,7 +4,8 @@ import { mockClient } from 'aws-sdk-client-mock';
 import {
   ConditionalCheckFailedException,
   DynamoDBClient,
-  PutItemCommand,
+  TransactWriteItemsCommand,
+  TransactionCanceledException,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
@@ -95,7 +96,11 @@ vi.mock('../lib/fth/fth-orchestrator.js', () => ({ fthOrchestrator }));
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getAvailableOrchestrators: () => [auroraOrchestrator, fthOrchestrator],
 }));
-vi.mock('../lib/org-profile.js', () => ({
+// Only the profile READ is stubbed; the fence helpers (sendFencedWrite and the
+// real isOrgDeleting predicate) stay real so the fenced audit write is exercised
+// end to end against the DynamoDB mock.
+vi.mock('../lib/org-profile.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/org-profile.js')>()),
   getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
 }));
 
@@ -110,6 +115,17 @@ import { handler } from './usage-reporting-worker.js';
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * The BillingTable audit rows written this run. The write is a fenced
+ * transaction (FIL-112), so item 0 is the fence-B ConditionCheck and item 1 is
+ * the `ORG#{orgId}` / `USAGE_REPORT#{date}` Put.
+ */
+function auditPuts() {
+  return ddbMock
+    .commandCalls(TransactWriteItemsCommand)
+    .map((call) => call.args[0].input.TransactItems![1].Put!);
+}
 
 const basePayload: UsageReportingWorkerPayload = {
   orgId: 'org-1',
@@ -130,7 +146,7 @@ describe('usage-reporting-worker', () => {
   beforeEach(() => {
     ddbMock.reset();
     vi.clearAllMocks();
-    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
     ddbMock.on(UpdateItemCommand).resolves({});
     mockGetCustomerExistence.mockResolvedValue('deleted');
     mockGetTenantUsageMetrics.mockResolvedValue({ storage: [], egress: [] });
@@ -178,9 +194,9 @@ describe('usage-reporting-worker', () => {
       }),
     );
 
-    const putCalls = ddbMock.commandCalls(PutItemCommand);
+    const putCalls = auditPuts();
     expect(putCalls).toHaveLength(1);
-    const item = putCalls[0].args[0].input.Item!;
+    const item = putCalls[0].Item!;
     expect(item.pk).toEqual({ S: 'ORG#org-1' });
     expect(item.sk).toEqual({ S: 'USAGE_REPORT#2024-01-15' });
     expect(item.reportedToStripe).toEqual({ BOOL: true });
@@ -193,9 +209,9 @@ describe('usage-reporting-worker', () => {
 
     expect(mockMeterEventsCreate).not.toHaveBeenCalled();
 
-    const putCalls = ddbMock.commandCalls(PutItemCommand);
+    const putCalls = auditPuts();
     expect(putCalls).toHaveLength(1);
-    const item = putCalls[0].args[0].input.Item!;
+    const item = putCalls[0].Item!;
     expect(item.reportedToStripe).toEqual({ BOOL: false });
   });
 
@@ -241,8 +257,8 @@ describe('usage-reporting-worker', () => {
 
     await handler(basePayload);
 
-    const putCalls = ddbMock.commandCalls(PutItemCommand);
-    const item = putCalls[0].args[0].input.Item!;
+    const putCalls = auditPuts();
+    const item = putCalls[0].Item!;
     expect(item.pk).toEqual({ S: 'ORG#org-1' });
     expect(item.sk).toEqual({ S: 'USAGE_REPORT#2024-01-15' });
     expect(item.orgId).toEqual({ S: 'org-1' });
@@ -258,8 +274,8 @@ describe('usage-reporting-worker', () => {
 
     expect(mockAuroraGetTenantStatus).not.toHaveBeenCalled();
     expect(mockAuroraUpdateTenantStatus).not.toHaveBeenCalled();
-    const putCalls = ddbMock.commandCalls(PutItemCommand);
-    const item = putCalls[0].args[0].input.Item!;
+    const putCalls = auditPuts();
+    const item = putCalls[0].Item!;
     expect(item.lockAction).toEqual({ S: 'skipped:paid' });
   });
 
@@ -279,7 +295,7 @@ describe('usage-reporting-worker', () => {
 
       expect(mockAuroraGetTenantStatus).toHaveBeenCalledOnce();
       expect(mockAuroraUpdateTenantStatus).not.toHaveBeenCalled();
-      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      const item = auditPuts()[0].Item!;
       expect(item.lockAction).toEqual({ S: 'active' });
     });
 
@@ -295,7 +311,7 @@ describe('usage-reporting-worker', () => {
         'aurora-tenant-123',
         'write-locked',
       );
-      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      const item = auditPuts()[0].Item!;
       expect(item.lockAction).toEqual({ S: 'write-locked' });
     });
 
@@ -308,7 +324,7 @@ describe('usage-reporting-worker', () => {
       await handler(trialPayload);
 
       expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith('aurora-tenant-123', 'disabled');
-      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      const item = auditPuts()[0].Item!;
       expect(item.lockAction).toEqual({ S: 'disabled' });
     });
 
@@ -321,7 +337,7 @@ describe('usage-reporting-worker', () => {
       await handler(trialPayload);
 
       expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith('aurora-tenant-123', 'disabled');
-      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      const item = auditPuts()[0].Item!;
       expect(item.lockAction).toEqual({ S: 'disabled' });
     });
 
@@ -333,7 +349,7 @@ describe('usage-reporting-worker', () => {
 
       await handler(trialPayload);
 
-      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      const item = auditPuts()[0].Item!;
       expect(item.totalEgressBytes).toEqual({ N: '500000000000' });
     });
 
@@ -351,7 +367,7 @@ describe('usage-reporting-worker', () => {
       await vi.runAllTimersAsync();
       await run;
 
-      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      const item = auditPuts()[0].Item!;
       expect(item.lockAction).toEqual({ S: 'error:sync-failed:aurora' });
     });
   });
@@ -430,9 +446,9 @@ describe('usage-reporting-worker', () => {
 
       await handler(basePayload);
 
-      const putCalls = ddbMock.commandCalls(PutItemCommand);
+      const putCalls = auditPuts();
       expect(putCalls).toHaveLength(1);
-      const item = putCalls[0].args[0].input.Item!;
+      const item = putCalls[0].Item!;
       expect(item.reportedToStripe).toEqual({ BOOL: false });
     });
 
@@ -478,7 +494,7 @@ describe('usage-reporting-worker', () => {
         'aurora-tenant-123',
         'write-locked',
       );
-      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      const item = auditPuts()[0].Item!;
       expect(item).toEqual(
         expect.objectContaining({
           lockAction: { S: 'disabled' },
@@ -516,9 +532,9 @@ describe('usage-reporting-worker', () => {
     }
 
     function auditItem() {
-      const putCalls = ddbMock.commandCalls(PutItemCommand);
+      const putCalls = auditPuts();
       expect(putCalls).toHaveLength(1);
-      return putCalls[0].args[0].input.Item!;
+      return putCalls[0].Item!;
     }
 
     it('verifies deletion, disables tenants, cancels the record, audits reconciled', async () => {
@@ -758,11 +774,11 @@ describe('usage-reporting-worker', () => {
       await handler(basePayload);
       await handler(basePayload);
 
-      const putCalls = ddbMock.commandCalls(PutItemCommand);
+      const putCalls = auditPuts();
       expect(putCalls).toHaveLength(2);
       // Both writes target the same key — PutItem overwrites safely
       for (const call of putCalls) {
-        const item = call.args[0].input.Item!;
+        const item = call.Item!;
         expect(item.pk).toEqual({ S: 'ORG#org-1' });
         expect(item.sk).toEqual({ S: 'USAGE_REPORT#2024-01-15' });
         expect(item.reportedToStripe).toEqual({ BOOL: true });
@@ -776,10 +792,10 @@ describe('usage-reporting-worker', () => {
       await handler(basePayload);
 
       expect(mockMeterEventsCreate).not.toHaveBeenCalled();
-      const putCalls = ddbMock.commandCalls(PutItemCommand);
+      const putCalls = auditPuts();
       expect(putCalls).toHaveLength(2);
       for (const call of putCalls) {
-        expect(call.args[0].input.Item!.reportedToStripe).toEqual({ BOOL: false });
+        expect(call.Item!.reportedToStripe).toEqual({ BOOL: false });
       }
     });
 
@@ -805,10 +821,10 @@ describe('usage-reporting-worker', () => {
 
       expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledTimes(1);
       // Both audit records still written
-      const putCalls = ddbMock.commandCalls(PutItemCommand);
+      const putCalls = auditPuts();
       expect(putCalls).toHaveLength(2);
-      expect(putCalls[0].args[0].input.Item!.lockAction).toEqual({ S: 'write-locked' });
-      expect(putCalls[1].args[0].input.Item!.lockAction).toEqual({ S: 'write-locked' });
+      expect(putCalls[0].Item!.lockAction).toEqual({ S: 'write-locked' });
+      expect(putCalls[1].Item!.lockAction).toEqual({ S: 'write-locked' });
     });
 
     it('paid user — no tenant enforcement on either run', async () => {
@@ -822,10 +838,10 @@ describe('usage-reporting-worker', () => {
 
       expect(mockAuroraGetTenantStatus).not.toHaveBeenCalled();
       expect(mockAuroraUpdateTenantStatus).not.toHaveBeenCalled();
-      const putCalls = ddbMock.commandCalls(PutItemCommand);
+      const putCalls = auditPuts();
       expect(putCalls).toHaveLength(2);
       for (const call of putCalls) {
-        expect(call.args[0].input.Item!.lockAction).toEqual({ S: 'skipped:paid' });
+        expect(call.Item!.lockAction).toEqual({ S: 'skipped:paid' });
       }
     });
   });
@@ -863,7 +879,7 @@ describe('usage-reporting-worker', () => {
 
       await expect(handler(basePayload)).resolves.toBeUndefined();
 
-      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      const item = auditPuts()[0].Item!;
       expect(item.orgSyncAction.S).toMatch(/^error:/);
     });
 
@@ -873,7 +889,7 @@ describe('usage-reporting-worker', () => {
       await handler({ ...basePayload, orgName: undefined });
 
       expect(mockCustomersUpdate).not.toHaveBeenCalled();
-      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      const item = auditPuts()[0].Item!;
       expect(item.orgSyncAction).toEqual({ S: 'skipped:nothing-to-sync' });
     });
 
@@ -899,7 +915,7 @@ describe('usage-reporting-worker', () => {
 
       await handler(basePayload);
 
-      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      const item = auditPuts()[0].Item!;
       expect(item.orgSyncAction).toEqual({ S: 'ok' });
     });
 
@@ -914,7 +930,7 @@ describe('usage-reporting-worker', () => {
       expect(mockCustomersUpdate).toHaveBeenCalledWith('cus_123', {
         metadata: { storage_used: '100 MB' },
       });
-      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      const item = auditPuts()[0].Item!;
       expect(item.orgSyncAction).toEqual({ S: 'ok' });
     });
 
@@ -1006,9 +1022,9 @@ describe('usage-reporting-worker', () => {
       expect(mockMeterEventsCreate).toHaveBeenCalledOnce();
 
       // Audit record must exist
-      const putCalls = ddbMock.commandCalls(PutItemCommand);
+      const putCalls = auditPuts();
       expect(putCalls).toHaveLength(1);
-      const item = putCalls[0].args[0].input.Item!;
+      const item = putCalls[0].Item!;
       expect(item.lockAction).toEqual({ S: 'active' });
     });
 
@@ -1027,7 +1043,7 @@ describe('usage-reporting-worker', () => {
       await handler(fthOnlyPayload);
 
       expect(mockFthUpdateTenantStatus).toHaveBeenCalledWith('fth-client-9', 'write-locked');
-      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      const item = auditPuts()[0].Item!;
       expect(item.lockAction).toEqual({ S: 'write-locked' });
     });
 
@@ -1049,7 +1065,7 @@ describe('usage-reporting-worker', () => {
 
       expect(mockAuroraUpdateTenantStatus).not.toHaveBeenCalled();
       expect(mockFthUpdateTenantStatus).toHaveBeenCalledWith('fth-client-9', 'write-locked');
-      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      const item = auditPuts()[0].Item!;
       expect(item.lockAction).toEqual({ S: 'write-locked' });
     });
 
@@ -1075,9 +1091,9 @@ describe('usage-reporting-worker', () => {
         'write-locked',
       );
       expect(mockMeterEventsCreate).toHaveBeenCalledOnce();
-      const putCalls = ddbMock.commandCalls(PutItemCommand);
+      const putCalls = auditPuts();
       expect(putCalls).toHaveLength(1);
-      const item = putCalls[0].args[0].input.Item!;
+      const item = putCalls[0].Item!;
       expect(item.lockAction).toEqual({ S: 'error:sync-failed:fth' });
     });
 
@@ -1099,7 +1115,7 @@ describe('usage-reporting-worker', () => {
       await promise;
 
       expect(mockFthUpdateTenantStatus).toHaveBeenCalledWith('fth-client-9', 'write-locked');
-      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      const item = auditPuts()[0].Item!;
       expect(item.lockAction).toEqual({ S: 'error:sync-failed:aurora' });
       vi.useRealTimers();
     });
@@ -1145,9 +1161,9 @@ describe('usage-reporting-worker', () => {
         }),
       );
 
-      const putCalls = ddbMock.commandCalls(PutItemCommand);
+      const putCalls = auditPuts();
       expect(putCalls).toHaveLength(1);
-      const record = unmarshall(putCalls[0].args[0].input.Item!);
+      const record = unmarshall(putCalls[0].Item!);
 
       // Aggregate averageStorageBytesUsed is the sum across both regions
       // aurora: 1 TB average (single sample), fth: 500 GB average (single sample) → 1.5 TB
@@ -1183,8 +1199,8 @@ describe('usage-reporting-worker', () => {
 
       await handler(bothPayload);
 
-      const putCalls = ddbMock.commandCalls(PutItemCommand);
-      const record = unmarshall(putCalls[0].args[0].input.Item!);
+      const putCalls = auditPuts();
+      const record = unmarshall(putCalls[0].Item!);
 
       // Carry-forward merge: t0 = 2000 + 0, t1 = 2000 + 4000 → avg (2000 + 6000) / 2 = 4000.
       // Summing per-region means would have wrongly billed 2000 + 4000 = 6000.
@@ -1199,7 +1215,66 @@ describe('usage-reporting-worker', () => {
 
       expect(mockGetTenantUsageMetrics).not.toHaveBeenCalled();
       expect(mockMeterEventsCreate).not.toHaveBeenCalled();
-      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+    });
+  });
+
+  describe('FIL-112 deletion fences', () => {
+    it('fences the audit record on the org profile deleting flag as item 0', async () => {
+      await handler(basePayload);
+
+      const items = ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems!;
+      expect(items).toHaveLength(2);
+      expect(items[0].ConditionCheck).toEqual({
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
+        ConditionExpression:
+          'attribute_exists(pk) AND (attribute_not_exists(deleting) OR deleting = :notDeleting)',
+        ExpressionAttributeValues: { ':notDeleting': { BOOL: false } },
+      });
+      expect(items[1].Put!.TableName).toBe('BillingTable');
+    });
+
+    it('skips the audit record without failing the run when the fence rejects', async () => {
+      // Without the fence a daily run landing after the purge would re-create a
+      // deleted org's BillingTable ORG# row and hold it for its 365-day TTL.
+      ddbMock.on(TransactWriteItemsCommand).rejects(
+        new TransactionCanceledException({
+          message: 'cancelled',
+          $metadata: {},
+          CancellationReasons: [{ Code: 'ConditionalCheckFailed' }, { Code: 'None' }],
+        }),
+      );
+
+      // The run's real work is already done by then; throwing would only
+      // re-drive it.
+      await expect(handler(basePayload)).resolves.toBeUndefined();
+    });
+
+    it('rethrows a non-fence transaction failure on the audit write', async () => {
+      ddbMock.on(TransactWriteItemsCommand).rejects(new Error('throttled'));
+      await expect(handler(basePayload)).rejects.toThrow('throttled');
+    });
+
+    it('records lockAction skipped:org-deleting and never drives a deleting org back to active', async () => {
+      const { getOrgProfile } = await import('../lib/org-profile.js');
+      vi.mocked(getOrgProfile).mockResolvedValue({
+        pk: { S: 'ORG#org-1' },
+        deleting: { BOOL: true },
+      });
+      // Aurora is currently write-locked, so an unfenced run would drive it back
+      // to `active` — undoing (and, via Aurora's disabled-verification, able to
+      // wedge) the teardown.
+      mockAuroraGetTenantStatus.mockResolvedValue({ kind: 'ok', status: 'write-locked' });
+
+      await handler({ ...basePayload, subscriptionStatus: 'trialing' });
+
+      expect(mockAuroraUpdateTenantStatus).not.toHaveBeenCalled();
+      expect(mockFthUpdateTenantStatus).not.toHaveBeenCalled();
+      // The run still writes its audit row (the fence on THAT write is
+      // evaluated by DynamoDB, not by this mock), and it must not claim the org
+      // was driven to `active`.
+      expect(auditPuts()[0].Item!.lockAction).toEqual({ S: 'skipped:org-deleting' });
     });
   });
 });

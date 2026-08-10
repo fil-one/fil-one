@@ -10,6 +10,7 @@ import {
   QueryCommand,
   ScanCommand,
   UpdateItemCommand,
+  type BatchWriteItemCommandInput,
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 
@@ -38,9 +39,10 @@ const testOrchestrator = {
   id: 'aurora',
   deleteTenant: (...args: unknown[]) => mockDeleteTenant(...args),
 };
+const mockGetAvailableOrchestrators = vi.fn(() => [testOrchestrator] as unknown[]);
 vi.mock('./service-orchestrator-registry.js', () => ({
   getOrchestratorForRegion: () => testOrchestrator,
-  getAvailableOrchestrators: () => [testOrchestrator],
+  getAvailableOrchestrators: () => mockGetAvailableOrchestrators(),
 }));
 
 const mockSubscriptionsCancel = vi.fn();
@@ -83,7 +85,7 @@ function customerHit(id: string, orgId: string = ORG_ID) {
 
 const mockGetOrgProfile = vi.fn();
 vi.mock('./org-profile.js', () => ({
-  getOrgProfile: (orgId: string) => mockGetOrgProfile(orgId),
+  getOrgProfile: (...args: unknown[]) => mockGetOrgProfile(...args),
 }));
 
 const mockDropIndex = vi.fn();
@@ -121,6 +123,11 @@ function deletionItem(status: string, overrides?: Record<string, unknown>) {
     tenantIds: { aurora: 'aurora-t-1' },
     attemptCount: 0,
     updatedAt: '2026-07-10T00:00:00.000Z',
+    // A re-drive of a record whose purge already completed long ago, so
+    // Stripe's search-index margin is spent and the pass never has to wait.
+    // The wait itself — and the fresh, never-purged record that triggers it —
+    // has its own tests below.
+    purgedAt: '2026-07-10T00:00:00.000Z',
     ...overrides,
   };
   // An `undefined` override means "absent from the record".
@@ -150,6 +157,7 @@ function setupHappyMocks(status: string) {
     auroraTenantId: { S: 'aurora-t-1' },
   });
   mockGetRegionsWithTenantIdsForOrg.mockResolvedValue([]);
+  mockGetAvailableOrchestrators.mockReturnValue([testOrchestrator]);
   mockDeleteAuth0User.mockResolvedValue(undefined);
   mockSubscriptionsCancel.mockResolvedValue({});
   mockSubscriptionsList.mockImplementation(({ customer }: { customer: string }) =>
@@ -201,21 +209,22 @@ describe('assertPurgeablePk (purge blast-radius guard)', () => {
     );
   });
 
-  it('billing allowlist: permits CUSTOMER# and DELETION_CHALLENGE# rows only', () => {
+  it('billing allowlist: permits CUSTOMER#, DELETION_CHALLENGE# and ORG# rows only', () => {
     expect(() => assertPurgeablePk('CUSTOMER#u-1', PURGEABLE_BILLING_PK_PREFIXES)).not.toThrow();
     expect(() =>
       assertPurgeablePk('DELETION_CHALLENGE#org-1', PURGEABLE_BILLING_PK_PREFIXES),
     ).not.toThrow();
+    // The usage-reporting worker's audit rows; previously unpurgeable, so they
+    // outlived the deletion until their 365-day TTL.
+    expect(() => assertPurgeablePk('ORG#org-1', PURGEABLE_BILLING_PK_PREFIXES)).not.toThrow();
   });
 
-  it('billing allowlist: refuses EMAIL_NORM# (trial claims) and ORG# tombstones, which must outlive the account', () => {
+  it('billing allowlist: refuses EMAIL_NORM# (trial claims) and the ORG_TOMBSTONE#, which must outlive the account', () => {
     expect(() =>
       assertPurgeablePk('EMAIL_NORM#user@gmail.com', PURGEABLE_BILLING_PK_PREFIXES),
     ).toThrow(/outside the purgeable prefixes/);
+    // The trailing '#' on 'ORG#' is what keeps the tombstone out of reach.
     expect(() => assertPurgeablePk('ORG_TOMBSTONE#org-1', PURGEABLE_BILLING_PK_PREFIXES)).toThrow(
-      /outside the purgeable prefixes/,
-    );
-    expect(() => assertPurgeablePk('ORG#org-1', PURGEABLE_BILLING_PK_PREFIXES)).toThrow(
       /outside the purgeable prefixes/,
     );
   });
@@ -288,7 +297,7 @@ describe('runAccountDeletion', () => {
 
   it('runs every external teardown, purges the records, and marks DONE', async () => {
     setupHappyMocks(OrgDeletionStatus.Pending);
-    ddbMock.on(QueryCommand).resolves({
+    ddbMock.on(QueryCommand, { TableName: 'UserInfoTable' }).resolves({
       // purgeRecords org partition query — includes an ACCESSKEY# row, whose
       // upstream key died with the tenant (no per-key revocation anymore).
       Items: [
@@ -307,8 +316,10 @@ describe('runAccountDeletion', () => {
     expect(mockDeleteAuth0User).toHaveBeenCalledWith('auth0|sub-1');
     expect(ddbMock.commandCalls(ScanCommand).length).toBeGreaterThan(0); // RAG purge
 
-    // Tombstone written to BillingTable without PII and without a ttl — once
-    // per Stripe pass (the post-purge pass re-writes the same singleton id).
+    // Tombstone written to BillingTable without PII and without a ttl. Two
+    // writes here because the stub reports NO existing tombstone on every read,
+    // so both Stripe passes see one to create; against a real table the second
+    // pass reads its own write back and skips (see the deletedAt test below).
     const puts = ddbMock.commandCalls(PutItemCommand);
     expect(puts).toHaveLength(2);
     const tombstone = puts[0].args[0].input.Item!;
@@ -600,6 +611,59 @@ describe('runAccountDeletion', () => {
     expect(lateDeleteTenant).toHaveBeenCalledWith('late-tenant');
   });
 
+  it('settles the late-region re-check too: one straggler failing does not skip the others', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    const downTenant = vi.fn().mockRejectedValue(new Error('aurora is down'));
+    const otherTenant = vi.fn().mockResolvedValue(undefined);
+    mockGetRegionsWithTenantIdsForOrg.mockResolvedValue([
+      { orchestrator: { id: 'aurora', deleteTenant: downTenant }, tenantId: 'late-aurora' },
+      { orchestrator: { id: 'fth', deleteTenant: otherTenant }, tenantId: 'late-fth' },
+    ]);
+
+    const err = (await runAccountDeletion(ORG_ID).catch((e: unknown) => e)) as AggregateError;
+
+    expect(otherTenant).toHaveBeenCalledWith('late-fth');
+    expect(err.message).toMatch(/Late-region teardown failed for org org-1 in: aurora/);
+    expect(doneWrites()).toHaveLength(0);
+  });
+
+  it('resolves teardown regions from a STRONGLY CONSISTENT profile read', async () => {
+    // A stale read here reports "no tenant in this region", the region is
+    // skipped, and the profile — the only pointer to the tenant id — is purged
+    // moments later, leaking a live upstream tenant permanently.
+    setupHappyMocks(OrgDeletionStatus.Pending);
+
+    await runAccountDeletion(ORG_ID);
+
+    expect(mockGetOrgProfile).toHaveBeenCalledWith(ORG_ID, { consistent: true });
+    expect(mockGetOrgProfile.mock.calls.every(([, options]) => options?.consistent === true)).toBe(
+      true,
+    );
+  });
+
+  it('settles every region before failing: one region going down does not skip the others', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    const downTenant = vi.fn().mockRejectedValue(new Error('aurora is down'));
+    const otherTenant = vi.fn().mockResolvedValue(undefined);
+    mockGetAvailableOrchestrators.mockReturnValue([
+      { id: 'aurora', deleteTenant: downTenant },
+      { id: 'fth', deleteTenant: otherTenant },
+    ]);
+    mockGetOrgProfile.mockResolvedValue({
+      pk: { S: `ORG#${ORG_ID}` },
+      sk: { S: 'PROFILE' },
+      auroraTenantId: { S: 'aurora-t-1' },
+      fthTenantId: { S: 'fth-t-1' },
+    });
+
+    const err = (await runAccountDeletion(ORG_ID).catch((e: unknown) => e)) as AggregateError;
+
+    // The healthy region was torn down even though the first one threw.
+    expect(otherTenant).toHaveBeenCalledWith('fth-t-1');
+    expect(err.errors.map(String).join('\n')).toMatch(/Region teardown failed .* in: aurora/);
+    expect(doneWrites()).toHaveLength(0);
+  });
+
   it('falls back to the DELETION-record snapshot when the profile row is already purged', async () => {
     setupHappyMocks(OrgDeletionStatus.Pending);
     mockGetOrgProfile.mockResolvedValue(undefined);
@@ -614,29 +678,137 @@ describe('runAccountDeletion', () => {
     expect(mockDeleteTenant).toHaveBeenCalledWith('snap-t-9');
   });
 
-  it('purges the RAGKEYHASH lookup rows (credential-hash residue) before the ORG# partition delete', async () => {
+  it('purges the RAGKEYHASH lookup rows BEFORE the ORG# partition delete, from the same snapshot', async () => {
     setupHappyMocks(OrgDeletionStatus.Pending);
-    // The RAGKEY#-prefixed query purgeRagKeyHashRows issues.
-    ddbMock
-      .on(QueryCommand, {
-        ExpressionAttributeValues: marshall({ ':pk': `ORG#${ORG_ID}`, ':skPrefix': 'RAGKEY#' }),
-      })
-      .resolves({
-        Items: [
-          marshall({ pk: `ORG#${ORG_ID}`, sk: 'RAGKEY#key-1', tokenHash: 'hash-1' }),
-          marshall({ pk: `ORG#${ORG_ID}`, sk: 'RAGKEY#key-2', tokenHash: 'hash-2' }),
-        ],
-      });
+    // One partition query feeds both deletes. Deriving the hashes from the SAME
+    // snapshot that drives the partition delete is what removes the orphan
+    // window: a key created between two separate queries used to have its
+    // RAGKEY# row swept while its lookup row survived forever.
+    ddbMock.on(QueryCommand, { TableName: 'UserInfoTable' }).resolves({
+      Items: [
+        marshall({ pk: `ORG#${ORG_ID}`, sk: 'PROFILE' }),
+        marshall({ pk: `ORG#${ORG_ID}`, sk: 'RAGKEY#key-1', tokenHash: 'hash-1' }),
+        marshall({ pk: `ORG#${ORG_ID}`, sk: 'RAGKEY#key-2', tokenHash: 'hash-2' }),
+      ],
+    });
 
     await runAccountDeletion(ORG_ID);
 
-    const userInfoDeletes = ddbMock
+    const userInfoBatches = ddbMock
+      .commandCalls(BatchWriteItemCommand)
+      .map((c) =>
+        (c.args[0].input.RequestItems?.UserInfoTable ?? []).map((r) =>
+          unmarshall(r.DeleteRequest!.Key!),
+        ),
+      )
+      .filter((batch) => batch.length > 0);
+
+    const flat = userInfoBatches.flat();
+    expect(flat).toContainEqual({ pk: 'RAGKEYHASH#hash-1', sk: 'LOOKUP' });
+    expect(flat).toContainEqual({ pk: 'RAGKEYHASH#hash-2', sk: 'LOOKUP' });
+
+    // Ordering: the lookup delete precedes the partition delete, for crash
+    // convergence. batchDelete throws once its retries are exhausted, and a
+    // re-drive re-queries the partition — so if the partition went first, an
+    // interrupted purge would leave a RAGKEYHASH# row that NO later pass could
+    // ever find again (its only pointer, the RAGKEY# row's tokenHash, is gone).
+    // This way an interruption leaves an unusable key, swept next pass.
+    const lookupBatch = userInfoBatches.findIndex((batch) =>
+      batch.some((key) => key.pk === 'RAGKEYHASH#hash-1'),
+    );
+    const partitionBatch = userInfoBatches.findIndex((batch) =>
+      batch.some((key) => key.sk === 'RAGKEY#key-1'),
+    );
+    expect(lookupBatch).toBeGreaterThanOrEqual(0);
+    expect(partitionBatch).toBeGreaterThan(lookupBatch);
+    expect(doneWrites()).toHaveLength(1);
+  });
+
+  it('leaves no unreachable RAGKEYHASH row when the partition delete is interrupted', async () => {
+    // The regression this pins: batchDelete throws on exhausted UnprocessedItems
+    // (throttling — most likely on the biggest orgs), and mid-purge interruption
+    // is the expected model for a 900s teardown. Whatever the partition delete
+    // fails to remove must still be re-derivable on the next pass, which means
+    // the credential hashes have to be gone first.
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    ddbMock.on(QueryCommand, { TableName: 'UserInfoTable' }).resolves({
+      Items: [
+        marshall({ pk: `ORG#${ORG_ID}`, sk: 'RAGKEY#key-1', tokenHash: 'hash-1' }),
+        marshall({ pk: `ORG#${ORG_ID}`, sk: 'ACCESSKEY#k' }),
+      ],
+    });
+    // The ORG# partition chunk is shed for good (throttling); everything else
+    // is accepted. batchDelete gives up after its retries and throws.
+    ddbMock.on(BatchWriteItemCommand).callsFake((input: BatchWriteItemCommandInput) => {
+      const requests = input.RequestItems?.UserInfoTable ?? [];
+      const isOrgPartition = requests.some(
+        (r) => unmarshall(r.DeleteRequest!.Key!).pk === `ORG#${ORG_ID}`,
+      );
+      return isOrgPartition ? { UnprocessedItems: input.RequestItems } : {};
+    });
+
+    vi.useFakeTimers();
+    const run = runAccountDeletion(ORG_ID);
+    const assertion = expect(run).rejects.toThrow();
+    await vi.runAllTimersAsync();
+    await assertion;
+    vi.useRealTimers();
+
+    // The lookup rows are gone even though the purge did not finish, so the
+    // re-drive never needs the tokenHash it can no longer read.
+    const deleted = ddbMock
       .commandCalls(BatchWriteItemCommand)
       .flatMap((c) => c.args[0].input.RequestItems?.UserInfoTable ?? [])
       .map((r) => unmarshall(r.DeleteRequest!.Key!));
-    expect(userInfoDeletes).toContainEqual({ pk: 'RAGKEYHASH#hash-1', sk: 'LOOKUP' });
-    expect(userInfoDeletes).toContainEqual({ pk: 'RAGKEYHASH#hash-2', sk: 'LOOKUP' });
-    expect(doneWrites()).toHaveLength(1);
+    expect(deleted).toContainEqual({ pk: 'RAGKEYHASH#hash-1', sk: 'LOOKUP' });
+    // And the record is NOT marked done, so the reconciler re-drives.
+    expect(doneWrites()).toHaveLength(0);
+  });
+
+  it('purges the BillingTable ORG# usage-audit rows, leaving the tombstone partition alone', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    ddbMock.on(QueryCommand, { TableName: 'BillingTable' }).resolves({
+      Items: [
+        marshall({ pk: `ORG#${ORG_ID}`, sk: 'USAGE_REPORT#2026-08-01' }),
+        marshall({ pk: `ORG#${ORG_ID}`, sk: 'USAGE_REPORT#2026-08-02' }),
+      ],
+    });
+
+    await runAccountDeletion(ORG_ID);
+
+    const billingDeletes = ddbMock
+      .commandCalls(BatchWriteItemCommand)
+      .flatMap((c) => c.args[0].input.RequestItems?.BillingTable ?? [])
+      .map((r) => unmarshall(r.DeleteRequest!.Key!));
+    expect(billingDeletes).toEqual([
+      { pk: `ORG#${ORG_ID}`, sk: 'USAGE_REPORT#2026-08-01' },
+      { pk: `ORG#${ORG_ID}`, sk: 'USAGE_REPORT#2026-08-02' },
+    ]);
+    // The ORG_TOMBSTONE# partition is never queried and never batch-deleted.
+    expect(
+      ddbMock
+        .commandCalls(QueryCommand)
+        .map((c) => unmarshall(c.args[0].input.ExpressionAttributeValues!)[':pk']),
+    ).not.toContain(`ORG_TOMBSTONE#${ORG_ID}`);
+  });
+
+  it('scopes the BillingTable purge to USAGE_REPORT# rows rather than the whole partition', async () => {
+    // This is an unrecoverable delete. Querying the bare `ORG#{orgId}` partition
+    // would silently pull any future row written there into its scope; a row
+    // that should be purged has to be added to the prefix deliberately.
+    setupHappyMocks(OrgDeletionStatus.Pending);
+
+    await runAccountDeletion(ORG_ID);
+
+    const billingQuery = ddbMock
+      .commandCalls(QueryCommand)
+      .map((c) => c.args[0].input)
+      .find((input) => input.TableName === 'BillingTable');
+    expect(billingQuery?.KeyConditionExpression).toBe('pk = :pk AND begins_with(sk, :skPrefix)');
+    expect(unmarshall(billingQuery!.ExpressionAttributeValues!)).toEqual({
+      ':pk': `ORG#${ORG_ID}`,
+      ':skPrefix': 'USAGE_REPORT#',
+    });
   });
 
   it('purges all RAG rows (bucket + checkpoint prefixes) with a single table scan', async () => {
@@ -817,6 +989,291 @@ describe('runAccountDeletion — live Stripe customer discovery', () => {
     expect(tombstoneWrites()).toHaveLength(0);
     expect(mockRawRequest).not.toHaveBeenCalled();
     expect(doneWrites()).toHaveLength(0);
+  });
+
+  it('anchors the search-index wait on the PURGE, not on when the user asked to be deleted', async () => {
+    // The bug this pins: the hazard is a customer minted DURING the deletion
+    // race being invisible to discovery, i.e. `discovery - customerCreatedAt <
+    // lag`. Anchoring the margin on `requestedAt` only bounds a mint at the
+    // instant of the request. On a big org whose pass runs for minutes, an
+    // in-flight request that beat the fence can mint a customer near the END of
+    // the pass — long after a requestedAt margin has "elapsed" — and the
+    // post-purge discovery then runs seconds later, still inside the lag,
+    // finds nothing, and markDone leaves the record inert with that PII intact.
+    // So: requestedAt is ancient here, and the pass must STILL wait.
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
+      .resolves({
+        Item: deletionItem(OrgDeletionStatus.Pending, {
+          requestedAt: new Date(Date.now() - 300_000).toISOString(),
+          purgedAt: undefined, // this pass is the one that purges
+        }),
+      });
+
+    vi.useFakeTimers();
+    let settled = false;
+    const run = runAccountDeletion(ORG_ID).then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(59_000);
+
+    // Everything is done except the finish — no DONE, no second discovery.
+    expect(settled).toBe(false);
+    expect(mockDeleteTenant).toHaveBeenCalled();
+    expect(mockCustomersSearch).toHaveBeenCalledTimes(1);
+    expect(doneWrites()).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await run;
+    vi.useRealTimers();
+
+    expect(mockCustomersSearch).toHaveBeenCalledTimes(2);
+    expect(doneWrites()).toHaveLength(1);
+  });
+
+  it('waits IN-PASS rather than deferring: one invocation, one teardown, one attempt bump', async () => {
+    // Deferring with a throw would emit a Lambda `Errors` datapoint for every
+    // healthy deletion (the metric Grafana alerts on), burn an async retry,
+    // push `attemptCount` toward the reconciler's stuck threshold, refresh the
+    // staleness window, and re-run every external teardown and the whole purge.
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
+      .resolves({
+        Item: deletionItem(OrgDeletionStatus.Pending, {
+          // A just-requested, never-purged record: the case that used to throw
+          // a deferral and hand the wait to the Lambda retry.
+          requestedAt: new Date(Date.now() - 5_000).toISOString(),
+          purgedAt: undefined,
+        }),
+      });
+
+    vi.useFakeTimers();
+    const run = runAccountDeletion(ORG_ID);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await run;
+    vi.useRealTimers();
+
+    expect(doneWrites()).toHaveLength(1);
+    expect(mockDeleteTenant).toHaveBeenCalledTimes(1);
+    const attemptBumps = ddbMock
+      .commandCalls(UpdateItemCommand)
+      .filter((c) => c.args[0].input.UpdateExpression?.includes('ADD attemptCount'));
+    expect(attemptBumps).toHaveLength(1);
+  });
+
+  it('a re-drive of an org purged 45s ago waits only the remaining 15s', async () => {
+    // `purgedAt` is already 45s old at the START of this pass, which only ever
+    // happens on a re-drive — a first pass stamps it at the end of its own
+    // purge and so always waits the full 60s. Here 15s of margin is left.
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
+      .resolves({
+        Item: deletionItem(OrgDeletionStatus.Pending, {
+          purgedAt: new Date(Date.now() - 45_000).toISOString(),
+        }),
+      });
+
+    vi.useFakeTimers();
+    let settled = false;
+    const run = runAccountDeletion(ORG_ID).then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(14_000);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await run;
+    vi.useRealTimers();
+
+    expect(doneWrites()).toHaveLength(1);
+  });
+
+  it('stamps purgedAt once, keeping the earliest purge across re-drives', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+
+    await runAccountDeletion(ORG_ID);
+
+    const stamps = ddbMock
+      .commandCalls(UpdateItemCommand)
+      .filter((c) => c.args[0].input.UpdateExpression?.includes('purgedAt'));
+    expect(stamps).toHaveLength(1);
+    expect(stamps[0].args[0].input.UpdateExpression).toBe(
+      'SET purgedAt = if_not_exists(purgedAt, :purgedAt), updatedAt = :now',
+    );
+    // Minting became impossible at the FIRST purge, so a re-drive must not
+    // restart the wait: the stored value is re-sent, never a fresh `now`.
+    expect(stamps[0].args[0].input.ExpressionAttributeValues?.[':purgedAt']?.S).toBe(
+      '2026-07-10T00:00:00.000Z',
+    );
+  });
+
+  it('does not wedge a legacy record that predates purgedAt (or carries a corrupt one)', async () => {
+    // lib/dynamo-records.ts documents that legacy DELETION records exist and
+    // instructs readers to tolerate them. Hard-failing on a timestamp retries
+    // into a DLQ that has no consumer; an early discovery pass is far cheaper.
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
+      .resolves({
+        Item: deletionItem(OrgDeletionStatus.Pending, {
+          purgedAt: 'not-a-date',
+          requestedAt: undefined,
+        }),
+      });
+
+    await runAccountDeletion(ORG_ID);
+
+    expect(doneWrites()).toHaveLength(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('no usable purgedAt'),
+      expect.objectContaining({ orgId: ORG_ID }),
+    );
+    warn.mockRestore();
+  });
+
+  it('caps the wait at the margin when purgedAt is in the future (clock skew)', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
+      .resolves({
+        Item: deletionItem(OrgDeletionStatus.Pending, {
+          purgedAt: new Date(Date.now() + 3_600_000).toISOString(),
+        }),
+      });
+
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const run = runAccountDeletion(ORG_ID);
+    // An hour of skew must not park the pass for an hour — one margin, no more.
+    await vi.advanceTimersByTimeAsync(60_000);
+    await run;
+    vi.useRealTimers();
+
+    expect(doneWrites()).toHaveLength(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("Waiting out Stripe's search-index lag"),
+      expect.objectContaining({ remainingMs: 60_000, clockSkewed: true }),
+    );
+    warn.mockRestore();
+  });
+
+  it('writes the tombstone conditionally so an overlapping worker cannot swap the customer id', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+
+    await runAccountDeletion(ORG_ID);
+
+    const put = tombstoneWrites()[0].args[0].input;
+    expect(put.ConditionExpression).toBe(
+      'attribute_not_exists(pk) OR attribute_not_exists(stripeCustomerId) OR stripeCustomerId = :id',
+    );
+    expect(put.ExpressionAttributeValues?.[':id']?.S).toBe('cus_1');
+  });
+
+  it('a pass that discovers no customer cannot overwrite a tombstone that names one', async () => {
+    // The read is only a snapshot: a concurrent worker can land a customer
+    // tombstone between it and this write. Without the condition, this pass
+    // would replace it with an item carrying no stripeCustomerId at all,
+    // destroying the last pointer to redact that customer by.
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    mockCustomersSearch.mockReturnValue(stripeSearch([]));
+
+    await runAccountDeletion(ORG_ID);
+
+    expect(tombstoneWrites()[0].args[0].input.ConditionExpression).toBe(
+      'attribute_not_exists(pk) OR attribute_not_exists(stripeCustomerId)',
+    );
+    expect(tombstoneWrites()[0].args[0].input.ExpressionAttributeValues).toBeUndefined();
+  });
+
+  it('surfaces a lost tombstone race instead of completing the teardown', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    ddbMock
+      .on(PutItemCommand)
+      .rejects(new ConditionalCheckFailedException({ message: 'raced', $metadata: {} }));
+
+    const err = (await runAccountDeletion(ORG_ID).catch((e: unknown) => e)) as AggregateError;
+
+    expect(err.errors.map(String).join('\n')).toMatch(/tombstone was written concurrently/);
+    expect(doneWrites()).toHaveLength(0);
+  });
+
+  it('accepts a concurrent tombstone UPGRADE: losing that race is not a failure', async () => {
+    // This pass discovers nothing, so it had nothing to write; a worker that
+    // landed a customer id first has a strictly better tombstone. Treating the
+    // rejected write as fatal failed the whole teardown over an outcome that is
+    // exactly what we wanted — and left the record non-DONE for a re-drive that
+    // would hit the same benign race again.
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    mockCustomersSearch.mockReturnValue(stripeSearch([]));
+    const tombstoneKey = { pk: { S: `ORG_TOMBSTONE#${ORG_ID}` }, sk: { S: 'TOMBSTONE' } };
+    ddbMock
+      .on(GetItemCommand, { Key: tombstoneKey })
+      // Read: nothing there yet. Re-read after the rejection: the winner's.
+      .resolvesOnce({})
+      .resolves({
+        Item: marshall({
+          pk: `ORG_TOMBSTONE#${ORG_ID}`,
+          sk: 'TOMBSTONE',
+          orgId: ORG_ID,
+          stripeCustomerId: 'cus_winner',
+          deletedAt: '2026-07-10T00:00:00.000Z',
+        }),
+      });
+    ddbMock
+      .on(PutItemCommand)
+      .rejects(new ConditionalCheckFailedException({ message: 'raced', $metadata: {} }));
+
+    await runAccountDeletion(ORG_ID);
+
+    expect(doneWrites()).toHaveLength(1);
+  });
+
+  it('leaves deletedAt alone when the tombstone already records the same customer', async () => {
+    // deletedAt answers "when was this org deleted?" — re-stamping it on every
+    // pass drifts the audit trail toward whenever the last retry happened.
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: `ORG_TOMBSTONE#${ORG_ID}` }, sk: { S: 'TOMBSTONE' } } })
+      .resolves({
+        Item: marshall({
+          pk: `ORG_TOMBSTONE#${ORG_ID}`,
+          sk: 'TOMBSTONE',
+          orgId: ORG_ID,
+          stripeCustomerId: 'cus_1',
+          deletedAt: '2026-07-10T00:00:00.000Z',
+        }),
+      });
+
+    await runAccountDeletion(ORG_ID);
+
+    expect(tombstoneWrites()).toHaveLength(0);
+    expect(doneWrites()).toHaveLength(1);
+  });
+
+  it('upgrades an id-less tombstone when the post-purge pass finds a late customer', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: `ORG_TOMBSTONE#${ORG_ID}` }, sk: { S: 'TOMBSTONE' } } })
+      .resolves({
+        Item: marshall({
+          pk: `ORG_TOMBSTONE#${ORG_ID}`,
+          sk: 'TOMBSTONE',
+          orgId: ORG_ID,
+          deletedAt: '2026-07-10T00:00:00.000Z',
+        }),
+      });
+    mockCustomersSearch.mockReturnValue(stripeSearch([customerHit('cus_late')]));
+
+    await runAccountDeletion(ORG_ID);
+
+    const put = tombstoneWrites()[0].args[0].input;
+    expect(put.Item!.stripeCustomerId?.S).toBe('cus_late');
+    // The original deletion timestamp is preserved, not re-stamped.
+    expect(put.Item!.deletedAt?.S).toBe('2026-07-10T00:00:00.000Z');
+    expect(doneWrites()).toHaveLength(1);
   });
 
   it('refuses to swap a tombstone that already records a different customer', async () => {

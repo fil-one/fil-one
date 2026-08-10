@@ -785,9 +785,21 @@ describe('processTenantSetup', () => {
     ddbMock.on(UpdateItemCommand).rejects(conditionalCheckFailed());
     mockCreateAuroraTenant.mockResolvedValue({ auroraTenantId: 'aurora-t-doomed' });
 
-    await expect(processTenantSetup('org-1')).rejects.toThrow(
+    let message = '';
+    try {
+      await processTenantSetup('org-1');
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toContain(
       'Org org-1 is deleting or purged; refusing to persist Aurora tenant aurora-t-doomed',
     );
+    // The failed write IS the write of `auroraTenantId`, so the teardown's
+    // late-region re-check — which resolves targets only from PROFILE
+    // attributes — can never find this tenant. Say so instead of promising a
+    // sweep.
+    expect(message).toContain('MANUAL CLEANUP REQUIRED');
+    expect(message).not.toMatch(/swept by/);
     // No further setup steps run against the doomed tenant.
     expect(mockSetupAuroraTenant).not.toHaveBeenCalled();
     // The tenant-id write itself must carry the deletion guard.
