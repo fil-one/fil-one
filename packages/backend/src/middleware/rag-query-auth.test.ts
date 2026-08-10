@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
+import { ApiErrorCode } from '@filone/shared';
 
 vi.mock('sst', () => ({
   Resource: {
@@ -47,7 +48,12 @@ const ORG_RECORD = {
   createdAt: '2026-07-01T00:00:00Z',
 };
 
-function stubKeyRecords(orgRecordOverrides: Record<string, unknown> = {}) {
+const ORG_PROFILE_KEY = { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'PROFILE' } };
+
+function stubKeyRecords(
+  orgRecordOverrides: Record<string, unknown> = {},
+  profileOverrides: Record<string, unknown> = {},
+) {
   ddbMock
     .on(GetItemCommand, {
       Key: { pk: { S: RagApiKeyKeys.lookupPk(TOKEN_HASH) }, sk: { S: RagApiKeyKeys.lookupSk() } },
@@ -58,7 +64,14 @@ function stubKeyRecords(orgRecordOverrides: Record<string, unknown> = {}) {
       Key: { pk: { S: RagApiKeyKeys.orgPk(ORG_ID) }, sk: { S: RagApiKeyKeys.orgSk(KEY_ID) } },
     })
     .resolves({ Item: marshall({ ...ORG_RECORD, ...orgRecordOverrides }) });
+  ddbMock.on(GetItemCommand, { Key: ORG_PROFILE_KEY }).resolves({
+    Item: marshall({ pk: `ORG#${ORG_ID}`, sk: 'PROFILE', orgName: 'Acme', ...profileOverrides }),
+  });
   ddbMock.on(UpdateItemCommand).resolves({});
+}
+
+function profileReadCall() {
+  return ddbMock.commandCalls(GetItemCommand).find((c) => c.args[0].input.Key?.sk?.S === 'PROFILE');
 }
 
 function bearerEvent({
@@ -245,6 +258,94 @@ describe('ragQueryAuthMiddleware', () => {
 
       expect(response).toBeUndefined();
       expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(TOKEN);
+    });
+  });
+
+  // FIL-112 fence B. Nothing downstream can catch this for the bearer path:
+  // the synthetic `ragkey|` sub has no SUB# row, so the tombstone gate never
+  // matches, and the subscription guard reads only `subscriptionStatus`, which
+  // the billing fence leaves alone.
+  describe('account deletion (fence B)', () => {
+    it('rejects the key with 410 ACCOUNT_DELETED while the org is being deleted', async () => {
+      stubKeyRecords({}, { deleting: true });
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const event = bearerEvent({ authorization: `Bearer ${TOKEN}` });
+
+      const { response } = await runBefore(event);
+
+      // The same contract every other deleted-account path emits: a 401 would
+      // invite a machine client to rotate credentials and retry forever.
+      expect(response?.statusCode).toBe(410);
+      expect(JSON.parse(response?.body ?? '{}')).toEqual({
+        message: 'Account has been deleted',
+        code: ApiErrorCode.ACCOUNT_DELETED,
+      });
+      expect(response?.headers?.['Cache-Control']).toBe('no-store');
+      // Nothing downstream may run as this org, and the key is not stamped.
+      expect(getUserInfo(event)).toBeUndefined();
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      // The token must never reach the logs.
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(TOKEN);
+    });
+
+    it('rejects even for a bucket the key is scoped to', async () => {
+      stubKeyRecords(
+        { bucketScope: 'specific', buckets: [{ region: 'eu-west-1', name: 'allowed-bucket' }] },
+        { deleting: true },
+      );
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const { response } = await runBefore(
+        bearerEvent({
+          authorization: `Bearer ${TOKEN}`,
+          bucketName: 'allowed-bucket',
+          region: 'eu-west-1',
+        }),
+      );
+
+      expect(response?.statusCode).toBe(410);
+    });
+
+    it.each([
+      ['the flag is absent', {}],
+      ['the flag is explicitly false', { deleting: false }],
+    ])('passes through unchanged when %s', async (_label, profileOverrides) => {
+      stubKeyRecords({}, profileOverrides);
+      const event = bearerEvent({ authorization: `Bearer ${TOKEN}` });
+
+      const { response } = await runBefore(event);
+
+      expect(response).toBeUndefined();
+      expect(getUserInfo(event)?.orgId).toBe(ORG_ID);
+    });
+
+    // A documented limitation, NOT a desired property. `isOrgDeleting(undefined)`
+    // is false and the purge batch-deletes ORG#{orgId}/PROFILE, so once the
+    // profile is gone this fence fails OPEN; post-purge safety then depends
+    // entirely on the RAGKEYHASH#/LOOKUP and ORG#/RAGKEY# rows also being gone,
+    // and a partial batch failure can leave RAGKEY# behind. The purge-ordering
+    // fix in the teardown work is what actually closes that, not this fence.
+    it('fails open when the org has no PROFILE row (post-purge limitation)', async () => {
+      stubKeyRecords();
+      ddbMock.on(GetItemCommand, { Key: ORG_PROFILE_KEY }).resolves({});
+
+      const { response } = await runBefore(bearerEvent({ authorization: `Bearer ${TOKEN}` }));
+
+      expect(response).toBeUndefined();
+    });
+
+    it('reads the profile strongly consistently and only from the stored orgId', async () => {
+      stubKeyRecords();
+      const event = bearerEvent({ authorization: `Bearer ${TOKEN}` });
+      // An attacker-controlled org id must not steer the fence read.
+      event.headers['x-org-id'] = 'org-B';
+
+      await runBefore(event);
+
+      const call = profileReadCall();
+      // `deleting` is absent until teardown starts, so a stale read fails OPEN.
+      expect(call?.args[0].input.ConsistentRead).toBe(true);
+      expect(call?.args[0].input.Key).toEqual(ORG_PROFILE_KEY);
     });
   });
 

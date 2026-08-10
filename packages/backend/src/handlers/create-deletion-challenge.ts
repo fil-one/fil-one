@@ -3,8 +3,9 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { DeletionChallengeResponse, ErrorResponse } from '@filone/shared';
 import { ApiErrorCode } from '@filone/shared';
+import { invokeAccountDeletionWorker } from '../lib/account-deletion-invoke.js';
 import { createDeletionChallenge } from '../lib/deletion-challenge.js';
-import { readDeletionRecord } from '../lib/deletion-record.js';
+import { claimDeletionRedrive, readDeletionRecord } from '../lib/deletion-record.js';
 import { sendDeletionCodeEmail } from '../lib/deletion-email.js';
 import { isOrgAdmin } from '../lib/org-membership.js';
 import { getOrgProfile } from '../lib/org-profile.js';
@@ -39,7 +40,27 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   }
 
   // Already confirmed — idempotent success, no new code issued or emailed.
+  //
+  // Re-invoke the (idempotent) teardown worker on the way out, throttled. The
+  // window this covers is NARROW: the never-fenced one. Once
+  // `applyDeletionGuards` has landed, middleware/auth.ts answers 410 for every
+  // member session, so no user can reach this route at all — a teardown that
+  // stalled AFTER fencing is the deletion reconciler's job (FIL-112), never
+  // this route's. What it does rescue is a deletion that was never scheduled at
+  // all: a failed worker invoke,
+  // or a crash between consuming the challenge code and invoking. The confirm
+  // handler needs a challenge code and this endpoint refuses to mint another
+  // while a DELETION record exists, so nothing else re-drives it.
+  //
+  // This re-drives a teardown; it does not unwedge an org. `deleting = true`
+  // stays on while a DELETION record exists, so an org whose teardown keeps
+  // failing stays fenced against access-key and RAG-key creation, RAG toggling
+  // and tenant re-activation — which is the intent while a deletion is in
+  // flight. The supported unwedge is `clearOrgDeletionFence`, driven by the
+  // deletion reconciler for orgs carrying the flag with NO deletion record
+  // (jobs/account-deletion-orchestrator.ts).
   if (await readDeletionRecord(orgId)) {
+    await redriveTeardown(orgId);
     return new ResponseBuilder()
       .status(200)
       .body<DeletionChallengeResponse>({ outcome: 'deletion_in_progress' })
@@ -73,6 +94,36 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
       resendAvailableAt: challenge.resendAvailableAt,
     })
     .build();
+}
+
+/**
+ * Best-effort, throttled re-drive of the teardown worker. Never fails the
+ * response: `deletion_in_progress` is a documented SUCCESS outcome (it is typed
+ * as one on {@link DeletionChallengeResponse}, and the website renders any 500
+ * as a generic server error rather than "account deletion is already in
+ * progress"), so a client that cannot reach Lambda must still be told the truth
+ * about its account. The failure is logged instead, and the reconciler re-drives
+ * teardowns that need it.
+ *
+ * Throttled because it short-circuits ahead of the code endpoint's own 5/hr
+ * limiter: without a cooldown of its own, every click Event-invokes another
+ * 900s / 1024MB worker.
+ *
+ * The claim is taken BEFORE the invoke, so a failed invoke — or an SDK-internal
+ * retry of the claim write, whose second attempt sees its own `lastRedriveAt`
+ * and reads as "cooldown live" — burns the 5-minute window with no worker
+ * scheduled. That is the deliberate trade: claiming only after a SUCCESSFUL
+ * invoke would let concurrent clicks fan out invokes unthrottled, which is what
+ * the cooldown exists to prevent. It self-heals — the user may retry after the
+ * cooldown, and the reconciler re-drives teardowns that stalled regardless.
+ */
+async function redriveTeardown(orgId: string): Promise<void> {
+  try {
+    if (!(await claimDeletionRedrive(orgId))) return;
+    await invokeAccountDeletionWorker(orgId);
+  } catch (err) {
+    console.error('[create-deletion-challenge] Teardown re-drive failed', { orgId, error: err });
+  }
 }
 
 export const handler = middy(baseHandler)

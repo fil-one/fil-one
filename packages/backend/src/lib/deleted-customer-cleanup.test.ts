@@ -54,6 +54,11 @@ function errorOutcome(orchestratorId: string) {
   };
 }
 
+/** `disabled` is never refused by fence B, so this path only ever sees `false`. */
+function syncResult(outcomes: ReturnType<typeof okOutcome | typeof errorOutcome>[]) {
+  return { outcomes, refusedForDeletion: false };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -63,7 +68,7 @@ describe('closeOutDeletedCustomer', () => {
     ddbMock.reset();
     ddbMock.on(UpdateItemCommand).resolves({});
     mockSyncTenantStatusInProvisionedRegions.mockReset();
-    mockSyncTenantStatusInProvisionedRegions.mockResolvedValue([okOutcome('aurora')]);
+    mockSyncTenantStatusInProvisionedRegions.mockResolvedValue(syncResult([okOutcome('aurora')]));
   });
 
   it('disables tenants, then marks the billing record canceled', async () => {
@@ -116,10 +121,9 @@ describe('closeOutDeletedCustomer', () => {
   });
 
   it('leaves the billing record untouched when any region fails to sync', async () => {
-    mockSyncTenantStatusInProvisionedRegions.mockResolvedValue([
-      okOutcome('aurora'),
-      errorOutcome('fth'),
-    ]);
+    mockSyncTenantStatusInProvisionedRegions.mockResolvedValue(
+      syncResult([okOutcome('aurora'), errorOutcome('fth')]),
+    );
 
     const { outcomes, billingCanceled } = await closeOutDeletedCustomer({
       userId: USER_ID,

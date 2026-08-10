@@ -13,6 +13,7 @@ import {
 } from '@filone/shared';
 import type { ActivateSubscriptionResponse } from '@filone/shared';
 import { Resource } from 'sst';
+import { accountDeletedResponse } from '../lib/account-deleted-response.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.js';
 import { saveBillingRecord, unlockAllProvisionedRegions } from '../lib/billing-activation.js';
@@ -51,24 +52,9 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   const { useSavedPaymentMethod, promotionCode } = parsed.data;
 
   // 2. Get customer record from billing table
-  const record = await getCustomerBillingRecord(userId);
-  const stripeCustomerId = record?.stripeCustomerId as string | undefined;
-
-  if (!record) {
-    return new ResponseBuilder()
-      .status(400)
-      .body({ message: 'No billing record found. Please set up a payment method first.' })
-      .build();
-  }
-
-  if (!stripeCustomerId) {
-    return new ResponseBuilder()
-      .status(400)
-      .body({
-        message: 'No Stripe customer found. Please set up a payment method first.',
-      })
-      .build();
-  }
+  const resolved = await resolveActivatableRecord(userId, orgId);
+  if ('error' in resolved) return resolved.error;
+  const { record, stripeCustomerId } = resolved;
 
   // 3. Resolve payment method: saved (DDB) or freshly confirmed (SetupIntent)
   const paymentMethodId = useSavedPaymentMethod
@@ -185,10 +171,7 @@ async function persistBillingAndUnlock(params: {
         { userId, subscriptionId: subscription.id, error },
       );
     }
-    return new ResponseBuilder()
-      .status(410)
-      .body({ message: 'Account has been deleted', code: ApiErrorCode.ACCOUNT_DELETED })
-      .build();
+    return accountDeletedResponse();
   }
   // Accepted TOCTOU with account deletion (FIL-112): the guarded save above
   // passed on then-current state, but a teardown can claim the record before
@@ -196,6 +179,58 @@ async function persistBillingAndUnlock(params: {
   // teardown deletes the tenants themselves.
   await unlockAllProvisionedRegions(orgId);
   return null;
+}
+
+type ActivatableRecord =
+  | { record: Record<string, unknown>; stripeCustomerId: string }
+  | { error: APIGatewayProxyResultV2 };
+
+/**
+ * Loads the billing record and refuses everything that must not reach Stripe.
+ *
+ * The FIL-112 branch is the load-bearing one: the write-time DELETION_GUARD in
+ * `saveBillingRecord` fires only *after* `createOrUpdateSubscription` has set
+ * `trial_end: 'now'`, which generates and charges an invoice — and the
+ * compensating `subscriptions.cancel` does not refund it, so a customer
+ * mid-deletion would be billed and then 410'd. Checking here is defence in
+ * depth, not a replacement: the guarded write still owns the genuine race
+ * where the teardown lands after this read.
+ */
+async function resolveActivatableRecord(userId: string, orgId: string): Promise<ActivatableRecord> {
+  const record = await getCustomerBillingRecord(userId);
+  const stripeCustomerId = record?.stripeCustomerId as string | undefined;
+
+  // Ordered ahead of both 400s: a mid-deletion record can legitimately lack
+  // `stripeCustomerId` (webhook-born and legacy records exist — see
+  // get-billing.ts), and such an account must be told ACCOUNT_DELETED, not
+  // handed the actionable-looking "set up a payment method first".
+  if (record?.deletionRequestedAt) {
+    console.warn('[activate-subscription] Account deletion in progress; refusing activation', {
+      userId,
+      orgId,
+    });
+    return { error: accountDeletedResponse() };
+  }
+
+  if (!record) {
+    return {
+      error: new ResponseBuilder()
+        .status(400)
+        .body({ message: 'No billing record found. Please set up a payment method first.' })
+        .build(),
+    };
+  }
+
+  if (!stripeCustomerId) {
+    return {
+      error: new ResponseBuilder()
+        .status(400)
+        .body({ message: 'No Stripe customer found. Please set up a payment method first.' })
+        .build(),
+    };
+  }
+
+  return { record, stripeCustomerId };
 }
 
 async function getCustomerBillingRecord(
@@ -208,6 +243,14 @@ async function getCustomerBillingRecord(
         pk: { S: `CUSTOMER#${userId}` },
         sk: { S: 'SUBSCRIPTION' },
       },
+      // Consistent: `deletionRequestedAt` is written synchronously before the
+      // confirm handler returns 200, so an eventually-consistent read inside the
+      // replication window (duplicate submit, second tab, client retry) would
+      // pass the pre-check below, reach `trial_end: 'now'` — which charges an
+      // invoice — and only then be 410'd by the write-time guard, whose
+      // compensating cancel does not refund. Same reasoning as the
+      // ConsistentRead in middleware/subscription-guard.ts.
+      ConsistentRead: true,
     }),
   );
 

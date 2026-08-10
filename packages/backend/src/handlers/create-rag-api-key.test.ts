@@ -4,6 +4,7 @@ import {
   DynamoDBClient,
   GetItemCommand,
   TransactWriteItemsCommand,
+  TransactionCanceledException,
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 
@@ -53,6 +54,15 @@ function sentTransactItems() {
   return calls[0].args[0].input.TransactItems ?? [];
 }
 
+/**
+ * The transaction's WRITE items. Item 0 is always the FIL-112 fence-B
+ * ConditionCheck (see sendFencedWrite); it is asserted on its own below so the
+ * key-shape assertions stay about the two rows this handler writes.
+ */
+function sentWriteItems() {
+  return sentTransactItems().slice(1);
+}
+
 describe('create-rag-api-key baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -70,7 +80,7 @@ describe('create-rag-api-key baseHandler', () => {
     expect(body.keyName).toBe('ci key');
     expect(body.bucketScope).toBe('all');
 
-    const items = sentTransactItems();
+    const items = sentWriteItems();
     expect(items).toHaveLength(2);
     const orgItem = unmarshall(items[0].Put!.Item!);
     const lookupItem = unmarshall(items[1].Put!.Item!);
@@ -103,7 +113,7 @@ describe('create-rag-api-key baseHandler', () => {
     );
 
     expect(result.statusCode).toBe(201);
-    const orgItem = unmarshall(sentTransactItems()[0].Put!.Item!);
+    const orgItem = unmarshall(sentWriteItems()[0].Put!.Item!);
     expect(orgItem.bucketScope).toBe('specific');
     expect(orgItem.buckets).toEqual([{ region: 'eu-west-1', name: 'docs' }]);
   });
@@ -117,7 +127,7 @@ describe('create-rag-api-key baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(201);
-    const orgItem = unmarshall(sentTransactItems()[0].Put!.Item!);
+    const orgItem = unmarshall(sentWriteItems()[0].Put!.Item!);
     expect(orgItem.creatorEmail).toBeUndefined();
   });
 
@@ -147,6 +157,60 @@ describe('create-rag-api-key baseHandler', () => {
 
     expect(result.statusCode).toBe(400);
     expect(ddbMock.calls()).toHaveLength(0);
+  });
+
+  it('fences the transaction on the org profile deleting flag as item 0', async () => {
+    await baseHandler(createEvent({ keyName: 'ci key' }));
+
+    expect(sentTransactItems()[0].ConditionCheck).toEqual({
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
+      ConditionExpression:
+        'attribute_exists(pk) AND (attribute_not_exists(deleting) OR deleting = :notDeleting)',
+      ExpressionAttributeValues: { ':notDeleting': { BOOL: false } },
+    });
+  });
+
+  it('returns 410 ACCOUNT_DELETED and mints nothing when the fence rejects', async () => {
+    // Without the fence, `attribute_not_exists(pk)` alone (it only stops key-id
+    // collisions) would let this commit a WORKING bearer credential into a
+    // partition the teardown has already purged.
+    ddbMock.on(TransactWriteItemsCommand).rejects(
+      new TransactionCanceledException({
+        message: 'cancelled',
+        $metadata: {},
+        CancellationReasons: [
+          { Code: 'ConditionalCheckFailed' },
+          { Code: 'None' },
+          { Code: 'None' },
+        ],
+      }),
+    );
+
+    const result = await baseHandler(createEvent({ keyName: 'ci key' }));
+
+    expect(result.statusCode).toBe(410);
+    expect(JSON.parse(result.body ?? '{}')).toMatchObject({ code: 'ACCOUNT_DELETED' });
+    // The token is never disclosed when the rows were not written.
+    expect(result.body).not.toContain('sk_rag_');
+  });
+
+  it('rethrows a key-id collision (a cancellation that is not the fence)', async () => {
+    ddbMock.on(TransactWriteItemsCommand).rejects(
+      new TransactionCanceledException({
+        message: 'cancelled',
+        $metadata: {},
+        CancellationReasons: [
+          { Code: 'None' },
+          { Code: 'ConditionalCheckFailed' },
+          { Code: 'None' },
+        ],
+      }),
+    );
+
+    await expect(baseHandler(createEvent({ keyName: 'ci key' }))).rejects.toBeInstanceOf(
+      TransactionCanceledException,
+    );
   });
 });
 

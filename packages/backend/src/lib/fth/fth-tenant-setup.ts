@@ -5,15 +5,11 @@
 // aurora-tenant-setup.ts for the pattern to mirror.
 
 import { format } from 'node:util';
-import {
-  ConditionalCheckFailedException,
-  GetItemCommand,
-  UpdateItemCommand,
-} from '@aws-sdk/client-dynamodb';
+import { ConditionalCheckFailedException, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, PutParameterCommand } from '@aws-sdk/client-ssm';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../ddb-client.js';
-import { assertOrgNotDeleting } from '../org-profile.js';
+import { assertOrgNotDeleting, getOrgProfile } from '../org-profile.js';
 import type { FthManagementClient } from './fth-management-client.js';
 
 const FTH_FULL_PERMISSIONS = [
@@ -69,16 +65,11 @@ async function processTenantSetup(client: FthManagementClient, orgId: string): P
   const stage = process.env.FILONE_STAGE!;
   const key = { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } };
 
-  const existing = await dynamo.send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: key,
-      ConsistentRead: true,
-    }),
-  );
-  assertOrgNotDeleting(existing.Item, orgId);
+  // Strongly consistent — see orchestrator/tenant-setup.ts for the rationale.
+  const existing = await getOrgProfile(orgId, { consistent: true });
+  assertOrgNotDeleting(existing, orgId);
 
-  const existingTenantId = existing.Item?.fthTenantId?.S;
+  const existingTenantId = existing?.fthTenantId?.S;
   // TODO: check fthTenantSetupStatus
   if (existingTenantId) {
     return existingTenantId;
@@ -139,11 +130,16 @@ async function processTenantSetup(client: FthManagementClient, orgId: string): P
     );
   } catch (err) {
     if (err instanceof ConditionalCheckFailedException) {
-      // The FTH client created above is now unreferenced.
+      // The FTH client created above is now unreferenced and unreachable by
+      // any sweep: the failed write IS the write of `fthTenantId`, and the
+      // teardown's late-region re-check resolves targets only from PROFILE
+      // tenant-id attributes. The console key landed in SSM before this
+      // write, so it leaks too.
       throw new Error(
         `Org ${orgId} is deleting or purged; refusing to persist FTH tenant ${tenantId}. ` +
-          `The just-created FTH client is swept by the teardown's late-region re-check ` +
-          `if the profile still exists; otherwise it needs manual cleanup.`,
+          `MANUAL CLEANUP REQUIRED: no PROFILE attribute references this client, so no ` +
+          `teardown sweep can reach it. Delete FTH client ${tenantId} and the SSM parameter ` +
+          `/filone/${stage}/fth-s3/access-key/${tenantId}.`,
         { cause: err },
       );
     }

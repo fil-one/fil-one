@@ -1,6 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, PutItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
+import {
+  DynamoDBClient,
+  GetItemCommand,
+  PutItemCommand,
+  QueryCommand,
+  TransactWriteItemsCommand,
+  TransactionCanceledException,
+} from '@aws-sdk/client-dynamodb';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -15,6 +22,7 @@ vi.mock('sst', () => ({
 const mockEnsureTenantReady = vi.fn();
 const mockIssueAccessKey = vi.fn();
 const mockFindAccessKeyByName = vi.fn();
+const mockDeleteAccessKey = vi.fn();
 const mockGetOrchestratorForRegion = vi.fn();
 
 const mockOrchestrator = {
@@ -23,6 +31,7 @@ const mockOrchestrator = {
   ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
   issueAccessKey: (...args: unknown[]) => mockIssueAccessKey(...args),
   findAccessKeyByName: (...args: unknown[]) => mockFindAccessKeyByName(...args),
+  deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
 };
 
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
@@ -55,6 +64,32 @@ function validBody({ keyName, region = 'eu-west-1' }: { keyName?: string; region
   });
 }
 
+/**
+ * The `ACCESSKEY#` rows are written through a fenced transaction (FIL-112), so
+ * every assertion about "the Put" reads item 1 — item 0 is always the fence-B
+ * ConditionCheck (see sendFencedWrite).
+ */
+function accessKeyPuts() {
+  return ddbMock
+    .commandCalls(TransactWriteItemsCommand)
+    .map((call) => call.args[0].input.TransactItems![1].Put!);
+}
+
+/** The fence-B ConditionCheck of the first transaction sent. */
+function sentFenceCheck() {
+  return ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems![0]
+    .ConditionCheck;
+}
+
+/** A fence rejection: item 0 (the ConditionCheck) is what DynamoDB cancelled on. */
+function fenceRejection() {
+  return new TransactionCanceledException({
+    message: 'cancelled',
+    $metadata: {},
+    CancellationReasons: [{ Code: 'ConditionalCheckFailed' }, { Code: 'None' }],
+  });
+}
+
 function issuedAccessKey() {
   return {
     id: 'aurora-key-1',
@@ -72,11 +107,14 @@ describe('create-access-key baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
+    // The FIL-112 pre-check reads ORG#{orgId}/PROFILE; a live org has no
+    // `deleting` attribute.
+    ddbMock.on(GetItemCommand).resolves({ Item: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } } });
     mockEnsureTenantReady.mockResolvedValue('aurora-t-1');
   });
 
   it('returns 201 with keyName, accessKeyId, and secretAccessKey on success', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
@@ -94,7 +132,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('calls orchestrator.issueAccessKey with correct params', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
@@ -110,15 +148,15 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('stores access key in DynamoDB without the secret', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
     await baseHandler(event);
 
-    const putCalls = ddbMock.commandCalls(PutItemCommand);
+    const putCalls = accessKeyPuts();
     expect(putCalls).toHaveLength(1);
-    const item = putCalls[0].args[0].input.Item!;
+    const item = putCalls[0].Item!;
     expect(item.pk.S).toBe('ORG#org-1');
     expect(item.sk.S).toBe('ACCESSKEY#aurora-key-1');
     expect(item.keyName.S).toBe('My Key');
@@ -130,6 +168,140 @@ describe('create-access-key baseHandler', () => {
     // Secret must NOT be stored
     expect(item.accessKeySecret).toBeUndefined();
     expect(item.secretAccessKey).toBeUndefined();
+  });
+
+  describe('FIL-112 deletion fence', () => {
+    it('pre-checks the profile strongly-consistently and never mints upstream when deleting', async () => {
+      ddbMock.on(GetItemCommand).resolves({
+        Item: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' }, deleting: { BOOL: true } },
+      });
+
+      const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(410);
+      expect(JSON.parse(result.body!)).toMatchObject({ code: 'ACCOUNT_DELETED' });
+      // The whole point of pre-checking: no upstream credential is created, so
+      // there is nothing that could be orphaned.
+      expect(mockIssueAccessKey).not.toHaveBeenCalled();
+      expect(mockDeleteAccessKey).not.toHaveBeenCalled();
+      expect(accessKeyPuts()).toHaveLength(0);
+      // `deleting` is absent until teardown starts, so a stale read fails open.
+      expect(ddbMock.commandCalls(GetItemCommand)[0].args[0].input).toMatchObject({
+        Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
+        ConsistentRead: true,
+      });
+    });
+
+    it('fences the DynamoDB write on the profile deleting flag as item 0', async () => {
+      ddbMock.on(TransactWriteItemsCommand).resolves({});
+      mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+
+      await baseHandler(
+        buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO }),
+      );
+
+      expect(sentFenceCheck()).toEqual({
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
+        ConditionExpression:
+          'attribute_exists(pk) AND (attribute_not_exists(deleting) OR deleting = :notDeleting)',
+        ExpressionAttributeValues: { ':notDeleting': { BOOL: false } },
+      });
+    });
+
+    it('revokes the key it just minted when the fenced write loses the race', async () => {
+      // The deletion is confirmed AFTER the pre-check but BEFORE the write, so
+      // the credential exists upstream with no ACCESSKEY# row for teardown to
+      // revoke by. Compensate.
+      mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+      ddbMock.on(TransactWriteItemsCommand).rejects(fenceRejection());
+      mockDeleteAccessKey.mockResolvedValue(undefined);
+
+      const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(410);
+      expect(JSON.parse(result.body!)).toMatchObject({ code: 'ACCOUNT_DELETED' });
+      // Blast radius: exactly one revoke, of exactly the key just issued, on
+      // exactly this request's tenant. Never a listed or looked-up key.
+      expect(mockDeleteAccessKey).toHaveBeenCalledTimes(1);
+      expect(mockDeleteAccessKey).toHaveBeenCalledWith('aurora-t-1', 'aurora-key-1');
+      // And the secret is never returned for a key that was just revoked.
+      expect(result.body).not.toContain('secret-abc-123');
+    });
+
+    it('does NOT revoke when the write succeeds', async () => {
+      ddbMock.on(TransactWriteItemsCommand).resolves({});
+      mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+
+      const result = await baseHandler(
+        buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO }),
+      );
+
+      expect(result.statusCode).toBe(201);
+      expect(mockDeleteAccessKey).not.toHaveBeenCalled();
+    });
+
+    it('does NOT revoke for a transaction failure that is not the fence', async () => {
+      // A conflict/throttle must propagate as a 500 with the key intact — the
+      // request can be retried; revoking here would destroy a usable key.
+      mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+      ddbMock.on(TransactWriteItemsCommand).rejects(
+        new TransactionCanceledException({
+          message: 'cancelled',
+          $metadata: {},
+          CancellationReasons: [{ Code: 'None' }, { Code: 'TransactionConflict' }],
+        }),
+      );
+
+      await expect(
+        baseHandler(buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO })),
+      ).rejects.toBeInstanceOf(TransactionCanceledException);
+      expect(mockDeleteAccessKey).not.toHaveBeenCalled();
+    });
+
+    it('still answers 410 when the compensating revoke itself fails', async () => {
+      mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+      ddbMock.on(TransactWriteItemsCommand).rejects(fenceRejection());
+      mockDeleteAccessKey.mockRejectedValue(new Error('orchestrator down'));
+
+      const result = await baseHandler(
+        buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO }),
+      );
+
+      // A 500 here would only invite a retry that mints a second key.
+      expect(result.statusCode).toBe(410);
+    });
+
+    it('skips the duplicate-key recovery record without revoking the pre-existing key', async () => {
+      // The recovery path did not mint this key — it already existed upstream —
+      // so a compensating revoke would destroy a credential this request never
+      // created.
+      mockIssueAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
+      ddbMock.on(QueryCommand).resolves({ Items: [] });
+      mockFindAccessKeyByName.mockResolvedValue({
+        id: 'aurora-key-1',
+        accessKeyId: 'AKIA1234567890',
+        createdAt: '2026-03-10T00:00:00Z',
+      });
+      ddbMock.on(TransactWriteItemsCommand).rejects(fenceRejection());
+
+      const result = await baseHandler(
+        buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO }),
+      );
+
+      expect(result.statusCode).toBe(409);
+      expect(mockDeleteAccessKey).not.toHaveBeenCalled();
+      // Teeth: the recovery row must not reach DynamoDB by ANY path. Before the
+      // fence this was a bare PutItemCommand, which aws-sdk-client-mock resolves
+      // by default — so the record was happily written for a deleting org and a
+      // test asserting only the 409 pinned nothing. The single write attempted
+      // now is the fenced transaction, and the fence rejected it.
+      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
+      expect(sentFenceCheck()?.Key).toEqual({ pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } });
+    });
   });
 
   it('returns 400 when keyName is missing', async () => {
@@ -161,7 +333,7 @@ describe('create-access-key baseHandler', () => {
   }
 
   it('trims whitespace from keyName', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({
@@ -185,7 +357,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('passes YYYY-MM-DD expiresAt through as-is', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({
@@ -207,7 +379,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('stores the YYYY-MM-DD expiresAt in DynamoDB (not RFC3339)', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({
@@ -222,7 +394,7 @@ describe('create-access-key baseHandler', () => {
     });
     await baseHandler(event);
 
-    const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+    const item = accessKeyPuts()[0].Item!;
     expect(item.expiresAt.S).toBe('2026-06-01');
   });
 
@@ -289,7 +461,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('drives tenant setup via ensureTenantReady before creating the access key', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
@@ -304,7 +476,7 @@ describe('create-access-key baseHandler', () => {
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
 
     await expect(baseHandler(event)).rejects.toThrow('Aurora API error');
-    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    expect(accessKeyPuts()).toHaveLength(0);
   });
 
   it('returns 409 when the orchestrator rejects duplicate key name and key exists in DynamoDB', async () => {
@@ -330,7 +502,7 @@ describe('create-access-key baseHandler', () => {
     expect(body).toStrictEqual({
       message: 'An access key with this name already exists',
     });
-    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    expect(accessKeyPuts()).toHaveLength(0);
   });
 
   it('returns 409 and recovers DynamoDB record on partial failure', async () => {
@@ -342,7 +514,7 @@ describe('create-access-key baseHandler', () => {
       accessKeyId: 'AKIA1234567890',
       createdAt: '2026-03-10T00:00:00Z',
     });
-    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
 
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
     const result = await baseHandler(event);
@@ -353,9 +525,9 @@ describe('create-access-key baseHandler', () => {
       message: 'An access key with this name already exists',
     });
     // Verify DynamoDB record was recovered
-    const putCalls = ddbMock.commandCalls(PutItemCommand);
+    const putCalls = accessKeyPuts();
     expect(putCalls).toHaveLength(1);
-    const item = putCalls[0].args[0].input.Item!;
+    const item = putCalls[0].Item!;
     expect(item).toMatchObject({
       pk: { S: 'ORG#org-1' },
       sk: { S: 'ACCESSKEY#aurora-key-1' },
@@ -386,7 +558,7 @@ describe('create-access-key baseHandler', () => {
       accessKeyId: 'AKIA1234567890',
       createdAt: '2026-03-10T00:00:00Z',
     });
-    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
 
     const event = buildEvent({
       body: validBody({ keyName: 'My Key', region: 'eu-west-1' }),
@@ -396,9 +568,9 @@ describe('create-access-key baseHandler', () => {
 
     expect(result.statusCode).toBe(409);
     expect(mockFindAccessKeyByName).toHaveBeenCalled();
-    const putCalls = ddbMock.commandCalls(PutItemCommand);
+    const putCalls = accessKeyPuts();
     expect(putCalls).toHaveLength(1);
-    const item = putCalls[0].args[0].input.Item!;
+    const item = putCalls[0].Item!;
     expect(item).toMatchObject({
       pk: { S: 'ORG#org-1' },
       sk: { S: 'ACCESSKEY#aurora-key-1' },
@@ -427,7 +599,7 @@ describe('create-access-key baseHandler', () => {
       accessKeyId: 'AKIA1234567890',
       createdAt: '2026-03-10T00:00:00Z',
     });
-    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
 
     const event = buildEvent({
       body: validBody({ keyName: 'My Key', region: 'us-east-1' }),
@@ -436,15 +608,15 @@ describe('create-access-key baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(409);
-    const putCalls = ddbMock.commandCalls(PutItemCommand);
+    const putCalls = accessKeyPuts();
     expect(putCalls).toHaveLength(1);
-    const item = putCalls[0].args[0].input.Item!;
+    const item = putCalls[0].Item!;
     expect(item.region.S).toBe('us-east-1');
   });
 
   describe('region', () => {
     beforeEach(() => {
-      ddbMock.on(PutItemCommand).resolves({});
+      ddbMock.on(TransactWriteItemsCommand).resolves({});
       mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
     });
 
@@ -481,7 +653,7 @@ describe('create-access-key baseHandler', () => {
 
       expect(result.statusCode).toBe(201);
       expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('us-east-1');
-      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      const item = accessKeyPuts()[0].Item!;
       expect(item.region.S).toBe('us-east-1');
     });
 
@@ -505,7 +677,7 @@ describe('create-access-key baseHandler', () => {
 
   describe('bucket management permissions', () => {
     beforeEach(() => {
-      ddbMock.on(PutItemCommand).resolves({});
+      ddbMock.on(TransactWriteItemsCommand).resolves({});
       mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
     });
 
@@ -535,7 +707,7 @@ describe('create-access-key baseHandler', () => {
       const event = buildEvent({ body: bucketBody('us-east-1'), userInfo: USER_INFO });
       await baseHandler(event);
 
-      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      const item = accessKeyPuts()[0].Item!;
       expect(item.permissions.L).toEqual([
         { S: 'read' },
         { S: 'CreateBucket' },

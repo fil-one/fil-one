@@ -12,7 +12,7 @@ import {
   GetItemCommand,
   TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
-import { ApiErrorCode, OrgRole } from '@filone/shared';
+import { ApiErrorCode, CSRF_COOKIE_NAME, OrgRole } from '@filone/shared';
 import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../lib/org-setup-status.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
@@ -184,7 +184,7 @@ describe('authMiddleware', () => {
       });
     });
 
-    it('returns 401 ACCOUNT_DELETED with cleared cookies for a tombstoned identity and never recreates the user', async () => {
+    it('returns 410 ACCOUNT_DELETED with cleared cookies for a tombstoned identity and never recreates the user', async () => {
       mockJwtVerify
         .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
         .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: true } });
@@ -213,13 +213,23 @@ describe('authMiddleware', () => {
 
       const result = (await before(buildMiddyRequest(event))) as APIGatewayProxyStructuredResultV2;
 
-      expect(result.statusCode).toBe(401);
+      // 410, not 401: a 401 invites a retry with credentials that can only
+      // loop for a permanently gone account. One status for this code across
+      // the whole API — see lib/account-deleted-response.ts.
+      expect(result.statusCode).toBe(410);
       expect(JSON.parse(result.body!)).toEqual({
         message: 'Account has been deleted',
         code: ApiErrorCode.ACCOUNT_DELETED,
       });
+      // The dead session must still be torn down alongside the 410.
       const cookies = result.cookies ?? [];
-      for (const name of ['hs_access_token', 'hs_id_token', 'hs_refresh_token', 'hs_logged_in']) {
+      for (const name of [
+        'hs_access_token',
+        'hs_id_token',
+        'hs_refresh_token',
+        'hs_logged_in',
+        CSRF_COOKIE_NAME,
+      ]) {
         expect(cookies).toEqual(expect.arrayContaining([expect.stringContaining(`${name}=;`)]));
       }
       // The resurrection hole: a tombstoned identity must never fall through

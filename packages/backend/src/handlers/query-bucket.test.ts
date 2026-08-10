@@ -19,8 +19,13 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getOrchestratorForRegion: (...args: unknown[]) => mockGetOrchestratorForRegion(...args),
 }));
 
-vi.mock('../lib/org-profile.js', () => ({
-  getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
+// Only the fetch is stubbed — `isOrgDeleting` stays real so the FIL-112 fence
+// below is exercised, not simulated.
+const mockGetOrgProfile = vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } }));
+
+vi.mock('../lib/org-profile.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/org-profile.js')>()),
+  getOrgProfile: (...args: unknown[]) => mockGetOrgProfile(...(args as [string])),
 }));
 
 // The queryability gate reads the bucket's enablement row (RagIndexerTable).
@@ -680,6 +685,27 @@ describe('query-bucket handler (RAG API key bearer auth)', () => {
 
     expect(result.statusCode).toBe(401);
     expect(mockEmbed).not.toHaveBeenCalled();
+  });
+
+  // FIL-112: the whole chain must refuse, not just the middleware in isolation.
+  // Nothing further down can catch this — the subscription guard reads only
+  // `subscriptionStatus`, which the billing fence leaves untouched, and the
+  // synthetic `ragkey|` sub has no SUB# row for the tombstone gate to match.
+  it('returns 410 ACCOUNT_DELETED and serves no bucket content while the key org is being deleted', async () => {
+    stubKey();
+    mockGetOrgProfile.mockResolvedValueOnce({
+      pk: { S: 'ORG#org-1' },
+      deleting: { BOOL: true },
+    } as never);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await handler(bearerEvent(`Bearer ${TOKEN}`), buildContext());
+
+    expect(result.statusCode).toBe(410);
+    expect(JSON.parse(result.body!).code).toBe('ACCOUNT_DELETED');
+    expect(mockEmbed).not.toHaveBeenCalled();
+    expect(mockQuery).not.toHaveBeenCalled();
+    expect(mockComplete).not.toHaveBeenCalled();
   });
 
   it('returns 403 when the key creator is not foundation and not allowlisted', async () => {

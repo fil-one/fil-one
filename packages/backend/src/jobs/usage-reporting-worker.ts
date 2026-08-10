@@ -1,6 +1,4 @@
-import { PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
-import { getDynamoClient } from '../lib/ddb-client.js';
 import { Resource } from 'sst';
 import {
   GB_BYTES,
@@ -28,8 +26,7 @@ import {
   getProvisionedRegions,
   syncTenantStatusInProvisionedRegions,
 } from '../lib/region-helpers.js';
-
-const dynamo = getDynamoClient();
+import { OrgDeletingError, sendFencedWrite } from '../lib/org-profile.js';
 
 export interface UsageReportingWorkerPayload {
   orgId: string;
@@ -73,7 +70,15 @@ async function enforceTenantLocks({
     desired = 'active';
   }
 
-  const outcomes = await syncTenantStatusInProvisionedRegions(orgId, desired);
+  const { outcomes, refusedForDeletion } = await syncTenantStatusInProvisionedRegions(
+    orgId,
+    desired,
+  );
+
+  // Fence B refused the re-activation (FIL-112): report that rather than
+  // claiming the org was driven to `desired`. Read off the org-level flag, not
+  // the outcomes — an org with no provisioned region is still refused.
+  if (refusedForDeletion) return 'skipped:org-deleting';
 
   const updated = outcomes.filter((o) => o.outcome === 'updated');
   if (updated.length > 0) {
@@ -517,28 +522,46 @@ async function writeUsageAuditRecord(params: {
   orgSyncAction: string;
 }): Promise<void> {
   const ttl = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60; // 365 days
-  await dynamo.send(
-    new PutItemCommand({
-      TableName: Resource.BillingTable.name,
-      Item: marshall({
-        pk: `ORG#${params.orgId}`,
-        sk: `USAGE_REPORT#${params.reportDate}`,
-        orgId: params.orgId,
-        subscriptionId: params.subscriptionId,
-        stripeCustomerId: params.stripeCustomerId,
-        currentPeriodStart: params.currentPeriodStart,
-        subscriptionStatus: params.subscriptionStatus,
-        reportDate: params.reportDate,
-        averageStorageBytesUsed: params.averageStorageBytesUsed,
-        averageStorageGbUsed: params.averageStorageGbUsed,
-        totalEgressBytes: params.totalEgressBytes,
-        sampleCount: params.sampleCount,
-        reportedToStripe: params.reportedToStripe,
-        lockAction: params.lockAction,
-        orgSyncAction: params.orgSyncAction,
-        createdAt: new Date().toISOString(),
-        ttl,
-      }),
-    }),
-  );
+  // FIL-112: fenced on the org's `deleting` flag. This is the only BillingTable
+  // `ORG#` writer, and its row now IS purged by teardown (see
+  // PURGEABLE_BILLING_PK_PREFIXES); without the fence a daily run landing after
+  // the purge would re-create a deleted org's usage row and hold it for the
+  // full 365-day TTL. The fence also refuses once the PROFILE row itself is
+  // gone (it requires the row), which is exactly the post-purge case here.
+  // Skipped rather than thrown: the audit row is the last step of a run whose
+  // real work is already done, and failing here would only re-drive that work.
+  try {
+    await sendFencedWrite(params.orgId, [
+      {
+        Put: {
+          TableName: Resource.BillingTable.name,
+          Item: marshall({
+            pk: `ORG#${params.orgId}`,
+            sk: `USAGE_REPORT#${params.reportDate}`,
+            orgId: params.orgId,
+            subscriptionId: params.subscriptionId,
+            stripeCustomerId: params.stripeCustomerId,
+            currentPeriodStart: params.currentPeriodStart,
+            subscriptionStatus: params.subscriptionStatus,
+            reportDate: params.reportDate,
+            averageStorageBytesUsed: params.averageStorageBytesUsed,
+            averageStorageGbUsed: params.averageStorageGbUsed,
+            totalEgressBytes: params.totalEgressBytes,
+            sampleCount: params.sampleCount,
+            reportedToStripe: params.reportedToStripe,
+            lockAction: params.lockAction,
+            orgSyncAction: params.orgSyncAction,
+            createdAt: new Date().toISOString(),
+            ttl,
+          }),
+        },
+      },
+    ]);
+  } catch (error) {
+    if (!(error instanceof OrgDeletingError)) throw error;
+    console.warn('[usage-worker] Skipping usage audit record: org deleted or being deleted', {
+      orgId: params.orgId,
+      reportDate: params.reportDate,
+    });
+  }
 }
