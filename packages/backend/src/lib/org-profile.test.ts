@@ -37,6 +37,30 @@ describe('getOrgProfile', () => {
     expect(result).toEqual(item);
   });
 
+  // The `deleting` fence (FIL-112) is mutable, so every caller that acts on it
+  // — the tenant-setup paths — must read it strongly consistently.
+  it('issues a strongly-consistent read when { consistent: true }', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: {} });
+
+    await getOrgProfile('org-1', { consistent: true });
+
+    expect(ddbMock.commandCalls(GetItemCommand)[0]?.args[0].input).toEqual({
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
+      ConsistentRead: true,
+    });
+  });
+
+  it('omits ConsistentRead entirely when { consistent: false }', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: {} });
+
+    await getOrgProfile('org-1', { consistent: false });
+
+    expect(ddbMock.commandCalls(GetItemCommand)[0]?.args[0].input).not.toHaveProperty(
+      'ConsistentRead',
+    );
+  });
+
   it('returns undefined when no PROFILE row exists', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: undefined });
 
