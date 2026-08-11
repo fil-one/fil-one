@@ -168,7 +168,7 @@ function getCustomerIdString(customer: string | Stripe.Customer | Stripe.Deleted
   return typeof customer === 'string' ? customer : customer.id;
 }
 
-type BackfillClause = { clause: string; values: Record<string, { S: string }> };
+type BackfillResult = { clause: string; values: Record<string, { S: string }> };
 
 /**
  * Records predating the orgId field are invisible to every lifecycle job (usage
@@ -176,7 +176,7 @@ type BackfillClause = { clause: string; values: Record<string, { S: string }> };
  * Backfill from Stripe metadata whenever it is in hand — if_not_exists so a
  * known-good stored value is never clobbered.
  */
-function orgIdBackfill(orgId: string | undefined): BackfillClause {
+function orgIdBackfill(orgId: string | undefined): BackfillResult {
   if (!orgId) return { clause: '', values: {} };
   return {
     clause: ', orgId = if_not_exists(orgId, :orgId)',
@@ -193,7 +193,7 @@ function orgIdBackfill(orgId: string | undefined): BackfillClause {
  * whenever it is in hand — if_not_exists so createBillingTrial's own values
  * always win.
  */
-function trialWindowBackfill(subscription: Stripe.Subscription): BackfillClause {
+function trialWindowBackfill(subscription: Stripe.Subscription): BackfillResult {
   const { trial_start: start, trial_end: end } = subscription;
   if (typeof start !== 'number' || typeof end !== 'number') return { clause: '', values: {} };
   const iso = (unixSeconds: number) => new Date(unixSeconds * 1000).toISOString();

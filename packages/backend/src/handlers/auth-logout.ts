@@ -13,9 +13,12 @@ async function baseHandler(
   const domain = process.env.AUTH0_DOMAIN!;
   const secrets = getAuthSecrets();
 
-  // Revoke the refresh token at Auth0 before clearing cookies so it cannot
-  // be reused after logout. Fire-and-forget: a revocation failure must not
-  // block the user from logging out.
+  // Revoke the refresh token at Auth0 before clearing cookies, so a token already
+  // handed out cannot be exchanged for new ones after logout.
+  //
+  // The failure is swallowed rather than surfaced: the cookies are cleared either
+  // way, so the session ends locally regardless, and a 500 here would leave the
+  // user apparently logged in with no way to retry. The token expires on its own.
   const cookies = parseCookies(event.cookies);
   const refreshToken = cookies[COOKIE_NAMES.REFRESH_TOKEN];
   if (refreshToken) {
@@ -30,7 +33,7 @@ async function baseHandler(
         }).toString(),
       });
     } catch (err) {
-      console.warn('[logout] Refresh token revocation failed', { error: err });
+      console.warn('[auth-logout] Refresh token revocation failed', { error: err });
     }
   }
 
