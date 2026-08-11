@@ -49,7 +49,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     return errorResponse(403, 'Only an organization admin can delete the account');
   }
 
-  const verify = await verifyDeletionChallenge(orgId, parsed.data.code);
+  const verify = await verifyDeletionChallenge(orgId, userId, parsed.data.code);
   if (verify === 'invalid') {
     return errorResponse(400, 'Incorrect verification code', ApiErrorCode.DELETION_CODE_INVALID);
   }

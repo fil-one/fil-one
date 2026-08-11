@@ -498,7 +498,9 @@ describe('delete-account handler (MFA step-up gate)', () => {
 
     expect(result.statusCode).toBe(200);
     expect(mockGetMfaEnrollments).toHaveBeenCalledWith(SUB);
-    expect(mockVerifyChallenge).toHaveBeenCalledWith(ORG_ID, '123456');
+    // The submitter is part of the challenge's identity: a code issued to another
+    // admin must not confirm this deletion.
+    expect(mockVerifyChallenge).toHaveBeenCalledWith(ORG_ID, USER_ID, '123456');
     expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(1);
   });
 });

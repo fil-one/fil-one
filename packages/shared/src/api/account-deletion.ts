@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { ErrorResponse } from './coreInterfaces.js';
 
 export const DELETION_CODE_LENGTH = 6;
 
@@ -32,3 +33,12 @@ export type DeletionChallengeResponse =
     }
   /** A deletion is already confirmed and running — no new code was issued. */
   | { outcome: 'deletion_in_progress' };
+
+/**
+ * 429 from the challenge endpoint. `resendAvailableAt` is the earliest moment
+ * another code may be requested — the cooldown's end, or the send window's end
+ * once the budget is spent.
+ */
+export interface DeletionRateLimitedResponse extends ErrorResponse {
+  resendAvailableAt: string;
+}
