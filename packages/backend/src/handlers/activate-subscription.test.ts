@@ -248,12 +248,15 @@ describe('activate-subscription handler', () => {
     const body = JSON.parse((result as { body: string }).body);
 
     // Should call create, NOT update
-    expect(mockSubscriptionsCreate).toHaveBeenCalledWith({
-      customer: 'cus_test_123',
-      items: [{ price: 'price_test_fake' }],
-      default_payment_method: 'pm_test_789',
-      expand: ['latest_invoice.payment_intent', 'default_payment_method'],
-    });
+    expect(mockSubscriptionsCreate).toHaveBeenCalledWith(
+      {
+        customer: 'cus_test_123',
+        items: [{ price: 'price_test_fake' }],
+        default_payment_method: 'pm_test_789',
+        expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+      },
+      { idempotencyKey: 'activate-sub-user-1-new' },
+    );
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
 
     expect(body.subscription.status).toBe(SubscriptionStatus.Active);
@@ -284,15 +287,62 @@ describe('activate-subscription handler', () => {
     const body = JSON.parse((result as { body: string }).body);
 
     expect(mockSubscriptionsCreate).toHaveBeenCalledTimes(1);
-    expect(mockSubscriptionsCreate).toHaveBeenCalledWith({
-      customer: 'cus_test_123',
-      items: [{ price: 'price_test_fake' }],
-      default_payment_method: 'pm_test_789',
-      expand: ['latest_invoice.payment_intent', 'default_payment_method'],
-    });
+    expect(mockSubscriptionsCreate).toHaveBeenCalledWith(
+      {
+        customer: 'cus_test_123',
+        items: [{ price: 'price_test_fake' }],
+        default_payment_method: 'pm_test_789',
+        expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+      },
+      { idempotencyKey: 'activate-sub-user-1-sub_canceled_old' },
+    );
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
 
     expect(body.subscription.status).toBe(SubscriptionStatus.Active);
+  });
+
+  it("keys subscriptions.create on the subscription it replaces, so successive re-activations aren't deduped", async () => {
+    // The key exists so a retried activation cannot mint a second paid
+    // subscription. Keying it on the user alone would break the legitimate case:
+    // cancel → re-activate → cancel → re-activate inside Stripe's 24h window
+    // would replay the first subscription instead of creating a new one.
+    async function activateWithStoredSubscription(subscriptionId: string) {
+      mockSubscriptionsCreate.mockReset();
+      ddbMock.reset();
+      ddbMock
+        .on(GetItemCommand)
+        .resolvesOnce({
+          Item: buildBillingRecord({
+            subscriptionId,
+            subscriptionStatus: SubscriptionStatus.Canceled,
+            paymentMethodId: 'pm_saved_1',
+          }),
+        })
+        .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
+      ddbMock.on(UpdateItemCommand).resolves({});
+      mockSubscriptionsCreate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
+
+      await handler(
+        buildEvent({
+          userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+          method: 'POST',
+          rawPath: '/api/billing/activate',
+          body: JSON.stringify({ useSavedPaymentMethod: true }),
+        }),
+        {} as never,
+      );
+      return mockSubscriptionsCreate.mock.calls[0][1].idempotencyKey;
+    }
+
+    expect(await activateWithStoredSubscription('sub_first')).toBe('activate-sub-user-1-sub_first');
+    expect(await activateWithStoredSubscription('sub_second')).toBe(
+      'activate-sub-user-1-sub_second',
+    );
+    // And the mirror, which is the invariant the key exists for: a retry against
+    // the same stored subscription reuses the key, so Stripe dedupes it. A key
+    // built from anything request-scoped (a nonce, the payment method) would
+    // still satisfy the two assertions above.
+    expect(await activateWithStoredSubscription('sub_first')).toBe('activate-sub-user-1-sub_first');
   });
 
   it('creates a new subscription when reactivating a fully canceled subscription (Canceled)', async () => {
@@ -318,12 +368,15 @@ describe('activate-subscription handler', () => {
     const body = JSON.parse((result as { body: string }).body);
 
     expect(mockSubscriptionsCreate).toHaveBeenCalledTimes(1);
-    expect(mockSubscriptionsCreate).toHaveBeenCalledWith({
-      customer: 'cus_test_123',
-      items: [{ price: 'price_test_fake' }],
-      default_payment_method: 'pm_test_789',
-      expand: ['latest_invoice.payment_intent', 'default_payment_method'],
-    });
+    expect(mockSubscriptionsCreate).toHaveBeenCalledWith(
+      {
+        customer: 'cus_test_123',
+        items: [{ price: 'price_test_fake' }],
+        default_payment_method: 'pm_test_789',
+        expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+      },
+      { idempotencyKey: 'activate-sub-user-1-sub_canceled_old' },
+    );
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
 
     expect(body.subscription.status).toBe(SubscriptionStatus.Active);
@@ -651,12 +704,15 @@ describe('activate-subscription handler', () => {
     expect(mockSetupIntentsList).not.toHaveBeenCalled();
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
     expect(mockSubscriptionsCreate).toHaveBeenCalledTimes(1);
-    expect(mockSubscriptionsCreate).toHaveBeenCalledWith({
-      customer: 'cus_test_123',
-      items: [{ price: 'price_test_fake' }],
-      default_payment_method: 'pm_saved_1',
-      expand: ['latest_invoice.payment_intent', 'default_payment_method'],
-    });
+    expect(mockSubscriptionsCreate).toHaveBeenCalledWith(
+      {
+        customer: 'cus_test_123',
+        items: [{ price: 'price_test_fake' }],
+        default_payment_method: 'pm_saved_1',
+        expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+      },
+      { idempotencyKey: 'activate-sub-user-1-sub_canceled_old' },
+    );
     expect(body.subscription.status).toBe(SubscriptionStatus.Active);
   });
 
@@ -839,13 +895,16 @@ describe('activate-subscription handler', () => {
       await handler(event, {} as never);
 
       expect(mockSubscriptionsCreate).toHaveBeenCalledTimes(1);
-      expect(mockSubscriptionsCreate).toHaveBeenCalledWith({
-        customer: 'cus_test_123',
-        items: [{ price: 'price_test_fake' }],
-        default_payment_method: 'pm_test_789',
-        discounts: [{ promotion_code: 'promo_xxx' }],
-        expand: ['latest_invoice.payment_intent', 'default_payment_method'],
-      });
+      expect(mockSubscriptionsCreate).toHaveBeenCalledWith(
+        {
+          customer: 'cus_test_123',
+          items: [{ price: 'price_test_fake' }],
+          default_payment_method: 'pm_test_789',
+          discounts: [{ promotion_code: 'promo_xxx' }],
+          expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+        },
+        { idempotencyKey: 'activate-sub-user-1-new' },
+      );
     });
 
     it('includes discounts in subscriptions.create when reactivating a canceled subscription', async () => {
@@ -872,13 +931,16 @@ describe('activate-subscription handler', () => {
       await handler(event, {} as never);
 
       expect(mockSubscriptionsCreate).toHaveBeenCalledTimes(1);
-      expect(mockSubscriptionsCreate).toHaveBeenCalledWith({
-        customer: 'cus_test_123',
-        items: [{ price: 'price_test_fake' }],
-        default_payment_method: 'pm_test_789',
-        discounts: [{ promotion_code: 'promo_xxx' }],
-        expand: ['latest_invoice.payment_intent', 'default_payment_method'],
-      });
+      expect(mockSubscriptionsCreate).toHaveBeenCalledWith(
+        {
+          customer: 'cus_test_123',
+          items: [{ price: 'price_test_fake' }],
+          default_payment_method: 'pm_test_789',
+          discounts: [{ promotion_code: 'promo_xxx' }],
+          expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+        },
+        { idempotencyKey: 'activate-sub-user-1-sub_canceled_old' },
+      );
       expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
     });
 
@@ -978,13 +1040,16 @@ describe('activate-subscription handler', () => {
 
       expect(mockSetupIntentsList).not.toHaveBeenCalled();
       expect(mockSubscriptionsCreate).toHaveBeenCalledTimes(1);
-      expect(mockSubscriptionsCreate).toHaveBeenCalledWith({
-        customer: 'cus_test_123',
-        items: [{ price: 'price_test_fake' }],
-        default_payment_method: 'pm_saved_1',
-        discounts: [{ promotion_code: 'promo_xxx' }],
-        expand: ['latest_invoice.payment_intent', 'default_payment_method'],
-      });
+      expect(mockSubscriptionsCreate).toHaveBeenCalledWith(
+        {
+          customer: 'cus_test_123',
+          items: [{ price: 'price_test_fake' }],
+          default_payment_method: 'pm_saved_1',
+          discounts: [{ promotion_code: 'promo_xxx' }],
+          expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+        },
+        { idempotencyKey: 'activate-sub-user-1-sub_canceled_old' },
+      );
     });
   });
 });

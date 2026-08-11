@@ -314,13 +314,24 @@ async function createOrUpdateSubscription({
       userId,
     });
   }
-  return stripe.subscriptions.create({
-    customer: record.stripeCustomerId as string,
-    items: [{ price: secrets.STRIPE_PRICE_ID }],
-    default_payment_method: paymentMethodId,
-    ...(discounts ? { discounts } : {}),
-    expand: ['latest_invoice.payment_intent', 'default_payment_method'],
-  });
+  // The subscription this create replaces, or 'new' when there is none — the
+  // idempotency key's discriminator, so both arms are load-bearing.
+  const replacing = typeof record.subscriptionId === 'string' ? record.subscriptionId : 'new';
+  return stripe.subscriptions.create(
+    {
+      customer: record.stripeCustomerId as string,
+      items: [{ price: secrets.STRIPE_PRICE_ID }],
+      default_payment_method: paymentMethodId,
+      ...(discounts ? { discounts } : {}),
+      expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+    },
+    // Without a key, a retried activation mints a second paid subscription and
+    // the org is billed twice. Keyed by the subscription being REPLACED, not by
+    // the user alone: re-activating out of grace_period/canceled must create a
+    // fresh subscription, and a per-user key would make Stripe replay the
+    // previous one for the 24h the key is remembered.
+    { idempotencyKey: `activate-sub-${userId}-${replacing}` },
+  );
 }
 
 function resolveSavedPaymentMethod(record: Record<string, unknown>): PaymentMethodResolution {
