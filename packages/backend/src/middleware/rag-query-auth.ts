@@ -109,20 +109,12 @@ async function bearerAuth(
   // `deleting` is absent until teardown starts, so a stale read fails open
   // (see the read-semantics note in lib/org-profile.ts).
   //
-  // Rejected as 410 ACCOUNT_DELETED, the same response every other
-  // deleted-account path emits (lib/account-deleted-response.ts): a 401 invites
-  // a machine client to rotate credentials and retry forever, while a 410 tells
-  // it definitively to stop. That is the same reasoning that drove the 401→410
-  // unification this change also makes; a third behaviour for one condition is
-  // exactly the drift that unification exists to remove. No no-oracle argument
-  // is being made for a bare 401 here, because there is none to make: this
-  // module already discloses token validity by status (a valid token outside
-  // its bucket scope gets 404 above, an unknown token gets 401), and this path
-  // costs three DynamoDB reads against an unknown token's one, which is
-  // trivially separable by latency. The `console.warn` below carries `orgId`
-  // and `keyId`, so on-call can tell "deleting org" from "revoked key" — an
-  // ambiguity that is otherwise a real support cost, and one the response
-  // deliberately does not resolve for the caller.
+  // 410 rather than 401 for the same reasons as lib/account-deleted-response.ts.
+  //
+  // The `console.warn` below carries `orgId` and `keyId`, so on-call can tell
+  // "deleting org" from "revoked key" — an ambiguity that is otherwise a real
+  // support cost, and one the response deliberately does not resolve for the
+  // caller.
   if (isOrgDeleting(await getOrgProfile(record.orgId, { consistent: true }))) {
     console.warn('[rag-key-auth] Rejecting bearer auth: org deletion in progress', {
       orgId: record.orgId,
