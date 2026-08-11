@@ -125,8 +125,7 @@ access keys valid.
 
 What keeps that acceptable rather than reckless is that the org-profile `deleting` guard already
 refuses `desired: 'active'` for a deleting org, so the only surviving window is a writer that read
-the profile *before* the guard landed. That is narrow, and it is the same exposure FTH lives with.
-
+the profile _before_ the guard landed. That is narrow, and it is the same exposure FTH lives with.
 
 ### Deferred Aurora data deletion
 
