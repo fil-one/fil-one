@@ -35,6 +35,9 @@ export const PURGEABLE_USER_INFO_PK_PREFIXES = ['ORG#', 'USER#', 'SUB#', 'RAGKEY
 // `USAGE_REPORT#{date}` audit rows. The trailing `#` keeps this away from
 // `ORG_TOMBSTONE#`, the PII-free customer reference that must OUTLIVE the purge.
 export const PURGEABLE_BILLING_PK_PREFIXES = ['CUSTOMER#', 'DELETION_CHALLENGE#', 'ORG#'] as const;
+// The RagIndexerTable rows a teardown owns: per-bucket manifests and the
+// indexer's per-bucket checkpoints, both keyed by org.
+export const PURGEABLE_RAG_INDEXER_PK_PREFIXES = ['BUCKET#', 'INDEXER_CHECKPOINT#'] as const;
 
 /** Blast-radius guard: refuses any purge target outside the purgeable prefixes. */
 export function assertPurgeablePk(pk: string, prefixes: readonly string[]): void {
@@ -61,8 +64,7 @@ export async function purgeRagKeyHashRows(orgRows: Record<string, unknown>[]): P
     .map((row) => row.tokenHash)
     .filter((tokenHash): tokenHash is string => typeof tokenHash === 'string')
     .map((tokenHash) => ({ pk: RagApiKeyKeys.lookupPk(tokenHash), sk: RagApiKeyKeys.lookupSk() }));
-  for (const key of lookupKeys) assertPurgeablePk(key.pk, PURGEABLE_USER_INFO_PK_PREFIXES);
-  await batchDelete(Resource.UserInfoTable.name, lookupKeys);
+  await batchDelete(Resource.UserInfoTable.name, lookupKeys, PURGEABLE_USER_INFO_PK_PREFIXES);
 }
 
 /**
@@ -84,8 +86,7 @@ export async function purgeBillingOrgRows(orgId: string): Promise<void> {
     UsageReportKeys.skPrefix,
   );
   const keys = rows.map((row) => ({ pk: row.pk as string, sk: row.sk as string }));
-  for (const key of keys) assertPurgeablePk(key.pk, PURGEABLE_BILLING_PK_PREFIXES);
-  await batchDelete(Resource.BillingTable.name, keys);
+  await batchDelete(Resource.BillingTable.name, keys, PURGEABLE_BILLING_PK_PREFIXES);
 }
 
 /** Paged Query of the org's UserInfoTable partition. */
@@ -159,14 +160,21 @@ const BATCH_DELETE_RETRY: RetryOptions = { retries: 4, minTimeout: 100, randomiz
 
 /**
  * BatchWrite deletes in 25-key chunks, retrying only the UnprocessedItems of
- * each chunk with capped exponential backoff. Exported for direct testing;
- * `retry` is injectable so tests keep timeouts tiny.
+ * each chunk with capped exponential backoff. `retry` is injectable so tests
+ * keep timeouts tiny.
+ *
+ * `prefixes` is required, and every key is checked against it before anything is
+ * sent: that is what makes a key outside the purgeable prefixes undeletable
+ * through this function rather than merely undeleted by convention. The check
+ * runs over the whole list up front, so a bad key in chunk 3 stops chunk 1 too.
  */
 export async function batchDelete(
   tableName: string,
   keys: { pk: string; sk: string }[],
+  prefixes: readonly string[],
   retry: RetryOptions = BATCH_DELETE_RETRY,
 ): Promise<void> {
+  for (const key of keys) assertPurgeablePk(key.pk, prefixes);
   for (let i = 0; i < keys.length; i += 25) {
     let requests = keys
       .slice(i, i + 25)
