@@ -168,9 +168,14 @@ describe('createBillingTrial', () => {
     );
   });
 
-  it('returns early without touching Stripe when a billing record already exists', async () => {
+  it('returns early without touching Stripe when a COMPLETE billing record exists', async () => {
     ddbMock.on(GetItemCommand, { TableName: 'BillingTable' }).resolves({
-      Item: { pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } },
+      Item: {
+        pk: { S: 'CUSTOMER#user-1' },
+        sk: { S: 'SUBSCRIPTION' },
+        stripeCustomerId: { S: 'cus_existing' },
+        subscriptionId: { S: 'sub_existing' },
+      },
     });
 
     await createBillingTrial({
@@ -298,7 +303,11 @@ describe('createBillingTrial', () => {
     expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
   });
 
-  it('returns cleanly without touching Stripe when the record is created concurrently', async () => {
+  it('resumes rather than returning when the row is created concurrently', async () => {
+    // Returning here is what made an incomplete row permanent. Resuming is safe
+    // because both Stripe calls are idempotency-keyed per user, so the loser's
+    // calls return the winner's customer and subscription rather than minting a
+    // second pair.
     ddbMock.on(PutItemCommand).rejects(
       new ConditionalCheckFailedException({
         message: 'The conditional request failed',
@@ -310,10 +319,41 @@ describe('createBillingTrial', () => {
       createBillingTrial({ userId: 'user-1', orgId: 'org-1', userInfo: USER_INFO }),
     ).resolves.toBeUndefined();
 
-    expect(mockCustomersCreate).not.toHaveBeenCalled();
-    expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
-    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    expect(mockCustomersCreate).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ idempotencyKey: 'billing-trial-user-1' }),
+    );
+    expect(mockSubscriptionsCreate).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ idempotencyKey: 'billing-trial-sub-user-1' }),
+    );
     expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
+  });
+
+  it('resumes provisioning for an existing row that has no Stripe pointers', async () => {
+    // The defect this closes: a crash between the early PutItem and the Stripe
+    // calls left a row with a valid local trial window and no
+    // stripeCustomerId/subscriptionId, and the old existence-only guard made
+    // every retry return early, so the pointers were never filled in.
+    ddbMock.on(GetItemCommand, { TableName: 'BillingTable' }).resolves({
+      Item: { pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } },
+    });
+
+    await createBillingTrial({
+      userId: 'user-1',
+      orgId: 'org-1',
+      email: 'test@example.com',
+      userInfo: USER_INFO,
+    });
+
+    expect(mockCustomersCreate).toHaveBeenCalledTimes(1);
+    expect(mockSubscriptionsCreate).toHaveBeenCalledTimes(1);
+    const fill = ddbMock
+      .commandCalls(UpdateItemCommand)
+      .map((c) => c.args[0].input)
+      .find((input) => input.UpdateExpression?.includes('stripeCustomerId'));
+    expect(fill?.ExpressionAttributeValues?.[':customerId']?.S).toBe('cus_test_123');
+    expect(fill?.ExpressionAttributeValues?.[':subscriptionId']?.S).toBe('sub_test_123');
   });
 
   it('keeps the final write unconditional and if_not_exists-guarded on status', async () => {
