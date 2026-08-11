@@ -83,7 +83,7 @@ async function bearerAuth(
   const record = await findRagKeyByToken(token);
   if (!record) return unauthorizedResponse();
 
-  // FIL-112 fence B. Without this the bearer path sits outside every deletion
+  // FIL-112: the org-profile `deleting` guard. Without this the bearer path sits outside every deletion
   // fence: the SUB# tombstone can never match (the synthetic sub below has no
   // SUB# row) and the downstream subscription guard reads only
   // `subscriptionStatus`, which the billing fence leaves untouched. So an

@@ -38,7 +38,7 @@ vi.mock('../lib/metrics.js', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 import { subscriptionGuardMiddleware, AccessLevel } from './subscription-guard.js';
-import { DELETION_GUARD } from '../lib/deletion-guard.js';
+import { DELETION_GUARD } from '../lib/deletion-guards.js';
 import { ensureTrialEntitlement } from '../lib/trial-entitlement.js';
 import { SubscriptionStatus } from '@filone/shared';
 

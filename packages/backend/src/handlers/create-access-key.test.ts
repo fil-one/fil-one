@@ -68,7 +68,7 @@ function validBody({ keyName, region = 'eu-west-1' }: { keyName?: string; region
 /**
  * The `ACCESSKEY#` rows are written through a fenced transaction (FIL-112), so
  * every assertion about "the Put" reads item 1 — item 0 is always the fence-B
- * ConditionCheck (see sendFencedWrite).
+ * ConditionCheck (see sendGuardedWrite).
  */
 function accessKeyPuts() {
   return ddbMock

@@ -503,7 +503,7 @@ async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<v
   // a credential hash no later pass could ever find again. (The reverse order
   // would strand it forever, which is exactly what purgeRagKeyHashRows exists to
   // prevent.) The window this leaves — a key created between the two deletes —
-  // is already closed by fence B: PROFILE still exists here carrying
+  // is already closed by the org-profile `deleting` guard: PROFILE still exists here carrying
   // `deleting = true`, re-armed every pass by applyDeletionGuards, so
   // create-rag-api-key is refused outright.
   await purgeRagKeyHashRows(orgRows);

@@ -36,7 +36,7 @@ vi.mock('../lib/stripe-client.js', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler } from './get-billing.js';
-import { DELETION_GUARD } from '../lib/deletion-guard.js';
+import { DELETION_GUARD } from '../lib/deletion-guards.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------

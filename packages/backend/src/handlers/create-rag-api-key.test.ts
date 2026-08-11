@@ -57,7 +57,7 @@ function sentTransactItems() {
 
 /**
  * The transaction's WRITE items. Item 0 is always the FIL-112 fence-B
- * ConditionCheck (see sendFencedWrite); it is asserted on its own below so the
+ * ConditionCheck (see sendGuardedWrite); it is asserted on its own below so the
  * key-shape assertions stay about the two rows this handler writes.
  */
 function sentWriteItems() {

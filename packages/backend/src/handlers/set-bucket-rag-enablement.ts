@@ -100,7 +100,7 @@ export async function baseHandler(
   try {
     record = await setBucketRagEnablement({ region, bucketName, orgId, enabled, existing: owned });
   } catch (err) {
-    // FIL-112 fence B rejected the write: the org's teardown is under way, so
+    // FIL-112: the org-profile `deleting` guard rejected the write: the org's teardown is under way, so
     // an enablement row written now would be resurrected data (and, when
     // `enabled`, would re-animate the indexer for a deleted org).
     if (!(err instanceof OrgDeletingError)) throw err;

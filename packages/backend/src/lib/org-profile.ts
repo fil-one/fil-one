@@ -94,7 +94,7 @@ export function assertOrgNotDeleting(orgProfile: OrgProfileItem | undefined, org
   }
 }
 
-/** Raised by {@link sendFencedWrite} when fence B rejected the write. */
+/** Raised by {@link sendGuardedWrite} when the org-profile `deleting` guard rejected the write. */
 export class OrgDeletingError extends Error {
   readonly orgId: string;
 
@@ -106,7 +106,7 @@ export class OrgDeletingError extends Error {
 }
 
 /**
- * Fence B expressed as a transaction pre-condition. It lives on a *different
+ * The org-profile `deleting` guard expressed as a transaction pre-condition. It lives on a *different
  * item* than anything its callers write (`ORG#{orgId}/PROFILE`), and a
  * DynamoDB `ConditionExpression` can only ever evaluate against the item being
  * written — so no caller, however simple, can express this as its own
@@ -166,7 +166,7 @@ export function orgNotDeletingCheck(orgId: string): TransactWriteItem {
 const FENCED_WRITE_RETRY: RetryOptions = { retries: 2, minTimeout: 50, randomize: true };
 
 /**
- * Send `writes` in one transaction, gated on fence B. The check is always item
+ * Send `writes` in one transaction, gated on the org-profile `deleting` guard. The check is always item
  * 0, so a cancellation is attributable: only `CancellationReasons[0]` being a
  * `ConditionalCheckFailed` means the fence rejected, and that becomes an
  * {@link OrgDeletingError}. A `TransactionConflict` is retried (see
@@ -177,7 +177,7 @@ const FENCED_WRITE_RETRY: RetryOptions = { retries: 2, minTimeout: 50, randomize
  * the guarded writes and the fence evaluation commit or fail together, so a
  * teardown arming `deleting` concurrently cannot land between them.
  */
-export async function sendFencedWrite(
+export async function sendGuardedWrite(
   orgId: string,
   writes: TransactWriteItem[],
   retry: RetryOptions = FENCED_WRITE_RETRY,

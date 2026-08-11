@@ -261,11 +261,11 @@ describe('ragQueryAuthMiddleware', () => {
     });
   });
 
-  // FIL-112 fence B. Nothing downstream can catch this for the bearer path:
+  // FIL-112: the org-profile `deleting` guard. Nothing downstream can catch this for the bearer path:
   // the synthetic `ragkey|` sub has no SUB# row, so the tombstone gate never
   // matches, and the subscription guard reads only `subscriptionStatus`, which
   // the billing fence leaves alone.
-  describe('account deletion (fence B)', () => {
+  describe('account deletion (org-profile `deleting` guard)', () => {
     it('rejects the key with 410 ACCOUNT_DELETED while the org is being deleted', async () => {
       stubKeyRecords({}, { deleting: true });
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});

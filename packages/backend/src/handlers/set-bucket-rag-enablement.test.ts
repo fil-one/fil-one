@@ -212,7 +212,7 @@ describe('set-bucket-rag-enablement baseHandler', () => {
     expect(mockSetEnablement).not.toHaveBeenCalled();
   });
 
-  it('returns 410 ACCOUNT_DELETED when fence B refuses the enablement write (FIL-112)', async () => {
+  it('returns 410 ACCOUNT_DELETED when the org-profile `deleting` guard refuses the enablement write (FIL-112)', async () => {
     // The lib throws when the transaction's ConditionCheck rejects; an
     // `enabled: true` row written now would re-animate the indexer for an org
     // whose teardown is under way.

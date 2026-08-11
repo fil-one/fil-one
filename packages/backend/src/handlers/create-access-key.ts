@@ -14,7 +14,7 @@ import {
   getOrgProfile,
   isOrgDeleting,
   OrgDeletingError,
-  sendFencedWrite,
+  sendGuardedWrite,
 } from '../lib/org-profile.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import {
@@ -62,7 +62,7 @@ export async function baseHandler(
     return unsupportedRegionResponse(region);
   }
 
-  // FIL-112 fence B, PRE-checked — the one place in this sweep where a
+  // FIL-112: the org-profile `deleting` guard, PRE-checked — the one place in this sweep where a
   // conditional write alone is not enough. `issueAccessKey` below mints a live
   // S3 credential upstream BEFORE anything is written to DynamoDB, so a write
   // the fence rejects would leave that credential alive with no `ACCESSKEY#`
@@ -151,7 +151,7 @@ interface RecordedAccessKeyRequest {
 }
 
 /**
- * Persist the `ACCESSKEY#` row behind fence B (FIL-112), compensating the
+ * Persist the `ACCESSKEY#` row behind the org-profile `deleting` guard (FIL-112), compensating the
  * credential `issueAccessKey` just minted when the fence rejects.
  *
  * @returns `false` when the fence refused the write — the caller answers 410.
@@ -167,7 +167,7 @@ async function recordIssuedAccessKey(args: {
   const { keyName, permissions, granularPermissions, bucketScope, buckets, expiresAt, region } =
     request;
   try {
-    await sendFencedWrite(orgId, [
+    await sendGuardedWrite(orgId, [
       {
         Put: {
           TableName: Resource.UserInfoTable.name,
@@ -205,7 +205,7 @@ interface CompensateOrphanedKeyParams {
 }
 
 /**
- * Revoke the credential this request just minted, after fence B refused to
+ * Revoke the credential this request just minted, after the org-profile `deleting` guard refused to
  * record it (mirrors the compensation in lib/create-billing-trial.ts and
  * handlers/create-setup-intent.ts).
  *
@@ -233,7 +233,7 @@ async function compensateOrphanedKey({
   orchestrator,
 }: CompensateOrphanedKeyParams): Promise<void> {
   console.warn(
-    '[create-access-key] Fence B rejected the key record mid-flight; revoking the key just minted',
+    '[create-access-key] Deletion guard rejected the key record mid-flight; revoking the key just minted',
     { orgId, tenantId, keyId, orchestrator: orchestrator.id },
   );
   try {
@@ -302,7 +302,7 @@ async function recoverDuplicateKey({
   // see lib/aurora/aurora-orchestrator.ts), and the key had no DynamoDB row
   // before this request either, so nothing is made worse.
   try {
-    await sendFencedWrite(orgId, [
+    await sendGuardedWrite(orgId, [
       {
         Put: {
           TableName: Resource.UserInfoTable.name,

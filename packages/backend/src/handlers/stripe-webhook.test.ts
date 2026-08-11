@@ -67,7 +67,7 @@ const lambdaMock = mockClient(LambdaClient);
 process.env.ACCOUNT_DELETION_WORKER_FUNCTION_NAME = 'account-deletion-worker';
 
 import { handler } from './stripe-webhook.js';
-import { DELETION_GUARD } from '../lib/deletion-guard.js';
+import { DELETION_GUARD } from '../lib/deletion-guards.js';
 import { WEBHOOK_STATUS_SYNC_RETRY } from '../lib/region-helpers.js';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 

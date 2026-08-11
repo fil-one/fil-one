@@ -20,7 +20,7 @@ import {
   isOrgDeleting,
   OrgDeletingError,
   orgNotDeletingCheck,
-  sendFencedWrite,
+  sendGuardedWrite,
 } from './org-profile.js';
 
 describe('getOrgProfile', () => {
@@ -110,7 +110,7 @@ describe('orgNotDeletingCheck', () => {
   });
 });
 
-describe('sendFencedWrite', () => {
+describe('sendGuardedWrite', () => {
   beforeEach(() => {
     ddbMock.reset();
   });
@@ -129,7 +129,7 @@ describe('sendFencedWrite', () => {
   it('sends the fence as item 0, ahead of the caller writes', async () => {
     ddbMock.on(TransactWriteItemsCommand).resolves({});
 
-    await sendFencedWrite('org-1', [write]);
+    await sendGuardedWrite('org-1', [write]);
 
     const items = ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems!;
     expect(items).toHaveLength(2);
@@ -143,7 +143,7 @@ describe('sendFencedWrite', () => {
   it('maps a cancellation on item 0 to OrgDeletingError', async () => {
     ddbMock.on(TransactWriteItemsCommand).rejects(cancelled(['ConditionalCheckFailed', 'None']));
 
-    await expect(sendFencedWrite('org-1', [write])).rejects.toBeInstanceOf(OrgDeletingError);
+    await expect(sendGuardedWrite('org-1', [write])).rejects.toBeInstanceOf(OrgDeletingError);
   });
 
   it("re-throws a caller's OWN failed condition untouched — item 0 is not the fence there", async () => {
@@ -153,14 +153,14 @@ describe('sendFencedWrite', () => {
     const err = cancelled(['None', 'ConditionalCheckFailed']);
     ddbMock.on(TransactWriteItemsCommand).rejects(err);
 
-    await expect(sendFencedWrite('org-1', [write])).rejects.toBe(err);
+    await expect(sendGuardedWrite('org-1', [write])).rejects.toBe(err);
   });
 
   it('re-throws a non-TransactionCanceledException untouched', async () => {
     const err = new Error('throttled');
     ddbMock.on(TransactWriteItemsCommand).rejects(err);
 
-    await expect(sendFencedWrite('org-1', [write])).rejects.toBe(err);
+    await expect(sendGuardedWrite('org-1', [write])).rejects.toBe(err);
   });
 
   it('re-throws a cancellation with no CancellationReasons untouched', async () => {
@@ -169,7 +169,7 @@ describe('sendFencedWrite', () => {
     const err = new TransactionCanceledException({ message: 'cancelled', $metadata: {} });
     ddbMock.on(TransactWriteItemsCommand).rejects(err);
 
-    await expect(sendFencedWrite('org-1', [write])).rejects.toBe(err);
+    await expect(sendGuardedWrite('org-1', [write])).rejects.toBe(err);
   });
 
   it('retries a TransactionConflict and succeeds', async () => {
@@ -182,7 +182,7 @@ describe('sendFencedWrite', () => {
       .rejectsOnce(cancelled(['TransactionConflict', 'None']))
       .resolves({});
 
-    await expect(sendFencedWrite('org-1', [write], { retries: 2, minTimeout: 0 })).resolves.toBe(
+    await expect(sendGuardedWrite('org-1', [write], { retries: 2, minTimeout: 0 })).resolves.toBe(
       undefined,
     );
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(2);
@@ -192,7 +192,7 @@ describe('sendFencedWrite', () => {
     const err = cancelled(['TransactionConflict', 'None']);
     ddbMock.on(TransactWriteItemsCommand).rejects(err);
 
-    await expect(sendFencedWrite('org-1', [write], { retries: 1, minTimeout: 0 })).rejects.toBe(
+    await expect(sendGuardedWrite('org-1', [write], { retries: 1, minTimeout: 0 })).rejects.toBe(
       err,
     );
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(2);
@@ -202,7 +202,7 @@ describe('sendFencedWrite', () => {
     ddbMock.on(TransactWriteItemsCommand).rejects(cancelled(['ConditionalCheckFailed', 'None']));
 
     await expect(
-      sendFencedWrite('org-1', [write], { retries: 3, minTimeout: 0 }),
+      sendGuardedWrite('org-1', [write], { retries: 3, minTimeout: 0 }),
     ).rejects.toBeInstanceOf(OrgDeletingError);
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
   });
