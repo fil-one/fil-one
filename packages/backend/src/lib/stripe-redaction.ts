@@ -178,13 +178,19 @@ async function establishRedactionJob(
     // complete — recover its id and drive ITS lifecycle instead of skipping
     // redaction, or the original job sits unvalidated forever.
     const recovered = await findRedactionJobIdForCustomer(orgId, customerId);
-    return persistRedactionJobId(orgId, record, customerId, recovered, replacing);
+    return persistRedactionJobId({ orgId, record, customerId, jobId: recovered, replacing });
   }
 
   // Persist may lose against a concurrent worker — the stored id wins, and
   // only OUR freshly created job gets the initial validate kick (the stored
   // one's lifecycle is driven by advanceRedactionJob).
-  const jobId = await persistRedactionJobId(orgId, record, customerId, created.id, replacing);
+  const jobId = await persistRedactionJobId({
+    orgId,
+    record,
+    customerId,
+    jobId: created.id,
+    replacing,
+  });
   if (jobId === created.id) {
     await stripeRawRequest('POST', `/v1/privacy/redaction_jobs/${jobId}/validate`);
   }
@@ -332,13 +338,14 @@ function redactionNotReadyError(orgId: string, jobId: string, status: string): E
  * @returns the effective job id — `jobId` when this write won, otherwise the
  *          id another worker persisted first.
  */
-async function persistRedactionJobId(
-  orgId: string,
-  record: OrgDeletionRecord,
-  customerId: string,
-  jobId: string,
-  replacing?: string,
-): Promise<string> {
+async function persistRedactionJobId(params: {
+  orgId: string;
+  record: OrgDeletionRecord;
+  customerId: string;
+  jobId: string;
+  replacing?: string;
+}): Promise<string> {
+  const { orgId, record, customerId, jobId, replacing } = params;
   try {
     // A nested SET cannot address a path inside a map that does not exist yet,
     // so seed it first. Idempotent, and only reached when a job is established.
