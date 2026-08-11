@@ -752,7 +752,7 @@ async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<v
 
   await deleteDeletionChallenge(orgId);
 
-  await stampPurgedAt(orgId, record);
+  await stampDeletedAt(orgId, record);
 }
 
 /**
@@ -772,7 +772,7 @@ async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<v
  * already up then, so a re-drive must not restart the wait. Persisted (rather
  * than kept in memory) for exactly that reason.
  */
-async function stampPurgedAt(orgId: string, record: OrgDeletionRecord): Promise<void> {
+async function stampDeletedAt(orgId: string, record: OrgDeletionRecord): Promise<void> {
   const deletedAt = record.deletedAt ?? new Date().toISOString();
   await dynamo.send(
     new UpdateItemCommand({
