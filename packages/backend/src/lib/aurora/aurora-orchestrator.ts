@@ -124,7 +124,9 @@ export const auroraOrchestrator = {
     // verification probe here, rather than escalating it into a blocked purge.
     //
     // That trade now rests on a single status field: the verification below is
-    // the whole of this teardown's fail-closed behaviour.
+    // the whole of this teardown's fail-closed behaviour — on every path except
+    // one. A tenant Aurora cannot resolve returns success before the
+    // verification runs, so that path is fail-OPEN by design and warns instead.
     await pRetry(() => runAuroraTeardownAttempt(tenantId), TENANT_DELETE_RETRY);
   },
 
@@ -354,7 +356,22 @@ async function runAuroraTeardownAttempt(tenantId: string): Promise<void> {
       cause: probe.cause,
     });
   }
-  if (probe.kind === 'not_found') return;
+  if (probe.kind === 'not_found') {
+    // Nothing to disable, so nothing to do — but this is the ONLY teardown path
+    // that reports success without the verification having confirmed anything, so
+    // it must not be silent. A misconfigured backoffice client (wrong base URL,
+    // wrong-scope token) 404s a live tenant identically to an absent one, and
+    // this teardown cannot tell those apart: see the ADR's misrouted-client
+    // scenario. If that happens the account's purge proceeds while the tenant is
+    // still ACTIVE and its access keys still work.
+    console.warn(
+      '[aurora-orchestrator] Tenant did not resolve, so the disable was never confirmed; ' +
+        'treating as nothing to do. A misconfigured backoffice client 404s live tenants the ' +
+        'same way, in which case this tenant is still ACTIVE',
+      { tenantId },
+    );
+    return;
+  }
 
   if (probe.status !== 'DISABLED') {
     await auroraOrchestrator.updateTenantStatus(tenantId, 'disabled');

@@ -212,10 +212,18 @@ export interface ServiceOrchestrator {
    *
    * Implementations force the tenant to `disabled` first when the upstream
    * requires it, and MUST take their idempotency from the upstream's own
-   * repeat-delete success — never by tolerating a not-found, which signals an
-   * unresolvable ref rather than a deleted tenant. Orchestrators with no
-   * remote delete perform the strongest teardown available and log the manual
-   * follow-up. Probe evidence:
+   * repeat-delete success — never by tolerating a not-found *as evidence of
+   * deletion*, which it is not: it signals an unresolvable ref.
+   *
+   * One carve-out, for orchestrators that destroy nothing. Where the teardown
+   * only disables, an unresolvable tenant may be treated as nothing-to-do,
+   * because there is no destructive step whose safety depended on resolving it.
+   * Such an implementation MUST log the case: a misconfigured client 404s live
+   * tenants identically, and this is the one path that reports success without
+   * having verified anything.
+   *
+   * Orchestrators with no remote delete perform the strongest teardown available
+   * and log the manual follow-up. Probe evidence:
    * `docs/architectural-decisions/2026-08-tenant-deletion-semantics.md`.
    */
   deleteTenant(tenantId: string): Promise<void>;

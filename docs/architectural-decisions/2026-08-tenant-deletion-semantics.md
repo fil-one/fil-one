@@ -177,7 +177,13 @@ Whichever mechanism ships, it depends on the FilOne-held SSM secrets this teardo
   the teardown no longer shreds anything. The operator wedge that safety used to cost — an org's
   purge blocked until a human deleted two named SSM parameters — is gone with it.
 - Aurora orgs leave a disabled tenant and its data behind until FIL-919 ships, and the teardown
-  fails (for retry) rather than returning while the tenant is anything but `DISABLED`.
+  fails (for retry) rather than returning while the tenant is anything but `DISABLED` — with one
+  exception. A tenant the backoffice cannot resolve returns success without the verification
+  running, because a teardown that destroys nothing has nothing left to do with an absent tenant.
+  That path is fail-OPEN and logs a warning, precisely because the misrouted-client scenario above
+  404s a live tenant identically: if that is what happened, the account's purge proceeds while the
+  tenant is still `ACTIVE`. It is the only `deleteTenant` path that reports success having verified
+  nothing.
 - **A `deleteTenant` failure blocks the account's DynamoDB purge.** This is the consequence that
   makes everything above load-bearing, and it is deliberate. `runAccountDeletion` tears down every
   region and rethrows an aggregate of the failures **before** `purgeRecords`, so a teardown that
