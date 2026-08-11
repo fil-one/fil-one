@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 
 // Re-exec under `sst shell` if SST resources aren't available
 if (!process.env.SST_RESOURCE_App) {
-  execFileSync('pnpx', ['sst', 'shell', 'node', import.meta.filename], {
+  execFileSync('pnpm', ['exec', 'sst', 'shell', 'node', import.meta.filename], {
     stdio: 'inherit',
   });
   process.exit(0);
