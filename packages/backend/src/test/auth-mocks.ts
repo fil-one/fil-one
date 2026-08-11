@@ -17,7 +17,7 @@ import { buildEvent } from './lambda-test-utilities.js';
  *     (await import('../test/auth-mocks.js')).joseMockModule(mockJwtVerify));
  */
 
-export const TEST_CSRF_TOKEN = 'csrf-token-value';
+const TEST_CSRF_TOKEN = 'csrf-token-value';
 
 /** Module factory for `vi.mock('jose', ...)`. */
 export function joseMockModule(mockJwtVerify: Mock) {
@@ -94,10 +94,9 @@ export function setupAuthMocks(params: {
   sub: string;
   userId: string;
   orgId: string;
-  email?: string;
   idTokenPayload?: Record<string, unknown>;
 }) {
-  const email = params.email ?? 'user@example.com';
+  const email = 'user@example.com';
   params.mockJwtVerify
     .mockResolvedValueOnce({ payload: { sub: params.sub } })
     .mockResolvedValueOnce({

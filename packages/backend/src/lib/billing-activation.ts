@@ -8,9 +8,10 @@ import {
 } from './region-helpers.js';
 
 /**
- * Returns false when the billing guard rejects the write — the caller must then
- * skip tenant unlocks. The handler 400s earlier on a missing record, so that only
- * happens when a teardown claimed or purged it mid-request.
+ * Returns false when the billing guard rejects the write (see
+ * {@link sendGuardedBillingUpdate}) — the caller must then skip tenant unlocks.
+ * The handler 400s earlier on a missing record, so that only happens when a
+ * teardown claimed or purged it mid-request.
  */
 export async function saveBillingRecord(
   userId: string,
