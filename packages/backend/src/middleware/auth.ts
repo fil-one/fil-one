@@ -560,7 +560,9 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
     )._forceTokenRefresh;
 
     if (forceRefresh && request.internal.refreshToken) {
-      // Same verification gate as the before hook; on failure no fresh cookies
+      // Same token-verification gate as the before hook — the tombstone gate does
+      // not run here, so a deletion landing mid-request is caught on the next
+      // request (single-request window, accepted). On failure no fresh cookies
       // are set and the handler response goes out unchanged.
       const domain = process.env.AUTH0_DOMAIN!;
       const refreshed = await exchangeAndVerifyRefreshToken({

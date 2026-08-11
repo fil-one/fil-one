@@ -14,9 +14,9 @@ Account deletion (FIL-112) leaves a permanent tombstone on the deleted user's id
 
 - `UserInfoTable`, `pk: SUB#{sub}`, `sk: IDENTITY`, `deleted: true` + `deletedAt`.
 - Written twice, both times with `if_not_exists(deletedAt, :now)` so the timestamp is stable across
-  re-runs: once at confirm time by `applyDeletionGuards` (`lib/deletion-guards.ts:72`), which is what
+  re-runs: once at confirm time by `applyDeletionGuards`'s member loop (`lib/deletion-guards.ts`), which is what
   kills live sessions synchronously, and once by the worker's purge
-  (`lib/account-deletion.ts:377`), which additionally `REMOVE`s the PII-adjacent attributes
+  (the SUB# update in `purgeRecords`, `lib/account-deletion.ts`), which additionally `REMOVE`s the PII-adjacent attributes
   (`userId`, `orgId`, `emailEntitlementClaimed`, `createdAt`) — the row survives stripped rather
   than being deleted.
 - The row carries no `ttl` attribute, so DynamoDB never expires it.
@@ -144,17 +144,15 @@ remaining tombstone attributes, and `deletedAt` must be cleared as part of it.
 
 ## References
 
-Line references are given against the tip of the FIL-112 stack, so
-`lib/deletion-guards.ts` and `lib/account-deletion.ts` are cited here even though neither file exists
-yet on the branch that adds this ADR — they arrive with the account-teardown PR further up the
-stack, and the citations are not dead links once the stack is read as a whole.
+Symbols rather than line numbers, so these stay accurate as the files move.
 
-- Tombstone writers: `packages/backend/src/lib/deletion-guards.ts:72`,
-  `packages/backend/src/lib/account-deletion.ts:377`
-- Tombstone readers: `packages/backend/src/middleware/auth.ts:232`,
-  `packages/backend/src/handlers/auth-callback.ts:139`,
+- Tombstone writers: `applyDeletionGuards`'s member loop
+  (`packages/backend/src/lib/deletion-guards.ts`) and the SUB# update in `purgeRecords`
+  (`packages/backend/src/lib/account-deletion.ts`)
+- Tombstone readers: `packages/backend/src/middleware/auth.ts`,
+  `packages/backend/src/handlers/auth-callback.ts`,
   `packages/backend/src/lib/identity-tombstone.ts`
-- Resurrection condition: `packages/backend/src/middleware/auth.ts:320`
+- Resurrection condition: `resolveUserAndOrg` in `packages/backend/src/middleware/auth.ts`
 - Connection-type metadata: `packages/shared/src/connection-providers.ts`
 - Trial claim record (the actual abuse control): `packages/backend/src/lib/trial-entitlement.ts:72`
 - [Tenant deletion semantics ADR](2026-08-tenant-deletion-semantics.md)
