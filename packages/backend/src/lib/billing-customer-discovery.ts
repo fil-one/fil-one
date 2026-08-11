@@ -66,6 +66,20 @@ export async function discoverBillingCustomer(
   orgId: string,
   members: OrgDeletionMember[],
 ): Promise<DiscoveredBillingCustomer> {
+  // Validated up front, before either search. Fail loud rather than skip: a member
+  // whose userId cannot be quoted in a Stripe query would never have their customer
+  // found, cancelled or redacted, and the teardown would still report success.
+  // Checked here and not inside the fallback so the guarantee holds on every path —
+  // the fallback only runs when the org-id search comes back empty.
+  for (const member of members) {
+    if (!SEARCHABLE_USER_ID.test(member.userId)) {
+      throw new Error(
+        `Org ${orgId} has a member whose userId cannot be searched in Stripe ` +
+          `(${member.userId}); refusing to complete a teardown that would skip them`,
+      );
+    }
+  }
+
   const byOrg = await searchCustomers(orgId, `metadata['orgId']:'${orgId}'`, 'org id');
   if (byOrg.size > 0) return toResult(byOrg);
 
@@ -92,15 +106,6 @@ async function searchByMember(orgId: string, members: OrgDeletionMember[]): Prom
   // for a given member order.
   const discovered = new Set<string>();
   for (const member of members) {
-    if (!SEARCHABLE_USER_ID.test(member.userId)) {
-      // Fail loud rather than skip. Skipping means this member's customer is never
-      // found, so it is never cancelled and its PII is never redacted — and the
-      // teardown still reports success.
-      throw new Error(
-        `Org ${orgId} has a member whose userId cannot be searched in Stripe ` +
-          `(${member.userId}); refusing to complete a teardown that would skip them`,
-      );
-    }
     for (const id of await searchCustomers(
       orgId,
       `metadata['userId']:'${member.userId}'`,
