@@ -27,16 +27,22 @@ export async function createBillingTrial({
   email,
   userInfo,
 }: CreateBillingTrialParams): Promise<void> {
-  // Check if this user already has a billing record.
+  // Return early only for a COMPLETE record. Mere existence is not enough: this
+  // function writes the row before its two Stripe calls, so a crash in between
+  // leaves a row with no Stripe pointers, and an existence check made that row
+  // permanent — every retry returned here and never healed it. Incompleteness is
+  // the "billing setup was started and did not finish" marker, so provisioning
+  // resumes against the existing row instead.
   const existing = await getDynamoClient().send(
     new GetItemCommand({
       TableName: Resource.BillingTable.name,
       Key: { pk: { S: `CUSTOMER#${userId}` }, sk: { S: 'SUBSCRIPTION' } },
       ConsistentRead: true,
-      ProjectionExpression: 'pk',
+      ProjectionExpression: 'pk, stripeCustomerId, subscriptionId',
     }),
   );
-  if (existing.Item) return;
+  if (existing.Item?.stripeCustomerId?.S && existing.Item?.subscriptionId?.S) return;
+  const resuming = existing.Item !== undefined;
 
   const now = new Date();
   const trialDurationMs = TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000;
@@ -68,15 +74,20 @@ export async function createBillingTrial({
     );
   } catch (err) {
     if (!(err instanceof ConditionalCheckFailedException)) throw err;
-    // A record appeared between the consistent GetItem above and this Put
-    // (concurrent onboarding, or the setup-intent handler). Same outcome as the
-    // early return: someone else owns the record, so we must not mint a second
-    // Stripe customer/subscription for this user.
-    console.info('[create-billing-trial] Billing record created concurrently — skipping trial', {
+    // The row already exists — either the incomplete one we are resuming, or one
+    // a concurrent provisioner just created. Carry on either way rather than
+    // returning: returning is what left an incomplete row permanent.
+    //
+    // Safe because both Stripe calls below are idempotency-keyed per user
+    // (`billing-trial-${userId}` / `billing-trial-sub-${userId}`), so a
+    // concurrent provisioner cannot mint a second customer or subscription — the
+    // loser's calls return the winner's objects. That keying is the whole reason
+    // resuming is allowed here.
+    console.info('[create-billing-trial] Billing record already exists — resuming provisioning', {
       userId,
       orgId,
+      resuming,
     });
-    return;
   }
 
   // 2. Verify the identity survived the write. The deletion confirm arms the
