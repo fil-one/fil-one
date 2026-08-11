@@ -536,19 +536,8 @@ describe('auroraOrchestrator', () => {
   describe('deleteTenant', () => {
     const tenantId = 'aurora-t-1';
 
-    // deleteTenant probes the status twice per attempt: once to decide the
-    // teardown, and once at the end to verify no competing writer re-activated
-    // the tenant. Statuses are Aurora's raw ModelsTenantStatus values.
-    function mockStatusThenVerify(initial: string, verified = 'DISABLED') {
-      mockGetAuroraTenantStatusApi
-        .mockResolvedValueOnce({ kind: 'ok', status: initial })
-        .mockResolvedValue({ kind: 'ok', status: verified });
-    }
-
-    // The whole teardown runs under TENANT_DELETE_RETRY, so a test that drives
-    // a failing attempt has to drain the backoff instead of waiting it out in
-    // real time. Resolves to the error when deletion rejects, or undefined when
-    // it eventually succeeds.
+    // The whole teardown runs under TENANT_DELETE_RETRY, so a failing attempt has
+    // to drain the backoff rather than wait it out in real time.
     async function deleteTenantDrainingRetries(): Promise<unknown> {
       vi.useFakeTimers();
       try {
@@ -566,16 +555,13 @@ describe('auroraOrchestrator', () => {
     // 1 initial attempt + TENANT_DELETE_RETRY's 3 retries.
     const ATTEMPTS = 4;
 
-    // The suite-level hook only clears call history, so a queued
-    // mockResolvedValue would otherwise leak across these tests and silently
-    // change which branch is exercised.
     beforeEach(() => {
       mockGetAuroraTenantStatusApi.mockReset();
       mockUpdateAuroraTenantStatusApi.mockReset();
     });
 
-    it('disables an active tenant and verifies it stayed disabled', async () => {
-      mockStatusThenVerify('ACTIVE');
+    it('disables the tenant', async () => {
+      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: 'ACTIVE' });
 
       await auroraOrchestrator.deleteTenant(tenantId);
 
@@ -583,14 +569,13 @@ describe('auroraOrchestrator', () => {
         tenantId,
         status: 'DISABLED',
       });
-      // Nothing is destroyed: the FilOne-held SSM secrets are the only route
-      // back to this tenant's Portal, and FIL-919's deferred data deletion
-      // needs them.
+      // Nothing is destroyed: the FilOne-held SSM secrets are the only route back
+      // to this tenant's Portal, and FIL-919's deferred deletion needs them.
       expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(0);
       expect(mockDeleteAuroraAccessKey).not.toHaveBeenCalled();
     });
 
-    it('skips the status update when the tenant is already disabled', async () => {
+    it('skips the update when the tenant is already disabled', async () => {
       mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: 'DISABLED' });
 
       await auroraOrchestrator.deleteTenant(tenantId);
@@ -598,109 +583,35 @@ describe('auroraOrchestrator', () => {
       expect(mockUpdateAuroraTenantStatusApi).not.toHaveBeenCalled();
     });
 
-    it('treats a tenant Aurora cannot resolve as nothing left to do, but warns', async () => {
-      // The only teardown path that reports success without the verification
-      // having confirmed anything, so silence here is the defect: a misconfigured
-      // backoffice client 404s a live tenant identically, and the account's purge
-      // would then proceed while the tenant is still ACTIVE.
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    it('disables a tenant whose status could not be read', async () => {
+      // The skip is an optimisation, not a gate: anything other than a confirmed
+      // DISABLED still gets the disable, so an unreadable status fails safe.
       mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'not_found' });
 
-      await expect(auroraOrchestrator.deleteTenant(tenantId)).resolves.toBeUndefined();
+      await auroraOrchestrator.deleteTenant(tenantId);
 
-      expect(mockUpdateAuroraTenantStatusApi).not.toHaveBeenCalled();
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('the disable was never confirmed'),
-        { tenantId },
-      );
-      warnSpy.mockRestore();
+      expect(mockUpdateAuroraTenantStatusApi).toHaveBeenCalledTimes(1);
     });
 
-    it('throws when the status probe fails, leaving everything for the retry', async () => {
-      const cause = new Error('backoffice down');
-      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'error', cause });
+    it('propagates a disable failure and exhausts the retry budget', async () => {
+      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: 'ACTIVE' });
+      mockUpdateAuroraTenantStatusApi.mockRejectedValue(new Error('backoffice 500'));
 
       const err = await deleteTenantDrainingRetries();
 
-      expect((err as Error).message).toContain(
-        `Aurora status probe failed while deleting tenant ${tenantId}`,
-      );
-      expect(mockUpdateAuroraTenantStatusApi).not.toHaveBeenCalled();
+      expect((err as Error).message).toContain('backoffice 500');
+      expect(mockUpdateAuroraTenantStatusApi).toHaveBeenCalledTimes(ATTEMPTS);
     });
 
-    // The verification is now the WHOLE of this teardown's fail-closed
-    // behaviour, so each of its branches has to keep failing closed.
-    it('re-disables and succeeds when a competing writer re-activated the tenant mid-teardown', async () => {
-      // attempt 1: probe ACTIVE -> disable -> verify still ACTIVE -> throw.
-      // attempt 2: probe ACTIVE -> disable again -> verify DISABLED -> success.
-      mockGetAuroraTenantStatusApi
-        .mockResolvedValueOnce({ kind: 'ok', status: 'ACTIVE' })
-        .mockResolvedValueOnce({ kind: 'ok', status: 'ACTIVE' })
-        .mockResolvedValueOnce({ kind: 'ok', status: 'ACTIVE' })
-        .mockResolvedValue({ kind: 'ok', status: 'DISABLED' });
+    it('retries through a transient disable failure and succeeds', async () => {
+      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: 'ACTIVE' });
+      mockUpdateAuroraTenantStatusApi
+        .mockRejectedValueOnce(new Error('backoffice 503'))
+        .mockResolvedValue(undefined);
 
       await expect(deleteTenantDrainingRetries()).resolves.toBeUndefined();
 
       expect(mockUpdateAuroraTenantStatusApi).toHaveBeenCalledTimes(2);
-    });
-
-    it('throws when a competing writer holds the tenant active past the retry budget', async () => {
-      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: 'ACTIVE' });
-
-      const err = await deleteTenantDrainingRetries();
-
-      expect((err as Error).message).toContain('could not be confirmed DISABLED after teardown');
-      expect((err as Error).message).toContain('a competing writer re-activated it');
-      expect(mockUpdateAuroraTenantStatusApi).toHaveBeenCalledTimes(ATTEMPTS);
-    });
-
-    it('names LOCKED as an operator-only state rather than blaming a competing writer', async () => {
-      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: 'LOCKED' });
-
-      const err = await deleteTenantDrainingRetries();
-
-      expect((err as Error).message).toContain('read-only rather than disabled');
-      expect((err as Error).message).toContain('an operator must set DISABLED by hand');
-    });
-
-    it('names a missing status field as an operator-only state', async () => {
-      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: undefined });
-
-      const err = await deleteTenantDrainingRetries();
-
-      expect((err as Error).message).toContain('no tenant status field at all');
-      expect((err as Error).message).toContain('needs an operator, not a retry');
-    });
-
-    it('throws when the post-teardown verification probe 404s', async () => {
-      // Alternating, because a `not_found` on the OPENING probe is now success:
-      // every attempt must resolve the tenant and then lose it at the verify.
-      // Do NOT collapse this to a constant `not_found` — deleteTenant would then
-      // RESOLVE (the retry's opening probe takes the success path), so `err` is
-      // undefined and this test dies with "Cannot read properties of undefined"
-      // instead of a clean assertion failure.
-      let call = 0;
-      mockGetAuroraTenantStatusApi.mockImplementation(() =>
-        Promise.resolve(
-          ++call % 2 === 1 ? { kind: 'ok', status: 'ACTIVE' } : { kind: 'not_found' },
-        ),
-      );
-
-      const err = await deleteTenantDrainingRetries();
-
-      expect((err as Error).message).toContain('could not be confirmed DISABLED after teardown');
-      expect((err as Error).message).toContain('stopped resolving mid-teardown');
-    });
-
-    // A transient 5xx on the verification is absorbed in-process rather than
-    // escalating into a blocked account purge.
-    it('retries through a transient verification failure and succeeds', async () => {
-      mockGetAuroraTenantStatusApi
-        .mockResolvedValueOnce({ kind: 'ok', status: 'DISABLED' })
-        .mockResolvedValueOnce({ kind: 'error', cause: new Error('backoffice 503') })
-        .mockResolvedValue({ kind: 'ok', status: 'DISABLED' });
-
-      await expect(deleteTenantDrainingRetries()).resolves.toBeUndefined();
     });
   });
 

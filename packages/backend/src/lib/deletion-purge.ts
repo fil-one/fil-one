@@ -15,10 +15,11 @@ import { RagApiKeyKeys } from './rag-api-keys.js';
 // Row-level mechanics of the account purge (FIL-112)
 // ---------------------------------------------------------------------------
 //
-// Enumerating the rows a teardown may delete, and deleting them. Separated from
-// the teardown that orchestrates it because this half carries its own safety
-// invariant — nothing outside the purgeable prefixes is ever deleted — and that
-// invariant is easier to hold, and to test, on its own.
+// Enumerating the rows a teardown deletes, and deleting them. Nothing here
+// constrains WHICH rows: these functions delete whatever keys they are given, and
+// the only thing keeping a purge inside its blast radius is the key construction
+// in the callers. There was a prefix allowlist enforced here; it was removed
+// deliberately, so do not read this module as a backstop.
 
 const dynamo = getDynamoClient();
 

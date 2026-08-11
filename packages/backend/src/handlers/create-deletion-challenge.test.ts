@@ -27,10 +27,10 @@ vi.mock('../lib/auth0-management.js', async () =>
 );
 
 const mockReadDeletionRecord = vi.fn();
-const mockClaimDeletionRedrive = vi.fn();
+const mockClaimDeletionRerun = vi.fn();
 vi.mock('../lib/deletion-record.js', () => ({
   readDeletionRecord: (orgId: string) => mockReadDeletionRecord(orgId),
-  claimDeletionRerun: (orgId: string) => mockClaimDeletionRedrive(orgId),
+  claimDeletionRerun: (orgId: string) => mockClaimDeletionRerun(orgId),
 }));
 
 const mockCreateChallenge = vi.fn();
@@ -87,7 +87,7 @@ describe('create-deletion-challenge baseHandler', () => {
     lambdaMock.on(InvokeCommand).resolves({});
     mockIsOrgAdmin.mockResolvedValue(true);
     mockReadDeletionRecord.mockResolvedValue(undefined);
-    mockClaimDeletionRedrive.mockResolvedValue(true);
+    mockClaimDeletionRerun.mockResolvedValue(true);
     mockGetOrgProfile.mockResolvedValue({ name: { S: 'Acme Corp' } });
     mockCreateChallenge.mockResolvedValue({
       outcome: 'created',
@@ -121,7 +121,7 @@ describe('create-deletion-challenge baseHandler', () => {
     expect(mockSendEmail).not.toHaveBeenCalled();
   });
 
-  it('returns 200 deletion_in_progress without issuing a code, and re-drives the teardown', async () => {
+  it('returns 200 deletion_in_progress without issuing a code, and reruns the teardown', async () => {
     // No new code is issued once a deletion exists. Re-invoking the idempotent
     // worker here is what makes a deletion that was never SCHEDULED (a failed
     // invoke, or a crash between consuming the code and invoking) recoverable
@@ -168,7 +168,7 @@ describe('create-deletion-challenge baseHandler', () => {
     // ahead of the code endpoint's own 5/hr limiter, so it needs a cooldown of
     // its own or a held-down button fans out workers.
     mockReadDeletionRecord.mockResolvedValue({ status: 'PENDING' });
-    mockClaimDeletionRedrive.mockResolvedValue(false);
+    mockClaimDeletionRerun.mockResolvedValue(false);
 
     const result = (await baseHandler(makeEvent())) as APIGatewayProxyStructuredResultV2;
 
@@ -181,7 +181,7 @@ describe('create-deletion-challenge baseHandler', () => {
     await baseHandler(makeEvent());
 
     expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
-    expect(mockClaimDeletionRedrive).not.toHaveBeenCalled();
+    expect(mockClaimDeletionRerun).not.toHaveBeenCalled();
   });
 
   it('returns 429 with resendAvailableAt when rate limited, without sending email', async () => {
