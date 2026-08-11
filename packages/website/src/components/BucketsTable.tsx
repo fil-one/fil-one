@@ -111,7 +111,18 @@ export function BucketsTable({ buckets, onDelete }: BucketsTableProps) {
                 Created
               </Table.Head>
               <Table.Head className={SECONDARY_COLUMN}>Features</Table.Head>
-              <Table.Head className={SECONDARY_COLUMN}>Retention</Table.Head>
+              <Table.Head className={SECONDARY_COLUMN}>
+                {/* The explanation lives on the header, not on every row: one
+                    keyboard stop rather than one per bucket, for a fact that
+                    doesn't vary by row. */}
+                <Tooltip
+                  content="A default policy applies to objects uploaded from now on"
+                  side="top"
+                  focusable
+                >
+                  Retention
+                </Tooltip>
+              </Table.Head>
               <Table.Head aria-label="Actions" />
             </Table.Row>
           </Table.Header>
@@ -168,11 +179,7 @@ function BucketRetention({ bucket }: { bucket: Bucket }) {
 
   if (!retention) return <span className="text-xs text-zinc-500">No retention</span>;
 
-  return (
-    <Tooltip content="Applied to objects uploaded from now on" side="top">
-      <span className="text-xs text-zinc-900">{retention}</span>
-    </Tooltip>
-  );
+  return <span className="text-xs text-zinc-900">{retention}</span>;
 }
 
 /**
@@ -256,7 +263,7 @@ function BucketRow({ bucket, onDelete }: { bucket: Bucket; onDelete: (name: stri
               when public ones arrive this stays the quiet state and "public" is
               what gets called out. */}
           {!bucket.isPublic && (
-            <Tooltip content="Private bucket" side="top">
+            <Tooltip content="Private bucket" side="top" focusable>
               {/* An eye, not a lock: the lock glyphs are spoken for elsewhere
                   (LockIcon is Object Lock, LockSimpleIcon is Default Retention),
                   so locks mean immutability here and the eye means visibility.
