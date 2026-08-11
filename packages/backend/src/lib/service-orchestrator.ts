@@ -269,3 +269,13 @@ export interface ServiceOrchestrator {
     opts: GetTenantUsageMetricsOptions,
   ): Promise<StorageUsageSample[]>;
 }
+
+/**
+ * Retry budget every {@link ServiceOrchestrator.deleteTenant} implementation
+ * shares. Its size is set by the one failure it has to survive: a competing
+ * writer re-activating the tenant between the disable and the delete. A 409 (or
+ * a status probe still reporting active) is that writer, not a disable that has
+ * not landed, so the budget has to outlast it rather than back off politely.
+ * Every implementation's attempt is idempotent, so a re-attempt converges.
+ */
+export const TENANT_DELETE_RETRY = { retries: 3 } as const;

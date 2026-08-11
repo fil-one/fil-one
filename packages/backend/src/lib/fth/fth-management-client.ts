@@ -19,9 +19,11 @@ export interface FthManagementClient {
     args: { status: FthClientStatus; displayName?: string; idempotencyKey?: string },
   ): Promise<void>;
   /**
-   * Permanently deletes the client and every resource it owns. FTH requires
-   * the client to be `disabled` first (409 otherwise) and 404s when the
-   * client is already gone — callers treat that as idempotent success.
+   * Permanently deletes the client and every resource it owns. FTH requires the
+   * client to be `disabled` first (409 otherwise). Repeat DELETE of a resolvable
+   * ref returns 204, so deletion is idempotent upstream; a 404 signals an
+   * unresolvable ref and callers MUST fail on it (see
+   * docs/architectural-decisions/2026-08-tenant-deletion-semantics.md).
    */
   deleteClient(clientRef: string): Promise<void>;
 
@@ -388,8 +390,9 @@ function buildEndpointMethods(request: RequestFn): Omit<FthManagementClient, 'in
         },
       ),
 
-    // No Idempotency-Key: deletion is naturally idempotent (404 when already
-    // gone), and replaying a key after a 409 could re-serve the cached conflict.
+    // No Idempotency-Key: deletion is naturally idempotent (repeat DELETE
+    // returns 204), and replaying a key after a 409 could re-serve the cached
+    // conflict.
     deleteClient: (clientRef) =>
       request<void>('DELETE', '/management/v1/clients/{clientRef}', { clientRef }),
 
