@@ -51,15 +51,17 @@ function isSessionProbe(path: string): boolean {
  * to /login instead would loop forever, because the Auth0 SSO session silently
  * re-authenticates the tombstoned identity.
  *
- * The navigation is scoped on purpose, and the discriminator is narrower than
- * the code's name suggests. ACCOUNT_DELETED does not mean "this account is
- * gone" on every endpoint: several backend handlers emit it off the `deleting`
- * fence, which an org can carry with no deletion ever having completed (see
- * `lib/deletion-guards.ts`, whose unwedge helper exists for exactly that
- * state). Navigating on those would evict a live, paying user onto a page
- * telling them their account is gone while their session still works. So what
- * this function acts on is only ever: *the session probe said the identity is
- * gone*.
+ * ACCOUNT_DELETION_IN_PROGRESS is treated identically: a user whose deletion is
+ * running should not be sent back into the app either.
+ *
+ * The navigation is still scoped to the session probe, and that scoping is not
+ * about telling the two codes apart — it is about *which endpoint* answered.
+ * Several backend handlers emit these codes off the org-profile `deleting` guard,
+ * which an org can carry with no deletion ever having completed (see
+ * `lib/deletion-guards.ts`, whose unwedge helper exists for exactly that state).
+ * Navigating on those would evict a live, paying user onto a page telling them
+ * their account is gone while their session still works. So what this function
+ * acts on is only ever: *the session probe said this identity is gone or going*.
  *
  * A genuinely tombstoned session still reaches the page — the auth middleware
  * answers ACCOUNT_DELETED for every request, so the SPA's next `/me` refetch
@@ -116,7 +118,10 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
       .clone()
       .json()
       .catch(() => ({}))) as { code?: string };
-    if (body.code === ApiErrorCode.ACCOUNT_DELETED) {
+    if (
+      body.code === ApiErrorCode.ACCOUNT_DELETED ||
+      body.code === ApiErrorCode.ACCOUNT_DELETION_IN_PROGRESS
+    ) {
       throwAccountDeleted(response.status, isSessionProbe(path));
     }
   }
