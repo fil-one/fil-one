@@ -68,7 +68,7 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  * Waited out IN-PASS rather than thrown as a retry: this is the ordinary
  * ending of a HEALTHY teardown, and a throw would emit a Lambda `Errors`
  * datapoint (what Grafana alerts on), burn an async retry, inflate
- * `attemptCount` toward the reconciler's stuck threshold, refresh the staleness
+ * `attemptCount` toward the orchestrator's stuck threshold, refresh the staleness
  * window, and re-run every external teardown and the whole purge a second time.
  *
  * The anchor is stamped as the LAST step of the purge and read back in the same
@@ -119,7 +119,7 @@ async function waitOutStripeSearchLag(orgId: string, record: OrgDeletionRecord):
  * idempotent and snapshot-driven, so each invocation simply runs ALL of them
  * concurrently, then purges the DDB records and marks the record DONE. A
  * failure anywhere leaves the record non-DONE and throws after everything
- * settles, so Lambda's async retry / the reconciler cron re-drives the whole
+ * settles, so Lambda's async retry / the orchestrator cron re-drives the whole
  * (idempotent) teardown. Concurrent invocations are harmless for the same
  * reason.
  *
@@ -490,7 +490,7 @@ async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<v
   // while its lookup row, never seen by the earlier sweep, survived forever.
   // Sharing the snapshot closes that: every RAGKEY# row this pass deletes has
   // its lookup deleted too, and a key created after the snapshot keeps BOTH
-  // rows (never a half pair) for the fence and the reconciler to handle.
+  // rows (never a half pair) for the guard and the orchestrator to handle.
   const orgRows = await queryOrgRows(orgId);
 
   // Given one snapshot, the order is chosen for CRASH-CONVERGENCE. `batchDelete`
@@ -711,7 +711,7 @@ async function markDone(orgId: string): Promise<void> {
 
 /**
  * Per-pass liveness bump: `updatedAt` is touched alongside the attempt count
- * because the reconciler treats a stale `updatedAt` as "worker died — re-
+ * because the orchestrator treats a stale `updatedAt` as "worker died — re-
  * drive"; a live worker mid-teardown must never look stale to it.
  */
 async function bumpAttemptCount(orgId: string): Promise<void> {

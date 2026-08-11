@@ -11,7 +11,7 @@ const MAX_KEYS_PER_BATCH = 100;
 // UnprocessedKeys means DynamoDB is shedding load — retry with exponential
 // backoff + jitter instead of hammering it in a tight loop, and give up after
 // ~5 attempts. The thrown error propagates to the caller so its own retry
-// (Lambda async retry / the deletion reconciler) re-drives the read.
+// (Lambda async retry / the deletion orchestrator) re-drives the read.
 const BATCH_GET_RETRY: RetryOptions = { retries: 4, minTimeout: 100, randomize: true };
 
 /**

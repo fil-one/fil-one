@@ -41,7 +41,7 @@ describe('claimDeletionRedrive', () => {
     expect(input.TableName).toBe('UserInfoTable');
     expect(input.Key).toEqual({ pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } });
     // The claim IS the conditional write — two concurrent requests cannot both
-    // win — and it must never touch `updatedAt`, the reconciler's liveness
+    // win — and it must never touch `updatedAt`, the orchestrator's liveness
     // signal.
     expect(input.UpdateExpression).toBe('SET lastRedriveAt = :now');
     // `attribute_not_exists(lastRedriveAt)` is load-bearing: without that

@@ -256,7 +256,7 @@ describe('batchDelete', () => {
     expect(sends[1].args[0].input.RequestItems!.TestTable[0].DeleteRequest!.Key!.sk.S).toBe(KEY.sk);
   });
 
-  it('caps the retries and throws on exhaustion so the reconciler re-drives', async () => {
+  it('caps the retries and throws on exhaustion so the orchestrator re-drives', async () => {
     ddbMock.on(BatchWriteItemCommand).resolves(unprocessed);
 
     await expect(batchDelete('TestTable', [KEY], { retries: 2, minTimeout: 0 })).rejects.toThrow(
@@ -336,7 +336,7 @@ describe('runAccountDeletion', () => {
       objects: { customers: ['cus_1'] },
     });
 
-    // attemptCount bumped for the reconciler's stuck gauge.
+    // attemptCount bumped for the orchestrator's stuck gauge.
     const bumps = ddbMock
       .commandCalls(UpdateItemCommand)
       .filter((c) => c.args[0].input.UpdateExpression?.includes('attemptCount'));
@@ -459,7 +459,7 @@ describe('runAccountDeletion', () => {
     expect(doneWrites()).toHaveLength(1);
   });
 
-  it('touches updatedAt on every attemptCount bump so a live worker never looks stale to the reconciler', async () => {
+  it('touches updatedAt on every attemptCount bump so a live worker never looks stale to the orchestrator', async () => {
     setupHappyMocks(OrgDeletionStatus.Pending);
 
     await runAccountDeletion(ORG_ID);
@@ -761,7 +761,7 @@ describe('runAccountDeletion', () => {
       .flatMap((c) => c.args[0].input.RequestItems?.UserInfoTable ?? [])
       .map((r) => unmarshall(r.DeleteRequest!.Key!));
     expect(deleted).toContainEqual({ pk: 'RAGKEYHASH#hash-1', sk: 'LOOKUP' });
-    // And the record is NOT marked done, so the reconciler re-drives.
+    // And the record is NOT marked done, so the orchestrator re-drives.
     expect(doneWrites()).toHaveLength(0);
   });
 
@@ -1059,7 +1059,7 @@ describe('runAccountDeletion — live Stripe customer discovery', () => {
   it('waits IN-PASS rather than deferring: one invocation, one teardown, one attempt bump', async () => {
     // Deferring with a throw would emit a Lambda `Errors` datapoint for every
     // healthy deletion (the metric Grafana alerts on), burn an async retry,
-    // push `attemptCount` toward the reconciler's stuck threshold, refresh the
+    // push `attemptCount` toward the orchestrator's stuck threshold, refresh the
     // staleness window, and re-run every external teardown and the whole purge.
     setupHappyMocks(OrgDeletionStatus.Pending);
     ddbMock

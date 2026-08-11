@@ -91,7 +91,7 @@ export async function handler(
     // `setBucketRagEnablement` being fenced: once the purge has swept the
     // enablement rows the orchestrator stops fanning out here, so the exposure
     // is one in-flight invocation, not a self-sustaining loop — and the
-    // reconciler re-drives the purge.
+    // orchestrator re-drives the purge.
     const orgProfile = await getOrgProfile(orgId, { consistent: true });
     if (isOrgDeleting(orgProfile)) {
       console.warn(`${LOG} Org deletion in progress, skipping indexing`, { orgId });

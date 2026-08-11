@@ -137,7 +137,7 @@ export class OrgDeletingError extends Error {
  * (lib/deletion-guards.ts) and NOTHING clears it today, so an org wedged by a
  * failed teardown is permanently refused by every fence below. A supported
  * unwedge — which is why `deleting = false` is accepted above — lands with the
- * deletion reconciler.
+ * deletion orchestrator.
  */
 export function orgNotDeletingCheck(orgId: string): TransactWriteItem {
   return {

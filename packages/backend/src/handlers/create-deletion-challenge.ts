@@ -49,7 +49,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   // window this covers is NARROW: the never-fenced one. Once
   // `applyDeletionGuards` has landed, middleware/auth.ts answers 410 for every
   // member session, so no user can reach this route at all — a teardown that
-  // stalled AFTER fencing is the deletion reconciler's job (FIL-112), never
+  // stalled AFTER fencing is the deletion orchestrator's job (FIL-112), never
   // this route's. What it does rescue is a deletion that was never scheduled at
   // all: a failed worker invoke,
   // or a crash between consuming the challenge code and invoking. The confirm
@@ -60,7 +60,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   // written in exactly one place (lib/deletion-guards.ts) and nothing clears it,
   // so an org whose teardown keeps failing stays fenced against access-key and
   // RAG-key creation, RAG toggling and tenant re-activation. A supported
-  // unwedge lands with the deletion reconciler (FIL-112).
+  // unwedge lands with the deletion orchestrator (FIL-112).
   if (await readDeletionRecord(orgId)) {
     await redriveTeardown(orgId);
     return new ResponseBuilder()
@@ -104,7 +104,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
  * as one on {@link DeletionChallengeResponse}, and the website renders any 500
  * as a generic server error rather than "account deletion is already in
  * progress"), so a client that cannot reach Lambda must still be told the truth
- * about its account. The failure is logged instead, and the reconciler re-drives
+ * about its account. The failure is logged instead, and the orchestrator re-drives
  * teardowns that need it.
  *
  * Throttled because it short-circuits ahead of the code endpoint's own 5/hr
@@ -117,7 +117,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
  * scheduled. That is the deliberate trade: claiming only after a SUCCESSFUL
  * invoke would let concurrent clicks fan out invokes unthrottled, which is what
  * the cooldown exists to prevent. It self-heals — the user may retry after the
- * cooldown, and the reconciler re-drives teardowns that stalled regardless.
+ * cooldown, and the orchestrator re-drives teardowns that stalled regardless.
  */
 async function redriveTeardown(orgId: string): Promise<void> {
   try {
