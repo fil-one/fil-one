@@ -41,16 +41,16 @@ export const DELETION_REDRIVE_COOLDOWN_MS = 5 * 60 * 1000;
  *
  * @returns true when the caller may invoke, false when the cooldown is live.
  */
-export async function claimDeletionRedrive(orgId: string): Promise<boolean> {
+export async function claimDeletionRerun(orgId: string): Promise<boolean> {
   const now = Date.now();
   try {
     await getDynamoClient().send(
       new UpdateItemCommand({
         TableName: Resource.UserInfoTable.name,
         Key: marshall({ pk: DeletionKeys.deletionPk(orgId), sk: DeletionKeys.deletionSk() }),
-        UpdateExpression: 'SET lastRedriveAt = :now',
+        UpdateExpression: 'SET lastAttemptAt = :now',
         ConditionExpression:
-          'attribute_exists(pk) AND (attribute_not_exists(lastRedriveAt) OR lastRedriveAt < :cutoff)',
+          'attribute_exists(pk) AND (attribute_not_exists(lastAttemptAt) OR lastAttemptAt < :cutoff)',
         ExpressionAttributeValues: marshall({
           ':now': new Date(now).toISOString(),
           ':cutoff': new Date(now - DELETION_REDRIVE_COOLDOWN_MS).toISOString(),

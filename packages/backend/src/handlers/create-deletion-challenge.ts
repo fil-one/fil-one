@@ -9,7 +9,7 @@ import type {
 import { ApiErrorCode } from '@filone/shared';
 import { invokeAccountDeletionWorker } from '../lib/account-deletion-invoke.js';
 import { createDeletionChallenge } from '../lib/deletion-challenge.js';
-import { claimDeletionRedrive, readDeletionRecord } from '../lib/deletion-record.js';
+import { claimDeletionRerun, readDeletionRecord } from '../lib/deletion-record.js';
 import { sendDeletionCodeEmail } from '../lib/deletion-email.js';
 import { isOrgAdmin } from '../lib/org-membership.js';
 import { getOrgProfile } from '../lib/org-profile.js';
@@ -62,7 +62,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   // RAG-key creation, RAG toggling and tenant re-activation. A supported
   // unwedge lands with the deletion orchestrator (FIL-112).
   if (await readDeletionRecord(orgId)) {
-    await redriveTeardown(orgId);
+    await rerunTeardown(orgId);
     return new ResponseBuilder()
       .status(200)
       .body<DeletionChallengeResponse>({ outcome: 'deletion_in_progress' })
@@ -112,16 +112,16 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
  * 900s / 1024MB worker.
  *
  * The claim is taken BEFORE the invoke, so a failed invoke — or an SDK-internal
- * retry of the claim write, whose second attempt sees its own `lastRedriveAt`
+ * retry of the claim write, whose second attempt sees its own `lastAttemptAt`
  * and reads as "cooldown live" — burns the 5-minute window with no worker
  * scheduled. That is the deliberate trade: claiming only after a SUCCESSFUL
  * invoke would let concurrent clicks fan out invokes unthrottled, which is what
  * the cooldown exists to prevent. It self-heals — the user may retry after the
  * cooldown, and the orchestrator re-drives teardowns that stalled regardless.
  */
-async function redriveTeardown(orgId: string): Promise<void> {
+async function rerunTeardown(orgId: string): Promise<void> {
   try {
-    if (!(await claimDeletionRedrive(orgId))) return;
+    if (!(await claimDeletionRerun(orgId))) return;
     await invokeAccountDeletionWorker(orgId);
   } catch (err) {
     console.error('[create-deletion-challenge] Teardown re-drive failed', { orgId, error: err });

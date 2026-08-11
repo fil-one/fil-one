@@ -14,12 +14,12 @@ vi.mock('sst', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { claimDeletionRedrive, DELETION_REDRIVE_COOLDOWN_MS } from './deletion-record.js';
+import { claimDeletionRerun, DELETION_REDRIVE_COOLDOWN_MS } from './deletion-record.js';
 
 const ORG_ID = 'org-123';
 const NOW = new Date('2026-08-10T12:00:00.000Z');
 
-describe('claimDeletionRedrive', () => {
+describe('claimDeletionRerun', () => {
   beforeEach(() => {
     ddbMock.reset();
     vi.useFakeTimers();
@@ -33,7 +33,7 @@ describe('claimDeletionRedrive', () => {
   it('claims with a conditional write that a FIRST re-drive can satisfy', async () => {
     ddbMock.on(UpdateItemCommand).resolves({});
 
-    await expect(claimDeletionRedrive(ORG_ID)).resolves.toBe(true);
+    await expect(claimDeletionRerun(ORG_ID)).resolves.toBe(true);
 
     const calls = ddbMock.commandCalls(UpdateItemCommand);
     expect(calls).toHaveLength(1);
@@ -43,13 +43,13 @@ describe('claimDeletionRedrive', () => {
     // The claim IS the conditional write — two concurrent requests cannot both
     // win — and it must never touch `updatedAt`, the orchestrator's liveness
     // signal.
-    expect(input.UpdateExpression).toBe('SET lastRedriveAt = :now');
-    // `attribute_not_exists(lastRedriveAt)` is load-bearing: without that
+    expect(input.UpdateExpression).toBe('SET lastAttemptAt = :now');
+    // `attribute_not_exists(lastAttemptAt)` is load-bearing: without that
     // disjunct a record that has never been re-driven has nothing to compare
     // against `:cutoff`, the condition fails, and the FIRST re-drive of every
     // org silently stops firing — the dead end this primitive exists to fix.
     expect(input.ConditionExpression).toBe(
-      'attribute_exists(pk) AND (attribute_not_exists(lastRedriveAt) OR lastRedriveAt < :cutoff)',
+      'attribute_exists(pk) AND (attribute_not_exists(lastAttemptAt) OR lastAttemptAt < :cutoff)',
     );
     expect(input.ExpressionAttributeValues?.[':now']?.S).toBe(NOW.toISOString());
     expect(input.ExpressionAttributeValues?.[':cutoff']?.S).toBe(
@@ -64,12 +64,12 @@ describe('claimDeletionRedrive', () => {
     });
     ddbMock.on(UpdateItemCommand).rejects(conditionFailed);
 
-    await expect(claimDeletionRedrive(ORG_ID)).resolves.toBe(false);
+    await expect(claimDeletionRerun(ORG_ID)).resolves.toBe(false);
   });
 
   it('rethrows any other DynamoDB failure rather than reporting a live cooldown', async () => {
     ddbMock.on(UpdateItemCommand).rejects(new Error('ProvisionedThroughputExceeded'));
 
-    await expect(claimDeletionRedrive(ORG_ID)).rejects.toThrow('ProvisionedThroughputExceeded');
+    await expect(claimDeletionRerun(ORG_ID)).rejects.toThrow('ProvisionedThroughputExceeded');
   });
 });

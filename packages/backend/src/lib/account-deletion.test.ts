@@ -121,7 +121,7 @@ function deletionItem(status: string, overrides?: Record<string, unknown>) {
     // Stripe's search-index margin is spent and the pass never has to wait.
     // The wait itself — and the fresh, never-purged record that triggers it —
     // has its own tests below.
-    purgedAt: '2026-07-10T00:00:00.000Z',
+    deletedAt: '2026-07-10T00:00:00.000Z',
     ...overrides,
   };
   // An `undefined` override means "absent from the record".
@@ -885,10 +885,10 @@ describe('runAccountDeletion — live Stripe customer discovery', () => {
     warn.mockRestore();
   });
 
-  it('a second-pass Stripe failure on an ordinary run keeps the record non-DONE but stamps purgedAt', async () => {
+  it('a second-pass Stripe failure on an ordinary run keeps the record non-DONE but stamps deletedAt', async () => {
     // The ordering contract, on a FIRST teardown rather than a resweep: the
     // purge has already happened and must not be undone or repeated needlessly,
-    // so `purgedAt` is stamped — but the pass still failed, so DONE must not be
+    // so `deletedAt` is stamped — but the pass still failed, so DONE must not be
     // written. Moving markDone ahead of the second pass would make the record
     // inert with the late customer's PII still in Stripe.
     setupHappyMocks(OrgDeletionStatus.Pending);
@@ -903,7 +903,10 @@ describe('runAccountDeletion — live Stripe customer discovery', () => {
     // rather than starting the margin again.
     const purgeStamps = ddbMock
       .commandCalls(UpdateItemCommand)
-      .filter((c) => c.args[0].input.UpdateExpression?.includes('purgedAt'));
+      // Keyed on the DELETION row, not on the attribute name: the SUB# identity
+      // tombstone writes a `deletedAt` of its own.
+      .filter((c) => c.args[0].input.Key?.sk?.S === 'DELETION')
+      .filter((c) => c.args[0].input.UpdateExpression?.includes('deletedAt'));
     expect(purgeStamps).toHaveLength(1);
     // But the teardown did not finish.
     expect(doneWrites()).toHaveLength(0);
@@ -945,7 +948,7 @@ describe('runAccountDeletion — live Stripe customer discovery', () => {
       .resolves({
         Item: deletionItem(OrgDeletionStatus.Pending, {
           requestedAt: new Date(Date.now() - 300_000).toISOString(),
-          purgedAt: undefined, // this pass is the one that purges
+          deletedAt: undefined, // this pass is the one that purges
         }),
       });
 
@@ -983,7 +986,7 @@ describe('runAccountDeletion — live Stripe customer discovery', () => {
           // A just-requested, never-purged record: the case that used to throw
           // a deferral and hand the wait to the Lambda retry.
           requestedAt: new Date(Date.now() - 5_000).toISOString(),
-          purgedAt: undefined,
+          deletedAt: undefined,
         }),
       });
 
@@ -1002,7 +1005,7 @@ describe('runAccountDeletion — live Stripe customer discovery', () => {
   });
 
   it('a re-drive of an org purged 45s ago waits only the remaining 15s', async () => {
-    // `purgedAt` is already 45s old at the START of this pass, which only ever
+    // `deletedAt` is already 45s old at the START of this pass, which only ever
     // happens on a re-drive — a first pass stamps it at the end of its own
     // purge and so always waits the full 60s. Here 15s of margin is left.
     setupHappyMocks(OrgDeletionStatus.Pending);
@@ -1010,7 +1013,7 @@ describe('runAccountDeletion — live Stripe customer discovery', () => {
       .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
       .resolves({
         Item: deletionItem(OrgDeletionStatus.Pending, {
-          purgedAt: new Date(Date.now() - 45_000).toISOString(),
+          deletedAt: new Date(Date.now() - 45_000).toISOString(),
         }),
       });
 
@@ -1028,26 +1031,29 @@ describe('runAccountDeletion — live Stripe customer discovery', () => {
     expect(doneWrites()).toHaveLength(1);
   });
 
-  it('stamps purgedAt once, keeping the earliest purge across re-drives', async () => {
+  it('stamps deletedAt once, keeping the earliest purge across re-drives', async () => {
     setupHappyMocks(OrgDeletionStatus.Pending);
 
     await runAccountDeletion(ORG_ID);
 
     const stamps = ddbMock
       .commandCalls(UpdateItemCommand)
-      .filter((c) => c.args[0].input.UpdateExpression?.includes('purgedAt'));
+      // Keyed on the DELETION row, not on the attribute name: the SUB# identity
+      // tombstone writes a `deletedAt` of its own.
+      .filter((c) => c.args[0].input.Key?.sk?.S === 'DELETION')
+      .filter((c) => c.args[0].input.UpdateExpression?.includes('deletedAt'));
     expect(stamps).toHaveLength(1);
     expect(stamps[0].args[0].input.UpdateExpression).toBe(
-      'SET purgedAt = if_not_exists(purgedAt, :purgedAt), updatedAt = :now',
+      'SET deletedAt = if_not_exists(deletedAt, :deletedAt), updatedAt = :now',
     );
     // Minting became impossible at the FIRST purge, so a re-drive must not
     // restart the wait: the stored value is re-sent, never a fresh `now`.
-    expect(stamps[0].args[0].input.ExpressionAttributeValues?.[':purgedAt']?.S).toBe(
+    expect(stamps[0].args[0].input.ExpressionAttributeValues?.[':deletedAt']?.S).toBe(
       '2026-07-10T00:00:00.000Z',
     );
   });
 
-  it('does not wedge a legacy record that predates purgedAt (or carries a corrupt one)', async () => {
+  it('does not wedge a legacy record that predates deletedAt (or carries a corrupt one)', async () => {
     // lib/dynamo-records.ts documents that legacy DELETION records exist and
     // instructs readers to tolerate them. Hard-failing on a timestamp retries
     // into a DLQ that has no consumer; an early discovery pass is far cheaper.
@@ -1057,7 +1063,7 @@ describe('runAccountDeletion — live Stripe customer discovery', () => {
       .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
       .resolves({
         Item: deletionItem(OrgDeletionStatus.Pending, {
-          purgedAt: 'not-a-date',
+          deletedAt: 'not-a-date',
           requestedAt: undefined,
         }),
       });
@@ -1066,19 +1072,19 @@ describe('runAccountDeletion — live Stripe customer discovery', () => {
 
     expect(doneWrites()).toHaveLength(1);
     expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining('no usable purgedAt'),
+      expect.stringContaining('no usable deletedAt'),
       expect.objectContaining({ orgId: ORG_ID }),
     );
     warn.mockRestore();
   });
 
-  it('caps the wait at the margin when purgedAt is in the future (clock skew)', async () => {
+  it('caps the wait at the margin when deletedAt is in the future (clock skew)', async () => {
     setupHappyMocks(OrgDeletionStatus.Pending);
     ddbMock
       .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
       .resolves({
         Item: deletionItem(OrgDeletionStatus.Pending, {
-          purgedAt: new Date(Date.now() + 3_600_000).toISOString(),
+          deletedAt: new Date(Date.now() + 3_600_000).toISOString(),
         }),
       });
 

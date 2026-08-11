@@ -313,15 +313,15 @@ export interface OrgDeletionRecord {
    * `requestedAt`, so it must survive across passes; the earliest value wins.
    * Absent on legacy records and until the first purge completes.
    */
-  purgedAt?: string;
+  deletedAt?: string;
   /** Worker invocations so far; the reconciler alerts past a threshold. */
   attemptCount: number;
   /**
    * Last user-triggered re-drive of the teardown worker, written by
-   * `claimDeletionRedrive` to throttle them. Never a liveness signal — see
+   * `claimDeletionRerun` to throttle them. Never a liveness signal — see
    * `lib/deletion-record.ts`.
    */
-  lastRedriveAt?: string;
+  lastAttemptAt?: string;
   updatedAt: string; // ISO-8601
 }
 
