@@ -598,12 +598,22 @@ describe('auroraOrchestrator', () => {
       expect(mockUpdateAuroraTenantStatusApi).not.toHaveBeenCalled();
     });
 
-    it('treats a tenant Aurora cannot resolve as nothing left to do', async () => {
+    it('treats a tenant Aurora cannot resolve as nothing left to do, but warns', async () => {
+      // The only teardown path that reports success without the verification
+      // having confirmed anything, so silence here is the defect: a misconfigured
+      // backoffice client 404s a live tenant identically, and the account's purge
+      // would then proceed while the tenant is still ACTIVE.
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'not_found' });
 
       await expect(auroraOrchestrator.deleteTenant(tenantId)).resolves.toBeUndefined();
 
       expect(mockUpdateAuroraTenantStatusApi).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('the disable was never confirmed'),
+        { tenantId },
+      );
+      warnSpy.mockRestore();
     });
 
     it('throws when the status probe fails, leaving everything for the retry', async () => {
