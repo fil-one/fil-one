@@ -234,13 +234,15 @@ async function resolveUserAndOrg(
   // independently blocked by createNewUserAndOrg's `attribute_not_exists(pk)`
   // transact condition against the retained SUB# row.
   //
-  // The same row distinguishes a teardown in flight from one that finished, at no
-  // extra cost — see classifyIdentityRow. `deleted` here is only reached with an
-  // armed row, since an absent one has no `userId` and falls through to the
-  // create path below.
-  const identityState = classifyIdentityRow(result.Item);
-  if (identityState !== 'live' && result.Item?.deleted?.BOOL === true) {
-    throw new AccountDeletedError(identityState === 'deleting' ? 'deleting' : 'deleted');
+  // Gated on raw `deleted === true`, NOT on `classifyIdentityRow(...) !== 'live'`.
+  // The classifier also calls a row with no `userId` non-live, and an absent or
+  // half-written row must fall through to the create path below rather than 410 a
+  // user who never had an account. The classifier is used only to pick WHICH code
+  // an armed row gets.
+  if (result.Item?.deleted?.BOOL === true) {
+    throw new AccountDeletedError(
+      classifyIdentityRow(result.Item) === 'deleting' ? 'deleting' : 'deleted',
+    );
   }
 
   if (result.Item?.userId?.S && result.Item?.orgId?.S) {
