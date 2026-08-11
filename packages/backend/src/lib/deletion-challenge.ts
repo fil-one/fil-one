@@ -55,9 +55,16 @@ export async function createDeletionChallenge(
     .toString()
     .padStart(DELETION_CODE_LENGTH, '0');
   const salt = randomBytes(16).toString('hex');
-  const expiresAt = new Date(now.getTime() + DELETION_CODE_TTL_MINUTES * 60 * 1000).toISOString();
+  const nominalExpiresAt = new Date(
+    now.getTime() + DELETION_CODE_TTL_MINUTES * 60 * 1000,
+  ).toISOString();
   const cooldownCutoff = new Date(now.getTime() - RESEND_COOLDOWN_SECONDS * 1000).toISOString();
-  let issuedExpiresAt = expiresAt;
+  const created = (expiresAt: string): CreateChallengeResult => ({
+    outcome: 'created',
+    code,
+    expiresAt,
+    resendAvailableAt: new Date(now.getTime() + RESEND_COOLDOWN_SECONDS * 1000).toISOString(),
+  });
 
   // Two atomic conditional updates, because the send counter lives on the row
   // being replaced. DynamoDB's TTL janitor deletes expired rows lazily (hours
@@ -80,7 +87,7 @@ export async function createDeletionChallenge(
           ':zero': 0,
           ':one': 1,
           ':now': now.toISOString(),
-          ':expiresAt': expiresAt,
+          ':expiresAt': nominalExpiresAt,
           ':ttl': nowEpoch + ROW_TTL_SECONDS,
           ':nowEpoch': nowEpoch,
         }),
@@ -89,13 +96,7 @@ export async function createDeletionChallenge(
     );
   } catch (err) {
     if (!(err instanceof ConditionalCheckFailedException)) throw err;
-    // The row can vanish at window end, so a resent code must never claim to
-    // outlive it: clamp the stated expiry to min(now + code TTL, window end).
-    const liveRow = err.Item ? unmarshall(err.Item) : undefined;
-    const windowEndMs = typeof liveRow?.ttl === 'number' ? liveRow.ttl * 1000 : undefined;
-    if (windowEndMs !== undefined && windowEndMs < new Date(expiresAt).getTime()) {
-      issuedExpiresAt = new Date(windowEndMs).toISOString();
-    }
+    const issuedExpiresAt = clampToWindowEnd(nominalExpiresAt, err);
     // Phase 2 — resend within the live window. The `#ttl > :nowEpoch` guard
     // keeps this from racing a concurrent phase-1 reclaim onto a stale window.
     try {
@@ -130,14 +131,25 @@ export async function createDeletionChallenge(
       }
       throw resendErr;
     }
+    return created(issuedExpiresAt);
   }
 
-  return {
-    outcome: 'created',
-    code,
-    expiresAt: issuedExpiresAt,
-    resendAvailableAt: new Date(now.getTime() + RESEND_COOLDOWN_SECONDS * 1000).toISOString(),
-  };
+  return created(nominalExpiresAt);
+}
+
+/**
+ * The expiry a resent code may advertise: `min(nominal, window end)`. The row
+ * carrying the code can vanish when its TTL window closes, so a code must never
+ * claim to outlive it. `err` is the rejected phase-1 write, whose `ALL_OLD` item
+ * is the live row.
+ */
+function clampToWindowEnd(nominalExpiresAt: string, err: ConditionalCheckFailedException): string {
+  const liveRow = err.Item ? unmarshall(err.Item) : undefined;
+  if (typeof liveRow?.ttl !== 'number') return nominalExpiresAt;
+  const windowEndMs = liveRow.ttl * 1000;
+  return windowEndMs < new Date(nominalExpiresAt).getTime()
+    ? new Date(windowEndMs).toISOString()
+    : nominalExpiresAt;
 }
 
 /** Retry-after from the rejected row: cooldown end, or window end if out of budget. */

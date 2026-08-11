@@ -1,7 +1,11 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import type { DeletionChallengeResponse, ErrorResponse } from '@filone/shared';
+import type {
+  DeletionChallengeResponse,
+  DeletionRateLimitedResponse,
+  ErrorResponse,
+} from '@filone/shared';
 import { ApiErrorCode } from '@filone/shared';
 import { createDeletionChallenge } from '../lib/deletion-challenge.js';
 import { readDeletionRecord } from '../lib/deletion-record.js';
@@ -50,7 +54,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   if (challenge.outcome === 'rate_limited') {
     return new ResponseBuilder()
       .status(429)
-      .body<ErrorResponse & { resendAvailableAt: string }>({
+      .body<DeletionRateLimitedResponse>({
         message: 'Too many verification codes requested. Please wait before retrying.',
         code: ApiErrorCode.DELETION_RATE_LIMITED,
         resendAvailableAt: challenge.resendAvailableAt,

@@ -59,7 +59,10 @@ describe('sendDeletionCodeEmail', () => {
     const payload = JSON.parse(init.body as string);
     expect(payload.personalizations).toEqual([{ to: [{ email: PARAMS.to }] }]);
     expect(payload.from).toEqual({ email: 'no-reply@filone.ai', name: 'Fil One' });
-    expect(payload.subject).toContain(PARAMS.code);
+    // The subject must never carry the code: lock-screen previews and mail-server
+    // logs would expose a live one.
+    expect(payload.subject).toBe('Your Fil One account deletion code');
+    expect(payload.subject).not.toContain(PARAMS.code);
     // The code appears in both the plain-text and HTML bodies.
     for (const content of payload.content) {
       expect(content.value).toContain(PARAMS.code);

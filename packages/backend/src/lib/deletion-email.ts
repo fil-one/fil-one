@@ -24,7 +24,10 @@ export async function sendDeletionCodeEmail(params: {
   }
 
   const fromAddress = senderAddress(isProduction);
-  const subject = `${params.code} is your Fil One account deletion code`;
+  // The code stays out of the subject: subject lines surface on lock screens and
+  // in mail-server logs, so leading with the OTP exposes a live code to anyone
+  // who can see the notification without unlocking the device.
+  const subject = 'Your Fil One account deletion code';
   const text = [
     `You requested to permanently delete your Fil One account and organization "${params.orgName}".`,
     '',
