@@ -239,6 +239,70 @@ describe('authMiddleware', () => {
       expect(mockFetch).not.toHaveBeenCalled();
     });
 
+    it('returns 410 ACCOUNT_DELETED when the tombstone is found via the refresh path', async () => {
+      // An expired access token routes through attachIdentity's refresh instead
+      // of tryValidateAccessToken's rethrow, so the tombstone gate has to hold on
+      // that path too. Without it, a deleted user with a live refresh token keeps
+      // getting fresh cookies.
+      mockJwtVerify
+        .mockRejectedValueOnce(new Error('token expired'))
+        // Refreshed access token verify (sub extraction), then the ID token.
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: true } });
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          access_token: 'new-access-token',
+          id_token: 'new-id-token',
+          refresh_token: 'new-refresh-token',
+        }),
+      });
+
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: {
+            pk: { S: `SUB#${MOCK_SUB}` },
+            sk: { S: 'IDENTITY' },
+            deleted: { BOOL: true },
+            deletedAt: { S: '2026-07-10T00:00:00.000Z' },
+          },
+        });
+
+      const { before } = authMiddleware();
+      const event = buildEvent({
+        cookies: [
+          `hs_access_token=expired-token`,
+          `hs_id_token=id-token`,
+          `hs_refresh_token=refresh-token`,
+        ],
+      });
+
+      const result = (await before(buildMiddyRequest(event))) as APIGatewayProxyStructuredResultV2;
+
+      expect(result.statusCode).toBe(410);
+      expect(JSON.parse(result.body!)).toEqual({
+        message: 'Account has been deleted',
+        code: ApiErrorCode.ACCOUNT_DELETED,
+      });
+      // The refresh succeeded, so the dead session's cookies must be cleared
+      // rather than replaced with the fresh ones Auth0 just issued.
+      const cookies = result.cookies ?? [];
+      for (const name of [
+        'hs_access_token',
+        'hs_id_token',
+        'hs_refresh_token',
+        'hs_logged_in',
+        CSRF_COOKIE_NAME,
+      ]) {
+        expect(cookies).toEqual(expect.arrayContaining([expect.stringContaining(`${name}=;`)]));
+      }
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+    });
+
     it('extracts name and picture from ID token claims', async () => {
       const existingUserId = 'existing-user-uuid';
       const existingOrgId = 'existing-org-uuid';
