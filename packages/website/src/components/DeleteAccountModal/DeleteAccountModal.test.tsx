@@ -8,7 +8,6 @@ const mockDeleteAccount = vi.fn();
 vi.mock('../../lib/api.js', () => ({
   requestDeletionChallenge: () => mockRequestChallenge(),
   deleteAccount: (req: unknown) => mockDeleteAccount(req),
-  DELETE_ACCOUNT_STEP_UP_ACTION: 'delete-account',
 }));
 
 import { DeleteAccountModal } from '.';
@@ -16,11 +15,11 @@ import { DeleteAccountModal } from '.';
 const ORG_NAME = 'Acme Corp';
 const RENAMED_ORG = 'Acme Inc';
 
-function renderModal(props?: Partial<Parameters<typeof DeleteAccountModal>[0]>) {
+function renderModal() {
   const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <DeleteAccountModal open onClose={() => {}} orgName={ORG_NAME} {...props} />
+      <DeleteAccountModal open onClose={() => {}} orgName={ORG_NAME} />
     </QueryClientProvider>,
   );
 }
@@ -314,6 +313,59 @@ describe('DeleteAccountModal', () => {
   });
 });
 
+describe('DeleteAccountModal success path', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupDefaultChallengeMock();
+  });
+
+  it('on success clears the query cache and hard-navigates to /account-deleted', async () => {
+    // The success path had no coverage at all: emptying onSuccess left every test
+    // green while the user sat on a dead session looking at the modal. The cache
+    // clear matters as much as the redirect — cookies are already gone, so any
+    // retained query would refetch against a deleted account.
+    // jsdom's Location cannot be assigned to, so swap in a plain object carrying
+    // the fields anything else may read — the same approach as lib/api.test.ts.
+    const real = window.location;
+    const assign = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        href: real.href,
+        hostname: real.hostname,
+        origin: real.origin,
+        assign,
+      } as unknown as Location,
+    });
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    const clear = vi.spyOn(client, 'clear');
+    try {
+      render(
+        <QueryClientProvider client={client}>
+          <DeleteAccountModal open onClose={() => {}} orgName={ORG_NAME} />
+        </QueryClientProvider>,
+      );
+      fireEvent.change(screen.getByLabelText(`Type "${ORG_NAME}" to continue`), {
+        target: { value: ORG_NAME },
+      });
+      fireEvent.click(sendCodeButton());
+      await waitFor(() => screen.getByLabelText(/enter the 6-digit code/i));
+
+      mockDeleteAccount.mockResolvedValue({ message: 'Account deleted' });
+      fireEvent.change(screen.getByLabelText(/enter the 6-digit code/i), {
+        target: { value: '123456' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /permanently delete account/i }));
+
+      await waitFor(() => expect(assign).toHaveBeenCalledWith('/account-deleted'));
+      // The component's own client, not a module singleton — see useQueryClient.
+      expect(clear).toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(window, 'location', { configurable: true, value: real });
+    }
+  });
+});
+
 describe('DeleteAccountModal close/reopen', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -387,7 +439,7 @@ describe('DeleteAccountModal close/reopen', () => {
     mockRequestChallenge.mockResolvedValue({
       outcome: 'challenge_created',
       expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-      resendAvailableAt: null,
+      resendAvailableAt: new Date(Date.now() - 1000).toISOString(),
     });
     const modal = renderReopenableModal();
     fireEvent.change(screen.getByLabelText(`Type "${ORG_NAME}" to continue`), {
@@ -418,7 +470,7 @@ describe('DeleteAccountModal close/reopen', () => {
     mockRequestChallenge.mockResolvedValue({
       outcome: 'challenge_created',
       expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-      resendAvailableAt: null,
+      resendAvailableAt: new Date(Date.now() - 1000).toISOString(),
     });
     const modal = renderReopenableModal();
     fireEvent.change(screen.getByLabelText(`Type "${ORG_NAME}" to continue`), {

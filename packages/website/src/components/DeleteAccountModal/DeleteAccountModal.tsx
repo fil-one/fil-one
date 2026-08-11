@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
 import { DialogTitle } from '@headlessui/react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { WarningCircleIcon } from '@phosphor-icons/react/dist/ssr';
 import { ApiErrorCode, DELETION_CODE_LENGTH } from '@filone/shared';
 import type { DeletionRateLimitedResponse } from '@filone/shared';
 import { deleteAccount, requestDeletionChallenge } from '../../lib/api.js';
-import { queryClient } from '../../lib/query-client.js';
 import { Button } from '../Button';
 import { FormField } from '../FormField';
 import { IconBox } from '../IconBox';
@@ -60,8 +59,9 @@ function useResendCountdown(resendAvailableAt: string | null): number {
 }
 
 function useDeleteAccountFlow(orgName: string, typedName: string, code: string) {
+  const queryClient = useQueryClient();
   const [step, setStep] = useState<Step>('confirm');
-  const [codeError, setCodeError] = useState<string | null>(null);
+  const [inlineError, setInlineError] = useState<string | null>(null);
   // A code was emailed at some point — survives close/reopen so an
   // accidental Escape doesn't strand a valid code behind the confirm step
   // (whose send button sits under the resend cooldown).
@@ -73,8 +73,8 @@ function useDeleteAccountFlow(orgName: string, typedName: string, code: string) 
   //
   // A stale snapshot is a usability problem, never a safety one: the server
   // re-checks the submitted name against the org it is about to delete and
-  // answers 400 "Organization name does not match" on any mismatch
-  // (`handlers/delete-account.ts:44`), so a wrong name deletes nothing. The
+  // answers 400 "Organization name does not match" on any mismatch, so a wrong
+  // name deletes nothing. The
   // effect below exists only so the user is not stranded by that rejection.
   const [confirmedOrgName, setConfirmedOrgName] = useState('');
   const [resendAvailableAt, setResendAvailableAt] = useState<string | null>(null);
@@ -92,7 +92,7 @@ function useDeleteAccountFlow(orgName: string, typedName: string, code: string) 
       setConfirmedOrgName('');
       setChallengeIssued(false);
       setStep('confirm');
-      setCodeError('The organization name changed. Confirm the new name to continue.');
+      setInlineError('The organization name changed. Confirm the new name to continue.');
     }
   }, [orgName, confirmedOrgName]);
 
@@ -102,7 +102,7 @@ function useDeleteAccountFlow(orgName: string, typedName: string, code: string) 
       if (challenge.outcome === 'deletion_in_progress') {
         // Deletion was already confirmed — no code was emailed, so stay on
         // the current step instead of advancing to code entry.
-        setCodeError('Account deletion is already in progress.');
+        setInlineError('Account deletion is already in progress.');
         return;
       }
       // Keep the first snapshot: only the first send passes the org-name gate,
@@ -111,7 +111,7 @@ function useDeleteAccountFlow(orgName: string, typedName: string, code: string) 
       setConfirmedOrgName((previous) => previous || typedName.trim());
       setChallengeIssued(true);
       setResendAvailableAt(challenge.resendAvailableAt);
-      setCodeError(null);
+      setInlineError(null);
       setStep('code');
     },
     onError: (err) => {
@@ -120,7 +120,7 @@ function useDeleteAccountFlow(orgName: string, typedName: string, code: string) 
       // instead of leaving the button enabled (or on a stale 60s timer).
       const serverCooldown = (err as Partial<DeletionRateLimitedResponse>).resendAvailableAt;
       if (serverCooldown) setResendAvailableAt(serverCooldown);
-      setCodeError(err instanceof Error ? err.message : 'Failed to send the verification code');
+      setInlineError(err instanceof Error ? err.message : 'Failed to send the verification code');
     },
   });
 
@@ -132,14 +132,14 @@ function useDeleteAccountFlow(orgName: string, typedName: string, code: string) 
       queryClient.clear();
       window.location.assign('/account-deleted');
     },
-    onError: (err) => setCodeError(deleteErrorMessage(err)),
+    onError: (err) => setInlineError(deleteErrorMessage(err)),
   });
 
   return {
     step,
     setStep,
-    codeError,
-    setCodeError,
+    inlineError,
+    setInlineError,
     challengeIssued,
     resendSecondsLeft,
     challengeMutation,
@@ -152,6 +152,19 @@ function useDeleteAccountFlow(orgName: string, typedName: string, code: string) 
 
 type Flow = ReturnType<typeof useDeleteAccountFlow>;
 
+/** id linking the inline message to the active input via aria-describedby. */
+const ERROR_ID = 'delete-account-error';
+
+/**
+ * A cooldown as a human duration. The server's window is normally 60s, but once
+ * the org's send budget is spent it becomes the rest of the hour, so a raw
+ * seconds count reaches "3540s". Minutes from 90s up, rounded up so the label
+ * never says a wait is over while the button is still disabled.
+ */
+function formatCooldown(seconds: number): string {
+  return seconds >= 90 ? `${Math.ceil(seconds / 60)}m` : `${seconds}s`;
+}
+
 /**
  * Two-step irreversible account deletion (FIL-112): type the exact org name
  * to unlock sending a verification code, then enter the emailed 6-digit code
@@ -159,9 +172,6 @@ type Flow = ReturnType<typeof useDeleteAccountFlow>;
  * to the static /account-deleted page — deletion reads as instantly complete
  * while the backend teardown finishes asynchronously.
  */
-/** id linking the inline error to the active input via aria-describedby. */
-const ERROR_ID = 'delete-account-error';
-
 export function DeleteAccountModal({ open, onClose, orgName }: DeleteAccountModalProps) {
   const [typedName, setTypedName] = useState('');
   const [code, setCode] = useState('');
@@ -177,7 +187,7 @@ export function DeleteAccountModal({ open, onClose, orgName }: DeleteAccountModa
     flow.setStep(flow.challengeIssued ? 'code' : 'confirm');
     setTypedName('');
     setCode('');
-    flow.setCodeError(null);
+    flow.setInlineError(null);
     // Deliberately NOT resetting resendAvailableAt: it mirrors a
     // server-enforced cooldown that outlives the modal. The countdown hook
     // already floors at 0, and clearing it would re-enable a send button the
@@ -195,7 +205,7 @@ export function DeleteAccountModal({ open, onClose, orgName }: DeleteAccountModa
               orgName={orgName}
               typedName={typedName}
               onChange={setTypedName}
-              describedBy={flow.codeError !== null ? ERROR_ID : undefined}
+              describedBy={flow.inlineError !== null ? ERROR_ID : undefined}
             />
           ) : (
             <CodeStep code={code} flow={flow} onChange={setCode} />
@@ -203,9 +213,9 @@ export function DeleteAccountModal({ open, onClose, orgName }: DeleteAccountModa
           {/* role="alert" announces the error to assistive tech on render
               (repo convention: Alert.tsx / Banner.tsx); ERROR_ID links it to
               the input via aria-describedby. */}
-          {flow.codeError && (
+          {flow.inlineError && (
             <p id={ERROR_ID} role="alert" className="text-xs text-red-600">
-              {flow.codeError}
+              {flow.inlineError}
             </p>
           )}
         </div>
@@ -240,9 +250,9 @@ function DeletionWarning({ orgName }: { orgName: string }) {
           This permanently deletes your Fil One account and organization{' '}
           <span className="font-medium text-zinc-900">{orgName}</span>: any active subscription is
           being canceled, all access keys are revoked, and your profile and account data are
-          deleted. Object data stored is immediately locked and inaccessible, and is scheduled for
-          later destruction — it is not instantly erased from underlying storage. This action cannot
-          be undone.
+          deleted. Object data stored is locked and inaccessible, and is scheduled for later
+          destruction — it is not instantly erased from underlying storage. This action cannot be
+          undone.
         </p>
       </div>
     </div>
@@ -296,13 +306,13 @@ function CodeStep({
           value={code}
           onChange={(value) => {
             onChange(value.replace(/\D/g, '').slice(0, DELETION_CODE_LENGTH));
-            flow.setCodeError(null);
+            flow.setInlineError(null);
           }}
           placeholder="123456"
           inputMode="numeric"
           autoComplete="one-time-code"
-          invalid={flow.codeError !== null}
-          aria-describedby={flow.codeError !== null ? ERROR_ID : undefined}
+          invalid={flow.inlineError !== null}
+          aria-describedby={flow.inlineError !== null ? ERROR_ID : undefined}
           // The confirm→code transition disables/replaces the button that held
           // focus, which would otherwise drop keyboard focus to <body>. Focus
           // the code input as the step mounts (precedent: ProvidersMultiSelect).
@@ -315,7 +325,9 @@ function CodeStep({
         disabled={flow.busy || flow.resendSecondsLeft > 0}
         onClick={() => flow.challengeMutation.mutate()}
       >
-        {flow.resendSecondsLeft > 0 ? `Resend code in ${flow.resendSecondsLeft}s` : 'Resend code'}
+        {flow.resendSecondsLeft > 0
+          ? `Resend code in ${formatCooldown(flow.resendSecondsLeft)}`
+          : 'Resend code'}
       </button>
     </>
   );
@@ -333,7 +345,7 @@ function PrimaryAction({ flow }: { flow: Flow }) {
       >
         {flow.challengeMutation.isPending && <Spinner ariaLabel="Sending code" size={14} />}
         {flow.resendSecondsLeft > 0
-          ? `Send verification code in ${flow.resendSecondsLeft}s`
+          ? `Send verification code in ${formatCooldown(flow.resendSecondsLeft)}`
           : 'Send verification code'}
       </Button>
     );

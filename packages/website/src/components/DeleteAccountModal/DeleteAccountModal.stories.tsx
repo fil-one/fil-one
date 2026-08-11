@@ -56,6 +56,9 @@ function ChallengeStub({ children }: { children: React.ReactNode }) {
       if (url.endsWith('/account/delete-challenge')) {
         return new Response(
           JSON.stringify({
+            // The response type is a discriminated union on `outcome`; without it
+            // this stub is not a DeletionChallengeResponse at all.
+            outcome: 'challenge_created',
             expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
             resendAvailableAt: new Date(Date.now() + 60 * 1000).toISOString(),
           }),
