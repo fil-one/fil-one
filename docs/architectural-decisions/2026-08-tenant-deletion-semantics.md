@@ -83,15 +83,16 @@ competing writers**, not to wait out propagation delay. It also covers the 5xx a
 return when cleanup fails partway through, which the Management API contract says leaves the tenant
 deletable on retry.
 
-### Aurora is the exception: disable + verify only
+### Aurora is the exception: disable only
 
-Aurora's Backoffice and Portal APIs expose **no tenant DELETE and no bucket DELETE**. Verified
+Aurora's Backoffice and Portal APIs expose **no tenant DELETE**. Verified
 against `packages/aurora-backoffice-client/aurora-backoffice.swagger.json` and
 `packages/aurora-portal-client/aurora-portal.swagger.json`: the only DELETE operations are on
 partner/tenant tokens, themes, and individual access keys.
 
-So `auroraOrchestrator.deleteTenant` does exactly two things: force the tenant to `disabled`, then
-verify it stayed that way. **Customer data survives**, and so do FilOne's SSM secrets.
+So `auroraOrchestrator.deleteTenant` does one thing: force the tenant to `disabled`, which "denies
+all actions" and renders every credential it owns inert. **Customer data survives**, and so do
+FilOne's SSM secrets.
 
 #### Why the FilOne-held secrets are retained
 
@@ -111,48 +112,21 @@ partner would otherwise destroy a live tenant's credentials on a 404. That entir
 local-SSM-evidence rules it needed to decide "already complete" from "never started" — is gone with
 the code.
 
-#### A 404 is nothing left to disable
+#### No post-teardown verification
 
-Aurora's teardown starts from a `GET tenant` probe. A probe that cannot resolve the tenant now
-returns successfully: there is nothing to disable, and nothing this teardown holds that would need
-cleaning up. This is materially safer than the previous posture, where the same 404 had to be
-interrogated against local SSM state before any destructive step could be allowed.
+`deleteTenant` forces the tenant to `disabled` and returns. It does not re-probe, and it does not
+fail closed on a non-`DISABLED` status — an earlier revision did both, and that machinery is gone in
+favour of the same shape FTH uses.
 
+**The residual, stated plainly:** `region-helpers.ts` refuses only `disabled → write-locked`;
+`disabled → active` is applied. So a competing writer can re-activate a tenant we just disabled, and
+nothing detects it — the account can be marked deleted with its tenant `ACTIVE` and its user-issued
+access keys valid.
 
-#### The teardown verifies the tenant is still `disabled` before returning
+What keeps that acceptable rather than reckless is that the org-profile `deleting` guard already
+refuses `desired: 'active'` for a deleting org, so the only surviving window is a writer that read
+the profile *before* the guard landed. That is narrow, and it is the same exposure FTH lives with.
 
-`region-helpers.ts` refuses only `disabled → write-locked`; `disabled → active` is applied, and the
-trial-lock enforcer in `usage-reporting-worker` is not fenced by the deletion guard. It can therefore
-re-activate a tenant we have just torn down, leaving its data intact and its user-issued access keys
-valid. FTH converges anyway because its terminal DELETE ends the race; Aurora, which only disables,
-does not.
-
-So Aurora re-probes at the end of `deleteTenant` and throws unless the tenant is `DISABLED`.
-Aurora's teardown is wrapped in the same bounded `TENANT_DELETE_RETRY` budget as FTH's, so the
-re-attempt re-probes and re-disables in-process.
-
-The comparison is against Aurora's **raw** `models.TenantStatus`, not the orchestrator-agnostic
-mapping, which collapses `LOCKED` to `undefined` — indistinguishable from a missing status field.
-The failure message is branched on what was actually observed, because most of these are not a
-competing writer:
-
-| Observed                  | What it means                                                                                | Exitable by retry?          |
-| ------------------------- | -------------------------------------------------------------------------------------------- | --------------------------- |
-| `ACTIVE` / `WRITE_LOCKED` | A competing writer re-activated it                                                           | Yes — the retry re-disables |
-| probe `error`             | Status unknown; usually transient                                                            | Yes                         |
-| probe `not_found`         | The client stopped resolving mid-teardown; the tenant resolved seconds earlier               | Yes, if the fault clears    |
-| `LOCKED`                  | Read-only, **not** "denies all actions" (declared in the enum) — the tenant is not torn down | Retried, but not by waiting |
-| status absent             | Aurora returned no status field                                                              | **No.** Needs an operator   |
-
-`LOCKED` is not unexitable in itself: the next attempt PATCHes any status other than `DISABLED`, so
-the retry does re-issue the disable. What it means when `LOCKED` **survives the retry budget** is
-that Aurora is refusing the transition or something is re-locking the tenant — then it needs an
-operator. An absent status field genuinely is unexitable: no retry can make an unverifiable
-teardown verifiable.
-
-That distinction matters because of the Consequences below: a state no retry can exit is permanent
-retention of the org's personal data, so it must be labelled as needing a human — and a state a
-retry _can_ exit must not be.
 
 ### Deferred Aurora data deletion
 
@@ -176,14 +150,9 @@ Whichever mechanism ships, it depends on the FilOne-held SSM secrets this teardo
 - A backoffice client pointed at the wrong partner can no longer shred live credentials, because
   the teardown no longer shreds anything. The operator wedge that safety used to cost — an org's
   purge blocked until a human deleted two named SSM parameters — is gone with it.
-- Aurora orgs leave a disabled tenant and its data behind until FIL-919 ships, and the teardown
-  fails (for retry) rather than returning while the tenant is anything but `DISABLED` — with one
-  exception. A tenant the backoffice cannot resolve returns success without the verification
-  running, because a teardown that destroys nothing has nothing left to do with an absent tenant.
-  That path is fail-OPEN and logs a warning, precisely because the misrouted-client scenario above
-  404s a live tenant identically: if that is what happened, the account's purge proceeds while the
-  tenant is still `ACTIVE`. It is the only `deleteTenant` path that reports success having verified
-  nothing.
+- Aurora orgs leave a disabled tenant and its data behind until FIL-919 ships. The teardown does not
+  verify the disable stuck, so a writer that re-activates the tenant afterwards goes undetected; see
+  the residual under "No post-teardown verification".
 - **A `deleteTenant` failure blocks the account's DynamoDB purge.** This is the consequence that
   makes everything above load-bearing, and it is deliberate. `runAccountDeletion` tears down every
   region and rethrows an aggregate of the failures **before** `purgeRecords`, so a teardown that
