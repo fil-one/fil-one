@@ -76,8 +76,20 @@ export class TrialEntitlementError extends Error {
 // on the auth path. 410 is the single status for this code across the API; see
 // that module for why.
 export class AccountDeletedError extends Error {
-  constructor(message = 'Account has been deleted', options?: ErrorOptions) {
+  /**
+   * `deleting` means the teardown is confirmed and in flight, `deleted` that it
+   * reached the purge (or the identity never existed). Both answer 410; the
+   * distinction only picks which `code` the client sees.
+   */
+  readonly state: 'deleting' | 'deleted';
+
+  constructor(
+    state: 'deleting' | 'deleted' = 'deleted',
+    message = state === 'deleting' ? 'Account deletion is in progress' : 'Account has been deleted',
+    options?: ErrorOptions,
+  ) {
     super(message, options);
     this.name = 'AccountDeletedError';
+    this.state = state;
   }
 }
