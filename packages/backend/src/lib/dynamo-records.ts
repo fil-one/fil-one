@@ -220,7 +220,7 @@ export interface RagIndexerCheckpointRecord {
 export interface DeletionChallengeRecord {
   pk: string;
   sk: string;
-  /** hex sha256 of `${orgId}:${salt}:${code}` — never the code itself. */
+  /** hex sha256 of `${orgId}:${userId}:${salt}:${code}` — never the code itself. */
   codeHash: string;
   /** 16 random bytes, hex. */
   salt: string;
@@ -246,8 +246,6 @@ export const OrgDeletionStatus = {
   Pending: 'PENDING',
   Done: 'DONE',
 } as const;
-
-export type OrgDeletionStatusValue = (typeof OrgDeletionStatus)[keyof typeof OrgDeletionStatus];
 
 /** Snapshot of an org member captured when deletion is confirmed. */
 export interface OrgDeletionMember {

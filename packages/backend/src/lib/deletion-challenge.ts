@@ -8,7 +8,7 @@ import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { DELETION_CODE_LENGTH, DELETION_CODE_TTL_MINUTES } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.js';
-import { DeletionKeys } from './dynamo-records.js';
+import { DeletionKeys, type DeletionChallengeRecord } from './dynamo-records.js';
 
 export const MAX_VERIFY_ATTEMPTS = 5;
 export const RESEND_COOLDOWN_SECONDS = 60;
@@ -16,11 +16,11 @@ export const MAX_SENDS_PER_WINDOW = 5;
 /** Row lifetime — also the send-rate window. Codes themselves expire sooner. */
 const ROW_TTL_SECONDS = 60 * 60;
 
-export type CreateChallengeResult =
+type CreateChallengeResult =
   | { outcome: 'created'; code: string; expiresAt: string; resendAvailableAt: string }
   | { outcome: 'rate_limited'; resendAvailableAt: string };
 
-export type VerifyChallengeResult = 'ok' | 'invalid' | 'expired_or_locked';
+type VerifyChallengeResult = 'ok' | 'invalid' | 'expired_or_locked';
 
 /**
  * The code is bound to the requester, not just the org: `userId` is part of the
@@ -170,7 +170,7 @@ export async function verifyDeletionChallenge(
   code: string,
 ): Promise<VerifyChallengeResult> {
   const key = challengeKey(orgId);
-  let attrs: Record<string, unknown>;
+  let attrs: Pick<DeletionChallengeRecord, 'codeHash' | 'salt'>;
   try {
     const out = await getDynamoClient().send(
       new UpdateItemCommand({
@@ -186,14 +186,14 @@ export async function verifyDeletionChallenge(
         ReturnValues: 'ALL_NEW',
       }),
     );
-    attrs = unmarshall(out.Attributes!);
+    attrs = unmarshall(out.Attributes!) as Pick<DeletionChallengeRecord, 'codeHash' | 'salt'>;
   } catch (err) {
     if (err instanceof ConditionalCheckFailedException) return 'expired_or_locked';
     throw err;
   }
 
-  const candidate = Buffer.from(hashCode(orgId, userId, attrs.salt as string, code), 'hex');
-  const stored = Buffer.from(attrs.codeHash as string, 'hex');
+  const candidate = Buffer.from(hashCode(orgId, userId, attrs.salt, code), 'hex');
+  const stored = Buffer.from(attrs.codeHash, 'hex');
   if (candidate.length !== stored.length || !timingSafeEqual(candidate, stored)) {
     return 'invalid';
   }
@@ -209,7 +209,7 @@ export async function verifyDeletionChallenge(
         TableName: Resource.BillingTable.name,
         Key: key,
         ConditionExpression: 'codeHash = :verified',
-        ExpressionAttributeValues: marshall({ ':verified': attrs.codeHash as string }),
+        ExpressionAttributeValues: marshall({ ':verified': attrs.codeHash }),
       }),
     );
   } catch (err) {

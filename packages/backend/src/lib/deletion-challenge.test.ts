@@ -58,8 +58,9 @@ describe('createDeletionChallenge', () => {
     ddbMock.reset();
   });
 
-  it('issues a 6-digit code with expiry and resend timestamps', async () => {
+  it('issues a 6-digit code and opens a fresh window (SET sendCount = 1, fresh ttl)', async () => {
     ddbMock.on(UpdateItemCommand).resolves({});
+    const before = Math.floor(Date.now() / 1000);
 
     const result = await createDeletionChallenge(ORG_ID, USER_ID);
 
@@ -69,34 +70,23 @@ describe('createDeletionChallenge', () => {
     expect(new Date(result.expiresAt).getTime()).toBeGreaterThan(Date.now());
     expect(new Date(result.resendAvailableAt).getTime()).toBeGreaterThan(Date.now());
 
-    const input = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
-    expect(input.ConditionExpression).toBe('attribute_not_exists(pk) OR #ttl <= :nowEpoch');
-    // The plaintext code is never stored — only a salted hash.
-    expect(JSON.stringify(input.ExpressionAttributeValues)).not.toContain(result.code);
-  });
-
-  it('reclaims a physically expired row with a fresh window (SET sendCount = 1, fresh ttl)', async () => {
-    // The condition-evaluating side (an expired-ttl row) accepts the phase-1
-    // write, so a single resolving call stands in for it here.
-    ddbMock.on(UpdateItemCommand).resolves({});
-    const before = Math.floor(Date.now() / 1000);
-
-    const result = await createDeletionChallenge(ORG_ID, USER_ID);
-
-    expect(result.outcome).toBe('created');
     const calls = ddbMock.commandCalls(UpdateItemCommand);
     expect(calls).toHaveLength(1);
     const input = calls[0].args[0].input;
-    // Fresh window: sendCount is SET to 1, never ADDed onto a stale counter.
+    // Phase 1 opens a window, so sendCount is SET to 1, never ADDed onto a stale
+    // counter, and the ttl is fresh. The condition also accepts a row whose ttl
+    // has lapsed — that is how a physically expired row gets reclaimed rather
+    // than blocking sends until the TTL janitor gets around to it.
     expect(input.UpdateExpression).toContain('sendCount = :one');
     expect(input.UpdateExpression).not.toContain('ADD sendCount');
     expect(input.UpdateExpression).toContain('#ttl = :ttl');
-    // The expired row is reclaimable: ttl in the past satisfies the condition.
     expect(input.ConditionExpression).toBe('attribute_not_exists(pk) OR #ttl <= :nowEpoch');
-    const ttl = Number(input.ExpressionAttributeValues?.[':ttl'].N);
-    expect(ttl).toBeGreaterThanOrEqual(before + 3600);
-    const nowEpoch = Number(input.ExpressionAttributeValues?.[':nowEpoch'].N);
-    expect(nowEpoch).toBeGreaterThanOrEqual(before);
+    expect(Number(input.ExpressionAttributeValues?.[':ttl'].N)).toBeGreaterThanOrEqual(
+      before + 3600,
+    );
+    expect(Number(input.ExpressionAttributeValues?.[':nowEpoch'].N)).toBeGreaterThanOrEqual(before);
+    // The plaintext code is never stored — only a salted hash.
+    expect(JSON.stringify(input.ExpressionAttributeValues)).not.toContain(result.code);
   });
 
   it('falls back to an in-window resend guarded by a live ttl when the fresh-window write is rejected', async () => {
