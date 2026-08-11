@@ -110,7 +110,9 @@ export function Tooltip({ children, content, side = 'right', className }: Toolti
           <div
             ref={tooltipRef}
             role="tooltip"
-            className="pointer-events-none fixed z-50 w-max max-w-[220px] whitespace-normal rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs leading-relaxed text-zinc-900 shadow-md"
+            // `text-balance` keeps multi-line tooltips from orphaning a single
+            // word on the last line; the max-width leaves short labels unwrapped.
+            className="pointer-events-none fixed z-50 w-max max-w-[280px] whitespace-normal text-balance rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs leading-relaxed text-zinc-900 shadow-md"
           >
             {content}
           </div>,
