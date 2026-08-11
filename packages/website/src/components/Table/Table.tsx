@@ -1,3 +1,4 @@
+import { ArrowDownIcon, ArrowUpIcon } from '@phosphor-icons/react/dist/ssr';
 import { clsx } from 'clsx';
 
 type TableProps = React.ComponentProps<'table'> & {
@@ -44,20 +45,73 @@ function TableRow({ className, ...props }: React.ComponentProps<'tr'>) {
   );
 }
 
+export type TableSortDirection = 'asc' | 'desc';
+
 type TableHeadProps = React.ComponentProps<'th'> & {
   sticky?: boolean;
+  /**
+   * Makes the header a sort toggle. Pass `sortDirection` for the active column
+   * and leave it undefined on the others.
+   */
+  onSort?: () => void;
+  sortDirection?: TableSortDirection;
 };
 
-function TableHead({ sticky, className, ...props }: TableHeadProps) {
+const ARIA_SORT: Record<TableSortDirection, 'ascending' | 'descending'> = {
+  asc: 'ascending',
+  desc: 'descending',
+};
+
+function TableHead({
+  sticky,
+  className,
+  onSort,
+  sortDirection,
+  children,
+  ...props
+}: TableHeadProps) {
   return (
     <th
       data-slot="table-head"
+      aria-sort={onSort ? (sortDirection ? ARIA_SORT[sortDirection] : 'none') : undefined}
       className={clsx(
         'border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-left text-xs font-normal text-zinc-600 whitespace-nowrap',
         sticky && 'sticky top-0',
         className,
       )}
       {...props}
+    >
+      {onSort ? (
+        <button
+          type="button"
+          onClick={onSort}
+          className="group -mx-1 flex items-center gap-1 rounded-sm px-1 py-0.5 transition-colors hover:text-zinc-900 focus-visible:brand-outline"
+        >
+          {children}
+          <SortIcon direction={sortDirection} />
+        </button>
+      ) : (
+        children
+      )}
+    </th>
+  );
+}
+
+/**
+ * Inactive columns keep the icon mounted but nearly invisible, so hovering hints
+ * that the header sorts without the row of labels shifting on hover.
+ */
+function SortIcon({ direction }: { direction?: TableSortDirection }) {
+  const Icon = direction === 'desc' ? ArrowDownIcon : ArrowUpIcon;
+  return (
+    <Icon
+      size={11}
+      weight="bold"
+      aria-hidden
+      className={clsx(
+        'transition-opacity',
+        direction ? 'opacity-100' : 'opacity-0 group-hover:opacity-40',
+      )}
     />
   );
 }

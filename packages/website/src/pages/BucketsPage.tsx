@@ -1,23 +1,17 @@
 import { useNavigate } from '@tanstack/react-router';
-import { Link } from '@tanstack/react-router';
-import { PlusIcon, DatabaseIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
+import { PlusIcon, DatabaseIcon } from '@phosphor-icons/react/dist/ssr';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { PageLayout } from '../components/PageLayout.js';
 import { Alert } from '../components/Alert';
-import { Badge } from '../components/Badge';
 import { Button } from '../components/Button';
-import { IconButton } from '../components/IconButton';
 import { Spinner } from '../components/Spinner';
-import { Tooltip } from '../components/Tooltip';
-import { Table } from '../components/Table/Table';
 import { useToast } from '../components/Toast';
 import { EmptyStateCard } from '../components/EmptyStateCard';
+import { BucketsTable } from '../components/BucketsTable';
 
-import type { ListBucketsResponse, S3Region } from '@filone/shared';
-import { S3_REGION, getRegionLabel } from '@filone/shared';
+import type { ListBucketsResponse } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
-import { formatDate } from '../lib/time.js';
 import { queryKeys } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
@@ -84,7 +78,6 @@ export function BucketsPage() {
         </Button>
       }
     >
-      {/* Content: empty state or table */}
       {buckets.length === 0 ? (
         <EmptyStateCard
           icon={DatabaseIcon}
@@ -101,88 +94,10 @@ export function BucketsPage() {
           </Button>
         </EmptyStateCard>
       ) : (
-        <Table>
-          <Table.Header>
-            <Table.Row>
-              <Table.Head>Name</Table.Head>
-              <Table.Head>Region</Table.Head>
-              <Table.Head>Created</Table.Head>
-              <Table.Head>Visibility</Table.Head>
-              <Table.Head>Features</Table.Head>
-              <Table.Head aria-label="Actions" />
-            </Table.Row>
-          </Table.Header>
-          <Table.Body>
-            {buckets.map((bucket) => (
-              <Table.Row
-                key={bucket.bucketName}
-                data-testid="bucket-row"
-                data-bucket-name={bucket.bucketName}
-              >
-                <Table.Cell>
-                  <Link
-                    to="/buckets/$bucketName"
-                    params={{ bucketName: bucket.bucketName }}
-                    search={{ region: bucket.region as S3Region }}
-                    data-testid="bucket-link"
-                    className="font-medium text-zinc-900 hover:text-brand-600"
-                  >
-                    {bucket.bucketName}
-                  </Link>
-                </Table.Cell>
-                <Table.Cell className="text-xs">
-                  <p className="font-medium text-zinc-900">{getRegionLabel(bucket.region)}</p>
-                  <p className="text-zinc-500">{bucket.region ?? S3_REGION}</p>
-                </Table.Cell>
-                <Table.Cell className="text-zinc-600">{formatDate(bucket.createdAt)}</Table.Cell>
-                <Table.Cell>
-                  {bucket.isPublic ? (
-                    <Badge color="green" size="sm" weight="medium">
-                      Public
-                    </Badge>
-                  ) : (
-                    <Badge color="grey" size="sm" weight="medium">
-                      Private
-                    </Badge>
-                  )}
-                </Table.Cell>
-                <Table.Cell>
-                  <div className="flex flex-wrap gap-1.5">
-                    {bucket.versioning && (
-                      <Badge color="blue" size="sm" weight="medium">
-                        Versioned
-                      </Badge>
-                    )}
-                    {bucket.objectLockEnabled && (
-                      <Badge color="amber" size="sm" weight="medium">
-                        Object Lock
-                      </Badge>
-                    )}
-                    {!bucket.versioning && !bucket.objectLockEnabled && (
-                      <span className="text-xs text-zinc-400">&mdash;</span>
-                    )}
-                  </div>
-                </Table.Cell>
-                <Table.Cell className="text-right">
-                  <Tooltip
-                    content="Deleting buckets is not available yet"
-                    side="left"
-                    className="align-middle"
-                  >
-                    <IconButton
-                      icon={TrashIcon}
-                      aria-label={`Delete bucket ${bucket.bucketName}`}
-                      onClick={() => deleteBucketMutation.mutate(bucket.bucketName)}
-                      // TODO: enable bucket deletion after Aurora implements this operation
-                      // https://linear.app/filecoin-foundation/issue/FIL-204/delete-bucket
-                      disabled
-                    />
-                  </Tooltip>
-                </Table.Cell>
-              </Table.Row>
-            ))}
-          </Table.Body>
-        </Table>
+        <BucketsTable
+          buckets={buckets}
+          onDelete={(bucketName) => deleteBucketMutation.mutate(bucketName)}
+        />
       )}
     </PageLayout>
   );
