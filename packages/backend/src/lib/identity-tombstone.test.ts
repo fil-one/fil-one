@@ -79,6 +79,13 @@ describe('classifyIdentityRow', () => {
     expect(classifyIdentityRow({ deleted: { BOOL: true } })).toBe('deleted');
   });
 
+  it('reads a present row with neither deleted nor userId as deleted', () => {
+    // Without this, `if (!armed) return hasUserId ? 'live' : 'deleted'` reduces to
+    // `return 'live'` with nothing failing — which silently drops the `!userId`
+    // half of the OR this classifier replaced.
+    expect(classifyIdentityRow({ pk: { S: 'SUB#x' }, sk: { S: 'IDENTITY' } })).toBe('deleted');
+  });
+
   it('reads an ABSENT row as deleted, never deleting', () => {
     // The confirm handler upserts this row, so no row at all means the identity
     // never existed — there is no evidence of an in-flight teardown to report.

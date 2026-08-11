@@ -14,8 +14,16 @@ async function baseHandler(
   const domain = process.env.AUTH0_DOMAIN!;
   const secrets = getAuthSecrets();
 
-  // Revoke before clearing cookies so the token cannot be reused after logout.
-  await revokeRefreshToken(parseCookies(event.cookies)[COOKIE_NAMES.REFRESH_TOKEN], '[logout]');
+  // Revoke the refresh token at Auth0 before clearing cookies, so a token already
+  // handed out cannot be exchanged for new ones after logout.
+  //
+  // The failure is swallowed rather than surfaced: the cookies are cleared either
+  // way, so the session ends locally regardless, and a 500 here would leave the
+  // user apparently logged in with no way to retry. The token expires on its own.
+  await revokeRefreshToken(
+    parseCookies(event.cookies)[COOKIE_NAMES.REFRESH_TOKEN],
+    '[auth-logout]',
+  );
 
   const clearCookies = makeClearAuthCookies(CSRF_COOKIE_NAME);
 
