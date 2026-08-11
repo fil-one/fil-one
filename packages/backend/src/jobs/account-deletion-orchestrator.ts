@@ -158,9 +158,9 @@ export async function handler(): Promise<void> {
   for (const org of resurrected) {
     console.warn(
       '[account-deletion-orchestrator] Residue found after a completed teardown — re-driving. ' +
-        'A row surface means a pre-fence leftover or a gap in the fences, since every writer ' +
-        'behind those is fenced; `stripeRedaction` means an earlier resweep left a Redaction Job ' +
-        'unfinished for a resurrected customer',
+        'A row surface means a leftover from before the guards, or a gap in them, since every ' +
+        'writer behind those is guarded; `stripeRedaction` means an earlier resweep left a ' +
+        'Redaction Job unfinished for a resurrected customer',
       {
         orgId: org.orgId,
         surfaces: org.surfaces,
@@ -347,7 +347,7 @@ function mergeResurrected(swept: ResurrectedOrg[], fromFences: string[]): Resurr
  *   transaction per fenced org, sequential, inside the same window
  *   {@link SWEEP_BUDGET_MS} bounds — so a mass-fencing incident would otherwise
  *   silently shrink the sweep's share of the 300s Lambda to nothing. Orgs past
- *   it are counted, not dropped silently, and stay fenced for the next run.
+ *   it are counted, not dropped silently, and stay guarded for the next run.
  */
 async function clearStaleDeletionGuards(
   guardedOrgIds: string[],
@@ -372,8 +372,8 @@ async function clearStaleDeletionGuards(
       if (await clearOrgDeletionGuard(orgId)) {
         unwedged += 1;
         console.warn(
-          '[account-deletion-orchestrator] Cleared an orphaned deletion fence: the org profile ' +
-            'carried `deleting` with no DELETION record, so every fenced writer was refused ' +
+          '[account-deletion-orchestrator] Cleared an orphaned deletion guard: the org profile ' +
+            'carried `deleting` with no DELETION record, so every guarded writer was refused ' +
             'and no teardown was running',
           { orgId },
         );
@@ -388,7 +388,7 @@ async function clearStaleDeletionGuards(
   if (skipped > 0) {
     console.warn(
       '[account-deletion-orchestrator] Budget expired before every guarded org was swept; ' +
-        'the rest stay fenced until the next run',
+        'the rest stay guarded until the next run',
       { skipped, guarded: guardedOrgIds.length },
     );
   }
