@@ -5,41 +5,92 @@
       "properties": {
         "access": {
           "description": "Default s3 permissions: [s3:GetBucketLocation, s3:ListAllMyBuckets]\nAdditional permissions:\n\t* Read                             [s3:GetObject, s3:ListMultipartUploadParts]\n\t* Write                            [s3:PutObject, s3:AbortMultipartUpload]\n\t* Delete                           [s3:DeleteObject]\n\t* List                             [s3:ListBucket, s3:ListBucketMultipartUploads]\n\t* GetBucketVersioning              [s3:GetBucketVersioning]\n\t* GetBucketObjectLockConfiguration [s3:GetBucketObjectLockConfiguration]\n\t* ListBucketVersions               [s3:ListBucketVersions]\n\t* GetObjectVersion                 [s3:GetObjectVersion]\n\t* GetObjectRetention               [s3:GetObjectRetention]\n\t* GetObjectLegalHold               [s3:GetObjectLegalHold]\n\t* PutObjectRetention               [s3:PutObjectRetention]\n\t* PutObjectLegalHold               [s3:PutObjectLegalHold]\n\t* DeleteObjectVersion              [s3:DeleteObjectVersion]",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "type": "array"
         },
-        "buckets": { "items": { "type": "string" }, "type": "array" },
-        "expiration": { "type": "string" },
-        "name": { "type": "string" }
+        "buckets": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "expiration": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
       },
       "type": "object"
     },
     "bucket.BaseBucketListResponse": {
       "properties": {
-        "createdAt": { "type": "string" },
-        "flags": { "items": { "$ref": "#/definitions/bucket.Flag" }, "type": "array" },
-        "name": { "type": "string" }
+        "createdAt": {
+          "type": "string"
+        },
+        "flags": {
+          "items": {
+            "$ref": "#/definitions/bucket.Flag"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "shared": {
+          "type": "boolean"
+        }
       },
       "type": "object"
     },
     "bucket.BucketResponse": {
       "properties": {
-        "createdAt": { "type": "string" },
-        "defaultRetention": { "$ref": "#/definitions/bucket.RetentionMode" },
-        "encrypted": { "type": "boolean" },
-        "name": { "type": "string" },
-        "objectLock": { "type": "boolean" },
-        "retentionDuration": { "type": "integer" },
-        "retentionDurationType": { "$ref": "#/definitions/bucket.DurationType" },
-        "versioning": { "type": "boolean" }
+        "canBeDeleted": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "defaultRetention": {
+          "$ref": "#/definitions/bucket.RetentionMode"
+        },
+        "encrypted": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "objectLock": {
+          "type": "boolean"
+        },
+        "retentionDuration": {
+          "type": "integer"
+        },
+        "retentionDurationType": {
+          "$ref": "#/definitions/bucket.DurationType"
+        },
+        "shared": {
+          "type": "boolean"
+        },
+        "versioning": {
+          "type": "boolean"
+        }
       },
       "type": "object"
     },
     "bucket.DefaultRetention": {
       "properties": {
-        "duration": { "$ref": "#/definitions/bucket.RetentionDuration" },
-        "enabled": { "type": "boolean" },
-        "mode": { "$ref": "#/definitions/bucket.RetentionMode" }
+        "duration": {
+          "$ref": "#/definitions/bucket.RetentionDuration"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/definitions/bucket.RetentionMode"
+        }
       },
       "type": "object"
     },
@@ -55,29 +106,49 @@
     },
     "bucket.ObjectResponse": {
       "properties": {
-        "bucket": { "type": "string" },
-        "key": { "type": "string" },
-        "size": { "type": "integer" },
-        "versionId": { "type": "string" }
+        "bucket": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer"
+        },
+        "versionId": {
+          "type": "string"
+        }
       },
       "type": "object"
     },
     "bucket.PaginatedBucketListResponse": {
       "properties": {
         "items": {
-          "items": { "$ref": "#/definitions/bucket.BaseBucketListResponse" },
+          "items": {
+            "$ref": "#/definitions/bucket.BaseBucketListResponse"
+          },
           "type": "array"
         },
-        "page": { "type": "integer" },
-        "pageSize": { "type": "integer" },
-        "totalCount": { "type": "integer" }
+        "page": {
+          "type": "integer"
+        },
+        "pageSize": {
+          "type": "integer"
+        },
+        "totalCount": {
+          "type": "integer"
+        }
       },
       "type": "object"
     },
     "bucket.RetentionDuration": {
       "properties": {
-        "duration": { "type": "integer" },
-        "type": { "$ref": "#/definitions/bucket.DurationType" }
+        "duration": {
+          "type": "integer"
+        },
+        "type": {
+          "$ref": "#/definitions/bucket.DurationType"
+        }
       },
       "type": "object"
     },
@@ -88,27 +159,893 @@
     },
     "buckets.BucketCreateRequest": {
       "properties": {
-        "defaultRetention": { "$ref": "#/definitions/bucket.DefaultRetention" },
-        "encrypted": { "type": "boolean" },
-        "lock": { "type": "boolean" },
-        "name": { "type": "string" },
-        "versioning": { "type": "boolean" }
+        "defaultRetention": {
+          "$ref": "#/definitions/bucket.DefaultRetention"
+        },
+        "encrypted": {
+          "type": "boolean"
+        },
+        "lock": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "versioning": {
+          "type": "boolean"
+        }
       },
       "type": "object"
     },
     "buckets.BucketEditRequest": {
-      "properties": { "defaultRetention": { "$ref": "#/definitions/bucket.DefaultRetention" } },
+      "properties": {
+        "defaultRetention": {
+          "$ref": "#/definitions/bucket.DefaultRetention"
+        }
+      },
       "type": "object"
     },
     "buckets.ObjectCloneRequest": {
-      "properties": { "objectKey": { "type": "string" }, "versionId": { "type": "string" } },
+      "properties": {
+        "objectKey": {
+          "type": "string"
+        },
+        "versionId": {
+          "type": "string"
+        }
+      },
       "type": "object"
     },
-    "common.ReturnMessage": { "properties": { "message": { "type": "string" } }, "type": "object" },
+    "common.Nullable-string": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "common.ReturnMessage": {
+      "properties": {
+        "message": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "compute.AsyncResourceResponse": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "jobId": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "compute.AttachVolumeToVMRequest": {
+      "properties": {
+        "deviceId": {
+          "type": "integer"
+        },
+        "instanceId": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "compute.CPUVendor": {
+      "enum": ["amd", "intel", "unspecified"],
+      "type": "string",
+      "x-enum-varnames": ["CPUVendorAMD", "CPUVendorIntel", "CPUVendorUnspecified"]
+    },
+    "compute.CreateInstanceRequest": {
+      "properties": {
+        "cloudInit": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "networkId": {
+          "type": "string"
+        },
+        "productCode": {
+          "type": "string"
+        },
+        "sshKeys": {
+          "items": {
+            "$ref": "#/definitions/compute.SSHKeyReference"
+          },
+          "type": "array"
+        },
+        "templateId": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "compute.CreateNetworkRequest": {
+      "properties": {
+        "gateway": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "netmask": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "compute.CreateVPCRequest": {
+      "properties": {
+        "cidr": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "compute.CreateVolumeRequest": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "sizeGigaBytes": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "compute.CreateVolumeSnapshotRequest": {
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "compute.IncreaseVolumeSizeRequest": {
+      "properties": {
+        "sizeGigaBytes": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "compute.Instance": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "primaryAddress": {
+          "type": "string"
+        },
+        "publicAddress": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/definitions/compute.InstanceState"
+        }
+      },
+      "type": "object"
+    },
+    "compute.InstanceDetail": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "defaultVpcId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "offering": {
+          "$ref": "#/definitions/compute.Offering"
+        },
+        "primaryAddress": {
+          "type": "string"
+        },
+        "protectedMode": {
+          "type": "boolean"
+        },
+        "publicAddress": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/definitions/compute.InstanceState"
+        }
+      },
+      "type": "object"
+    },
+    "compute.InstanceState": {
+      "enum": [
+        "Starting",
+        "Running",
+        "Stopping",
+        "Stopped",
+        "Destroyed",
+        "Expunging",
+        "Migrating",
+        "Error",
+        "Unknown",
+        "Shutdown",
+        "Restoring"
+      ],
+      "type": "string",
+      "x-enum-varnames": [
+        "InstanceStateStarting",
+        "InstanceStateRunning",
+        "InstanceStateStopping",
+        "InstanceStateStopped",
+        "InstanceStateDestroyed",
+        "InstanceStateExpunging",
+        "InstanceStateMigrating",
+        "InstanceStateError",
+        "InstanceStateUnknown",
+        "InstanceStateShutdown",
+        "InstanceStateRestoring"
+      ]
+    },
+    "compute.IpAddress": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "ipAddress": {
+          "type": "string"
+        },
+        "networkName": {
+          "type": "string"
+        },
+        "vmName": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "compute.JobAction": {
+      "enum": [
+        "compute.vm.start",
+        "compute.vm.stop",
+        "compute.vm.reboot",
+        "compute.vm.remove",
+        "compute.vm.create",
+        "compute.ip.associate",
+        "compute.ip.disassociate",
+        "compute.network.remove",
+        "compute.vpc.remove",
+        "compute.vpc.create",
+        "compute.volume.create",
+        "compute.volume.attach",
+        "compute.volume.detach",
+        "compute.volume.resize",
+        "compute.volume.remove",
+        "compute.snapshot.revert",
+        "compute.snapshot.create",
+        "compute.snapshot.delete",
+        "unknown.unknown.unknown"
+      ],
+      "type": "string",
+      "x-enum-varnames": [
+        "JobActionComputeVmStart",
+        "JobActionComputeVmStop",
+        "JobActionComputeVmReboot",
+        "JobActionComputeVmRemove",
+        "JobActionComputeVmCreate",
+        "JobActionComputeIpAssociate",
+        "JobActionComputeIpDisassociate",
+        "JobActionComputeNetworkRemove",
+        "JobActionComputeVpcRemove",
+        "JobActionComputeVpcCreate",
+        "JobActionComputeVolumeCreate",
+        "JobActionComputeVolumeAttach",
+        "JobActionComputeVolumeDetach",
+        "JobActionComputeVolumeResize",
+        "JobActionComputeVolumeRemove",
+        "JobActionComputeSnapshotRevert",
+        "JobActionComputeSnapshotCreate",
+        "JobActionComputeSnapshotDelete",
+        "JobActionUnknown"
+      ]
+    },
+    "compute.JobInfoListResponse": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/compute.JobInfoResponse"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "compute.JobInfoResponse": {
+      "properties": {
+        "jobAction": {
+          "$ref": "#/definitions/compute.JobAction"
+        },
+        "jobId": {
+          "type": "string"
+        },
+        "jobResourceType": {
+          "$ref": "#/definitions/models.ResourceType"
+        },
+        "jobStatus": {
+          "$ref": "#/definitions/compute.JobStatus"
+        },
+        "resourceId": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "compute.JobStatus": {
+      "enum": ["Running", "Success", "Failed", "Unknown"],
+      "type": "string",
+      "x-enum-varnames": [
+        "JobStatusRunning",
+        "JobStatusSuccess",
+        "JobStatusFailed",
+        "JobStatusUnknown"
+      ]
+    },
+    "compute.Network": {
+      "properties": {
+        "cidr": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "gateway": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "netmask": {
+          "type": "string"
+        },
+        "vpcId": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "compute.Offering": {
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "cpu": {
+          "$ref": "#/definitions/compute.OfferingCPU"
+        },
+        "memory": {
+          "$ref": "#/definitions/compute.OfferingMemory"
+        },
+        "name": {
+          "type": "string"
+        },
+        "price": {
+          "$ref": "#/definitions/compute.OfferingPrice"
+        },
+        "productCode": {
+          "type": "string"
+        },
+        "storage": {
+          "$ref": "#/definitions/compute.OfferingStorage"
+        }
+      },
+      "type": "object"
+    },
+    "compute.OfferingCPU": {
+      "properties": {
+        "cores": {
+          "type": "integer"
+        },
+        "vendor": {
+          "$ref": "#/definitions/compute.CPUVendor"
+        }
+      },
+      "type": "object"
+    },
+    "compute.OfferingMemory": {
+      "properties": {
+        "amount": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "compute.OfferingPrice": {
+      "properties": {
+        "price": {
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "compute.OfferingStorage": {
+      "properties": {
+        "amount": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "compute.PaginatedInstanceListResponse": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/compute.Instance"
+          },
+          "type": "array"
+        },
+        "page": {
+          "type": "integer"
+        },
+        "pageSize": {
+          "type": "integer"
+        },
+        "totalCount": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "compute.PaginatedIpAddressInfoResponse": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/compute.IpAddress"
+          },
+          "type": "array"
+        },
+        "page": {
+          "type": "integer"
+        },
+        "pageSize": {
+          "type": "integer"
+        },
+        "totalCount": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "compute.PaginatedNetworkListResponse": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/compute.Network"
+          },
+          "type": "array"
+        },
+        "page": {
+          "type": "integer"
+        },
+        "pageSize": {
+          "type": "integer"
+        },
+        "totalCount": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "compute.PaginatedSSHKeyDetailListResponse": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/compute.SSHKeyDetail"
+          },
+          "type": "array"
+        },
+        "page": {
+          "type": "integer"
+        },
+        "pageSize": {
+          "type": "integer"
+        },
+        "totalCount": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "compute.PaginatedVolumeListResponse": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/compute.VolumeResponse"
+          },
+          "type": "array"
+        },
+        "page": {
+          "type": "integer"
+        },
+        "pageSize": {
+          "type": "integer"
+        },
+        "totalCount": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "compute.PaginatedVolumeSnapshotListResponse": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/compute.VolumeSnapshotResponse"
+          },
+          "type": "array"
+        },
+        "page": {
+          "type": "integer"
+        },
+        "pageSize": {
+          "type": "integer"
+        },
+        "totalCount": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "compute.PaginatedVpcListResponse": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/compute.VPC"
+          },
+          "type": "array"
+        },
+        "page": {
+          "type": "integer"
+        },
+        "pageSize": {
+          "type": "integer"
+        },
+        "totalCount": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "compute.SSHKeyCreateRequest": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "compute.SSHKeyDetail": {
+      "properties": {
+        "fingerprint": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "compute.SSHKeyReference": {
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "compute.Template": {
+      "properties": {
+        "iconUrl": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "variants": {
+          "items": {
+            "$ref": "#/definitions/compute.TemplateVariant"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "compute.TemplateVariant": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "compute.UpdateInstanceRequest": {
+      "properties": {
+        "protectedMode": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "compute.UpdateInstanceStateRequest": {
+      "properties": {
+        "state": {
+          "$ref": "#/definitions/compute.InstanceState"
+        }
+      },
+      "type": "object"
+    },
+    "compute.VPC": {
+      "properties": {
+        "cidr": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "compute.VolumeResponse": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "instanceId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "sizeBytes": {
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/definitions/compute.VolumeState"
+        },
+        "type": {
+          "$ref": "#/definitions/compute.VolumeType"
+        }
+      },
+      "type": "object"
+    },
+    "compute.VolumeSnapshotResponse": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "physicalSizeBytes": {
+          "description": "physical size of backed-up snapshot on image store",
+          "type": "integer"
+        },
+        "revertible": {
+          "type": "boolean"
+        },
+        "state": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/compute.VolumeSnapshotState"
+            }
+          ],
+          "description": "the state of the snapshot. BackedUpSnapshot means that the snapshot is ready to be used; Creating - the snapshot is being allocated on the primary storage; BackingUp - the snapshot is being backed up on secondary storage"
+        },
+        "virtualSizeBytes": {
+          "description": "virtual size of backed-up snapshot on image store",
+          "type": "integer"
+        },
+        "volumeId": {
+          "type": "string"
+        },
+        "volumeName": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "compute.VolumeSnapshotState": {
+      "enum": [
+        "BackedUp",
+        "Creating",
+        "BackingUp",
+        "Copying",
+        "Destroying",
+        "Destroyed",
+        "Hidden",
+        "CreatedOnPrimary",
+        "Allocated",
+        "Unknown"
+      ],
+      "type": "string",
+      "x-enum-varnames": [
+        "BackedUpSnapshot",
+        "CreatingSnapshot",
+        "BackingUpSnapshot",
+        "CopyingSnapshot",
+        "DestroyingSnapshot",
+        "DestroyedSnapshot",
+        "HiddenSnapshot",
+        "CreatedOnPrimarySnapshot",
+        "AllocatedSnapshot",
+        "UnknownSnapshot"
+      ]
+    },
+    "compute.VolumeState": {
+      "enum": [
+        "Allocated",
+        "Creating",
+        "Ready",
+        "Migrating",
+        "Expunging",
+        "Destroy",
+        "UploadOp",
+        "Snapshotting",
+        "RevertSnapshotting",
+        "Resizing",
+        "Expunged",
+        "Destroying",
+        "Copying",
+        "Uploaded",
+        "NotUploaded",
+        "UploadInProgress",
+        "UploadError",
+        "UploadAbandonedVolumeState",
+        "Attaching",
+        "Restoring",
+        "Unknown"
+      ],
+      "type": "string",
+      "x-enum-varnames": [
+        "Allocated",
+        "Creating",
+        "Ready",
+        "Migrating",
+        "Expunging",
+        "Destroy",
+        "UploadOp",
+        "Snapshotting",
+        "RevertSnapshotting",
+        "Resizing",
+        "Expunged",
+        "Destroying",
+        "Copying",
+        "Uploaded",
+        "NotUploaded",
+        "UploadInProgress",
+        "UploadError",
+        "UploadAbandoned",
+        "Attaching",
+        "Restoring",
+        "Unknown"
+      ]
+    },
+    "compute.VolumeType": {
+      "enum": ["Root", "DataDisk", "BaseImage", "ISO", "Unknown"],
+      "type": "string",
+      "x-enum-varnames": [
+        "VolumeRoot",
+        "VolumeDataDisk",
+        "VolumeBaseImage",
+        "VolumeIso",
+        "VolumeUnknown"
+      ]
+    },
+    "model.InferenceUsageResponse": {
+      "properties": {
+        "series": {
+          "items": {
+            "$ref": "#/definitions/model.InferenceUsageSeries"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "model.InferenceUsageSample": {
+      "properties": {
+        "cachedTokens": {
+          "type": "integer"
+        },
+        "completionTokens": {
+          "type": "integer"
+        },
+        "errors": {
+          "type": "integer"
+        },
+        "promptTokens": {
+          "type": "integer"
+        },
+        "requests": {
+          "type": "integer"
+        },
+        "timestamp": {
+          "type": "string"
+        },
+        "totalTokens": {
+          "type": "integer"
+        },
+        "windowSizeSeconds": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "model.InferenceUsageSeries": {
+      "properties": {
+        "samples": {
+          "items": {
+            "$ref": "#/definitions/model.InferenceUsageSample"
+          },
+          "type": "array"
+        },
+        "tags": {
+          "$ref": "#/definitions/model.InferenceUsageSeriesKey"
+        }
+      },
+      "type": "object"
+    },
+    "model.InferenceUsageSeriesKey": {
+      "properties": {
+        "model": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "model.OperationMetricsResponse": {
       "properties": {
         "series": {
-          "items": { "$ref": "#/definitions/model.OperationMetricsSeries" },
+          "items": {
+            "$ref": "#/definitions/model.OperationMetricsSeries"
+          },
           "type": "array"
         }
       },
@@ -116,64 +1053,145 @@
     },
     "model.OperationMetricsSample": {
       "properties": {
-        "abortMultipartUpload": { "type": "integer" },
-        "completeMultipartUpload": { "type": "integer" },
-        "copyObject": { "type": "integer" },
-        "createMultipartUpload": { "type": "integer" },
-        "deleteObject": { "type": "integer" },
-        "deleteObjectTagging": { "type": "integer" },
-        "deleteObjects": { "type": "integer" },
-        "getBucketLocation": { "type": "integer" },
-        "getBucketVersioning": { "type": "integer" },
-        "getObject": { "type": "integer" },
-        "getObjectAttributes": { "type": "integer" },
-        "getObjectLegalHold": { "type": "integer" },
-        "getObjectLockConfiguration": { "type": "integer" },
-        "getObjectRetention": { "type": "integer" },
-        "getObjectTagging": { "type": "integer" },
-        "headBucket": { "type": "integer" },
-        "headObject": { "type": "integer" },
-        "listBuckets": { "type": "integer" },
-        "listMultipartUploads": { "type": "integer" },
-        "listObjectVersions": { "type": "integer" },
-        "listObjects": { "type": "integer" },
-        "listObjectsV2": { "type": "integer" },
-        "listParts": { "type": "integer" },
-        "putObject": { "type": "integer" },
-        "putObjectLegalHold": { "type": "integer" },
-        "putObjectLockConfiguration": { "type": "integer" },
-        "putObjectRetention": { "type": "integer" },
-        "putObjectTagging": { "type": "integer" },
-        "rxBytes": { "type": "integer" },
-        "timestamp": { "type": "string" },
-        "txBytes": { "type": "integer" },
-        "uploadPart": { "type": "integer" },
-        "uploadPartCopy": { "type": "integer" },
-        "windowSizeSeconds": { "type": "integer" }
+        "abortMultipartUpload": {
+          "type": "integer"
+        },
+        "completeMultipartUpload": {
+          "type": "integer"
+        },
+        "copyObject": {
+          "type": "integer"
+        },
+        "createMultipartUpload": {
+          "type": "integer"
+        },
+        "deleteObject": {
+          "type": "integer"
+        },
+        "deleteObjectTagging": {
+          "type": "integer"
+        },
+        "deleteObjects": {
+          "type": "integer"
+        },
+        "getBucketLocation": {
+          "type": "integer"
+        },
+        "getBucketVersioning": {
+          "type": "integer"
+        },
+        "getObject": {
+          "type": "integer"
+        },
+        "getObjectAttributes": {
+          "type": "integer"
+        },
+        "getObjectLegalHold": {
+          "type": "integer"
+        },
+        "getObjectLockConfiguration": {
+          "type": "integer"
+        },
+        "getObjectRetention": {
+          "type": "integer"
+        },
+        "getObjectTagging": {
+          "type": "integer"
+        },
+        "headBucket": {
+          "type": "integer"
+        },
+        "headObject": {
+          "type": "integer"
+        },
+        "listBuckets": {
+          "type": "integer"
+        },
+        "listMultipartUploads": {
+          "type": "integer"
+        },
+        "listObjectVersions": {
+          "type": "integer"
+        },
+        "listObjects": {
+          "type": "integer"
+        },
+        "listObjectsV2": {
+          "type": "integer"
+        },
+        "listParts": {
+          "type": "integer"
+        },
+        "putObject": {
+          "type": "integer"
+        },
+        "putObjectLegalHold": {
+          "type": "integer"
+        },
+        "putObjectLockConfiguration": {
+          "type": "integer"
+        },
+        "putObjectPart": {
+          "type": "integer"
+        },
+        "putObjectRetention": {
+          "type": "integer"
+        },
+        "putObjectTagging": {
+          "type": "integer"
+        },
+        "rxBytes": {
+          "type": "integer"
+        },
+        "timestamp": {
+          "type": "string"
+        },
+        "txBytes": {
+          "type": "integer"
+        },
+        "uploadPart": {
+          "type": "integer"
+        },
+        "uploadPartCopy": {
+          "type": "integer"
+        },
+        "windowSizeSeconds": {
+          "type": "integer"
+        }
       },
       "type": "object"
     },
     "model.OperationMetricsSeries": {
       "properties": {
         "samples": {
-          "items": { "$ref": "#/definitions/model.OperationMetricsSample" },
+          "items": {
+            "$ref": "#/definitions/model.OperationMetricsSample"
+          },
           "type": "array"
         },
-        "tags": { "$ref": "#/definitions/model.OperationMetricsSeriesKey" }
+        "tags": {
+          "$ref": "#/definitions/model.OperationMetricsSeriesKey"
+        }
       },
       "type": "object"
     },
     "model.OperationMetricsSeriesKey": {
       "properties": {
-        "requesterTenantId": { "type": "string" },
-        "trafficClass": { "type": "string" }
+        "requesterTenantId": {
+          "type": "string"
+        },
+        "trafficClass": {
+          "type": "string"
+        }
       },
       "type": "object"
     },
     "model.StorageMetricsResponse": {
       "properties": {
         "samples": {
-          "items": { "$ref": "#/definitions/model.StorageMetricsSample" },
+          "items": {
+            "$ref": "#/definitions/model.StorageMetricsSample"
+          },
           "type": "array"
         }
       },
@@ -181,116 +1199,464 @@
     },
     "model.StorageMetricsSample": {
       "properties": {
-        "bytesUsed": { "type": "integer" },
-        "objectCount": { "type": "integer" },
-        "timestamp": { "type": "string" },
-        "versionCount": { "type": "integer" },
-        "windowSize": { "type": "integer" }
+        "bytesUsed": {
+          "type": "integer"
+        },
+        "objectCount": {
+          "type": "integer"
+        },
+        "timestamp": {
+          "type": "string"
+        },
+        "versionCount": {
+          "type": "integer"
+        },
+        "windowSize": {
+          "type": "integer"
+        }
       },
       "type": "object"
     },
     "models.AccessKey": {
       "properties": {
-        "accessKeyId": { "type": "string" },
-        "createdAt": { "type": "string" },
-        "expiresAt": { "type": "string" },
-        "id": { "type": "string" },
-        "modifiedAt": { "type": "string" },
-        "name": { "type": "string" },
-        "tenantId": { "type": "string" }
+        "accessKeyId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "modifiedAt": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "tenantId": {
+          "type": "string"
+        }
       },
       "type": "object"
     },
     "models.AccessKeyBase": {
       "properties": {
-        "createdAt": { "type": "string" },
-        "expiresAt": { "type": "string" },
-        "id": { "type": "string" },
-        "modifiedAt": { "type": "string" },
-        "name": { "type": "string" },
-        "tenantId": { "type": "string" }
+        "createdAt": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "modifiedAt": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "tenantId": {
+          "type": "string"
+        }
       },
       "type": "object"
     },
     "models.AccessKeyFull": {
       "properties": {
-        "accessKeyId": { "type": "string" },
-        "accessKeySecret": { "type": "string" },
-        "createdAt": { "type": "string" },
-        "expiresAt": { "type": "string" },
-        "id": { "type": "string" },
-        "modifiedAt": { "type": "string" },
-        "name": { "type": "string" },
-        "tenantId": { "type": "string" }
+        "accessKeyId": {
+          "type": "string"
+        },
+        "accessKeySecret": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "modifiedAt": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "tenantId": {
+          "type": "string"
+        }
       },
       "type": "object"
     },
     "models.AccessKeyFullResponse": {
-      "properties": { "accessKey": { "$ref": "#/definitions/models.AccessKeyFull" } },
+      "properties": {
+        "accessKey": {
+          "$ref": "#/definitions/models.AccessKeyFull"
+        }
+      },
       "type": "object"
     },
     "models.AccessKeyResponse": {
-      "properties": { "accessKey": { "$ref": "#/definitions/models.AccessKey" } },
+      "properties": {
+        "accessKey": {
+          "$ref": "#/definitions/models.AccessKey"
+        }
+      },
+      "type": "object"
+    },
+    "models.AuthComponentSetupStatus": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "lastSetupStep": {
+          "$ref": "#/definitions/models.SetupStep"
+        },
+        "properties": {
+          "$ref": "#/definitions/models.EmptyComponentProperties"
+        }
+      },
       "type": "object"
     },
     "models.ClientEnvironmentResponse": {
       "properties": {
-        "apiUrl": { "type": "string" },
-        "auth0Audience": { "type": "string" },
-        "auth0ClientId": { "type": "string" },
-        "auth0Connection": { "type": "string" },
-        "auth0Issuer": { "type": "string" },
-        "bucketEncryptionEnabled": { "type": "boolean" },
-        "captchaToken": { "type": "string" },
-        "docsUrl": { "type": "string" },
-        "tracingEnabled": { "type": "boolean" },
-        "tracingUrl": { "type": "string" },
-        "trialRegistrationEnabled": { "type": "boolean" }
+        "apiUrl": {
+          "type": "string"
+        },
+        "auth0Audience": {
+          "type": "string"
+        },
+        "auth0ClientId": {
+          "type": "string"
+        },
+        "auth0Connection": {
+          "type": "string"
+        },
+        "auth0Issuer": {
+          "type": "string"
+        },
+        "bucketEncryptionEnabled": {
+          "type": "boolean"
+        },
+        "docsUrl": {
+          "type": "string"
+        },
+        "inferenceApiUrl": {
+          "type": "string"
+        },
+        "tracingEnabled": {
+          "type": "boolean"
+        },
+        "tracingUrl": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "models.ComponentsStatus": {
+      "properties": {
+        "auth": {
+          "$ref": "#/definitions/models.AuthComponentSetupStatus"
+        },
+        "compute": {
+          "$ref": "#/definitions/models.ComputeComponentSetupStatus"
+        },
+        "inference": {
+          "$ref": "#/definitions/models.InferenceComponentSetupStatus"
+        },
+        "s3": {
+          "$ref": "#/definitions/models.S3ComponentSetupStatus"
+        }
+      },
+      "type": "object"
+    },
+    "models.ComputeComponentLimitsProperties": {
+      "properties": {
+        "cpuCountLimit": {
+          "type": "integer"
+        },
+        "instancesCountLimit": {
+          "type": "integer"
+        },
+        "memoryMiBLimit": {
+          "type": "integer"
+        },
+        "networkCountLimit": {
+          "type": "integer"
+        },
+        "primaryStorageGiBLimit": {
+          "type": "integer"
+        },
+        "publicIpCountLimit": {
+          "type": "integer"
+        },
+        "secondaryStorageGiBLimit": {
+          "type": "integer"
+        },
+        "snapshotCountLimit": {
+          "type": "integer"
+        },
+        "volumeCountLimit": {
+          "type": "integer"
+        },
+        "vpcCountLimit": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "models.ComputeComponentProperties": {
+      "properties": {
+        "limits": {
+          "$ref": "#/definitions/models.ComputeComponentLimitsProperties"
+        }
+      },
+      "type": "object"
+    },
+    "models.ComputeComponentSetupStatus": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "lastSetupStep": {
+          "$ref": "#/definitions/models.SetupStep"
+        },
+        "properties": {
+          "$ref": "#/definitions/models.ComputeComponentProperties"
+        }
       },
       "type": "object"
     },
     "models.CreateTokenPortalRequest": {
       "properties": {
-        "description": { "type": "string" },
-        "expiresAt": { "type": "string" },
-        "name": { "type": "string" }
+        "description": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "models.EmptyComponentProperties": {
+      "type": "object"
+    },
+    "models.InferenceComponentSetupStatus": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "lastSetupStep": {
+          "$ref": "#/definitions/models.SetupStep"
+        },
+        "properties": {
+          "$ref": "#/definitions/models.EmptyComponentProperties"
+        }
       },
       "type": "object"
     },
     "models.MetricsResponse": {
       "properties": {
-        "bucketCount": { "type": "integer" },
-        "bucketLimit": { "type": "integer" },
-        "keyCount": { "type": "integer" },
-        "keyLimit": { "type": "integer" },
-        "maxBucketSize": { "type": "integer" },
-        "tenantName": { "type": "string" }
+        "bucketCount": {
+          "type": "integer"
+        },
+        "bucketLimit": {
+          "type": "integer"
+        },
+        "keyCount": {
+          "type": "integer"
+        },
+        "keyLimit": {
+          "type": "integer"
+        },
+        "maxBucketSize": {
+          "type": "integer"
+        },
+        "tenantName": {
+          "type": "string"
+        }
       },
       "type": "object"
     },
     "models.PaginatedListKeysResponse": {
       "properties": {
-        "items": { "items": { "$ref": "#/definitions/models.AccessKeyBase" }, "type": "array" },
-        "page": { "type": "integer" },
-        "pageSize": { "type": "integer" },
-        "totalCount": { "type": "integer" }
+        "items": {
+          "items": {
+            "$ref": "#/definitions/models.AccessKeyBase"
+          },
+          "type": "array"
+        },
+        "page": {
+          "type": "integer"
+        },
+        "pageSize": {
+          "type": "integer"
+        },
+        "totalCount": {
+          "type": "integer"
+        }
       },
       "type": "object"
     },
-    "models.TenantBase": {
-      "properties": { "id": { "type": "string" }, "name": { "type": "string" } },
+    "models.ResourceType": {
+      "enum": [
+        "Compute.VirtualMachine",
+        "Compute.IpAddress",
+        "Compute.Network",
+        "Compute.Vpc",
+        "Compute.Zone",
+        "Compute.FirewallRule",
+        "Compute.Volume",
+        "Compute.VolumeSnapshot",
+        "Compute.None",
+        "Unknown.Unknown"
+      ],
+      "type": "string",
+      "x-enum-varnames": [
+        "ResourceTypeComputeVirtualMachine",
+        "ResourceTypeComputeIpAddress",
+        "ResourceTypeComputeNetwork",
+        "ResourceTypeComputeVpc",
+        "ResourceTypeComputeZone",
+        "ResourceTypeComputeFirewallRule",
+        "ResourceTypeComputeVolume",
+        "ResourceTypeComputeVolumeSnapshot",
+        "ResourceTypeComputeNone",
+        "ResourceTypeUnknown"
+      ]
+    },
+    "models.S3ComponentLimits": {
+      "properties": {
+        "accessKeyQuantityLimit": {
+          "type": "integer"
+        },
+        "bucketQuantityLimit": {
+          "type": "integer"
+        },
+        "bucketSizeLimitBytes": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "models.S3ComponentProperties": {
+      "properties": {
+        "bucketSharingEnabled": {
+          "type": "boolean"
+        },
+        "limits": {
+          "$ref": "#/definitions/models.S3ComponentLimits"
+        }
+      },
+      "type": "object"
+    },
+    "models.S3ComponentSetupStatus": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "lastSetupStep": {
+          "$ref": "#/definitions/models.SetupStep"
+        },
+        "properties": {
+          "$ref": "#/definitions/models.S3ComponentProperties"
+        }
+      },
+      "type": "object"
+    },
+    "models.SetupStep": {
+      "enum": [
+        "NOT_STARTED",
+        "ORGANIZATION_CREATED",
+        "POLICY_ADMIN_ADDED",
+        "POLICY_READONLY_ADDED",
+        "WARM_TIER_ADDED",
+        "TENANT_ADMIN_USER_CREATED",
+        "TENANT_ADMIN_USER_POLICY_ATTACHED",
+        "CLOUDSTACK_ACCOUNT_CREATED",
+        "CLOUDSTACK_USER_KEYS_CREATED",
+        "FINISHED"
+      ],
+      "type": "string",
+      "x-enum-varnames": [
+        "NOT_STARTED",
+        "ORGANIZATION_CRATED",
+        "POLICY_ADMIN_ADDED",
+        "POLICY_READONLY_ADDED",
+        "WARM_TIER_ADDED",
+        "TENANT_ADMIN_USER_CREATED",
+        "TENANT_ADMIN_USER_POLICY_ATTACHED",
+        "CLOUDSTACK_ACCOUNT_CREATED",
+        "CLOUDSTACK_USER_KEYS_CREATED",
+        "FINISHED"
+      ]
+    },
+    "models.Tag": {
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "models.TenantPortalListItem": {
+      "properties": {
+        "components": {
+          "$ref": "#/definitions/models.ComponentsStatus"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "models.TenantResponse": {
       "properties": {
-        "endpoint": { "type": "string" },
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "orgId": { "type": "string" },
-        "region": { "type": "string" },
-        "status": { "$ref": "#/definitions/models.TenantStatus" },
-        "trialEndDate": { "type": "string" },
-        "trialStartDate": { "type": "string" }
+        "components": {
+          "$ref": "#/definitions/models.ComponentsStatus"
+        },
+        "endpoint": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "orgId": {
+          "type": "string"
+        },
+        "region": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/models.TenantStatus"
+        },
+        "trialEndDate": {
+          "description": "Deprecated",
+          "type": "string"
+        },
+        "trialStartDate": {
+          "description": "Deprecated",
+          "type": "string"
+        }
       },
       "type": "object"
     },
@@ -313,52 +1679,157 @@
     },
     "models.TenantsResponse": {
       "properties": {
-        "tenants": { "items": { "$ref": "#/definitions/models.TenantBase" }, "type": "array" }
+        "tenants": {
+          "items": {
+            "$ref": "#/definitions/models.TenantPortalListItem"
+          },
+          "type": "array"
+        }
       },
       "type": "object"
     },
     "models.TokenCreatePortalResponse": {
       "properties": {
-        "createdAt": { "type": "string" },
-        "description": { "type": "string" },
-        "expiresAt": { "type": "string" },
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "token": { "type": "string" }
+        "createdAt": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        }
       },
       "type": "object"
     },
     "models.TokenListPortalResponse": {
       "properties": {
         "items": {
-          "items": { "$ref": "#/definitions/models.TokenPortalResponse" },
+          "items": {
+            "$ref": "#/definitions/models.TokenPortalResponse"
+          },
           "type": "array"
         },
-        "page": { "type": "integer" },
-        "pageSize": { "type": "integer" },
-        "totalCount": { "type": "integer" }
+        "page": {
+          "type": "integer"
+        },
+        "pageSize": {
+          "type": "integer"
+        },
+        "totalCount": {
+          "type": "integer"
+        }
       },
       "type": "object"
     },
     "models.TokenPortalResponse": {
       "properties": {
-        "createdAt": { "type": "string" },
-        "description": { "type": "string" },
-        "expiresAt": { "type": "string" },
-        "id": { "type": "string" },
-        "name": { "type": "string" }
+        "createdAt": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "vmcontroller.assignPublicIPAddressAsStaticNATRequest": {
+      "properties": {
+        "address": {
+          "$ref": "#/definitions/common.Nullable-string"
+        }
       },
       "type": "object"
     }
   },
-  "host": "api.portal.dev.aur.lu",
+  "host": "api-portal.aur.lu",
   "info": {
     "contact": {},
-    "description": "This is Aurora Portal API.",
+    "description": "Every action available in the Aurora Portal can be automated through these REST endpoints, authenticated with an API token.",
     "title": "Aurora Portal API",
     "version": "1.0"
   },
   "paths": {
+    "/analytics/v1/inference/myorg": {
+      "get": {
+        "description": "Returns inference usage metrics (token counts, requests, errors) for the authenticated tenant in the given time range, optionally resampled by window duration and grouped by model",
+        "operationId": "GetTenantInferenceUsage",
+        "parameters": [
+          {
+            "description": "Start of time range (RFC3339)",
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "End of time range (RFC3339)",
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Resample window duration, e.g., 5m, 1h. Minutes and hours are the only supported units",
+            "in": "query",
+            "name": "window",
+            "type": "string"
+          },
+          {
+            "description": "Group by fields (comma-separated): model",
+            "in": "query",
+            "name": "groupBy",
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Inference usage metrics",
+            "schema": {
+              "$ref": "#/definitions/model.InferenceUsageResponse"
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Get tenant inference usage metrics",
+        "tags": ["Inference"]
+      }
+    },
     "/analytics/v1/operations/buckets/{bucketName}": {
       "get": {
         "description": "Returns S3 operation metrics for a bucket, optionally filtered by requester tenant and grouped by tags",
@@ -408,26 +1879,34 @@
         "responses": {
           "200": {
             "description": "Operation metrics",
-            "schema": { "$ref": "#/definitions/model.OperationMetricsResponse" }
+            "schema": {
+              "$ref": "#/definitions/model.OperationMetricsResponse"
+            }
           },
           "400": {
             "description": "Bad request",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           },
           "401": {
             "description": "Unauthorized",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           },
           "403": {
             "description": "Access denied",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
-          },
-          "500": {
-            "description": "Internal server error",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           }
         },
-        "security": [{ "ApiKeyAuth": [] }],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get bucket operation metrics",
         "tags": ["Operations"]
       }
@@ -468,22 +1947,28 @@
         "responses": {
           "200": {
             "description": "Operation metrics",
-            "schema": { "$ref": "#/definitions/model.OperationMetricsResponse" }
+            "schema": {
+              "$ref": "#/definitions/model.OperationMetricsResponse"
+            }
           },
           "400": {
             "description": "Bad request",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           },
           "401": {
             "description": "Unauthorized",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
-          },
-          "500": {
-            "description": "Internal server error",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           }
         },
-        "security": [{ "ApiKeyAuth": [] }],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get tenant operation metrics",
         "tags": ["Operations"]
       }
@@ -525,26 +2010,34 @@
         "responses": {
           "200": {
             "description": "Storage metrics",
-            "schema": { "$ref": "#/definitions/model.StorageMetricsResponse" }
+            "schema": {
+              "$ref": "#/definitions/model.StorageMetricsResponse"
+            }
           },
           "400": {
             "description": "Bad request",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           },
           "401": {
             "description": "Unauthorized",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           },
           "403": {
             "description": "Access denied",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
-          },
-          "500": {
-            "description": "Internal server error",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           }
         },
-        "security": [{ "ApiKeyAuth": [] }],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get bucket storage metrics",
         "tags": ["Storage"]
       }
@@ -579,22 +2072,28 @@
         "responses": {
           "200": {
             "description": "Storage metrics",
-            "schema": { "$ref": "#/definitions/model.StorageMetricsResponse" }
+            "schema": {
+              "$ref": "#/definitions/model.StorageMetricsResponse"
+            }
           },
           "400": {
             "description": "Bad request",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           },
           "401": {
             "description": "Unauthorized",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
-          },
-          "500": {
-            "description": "Internal server error",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           }
         },
-        "security": [{ "ApiKeyAuth": [] }],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get tenant storage metrics",
         "tags": ["Storage"]
       }
@@ -630,14 +2129,16 @@
         "responses": {
           "200": {
             "description": "List of tenant tokens",
-            "schema": { "$ref": "#/definitions/models.TokenListPortalResponse" }
-          },
-          "500": {
-            "description": "Error getting tokens",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/models.TokenListPortalResponse"
+            }
           }
         },
-        "security": [{ "ApiKeyAuth": [] }],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "List tokens",
         "tags": ["Token"]
       },
@@ -658,29 +2159,37 @@
             "in": "body",
             "name": "request",
             "required": true,
-            "schema": { "$ref": "#/definitions/models.CreateTokenPortalRequest" }
+            "schema": {
+              "$ref": "#/definitions/models.CreateTokenPortalRequest"
+            }
           }
         ],
         "produces": ["application/json"],
         "responses": {
           "201": {
             "description": "Token created",
-            "schema": { "$ref": "#/definitions/models.TokenCreatePortalResponse" }
+            "schema": {
+              "$ref": "#/definitions/models.TokenCreatePortalResponse"
+            }
           },
           "400": {
             "description": "Invalid request body or parameters",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           },
           "409": {
             "description": "Token with this name already exists",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
-          },
-          "500": {
-            "description": "Error while creating token",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           }
         },
-        "security": [{ "ApiKeyAuth": [] }],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create token",
         "tags": ["Token"]
       }
@@ -706,17 +2215,21 @@
           }
         ],
         "responses": {
-          "204": { "description": "Token deleted" },
+          "204": {
+            "description": "Token deleted"
+          },
           "404": {
             "description": "Token not found",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
-          },
-          "500": {
-            "description": "Error deleting token",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           }
         },
-        "security": [{ "ApiKeyAuth": [] }],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Delete token",
         "tags": ["Token"]
       },
@@ -743,20 +2256,1792 @@
         "responses": {
           "200": {
             "description": "Tenant token details",
-            "schema": { "$ref": "#/definitions/models.TokenPortalResponse" }
+            "schema": {
+              "$ref": "#/definitions/models.TokenPortalResponse"
+            }
           },
           "404": {
             "description": "Token not found",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
-          },
-          "500": {
-            "description": "Error getting token",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           }
         },
-        "security": [{ "ApiKeyAuth": [] }],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get token",
         "tags": ["Token"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/instances": {
+      "get": {
+        "description": "Returns a paginated list of VM instances for a tenant",
+        "operationId": "ListInstances",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default": 1,
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "type": "integer"
+          },
+          {
+            "default": 20,
+            "description": "Page size",
+            "in": "query",
+            "name": "pageSize",
+            "type": "integer"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.PaginatedInstanceListResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] List VM instances",
+        "tags": ["VM Instances"]
+      },
+      "post": {
+        "consumes": ["application/json"],
+        "description": "Handles the creation of a new virtual machine instance for a specific tenant. If sshKeys are provided, they are associated with the instance.",
+        "operationId": "CreateInstance",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Create instance request",
+            "in": "body",
+            "name": "request",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/compute.CreateInstanceRequest"
+            }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "schema": {
+              "$ref": "#/definitions/compute.AsyncResourceResponse"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Create VM instance",
+        "tags": ["VM Instances"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/instances/{instanceId}": {
+      "delete": {
+        "description": "Deletes a specific VM instance",
+        "operationId": "DeleteInstance",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Instance ID",
+            "in": "path",
+            "name": "instanceId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.AsyncResourceResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Delete VM instance",
+        "tags": ["VM Instances"]
+      },
+      "get": {
+        "description": "Returns details of a specific VM instance",
+        "operationId": "GetInstance",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Instance ID",
+            "in": "path",
+            "name": "instanceId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.InstanceDetail"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Get VM instance",
+        "tags": ["VM Instances"]
+      },
+      "patch": {
+        "consumes": ["application/json"],
+        "description": "Updates details of a specific VM instance",
+        "operationId": "UpdateInstance",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Instance ID",
+            "in": "path",
+            "name": "instanceId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Update request",
+            "in": "body",
+            "name": "request",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/compute.UpdateInstanceRequest"
+            }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Update VM instance",
+        "tags": ["VM Instances"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/instances/{instanceId}/force-stop": {
+      "post": {
+        "description": "Forcefully stops a specific VM instance",
+        "operationId": "ForceStopInstance",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Instance ID",
+            "in": "path",
+            "name": "instanceId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.AsyncResourceResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Force stop VM instance",
+        "tags": ["VM Instances"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/instances/{instanceId}/public-ip": {
+      "post": {
+        "consumes": ["application/json"],
+        "description": "Changes or releases the public IP address of a VM instance",
+        "operationId": "ChangePublicIPAddress",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Instance ID",
+            "in": "path",
+            "name": "instanceId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "IP address request",
+            "in": "body",
+            "name": "request",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/vmcontroller.assignPublicIPAddressAsStaticNATRequest"
+            }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Change public IP address",
+        "tags": ["IP Addresses"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/instances/{instanceId}/reboot": {
+      "post": {
+        "description": "Reboots a specific VM instance",
+        "operationId": "RebootInstance",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Instance ID",
+            "in": "path",
+            "name": "instanceId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.AsyncResourceResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Reboot VM instance",
+        "tags": ["VM Instances"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/instances/{instanceId}/state": {
+      "put": {
+        "consumes": ["application/json"],
+        "description": "Updates the state (e.g. start/stop) of a specific VM instance",
+        "operationId": "UpdateInstanceState",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Instance ID",
+            "in": "path",
+            "name": "instanceId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Update state request",
+            "in": "body",
+            "name": "request",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/compute.UpdateInstanceStateRequest"
+            }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.AsyncResourceResponse"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Update VM instance state",
+        "tags": ["VM Instances"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/jobs": {
+      "get": {
+        "description": "Returns a list of pending asynchronous jobs for a tenant",
+        "operationId": "ListPendingJobs",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Filter by resource ID",
+            "in": "query",
+            "name": "resourceId",
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.JobInfoListResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] List pending jobs",
+        "tags": ["Jobs"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/jobs/{jobId}": {
+      "get": {
+        "description": "Returns status and details of a specific asynchronous job",
+        "operationId": "GetJobInfo",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Job ID",
+            "in": "path",
+            "name": "jobId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.JobInfoResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Get job info",
+        "tags": ["Jobs"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/ssh-keys": {
+      "get": {
+        "description": "Returns a list of SSH keys for a tenant",
+        "operationId": "ListSSHKeys",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default": 1,
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "type": "integer"
+          },
+          {
+            "default": 20,
+            "description": "Page size",
+            "in": "query",
+            "name": "pageSize",
+            "type": "integer"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.PaginatedSSHKeyDetailListResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] List SSH keys",
+        "tags": ["SSH Keys"]
+      },
+      "post": {
+        "consumes": ["application/json"],
+        "description": "Creates a new SSH key for a tenant",
+        "operationId": "CreateSSHKey",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Create SSH key request",
+            "in": "body",
+            "name": "request",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/compute.SSHKeyCreateRequest"
+            }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "schema": {
+              "$ref": "#/definitions/compute.SSHKeyDetail"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Create SSH key",
+        "tags": ["SSH Keys"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/ssh-keys/{sshKeyId}": {
+      "delete": {
+        "description": "Deletes a specific SSH key",
+        "operationId": "DeleteSSHKey",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "SSH Key ID",
+            "in": "path",
+            "name": "sshKeyId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "204": {
+            "description": "No content"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Delete SSH key",
+        "tags": ["SSH Keys"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/vm/offerings": {
+      "get": {
+        "description": "Returns list of available VM offerings",
+        "operationId": "ListOfferings",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "items": {
+                "$ref": "#/definitions/compute.Offering"
+              },
+              "type": "array"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] List VM offerings",
+        "tags": ["VM Offerings"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/vm/templates": {
+      "get": {
+        "description": "Returns list of available VM templates",
+        "operationId": "ListTemplates",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "items": {
+                "$ref": "#/definitions/compute.Template"
+              },
+              "type": "array"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] List VM templates",
+        "tags": ["VM Templates"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/volumes": {
+      "get": {
+        "description": "Returns a paginated list of volumes for a tenant",
+        "operationId": "ListVolumes",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default": 1,
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "type": "integer"
+          },
+          {
+            "default": 20,
+            "description": "Page size",
+            "in": "query",
+            "name": "pageSize",
+            "type": "integer"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.PaginatedVolumeListResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] List volumes",
+        "tags": ["Volumes"]
+      },
+      "post": {
+        "consumes": ["application/json"],
+        "description": "Creates a new volume for a tenant",
+        "operationId": "CreateVolume",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Volume details",
+            "in": "body",
+            "name": "request",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/compute.CreateVolumeRequest"
+            }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "schema": {
+              "$ref": "#/definitions/compute.AsyncResourceResponse"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Create volume",
+        "tags": ["Volumes"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/volumes/{volumeId}": {
+      "delete": {
+        "description": "Deletes a volume by ID",
+        "operationId": "DeleteVolume",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Volume ID",
+            "in": "path",
+            "name": "volumeId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.AsyncResourceResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Delete volume",
+        "tags": ["Volumes"]
+      },
+      "get": {
+        "description": "Returns a volume by ID",
+        "operationId": "GetVolume",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Volume ID",
+            "in": "path",
+            "name": "volumeId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.VolumeResponse"
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Get volume",
+        "tags": ["Volumes"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/volumes/{volumeId}/attach": {
+      "delete": {
+        "description": "Detaches a volume from its current virtual machine",
+        "operationId": "DetachVolume",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Volume ID",
+            "in": "path",
+            "name": "volumeId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.AsyncResourceResponse"
+            }
+          },
+          "204": {
+            "description": "Volume not attached"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Detach volume",
+        "tags": ["Volumes"]
+      },
+      "post": {
+        "consumes": ["application/json"],
+        "description": "Attaches a volume to a virtual machine",
+        "operationId": "AttachVolume",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Volume ID",
+            "in": "path",
+            "name": "volumeId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Attachment details",
+            "in": "body",
+            "name": "request",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/compute.AttachVolumeToVMRequest"
+            }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.AsyncResourceResponse"
+            }
+          },
+          "204": {
+            "description": "Volume already attached"
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Attach volume",
+        "tags": ["Volumes"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/volumes/{volumeId}/resize": {
+      "post": {
+        "consumes": ["application/json"],
+        "description": "Increases the size of a volume",
+        "operationId": "ResizeVolume",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Volume ID",
+            "in": "path",
+            "name": "volumeId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "New size details",
+            "in": "body",
+            "name": "request",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/compute.IncreaseVolumeSizeRequest"
+            }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.AsyncResourceResponse"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Resize volume",
+        "tags": ["Volumes"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/volumes/{volumeId}/snapshots": {
+      "get": {
+        "description": "Returns a paginated list of snapshots for a volume",
+        "operationId": "ListVolumeSnapshots",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Volume ID",
+            "in": "path",
+            "name": "volumeId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default": 1,
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "type": "integer"
+          },
+          {
+            "default": 20,
+            "description": "Page size",
+            "in": "query",
+            "name": "pageSize",
+            "type": "integer"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.PaginatedVolumeSnapshotListResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] List volume snapshots",
+        "tags": ["Compute"]
+      },
+      "post": {
+        "consumes": ["application/json"],
+        "description": "Creates a new snapshot for a volume. The volume must be in the \"Ready\" state to perform this operation.",
+        "operationId": "CreateVolumeSnapshot",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Volume ID",
+            "in": "path",
+            "name": "volumeId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Snapshot details",
+            "in": "body",
+            "name": "request",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/compute.CreateVolumeSnapshotRequest"
+            }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "schema": {
+              "$ref": "#/definitions/compute.AsyncResourceResponse"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Create volume snapshot",
+        "tags": ["Compute"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/volumes/{volumeId}/snapshots/{snapshotId}": {
+      "delete": {
+        "description": "Deletes a volume snapshot by ID",
+        "operationId": "DeleteVolumeSnapshot",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Volume ID",
+            "in": "path",
+            "name": "volumeId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Snapshot ID",
+            "in": "path",
+            "name": "snapshotId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.AsyncResourceResponse"
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Delete volume snapshot",
+        "tags": ["Compute"]
+      },
+      "get": {
+        "description": "Returns a volume snapshot by ID",
+        "operationId": "GetVolumeSnapshot",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Volume ID",
+            "in": "path",
+            "name": "volumeId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Snapshot ID",
+            "in": "path",
+            "name": "snapshotId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.VolumeSnapshotResponse"
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Get volume snapshot",
+        "tags": ["Compute"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/volumes/{volumeId}/snapshots/{snapshotId}/restore": {
+      "post": {
+        "description": "Reverts a volume to the state captured by the given snapshot. The VM to which the volume is attached must be stopped before performing this operation.",
+        "operationId": "RestoreVolumeSnapshot",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Volume ID",
+            "in": "path",
+            "name": "volumeId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Snapshot ID",
+            "in": "path",
+            "name": "snapshotId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.AsyncResourceResponse"
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Restore volume snapshot",
+        "tags": ["Compute"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/vpc": {
+      "get": {
+        "description": "Returns a paginated list of VPCs for a tenant",
+        "operationId": "ListVPCs",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default": 1,
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "type": "integer"
+          },
+          {
+            "default": 20,
+            "description": "Page size",
+            "in": "query",
+            "name": "pageSize",
+            "type": "integer"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.PaginatedVpcListResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] List VPCs",
+        "tags": ["VPC"]
+      },
+      "post": {
+        "consumes": ["application/json"],
+        "description": "Creates a new VPC for a tenant",
+        "operationId": "CreateVPC",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Create VPC request",
+            "in": "body",
+            "name": "request",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/compute.CreateVPCRequest"
+            }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "schema": {
+              "$ref": "#/definitions/compute.AsyncResourceResponse"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Create VPC",
+        "tags": ["VPC"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/vpc/{vpcId}": {
+      "delete": {
+        "description": "Deletes a specific VPC",
+        "operationId": "DeleteVPC",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "VPC ID",
+            "in": "path",
+            "name": "vpcId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.AsyncResourceResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Delete VPC",
+        "tags": ["VPC"]
+      },
+      "get": {
+        "description": "Returns details of a specific VPC",
+        "operationId": "GetVPC",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "VPC ID",
+            "in": "path",
+            "name": "vpcId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.VPC"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Get VPC",
+        "tags": ["VPC"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/vpc/{vpcId}/networks": {
+      "get": {
+        "description": "Returns a paginated list of networks within a VPC",
+        "operationId": "ListNetworks",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "VPC ID",
+            "in": "path",
+            "name": "vpcId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default": 1,
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "type": "integer"
+          },
+          {
+            "default": 20,
+            "description": "Page size",
+            "in": "query",
+            "name": "pageSize",
+            "type": "integer"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.PaginatedNetworkListResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] List networks",
+        "tags": ["Networks"]
+      },
+      "post": {
+        "consumes": ["application/json"],
+        "description": "Creates a new network within a VPC",
+        "operationId": "CreateNetwork",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "VPC ID",
+            "in": "path",
+            "name": "vpcId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Create network request",
+            "in": "body",
+            "name": "request",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/compute.CreateNetworkRequest"
+            }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "schema": {
+              "$ref": "#/definitions/compute.Network"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Create network",
+        "tags": ["Networks"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/vpc/{vpcId}/networks/{networkId}": {
+      "delete": {
+        "description": "Deletes a specific network",
+        "operationId": "DeleteNetwork",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "VPC ID",
+            "in": "path",
+            "name": "vpcId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Network ID",
+            "in": "path",
+            "name": "networkId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.AsyncResourceResponse"
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Delete network",
+        "tags": ["Networks"]
+      },
+      "get": {
+        "description": "Returns details of a specific network",
+        "operationId": "GetNetwork",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "VPC ID",
+            "in": "path",
+            "name": "vpcId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Network ID",
+            "in": "path",
+            "name": "networkId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.Network"
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Get network",
+        "tags": ["Networks"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/vpc/{vpcId}/public-addresses": {
+      "get": {
+        "description": "Returns a list of public IPs associated with a VPC",
+        "operationId": "ListVPCPublicIps",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "VPC ID",
+            "in": "path",
+            "name": "vpcId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Filter by unassigned only (1 for true)",
+            "in": "query",
+            "name": "unassignedOnly",
+            "type": "integer"
+          },
+          {
+            "default": 1,
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "type": "integer"
+          },
+          {
+            "default": 20,
+            "description": "Page size",
+            "in": "query",
+            "name": "pageSize",
+            "type": "integer"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.PaginatedIpAddressInfoResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] List VPC public IPs",
+        "tags": ["VPC"]
+      },
+      "post": {
+        "description": "Allocates a new public IP and assigns it to a VPC",
+        "operationId": "AllocateAndAssignPublicIpToVPC",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "VPC ID",
+            "in": "path",
+            "name": "vpcId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.AsyncResourceResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Allocate and assign public IP to VPC",
+        "tags": ["VPC"]
+      }
+    },
+    "/compute/v1/tenants/{tenantId}/vpc/{vpcId}/public-addresses/{ipId}": {
+      "delete": {
+        "description": "Disassociates and deallocates a public IP address from a VPC",
+        "operationId": "DisassociateVPCPublicIpAddress",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "VPC ID",
+            "in": "path",
+            "name": "vpcId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "IP ID",
+            "in": "path",
+            "name": "ipId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/compute.AsyncResourceResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "[BETA] Disassociate VPC public IP address",
+        "tags": ["VPC"]
       }
     },
     "/v1/environment": {
@@ -767,19 +4052,21 @@
         "responses": {
           "200": {
             "description": "Environment configuration",
-            "schema": { "$ref": "#/definitions/models.ClientEnvironmentResponse" }
+            "schema": {
+              "$ref": "#/definitions/models.ClientEnvironmentResponse"
+            }
           },
           "400": {
             "description": "Bad request",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           },
           "404": {
             "description": "Not found",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
-          },
-          "500": {
-            "description": "Internal server error",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           }
         },
         "summary": "Get portal environment configuration",
@@ -794,14 +4081,16 @@
         "responses": {
           "200": {
             "description": "Tenants",
-            "schema": { "$ref": "#/definitions/models.TenantsResponse" }
-          },
-          "500": {
-            "description": "Internal server error",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/models.TenantsResponse"
+            }
           }
         },
-        "security": [{ "ApiKeyAuth": [] }],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "List tenants",
         "tags": ["Tenants"]
       }
@@ -823,18 +4112,22 @@
         "responses": {
           "200": {
             "description": "Tenant details",
-            "schema": { "$ref": "#/definitions/models.TenantResponse" }
+            "schema": {
+              "$ref": "#/definitions/models.TenantResponse"
+            }
           },
           "404": {
             "description": "Not found",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
-          },
-          "500": {
-            "description": "Internal server error",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           }
         },
-        "security": [{ "ApiKeyAuth": [] }],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get tenant",
         "tags": ["Tenants"]
       }
@@ -870,14 +4163,16 @@
         "responses": {
           "200": {
             "description": "Access keys",
-            "schema": { "$ref": "#/definitions/models.PaginatedListKeysResponse" }
-          },
-          "500": {
-            "description": "Internal server error",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/models.PaginatedListKeysResponse"
+            }
           }
         },
-        "security": [{ "ApiKeyAuth": [] }],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "List S3 access keys",
         "tags": ["Access Keys"]
       },
@@ -898,29 +4193,37 @@
             "in": "body",
             "name": "request",
             "required": true,
-            "schema": { "$ref": "#/definitions/accesskeys.AccessKeyRequest" }
+            "schema": {
+              "$ref": "#/definitions/accesskeys.AccessKeyRequest"
+            }
           }
         ],
         "produces": ["application/json"],
         "responses": {
           "201": {
             "description": "Created access key",
-            "schema": { "$ref": "#/definitions/models.AccessKeyFullResponse" }
+            "schema": {
+              "$ref": "#/definitions/models.AccessKeyFullResponse"
+            }
           },
           "400": {
             "description": "Bad request",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           },
           "409": {
             "description": "Conflict",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
-          },
-          "500": {
-            "description": "Internal server error",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           }
         },
-        "security": [{ "ApiKeyAuth": [] }],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create S3 access key",
         "tags": ["Access Keys"]
       }
@@ -946,17 +4249,24 @@
           }
         ],
         "responses": {
-          "204": { "description": "No Content", "schema": { "type": "string" } },
+          "204": {
+            "description": "No Content",
+            "schema": {
+              "type": "string"
+            }
+          },
           "404": {
             "description": "Not found",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
-          },
-          "500": {
-            "description": "Internal server error",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           }
         },
-        "security": [{ "ApiKeyAuth": [] }],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Delete S3 access key",
         "tags": ["Access Keys"]
       },
@@ -983,18 +4293,22 @@
         "responses": {
           "200": {
             "description": "Access key",
-            "schema": { "$ref": "#/definitions/models.AccessKeyResponse" }
+            "schema": {
+              "$ref": "#/definitions/models.AccessKeyResponse"
+            }
           },
           "404": {
             "description": "Not found",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
-          },
-          "500": {
-            "description": "Internal server error",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           }
         },
-        "security": [{ "ApiKeyAuth": [] }],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get S3 access key",
         "tags": ["Access Keys"]
       }
@@ -1030,14 +4344,16 @@
         "responses": {
           "200": {
             "description": "Bucket list",
-            "schema": { "$ref": "#/definitions/bucket.PaginatedBucketListResponse" }
-          },
-          "500": {
-            "description": "Internal server error",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/bucket.PaginatedBucketListResponse"
+            }
           }
         },
-        "security": [{ "ApiKeyAuth": [] }],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "List buckets",
         "tags": ["Buckets"]
       },
@@ -1058,34 +4374,92 @@
             "in": "body",
             "name": "request",
             "required": true,
-            "schema": { "$ref": "#/definitions/buckets.BucketCreateRequest" }
+            "schema": {
+              "$ref": "#/definitions/buckets.BucketCreateRequest"
+            }
           }
         ],
         "responses": {
-          "201": { "description": "Created", "schema": { "type": "string" } },
+          "201": {
+            "description": "Created",
+            "schema": {
+              "type": "string"
+            }
+          },
           "400": {
             "description": "Bad request",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           },
           "403": {
             "description": "Forbidden",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           },
           "409": {
             "description": "Conflict",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
-          },
-          "500": {
-            "description": "Internal server error",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           }
         },
-        "security": [{ "ApiKeyAuth": [] }],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create bucket",
         "tags": ["Buckets"]
       }
     },
     "/v1/tenants/{tenantId}/buckets/{bucketName}": {
+      "delete": {
+        "description": "Delete bucket for the given tenant",
+        "operationId": "DeleteBucket",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Bucket name",
+            "in": "path",
+            "name": "bucketName",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "description": "Not found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "409": {
+            "description": "Can't delete a bucket with objects/versions present",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete bucket",
+        "tags": ["Buckets"]
+      },
       "get": {
         "description": "Returns bucket details for the given tenant and bucket name",
         "operationId": "GetBucketInfo",
@@ -1109,18 +4483,22 @@
         "responses": {
           "200": {
             "description": "Bucket",
-            "schema": { "$ref": "#/definitions/bucket.BucketResponse" }
+            "schema": {
+              "$ref": "#/definitions/bucket.BucketResponse"
+            }
           },
           "404": {
             "description": "Not found",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
-          },
-          "500": {
-            "description": "Internal server error",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           }
         },
-        "security": [{ "ApiKeyAuth": [] }],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get bucket",
         "tags": ["Buckets"]
       },
@@ -1148,29 +4526,42 @@
             "in": "body",
             "name": "request",
             "required": true,
-            "schema": { "$ref": "#/definitions/buckets.BucketEditRequest" }
+            "schema": {
+              "$ref": "#/definitions/buckets.BucketEditRequest"
+            }
           }
         ],
         "responses": {
-          "204": { "description": "No Content", "schema": { "type": "string" } },
+          "204": {
+            "description": "No Content",
+            "schema": {
+              "type": "string"
+            }
+          },
           "400": {
             "description": "Bad request",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           },
           "404": {
             "description": "Not found",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           },
           "409": {
             "description": "Conflict",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
-          },
-          "500": {
-            "description": "Internal server error",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           }
         },
-        "security": [{ "ApiKeyAuth": [] }],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Edit bucket",
         "tags": ["Buckets"]
       }
@@ -1200,29 +4591,37 @@
             "in": "body",
             "name": "request",
             "required": true,
-            "schema": { "$ref": "#/definitions/buckets.ObjectCloneRequest" }
+            "schema": {
+              "$ref": "#/definitions/buckets.ObjectCloneRequest"
+            }
           }
         ],
         "produces": ["application/json"],
         "responses": {
           "200": {
             "description": "Cloned object",
-            "schema": { "$ref": "#/definitions/bucket.ObjectResponse" }
+            "schema": {
+              "$ref": "#/definitions/bucket.ObjectResponse"
+            }
           },
           "400": {
             "description": "Bad request",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           },
           "404": {
             "description": "Not found",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
-          },
-          "500": {
-            "description": "Internal server error",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           }
         },
-        "security": [{ "ApiKeyAuth": [] }],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Clone object",
         "tags": ["Buckets"]
       }
@@ -1244,24 +4643,141 @@
         "responses": {
           "200": {
             "description": "Metrics",
-            "schema": { "$ref": "#/definitions/models.MetricsResponse" }
+            "schema": {
+              "$ref": "#/definitions/models.MetricsResponse"
+            }
           },
           "404": {
             "description": "Not found",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
-          },
-          "500": {
-            "description": "Internal server error",
-            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
           }
         },
-        "security": [{ "ApiKeyAuth": [] }],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get tenant metrics",
         "tags": ["Metrics"]
       }
+    },
+    "/v1/tenants/{tenantId}/tags": {
+      "get": {
+        "description": "Returns list of tags for the given resource",
+        "operationId": "ListTags",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Resource ID",
+            "in": "query",
+            "name": "resourceId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Resource Type",
+            "in": "query",
+            "name": "resourceType",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "items": {
+                "$ref": "#/definitions/models.Tag"
+              },
+              "type": "array"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "List resource tags",
+        "tags": ["Tags"]
+      },
+      "put": {
+        "consumes": ["application/json"],
+        "description": "Updates the list of tags for the given resource. Allowed characters for tag are: letters, numbers, spaces representable in UTF-8, and _ . : / = + - @",
+        "operationId": "UpdateTags",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Resource ID",
+            "in": "query",
+            "name": "resourceId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Resource Type",
+            "in": "query",
+            "name": "resourceType",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tags list",
+            "in": "body",
+            "name": "tags",
+            "required": true,
+            "schema": {
+              "items": {
+                "$ref": "#/definitions/models.Tag"
+              },
+              "type": "array"
+            }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Update resource tags",
+        "tags": ["Tags"]
+      }
     }
   },
-  "schemes": [],
+  "schemes": ["https"],
   "securityDefinitions": {
     "ApiKeyAuth": {
       "description": "API Key Authentication",

@@ -498,7 +498,7 @@ After API changes, update the relevant Swagger spec and regenerate:
 **Back Office client:**
 
 1. Download the updated Swagger spec from
-   https://backoffice.dev.aur.lu/ff/docs/backoffice-api (open the page, then
+   https://backoffice.dev.aur.lu/api/v1/docs/swagger.json (open the page, then
    save the JSON loaded by the page)
 2. Replace `packages/aurora-backoffice-client/aurora-backoffice.swagger.json`
    with the downloaded file
@@ -508,7 +508,7 @@ After API changes, update the relevant Swagger spec and regenerate:
 Download the updated Swagger spec from the Aurora Portal API docs and save it to `packages/aurora-portal-client/aurora-portal.swagger.json`:
 
 ```bash
-curl https://portal-ff.dev.aur.lu/api/v1/docs/swagger.json -o packages/aurora-portal-client/aurora-portal.swagger.json && oxfmt
+curl https://docs.aur.lu/portal-api-spec.json -o packages/aurora-portal-client/aurora-portal.swagger.json && oxfmt
 ```
 
 Reformat the file:
