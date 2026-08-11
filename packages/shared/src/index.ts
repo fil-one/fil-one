@@ -67,6 +67,7 @@ export type {
   DeleteAccountRequest,
   DeleteAccountResponse,
   DeletionChallengeResponse,
+  DeletionRateLimitedResponse,
 } from './api/account-deletion.js';
 
 export type {
