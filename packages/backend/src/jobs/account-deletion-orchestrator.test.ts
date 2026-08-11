@@ -653,7 +653,7 @@ describe('account-deletion-orchestrator', () => {
           ConditionExpression: 'attribute_exists(pk) AND deleting = :true',
         });
         expect(warnSpy).toHaveBeenCalledWith(
-          expect.stringContaining('Cleared an orphaned deletion fence'),
+          expect.stringContaining('Cleared an orphaned deletion guard'),
           { orgId: 'org-wedged' },
         );
       } finally {
