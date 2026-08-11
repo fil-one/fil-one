@@ -35,7 +35,7 @@ vi.mock('../lib/deletion-record.js', () => ({
 
 const mockCreateChallenge = vi.fn();
 vi.mock('../lib/deletion-challenge.js', () => ({
-  createDeletionChallenge: (orgId: string) => mockCreateChallenge(orgId),
+  createDeletionChallenge: (orgId: string, userId: string) => mockCreateChallenge(orgId, userId),
 }));
 
 const mockSendEmail = vi.fn();
@@ -67,14 +67,15 @@ import { buildAuthenticatedEvent, setupAuthMocks } from '../test/auth-mocks.js';
 const ORG_ID = 'org-1';
 const SUB = 'auth0|sub-1';
 
-function makeEvent(email?: string | null) {
+function makeEvent(opts?: { withEmail: boolean }) {
+  const withEmail = opts?.withEmail ?? true;
   return buildEvent({
     method: 'POST',
     userInfo: {
       sub: 'auth0|sub-1',
       userId: 'user-1',
       orgId: ORG_ID,
-      ...(email === null ? {} : { email: email ?? 'user@example.com' }),
+      ...(withEmail ? { email: 'user@example.com' } : {}),
     },
   });
 }
@@ -98,7 +99,9 @@ describe('create-deletion-challenge baseHandler', () => {
   });
 
   it('returns 400 when the authenticated session carries no email', async () => {
-    const result = (await baseHandler(makeEvent(null))) as APIGatewayProxyStructuredResultV2;
+    const result = (await baseHandler(
+      makeEvent({ withEmail: false }),
+    )) as APIGatewayProxyStructuredResultV2;
 
     expect(result.statusCode).toBe(400);
     expect(JSON.parse(result.body!).message).toBe('No email on the authenticated session');

@@ -88,10 +88,12 @@ describe('saveBillingRecord', () => {
     );
     // Alarmable, not just logged: this rejection is the one that stops an
     // activation from unlocking tenants a teardown is disabling.
-    expect(mockReportMetric.mock.calls[0][0]).toMatchObject({
-      source: 'billing-activation',
-      BillingDeletionGuardRejected: 1,
-    });
+    expect(mockReportMetric).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: 'billing-activation',
+        BillingDeletionGuardRejected: 1,
+      }),
+    );
     warnSpy.mockRestore();
   });
 
