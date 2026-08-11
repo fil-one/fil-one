@@ -334,8 +334,8 @@ describe('createBillingTrial', () => {
     // The fill-in UpdateItem writes trialStartedAt/trialEndsAt unconditionally, so
     // recomputing them from `now` would silently reset the entitlement on every
     // resume — and hand Stripe a fresh trial_end to match.
-    const originalStart = '2026-07-01T00:00:00.000Z';
-    const originalEnd = '2026-07-31T00:00:00.000Z';
+    const originalStart = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+    const originalEnd = new Date(Date.now() + 20 * 24 * 60 * 60 * 1000).toISOString();
     ddbMock.on(GetItemCommand, { TableName: 'BillingTable' }).resolves({
       Item: {
         pk: { S: 'CUSTOMER#user-1' },
@@ -358,6 +358,38 @@ describe('createBillingTrial', () => {
       expect.objectContaining({ trial_end: Math.floor(new Date(originalEnd).getTime() / 1000) }),
       expect.anything(),
     );
+  });
+
+  it("clamps an elapsed window to Stripe's floor instead of failing forever", async () => {
+    // Stripe rejects a trial_end under 48h out. Passing the stored value straight
+    // through meant a resume from an old row was rejected on every attempt — the
+    // unhealable row this rewrite exists to remove, relocated from "returns early
+    // forever" to "errors forever".
+    const elapsed = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+    ddbMock.on(GetItemCommand, { TableName: 'BillingTable' }).resolves({
+      Item: {
+        pk: { S: 'CUSTOMER#user-1' },
+        sk: { S: 'SUBSCRIPTION' },
+        trialStartedAt: { S: '2026-06-01T00:00:00.000Z' },
+        trialEndsAt: { S: elapsed },
+      },
+    });
+
+    await expect(
+      createBillingTrial({ userId: 'user-1', orgId: 'org-1', userInfo: USER_INFO }),
+    ).resolves.toBeUndefined();
+
+    const trialEnd = mockSubscriptionsCreate.mock.calls[0][0].trial_end as number;
+    expect(trialEnd * 1000).toBeGreaterThan(Date.now());
+    // Bounded: ~48h, not another 30 days.
+    expect(trialEnd * 1000).toBeLessThan(Date.now() + 3 * 24 * 60 * 60 * 1000);
+    // The record and Stripe stay in step — one clamped value feeds both.
+    const fill = ddbMock
+      .commandCalls(UpdateItemCommand)
+      .map((c) => c.args[0].input)
+      .find((input) => input.UpdateExpression?.includes('stripeCustomerId'));
+    const written = Date.parse(fill!.ExpressionAttributeValues![':trialEndsAt'].S!);
+    expect(Math.floor(written / 1000)).toBe(trialEnd);
   });
 
   it('computes a fresh trial window on a first attempt', async () => {

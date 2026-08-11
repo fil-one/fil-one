@@ -318,10 +318,11 @@ export async function runAccountDeletion(
  * a terminal status (`pendingRedactionCustomerIds`, dynamo-records.ts).
  *
  * A resweep also sweeps every customer already recorded on the record, not just
- * what discovery returns. Discovery searches Stripe for `metadata.userId`, and
- * redaction nulls that metadata — so a job caught mid-lifecycle would become
- * undriveable exactly once it started working, and the org would be re-driven
- * for it forever.
+ * what discovery returns. Discovery searches Stripe metadata — `metadata.orgId`,
+ * falling back to `metadata.userId` — and running a redaction job nulls both, so a
+ * job caught mid-run would become undriveable exactly once it started working, and
+ * the org would be re-driven for it forever. Only a RUNNING job nulls metadata, which
+ * is why a first teardown needs no such list (see `advanceRedactionJob`).
  *
  * @param opts.prior the first pass's discovery result. Present ONLY on the
  *   second pass, and only when the first pass actually COMPLETED — including

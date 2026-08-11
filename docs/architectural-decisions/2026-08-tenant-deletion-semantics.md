@@ -64,8 +64,10 @@ The only way the probe ever produced a 404 was a ref that never resolved at all 
 _every_ ref unresolvable, so reading 404 as "already deleted" would fall through and destroy the SSM
 credentials of a client that is still live upstream, leaving an orphaned tenant nobody can reach.
 
-**Implementations MUST fail on 404**, at both the pre-deletion PATCH and the DELETE. Idempotency
-comes from the upstream's own repeat-delete success, never from tolerating a not-found.
+**Implementations MUST fail on 404 wherever a destructive step depends on the ref resolving** — at
+both the pre-deletion PATCH and the DELETE. Idempotency comes from the upstream's own repeat-delete
+success, never from tolerating a not-found. An orchestrator that destroys nothing is carved out; see
+Consequences.
 
 ### 409 means a competing writer, not an unlanded disable
 
