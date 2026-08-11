@@ -126,13 +126,10 @@ export async function handler(
         continue;
       }
 
-      // FIL-112: re-take the check per region. Regions run serially inside a
-      // 900s invocation, so by the time the last one starts the up-front check
-      // can be many minutes stale — long enough to re-create a dropped vector
-      // index and re-embed the deleted user's text. One strongly-consistent
-      // GetItem per region is negligible against a region's indexing work
-      // (a per-object read would not be). Abandon the whole run, not just this
-      // region: the org is gone for every remaining region too.
+      // FIL-112: re-taken per region — regions run serially inside a 900s
+      // invocation, so the up-front check can be many minutes stale by the last
+      // one. Abandon the rest of the run on a mid-run deletion: the org is gone
+      // for every remaining region too.
       if (isOrgDeleting(await getOrgProfile(orgId, { consistent: true }))) {
         console.warn(`${LOG} Org deletion confirmed mid-run, abandoning remaining regions`, {
           orgId,
