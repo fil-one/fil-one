@@ -40,13 +40,41 @@ import { makeClearAuthCookies, ResponseBuilder } from './response-builder.js';
 export function accountDeletedResponse(
   options: { clearSession?: boolean } = {},
 ): APIGatewayProxyStructuredResultV2 {
+  return deletedResponse(
+    { message: 'Account has been deleted', code: ApiErrorCode.ACCOUNT_DELETED },
+    options,
+  );
+}
+
+/**
+ * The in-flight sibling. Same 410, same single-emitter discipline, same
+ * `no-store` and `clearSession` semantics — a different `code`, so a client can
+ * tell "your deletion is running" from "your account is gone" without either
+ * having to infer it from the status.
+ *
+ * Distinguished from the row the auth path already reads; see
+ * {@link classifyIdentityRow} in lib/identity-tombstone.ts.
+ */
+export function accountDeletionInProgressResponse(
+  options: { clearSession?: boolean } = {},
+): APIGatewayProxyStructuredResultV2 {
+  return deletedResponse(
+    {
+      message: 'Account deletion is in progress',
+      code: ApiErrorCode.ACCOUNT_DELETION_IN_PROGRESS,
+    },
+    options,
+  );
+}
+
+function deletedResponse(
+  body: ErrorResponse,
+  options: { clearSession?: boolean },
+): APIGatewayProxyStructuredResultV2 {
   const builder = new ResponseBuilder()
     .status(410)
     .header('Cache-Control', 'no-store')
-    .body<ErrorResponse>({
-      message: 'Account has been deleted',
-      code: ApiErrorCode.ACCOUNT_DELETED,
-    });
+    .body<ErrorResponse>(body);
   if (options.clearSession) {
     for (const cookie of makeClearAuthCookies(CSRF_COOKIE_NAME)) {
       builder.addCookie(cookie);

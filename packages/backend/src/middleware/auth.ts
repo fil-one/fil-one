@@ -18,9 +18,13 @@ import {
   makeHintCookieHeader,
   ResponseBuilder,
 } from '../lib/response-builder.js';
-import { accountDeletedResponse } from '../lib/account-deleted-response.js';
+import {
+  accountDeletedResponse,
+  accountDeletionInProgressResponse,
+} from '../lib/account-deleted-response.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { AccountDeletedError } from '../lib/errors.js';
+import { classifyIdentityRow } from '../lib/identity-tombstone.js';
 import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { deriveOrgName } from '../lib/suggest-org-name.js';
@@ -229,8 +233,14 @@ async function resolveUserAndOrg(
   // eventually consistent (accepted sub-second staleness); resurrection is
   // independently blocked by createNewUserAndOrg's `attribute_not_exists(pk)`
   // transact condition against the retained SUB# row.
-  if (result.Item?.deleted?.BOOL === true) {
-    throw new AccountDeletedError();
+  //
+  // The same row distinguishes a teardown in flight from one that finished, at no
+  // extra cost — see classifyIdentityRow. `deleted` here is only reached with an
+  // armed row, since an absent one has no `userId` and falls through to the
+  // create path below.
+  const identityState = classifyIdentityRow(result.Item);
+  if (identityState !== 'live' && result.Item?.deleted?.BOOL === true) {
+    throw new AccountDeletedError(identityState === 'deleting' ? 'deleting' : 'deleted');
   }
 
   if (result.Item?.userId?.S && result.Item?.orgId?.S) {
@@ -444,7 +454,11 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
       // retry can succeed.
       // 410 + cleared cookies: the identity is tombstoned, so the session is
       // ended here and the client is told the account is gone for good.
-      if (err instanceof AccountDeletedError) return accountDeletedResponse({ clearSession: true });
+      if (err instanceof AccountDeletedError) {
+        return err.state === 'deleting'
+          ? accountDeletionInProgressResponse({ clearSession: true })
+          : accountDeletedResponse({ clearSession: true });
+      }
       throw err;
     }
   };
