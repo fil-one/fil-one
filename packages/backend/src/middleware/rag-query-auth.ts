@@ -34,7 +34,7 @@ import type { AuthMiddlewareOptions } from './auth.js';
  *
  * Account deletion (FIL-112) is the one gate the downstream chain cannot
  * enforce for this path, so `bearerAuth` checks it here — see the comment on
- * the fence-B read below.
+ * the org-profile `deleting` read below.
  */
 
 interface RagQueryAuthInternal extends Record<string, unknown> {

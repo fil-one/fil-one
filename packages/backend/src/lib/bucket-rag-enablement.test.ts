@@ -13,7 +13,7 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 vi.mock('sst', () => ({
   Resource: {
     RagIndexerTable: { name: 'RagIndexerTable' },
-    // The FIL-112 fence-B ConditionCheck reads ORG#{orgId}/PROFILE here.
+    // The FIL-112 deletion-guard ConditionCheck reads ORG#{orgId}/PROFILE here.
     UserInfoTable: { name: 'UserInfoTable' },
   },
 }));

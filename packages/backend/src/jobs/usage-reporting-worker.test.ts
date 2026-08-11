@@ -120,7 +120,7 @@ import { handler } from './usage-reporting-worker.js';
 
 /**
  * The BillingTable audit rows written this run. The write is a fenced
- * transaction (FIL-112), so item 0 is the fence-B ConditionCheck and item 1 is
+ * transaction (FIL-112), so item 0 is the deletion-guard ConditionCheck and item 1 is
  * the `ORG#{orgId}` / `USAGE_REPORT#{date}` Put.
  */
 function auditPuts() {

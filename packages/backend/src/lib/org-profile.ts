@@ -70,7 +70,7 @@ export async function getOrgProfile(
 }
 
 /**
- * The fence-B predicate (FIL-112), in one place so every reader agrees on what
+ * The org-profile `deleting` predicate (FIL-112), in one place so every reader agrees on what
  * "deleting" means. Only ever call this on a profile fetched with
  * `{ consistent: true }` — see the read-semantics note above.
  *
@@ -191,12 +191,12 @@ export async function sendGuardedWrite(
       { ...retry, shouldRetry: ({ error }) => isTransactionConflict(error) },
     );
   } catch (err) {
-    if (isFenceRejection(err)) throw new OrgDeletingError(orgId);
+    if (isDeletionGuardRejection(err)) throw new OrgDeletingError(orgId);
     throw err;
   }
 }
 
-function isFenceRejection(err: unknown): boolean {
+function isDeletionGuardRejection(err: unknown): boolean {
   return (
     err instanceof TransactionCanceledException &&
     err.CancellationReasons?.[0]?.Code === 'ConditionalCheckFailed'
@@ -211,7 +211,7 @@ function isFenceRejection(err: unknown): boolean {
 function isTransactionConflict(err: unknown): boolean {
   return (
     err instanceof TransactionCanceledException &&
-    !isFenceRejection(err) &&
+    !isDeletionGuardRejection(err) &&
     (err.CancellationReasons ?? []).some((reason) => reason.Code === 'TransactionConflict')
   );
 }
