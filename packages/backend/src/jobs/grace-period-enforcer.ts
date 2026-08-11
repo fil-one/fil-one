@@ -153,18 +153,15 @@ async function cancelSubscriptionAndDisableTenant(
   );
   // A teardown can claim (or purge) the record after the scan filtered it in;
   // an unconditional write would then upsert a zombie {pk, sk, canceled} row.
-  const applied = await sendGuardedBillingUpdate(
-    {
-      TableName: billingTableName,
-      Key: { pk: { S: candidate.pk }, sk: { S: 'SUBSCRIPTION' } },
-      UpdateExpression: 'SET subscriptionStatus = :status, updatedAt = :now',
-      ExpressionAttributeValues: {
-        ':status': { S: SubscriptionStatus.Canceled },
-        ':now': { S: now.toISOString() },
-      },
+  const applied = await sendGuardedBillingUpdate({
+    TableName: billingTableName,
+    Key: { pk: { S: candidate.pk }, sk: { S: 'SUBSCRIPTION' } },
+    UpdateExpression: 'SET subscriptionStatus = :status, updatedAt = :now',
+    ExpressionAttributeValues: {
+      ':status': { S: SubscriptionStatus.Canceled },
+      ':now': { S: now.toISOString() },
     },
-    { source: 'grace-period-enforcer', userId: candidate.userId, orgId: candidate.orgId },
-  );
+  });
   if (!applied) return 'skipped';
 
   console.log('[grace-period-enforcer] Canceled + disabled', {

@@ -165,8 +165,9 @@ describe('closeOutDeletedCustomer', () => {
     });
 
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('No billing record to cancel'),
-      expect.objectContaining({ userId: USER_ID }),
+      // The shared guard helper owns this log line now.
+      expect.stringContaining('Billing record missing or org mid-deletion'),
+      expect.objectContaining({ key: expect.anything() }),
     );
     warnSpy.mockRestore();
   });
