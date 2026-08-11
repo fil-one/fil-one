@@ -40,6 +40,7 @@ import type { OrgProfileItem } from '../org-profile.js';
 import type { S3ClientContext } from '../s3-client.js';
 
 import { createS3Client } from '../s3-client.js';
+import { mapWithConcurrency } from '../map-with-concurrency.js';
 import {
   createBucket as s3CreateBucket,
   listBuckets as s3ListBuckets,
@@ -64,6 +65,12 @@ const FTH_CONSOLE_USER_CODE = 'filone-console';
 // bucket is created. Retry them so a transient S3 blip doesn't leave the bucket
 // partially configured (which would surface as a dead-end BucketConfigurationError).
 const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
+
+/**
+ * In-flight per-bucket reads while listing (versioning, and object-lock when
+ * asked for). Bounded so a tenant with many buckets doesn't burst S3.
+ */
+const BUCKET_DETAIL_CONCURRENCY = 8;
 
 const consoleStorageUserCache = new QuickLRU<string, string>({ maxSize: 500 });
 const client = createInstrumentedFthClient();
@@ -159,20 +166,35 @@ export const fthOrchestrator = {
   async listBuckets(tenantId: string, opts: ListBucketsOptions = {}): Promise<BucketSummary[]> {
     // Loading versioning costs one GetBucketVersioning call per bucket (an N+1),
     // so callers that don't surface it opt out via includeVersioning: false.
+    // Object-lock state is a second such call, off unless asked for.
     const includeVersioning = opts.includeVersioning ?? true;
     const ctx = await fthOrchestrator.getS3ClientContext(tenantId);
     const s3 = createS3Client(ctx);
     const { buckets } = await s3ListBuckets(s3);
-    return Promise.all(
-      buckets.map(async (b) => ({
+
+    return mapWithConcurrency(buckets, BUCKET_DETAIL_CONCURRENCY, async (b) => {
+      const [versioning, lock] = await Promise.all([
+        includeVersioning ? getBucketVersioning(s3, b.name) : Promise.resolve(false),
+        opts.includeObjectLock ? getBucketObjectLock(s3, b.name) : Promise.resolve(null),
+      ]);
+
+      return {
         bucketName: b.name,
         region: fthOrchestrator.region,
         createdAt: b.createdAt,
         isPublic: false,
-        versioning: includeVersioning ? await getBucketVersioning(s3, b.name) : false,
+        versioning,
         encrypted: true,
-      })),
-    );
+        // getBucketObjectLock returns null when the bucket has no lock
+        // configuration at all, which is the same story as "not enabled".
+        ...(opts.includeObjectLock && { objectLockEnabled: lock?.objectLockEnabled ?? false }),
+        ...(lock?.defaultRetention && { defaultRetention: lock.defaultRetention }),
+        ...(lock?.retentionDuration != null && { retentionDuration: lock.retentionDuration }),
+        ...(lock?.retentionDurationType && {
+          retentionDurationType: lock.retentionDurationType,
+        }),
+      };
+    });
   },
 
   async getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null> {

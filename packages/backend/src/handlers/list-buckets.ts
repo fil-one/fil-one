@@ -27,7 +27,9 @@ export async function baseHandler(
     orchestrators.map(async (orchestrator) => {
       const tenantId = orchestrator.isTenantReady(orgProfile);
       if (!tenantId) return [];
-      return orchestrator.listBuckets(tenantId);
+      // The buckets table shows object-lock state, which neither orchestrator
+      // returns on the list itself: this costs one extra call per bucket.
+      return orchestrator.listBuckets(tenantId, { includeObjectLock: true });
     }),
   );
 

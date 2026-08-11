@@ -9,7 +9,19 @@ import type {
 import type { S3ClientContext } from './s3-client.js';
 import type { OrgProfileItem } from './org-profile.js';
 
-export interface BucketSummary {
+/**
+ * Object-lock and retention state. Neither orchestrator's bucket *list* carries
+ * it, so it costs one call per bucket to load and is absent unless asked for
+ * (see {@link ListBucketsOptions.includeObjectLock}).
+ */
+export interface BucketProtection {
+  objectLockEnabled?: boolean;
+  defaultRetention?: RetentionMode;
+  retentionDuration?: number;
+  retentionDurationType?: RetentionDurationType;
+}
+
+export interface BucketSummary extends BucketProtection {
   bucketName: string;
   region: S3Region;
   createdAt: string;
@@ -18,12 +30,8 @@ export interface BucketSummary {
   encrypted: boolean;
 }
 
-export interface BucketDetails extends BucketSummary {
-  objectLockEnabled?: boolean;
-  defaultRetention?: RetentionMode;
-  retentionDuration?: number;
-  retentionDurationType?: RetentionDurationType;
-}
+/** A single-bucket read, which always loads the protection state. */
+export type BucketDetails = BucketSummary;
 
 export interface CreateBucketArgs {
   bucketName: string;
@@ -84,6 +92,14 @@ export interface ListBucketsOptions {
    * Defaults to true.
    */
   includeVersioning?: boolean;
+
+  /**
+   * When true, load each bucket's object-lock and retention state. Neither
+   * orchestrator returns it on the list itself (Aurora's list response carries
+   * only `flags: unencrypted | encrypted | versioned`), so this costs one extra
+   * call per bucket on both. Off by default: only the buckets table needs it.
+   */
+  includeObjectLock?: boolean;
 }
 
 export interface GetTenantUsageMetricsOptions {

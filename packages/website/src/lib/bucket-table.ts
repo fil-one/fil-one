@@ -6,10 +6,15 @@ import type { Bucket } from '@filone/shared';
 import { S3_REGION, getRegionLabel } from '@filone/shared';
 
 /**
- * Bucket count above which the table shows its search and filter controls.
- * Below this, the whole list fits on screen and the controls are just chrome.
+ * Bucket count at which the table starts showing its search, sort and filter
+ * controls. Below this the whole list is one glance and the controls are chrome.
  */
-export const BUCKET_TABLE_CONTROLS_THRESHOLD = 8;
+export const BUCKET_TABLE_CONTROLS_MIN = 5;
+
+/** True when a list is long enough to be worth searching, sorting and filtering. */
+export function shouldShowBucketControls(bucketCount: number): boolean {
+  return bucketCount >= BUCKET_TABLE_CONTROLS_MIN;
+}
 
 export type BucketSortKey = 'bucketName' | 'region' | 'createdAt';
 export type SortDirection = 'asc' | 'desc';
@@ -32,6 +37,14 @@ export type BucketFilters = {
 export const ALL_REGIONS = 'all';
 
 export const EMPTY_BUCKET_FILTERS: BucketFilters = { query: '', region: ALL_REGIONS };
+
+/**
+ * True when the filters actually narrow the list. Drives the result count, which
+ * says nothing when every bucket is showing.
+ */
+export function hasActiveFilters(filters: BucketFilters): boolean {
+  return filters.query.trim() !== '' || filters.region !== ALL_REGIONS;
+}
 
 /** A bucket's region, falling back to the default when the API omits it. */
 function regionOf(bucket: Bucket): string {

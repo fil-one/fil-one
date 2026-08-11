@@ -8,14 +8,7 @@ import {
 import type { Bucket } from '@filone/shared';
 
 import { PropertyCard } from './PropertyCard';
-
-function formatRetention(mode?: string, duration?: number, durationType?: string): string | null {
-  if (!mode || !duration || !durationType) return null;
-  const unit =
-    durationType === 'y' ? (duration === 1 ? 'year' : 'years') : duration === 1 ? 'day' : 'days';
-  const modeLabel = mode.charAt(0).toUpperCase() + mode.slice(1);
-  return `${modeLabel} · ${duration} ${unit}`;
-}
+import { formatRetention } from '../lib/retention.js';
 
 export function BucketPropertyCards({ bucket }: { bucket: Bucket }) {
   return (

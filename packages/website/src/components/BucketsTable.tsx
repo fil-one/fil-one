@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { LockSimpleIcon, MagnifyingGlassIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
+import { EyeSlashIcon, MagnifyingGlassIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
 
 import type { Bucket, S3Region } from '@filone/shared';
 import { S3_REGION, getRegionLabel } from '@filone/shared';
@@ -14,14 +14,15 @@ import { Table } from './Table/Table';
 import { Tooltip } from './Tooltip';
 import { BucketsToolbar } from './BucketsToolbar';
 import { formatDate } from '../lib/time.js';
+import { formatRetention } from '../lib/retention.js';
 import {
-  BUCKET_TABLE_CONTROLS_THRESHOLD,
   DEFAULT_BUCKET_SORT,
   EMPTY_BUCKET_FILTERS,
   type BucketSortKey,
   bucketRegions,
   filterBuckets,
   nextBucketSort,
+  shouldShowBucketControls,
   sortBuckets,
 } from '../lib/bucket-table.js';
 
@@ -36,7 +37,7 @@ export function BucketsTable({ buckets, onDelete }: BucketsTableProps) {
 
   // Gated on the total, not the filtered count, so narrowing a search down to a
   // couple of rows can't pull the search field out from under the cursor.
-  const showControls = buckets.length > BUCKET_TABLE_CONTROLS_THRESHOLD;
+  const showControls = shouldShowBucketControls(buckets.length);
   const regions = useMemo(() => bucketRegions(buckets), [buckets]);
   const visibleBuckets = useMemo(
     () => sortBuckets(showControls ? filterBuckets(buckets, filters) : buckets, sort),
@@ -86,7 +87,7 @@ export function BucketsTable({ buckets, onDelete }: BucketsTableProps) {
               <Table.Head {...sortProps('bucketName')}>Name</Table.Head>
               <Table.Head {...sortProps('region')}>Region</Table.Head>
               <Table.Head {...sortProps('createdAt')}>Created</Table.Head>
-              <Table.Head>Versioning</Table.Head>
+              <Table.Head>Features</Table.Head>
               <Table.Head aria-label="Actions" />
             </Table.Row>
           </Table.Header>
@@ -98,6 +99,43 @@ export function BucketsTable({ buckets, onDelete }: BucketsTableProps) {
         </Table>
       )}
     </>
+  );
+}
+
+/**
+ * Versioning and Object Lock badges. Object Lock requires versioning, so a
+ * locked bucket always shows both; the retention policy rides in the lock
+ * badge's tooltip rather than earning a third badge.
+ */
+function BucketFeatures({ bucket }: { bucket: Bucket }) {
+  const retention = formatRetention(
+    bucket.defaultRetention,
+    bucket.retentionDuration,
+    bucket.retentionDurationType,
+  );
+
+  if (!bucket.versioning && !bucket.objectLockEnabled) {
+    return <span className="text-xs text-zinc-500">&mdash;</span>;
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {bucket.versioning && (
+        <Badge color="blue" size="sm" weight="medium">
+          Versioned
+        </Badge>
+      )}
+      {bucket.objectLockEnabled && (
+        <Tooltip
+          content={retention ? `Object Lock · default retention ${retention}` : 'Object Lock'}
+          side="top"
+        >
+          <Badge color="amber" size="sm" weight="medium">
+            Object Lock
+          </Badge>
+        </Tooltip>
+      )}
+    </div>
   );
 }
 
@@ -122,10 +160,13 @@ function BucketRow({ bucket, onDelete }: { bucket: Bucket; onDelete: (name: stri
               what gets called out. */}
           {!bucket.isPublic && (
             <Tooltip content="Private bucket" side="top">
-              {/* zinc-500, not zinc-400: non-text graphics need 3:1 against the
-                  row (WCAG 1.4.11) and zinc-400 is 2.56:1 on white. */}
-              <LockSimpleIcon
-                size={12}
+              {/* An eye, not a lock: the lock glyphs are spoken for elsewhere
+                  (LockIcon is Object Lock, LockSimpleIcon is Default Retention),
+                  so locks mean immutability here and the eye means visibility.
+                  zinc-500 because non-text graphics need 3:1 (WCAG 1.4.11) and
+                  zinc-400 is 2.56:1 on white. */}
+              <EyeSlashIcon
+                size={13}
                 role="img"
                 aria-label="Private bucket"
                 className="text-zinc-500"
@@ -146,16 +187,7 @@ function BucketRow({ bucket, onDelete }: { bucket: Bucket; onDelete: (name: stri
       {/* text-xs to match the region cell beside it */}
       <Table.Cell className="text-xs text-zinc-600">{formatDate(bucket.createdAt)}</Table.Cell>
       <Table.Cell>
-        {/* Object Lock is deliberately absent: `listBuckets` doesn't return it, so a
-            badge here would read as "off" for buckets that have it on. The bucket
-            detail page fetches and shows it. */}
-        {bucket.versioning ? (
-          <Badge color="blue" size="sm" weight="medium">
-            Enabled
-          </Badge>
-        ) : (
-          <span className="text-xs text-zinc-500">&mdash;</span>
-        )}
+        <BucketFeatures bucket={bucket} />
       </Table.Cell>
       <Table.Cell className="text-right">
         <Tooltip

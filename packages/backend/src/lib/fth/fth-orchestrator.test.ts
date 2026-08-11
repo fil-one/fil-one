@@ -758,6 +758,48 @@ describe('fthOrchestrator.listBuckets', () => {
     expect(result.map((b) => b.versioning)).toEqual([false, false]);
   });
 
+  it('loads object-lock state per bucket when includeObjectLock is set', async () => {
+    ssmMock.on(GetParameterCommand).resolves({
+      Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
+    });
+    s3Mock.on(ListBucketsCommand).resolves({
+      Buckets: [{ Name: 'b1', CreationDate: new Date('2026-01-01T00:00:00Z') }],
+    });
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
+    s3Mock.on(GetObjectLockConfigurationCommand).resolves({
+      ObjectLockConfiguration: {
+        ObjectLockEnabled: 'Enabled',
+        Rule: { DefaultRetention: { Mode: 'COMPLIANCE', Days: 30 } },
+      },
+    });
+
+    const result = await fthOrchestrator.listBuckets(fthClientId, { includeObjectLock: true });
+
+    expect(result[0]).toMatchObject({
+      bucketName: 'b1',
+      versioning: true,
+      objectLockEnabled: true,
+      defaultRetention: 'compliance',
+      retentionDuration: 30,
+      retentionDurationType: 'd',
+    });
+  });
+
+  it('skips GetObjectLockConfiguration unless includeObjectLock is set', async () => {
+    ssmMock.on(GetParameterCommand).resolves({
+      Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
+    });
+    s3Mock.on(ListBucketsCommand).resolves({
+      Buckets: [{ Name: 'b1', CreationDate: new Date('2026-01-01T00:00:00Z') }],
+    });
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
+
+    const result = await fthOrchestrator.listBuckets(fthClientId);
+
+    expect(s3Mock.commandCalls(GetObjectLockConfigurationCommand)).toHaveLength(0);
+    expect(result[0]?.objectLockEnabled).toBeUndefined();
+  });
+
   it('propagates GetBucketVersioning failures instead of swallowing them', async () => {
     ssmMock.on(GetParameterCommand).resolves({
       Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },

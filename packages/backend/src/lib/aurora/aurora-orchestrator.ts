@@ -7,12 +7,12 @@
 import { S3Region, getS3Endpoint, TenantStatus } from '@filone/shared';
 import type {
   AccessKeyPermission,
-  Bucket,
   GranularPermission,
   RetentionDurationType,
   RetentionMode,
   S3Region as S3RegionType,
 } from '@filone/shared';
+import type { BucketBucketResponse } from '@filone/aurora-portal-client';
 import { getBucketInfo, listBuckets } from '@filone/aurora-portal-client';
 import { ensureTenantReady as ensureAuroraTenantReady } from '../aurora/aurora-tenant-setup.js';
 import {
@@ -36,8 +36,10 @@ import { isOrgSetupComplete } from '../org-setup-status.js';
 import type { OrgProfileItem } from '../org-profile.js';
 import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
 import { BucketNotFoundError, NotImplementedError } from '../errors.js';
+import { mapWithConcurrency } from '../map-with-concurrency.js';
 import type {
   BucketDetails,
+  BucketProtection,
   BucketSummary,
   CreateBucketArgs,
   GetTenantUsageMetricsOptions,
@@ -56,6 +58,27 @@ export const _resetSsmCacheForTesting = () => _resetS3CredentialsCacheForTesting
 
 function getStage(): string {
   return process.env.FILONE_STAGE!;
+}
+
+/**
+ * In-flight per-bucket detail reads when a listing needs object-lock state.
+ * Bounded so a tenant with many buckets doesn't burst the portal API.
+ */
+const BUCKET_DETAIL_CONCURRENCY = 8;
+
+/** Object-lock and retention fields off a portal single-bucket response. */
+function toBucketProtection(data: BucketBucketResponse): BucketProtection {
+  return {
+    objectLockEnabled: data.objectLock ?? false,
+    // The portal reports "no default retention" as the string 'off'.
+    defaultRetention:
+      data.defaultRetention && data.defaultRetention !== 'off'
+        ? (data.defaultRetention as RetentionMode)
+        : undefined,
+    retentionDuration: data.retentionDuration ?? undefined,
+    retentionDurationType:
+      (data.retentionDurationType as RetentionDurationType | undefined) ?? undefined,
+  };
 }
 
 export const auroraOrchestrator = {
@@ -129,7 +152,7 @@ export const auroraOrchestrator = {
       });
     }
 
-    return (data?.items ?? [])
+    const summaries = (data?.items ?? [])
       .filter((b): b is typeof b & { name: string; createdAt: string } => !!b.name && !!b.createdAt)
       .map((b) => ({
         bucketName: b.name,
@@ -139,6 +162,30 @@ export const auroraOrchestrator = {
         versioning: includeVersioning ? (b.flags?.includes('versioned') ?? false) : false,
         encrypted: b.flags?.includes('encrypted') ?? true,
       }));
+
+    if (!opts.includeObjectLock) return summaries;
+
+    // The list response has no lock field at all, so each bucket needs its own
+    // getBucketInfo. Bounded, and a per-bucket failure degrades that row to
+    // "no lock" rather than failing the whole listing.
+    return mapWithConcurrency(summaries, BUCKET_DETAIL_CONCURRENCY, async (summary) => {
+      const { data: info, error: infoError } = await getBucketInfo({
+        client,
+        path: { tenantId, bucketName: summary.bucketName },
+        throwOnError: false,
+      });
+
+      if (infoError || !info) {
+        console.warn('[aurora] Failed to load object-lock state for bucket', {
+          tenantId,
+          bucketName: summary.bucketName,
+          error: infoError,
+        });
+        return summary;
+      }
+
+      return { ...summary, ...toBucketProtection(info) };
+    });
   },
 
   async getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null> {
@@ -162,23 +209,14 @@ export const auroraOrchestrator = {
       );
     }
 
-    const defaultRetention =
-      data.defaultRetention && data.defaultRetention !== 'off'
-        ? (data.defaultRetention as Bucket['defaultRetention'])
-        : undefined;
-
     return {
       bucketName: data.name ?? bucketName,
       region: auroraOrchestrator.region,
       createdAt: data.createdAt,
       isPublic: false,
-      objectLockEnabled: data.objectLock ?? false,
       versioning: data.versioning ?? false,
       encrypted: data.encrypted ?? true,
-      defaultRetention,
-      retentionDuration: data.retentionDuration ?? undefined,
-      retentionDurationType:
-        (data.retentionDurationType as RetentionDurationType | undefined) ?? undefined,
+      ...toBucketProtection(data),
     };
   },
 

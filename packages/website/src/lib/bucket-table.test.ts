@@ -3,11 +3,13 @@ import { describe, it, expect } from 'vitest';
 import type { Bucket } from '@filone/shared';
 import {
   ALL_REGIONS,
+  BUCKET_TABLE_CONTROLS_MIN,
   DEFAULT_BUCKET_SORT,
   EMPTY_BUCKET_FILTERS,
   bucketRegions,
   filterBuckets,
   nextBucketSort,
+  shouldShowBucketControls,
   sortBuckets,
 } from './bucket-table.js';
 
@@ -25,6 +27,26 @@ const BUCKETS: Bucket[] = [
   bucket({ bucketName: 'media', region: 'eu-west-1', createdAt: '2026-01-15T00:00:00Z' }),
   bucket({ bucketName: 'Uploads', region: 'eu-central-3', createdAt: '2026-02-10T00:00:00Z' }),
 ];
+
+// ---------------------------------------------------------------------------
+// shouldShowBucketControls
+// ---------------------------------------------------------------------------
+
+describe('shouldShowBucketControls', () => {
+  it('shows the controls at exactly the minimum, not one past it', () => {
+    expect(shouldShowBucketControls(BUCKET_TABLE_CONTROLS_MIN)).toBe(true);
+    expect(shouldShowBucketControls(BUCKET_TABLE_CONTROLS_MIN - 1)).toBe(false);
+  });
+
+  it('shows the controls for longer lists', () => {
+    expect(shouldShowBucketControls(BUCKET_TABLE_CONTROLS_MIN + 20)).toBe(true);
+  });
+
+  it('hides them for an empty or single-bucket list', () => {
+    expect(shouldShowBucketControls(0)).toBe(false);
+    expect(shouldShowBucketControls(1)).toBe(false);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // bucketRegions

@@ -4,7 +4,7 @@ import { getRegionLabel } from '@filone/shared';
 
 import { Input } from './Input';
 import { Select } from './Select';
-import { ALL_REGIONS, type BucketFilters } from '../lib/bucket-table.js';
+import { ALL_REGIONS, type BucketFilters, hasActiveFilters } from '../lib/bucket-table.js';
 
 type BucketsToolbarProps = {
   filters: BucketFilters;
@@ -16,6 +16,13 @@ type BucketsToolbarProps = {
   totalCount: number;
 };
 
+/**
+ * Filter chrome for the buckets table, deliberately quieter and shorter than the
+ * form controls it borrows: at the default 40px height with full borders, three
+ * of these read as a form floating above the table rather than as controls
+ * belonging to it. 32px, 13px text, and no result count until the filters
+ * actually narrow something.
+ */
 export function BucketsToolbar({
   filters,
   onChange,
@@ -24,12 +31,13 @@ export function BucketsToolbar({
   totalCount,
 }: BucketsToolbarProps) {
   const showRegionFilter = regions.length > 1;
+  const filtering = hasActiveFilters(filters);
 
   return (
-    <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-      <div className="relative sm:max-w-xs sm:flex-1">
-        <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-zinc-400">
-          <MagnifyingGlassIcon size={15} />
+    <div className="mb-2.5 flex items-center gap-2">
+      <div className="relative w-full sm:w-64">
+        <span className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-zinc-400">
+          <MagnifyingGlassIcon size={14} />
         </span>
         <Input
           type="search"
@@ -37,32 +45,34 @@ export function BucketsToolbar({
           onChange={(query) => onChange({ ...filters, query })}
           placeholder="Search buckets"
           aria-label="Search buckets by name"
-          className="py-2 pl-9"
+          inputSize="sm"
+          className="pl-8"
         />
       </div>
 
       {showRegionFilter && (
-        <div className="sm:w-56">
-          <Select
-            value={filters.region}
-            onChange={(region) => onChange({ ...filters, region })}
-            aria-label="Filter buckets by region"
-            className="py-2"
-          >
-            <option value={ALL_REGIONS}>All regions</option>
-            {regions.map((region) => (
-              <option key={region} value={region}>
-                {getRegionLabel(region)}
-              </option>
-            ))}
-          </Select>
-        </div>
+        <Select
+          value={filters.region}
+          onChange={(region) => onChange({ ...filters, region })}
+          aria-label="Filter buckets by region"
+          selectSize="sm"
+          className="w-auto"
+        >
+          <option value={ALL_REGIONS}>All regions</option>
+          {regions.map((region) => (
+            <option key={region} value={region}>
+              {getRegionLabel(region)}
+            </option>
+          ))}
+        </Select>
       )}
 
-      <p className="text-xs text-zinc-500 sm:ml-auto" aria-live="polite">
-        {matchCount === totalCount
-          ? `${totalCount} ${totalCount === 1 ? 'bucket' : 'buckets'}`
-          : `${matchCount} of ${totalCount} buckets`}
+      {/* Reads as a total until the filters narrow it, then as a fraction, so the
+          number always answers "how much am I looking at". */}
+      <p className="ml-auto text-xs text-zinc-500 tabular-nums" aria-live="polite">
+        {filtering
+          ? `${matchCount} of ${totalCount}`
+          : `${totalCount} ${totalCount === 1 ? 'bucket' : 'buckets'}`}
       </p>
     </div>
   );
