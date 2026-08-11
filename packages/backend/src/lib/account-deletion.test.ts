@@ -1046,8 +1046,9 @@ describe('runAccountDeletion — live Stripe customer discovery', () => {
 
     await runAccountDeletion(ORG_ID);
 
+    // Discovery is org-first now; the per-member search is only a fallback.
     expect(mockCustomersSearch).toHaveBeenCalledWith({
-      query: "metadata['userId']:'user-1'",
+      query: `metadata['orgId']:'${ORG_ID}'`,
       limit: 100,
     });
     expect(mockSubscriptionsList).toHaveBeenCalledWith({
@@ -1101,9 +1102,13 @@ describe('runAccountDeletion — live Stripe customer discovery', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     // Stripe Search indexes writes ~25s behind: the first pass sees nothing,
     // the post-purge pass sees the customer minted just before the confirm.
-    mockCustomersSearch
-      .mockReturnValueOnce(stripeSearch([]))
-      .mockReturnValue(stripeSearch([customerHit('cus_late')]));
+    // Discovery is org-first with a per-member fallback, so a pass that finds
+    // nothing makes TWO searches — both must be empty for pass 1.
+    let pass = 0;
+    mockCustomersSearch.mockImplementation(({ query }: { query: string }) => {
+      if (query.includes("metadata['orgId']")) pass += 1;
+      return stripeSearch(pass === 1 ? [] : [customerHit('cus_late')]);
+    });
 
     await runAccountDeletion(ORG_ID);
 
@@ -1130,9 +1135,13 @@ describe('runAccountDeletion — live Stripe customer discovery', () => {
     // written. Moving markDone ahead of the second pass would make the record
     // inert with the late customer's PII still in Stripe.
     setupHappyMocks(OrgDeletionStatus.Pending);
-    // First pass finds nothing and succeeds; the post-purge pass throws.
-    mockCustomersSearch.mockReturnValueOnce(stripeSearch([])).mockImplementation(() => {
-      throw new Error('Stripe customer search failed');
+    // First pass finds nothing and succeeds; the post-purge pass throws. Org-first
+    // discovery makes two searches per empty pass, so pass 1 needs both to be empty.
+    let pass = 0;
+    mockCustomersSearch.mockImplementation(({ query }: { query: string }) => {
+      if (query.includes("metadata['orgId']")) pass += 1;
+      if (pass > 1) throw new Error('Stripe customer search failed');
+      return stripeSearch([]);
     });
 
     await expect(runAccountDeletion(ORG_ID)).rejects.toThrow(/Stripe customer search failed/);

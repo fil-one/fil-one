@@ -4,6 +4,7 @@ import {
   GetItemCommand,
   PutItemCommand,
   UpdateItemCommand,
+  type AttributeValue,
 } from '@aws-sdk/client-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
@@ -38,16 +39,23 @@ export async function createBillingTrial({
       TableName: Resource.BillingTable.name,
       Key: { pk: { S: `CUSTOMER#${userId}` }, sk: { S: 'SUBSCRIPTION' } },
       ConsistentRead: true,
-      ProjectionExpression: 'pk, stripeCustomerId, subscriptionId',
+      ProjectionExpression: 'pk, stripeCustomerId, subscriptionId, trialStartedAt, trialEndsAt',
     }),
   );
   if (existing.Item?.stripeCustomerId?.S && existing.Item?.subscriptionId?.S) return;
   const resuming = existing.Item !== undefined;
 
+  // The trial window is established ONCE, on the first attempt, and reused by
+  // every resume. Recomputing it from `now` would restart the entitlement clock on
+  // each resume — the conditional PutItem below declines to overwrite the row, but
+  // the fill-in UpdateItem writes these two attributes unconditionally, so a
+  // recomputed window would land anyway.
+  //
+  // Reused rather than guarded with `if_not_exists`: that would keep DynamoDB on
+  // the original window while Stripe got a fresh `trial_end`, trading a silent
+  // reset for a silent divergence between our record and Stripe.
   const now = new Date();
-  const trialDurationMs = TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000;
-  const trialEndsAt = new Date(now.getTime() + trialDurationMs);
-  const trialEndsAtUnix = Math.floor(trialEndsAt.getTime() / 1000);
+  const { trialStartedAt, trialEndsAt, trialEndsAtUnix } = resolveTrialWindow(existing.Item, now);
 
   const billingKey = { pk: { S: `CUSTOMER#${userId}` }, sk: { S: 'SUBSCRIPTION' } };
 
@@ -65,7 +73,7 @@ export async function createBillingTrial({
           ...billingKey,
           orgId: { S: orgId },
           subscriptionStatus: { S: SubscriptionStatus.Trialing },
-          trialStartedAt: { S: now.toISOString() },
+          trialStartedAt: { S: trialStartedAt },
           trialEndsAt: { S: trialEndsAt.toISOString() },
           updatedAt: { S: now.toISOString() },
         },
@@ -79,10 +87,17 @@ export async function createBillingTrial({
     // returning: returning is what left an incomplete row permanent.
     //
     // Safe because both Stripe calls below are idempotency-keyed per user
-    // (`billing-trial-${userId}` / `billing-trial-sub-${userId}`), so a
-    // concurrent provisioner cannot mint a second customer or subscription — the
-    // loser's calls return the winner's objects. That keying is the whole reason
-    // resuming is allowed here.
+    // (`billing-trial-${userId}` / `billing-trial-sub-${userId}`), so the loser's
+    // calls return the winner's objects rather than minting a second pair. That
+    // keying is the whole reason resuming is allowed here.
+    //
+    // Its limit matters: Stripe forgets an idempotency key after 24h, so a resume
+    // more than a day later mints a duplicate customer and subscription. It no
+    // longer extends the trial — the new subscription carries the ORIGINAL
+    // `trial_end`, which may already be past — so the residual is not a free trial
+    // but a stalled future deletion: teardown's multi-customer guard refuses to
+    // proceed past two customers for one org. Tracked with the duplicate-customer
+    // ticket rather than fixed here.
     console.info('[create-billing-trial] Billing record already exists — resuming provisioning', {
       userId,
       orgId,
@@ -159,7 +174,7 @@ export async function createBillingTrial({
         ':customerId': { S: stripeCustomer.id },
         ':subscriptionId': { S: subscription.id },
         ':status': { S: SubscriptionStatus.Trialing },
-        ':trialStartedAt': { S: now.toISOString() },
+        ':trialStartedAt': { S: trialStartedAt },
         ':trialEndsAt': { S: trialEndsAt.toISOString() },
         ':periodStart': {
           S: new Date(subscription.items.data[0].current_period_start * 1000).toISOString(),
@@ -171,4 +186,21 @@ export async function createBillingTrial({
       },
     }),
   );
+}
+
+/**
+ * The trial window, established once and reused by every resume. Recomputing it
+ * would restart the entitlement clock, because the fill-in write below is
+ * unconditional; reusing the stored values also keeps Stripe's `trial_end` in step
+ * with the record.
+ */
+function resolveTrialWindow(
+  existing: Record<string, AttributeValue> | undefined,
+  now: Date,
+): { trialStartedAt: string; trialEndsAt: Date; trialEndsAtUnix: number } {
+  const trialStartedAt = existing?.trialStartedAt?.S ?? now.toISOString();
+  const trialEndsAt = new Date(
+    existing?.trialEndsAt?.S ?? now.getTime() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000,
+  );
+  return { trialStartedAt, trialEndsAt, trialEndsAtUnix: Math.floor(trialEndsAt.getTime() / 1000) };
 }

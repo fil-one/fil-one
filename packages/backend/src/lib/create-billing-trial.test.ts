@@ -330,6 +330,46 @@ describe('createBillingTrial', () => {
     expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
   });
 
+  it('preserves the original trial window on resume instead of restarting the clock', async () => {
+    // The fill-in UpdateItem writes trialStartedAt/trialEndsAt unconditionally, so
+    // recomputing them from `now` would silently reset the entitlement on every
+    // resume — and hand Stripe a fresh trial_end to match.
+    const originalStart = '2026-07-01T00:00:00.000Z';
+    const originalEnd = '2026-07-31T00:00:00.000Z';
+    ddbMock.on(GetItemCommand, { TableName: 'BillingTable' }).resolves({
+      Item: {
+        pk: { S: 'CUSTOMER#user-1' },
+        sk: { S: 'SUBSCRIPTION' },
+        trialStartedAt: { S: originalStart },
+        trialEndsAt: { S: originalEnd },
+      },
+    });
+
+    await createBillingTrial({ userId: 'user-1', orgId: 'org-1', userInfo: USER_INFO });
+
+    const fill = ddbMock
+      .commandCalls(UpdateItemCommand)
+      .map((c) => c.args[0].input)
+      .find((input) => input.UpdateExpression?.includes('stripeCustomerId'));
+    expect(fill?.ExpressionAttributeValues?.[':trialStartedAt']?.S).toBe(originalStart);
+    expect(fill?.ExpressionAttributeValues?.[':trialEndsAt']?.S).toBe(originalEnd);
+    // Stripe gets the same window, so the record and Stripe cannot diverge.
+    expect(mockSubscriptionsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ trial_end: Math.floor(new Date(originalEnd).getTime() / 1000) }),
+      expect.anything(),
+    );
+  });
+
+  it('computes a fresh trial window on a first attempt', async () => {
+    ddbMock.on(GetItemCommand, { TableName: 'BillingTable' }).resolves({});
+
+    await createBillingTrial({ userId: 'user-1', orgId: 'org-1', userInfo: USER_INFO });
+
+    const put = ddbMock.commandCalls(PutItemCommand)[0].args[0].input;
+    const endsAt = new Date(put.Item!.trialEndsAt.S!).getTime();
+    expect(endsAt).toBeGreaterThan(Date.now());
+  });
+
   it('resumes provisioning for an existing row that has no Stripe pointers', async () => {
     // The defect this closes: a crash between the early PutItem and the Stripe
     // calls left a row with a valid local trial window and no
