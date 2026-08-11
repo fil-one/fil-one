@@ -35,6 +35,7 @@ import type {
   TenantInfo,
   TenantUsageMetrics,
 } from '../service-orchestrator.js';
+import { TENANT_DELETE_RETRY } from '../service-orchestrator.js';
 import type { OrgProfileItem } from '../org-profile.js';
 
 import type { S3ClientContext } from '../s3-client.js';
@@ -68,11 +69,6 @@ const FTH_CONSOLE_USER_CODE = 'filone-console';
 // bucket is created. Retry them so a transient S3 blip doesn't leave the bucket
 // partially configured (which would surface as a dead-end BucketConfigurationError).
 const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
-
-// A 409 means a competing writer re-activated the client, not a disable that
-// hasn't landed; the budget is what outlasts that writer. See
-// docs/architectural-decisions/2026-08-tenant-deletion-semantics.md.
-const TENANT_DELETE_RETRY = { retries: 3 } as const;
 
 const consoleStorageUserCache = new QuickLRU<string, string>({ maxSize: 500 });
 const client = createInstrumentedFthClient();

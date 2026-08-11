@@ -40,6 +40,7 @@ import type {
   TenantStatusProbe,
   TenantUsageMetrics,
 } from '../service-orchestrator.js';
+import { TENANT_DELETE_RETRY } from '../service-orchestrator.js';
 import type { OrgProfileItem } from '../org-profile.js';
 import type { S3ClientContext } from '../s3-client.js';
 import { createS3Client } from '../s3-client.js';
@@ -94,12 +95,6 @@ export interface FilOneOrchestratorConfig {
 // bucket is created. Retry them so a transient S3 blip doesn't leave the bucket
 // partially configured (which would surface as a dead-end BucketConfigurationError).
 const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
-
-// A 409 means a competing writer re-activated the tenant, not a disable that
-// hasn't landed; the budget is what outlasts that writer. Also covers the 5xx
-// the contract mandates on partway-through cleanup. See
-// docs/architectural-decisions/2026-08-tenant-deletion-semantics.md.
-const TENANT_DELETE_RETRY = { retries: 3 } as const;
 
 export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): ServiceOrchestrator {
   const client = resolveClient(config);
@@ -160,6 +155,8 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
       // Disable-then-delete, re-disabling on every attempt; no error is
       // tolerated (see ServiceOrchestrator.deleteTenant). The SDK reports
       // failures in `result` rather than throwing, so wrap them for pRetry.
+      // TENANT_DELETE_RETRY's budget also covers the 5xx the contract mandates
+      // on a partway-through cleanup here.
       await pRetry(async () => {
         await disableTenantForDeletion(client, config.id, tenantId);
         const result = await deleteTenantsByTenantId({

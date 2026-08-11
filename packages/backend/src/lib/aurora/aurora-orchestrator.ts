@@ -60,6 +60,7 @@ import type {
   TenantInfo,
   TenantUsageMetrics,
 } from '../service-orchestrator.js';
+import { TENANT_DELETE_RETRY } from '../service-orchestrator.js';
 import type { S3ClientContext } from '../s3-client.js';
 
 export const _resetSsmCacheForTesting = () => _resetS3CredentialsCacheForTesting();
@@ -338,9 +339,6 @@ export const auroraOrchestrator = {
       }));
   },
 } satisfies ServiceOrchestrator;
-
-// Matches TENANT_DELETE_RETRY in fth-orchestrator.ts and orchestrator.ts.
-const TENANT_DELETE_RETRY = { retries: 3 } as const;
 
 /**
  * Carried across the attempts of a single `deleteTenant` call so a later
