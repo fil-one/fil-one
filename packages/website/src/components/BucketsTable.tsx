@@ -1,18 +1,29 @@
 import { useMemo, useState } from 'react';
-import { Link } from '@tanstack/react-router';
-import { EyeSlashIcon, MagnifyingGlassIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
+import { Link, useNavigate } from '@tanstack/react-router';
+import {
+  CopyIcon,
+  EyeSlashIcon,
+  FolderOpenIcon,
+  LinkSimpleIcon,
+  MagnifyingGlassIcon,
+  TrashIcon,
+} from '@phosphor-icons/react/dist/ssr';
 
 import type { Bucket, S3Region } from '@filone/shared';
-import { S3_REGION, getRegionLabel } from '@filone/shared';
+import { S3_REGION, getRegionLabel, getS3Endpoint } from '@filone/shared';
 
 import { Badge } from './Badge';
 import { Button } from './Button';
 import { EmptyStateCard } from './EmptyStateCard';
-import { IconButton } from './IconButton';
 import { RegionFlag } from './RegionFlag';
 import { Table } from './Table/Table';
 import { Tooltip } from './Tooltip';
 import { BucketsToolbar } from './BucketsToolbar';
+import { BucketActionMenu } from './BucketActionMenu';
+import { BucketStorageLine } from './BucketStorageLine';
+import { useToast } from './Toast';
+import { FILONE_STAGE } from '../env.js';
+import { useCopyToClipboard } from '../lib/use-copy-to-clipboard.js';
 import { formatDate } from '../lib/time.js';
 import { formatRetention } from '../lib/retention.js';
 import {
@@ -88,6 +99,7 @@ export function BucketsTable({ buckets, onDelete }: BucketsTableProps) {
               <Table.Head {...sortProps('region')}>Region</Table.Head>
               <Table.Head {...sortProps('createdAt')}>Created</Table.Head>
               <Table.Head>Features</Table.Head>
+              <Table.Head>Retention</Table.Head>
               <Table.Head aria-label="Actions" />
             </Table.Row>
           </Table.Header>
@@ -102,18 +114,8 @@ export function BucketsTable({ buckets, onDelete }: BucketsTableProps) {
   );
 }
 
-/**
- * Versioning and Object Lock badges. Object Lock requires versioning, so a
- * locked bucket always shows both; the retention policy rides in the lock
- * badge's tooltip rather than earning a third badge.
- */
+/** Versioning and Object Lock. Object Lock requires versioning, so a locked bucket shows both. */
 function BucketFeatures({ bucket }: { bucket: Bucket }) {
-  const retention = formatRetention(
-    bucket.defaultRetention,
-    bucket.retentionDuration,
-    bucket.retentionDurationType,
-  );
-
   if (!bucket.versioning && !bucket.objectLockEnabled) {
     return <span className="text-xs text-zinc-500">&mdash;</span>;
   }
@@ -126,16 +128,92 @@ function BucketFeatures({ bucket }: { bucket: Bucket }) {
         </Badge>
       )}
       {bucket.objectLockEnabled && (
-        <Tooltip
-          content={retention ? `Object Lock · default retention ${retention}` : 'Object Lock'}
-          side="top"
-        >
-          <Badge color="amber" size="sm" weight="medium">
-            Object Lock
-          </Badge>
-        </Tooltip>
+        <Badge color="amber" size="sm" weight="medium">
+          Object Lock
+        </Badge>
       )}
     </div>
+  );
+}
+
+/**
+ * The bucket's default retention policy, as mode and duration.
+ *
+ * Not a date: what a bucket holds is the policy applied to new objects, so the
+ * retain-until date differs per object by upload time. That date lives on the
+ * object, from GetObjectRetention, and the object detail page shows it there.
+ */
+function BucketRetention({ bucket }: { bucket: Bucket }) {
+  const retention = formatRetention(
+    bucket.defaultRetention,
+    bucket.retentionDuration,
+    bucket.retentionDurationType,
+  );
+
+  if (!retention) return <span className="text-xs text-zinc-500">&mdash;</span>;
+
+  return (
+    <Tooltip content="Applied to objects uploaded from now on" side="top">
+      <span className="text-xs text-zinc-900">{retention}</span>
+    </Tooltip>
+  );
+}
+
+/**
+ * Row actions. Delete stays in the menu, disabled with the reason, so the column
+ * carries the things you can actually do instead of one button that can't run.
+ */
+function BucketRowActions({
+  bucket,
+  region,
+  onDelete,
+}: {
+  bucket: Bucket;
+  region: string;
+  onDelete: (name: string) => void;
+}) {
+  const navigate = useNavigate();
+  const { copy } = useCopyToClipboard();
+  const { toast } = useToast();
+
+  const copyValue = (label: string, value: string) => {
+    void copy(value).then(() => toast.success(`${label} copied`));
+  };
+
+  return (
+    <BucketActionMenu
+      actions={[
+        {
+          label: 'Browse objects',
+          icon: FolderOpenIcon,
+          onSelect: () =>
+            void navigate({
+              to: '/buckets/$bucketName',
+              params: { bucketName: bucket.bucketName },
+              search: { region: region as S3Region },
+            }),
+        },
+        {
+          label: 'Copy bucket name',
+          icon: CopyIcon,
+          onSelect: () => copyValue('Bucket name', bucket.bucketName),
+        },
+        {
+          label: 'Copy S3 endpoint',
+          icon: LinkSimpleIcon,
+          onSelect: () => copyValue('S3 endpoint', getS3Endpoint(region as S3Region, FILONE_STAGE)),
+        },
+        {
+          label: 'Delete bucket',
+          icon: TrashIcon,
+          // TODO: enable bucket deletion after Aurora implements this operation
+          // https://linear.app/filecoin-foundation/issue/FIL-204/delete-bucket
+          disabled: true,
+          hint: 'Not available yet',
+          onSelect: () => onDelete(bucket.bucketName),
+        },
+      ]}
+    />
   );
 }
 
@@ -145,7 +223,7 @@ function BucketRow({ bucket, onDelete }: { bucket: Bucket; onDelete: (name: stri
   return (
     <Table.Row data-testid="bucket-row" data-bucket-name={bucket.bucketName}>
       <Table.Cell>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 leading-tight">
           <Link
             to="/buckets/$bucketName"
             params={{ bucketName: bucket.bucketName }}
@@ -166,7 +244,7 @@ function BucketRow({ bucket, onDelete }: { bucket: Bucket; onDelete: (name: stri
                   zinc-500 because non-text graphics need 3:1 (WCAG 1.4.11) and
                   zinc-400 is 2.56:1 on white. */}
               <EyeSlashIcon
-                size={13}
+                size={15}
                 role="img"
                 aria-label="Private bucket"
                 className="text-zinc-500"
@@ -174,6 +252,7 @@ function BucketRow({ bucket, onDelete }: { bucket: Bucket; onDelete: (name: stri
             </Tooltip>
           )}
         </div>
+        <BucketStorageLine bucketName={bucket.bucketName} region={region as S3Region} />
       </Table.Cell>
       <Table.Cell className="text-xs">
         <div className="flex items-center gap-2.5">
@@ -189,21 +268,11 @@ function BucketRow({ bucket, onDelete }: { bucket: Bucket; onDelete: (name: stri
       <Table.Cell>
         <BucketFeatures bucket={bucket} />
       </Table.Cell>
+      <Table.Cell>
+        <BucketRetention bucket={bucket} />
+      </Table.Cell>
       <Table.Cell className="text-right">
-        <Tooltip
-          content="Deleting buckets is not available yet"
-          side="left"
-          className="align-middle"
-        >
-          <IconButton
-            icon={TrashIcon}
-            aria-label={`Delete bucket ${bucket.bucketName}`}
-            onClick={() => onDelete(bucket.bucketName)}
-            // TODO: enable bucket deletion after Aurora implements this operation
-            // https://linear.app/filecoin-foundation/issue/FIL-204/delete-bucket
-            disabled
-          />
-        </Tooltip>
+        <BucketRowActions bucket={bucket} region={region} onDelete={onDelete} />
       </Table.Cell>
     </Table.Row>
   );

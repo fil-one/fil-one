@@ -37,13 +37,16 @@ function bucket(
 }
 
 /** Object Lock requires versioning, so locked buckets always carry both. */
-function locked(base: Bucket, retention?: { duration: number; durationType: 'd' | 'y' }): Bucket {
+function locked(
+  base: Bucket,
+  retention?: { mode: 'compliance' | 'governance'; duration: number; durationType: 'd' | 'y' },
+): Bucket {
   return {
     ...base,
     versioning: true,
     objectLockEnabled: true,
     ...(retention && {
-      defaultRetention: 'compliance',
+      defaultRetention: retention.mode,
       retentionDuration: retention.duration,
       retentionDurationType: retention.durationType,
     }),
@@ -54,6 +57,7 @@ const FEW: Bucket[] = [
   bucket('app-assets', S3Region.EuWest1, '2026-05-02T09:12:00Z'),
   bucket('customer-exports', S3Region.EuWest1, '2026-04-18T16:40:00Z', true),
   locked(bucket('site-backups', S3Region.EuWest1, '2026-02-27T11:05:00Z'), {
+    mode: 'compliance',
     duration: 30,
     durationType: 'd',
   }),
@@ -62,7 +66,14 @@ const FEW: Bucket[] = [
 const MANY: Bucket[] = [
   ...FEW,
   bucket('analytics-raw', S3Region.UsEast1, '2026-06-01T08:00:00Z', true),
-  locked(bucket('archive-2025', S3Region.UsEast1, '2026-01-09T13:20:00Z')),
+  // Locked with a years-long governance policy, and one locked bucket with no
+  // default policy at all, so the Retention column shows both shapes.
+  locked(bucket('archive-2025', S3Region.UsEast1, '2026-01-09T13:20:00Z'), {
+    mode: 'governance',
+    duration: 7,
+    durationType: 'y',
+  }),
+  locked(bucket('legal-hold', S3Region.EuWest1, '2026-02-02T09:00:00Z')),
   bucket('design-library', S3Region.EuCentral3, '2026-03-14T10:30:00Z'),
   bucket('invoices', S3Region.EuWest1, '2026-05-22T15:45:00Z', true),
   bucket('ml-training-set', S3Region.EuCentral3, '2026-06-08T07:15:00Z'),
