@@ -167,6 +167,17 @@ async function processStripeEvent(tableName: string, stripeEvent: Stripe.Event):
   }
 }
 
+/**
+ * Origin context for this handler's guarded billing writes. `source` names the
+ * module — the key every other guard call site uses — and `event` the Stripe
+ * event type that reached it, which is the part only this handler knows.
+ */
+const webhookContext = (event: string, extra?: Record<string, unknown>) => ({
+  source: 'stripe-webhook',
+  event,
+  ...extra,
+});
+
 function getCustomerIdString(customer: string | Stripe.Customer | Stripe.DeletedCustomer): string {
   return typeof customer === 'string' ? customer : customer.id;
 }
@@ -236,10 +247,7 @@ async function updatePaymentMethod(
   await sendGuardedBillingUpdate(
     {
       TableName: tableName,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
+      Key: { pk: { S: `CUSTOMER#${userId}` }, sk: { S: 'SUBSCRIPTION' } },
       UpdateExpression:
         'SET paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now',
       ExpressionAttributeValues: {
@@ -251,7 +259,7 @@ async function updatePaymentMethod(
         ':now': { S: new Date().toISOString() },
       },
     },
-    { userId, event: 'customer.updated' },
+    webhookContext('customer.updated', { userId }),
   );
 }
 
@@ -382,10 +390,7 @@ async function updateBillingRecord({
   await sendGuardedBillingUpdate(
     {
       TableName: tableName,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
+      Key: { pk: { S: `CUSTOMER#${userId}` }, sk: { S: 'SUBSCRIPTION' } },
       // stripeCustomerId uses if_not_exists rather than a plain SET: it only fills the
       // gap when createBillingTrial's final write never landed, since that write's
       // unconditional SET always wins otherwise. A plain SET here would let a delayed
@@ -406,7 +411,7 @@ async function updateBillingRecord({
         ...trialBackfill.values,
       },
     },
-    { userId, subscriptionId: subscription.id, event: 'subscription.created/updated' },
+    webhookContext('subscription.created/updated', { userId, subscriptionId: subscription.id }),
   );
 }
 
@@ -447,10 +452,7 @@ async function handleSubscriptionDeleted(
   const applied = await sendGuardedBillingUpdate(
     {
       TableName: tableName,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
+      Key: { pk: { S: `CUSTOMER#${userId}` }, sk: { S: 'SUBSCRIPTION' } },
       UpdateExpression: `SET subscriptionStatus = :status, canceledAt = :now, gracePeriodEndsAt = :grace, updatedAt = :now${backfill.clause}`,
       ExpressionAttributeValues: {
         ':status': { S: SubscriptionStatus.GracePeriod },
@@ -459,7 +461,7 @@ async function handleSubscriptionDeleted(
         ...backfill.values,
       },
     },
-    { userId, subscriptionId: subscription.id, event: 'subscription.deleted' },
+    webhookContext('subscription.deleted', { userId, subscriptionId: subscription.id }),
   );
   if (!applied) return;
 
@@ -508,10 +510,7 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   const updateResult = await sendGuardedBillingUpdate(
     {
       TableName: tableName,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
+      Key: { pk: { S: `CUSTOMER#${userId}` }, sk: { S: 'SUBSCRIPTION' } },
       UpdateExpression: `SET subscriptionStatus = :active, lastPaymentAt = :now, updatedAt = :now${backfill.clause} REMOVE gracePeriodEndsAt, lastPaymentFailedAt, canceledAt`,
       ExpressionAttributeValues: {
         ':active': { S: SubscriptionStatus.Active },
@@ -520,7 +519,7 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
       },
       ReturnValues: 'ALL_OLD',
     },
-    { userId, event: 'invoice.payment_succeeded' },
+    webhookContext('invoice.payment_succeeded', { userId }),
   );
   if (!updateResult) return;
 
@@ -580,10 +579,7 @@ async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): 
   const applied = await sendGuardedBillingUpdate(
     {
       TableName: tableName,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
+      Key: { pk: { S: `CUSTOMER#${userId}` }, sk: { S: 'SUBSCRIPTION' } },
       UpdateExpression: `SET subscriptionStatus = :status, lastPaymentFailedAt = :failedAt, updatedAt = :now${backfill.clause}`,
       ExpressionAttributeValues: {
         ':status': { S: SubscriptionStatus.PastDue },
@@ -592,7 +588,7 @@ async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): 
         ...backfill.values,
       },
     },
-    { userId, event: 'invoice.payment_failed' },
+    webhookContext('invoice.payment_failed', { userId }),
   );
   if (!applied) return;
 

@@ -165,11 +165,19 @@ async function persistBillingAndUnlock(params: {
         subscriptionId: subscription.id,
       });
     } catch (error) {
-      console.error(
-        '[activate-subscription] Failed to cancel subscription after deletion-guard rejection; ' +
-          'it may keep billing a deleted account and needs manual cleanup',
-        { userId, subscriptionId: subscription.id, error },
-      );
+      if (isAlreadyCanceled(error)) {
+        console.log(
+          '[activate-subscription] Subscription already canceled by the teardown; nothing to ' +
+            'clean up',
+          { userId, subscriptionId: subscription.id },
+        );
+      } else {
+        console.error(
+          '[activate-subscription] Failed to cancel subscription after deletion-guard rejection; ' +
+            'it may keep billing a deleted account and needs manual cleanup',
+          { userId, subscriptionId: subscription.id, error },
+        );
+      }
     }
     return accountDeletedResponse();
   }
@@ -179,6 +187,21 @@ async function persistBillingAndUnlock(params: {
   // teardown deletes the tenants themselves.
   await unlockAllProvisionedRegions(orgId);
   return null;
+}
+
+/**
+ * The cancel above raced the teardown and lost, which is the common case rather
+ * than a failure: the guard rejected precisely because a teardown owns this
+ * record, and cancelling the org's subscriptions is one of the things it does.
+ *
+ * Stripe ships no dedicated code for it. Cancelling an already-canceled
+ * subscription returns `invalid_request_error` with "A subscription can only be
+ * canceled once"; `resource_missing` means the subscription (or its customer) is
+ * gone, which Stripe cancels on its behalf.
+ */
+function isAlreadyCanceled(error: unknown): boolean {
+  const e = error as { code?: string; message?: string };
+  return e.code === 'resource_missing' || /can only be canceled once/i.test(e.message ?? '');
 }
 
 type ActivatableRecord =
@@ -307,13 +330,24 @@ async function createOrUpdateSubscription({
       userId,
     });
   }
-  return stripe.subscriptions.create({
-    customer: record.stripeCustomerId as string,
-    items: [{ price: secrets.STRIPE_PRICE_ID }],
-    default_payment_method: paymentMethodId,
-    ...(discounts ? { discounts } : {}),
-    expand: ['latest_invoice.payment_intent', 'default_payment_method'],
-  });
+  // The subscription this create replaces, or 'new' when there is none — the
+  // idempotency key's discriminator, so both arms are load-bearing.
+  const replacing = typeof record.subscriptionId === 'string' ? record.subscriptionId : 'new';
+  return stripe.subscriptions.create(
+    {
+      customer: record.stripeCustomerId as string,
+      items: [{ price: secrets.STRIPE_PRICE_ID }],
+      default_payment_method: paymentMethodId,
+      ...(discounts ? { discounts } : {}),
+      expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+    },
+    // Without a key, a retried activation mints a second paid subscription and
+    // the org is billed twice. Keyed by the subscription being REPLACED, not by
+    // the user alone: re-activating out of grace_period/canceled must create a
+    // fresh subscription, and a per-user key would make Stripe replay the
+    // previous one for the 24h the key is remembered.
+    { idempotencyKey: `activate-sub-${userId}-${replacing}` },
+  );
 }
 
 function resolveSavedPaymentMethod(record: Record<string, unknown>): PaymentMethodResolution {
