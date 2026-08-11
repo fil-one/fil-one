@@ -43,8 +43,3 @@ export type RecentActivity = BucketActivity | ObjectActivity | KeyActivity;
 export interface RecentActivityResponse {
   activities: RecentActivity[];
 }
-
-export interface ActivityResponse {
-  activities: RecentActivity[];
-  trends: UsageTrendsResponse;
-}
