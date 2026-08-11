@@ -30,8 +30,17 @@ const lambda = new LambdaClient({});
  * for the worker's own async retries too.
  */
 const STALE_AFTER_MS = 60 * 60 * 1000;
-/** Past this many worker attempts the record counts as stuck (alerting gauge). */
-const STUCK_ATTEMPT_THRESHOLD = 3;
+/**
+ * Past this many worker attempts the record counts as stuck (alerting gauge).
+ *
+ * Above one confirm-time invoke chain on purpose. The worker bumps
+ * `attemptCount` once per pass, and a single failing invoke from the confirm
+ * handler is already three passes — the initial one plus Lambda's two async
+ * retries — so a threshold of 3 paged before this cron had ever attempted a
+ * re-drive. At 4, the gauge means "the automated rescue has also failed at least
+ * once", which is the condition an operator is actually needed for.
+ */
+const STUCK_ATTEMPT_THRESHOLD = 4;
 
 /**
  * How long after a DELETION record last advanced the resurrection sweep keeps
@@ -71,14 +80,13 @@ const SWEEP_BUDGET_MS = 150 * 1000;
  * repeatedly-failing teardowns surface in Grafana. The user was already told
  * deletion succeeded — this cron is what makes that promise eventually true.
  *
- * That rescue path runs FIRST — gauge, then re-drives — because everything
- * below it scales with the number of completed deletions, which only grows.
+ * That rescue path runs FIRST — gauge, then re-drives — so the cheapest and most
+ * alert-critical output cannot be lost to anything below it.
  *
- * Next it reconciles fence B (`deleting = true` on `ORG#{orgId}/PROFILE`),
- * clearing it for any org that carries it with no DELETION record at all — see
- * {@link reconcileDeletionFences}. This runs BEFORE the sweep, not after,
- * because it also routes fenced orgs whose teardown already completed into the
- * sweep's re-drive list.
+ * Next it clears the org-profile `deleting` guard for any org that carries it
+ * with no DELETION record at all — see {@link reconcileDeletionFences}. This runs
+ * before the sweep so those unwedges get first claim on the shared budget; its
+ * DONE-guarded orgs are merged into the re-drive list either way.
  *
  * Then it sweeps recently-DONE records for rows that came back after the purge
  * (billing, org partition, RAG index, RAG key-hash lookups) plus any record
@@ -99,11 +107,13 @@ export async function handler(): Promise<void> {
   const done = scanned.deletions.filter((r) => r.status === OrgDeletionStatus.Done);
 
   const stale = incomplete.filter((record) => isStale(record, now));
-  const stuck = incomplete.filter((record) => record.attemptCount >= STUCK_ATTEMPT_THRESHOLD);
+  const stuck = incomplete.filter(
+    (record) => (record.attemptCount ?? 0) >= STUCK_ATTEMPT_THRESHOLD,
+  );
 
-  // Gauge BEFORE the re-invokes: it must reach CloudWatch even when a later
-  // worker invoke fails — and before the sweep, which is unbounded in the
-  // number of completed deletions and must never be able to starve it.
+  // Gauge first: the cheapest, most alert-critical output runs before anything
+  // that can consume budget or throw, so a regression in the sweep's bounds can
+  // never cost the gauge.
   emitGauge('StuckAccountDeletionCount', stuck.length);
 
   let reinvoked = 0;
@@ -172,7 +182,7 @@ export async function handler(): Promise<void> {
     reinvoked,
     failed,
     stuck: stuck.length,
-    swept: candidates.length,
+    candidates: candidates.length,
     sweepSkipped: swept.skipped,
     ragIndexTruncated: swept.ragIndexTruncated,
     fenceSkipped: fences.skipped,
@@ -184,7 +194,10 @@ export async function handler(): Promise<void> {
   });
 }
 
-/** One-metric EMF event, so a failure to compute one gauge cannot suppress the others. */
+/**
+ * Emits one gauge as its own EMF event. The isolation comes from emitting at
+ * compute time — a later gauge that throws cannot retract one already written.
+ */
 function emitGauge(
   name:
     | 'StuckAccountDeletionCount'
@@ -236,14 +249,13 @@ async function invokeWorker(
  * record — however old — whose resurrected Stripe customer still has no
  * terminal redaction status.
  *
- * The exemption is what makes a resweep's Stripe tail converge. A resweep holds
- * a Stripe failure so its DynamoDB purge can run, which deletes the rows every
- * other surface detects the org by; from the next run on, the org looks
- * spotless while a redaction job sits unfinished. Keying on the record's own
- * state instead survives that purge, and ageing it out on a clock would put the
- * PII back beyond reach. Unbounded is safe here in a way an unbounded row sweep
- * is not: this costs no round trip, and the set is exactly the orgs a fence gap
- * resurrected — normally empty.
+ * The exemption is what makes a resweep's Stripe tail converge: it keys on the
+ * record's own state, which survives the purge that erases every other surface —
+ * see the `stripeRedaction` surface on `sweepResurrectedOrgs`
+ * (lib/deletion-resurrection-sweep.ts). Ageing it out on a clock would put the PII
+ * back beyond reach. Unbounded is safe here in a way an unbounded row sweep is not:
+ * it costs no round trip, and the set is exactly the orgs a guard gap resurrected —
+ * normally empty.
  */
 function sweepCandidates(done: ScannedDeletion[], now: number): SweepCandidate[] {
   return done
@@ -428,11 +440,11 @@ interface ScanResult {
   ragKeyHashOrgIds: Set<string>;
 }
 
-// At current scale (< a few thousand orgs, running twice a day) a Scan with
-// FilterExpression is fine, even though it consumes RCUs for the whole table
-// regardless of the filter — which is also why the two extra row families
-// below are free to add: they change what is RETURNED, not what is read. The
-// TODO stands: if org count grows, add a sparse GSI on a deletionStatus
+// TODO: full-table Scan — cost grows with total users, not active deletions.
+// The FilterExpression trims what is RETURNED, not what is read, so it saves no
+// RCUs (which is also why the two extra row families below are free to add). At
+// current scale (< a few thousand orgs, twice a day) that is fine. To make this
+// O(active deletions), add a sparse GSI on a deletionStatus
 // attribute carried only by non-DONE DELETION rows — with the wrinkle that
 // DELETION rows are retained forever as audit records, so the finalize step
 // must REMOVE the attribute for the index to stay O(active deletions). The

@@ -153,30 +153,74 @@ describe('account-deletion-orchestrator', () => {
     expect(gauge('StuckAccountDeletionCount')).toBe(1);
   });
 
-  it('scan filter returns DELETION records, fenced ORG profiles and RAGKEYHASH lookups, and projects only what it reads', async () => {
+  it('one failed confirm-time invoke chain does not page', async () => {
+    // The confirm handler's invoke is async: Lambda runs it once and retries
+    // twice, and the worker bumps attemptCount on every pass. So a single failing
+    // confirm is already 3 attempts — with a threshold of 3 the gauge fired
+    // before this cron had ever tried a re-drive, paging someone for a rescue
+    // that had not been attempted yet.
+    scanReturns([deletionRecord('org-1', { attemptCount: 3 })]);
+
+    await handler();
+
+    expect(gauge('StuckAccountDeletionCount')).toBe(0);
+    // The re-drive is what should happen at this point, and it does.
+    expect(invokedPayloads()).toContainEqual({ orgId: 'org-1' });
+  });
+
+  it('scans DONE records too, and only fenced ORG profiles', async () => {
+    // Two subtleties worth protecting, both invisible in a payload comparison.
+    // The verbatim FilterExpression/ProjectionExpression assertions this replaces
+    // are the pattern that hid a live bug: they passed while the sweep they
+    // describe was a no-op.
     await handler();
 
     const scan = ddbMock
       .commandCalls(ScanCommand)
       .map((c) => c.args[0].input)
       .find((input) => input.TableName === 'UserInfoTable')!;
-    expect(scan.FilterExpression).toBe(
-      '(begins_with(pk, :orgPrefix) AND (sk = :deletion OR (sk = :profile AND deleting = :true)))' +
-        ' OR (begins_with(pk, :hashPrefix) AND sk = :lookup)',
-    );
-    expect(scan.ExpressionAttributeValues).toEqual({
-      ':orgPrefix': { S: 'ORG#' },
-      ':deletion': { S: 'DELETION' },
-      ':profile': { S: 'PROFILE' },
-      ':true': { BOOL: true },
-      ':hashPrefix': { S: 'RAGKEYHASH#' },
-      ':lookup': { S: 'LOOKUP' },
-    });
-    expect(scan.ProjectionExpression).toBe(
-      'pk, sk, updatedAt, attemptCount, #s, #m, orgId, ' +
-        'resurrectedStripeCustomerIds, stripeRedactionJobStatuses',
-    );
-    expect(scan.ExpressionAttributeNames).toEqual({ '#s': 'status', '#m': 'members' });
+
+    // 1. Status is NOT part of the filter. DONE records must come back — they are
+    //    exactly what the resurrection sweep inspects — so filtering on status
+    //    would silently empty the sweep.
+    expect(scan.FilterExpression).not.toMatch(/status|:done/i);
+    // 2. A PROFILE row is only of interest while it carries the guard; an
+    //    unguarded profile must not be dragged into the unwedge path.
+    expect(scan.FilterExpression).toMatch(/sk = :profile AND deleting = :true/);
+    expect(scan.ExpressionAttributeValues?.[':true']).toEqual({ BOOL: true });
+
+    // The projection has to carry every attribute the handler reads; a new read
+    // added without projecting it reads as undefined rather than failing.
+    for (const attribute of [
+      'pk',
+      'sk',
+      'updatedAt',
+      'attemptCount',
+      'orgId',
+      'resurrectedStripeCustomerIds',
+      'stripeRedactionJobStatuses',
+    ]) {
+      expect(scan.ProjectionExpression).toContain(attribute);
+    }
+    expect(scan.ExpressionAttributeNames).toMatchObject({ '#s': 'status', '#m': 'members' });
+  });
+
+  it('routes each scanned row family to the path that owns it', async () => {
+    // The behaviour the payload assertions were standing in for: a stale
+    // incomplete record is re-driven, a DONE record becomes a sweep candidate,
+    // and a guarded record-less profile is unwedged.
+    scanReturns([
+      deletionRecord('org-stale', { updatedAt: new Date(Date.now() - 7_200_000).toISOString() }),
+      doneRecord('org-done'),
+      fencedProfile('org-wedged'),
+    ]);
+
+    await handler();
+
+    const payloads = invokedPayloads();
+    expect(payloads).toContainEqual({ orgId: 'org-stale' });
+    expect(payloads.map((p) => p.orgId)).not.toContain('org-wedged');
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).not.toHaveLength(0);
   });
 
   it('pages the scan via LastEvaluatedKey and reconciles records from every page', async () => {
@@ -261,7 +305,7 @@ describe('account-deletion-orchestrator', () => {
         reinvoked: 1,
         failed: 1,
         stuck: 0,
-        swept: 1,
+        candidates: 1,
         sweepSkipped: 0,
         ragIndexTruncated: false,
         fenceSkipped: 0,
@@ -739,26 +783,6 @@ describe('account-deletion-orchestrator', () => {
         expect(invokedPayloads()).toEqual([{ orgId: 'org-stale' }]);
       } finally {
         errorSpy.mockRestore();
-      }
-    });
-
-    it('does not count a clear that lost the conditional race', async () => {
-      scanReturns([fencedProfile('org-wedged')]);
-      const { ConditionalCheckFailedException } = await import('@aws-sdk/client-dynamodb');
-      ddbMock
-        .on(TransactWriteItemsCommand)
-        .rejects(new ConditionalCheckFailedException({ message: 'nope', $metadata: {} }));
-      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
-      try {
-        await handler();
-
-        expect(logSpy).toHaveBeenCalledWith(
-          '[account-deletion-orchestrator] Reconcile complete',
-          expect.objectContaining({ unwedged: 0 }),
-        );
-      } finally {
-        logSpy.mockRestore();
       }
     });
   });

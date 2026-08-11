@@ -58,22 +58,15 @@ const REDACTION_JOB_MAX_PAGES = 100;
  * creation KEYED BY THE CUSTOMER IT COVERS, and a not-yet-ready job throws so a
  * later pass advances the SAME job (never a duplicate).
  *
- * What brings that later pass is NOT the same on both paths, and the difference
- * is why {@link recordRedactionStatus} exists:
- *
- * - **First teardown** — the throw leaves the DELETION record non-DONE, so
- *   Lambda's async retry and then the orchestrator's stale re-drive keep coming
- *   back for as long as it takes.
- * - **Resweep** — the record is ALREADY DONE and this code never moves a status
- *   backwards, so a throw changes nothing about it, and the resweep's purge has
- *   by then deleted the resurrected rows the sweep detects orgs by. Past
- *   Lambda's two bounded async retries, the only thing that re-drives the org is
- *   the sweep reading `resurrectedStripeCustomerIds` against the terminal
- *   statuses recorded here (see `pendingRedactionCustomerIds` in
- *   dynamo-records.ts). So every terminal outcome — `redacting`/`succeeded`,
- *   `failed`/`canceled`, or a customer Stripe no longer has — is persisted on
- *   the record as it is observed, and anything short of terminal is not: that,
- *   and only that, is what makes the re-drive stop.
+ * What brings that later pass differs by path, and the difference is why
+ * {@link recordRedactionStatus} exists. On a first teardown the throw leaves the
+ * record non-DONE, which is enough on its own. On a resweep it is not: the record
+ * is already DONE and the purge has deleted the rows the sweep detects orgs by, so
+ * the only remaining driver is this module's own record-keeping. Hence every
+ * TERMINAL outcome is persisted as it is observed and anything short of terminal is
+ * not — that, and only that, is what makes the re-drive stop. See the
+ * `stripeRedaction` surface on `sweepResurrectedOrgs`
+ * (lib/deletion-resurrection-sweep.ts).
  *
  * `redacting`/`succeeded` count as done — redaction is irreversible once
  * running.

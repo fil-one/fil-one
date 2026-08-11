@@ -21,16 +21,10 @@ export interface AccountDeletionWorkerPayload {
  * so each invocation simply re-runs ALL of them.
  *
  * A throw is surfaced to Lambda's async retry, which is bounded (2 attempts).
- * What re-drives the pass after that depends on which kind of pass it was, and
- * the difference matters:
- *
- * - **Ordinary teardown** — the throw leaves the record non-DONE, so the
- *   orchestrator's stale re-drive keeps coming back until it is marked DONE.
- * - **Resweep** (`resweep: true`) — the record is ALREADY DONE and a failure
- *   never moves it back, so nothing here re-drives it. The orchestrator's
- *   resurrection sweep does, for as long as the org still presents residue —
- *   including the residue a resweep cannot purge, an unfinished Stripe
- *   Redaction Job (see lib/deletion-resurrection-sweep.ts).
+ * After that, an ordinary teardown is re-driven because the throw left the record
+ * non-DONE. A resweep is not: its record is ALREADY DONE and a failure never moves
+ * that back, so the orchestrator's resurrection sweep is the only thing that
+ * returns — see `sweepResurrectedOrgs` (lib/deletion-resurrection-sweep.ts).
  */
 export async function handler(event: AccountDeletionWorkerPayload): Promise<void> {
   const { orgId } = event;

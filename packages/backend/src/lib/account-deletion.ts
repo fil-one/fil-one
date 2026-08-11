@@ -152,11 +152,9 @@ export interface RunAccountDeletionOptions {
    * so a resurrection that minted a new one trips one guard or the other by
    * construction. Left fatal, they threw before the purge on every single
    * resweep and the zombie rows were never removed. Under `resweep` they become
-   * expected findings — recorded on the DELETION record, reported, and given
-   * their OWN redaction job (established here; driven to completion across
-   * passes, which is what `resurrectedStripeCustomerIds` +
-   * `stripeRedactionJobStatuses` exist to keep happening) — so the DynamoDB
-   * residue always converges. See {@link cancelStripeAndWriteTombstone}.
+   * expected findings — recorded on the DELETION record, reported, and given their
+   * OWN redaction job — so the DynamoDB residue always converges. See
+   * {@link cancelStripeAndWriteTombstone}.
    */
   resweep?: boolean;
 }
@@ -203,13 +201,10 @@ export interface RunAccountDeletionOptions {
  * That leaves the residue gone, the Lambda `Errors` datapoint Grafana alerts on
  * raised, and any Stripe follow-up visible rather than swallowed.
  *
- * Purging the residue does, however, delete the evidence the resurrection sweep
- * detects orgs BY, so the held Stripe failure needs a driver that outlives it.
- * That driver is the record itself: a resurrected customer is written to
- * `resurrectedStripeCustomerIds` and its redaction outcome to
- * `stripeRedactionJobStatuses`, and the sweep re-drives any DONE org whose
- * resurrected customers have no terminal status yet — every data surface clean
- * or not. See `pendingRedactionCustomerIds` in dynamo-records.ts.
+ * The purge deletes the very rows the sweep detects orgs by, so a held Stripe
+ * failure needs a driver that outlives them — the DELETION record itself. See the
+ * `stripeRedaction` surface on `sweepResurrectedOrgs`
+ * (lib/deletion-resurrection-sweep.ts).
  *
  * @param options.resweep run the pass even when the record is DONE. See
  *   {@link RunAccountDeletionOptions}.
@@ -245,13 +240,12 @@ export async function runAccountDeletion(
   // pass before it. On a first teardown nothing is held: the record is still
   // non-DONE and the ordinary re-drive is the right answer.
   //
-  // ONLY the Stripe surface is held, and the asymmetry is the point. Its
-  // failures on a resweep are DETERMINISTIC — the redaction lifecycle needs a
-  // later pass, or a customer needs manual follow-up — so retrying alone never
-  // clears them and the residue would sit there forever. A region/auth0/RAG
-  // failure is a transient outage that the next run genuinely does fix, and
-  // purging the org's rows while one of them is still half-torn-down would
-  // throw away the state that teardown re-reads.
+  // ONLY the Stripe surface is held, and the asymmetry is the point. Its failures
+  // on a resweep are DETERMINISTIC — the redaction lifecycle needs a later pass,
+  // or a customer needs manual follow-up — so retrying alone never clears them. A
+  // region/auth0/RAG failure is a transient outage the next run genuinely does
+  // fix, and purging the org's rows while one is still half-torn-down would throw
+  // away the state teardown re-reads.
   const held: unknown[] = [];
   const holdOnResweep = async (run: () => Promise<void>): Promise<void> => {
     if (!resweep) return run();

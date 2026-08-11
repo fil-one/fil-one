@@ -329,13 +329,10 @@ export interface OrgDeletionRecord {
    * terminal values are ever written, so an entry means "Stripe will not move
    * this job again"; a resurrected customer with no entry still needs driving.
    *
-   * This is what gives a resweep's Stripe tail a durable driver. A resweep
-   * purges the org's DynamoDB residue — which is the evidence the resurrection
-   * sweep otherwise works from — so once the purge succeeds, an unfinished
-   * redaction job would be driven only by Lambda's two bounded async retries
-   * and then by nothing at all, leaving the resurrected customer's PII in
-   * Stripe forever. Keyed here, the sweep re-drives the org from the record
-   * alone. See {@link pendingRedactionCustomerIds}.
+   * This is what gives a resweep's Stripe tail a driver that outlives the purge:
+   * the sweep re-drives the org from the record alone. See the `stripeRedaction`
+   * surface on `sweepResurrectedOrgs` (lib/deletion-resurrection-sweep.ts) and
+   * {@link pendingRedactionCustomerIds}.
    */
   stripeRedactionJobStatuses?: Record<string, string>;
   /**
