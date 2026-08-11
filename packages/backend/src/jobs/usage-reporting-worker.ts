@@ -255,6 +255,7 @@ async function resolveOrgSyncAndLockActions(params: {
     orgSyncAction = 'skipped:customer-missing';
   } else {
     const syncResult = await syncOrgMetadata({
+      orgId,
       stripeCustomerId,
       orgName,
       currentStorageBytes: aggregate.currentStorageBytes,
@@ -361,21 +362,35 @@ async function safeEnforceTrialLocks(params: {
   }
 }
 
+/**
+ * Syncs the org's Stripe customer metadata.
+ *
+ * `orgId` is ALWAYS written, even when there is nothing else to sync. Account
+ * deletion discovers customers by searching `metadata['orgId']`, and customers
+ * predating that key would otherwise never be found — so the backfill must not be
+ * skippable. The quietest orgs (no name, no storage) are the likeliest to be old
+ * trials, i.e. exactly the population that needs it.
+ *
+ * The key is the literal camelCase `orgId`, deliberately not a
+ * `STRIPE_METADATA_KEYS` entry: that constant is snake_case by convention, but both
+ * customer creators write raw `metadata: { userId, orgId }` and discovery searches
+ * `metadata['orgId']`. A snake_case `org_id` would backfill a key nothing reads.
+ */
 async function syncOrgMetadata(params: {
+  orgId: string;
   stripeCustomerId: string;
   orgName: string | undefined;
   currentStorageBytes: number;
 }): Promise<{ action: string; customerMissing: boolean }> {
-  if (!params.orgName && params.currentStorageBytes === 0) {
-    return { action: 'skipped:nothing-to-sync', customerMissing: false };
-  }
+  const nothingElseToSync = !params.orgName && params.currentStorageBytes === 0;
   try {
-    const metadata: Record<string, string> = {
-      [STRIPE_METADATA_KEYS.storageUsed]: formatBytes(params.currentStorageBytes),
-    };
-    if (params.orgName) metadata[STRIPE_METADATA_KEYS.organizationName] = params.orgName;
+    const metadata: Record<string, string> = { orgId: params.orgId };
+    if (!nothingElseToSync) {
+      metadata[STRIPE_METADATA_KEYS.storageUsed] = formatBytes(params.currentStorageBytes);
+      if (params.orgName) metadata[STRIPE_METADATA_KEYS.organizationName] = params.orgName;
+    }
     await updateCustomerMetadata(params.stripeCustomerId, metadata);
-    return { action: 'ok', customerMissing: false };
+    return { action: nothingElseToSync ? 'ok:org-id-only' : 'ok', customerMissing: false };
   } catch (error) {
     if (isStripeResourceMissing(error)) {
       console.warn('[usage-worker] Stripe customer missing — skipping org metadata sync', {

@@ -866,6 +866,7 @@ describe('usage-reporting-worker', () => {
       expect(mockCustomersUpdate).toHaveBeenCalledOnce();
       expect(mockCustomersUpdate).toHaveBeenCalledWith('cus_123', {
         metadata: {
+          orgId: 'org-1',
           storage_used: '1.5 TB',
           organization_name: 'Acme Corp',
         },
@@ -885,14 +886,19 @@ describe('usage-reporting-worker', () => {
       expect(item.orgSyncAction.S).toMatch(/^error:/);
     });
 
-    it('skips sync when no org name and zero storage', async () => {
+    it('still writes orgId when there is nothing else to sync', async () => {
+      // The backfill account deletion depends on must not be skippable: an org with
+      // no name and no storage is the likeliest to be an old trial, i.e. exactly the
+      // customer whose PII would survive a teardown that reported success.
       mockGetTenantUsageMetrics.mockResolvedValue({ storage: [], egress: [] });
 
       await handler({ ...basePayload, orgName: undefined });
 
-      expect(mockCustomersUpdate).not.toHaveBeenCalled();
+      expect(mockCustomersUpdate).toHaveBeenCalledWith('cus_123', {
+        metadata: { orgId: 'org-1' },
+      });
       const item = auditPuts()[0].Item!;
-      expect(item.orgSyncAction).toEqual({ S: 'skipped:nothing-to-sync' });
+      expect(item.orgSyncAction).toEqual({ S: 'ok:org-id-only' });
     });
 
     it('syncs storage only when org name missing', async () => {
@@ -905,7 +911,7 @@ describe('usage-reporting-worker', () => {
 
       expect(mockCustomersUpdate).toHaveBeenCalledOnce();
       expect(mockCustomersUpdate).toHaveBeenCalledWith('cus_123', {
-        metadata: { storage_used: '2 TB' },
+        metadata: { orgId: 'org-1', storage_used: '2 TB' },
       });
     });
 
@@ -930,7 +936,7 @@ describe('usage-reporting-worker', () => {
 
       expect(mockCustomersUpdate).toHaveBeenCalledOnce();
       expect(mockCustomersUpdate).toHaveBeenCalledWith('cus_123', {
-        metadata: { storage_used: '100 MB' },
+        metadata: { orgId: 'org-1', storage_used: '100 MB' },
       });
       const item = auditPuts()[0].Item!;
       expect(item.orgSyncAction).toEqual({ S: 'ok' });
@@ -960,7 +966,7 @@ describe('usage-reporting-worker', () => {
 
         expect(mockCustomersUpdate).toHaveBeenCalledOnce();
         expect(mockCustomersUpdate).toHaveBeenCalledWith('cus_123', {
-          metadata: { storage_used: expected },
+          metadata: { orgId: 'org-1', storage_used: expected },
         });
       });
 
@@ -977,7 +983,7 @@ describe('usage-reporting-worker', () => {
         await handler({ ...basePayload, orgName: undefined });
 
         expect(mockCustomersUpdate).toHaveBeenCalledWith('cus_123', {
-          metadata: { storage_used: '1.5 TB' },
+          metadata: { orgId: 'org-1', storage_used: '1.5 TB' },
         });
       });
 
@@ -989,6 +995,7 @@ describe('usage-reporting-worker', () => {
         expect(mockCustomersUpdate).toHaveBeenCalledOnce();
         expect(mockCustomersUpdate).toHaveBeenCalledWith('cus_123', {
           metadata: {
+            orgId: 'org-1',
             storage_used: '0 B',
             organization_name: 'Acme Corp',
           },
