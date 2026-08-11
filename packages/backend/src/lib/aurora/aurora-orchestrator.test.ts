@@ -675,6 +675,10 @@ describe('auroraOrchestrator', () => {
     it('throws when the post-teardown verification probe 404s', async () => {
       // Alternating, because a `not_found` on the OPENING probe is now success:
       // every attempt must resolve the tenant and then lose it at the verify.
+      // Do NOT collapse this to a constant `not_found` — deleteTenant would then
+      // RESOLVE (the retry's opening probe takes the success path), so `err` is
+      // undefined and this test dies with "Cannot read properties of undefined"
+      // instead of a clean assertion failure.
       let call = 0;
       mockGetAuroraTenantStatusApi.mockImplementation(() =>
         Promise.resolve(
