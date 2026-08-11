@@ -8,7 +8,6 @@ import type { UpdateItemCommandOutput } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.js';
-import { reportMetric } from './metrics.js';
 import type { OrgDeletionMember } from './dynamo-records.js';
 
 const dynamo = getDynamoClient();
@@ -185,40 +184,8 @@ async function guardMember(member: OrgDeletionMember, now: string): Promise<void
  * record. Until it is armed the condition reduces to `attribute_exists(pk)`,
  * which is the half that blocks upsert-driven resurrection of purged records.
  *
- * `closeOutDeletedCustomer` (lib/deleted-customer-cleanup.ts) inlines this
- * condition instead of calling {@link sendGuardedBillingUpdate}, on purpose: its
- * customer-without-record case is expected-benign and must not count into
- * `BillingDeletionGuardRejected`.
  */
 export const DELETION_GUARD = 'attribute_exists(pk) AND attribute_not_exists(deletionRequestedAt)';
-
-/**
- * Emits the rejection as an EMF counter alongside the warn so it is alarmable
- * in Grafana (no CloudWatch alarm resources exist in this repo by design).
- *
- * This matters because a rejection is self-sustaining: when the guard refuses
- * a lazy `trialing → grace_period` transition the new status is never
- * persisted, so the trigger condition never clears and every subsequent request
- * re-attempts and re-rejects — an unbounded stream of warns and billed failed
- * conditional writes that a log line alone leaves unalarmable.
- */
-function emitGuardRejection(context: Record<string, unknown>): void {
-  reportMetric({
-    _aws: {
-      Timestamp: Date.now(),
-      CloudWatchMetrics: [
-        {
-          Namespace: 'FilOne',
-          Dimensions: [[]],
-          Metrics: [{ Name: 'BillingDeletionGuardRejected', Unit: 'Count' }],
-        },
-      ],
-    },
-    ...context,
-    // Last so a `context` key of the same name can never shadow the datum.
-    BillingDeletionGuardRejected: 1,
-  });
-}
 
 /**
  * Returns null when the guard rejects the write (record purged or org
@@ -226,7 +193,6 @@ function emitGuardRejection(context: Record<string, unknown>): void {
  */
 export async function sendGuardedBillingUpdate(
   input: Omit<ConstructorParameters<typeof UpdateItemCommand>[0], 'ConditionExpression'>,
-  context: Record<string, unknown>,
 ): Promise<UpdateItemCommandOutput | null> {
   try {
     return await dynamo.send(
@@ -234,11 +200,9 @@ export async function sendGuardedBillingUpdate(
     );
   } catch (err) {
     if (err instanceof ConditionalCheckFailedException) {
-      console.warn(
-        '[deletion-guard] Billing record missing or org mid-deletion; skipping update',
-        context,
-      );
-      emitGuardRejection(context);
+      console.warn('[deletion-guard] Billing record missing or org mid-deletion; skipping update', {
+        key: input.Key,
+      });
       return null;
     }
     throw err;
