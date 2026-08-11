@@ -84,7 +84,7 @@ const SWEEP_BUDGET_MS = 150 * 1000;
  * alert-critical output cannot be lost to anything below it.
  *
  * Next it clears the org-profile `deleting` guard for any org that carries it
- * with no DELETION record at all — see {@link reconcileDeletionFences}. This runs
+ * with no DELETION record at all — see {@link clearStaleDeletionGuards}. This runs
  * before the sweep so those unwedges get first claim on the shared budget; its
  * DONE-guarded orgs are merged into the re-drive list either way.
  *
@@ -128,7 +128,7 @@ export async function handler(): Promise<void> {
   const statusByOrgId = new Map(
     scanned.deletions.map((record) => [record.pk.slice('ORG#'.length), record.status]),
   );
-  const fences = await reconcileDeletionFences(scanned.fencedOrgIds, statusByOrgId, deadline);
+  const guards = await clearStaleDeletionGuards(scanned.fencedOrgIds, statusByOrgId, deadline);
 
   const candidates = sweepCandidates(done, now);
   const swept = await sweepResurrectedOrgs({
@@ -136,14 +136,14 @@ export async function handler(): Promise<void> {
     ragKeyHashOrgIds: scanned.ragKeyHashOrgIds,
     deadline,
   });
-  const resurrected = mergeResurrected(swept.resurrected, fences.resweepOrgIds);
+  const resurrected = mergeResurrected(swept.resurrected, guards.resweepOrgIds);
 
   emitGauge('ResurrectedAccountDeletionCount', resurrected.length);
-  // Coverage lost to the budget, in orgs — the reconciler and the org-partition
+  // Coverage lost to the budget, in orgs — the guard sweep and the org-partition
   // probe are the two per-org loops it can cut short. A log line is not
   // alertable in this repo (Grafana rules read the EMF MetricStream), and a
   // sweep that silently checks nothing looks exactly like a clean one.
-  emitGauge('DeletionSweepSkippedCount', swept.skipped + fences.skipped);
+  emitGauge('DeletionSweepSkippedCount', swept.skipped + guards.skipped);
   // The RagIndexerTable scan has no per-org granularity to skip: it either
   // completed or the `ragIndex` surface went unchecked for the whole run.
   emitGauge('DeletionSweepTruncatedCount', swept.ragIndexTruncated ? 1 : 0);
@@ -176,7 +176,7 @@ export async function handler(): Promise<void> {
   // until the next run, so this is a rescue-path failure, not bookkeeping.
   emitGauge('DeletionResweepFailedCount', resweepFailed);
 
-  console.log('[account-deletion-orchestrator] Reconcile complete', {
+  console.log('[account-deletion-orchestrator] Orchestration complete', {
     incomplete: incomplete.length,
     stale: stale.length,
     reinvoked,
@@ -185,12 +185,12 @@ export async function handler(): Promise<void> {
     candidates: candidates.length,
     sweepSkipped: swept.skipped,
     ragIndexTruncated: swept.ragIndexTruncated,
-    fenceSkipped: fences.skipped,
+    guardSkipped: guards.skipped,
     resurrected: resurrected.length,
     reswept,
     resweepFailed,
     redactionFailed,
-    unwedged: fences.unwedged,
+    unwedged: guards.unwedged,
   });
 }
 
@@ -301,7 +301,7 @@ function reportFailedRedactions(done: ScannedDeletion[]): number {
 }
 
 /**
- * Fold the orgs the fence reconciler routed to a resweep into the sweep's own
+ * Fold the orgs the guard sweep routed to a resweep into the sweep's own
  * findings, without double-invoking an org both found. Their surviving PROFILE
  * row is an `orgRows` hit by definition — that is what carries the fence.
  */
@@ -338,18 +338,18 @@ function mergeResurrected(swept: ResurrectedOrg[], fromFences: string[]): Resurr
  * The scan that produced these ids is eventually consistent, so "absent" here
  * only means "absent from the scan". It is never trusted: `clearOrgDeletionGuard`
  * asserts the record's absence transactionally against the write, which both
- * closes the start-a-deletion-mid-reconcile race and removes the need for a
+ * closes the start-a-deletion-mid-sweep race and removes the need for a
  * separate strongly-consistent read. The cost is that an org whose DONE record
  * the scan missed is not routed to a resweep on THIS run — the transaction
  * declines the clear, and the next run's scan sees the record and sweeps it.
  *
- * @param deadline epoch ms after which no further org is reconciled. One
+ * @param deadline epoch ms after which no further org is swept. One
  *   transaction per fenced org, sequential, inside the same window
  *   {@link SWEEP_BUDGET_MS} bounds — so a mass-fencing incident would otherwise
  *   silently shrink the sweep's share of the 300s Lambda to nothing. Orgs past
  *   it are counted, not dropped silently, and stay fenced for the next run.
  */
-async function reconcileDeletionFences(
+async function clearStaleDeletionGuards(
   fencedOrgIds: string[],
   statusByOrgId: Map<string, string>,
   deadline: number,
@@ -379,7 +379,7 @@ async function reconcileDeletionFences(
         );
       }
     } catch (error) {
-      console.error('[account-deletion-orchestrator] Failed to reconcile a deletion fence', {
+      console.error('[account-deletion-orchestrator] Failed to clear a stale deletion guard', {
         orgId,
         error,
       });
@@ -387,7 +387,7 @@ async function reconcileDeletionFences(
   }
   if (skipped > 0) {
     console.warn(
-      '[account-deletion-orchestrator] Budget expired before every fenced org was reconciled; ' +
+      '[account-deletion-orchestrator] Budget expired before every guarded org was swept; ' +
         'the rest stay fenced until the next run',
       { skipped, fenced: fencedOrgIds.length },
     );

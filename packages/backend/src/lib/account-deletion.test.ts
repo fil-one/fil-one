@@ -999,7 +999,7 @@ describe('runAccountDeletion', () => {
       .flatMap((c) => c.args[0].input.RequestItems?.UserInfoTable ?? [])
       .map((r) => unmarshall(r.DeleteRequest!.Key!));
     expect(deleted).toContainEqual({ pk: 'RAGKEYHASH#hash-1', sk: 'LOOKUP' });
-    // And the record is NOT marked done, so the reconciler re-drives.
+    // And the record is NOT marked done, so the orchestrator re-drives.
     expect(doneWrites()).toHaveLength(0);
   });
 
@@ -1297,7 +1297,7 @@ describe('runAccountDeletion — live Stripe customer discovery', () => {
   it('waits IN-PASS rather than deferring: one invocation, one teardown, one attempt bump', async () => {
     // Deferring with a throw would emit a Lambda `Errors` datapoint for every
     // healthy deletion (the metric Grafana alerts on), burn an async retry,
-    // push `attemptCount` toward the reconciler's stuck threshold, refresh the
+    // push `attemptCount` toward the orchestrator's stuck threshold, refresh the
     // staleness window, and re-run every external teardown and the whole purge.
     setupHappyMocks(OrgDeletionStatus.Pending);
     ddbMock

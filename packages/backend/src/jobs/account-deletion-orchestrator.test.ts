@@ -223,7 +223,7 @@ describe('account-deletion-orchestrator', () => {
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).not.toHaveLength(0);
   });
 
-  it('pages the scan via LastEvaluatedKey and reconciles records from every page', async () => {
+  it('pages the scan via LastEvaluatedKey and processes records from every page', async () => {
     ddbMock
       .on(ScanCommand, { TableName: 'UserInfoTable' })
       .resolvesOnce({
@@ -299,22 +299,25 @@ describe('account-deletion-orchestrator', () => {
     try {
       await handler();
 
-      expect(logSpy).toHaveBeenCalledWith('[account-deletion-orchestrator] Reconcile complete', {
-        incomplete: 2,
-        stale: 2,
-        reinvoked: 1,
-        failed: 1,
-        stuck: 0,
-        candidates: 1,
-        sweepSkipped: 0,
-        ragIndexTruncated: false,
-        fenceSkipped: 0,
-        resurrected: 0,
-        reswept: 0,
-        resweepFailed: 0,
-        redactionFailed: 0,
-        unwedged: 0,
-      });
+      expect(logSpy).toHaveBeenCalledWith(
+        '[account-deletion-orchestrator] Orchestration complete',
+        {
+          incomplete: 2,
+          stale: 2,
+          reinvoked: 1,
+          failed: 1,
+          stuck: 0,
+          candidates: 1,
+          sweepSkipped: 0,
+          ragIndexTruncated: false,
+          guardSkipped: 0,
+          resurrected: 0,
+          reswept: 0,
+          resweepFailed: 0,
+          redactionFailed: 0,
+          unwedged: 0,
+        },
+      );
     } finally {
       logSpy.mockRestore();
       errorSpy.mockRestore();
@@ -703,7 +706,7 @@ describe('account-deletion-orchestrator', () => {
         await handler();
 
         expect(logSpy).toHaveBeenCalledWith(
-          '[account-deletion-orchestrator] Reconcile complete',
+          '[account-deletion-orchestrator] Orchestration complete',
           expect.objectContaining({ unwedged: 0 }),
         );
       } finally {
@@ -728,7 +731,7 @@ describe('account-deletion-orchestrator', () => {
         await handler();
 
         expect(errorSpy).toHaveBeenCalledWith(
-          expect.stringContaining('Failed to reconcile a deletion fence'),
+          expect.stringContaining('Failed to clear a stale deletion guard'),
           expect.objectContaining({ orgId: 'org-wedged' }),
         );
       } finally {
@@ -768,7 +771,7 @@ describe('account-deletion-orchestrator', () => {
       }
     });
 
-    it('a failing fence reconcile is logged and does not abort the run', async () => {
+    it('a failing guard clear is logged and does not abort the run', async () => {
       scanReturns([fencedProfile('org-wedged'), deletionRecord('org-stale')]);
       ddbMock.on(TransactWriteItemsCommand).rejects(new Error('DynamoDB unavailable'));
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -777,7 +780,7 @@ describe('account-deletion-orchestrator', () => {
         await handler();
 
         expect(errorSpy).toHaveBeenCalledWith(
-          expect.stringContaining('Failed to reconcile a deletion fence'),
+          expect.stringContaining('Failed to clear a stale deletion guard'),
           expect.objectContaining({ orgId: 'org-wedged' }),
         );
         expect(invokedPayloads()).toEqual([{ orgId: 'org-stale' }]);
