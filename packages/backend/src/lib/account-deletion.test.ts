@@ -101,13 +101,13 @@ const ddbMock = mockClient(DynamoDBClient);
 
 process.env.FILONE_STAGE = 'test';
 
+import { runAccountDeletion } from './account-deletion.js';
 import {
   assertPurgeablePk,
   batchDelete,
-  runAccountDeletion,
   PURGEABLE_BILLING_PK_PREFIXES,
   PURGEABLE_USER_INFO_PK_PREFIXES,
-} from './account-deletion.js';
+} from './deletion-purge.js';
 import { OrgDeletionStatus } from './dynamo-records.js';
 
 const ORG_ID = 'org-1';
