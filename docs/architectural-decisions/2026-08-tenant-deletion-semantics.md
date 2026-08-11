@@ -9,10 +9,9 @@ Account deletion (FIL-112) tears down every orchestrator tenant an org owns: the
 itself plus the FilOne-held secrets in SSM. The teardown is re-runnable, so `deleteTenant` must be
 idempotent — but "idempotent" was ambiguous about which upstream responses may be swallowed.
 
-The upstream behaviour was probed against the live FTH management API with
-`bin/probe-fth-tenant-delete.ts`, which creates throwaway bare tenants (no storage users, no access
-keys), exercises the delete sequence, and cleans up after itself. This ADR records what that probe
-established so the orchestrators do not have to restate it inline.
+The upstream behaviour was probed against the live FTH management API using throwaway bare tenants
+(no storage users, no access keys), exercising the delete sequence and cleaning up afterwards. This
+ADR records what that probe established so the orchestrators do not have to restate it inline.
 
 **Evidence levels.** Statements about FTH are **probed** — they come from that script. Aurora
 statements are either **probed** (see the evidence section below, run read-only against the dev
@@ -84,53 +83,41 @@ competing writers**, not to wait out propagation delay. It also covers the 5xx a
 return when cleanup fails partway through, which the Management API contract says leaves the tenant
 deletable on retry.
 
-### Aurora is the exception: disable + secret-shred only
+### Aurora is the exception: disable + verify only
 
 Aurora's Backoffice and Portal APIs expose **no tenant DELETE and no bucket DELETE**. Verified
 against `packages/aurora-backoffice-client/aurora-backoffice.swagger.json` and
 `packages/aurora-portal-client/aurora-portal.swagger.json`: the only DELETE operations are on
 partner/tenant tokens, themes, and individual access keys.
 
-So `auroraOrchestrator.deleteTenant` performs the strongest teardown available remotely — force the
-tenant to `disabled`, revoke the console S3 key upstream, delete the FilOne-held SSM secrets — and
-logs the manual backoffice follow-up. **Customer data survives.**
+So `auroraOrchestrator.deleteTenant` does exactly two things: force the tenant to `disabled`, then
+verify it stayed that way. **Customer data survives**, and so do FilOne's SSM secrets.
 
-#### A 404 never deletes an Aurora credential
+#### Why the FilOne-held secrets are retained
 
-Aurora's teardown starts from a `GET tenant` probe, and `getTenantStatus` maps **any** 404 to
-`not_found`. The systemic faults above (wrong `AURORA_PARTNER_ID`, misrouted
-`AURORA_BACKOFFICE_URL`, wrong-scope token) 404 every tenant identically, so a bare `not_found`
-cannot distinguish "this tenant is gone" from "we are talking to the wrong place". Losing the two
-SSM secrets for a live tenant is unrecoverable: they are the only way FilOne can reach it, and
-`processTenantSetup` will not re-mint either once `auroraSetupStatus` is terminal.
+An earlier version of this teardown also revoked the tenant's `filone-console` S3 key and deleted
+FilOne's two SSM secrets (the portal API key and the console S3 credentials). Both were dropped,
+for a reason stronger than brevity: **those secrets are FilOne's only route back to the tenant.**
+Deleting a customer's Aurora data later requires reaching the Portal, which requires the portal API
+key. Shredding it forecloses the deferred purge (FIL-919) permanently.
 
-Corroborating the 404 upstream was designed and then abandoned: the evidence section above shows
-that the two calls it needs cannot be made soundly with the access we have (`GetPartner` 403s;
-a `ListTenants` walk that terminates on a short page sees 20 of 239 tenants). So:
+Retaining them is safe because a `disabled` tenant "denies all actions" — every credential it owns,
+console-issued or user-issued, is already inert. The credential destruction was buying nothing that
+the disable does not already provide, while costing the only path to finishing the job.
 
-**The rule: FilOne never deletes Aurora credentials in response to a 404.** Only a confirmed
-teardown of a tenant that actually resolved and was disabled, or an operator's manual SSM deletion,
-removes them.
+Deleting the secrets also carried a wrongful-shred risk class of its own: the shred had to be
+refused whenever the tenant could not be resolved, since a backoffice client pointed at the wrong
+partner would otherwise destroy a live tenant's credentials on a 404. That entire branch — and the
+local-SSM-evidence rules it needed to decide "already complete" from "never started" — is gone with
+the code.
 
-The 404 branch decides from **local** evidence only — whether FilOne still holds the tenant's two
-SSM parameters (`/filone/{stage}/aurora-portal/tenant-api-key/{tenantId}` and
-`/filone/{stage}/aurora-s3/access-key/{tenantId}`):
+#### A 404 is nothing left to disable
 
-- **Both already absent** → nothing is left to do. This is the idempotent-completion exit: a
-  previous pass finished this teardown, or an operator did the manual cleanup below. Logged, not
-  warned — `purgeRecords` calls `deleteTenant` a second time for late regions, so a repeat pass is
-  routine, and warning on it would drown the anomaly signal.
-- **Either still present** → **throw, deleting nothing.** The message states that the tenant did
-  not resolve, that credentials will not be deleted on an unexplained 404, and that an operator
-  must confirm upstream and then delete the named parameter(s) by hand. That manual deletion is the
-  signal that lets the next pass take the branch above, so the wedge has an achievable exit that
-  needs no Aurora permission FilOne lacks.
+Aurora's teardown starts from a `GET tenant` probe. A probe that cannot resolve the tenant now
+returns successfully: there is nothing to disable, and nothing this teardown holds that would need
+cleaning up. This is materially safer than the previous posture, where the same 404 had to be
+interrogated against local SSM state before any destructive step could be allowed.
 
-Only SSM's `ParameterNotFound` counts as absence; any other read failure (AccessDenied, throttling)
-propagates, because "we could not read it" must never be mistaken for "it is gone".
-
-This is strictly stronger than corroboration: it removes the wrongful-shred class entirely rather
-than gating it behind checks whose premises we could not verify.
 
 #### The teardown verifies the tenant is still `disabled` before returning
 
@@ -167,43 +154,30 @@ That distinction matters because of the Consequences below: a state no retry can
 retention of the org's personal data, so it must be labelled as needing a human — and a state a
 retry _can_ exit must not be.
 
-A retry after the shred is safe with respect to SSM — both deletes treat `ParameterNotFound` as
-success. A later pass that finds the portal API key missing from SSM cannot revoke or verify
-anything, and what it should say depends on local evidence, not on an assumption about earlier
-runs: if the console S3 credentials are gone too, an earlier pass completed the teardown and
-already reported whatever it observed, so this is the routine repeat pass and is logged; if they
-survive while the portal key does not, nothing establishes that the console key was ever revoked
-and the pass warns.
+### Deferred Aurora data deletion
 
-### Future Aurora purge sequence
+Tracked as **FIL-919**. The intended direction is an upstream **tenant-deletion API**: a tenant
+delete takes its objects with it, so no data-plane dance is needed.
 
-The correct purge order is `write-locked → purge objects via the S3 data plane → disabled`, because
-Aurora's `models.TenantStatus` enum documents `WRITE_LOCKED` as "blocks writes but still allows reads
-and deletes" and `DISABLED` as "denies all actions". Only the `write-locked` window can issue the
-object deletes.
+An earlier revision of this ADR designed one — `write-locked → purge objects via the S3 data plane →
+disabled`, since `WRITE_LOCKED` still permits deletes while `DISABLED` denies all actions. That
+section has been retired deliberately rather than annotated, so nobody implements it. It also
+carried a blocker of its own: `region-helpers.ts` refuses to downgrade a `disabled` tenant back to
+`write-locked`, so a retry arrives already disabled with no way to reopen the window.
 
-That window cannot be reopened: `packages/backend/src/lib/region-helpers.ts:130-133` refuses to
-downgrade a `disabled` tenant back to `write-locked` (`disabled` is the stronger lock and may only be
-lifted by an explicit re-activation). A teardown retry therefore arrives with the tenant already
-`disabled` and no way to purge. Whoever builds the purge must make it idempotent and **record
-completion on the DELETION record** so a retry can tell "purged" from "never purged".
+Whichever mechanism ships, it depends on the FilOne-held SSM secrets this teardown now retains.
 
 ## Consequences
 
 - `deleteTenant` implementations wrap their whole teardown in a bounded retry and let every error —
   404 included — surface. **No orchestrator swallows a not-found as licence to delete:** the
-  DELETE-based path (FTH) tolerates no 404 at all, and Aurora's disable+shred deletes nothing on
-  one. Aurora's 404 branch returns successfully in exactly one case — both SSM secrets are already
-  gone, so there is nothing left to delete — which is idempotent completion, not tolerance.
-- Re-running the account-deletion teardown is safe: the upstream answers 204 again.
-- A backoffice client pointed at the wrong partner fails loudly instead of silently shredding live
-  credentials, and does so without depending on any Aurora call succeeding.
-- The cost of that safety is a wedge: a genuinely deleted Aurora tenant whose FilOne secrets still
-  exist blocks the org's purge until an operator deletes the two named SSM parameters. That is
-  deliberate — the remediation is cheap, auditable, and available to us, whereas a wrongful shred
-  is unrecoverable.
-- Aurora orgs leave a disabled tenant and its data behind until the purge above is built, and the
-  teardown fails (for retry) rather than returning while the tenant is anything but `DISABLED`.
+  DELETE-based path (FTH) tolerates no 404 at all. Aurora destroys nothing, so its 404 branch has
+  nothing to be careless with: an unresolvable tenant has nothing left to disable.
+- A backoffice client pointed at the wrong partner can no longer shred live credentials, because
+  the teardown no longer shreds anything. The operator wedge that safety used to cost — an org's
+  purge blocked until a human deleted two named SSM parameters — is gone with it.
+- Aurora orgs leave a disabled tenant and its data behind until FIL-919 ships, and the teardown
+  fails (for retry) rather than returning while the tenant is anything but `DISABLED`.
 - **A `deleteTenant` failure blocks the account's DynamoDB purge.** This is the consequence that
   makes everything above load-bearing, and it is deliberate. `runAccountDeletion` tears down every
   region and rethrows an aggregate of the failures **before** `purgeRecords`, so a teardown that
@@ -226,8 +200,6 @@ completion on the DELETION record** so a retry can tell "purged" from "never pur
 
 ## References
 
-- FTH probe script: `bin/probe-fth-tenant-delete.ts` (untracked; run with `--confirm`)
-- Aurora probe script: `bin/probe-aurora-tenant-delete.ts` (untracked; read-only)
 - Interface contract: `ServiceOrchestrator.deleteTenant` in
   `packages/backend/src/lib/service-orchestrator.ts`
 - [Service Orchestrator Management API ADR](2026-04-service-orchestrator-management-api.md)
