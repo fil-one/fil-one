@@ -270,6 +270,14 @@ async function requireRedactionJob(jobId: string): Promise<StripeRedactionJob> {
  * Take the one legal step toward `succeeded` for an already-fetched job, and
  * persist the outcome whenever that step lands the job somewhere terminal — the
  * durable signal a resweep's re-drive stops on.
+ *
+ * `redacting` counts as done, and that is what keeps a first teardown's discovery
+ * working across passes: creating and validating a job does not null the customer's
+ * metadata — only RUNNING it does — so a customer whose job is still short of
+ * `ready` is re-found by the next pass's `metadata` search. Once the job is running
+ * the metadata may be gone, but this returns without needing it. Only a resweep has
+ * to carry customer ids forward explicitly, because its purge removes the rows the
+ * sweep would otherwise re-derive them from.
  */
 async function advanceRedactionJob(
   orgId: string,
