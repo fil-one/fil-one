@@ -38,68 +38,112 @@ interface DiscoveredBillingCustomer {
 const SEARCHABLE_USER_ID = /^[A-Za-z0-9_-]+$/;
 
 /**
- * Find the org's Stripe customer by searching each member's `metadata.userId`.
+ * Find the org's Stripe customer.
  *
- * There is no fallback if the search fails: with the snapshot gone there is
- * nothing to fall back TO, and guessing "no customer" would silently skip
- * cancellation and redaction. A throw leaves the DELETION record non-DONE, so
- * the worker retry / the 12h orchestrator cron re-drives the whole idempotent
- * teardown — and the stuck gauge surfaces it if it never converges.
+ * Primary path: one search on `metadata['orgId']`. Both customer creators stamp it
+ * (`create-billing-trial.ts`, `create-setup-intent.ts`), and the usage-reporting
+ * worker re-stamps it on every daily run, which backfills customers that predate
+ * the key.
  *
- * Stripe Search indexes writes with a lag (~25s, measured 2026-08-07), so a
- * customer minted seconds before the confirm can be invisible to the first
- * call. The caller's second pass, run after the rest of teardown, covers it.
+ * The per-member `metadata['userId']` search survives as a FALLBACK, used only when
+ * the org-id search returns nothing. It exists for one remaining hole: an org whose
+ * customer the worker never syncs — no active subscription, so the orchestrator's
+ * scan never dispatches it — is never backfilled. When the fallback finds something
+ * the org-id search missed it warns, and that log is what retires it: once it stays
+ * silent, the fallback and the whole member loop can go.
+ *
+ * There is no fallback if a search FAILS: with the snapshot gone there is nothing to
+ * fall back TO, and guessing "no customer" would silently skip cancellation and
+ * redaction. A throw leaves the DELETION record non-DONE, so the worker retry / the
+ * 12h orchestrator cron re-drives the whole idempotent teardown — and the stuck
+ * gauge surfaces it if it never converges.
+ *
+ * Stripe Search indexes writes with a lag (~25s, measured 2026-08-07), so a customer
+ * minted seconds before the confirm can be invisible to the first call. The caller's
+ * second pass, run after the rest of teardown, covers it.
  */
 export async function discoverBillingCustomer(
   orgId: string,
   members: OrgDeletionMember[],
 ): Promise<DiscoveredBillingCustomer> {
-  // Insertion-ordered so the caller's "first distinct id" is stable across
-  // passes for a given member order.
-  const discovered = new Set<string>();
+  const byOrg = await searchCustomers(orgId, `metadata['orgId']:'${orgId}'`, 'org id');
+  if (byOrg.size > 0) return toResult(byOrg);
 
+  const byMember = await searchByMember(orgId, members);
+  if (byMember.size > 0) {
+    console.warn(
+      '[billing-customer-discovery] Found customer(s) by member userId that the orgId search ' +
+        'missed — this customer was never backfilled by the usage worker. While this fires, the ' +
+        'member fallback cannot be removed',
+      { orgId, customerIds: [...byMember] },
+    );
+  }
+  return toResult(byMember);
+}
+
+function toResult(discovered: Set<string>): DiscoveredBillingCustomer {
+  const [customerId, ...extraCustomerIds] = [...discovered];
+  return { ...(customerId ? { customerId } : {}), extraCustomerIds };
+}
+
+/** The fallback path: one search per member, keyed on `metadata.userId`. */
+async function searchByMember(orgId: string, members: OrgDeletionMember[]): Promise<Set<string>> {
+  // Insertion-ordered so the caller's "first distinct id" is stable across passes
+  // for a given member order.
+  const discovered = new Set<string>();
   for (const member of members) {
     if (!SEARCHABLE_USER_ID.test(member.userId)) {
-      // Fail loud rather than skip. Skipping means this member's customer is
-      // never found, so it is never cancelled and its PII is never redacted —
-      // and the teardown still reports success. Throwing keeps the DELETION
-      // record non-DONE, so the pass retries and the stuck gauge surfaces it.
+      // Fail loud rather than skip. Skipping means this member's customer is never
+      // found, so it is never cancelled and its PII is never redacted — and the
+      // teardown still reports success.
       throw new Error(
         `Org ${orgId} has a member whose userId cannot be searched in Stripe ` +
           `(${member.userId}); refusing to complete a teardown that would skip them`,
       );
     }
-
-    try {
-      // `customers.search` returns an auto-paginating async iterable, so this
-      // walks every page — the same idiom as the subscriptions.list sweep in
-      // lib/account-deletion.ts.
-      for await (const customer of getStripeClient().customers.search({
-        query: `metadata['userId']:'${member.userId}'`,
-        limit: 100,
-      })) {
-        // A customer whose metadata names a DIFFERENT org is never touched:
-        // cancelling or redacting it would destroy a live account's billing.
-        // Absent orgId metadata is accepted — legacy customers predate it.
-        const customerOrgId = customer.metadata?.orgId;
-        if (customerOrgId && customerOrgId !== orgId) {
-          console.warn(
-            '[billing-customer-discovery] Skipping Stripe customer owned by another org',
-            { orgId, memberUserId: member.userId, customerId: customer.id, customerOrgId },
-          );
-          continue;
-        }
-        discovered.add(customer.id);
-      }
-    } catch (err) {
-      throw new Error(
-        `Stripe customer search failed for org ${orgId} (member ${member.userId}); ` +
-          'the next teardown pass retries',
-        { cause: err },
-      );
+    for (const id of await searchCustomers(
+      orgId,
+      `metadata['userId']:'${member.userId}'`,
+      `member ${member.userId}`,
+    )) {
+      discovered.add(id);
     }
   }
+  return discovered;
+}
 
-  const [customerId, ...extraCustomerIds] = [...discovered];
-  return { ...(customerId ? { customerId } : {}), extraCustomerIds };
+/**
+ * One `customers.search`, walking every page. Customers whose metadata names a
+ * DIFFERENT org are skipped: cancelling or redacting one would destroy a live
+ * account's billing. Absent `orgId` is accepted — legacy customers predate it, and
+ * they are the reason the member fallback still exists.
+ */
+async function searchCustomers(
+  orgId: string,
+  query: string,
+  describeQuery: string,
+): Promise<Set<string>> {
+  const found = new Set<string>();
+  try {
+    for await (const customer of getStripeClient().customers.search({ query, limit: 100 })) {
+      const customerOrgId = customer.metadata?.orgId;
+      if (customerOrgId && customerOrgId !== orgId) {
+        console.warn('[billing-customer-discovery] Skipping Stripe customer owned by another org', {
+          orgId,
+          query: describeQuery,
+          customerId: customer.id,
+          customerOrgId,
+        });
+        continue;
+      }
+      found.add(customer.id);
+    }
+  } catch (err) {
+    throw new Error(
+      `Stripe customer search failed for org ${orgId} (${describeQuery}); ` +
+        'the next teardown pass retries',
+      { cause: err },
+    );
+  }
+  return found;
 }
