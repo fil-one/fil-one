@@ -564,9 +564,9 @@ function describeFailedVerification(verify: TenantStatusResult): string {
   }
   if (verify.status === 'ACTIVE' || verify.status === 'WRITE_LOCKED') {
     return (
-      `Aurora reports status=${verify.status}: a competing writer re-activated it (the ` +
-      'trial-lock enforcer in usage-reporting-worker is unfenced, and region-helpers permits ' +
-      'disabled -> active). Retrying the teardown re-disables it.'
+      `Aurora reports status=${verify.status}: a competing writer re-activated it — one that ` +
+      'read the org profile before the `deleting` guard landed. Retrying the teardown ' +
+      're-disables it.'
     );
   }
   if (verify.status === 'LOCKED') {
