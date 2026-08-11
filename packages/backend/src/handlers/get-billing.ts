@@ -312,21 +312,18 @@ async function cacheStripePrice(
   userId: string,
   billingTableName: string,
 ): Promise<void> {
-  await sendGuardedBillingUpdate(
-    {
-      TableName: billingTableName,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
-      UpdateExpression: 'SET stripePrice = :price, updatedAt = :now',
-      ExpressionAttributeValues: {
-        ':price': convertToAttr(price, { removeUndefinedValues: true }),
-        ':now': { S: new Date().toISOString() },
-      },
+  await sendGuardedBillingUpdate({
+    TableName: billingTableName,
+    Key: {
+      pk: { S: `CUSTOMER#${userId}` },
+      sk: { S: 'SUBSCRIPTION' },
     },
-    { source: 'get-billing.cacheStripePrice', userId },
-  );
+    UpdateExpression: 'SET stripePrice = :price, updatedAt = :now',
+    ExpressionAttributeValues: {
+      ':price': convertToAttr(price, { removeUndefinedValues: true }),
+      ':now': { S: new Date().toISOString() },
+    },
+  });
 }
 
 async function evaluateStatusTransitions(
@@ -351,23 +348,20 @@ async function evaluateStatusTransitions(
     // middleware/subscription-guard.ts. A guard rejection is a skip — the
     // response still reports grace_period, which is the read model this record
     // has already earned; only the persistence is declined.
-    await sendGuardedBillingUpdate(
-      {
-        TableName: billingTableName,
-        Key: {
-          pk: { S: `CUSTOMER#${userId}` },
-          sk: { S: 'SUBSCRIPTION' },
-        },
-        UpdateExpression:
-          'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
-        ExpressionAttributeValues: {
-          ':status': { S: SubscriptionStatus.GracePeriod },
-          ':grace': { S: gracePeriodEndsAt },
-          ':now': { S: new Date().toISOString() },
-        },
+    await sendGuardedBillingUpdate({
+      TableName: billingTableName,
+      Key: {
+        pk: { S: `CUSTOMER#${userId}` },
+        sk: { S: 'SUBSCRIPTION' },
       },
-      { source: 'get-billing.evaluateStatusTransitions', userId },
-    );
+      UpdateExpression:
+        'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
+      ExpressionAttributeValues: {
+        ':status': { S: SubscriptionStatus.GracePeriod },
+        ':grace': { S: gracePeriodEndsAt },
+        ':now': { S: new Date().toISOString() },
+      },
+    });
     currentStatus = SubscriptionStatus.GracePeriod;
     billingRecord.gracePeriodEndsAt = gracePeriodEndsAt;
   }

@@ -255,22 +255,8 @@ describe('subscriptionGuardMiddleware', () => {
     });
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('org mid-deletion'),
-      expect.objectContaining({ source: 'subscription-guard', userId: USER_ID }),
+      expect.objectContaining({ key: expect.anything() }),
     );
-    expect(mockReportMetric).toHaveBeenCalledTimes(1);
-    expect(mockReportMetric.mock.calls[0][0]).toMatchObject({
-      _aws: {
-        CloudWatchMetrics: [
-          {
-            Namespace: 'FilOne',
-            Dimensions: [[]],
-            Metrics: [{ Name: 'BillingDeletionGuardRejected', Unit: 'Count' }],
-          },
-        ],
-      },
-      source: 'subscription-guard',
-      BillingDeletionGuardRejected: 1,
-    });
   });
 
   it('blocks READ access too when the guard declines — grace_period would unlock shareable presigns', async () => {

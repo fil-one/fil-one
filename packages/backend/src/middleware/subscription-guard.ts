@@ -141,23 +141,20 @@ async function transitionExpiredTrial(
 
   // Lazy transition: trial expired → grace_period
   const gracePeriodEndsAt = addDays(new Date(trialEndsAt), TRIAL_GRACE_DAYS).toISOString();
-  const persisted = await sendGuardedBillingUpdate(
-    {
-      TableName: tableName,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
-      UpdateExpression:
-        'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
-      ExpressionAttributeValues: {
-        ':status': { S: SubscriptionStatus.GracePeriod },
-        ':grace': { S: gracePeriodEndsAt },
-        ':now': { S: new Date().toISOString() },
-      },
+  const persisted = await sendGuardedBillingUpdate({
+    TableName: tableName,
+    Key: {
+      pk: { S: `CUSTOMER#${userId}` },
+      sk: { S: 'SUBSCRIPTION' },
     },
-    { source: 'subscription-guard', userId },
-  );
+    UpdateExpression:
+      'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
+    ExpressionAttributeValues: {
+      ':status': { S: SubscriptionStatus.GracePeriod },
+      ':grace': { S: gracePeriodEndsAt },
+      ':now': { S: new Date().toISOString() },
+    },
+  });
   if (!persisted) return 'declined';
 
   record.gracePeriodEndsAt = gracePeriodEndsAt;
