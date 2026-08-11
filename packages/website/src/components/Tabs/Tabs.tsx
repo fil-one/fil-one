@@ -10,6 +10,8 @@ import { clsx } from 'clsx';
 export type TabsProps = {
   children: React.ReactNode;
   defaultIndex?: number;
+  /** Controlled selected index. Pair with {@link onChange} to drive tabs from outside. */
+  selectedIndex?: number;
   onChange?: (index: number) => void;
 };
 
@@ -36,9 +38,13 @@ export type TabPanelProps = {
   testId?: string;
 };
 
-export function Tabs({ children, defaultIndex = 0, onChange }: TabsProps) {
+export function Tabs({ children, defaultIndex = 0, selectedIndex, onChange }: TabsProps) {
+  // Controlled when `selectedIndex` is supplied; otherwise uncontrolled via `defaultIndex`.
+  // Passing both to Headless UI's TabGroup triggers a controlled/uncontrolled warning.
+  const modeProps =
+    selectedIndex === undefined ? { defaultIndex } : { selectedIndex, defaultIndex: undefined };
   return (
-    <TabGroup defaultIndex={defaultIndex} onChange={onChange}>
+    <TabGroup {...modeProps} onChange={onChange}>
       {children}
     </TabGroup>
   );

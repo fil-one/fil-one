@@ -2,10 +2,18 @@ import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { CopySimpleIcon, DatabaseIcon, PlusIcon } from '@phosphor-icons/react/dist/ssr';
+import {
+  ArrowRightIcon,
+  ArrowUpRightIcon,
+  DatabaseIcon,
+  PlusIcon,
+} from '@phosphor-icons/react/dist/ssr';
 
 import { AccessKeysTable } from '../components/AccessKeysTable';
+import { Badge } from '../components/Badge';
 import { Button } from '../components/Button';
+import { Card } from '../components/Card';
+import { CopyButton } from '../components/CopyButton';
 import { Heading } from '../components/Heading/Heading';
 import { PageLayout } from '../components/PageLayout.js';
 import { CodeBlock } from '../components/CodeBlock';
@@ -16,11 +24,16 @@ import { useToast } from '../components/Toast';
 
 import type { AccessKey, ListAccessKeysResponse, S3Region } from '@filone/shared';
 
-import { getS3Endpoint, S3_REGION, DOCS_URL } from '@filone/shared';
+import {
+  getS3Endpoint,
+  getRegionLabel,
+  supportsBucketManagement,
+  S3_REGION,
+  DOCS_URL,
+} from '@filone/shared';
 import { RegionSelect } from '../components/RegionSelect';
 import { FILONE_STAGE } from '../env';
 import { apiRequest } from '../lib/api.js';
-import { useCopyToClipboard } from '../lib/use-copy-to-clipboard.js';
 import { queryKeys } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
@@ -36,12 +49,6 @@ type AccessKeysTabProps = {
 function AccessKeysTab({ keys, onCreateOpen, onDelete }: AccessKeysTabProps) {
   return (
     <>
-      <div className="mt-4 mb-4">
-        <span className="text-sm text-zinc-600">
-          {keys.length === 1 ? '1 key' : `${keys.length} keys`}
-        </span>
-      </div>
-
       <AccessKeysTable
         keys={keys}
         showBuckets
@@ -64,24 +71,24 @@ function AccessKeysTab({ keys, onCreateOpen, onDelete }: AccessKeysTabProps) {
 // Tab 2: Connection Details
 // ---------------------------------------------------------------------------
 
-function CopyButton({ value }: { value: string }) {
-  const { copied, copy } = useCopyToClipboard();
-
+/** A single numbered step: a small index chip plus its title, sitting above its
+ * code sample. Shared by the Quickstart and SDK example cards. */
+function Step({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
   return (
-    <button
-      type="button"
-      onClick={() => void copy(value)}
-      title={copied ? 'Copied' : 'Copy'}
-      aria-label={copied ? 'Copied to clipboard' : 'Copy to clipboard'}
-      className="ml-2 shrink-0 rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
-    >
-      <CopySimpleIcon size={14} />
-    </button>
+    <div className="px-4 py-3.5">
+      <div className="mb-2 flex items-center gap-2.5">
+        <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-600">
+          {n}
+        </span>
+        <span className="text-sm font-medium text-(--color-paragraph-text-strong)">{title}</span>
+      </div>
+      <div className="pl-[1.9rem]">{children}</div>
+    </div>
   );
 }
 
 // eslint-disable-next-line max-lines-per-function
-function ConnectionDetailsTab() {
+function ConnectionDetailsTab({ onViewKeys }: { onViewKeys: () => void }) {
   const [region, setRegion] = useState<S3Region>(S3_REGION);
   const s3Endpoint = getS3Endpoint(region, FILONE_STAGE);
   const [sdkTab, setSdkTab] = useState<'python' | 'nodejs' | 'go'>('python');
@@ -147,58 +154,75 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 })`;
 
   const SDK_META = {
-    python: {
-      label: 'Python',
-      hint: 'Using boto3 (AWS SDK for Python)',
-      install: pythonInstall,
-      upload: pythonUpload,
-      lang: 'python',
-    },
-    nodejs: {
-      label: 'Node.js',
-      hint: 'Using @aws-sdk/client-s3',
-      install: nodejsInstall,
-      upload: nodejsUpload,
-      lang: 'javascript',
-    },
-    go: {
-      label: 'Go',
-      hint: 'Using aws-sdk-go-v2',
-      install: goInstall,
-      upload: goUpload,
-      lang: 'go',
-    },
+    python: { install: pythonInstall, upload: pythonUpload, lang: 'python' },
+    nodejs: { install: nodejsInstall, upload: nodejsUpload, lang: 'javascript' },
+    go: { install: goInstall, upload: goUpload, lang: 'go' },
   } as const;
 
-  const active = SDK_META[sdkTab];
-
   return (
-    <div className="mt-4 flex flex-col gap-8">
-      {/* Region selector */}
-      <div className="flex items-center gap-3">
-        <label htmlFor="connection-region" className="text-sm font-medium text-zinc-700">
-          Region
-        </label>
-        <RegionSelect id="connection-region" value={region} onChange={setRegion} />
-      </div>
+    <div className="mt-6 flex flex-col gap-10">
+      {/* Connection: the canonical facts you need to connect. Region leads — it drives the rest. */}
+      <section>
+        <Heading tag="h3" size="sm" className="mb-3">
+          Connection
+        </Heading>
+        <Card padding="none" className="overflow-hidden">
+          <dl className="divide-y divide-zinc-100">
+            <div className="flex min-h-12 items-center gap-3 px-4 py-2">
+              <dt className="w-24 shrink-0 text-sm text-(--color-paragraph-text-subtle)">
+                <label htmlFor="connection-region">Region</label>
+              </dt>
+              <dd className="min-w-0 flex-1">
+                <div className="w-60 [&_select]:py-1.5 [&_select]:pr-8 [&_select]:text-xs">
+                  <RegionSelect id="connection-region" value={region} onChange={setRegion} />
+                </div>
+              </dd>
+            </div>
+            <div className="group flex min-h-12 items-center gap-3 px-4 py-2">
+              <dt className="w-24 shrink-0 text-sm text-(--color-paragraph-text-subtle)">
+                S3 Endpoint
+              </dt>
+              <dd className="min-w-0 flex-1 truncate font-mono text-sm text-(--color-text-base)">
+                {s3Endpoint}
+              </dd>
+              <span className="shrink-0 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100 max-sm:opacity-100">
+                <CopyButton value={s3Endpoint} />
+              </span>
+            </div>
+            <div className="flex min-h-12 items-center gap-3 px-4 py-2">
+              <dt className="w-24 shrink-0 text-sm text-(--color-paragraph-text-subtle)">
+                Credentials
+              </dt>
+              <dd className="min-w-0 flex-1 text-sm text-(--color-paragraph-text-strong)">
+                Your Fil One key + secret
+              </dd>
+              <button
+                type="button"
+                onClick={onViewKeys}
+                className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-brand-600 transition-colors hover:text-brand-700"
+              >
+                View keys
+                <ArrowRightIcon size={12} weight="bold" />
+              </button>
+            </div>
+            <div className="flex min-h-12 items-center gap-3 px-4 py-2">
+              <dt className="w-24 shrink-0 text-sm text-(--color-paragraph-text-subtle)">
+                Path style
+              </dt>
+              <dd className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+                <span className="font-mono text-(--color-text-base)">forcePathStyle: true</span>
+                <Badge color="grey" size="sm">
+                  required
+                </Badge>
+              </dd>
+            </div>
+          </dl>
+        </Card>
+      </section>
 
-      {/* Endpoint + Region card */}
-      <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
-        <div className="flex items-center border-b border-zinc-100 px-4 py-3">
-          <span className="w-28 shrink-0 text-sm text-zinc-500">S3 Endpoint</span>
-          <span className="flex-1 font-mono text-sm text-zinc-900">{s3Endpoint}</span>
-          <CopyButton value={s3Endpoint} />
-        </div>
-        <div className="flex items-center px-4 py-3">
-          <span className="w-28 shrink-0 text-sm text-zinc-500">Region</span>
-          <span className="flex-1 font-mono text-sm text-zinc-900">{region}</span>
-          <CopyButton value={region} />
-        </div>
-      </div>
-
-      {/* Quickstart CLI */}
-      <div>
-        <div className="mb-4 flex items-center justify-between">
+      {/* Quickstart: the fastest path — copy-paste shell commands */}
+      <section>
+        <div className="mb-3 flex items-center justify-between">
           <Heading tag="h3" size="sm">
             Quickstart (AWS CLI)
           </Heading>
@@ -206,162 +230,89 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
             href={DOCS_URL}
             target="_blank"
             rel="noreferrer"
-            className="text-xs font-medium text-brand-600 hover:underline"
+            className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 transition-colors hover:text-brand-700 hover:underline"
           >
-            View docs ↗
+            View docs
+            <ArrowUpRightIcon size={12} weight="bold" />
           </a>
         </div>
-        <div className="flex flex-col gap-3">
-          {[
-            {
-              n: 1,
-              title: 'Configure your S3 client',
-              code: `aws configure set aws_access_key_id YOUR_ACCESS_KEY\naws configure set aws_secret_access_key YOUR_SECRET_KEY\naws configure set default.region ${region}`,
-            },
-            {
-              n: 2,
-              title: 'Create a bucket',
-              code: `aws s3 mb s3://my-bucket --endpoint-url ${s3Endpoint}`,
-            },
-            {
-              n: 3,
-              title: 'Upload a file',
-              code: `aws s3 cp ./my-file.parquet s3://my-bucket/ --endpoint-url ${s3Endpoint}`,
-            },
-          ].map(({ n, title, code }) => (
-            <div key={n} className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
-              <div className="flex items-center gap-3 border-b border-zinc-100 px-4 py-2.5">
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-600">
-                  {n}
-                </span>
-                <span className="text-sm font-medium text-zinc-800">{title}</span>
-              </div>
-              <div className="px-4 py-3">
-                <CodeBlock language="sh" code={code} />
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+        <Card padding="none" className="divide-y divide-zinc-100 overflow-hidden">
+          <Step n={1} title="Configure your S3 client">
+            <CodeBlock
+              minimal
+              code={`aws configure set aws_access_key_id YOUR_ACCESS_KEY\naws configure set aws_secret_access_key YOUR_SECRET_KEY\naws configure set default.region ${region}`}
+            />
+          </Step>
+          <Step n={2} title="Create a bucket">
+            {supportsBucketManagement(region) ? (
+              <CodeBlock minimal code={`aws s3 mb s3://my-bucket --endpoint-url ${s3Endpoint}`} />
+            ) : (
+              <p className="text-sm text-(--color-paragraph-text)">
+                {getRegionLabel(region)} doesn&apos;t support creating buckets over the S3 API.
+                Create one in the{' '}
+                <a
+                  href="/buckets"
+                  className="font-medium text-brand-600 transition-colors hover:text-brand-700 hover:underline"
+                >
+                  Buckets
+                </a>{' '}
+                console instead.
+              </p>
+            )}
+          </Step>
+          <Step n={3} title="Upload a file">
+            <CodeBlock
+              minimal
+              code={`aws s3 cp ./my-file.parquet s3://my-bucket/ --endpoint-url ${s3Endpoint}`}
+            />
+          </Step>
+        </Card>
+      </section>
 
-      {/* SDK Examples */}
-      <div>
-        <Heading tag="h3" size="sm" className="mb-4">
+      {/* SDK examples: code snippets, one language per tab */}
+      <section>
+        <Heading tag="h3" size="sm" className="mb-3">
           SDK examples
         </Heading>
-        <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
+        <Card padding="none" className="overflow-hidden">
           {/* Tab bar */}
-          <div className="flex border-b border-zinc-200 bg-zinc-50">
-            {(['python', 'nodejs', 'go'] as const).map((lang) => (
+          <div className="flex gap-1 overflow-x-auto border-b border-zinc-100 px-2">
+            {(
+              [
+                ['python', 'Python'],
+                ['nodejs', 'Node.js'],
+                ['go', 'Go'],
+              ] as const
+            ).map(([key, label]) => (
               <button
-                key={lang}
+                key={key}
                 type="button"
-                onClick={() => setSdkTab(lang)}
-                className={`px-4 py-2.5 text-sm font-medium transition-colors ${
-                  sdkTab === lang
-                    ? 'border-b-2 border-brand-600 text-brand-700'
-                    : 'text-zinc-500 hover:text-zinc-700'
+                onClick={() => setSdkTab(key)}
+                aria-pressed={sdkTab === key}
+                className={`relative shrink-0 rounded-t px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-600 ${
+                  sdkTab === key
+                    ? 'text-brand-700'
+                    : 'text-(--color-paragraph-text-subtle) hover:text-(--color-paragraph-text-strong)'
                 }`}
               >
-                {SDK_META[lang].label}
+                {label}
+                {sdkTab === key && (
+                  <span className="absolute inset-x-3 -bottom-px h-0.5 rounded-full bg-brand-600" />
+                )}
               </button>
             ))}
           </div>
           {/* Content */}
-          <div className="flex flex-col gap-0">
-            <div className="border-b border-zinc-100 px-4 py-2.5">
-              <span className="text-xs text-zinc-500">Using </span>
-              <code className="text-xs font-medium text-zinc-700">
-                {active.hint.replace('Using ', '')}
-              </code>
-            </div>
-            <div className="overflow-hidden border-b border-zinc-100">
-              <div className="flex items-center gap-3 border-b border-zinc-100 px-4 py-2.5">
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-600">
-                  1
-                </span>
-                <span className="text-sm font-medium text-zinc-800">Install</span>
-              </div>
-              <div className="px-4 py-3">
-                <CodeBlock language="sh" code={active.install} />
-              </div>
-            </div>
-            <div>
-              <div className="flex items-center gap-3 border-b border-zinc-100 px-4 py-2.5">
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-600">
-                  2
-                </span>
-                <span className="text-sm font-medium text-zinc-800">Upload &amp; retrieve</span>
-              </div>
-              <div className="px-4 py-3">
-                <CodeBlock language={active.lang} code={active.upload} />
-              </div>
-            </div>
+          <div className="divide-y divide-zinc-100">
+            <Step n={1} title="Install">
+              <CodeBlock minimal code={SDK_META[sdkTab].install} />
+            </Step>
+            <Step n={2} title="Upload & retrieve">
+              <CodeBlock minimal language={SDK_META[sdkTab].lang} code={SDK_META[sdkTab].upload} />
+            </Step>
           </div>
-        </div>
-      </div>
-
-      {/* Migrating from AWS S3 */}
-      <div>
-        <Heading tag="h3" size="sm" className="mb-2">
-          Migrating from AWS S3
-        </Heading>
-        <p className="mb-4 text-sm text-zinc-600">
-          Fil One is fully S3-compatible. In most cases, you only need to change two settings in
-          your existing code.
-        </p>
-        <div className="overflow-hidden rounded-lg border border-zinc-200">
-          <table className="w-full text-sm">
-            <tbody>
-              {[
-                {
-                  label: 'Endpoint URL',
-                  aws: 'https://s3.amazonaws.com',
-                  fil: s3Endpoint,
-                  highlight: true,
-                },
-                {
-                  label: 'Credentials',
-                  aws: 'AWS IAM key + secret',
-                  fil: 'Fil One key + secret',
-                  highlight: true,
-                },
-                { label: 'Region', aws: 'Any AWS region', fil: region, highlight: false },
-                {
-                  label: 'Path style',
-                  aws: 'Optional',
-                  fil: 'Required (forcePathStyle: true)',
-                  highlight: false,
-                },
-              ].map((row) => (
-                <tr key={row.label} className="border-b border-zinc-100 last:border-0">
-                  <td className="w-28 px-4 py-2.5 text-xs font-medium text-zinc-500">
-                    {row.label}
-                  </td>
-                  <td className="px-4 py-2.5 font-mono text-xs text-zinc-500 line-through">
-                    {row.aws}
-                  </td>
-                  <td
-                    className={`px-4 py-2.5 font-mono text-xs ${row.highlight ? 'rounded bg-brand-50 font-semibold text-brand-700' : 'text-zinc-700'}`}
-                  >
-                    {row.fil}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="border-t border-zinc-200 bg-zinc-50 px-4 py-2.5 text-xs text-zinc-600">
-            ✓ All S3 operations (PUT, GET, DELETE, multipart, presigned URLs) are supported
-          </div>
-        </div>
-      </div>
-
-      {/* Manage buckets */}
-      <div className="flex justify-center border-t border-zinc-100 pt-4">
-        <a href="/buckets" className="text-sm font-medium text-zinc-500 hover:text-zinc-800">
-          Manage buckets →
-        </a>
-      </div>
+        </Card>
+      </section>
     </div>
   );
 }
@@ -381,6 +332,7 @@ export function ApiKeysPage() {
   });
   const keys = data?.keys ?? [];
 
+  const [tabIndex, setTabIndex] = useState(0);
   const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
 
   const deleteKeyMutation = useMutation({
@@ -449,7 +401,7 @@ export function ApiKeysPage() {
         </Button>
       }
     >
-      <Tabs>
+      <Tabs selectedIndex={tabIndex} onChange={setTabIndex}>
         <TabList>
           <Tab testId="api-keys-tab">API keys {keys.length > 0 && `(${keys.length})`}</Tab>
           <Tab testId="connection-details-tab">Connection details</Tab>
@@ -464,7 +416,7 @@ export function ApiKeysPage() {
             />
           </TabPanel>
           <TabPanel>
-            <ConnectionDetailsTab />
+            <ConnectionDetailsTab onViewKeys={() => setTabIndex(0)} />
           </TabPanel>
         </TabPanels>
       </Tabs>
