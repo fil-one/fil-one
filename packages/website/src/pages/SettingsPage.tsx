@@ -463,7 +463,8 @@ function DangerSection({ me }: { me: MeResponse }) {
         <div>
           <p className="text-sm font-medium text-zinc-900">Delete account</p>
           <p className="text-xs text-zinc-500 mt-1">
-            Permanently delete your account, organization, and all data. This cannot be undone.
+            Permanently delete your account and organization, and disable your storage. This cannot
+            be undone.
           </p>
         </div>
         <Button

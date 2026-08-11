@@ -249,10 +249,10 @@ function DeletionWarning({ orgName }: { orgName: string }) {
         <p className="text-sm text-zinc-500">
           This permanently deletes your Fil One account and organization{' '}
           <span className="font-medium text-zinc-900">{orgName}</span>: any active subscription is
-          being canceled, all access keys are revoked, and your profile and account data are
-          deleted. Object data stored is locked and inaccessible, and is scheduled for later
-          destruction — it is not instantly erased from underlying storage. This action cannot be
-          undone.
+          being canceled, your storage is disabled so no access key can be used, and your profile
+          and account data are deleted. Object data stored is locked and inaccessible, and is
+          scheduled for later destruction — it is not instantly erased from underlying storage. This
+          action cannot be undone.
         </p>
       </div>
     </div>
