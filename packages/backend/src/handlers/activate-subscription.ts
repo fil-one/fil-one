@@ -28,6 +28,19 @@ const dynamo = getDynamoClient();
 
 type PaymentMethodResolution = string | APIGatewayProxyResultV2;
 
+type ActivatableRecord =
+  | { record: Record<string, unknown>; stripeCustomerId: string }
+  | { error: APIGatewayProxyResultV2 };
+
+interface CreateOrUpdateSubscriptionParams {
+  stripe: ReturnType<typeof getStripeClient>;
+  record: Record<string, unknown>;
+  paymentMethodId: string;
+  secrets: ReturnType<typeof getBillingSecrets>;
+  userId: string;
+  promotionCodeId?: string;
+}
+
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { userId, orgId } = getUserInfo(event);
   const stripe = getStripeClient();
@@ -52,7 +65,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   const { useSavedPaymentMethod, promotionCode } = parsed.data;
 
   // 2. Get customer record from billing table
-  const resolved = await resolveActivatableRecord(userId, orgId);
+  const resolved = await resolveRecordForActivation(userId, orgId);
   if ('error' in resolved) return resolved.error;
   const { record, stripeCustomerId } = resolved;
 
@@ -116,7 +129,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
 
   // 6. Persist billing record and unlock the tenant on every orchestrator.
   const saveArgs = { userId, orgId, subscription, paymentMethodId, mappedStatus };
-  const deletionGuardResponse = await persistBillingAndUnlock(saveArgs);
+  const deletionGuardResponse = await persistBillingAndUnlockRegions(saveArgs);
   if (deletionGuardResponse) return deletionGuardResponse;
 
   const response: ActivateSubscriptionResponse = {
@@ -138,7 +151,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
  * record, this request must not unlock tenants the teardown is disabling —
  * returns the 410 ACCOUNT_DELETED response instead, or null on success.
  */
-async function persistBillingAndUnlock(params: {
+async function persistBillingAndUnlockRegions(params: {
   userId: string;
   orgId: string;
   subscription: Stripe.Subscription;
@@ -204,10 +217,6 @@ function isAlreadyCanceled(error: unknown): boolean {
   return e.code === 'resource_missing' || /can only be canceled once/i.test(e.message ?? '');
 }
 
-type ActivatableRecord =
-  | { record: Record<string, unknown>; stripeCustomerId: string }
-  | { error: APIGatewayProxyResultV2 };
-
 /**
  * Loads the billing record and refuses everything that must not reach Stripe.
  *
@@ -219,7 +228,10 @@ type ActivatableRecord =
  * depth, not a replacement: the guarded write still owns the genuine race
  * where the teardown lands after this read.
  */
-async function resolveActivatableRecord(userId: string, orgId: string): Promise<ActivatableRecord> {
+async function resolveRecordForActivation(
+  userId: string,
+  orgId: string,
+): Promise<ActivatableRecord> {
   const record = await getCustomerBillingRecord(userId);
   const stripeCustomerId = record?.stripeCustomerId as string | undefined;
 
@@ -278,15 +290,6 @@ async function getCustomerBillingRecord(
   );
 
   return result.Item ? unmarshall(result.Item) : undefined;
-}
-
-interface CreateOrUpdateSubscriptionParams {
-  stripe: ReturnType<typeof getStripeClient>;
-  record: Record<string, unknown>;
-  paymentMethodId: string;
-  secrets: ReturnType<typeof getBillingSecrets>;
-  userId: string;
-  promotionCodeId?: string;
 }
 
 async function createOrUpdateSubscription({
