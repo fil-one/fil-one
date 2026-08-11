@@ -415,7 +415,7 @@ describe('delete-account baseHandler', () => {
 
     await expect(baseHandler(makeEvent())).rejects.toThrow(/Deletion start incomplete/);
 
-    // Fence C (the session tombstone) landed anyway.
+    // The identity tombstone landed anyway.
     const identityWrites = ddbMock
       .commandCalls(UpdateItemCommand)
       .filter((c) => c.args[0].input.Key?.pk?.S === `SUB#${SUB}`);

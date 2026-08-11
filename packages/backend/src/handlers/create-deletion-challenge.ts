@@ -60,7 +60,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   // stays on while a DELETION record exists, so an org whose teardown keeps
   // failing stays fenced against access-key and RAG-key creation, RAG toggling
   // and tenant re-activation — which is the intent while a deletion is in
-  // flight. The supported unwedge is `clearOrgDeletionFence`, driven by the
+  // flight. The supported unwedge is `clearOrgDeletionGuard`, driven by the
   // deletion reconciler for orgs carrying the flag with NO deletion record
   // (jobs/account-deletion-orchestrator.ts).
   if (await readDeletionRecord(orgId)) {

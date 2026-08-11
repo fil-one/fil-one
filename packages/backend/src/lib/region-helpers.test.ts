@@ -123,7 +123,7 @@ describe('syncTenantStatusInProvisionedRegions', () => {
     expect(aurora.updateTenantStatus).toHaveBeenCalledWith('aurora:org-1', 'active');
   });
 
-  describe('FIL-112 fence B — re-activation only', () => {
+  describe('FIL-112 org-profile `deleting` guard — re-activation only', () => {
     /** Make the profile read report an org whose teardown has started. */
     function orgIsDeleting(orgId = 'org-1') {
       mockGetOrgProfile.mockResolvedValue({ ...fakeOrgProfile(orgId), deleting: { BOOL: true } });

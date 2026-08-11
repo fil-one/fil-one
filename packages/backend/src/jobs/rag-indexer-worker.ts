@@ -65,7 +65,7 @@ export async function handler(
   let regionFailures = 0;
 
   try {
-    // FIL-112 fence B, checked ONCE per invocation. The indexer's per-object
+    // FIL-112: the org-profile `deleting` guard, checked ONCE per invocation. The indexer's per-object
     // writes (rag-indexer-manifest's MANIFEST# and CHECKPOINT# Puts) are
     // unconditional and would happily re-create rows the teardown's purge just
     // swept, so the whole org's run is refused instead of fencing each write: a

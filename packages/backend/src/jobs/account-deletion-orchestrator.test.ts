@@ -63,7 +63,7 @@ function doneRecord(orgId: string, overrides?: Record<string, unknown>) {
   });
 }
 
-/** An `ORG#{orgId}/PROFILE` row still carrying fence B. */
+/** An `ORG#{orgId}/PROFILE` row still carrying the `deleting` guard. */
 function fencedProfile(orgId: string) {
   return marshall({ pk: `ORG#${orgId}`, sk: 'PROFILE', deleting: true });
 }

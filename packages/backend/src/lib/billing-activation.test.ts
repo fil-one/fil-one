@@ -28,7 +28,7 @@ vi.mock('./metrics.js', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 import { saveBillingRecord } from './billing-activation.js';
-import { DELETION_GUARD } from './deletion-guard.js';
+import { DELETION_GUARD } from './deletion-guards.js';
 
 const USER_ID = 'user-1';
 

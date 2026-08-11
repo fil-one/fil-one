@@ -3,7 +3,7 @@ import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { clearOrgDeletionFence } from '../lib/deletion-guards.js';
+import { clearOrgDeletionGuard } from '../lib/deletion-guards.js';
 import {
   sweepResurrectedOrgs,
   type ResurrectedOrg,
@@ -336,7 +336,7 @@ function mergeResurrected(swept: ResurrectedOrg[], fromFences: string[]): Resurr
  *   orphaned. Clear it.
  *
  * The scan that produced these ids is eventually consistent, so "absent" here
- * only means "absent from the scan". It is never trusted: `clearOrgDeletionFence`
+ * only means "absent from the scan". It is never trusted: `clearOrgDeletionGuard`
  * asserts the record's absence transactionally against the write, which both
  * closes the start-a-deletion-mid-reconcile race and removes the need for a
  * separate strongly-consistent read. The cost is that an org whose DONE record
@@ -369,7 +369,7 @@ async function reconcileDeletionFences(
       continue;
     }
     try {
-      if (await clearOrgDeletionFence(orgId)) {
+      if (await clearOrgDeletionGuard(orgId)) {
         unwedged += 1;
         console.warn(
           '[account-deletion-orchestrator] Cleared an orphaned deletion fence: the org profile ' +

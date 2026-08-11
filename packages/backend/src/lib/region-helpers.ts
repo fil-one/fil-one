@@ -74,7 +74,7 @@ export async function getRegionsWithTenantIdsForOrg(orgId: string): Promise<Prov
 export interface RegionSyncOutcome {
   orchestratorId: string;
   tenantId: string;
-  /** `refused` = fence B blocked a re-activation; see {@link RegionSyncResult}. */
+  /** `refused` = the org-profile `deleting` guard blocked a re-activation; see {@link RegionSyncResult}. */
   outcome: 'updated' | 'in-sync' | 'skipped' | 'not-found' | 'error' | 'refused';
   cause?: unknown;
 }
@@ -83,7 +83,7 @@ export interface RegionSyncResult {
   /** One entry per provisioned region. Empty when the org has no tenants yet. */
   outcomes: RegionSyncOutcome[];
   /**
-   * Fence B (FIL-112) refused a re-activation because the org is being deleted.
+   * The org-profile `deleting` guard (FIL-112) refused a re-activation because the org is being deleted.
    * Callers that log success after {@link assertRegionSyncSucceeded} must
    * consult this — `refused` is deliberately not an `error` (nothing failed,
    * and re-driving would not help), so the assert lets it through.
@@ -147,7 +147,7 @@ export const WEBHOOK_STATUS_SYNC_RETRY: RetryOptions = { retries: 1, minTimeout:
 // The fence read is strongly consistent (`deleting` is absent until teardown
 // starts, so a stale read fails open) and costs no extra request: it replaces
 // the profile read `getProvisionedRegions` was already doing. This is the READ
-// side of fence B, so — unlike the write-side `orgNotDeletingCheck`, which
+// side of the org-profile `deleting` guard, so — unlike the write-side `orgNotDeletingCheck`, which
 // requires the row — it is meaningful only while the PROFILE row exists: once
 // the purge deletes it this reads nothing. That is harmless here, because the
 // same read then resolves no provisioned region, so there is no tenant left to

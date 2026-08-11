@@ -31,7 +31,7 @@ import {
   closeOutDeletedCustomer,
   resolveOrgIdFromSubscription,
 } from './deleted-customer-cleanup.js';
-import { DELETION_GUARD } from './deletion-guard.js';
+import { DELETION_GUARD } from './deletion-guards.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -54,7 +54,7 @@ function errorOutcome(orchestratorId: string) {
   };
 }
 
-/** `disabled` is never refused by fence B, so this path only ever sees `false`. */
+/** `disabled` is never refused by the org-profile `deleting` guard, so this path only ever sees `false`. */
 function syncResult(outcomes: ReturnType<typeof okOutcome | typeof errorOutcome>[]) {
   return { outcomes, refusedForDeletion: false };
 }

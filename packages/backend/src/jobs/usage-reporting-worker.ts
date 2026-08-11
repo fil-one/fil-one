@@ -27,7 +27,7 @@ import {
   syncTenantStatusInProvisionedRegions,
 } from '../lib/region-helpers.js';
 import { UsageReportKeys } from '../lib/dynamo-records.js';
-import { OrgDeletingError, sendFencedWrite } from '../lib/org-profile.js';
+import { OrgDeletingError, sendGuardedWrite } from '../lib/org-profile.js';
 
 export interface UsageReportingWorkerPayload {
   orgId: string;
@@ -76,7 +76,7 @@ async function enforceTenantLocks({
     desired,
   );
 
-  // Fence B refused the re-activation (FIL-112): report that rather than
+  // The org-profile `deleting` guard refused the re-activation (FIL-112): report that rather than
   // claiming the org was driven to `desired`. Read off the org-level flag, not
   // the outcomes — an org with no provisioned region is still refused.
   if (refusedForDeletion) return 'skipped:org-deleting';
@@ -532,7 +532,7 @@ async function writeUsageAuditRecord(params: {
   // Skipped rather than thrown: the audit row is the last step of a run whose
   // real work is already done, and failing here would only re-drive that work.
   try {
-    await sendFencedWrite(params.orgId, [
+    await sendGuardedWrite(params.orgId, [
       {
         Put: {
           TableName: Resource.BillingTable.name,
