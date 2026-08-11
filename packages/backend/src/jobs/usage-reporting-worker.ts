@@ -523,9 +523,9 @@ async function writeUsageAuditRecord(params: {
   orgSyncAction: string;
 }): Promise<void> {
   const ttl = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60; // 365 days
-  // FIL-112: fenced on the org's `deleting` flag. This is the only BillingTable
-  // `ORG#` writer, and its row now IS purged by teardown (see
-  // PURGEABLE_BILLING_PK_PREFIXES); without the fence a daily run landing after
+  // FIL-112: guarded on the org's `deleting` flag. This is the only BillingTable
+  // `ORG#` writer, and its row now IS deleted by teardown (see
+  // `deleteBillingOrgRows`); without the guard a daily run landing after
   // the purge would re-create a deleted org's usage row and hold it for the
   // full 365-day TTL. The fence also refuses once the PROFILE row itself is
   // gone (it requires the row), which is exactly the post-purge case here.

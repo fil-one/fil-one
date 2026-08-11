@@ -15,15 +15,11 @@ import { deleteDeletionChallenge } from './deletion-challenge.js';
 import { applyDeletionGuards } from './deletion-guards.js';
 import { readDeletionRecord } from './deletion-record.js';
 import {
-  assertPurgeablePk,
   batchDelete,
-  PURGEABLE_RAG_INDEXER_PK_PREFIXES,
-  purgeBillingOrgRows,
-  purgeRagKeyHashRows,
+  deleteBillingOrgRows,
+  deleteRagKeyHashRows,
   queryOrgRows,
-  scanRagKeys,
-  PURGEABLE_BILLING_PK_PREFIXES,
-  PURGEABLE_USER_INFO_PK_PREFIXES,
+  listRagKeys,
 } from './deletion-purge.js';
 import {
   DeletionKeys,
@@ -49,7 +45,7 @@ const dynamo = getDynamoClient();
  * Stripe Search indexes writes with a lag (~25s, measured 2026-08-07). A
  * customer minted inside the deletion race is therefore invisible to discovery
  * until this long after IT WAS CREATED — which is why the wait below is
- * anchored on `purgedAt` (the instant minting became impossible) and not on
+ * anchored on `deletedAt` (the instant minting became impossible) and not on
  * `requestedAt`. Anchoring on the request only bounds the mint that happens at
  * the very instant of the request: on a large org whose pass runs for minutes,
  * an in-flight request that beat the fence can mint a customer near the END of
@@ -76,30 +72,30 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  * pass, so a FIRST pass always waits the full margin — every healthy deletion,
  * whatever the org's size. Purge duration cannot count against the wait,
  * because the anchor is set after the purge, not before it. Only a re-drive
- * (whose stored `purgedAt` is already old) waits less, and a legacy/corrupt one
+ * (whose stored `deletedAt` is already old) waits less, and a legacy/corrupt one
  * waits zero. The margin is therefore ADDITIVE to the pass: headroom against
  * the 900s Lambda budget is 900s - 60s. Convergence is unaffected either way —
- * a first pass killed at the 900s timeout re-drives with `purgedAt` already
+ * a first pass killed at the 900s timeout re-drives with `deletedAt` already
  * stored, and that pass waits zero.
  *
- * A missing or unparseable `purgedAt` is treated as "old enough" rather than
+ * A missing or unparseable `deletedAt` is treated as "old enough" rather than
  * hard-failing: legacy DELETION records predate this field (see
  * dynamo-records.ts), and wedging their teardown forever is strictly worse than
  * running a discovery pass that may be early.
  */
 async function waitOutStripeSearchLag(orgId: string, record: OrgDeletionRecord): Promise<void> {
-  const purgedAtMs = Date.parse(record.purgedAt ?? '');
-  if (Number.isNaN(purgedAtMs)) {
+  const deletedAtMs = Date.parse(record.deletedAt ?? '');
+  if (Number.isNaN(deletedAtMs)) {
     console.warn(
-      '[account-deletion] DELETION record carries no usable purgedAt; treating the Stripe ' +
+      '[account-deletion] DELETION record carries no usable deletedAt; treating the Stripe ' +
         'search-index lag as already elapsed',
-      { orgId, purgedAt: record.purgedAt },
+      { orgId, deletedAt: record.deletedAt },
     );
     return;
   }
-  const elapsedMs = Date.now() - purgedAtMs;
+  const elapsedMs = Date.now() - deletedAtMs;
   if (elapsedMs >= STRIPE_SEARCH_LAG_MARGIN_MS) return;
-  // Clamped to the margin: a `purgedAt` in the future (clock skew between the
+  // Clamped to the margin: a `deletedAt` in the future (clock skew between the
   // Lambda that stamped it and this one) must never park the pass for longer
   // than the wait it is standing in for.
   const remainingMs = Math.min(
@@ -162,9 +158,9 @@ export interface RunAccountDeletionOptions {
  * {@link RunAccountDeletionOptions}.
  *
  * One pass is therefore: bump the attempt count, re-apply the fences, settle
- * all four external teardowns, purge the DDB records and stamp `purgedAt`,
+ * all four external teardowns, purge the DDB records and stamp `deletedAt`,
  * wait out Stripe's search-index lag — the full 60s margin on a first pass,
- * since `purgedAt` was stamped moments earlier; only a re-drive finds it
+ * since `deletedAt` was stamped moments earlier; only a re-drive finds it
  * already elapsed — run Stripe discovery a SECOND time, then mark DONE. Stripe runs
  * twice because its customer discovery is index-lagged; see the second call
  * site below. The in-pass wait is deliberate — deferring to a retry instead
@@ -207,7 +203,7 @@ export async function runAccountDeletion(
     console.warn(
       '[account-deletion] Re-sweeping an org whose teardown already completed — rows were ' +
         'observed after the purge',
-      { orgId, purgedAt: record.purgedAt },
+      { orgId, deletedAt: record.deletedAt },
     );
   }
 
@@ -654,7 +650,7 @@ async function deleteAuth0Users(record: OrgDeletionRecord): Promise<void> {
 async function purgeRagData(orgId: string): Promise<void> {
   const vectorStore = new S3VectorsStore(Resource.RagVectorBucket.name);
   // Both prefixes in ONE paged scan — the table is scanned once, not per prefix.
-  const keys = await scanRagKeys(orgId);
+  const keys = await listRagKeys(orgId);
   const droppedIndexes = new Set<string>();
 
   for (const key of keys) {
@@ -663,7 +659,7 @@ async function purgeRagData(orgId: string): Promise<void> {
     // INDEXER_CHECKPOINT# pks parse to undefined and are skipped inside.
     await dropVectorIndexForPk(vectorStore, key.pk);
   }
-  await batchDelete(Resource.RagIndexerTable.name, keys, PURGEABLE_RAG_INDEXER_PK_PREFIXES);
+  await batchDelete(Resource.RagIndexerTable.name, keys);
 }
 
 /** Drop the S3 Vectors index behind a BUCKET# pk; already-gone is success. */
@@ -709,26 +705,25 @@ async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<v
   // to anything else. Hashes therefore go FIRST: a crash mid-purge leaves a
   // RAGKEY# row with no lookup — an unusable key, swept next pass — instead of
   // a credential hash no later pass could ever find again. (The reverse order
-  // would strand it forever, which is exactly what purgeRagKeyHashRows exists to
+  // would strand it forever, which is exactly what deleteRagKeyHashRows exists to
   // prevent.) The window this leaves — a key created between the two deletes —
   // is already closed by the org-profile `deleting` guard: PROFILE still exists here carrying
   // `deleting = true`, re-armed every pass by applyDeletionGuards, so
   // create-rag-api-key is refused outright.
-  await purgeRagKeyHashRows(orgRows);
+  await deleteRagKeyHashRows(orgRows);
 
   // The ACCESSKEY# rows go with the rest of the partition: their upstream keys
   // died with the tenant, so no per-key orchestrator revocation is needed.
   const orgKeys = orgRows
     .filter((row) => row.sk !== DeletionKeys.deletionSk())
     .map((row) => ({ pk: row.pk as string, sk: row.sk as string }));
-  await batchDelete(Resource.UserInfoTable.name, orgKeys, PURGEABLE_USER_INFO_PK_PREFIXES);
+  await batchDelete(Resource.UserInfoTable.name, orgKeys);
 
   // BillingTable `ORG#{orgId}` — the usage-reporting worker's audit rows.
-  await purgeBillingOrgRows(orgId);
+  await deleteBillingOrgRows(orgId);
 
   for (const member of record.members) {
     const userKey = { pk: `USER#${member.userId}`, sk: 'PROFILE' };
-    assertPurgeablePk(userKey.pk, PURGEABLE_USER_INFO_PK_PREFIXES);
     await dynamo.send(
       new DeleteItemCommand({ TableName: Resource.UserInfoTable.name, Key: marshall(userKey) }),
     );
@@ -737,7 +732,6 @@ async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<v
     // only) so a stale-but-valid session can never resurrect the account —
     // strip the PII-adjacent attributes instead of deleting the row.
     if (member.sub) {
-      assertPurgeablePk(`SUB#${member.sub}`, PURGEABLE_USER_INFO_PK_PREFIXES);
       await dynamo.send(
         new UpdateItemCommand({
           TableName: Resource.UserInfoTable.name,
@@ -751,7 +745,6 @@ async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<v
     }
 
     const billingKey = { pk: `CUSTOMER#${member.userId}`, sk: 'SUBSCRIPTION' };
-    assertPurgeablePk(billingKey.pk, PURGEABLE_BILLING_PK_PREFIXES);
     await dynamo.send(
       new DeleteItemCommand({ TableName: Resource.BillingTable.name, Key: marshall(billingKey) }),
     );
@@ -780,15 +773,15 @@ async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<v
  * than kept in memory) for exactly that reason.
  */
 async function stampPurgedAt(orgId: string, record: OrgDeletionRecord): Promise<void> {
-  const purgedAt = record.purgedAt ?? new Date().toISOString();
+  const deletedAt = record.deletedAt ?? new Date().toISOString();
   await dynamo.send(
     new UpdateItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: marshall({ pk: DeletionKeys.deletionPk(orgId), sk: DeletionKeys.deletionSk() }),
-      UpdateExpression: 'SET purgedAt = if_not_exists(purgedAt, :purgedAt), updatedAt = :now',
+      UpdateExpression: 'SET deletedAt = if_not_exists(deletedAt, :deletedAt), updatedAt = :now',
       ConditionExpression: 'attribute_exists(pk)',
       ExpressionAttributeValues: marshall({
-        ':purgedAt': purgedAt,
+        ':deletedAt': deletedAt,
         ':now': new Date().toISOString(),
       }),
     }),
@@ -796,7 +789,7 @@ async function stampPurgedAt(orgId: string, record: OrgDeletionRecord): Promise<
   // Keep the in-memory record in step for the wait below. A concurrent worker
   // that stamped first wins in DynamoDB; using our own (later) value here only
   // ever waits longer, never less.
-  record.purgedAt = purgedAt;
+  record.deletedAt = deletedAt;
 }
 
 /**

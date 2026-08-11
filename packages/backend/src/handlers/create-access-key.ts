@@ -191,7 +191,7 @@ async function recordIssuedAccessKey(args: {
     return true;
   } catch (err) {
     if (!(err instanceof OrgDeletingError)) throw err;
-    await compensateOrphanedKey({ orgId, tenantId, keyId: accessKey.id, orchestrator });
+    await cleanOrphanedKeys({ orgId, tenantId, keyId: accessKey.id, orchestrator });
     return false;
   }
 }
@@ -218,15 +218,13 @@ interface CompensateOrphanedKeyParams {
  * Failure is logged, not thrown: the caller's answer to the client is 410
  * either way, and masking that with a 500 would only invite a retry that mints
  * a second key. What a failed revoke leaves behind depends on the orchestrator
- * and is worth stating exactly: teardown does NOT delete every key. Aurora
+ * and is worth stating exactly: teardown does NOT revoke any key on Aurora, which
  * exposes no tenant DELETE at all (lib/aurora/aurora-orchestrator.ts) — it
- * disables the tenant and shreds its secrets, revoking only the console key, so
- * a user-issued key is never enumerated or revoked. The honest claim is that
- * the tenant is disabled, which renders the key inert; the key itself survives
- * with no DynamoDB row pointing at it, so this is logged at error with the ids
- * an operator needs.
+ * disables the tenant, which renders every key inert without revoking any of
+ * them. So the key here survives with no DynamoDB row pointing at it, which is
+ * why this is logged at error with the ids an operator needs.
  */
-async function compensateOrphanedKey({
+async function cleanOrphanedKeys({
   orgId,
   tenantId,
   keyId,
