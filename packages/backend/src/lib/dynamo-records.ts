@@ -307,21 +307,12 @@ export interface OrgDeletionRecord {
    */
   tenantIds?: Record<string, string>;
   /**
-   * Stripe Redaction Job driving the org customer's PII erasure, persisted at
-   * creation so retries advance the same job instead of creating duplicates.
-   *
-   * @deprecated Superseded by {@link stripeRedactionJobIds}, which says WHICH
-   *   customer each job covers. Still written by no one and still read: records
-   *   in flight when that change shipped carry only this field. Whether it
-   *   covers a given customer is resolved from Stripe, not assumed — see
-   *   `lib/stripe-redaction.ts`.
-   */
-  stripeRedactionJobId?: string;
-  /**
-   * Stripe customer id → the Redaction Job erasing that customer's PII. Keyed
-   * by customer because a teardown can face more than one: a resurrection
-   * (`createBillingTrial` landing after the purge) mints a NEW customer, and
-   * redacting it must not be short-circuited by the job covering the original.
+   * Stripe customer id → the Redaction Job erasing that customer's PII,
+   * persisted at creation so retries advance the same job instead of creating
+   * duplicates. Keyed by customer because a teardown can face more than one: a
+   * resurrection (`createBillingTrial` landing after the purge) mints a NEW
+   * customer, and redacting it must not be short-circuited by the job covering
+   * the original.
    */
   stripeRedactionJobIds?: Record<string, string>;
   /**

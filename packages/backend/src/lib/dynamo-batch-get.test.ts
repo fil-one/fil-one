@@ -59,7 +59,7 @@ describe('batchGet', () => {
       })
       .resolves({ Responses: { [TABLE]: [marshall(key(1))] } });
 
-    const items = await batchGet(TABLE, [key(0), key(1)], { retries: 4, minTimeout: 0 });
+    const items = await batchGet(TABLE, [key(0), key(1)], { retry: { retries: 4, minTimeout: 0 } });
 
     const sends = ddbMock.commandCalls(BatchGetItemCommand);
     expect(sends).toHaveLength(2);
@@ -74,11 +74,22 @@ describe('batchGet', () => {
       UnprocessedKeys: { [TABLE]: { Keys: [marshall(key(0))] } },
     });
 
-    await expect(batchGet(TABLE, [key(0)], { retries: 2, minTimeout: 0 })).rejects.toThrow(
-      /unprocessed key/,
-    );
+    await expect(
+      batchGet(TABLE, [key(0)], { retry: { retries: 2, minTimeout: 0 } }),
+    ).rejects.toThrow(/unprocessed key/);
 
     // 1 initial attempt + 2 retries.
     expect(ddbMock.commandCalls(BatchGetItemCommand)).toHaveLength(3);
+  });
+
+  it('reads eventually consistent by default and strongly consistent on request', async () => {
+    ddbMock.on(BatchGetItemCommand).resolves({ Responses: { [TABLE]: [] } });
+
+    await batchGet(TABLE, [key(0)]);
+    await batchGet(TABLE, [key(0)], { consistent: true });
+
+    const sends = ddbMock.commandCalls(BatchGetItemCommand);
+    expect(sends[0].args[0].input.RequestItems![TABLE].ConsistentRead).toBeUndefined();
+    expect(sends[1].args[0].input.RequestItems![TABLE].ConsistentRead).toBe(true);
   });
 });

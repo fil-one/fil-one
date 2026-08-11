@@ -190,7 +190,7 @@ const RESURRECTED_CUSTOMER = 'cus_resurrected';
  * The state a teardown that ACTUALLY COMPLETED leaves behind, which is the only
  * state a resweep ever runs against — and which `setupHappyMocks(Done)` does
  * NOT produce. That fixture is a pre-purge record with the status flipped: no
- * `stripeRedactionJobId`, no tombstone. A real completed teardown always wrote
+ * redaction job id, no tombstone. A real completed teardown always wrote
  * the tombstone and the redaction job BEFORE markDone, and for any org that
  * ever had a customer that tombstone names the ORIGINAL one — so every resweep
  * meets a tombstone/discovery disagreement by construction. Testing against the
@@ -204,7 +204,9 @@ function setupCompletedTeardownMocks(discovered: string[]) {
   ddbMock
     .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
     .resolves({
-      Item: deletionItem(OrgDeletionStatus.Done, { stripeRedactionJobId: 'prj_original' }),
+      Item: deletionItem(OrgDeletionStatus.Done, {
+        stripeRedactionJobIds: { [ORIGINAL_CUSTOMER]: 'prj_original' },
+      }),
     });
   ddbMock
     .on(GetItemCommand, { Key: { pk: { S: `ORG_TOMBSTONE#${ORG_ID}` }, sk: { S: 'TOMBSTONE' } } })
@@ -477,7 +479,7 @@ describe('runAccountDeletion', () => {
         .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
         .resolves({
           Item: deletionItem(OrgDeletionStatus.Done, {
-            stripeRedactionJobId: 'prj_original',
+            stripeRedactionJobIds: { [ORIGINAL_CUSTOMER]: 'prj_original' },
             resurrectedStripeCustomerIds: ['cus_ghost'],
           }),
         });
