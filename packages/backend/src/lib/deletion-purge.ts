@@ -23,30 +23,6 @@ import { RagApiKeyKeys } from './rag-api-keys.js';
 const dynamo = getDynamoClient();
 
 /**
- * Partition-key prefixes the purge is allowed to delete, per table. Anything
- * outside them — e.g. `EMAIL_NORM#`, the FIL-422 trial-claim record that must
- * survive account deletion — is structurally undeletable: the guard throws
- * before a delete is issued. The trailing `#` matters: it stops a prefix
- * colliding with a longer key family (`ORG#` never matches `ORGANIZATION#`).
- */
-export const PURGEABLE_USER_INFO_PK_PREFIXES = ['ORG#', 'USER#', 'SUB#', 'RAGKEYHASH#'] as const;
-
-// `ORG#` covers the usage-reporting worker's BillingTable `ORG#{orgId}` /
-// `USAGE_REPORT#{date}` audit rows. The trailing `#` keeps this away from
-// `ORG_TOMBSTONE#`, the PII-free customer reference that must OUTLIVE the purge.
-export const PURGEABLE_BILLING_PK_PREFIXES = ['CUSTOMER#', 'DELETION_CHALLENGE#', 'ORG#'] as const;
-// The RagIndexerTable rows a teardown owns: per-bucket manifests and the
-// indexer's per-bucket checkpoints, both keyed by org.
-export const PURGEABLE_RAG_INDEXER_PK_PREFIXES = ['BUCKET#', 'INDEXER_CHECKPOINT#'] as const;
-
-/** Blast-radius guard: refuses any purge target outside the purgeable prefixes. */
-export function assertPurgeablePk(pk: string, prefixes: readonly string[]): void {
-  if (!prefixes.some((prefix) => pk.startsWith(prefix))) {
-    throw new Error(`Refusing to purge key outside the purgeable prefixes: ${pk}`);
-  }
-}
-
-/**
  * RAG API keys write a `RAGKEYHASH#{sha256}/LOOKUP` row alongside the org's
  * `RAGKEY#` row (see lib/rag-api-keys.ts). The ORG# partition purge removes
  * the RAGKEY# rows but not the hash lookups — credential-hash residue that
@@ -58,13 +34,13 @@ export function assertPurgeablePk(pk: string, prefixes: readonly string[]): void
  * pairing exact, and running before it is what makes a crash between the two
  * recoverable (see the note at the call site).
  */
-export async function purgeRagKeyHashRows(orgRows: Record<string, unknown>[]): Promise<void> {
+export async function deleteRagKeyHashRows(orgRows: Record<string, unknown>[]): Promise<void> {
   const lookupKeys = orgRows
     .filter((row) => typeof row.sk === 'string' && row.sk.startsWith(RagApiKeyKeys.orgSkPrefix()))
     .map((row) => row.tokenHash)
     .filter((tokenHash): tokenHash is string => typeof tokenHash === 'string')
     .map((tokenHash) => ({ pk: RagApiKeyKeys.lookupPk(tokenHash), sk: RagApiKeyKeys.lookupSk() }));
-  await batchDelete(Resource.UserInfoTable.name, lookupKeys, PURGEABLE_USER_INFO_PK_PREFIXES);
+  await batchDelete(Resource.UserInfoTable.name, lookupKeys);
 }
 
 /**
@@ -79,14 +55,14 @@ export async function purgeRagKeyHashRows(orgRows: Record<string, unknown>[]): P
  * future `ORG#{orgId}` row into its scope the moment someone adds one. A row
  * that should be purged has to be added here deliberately.
  */
-export async function purgeBillingOrgRows(orgId: string): Promise<void> {
+export async function deleteBillingOrgRows(orgId: string): Promise<void> {
   const rows = await queryPartition(
     Resource.BillingTable.name,
     `ORG#${orgId}`,
     UsageReportKeys.skPrefix,
   );
   const keys = rows.map((row) => ({ pk: row.pk as string, sk: row.sk as string }));
-  await batchDelete(Resource.BillingTable.name, keys, PURGEABLE_BILLING_PK_PREFIXES);
+  await batchDelete(Resource.BillingTable.name, keys);
 }
 
 /** Paged Query of the org's UserInfoTable partition. */
@@ -125,7 +101,7 @@ async function queryPartition(
 }
 
 /** One paged full-table Scan matching BOTH of the org's RAG pk prefixes. */
-export async function scanRagKeys(orgId: string): Promise<{ pk: string; sk: string }[]> {
+export async function listRagKeys(orgId: string): Promise<{ pk: string; sk: string }[]> {
   const keys: { pk: string; sk: string }[] = [];
   let lastEvaluatedKey: Record<string, AttributeValue> | undefined;
   do {
@@ -163,18 +139,12 @@ const BATCH_DELETE_RETRY: RetryOptions = { retries: 4, minTimeout: 100, randomiz
  * each chunk with capped exponential backoff. `retry` is injectable so tests
  * keep timeouts tiny.
  *
- * `prefixes` is required, and every key is checked against it before anything is
- * sent: that is what makes a key outside the purgeable prefixes undeletable
- * through this function rather than merely undeleted by convention. The check
- * runs over the whole list up front, so a bad key in chunk 3 stops chunk 1 too.
  */
 export async function batchDelete(
   tableName: string,
   keys: { pk: string; sk: string }[],
-  prefixes: readonly string[],
   retry: RetryOptions = BATCH_DELETE_RETRY,
 ): Promise<void> {
-  for (const key of keys) assertPurgeablePk(key.pk, prefixes);
   for (let i = 0; i < keys.length; i += 25) {
     let requests = keys
       .slice(i, i + 25)

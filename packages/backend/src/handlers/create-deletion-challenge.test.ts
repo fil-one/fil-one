@@ -30,7 +30,7 @@ const mockReadDeletionRecord = vi.fn();
 const mockClaimDeletionRedrive = vi.fn();
 vi.mock('../lib/deletion-record.js', () => ({
   readDeletionRecord: (orgId: string) => mockReadDeletionRecord(orgId),
-  claimDeletionRedrive: (orgId: string) => mockClaimDeletionRedrive(orgId),
+  claimDeletionRerun: (orgId: string) => mockClaimDeletionRedrive(orgId),
 }));
 
 const mockCreateChallenge = vi.fn();
