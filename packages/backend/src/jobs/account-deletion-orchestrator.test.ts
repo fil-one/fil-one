@@ -64,7 +64,7 @@ function doneRecord(orgId: string, overrides?: Record<string, unknown>) {
 }
 
 /** An `ORG#{orgId}/PROFILE` row still carrying the `deleting` guard. */
-function fencedProfile(orgId: string) {
+function guardedProfile(orgId: string) {
   return marshall({ pk: `ORG#${orgId}`, sk: 'PROFILE', deleting: true });
 }
 
@@ -212,7 +212,7 @@ describe('account-deletion-orchestrator', () => {
     scanReturns([
       deletionRecord('org-stale', { updatedAt: new Date(Date.now() - 7_200_000).toISOString() }),
       doneRecord('org-done'),
-      fencedProfile('org-wedged'),
+      guardedProfile('org-wedged'),
     ]);
 
     await handler();
@@ -640,7 +640,7 @@ describe('account-deletion-orchestrator', () => {
       // lib/fth/fth-tenant-setup.ts and lib/aurora/aurora-tenant-setup.ts all
       // condition their tenant-id write on `attribute_not_exists(deleting)`,
       // so a literal `false` would leave tenant setup refused forever.
-      scanReturns([fencedProfile('org-wedged')]);
+      scanReturns([guardedProfile('org-wedged')]);
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
       try {
@@ -667,7 +667,7 @@ describe('account-deletion-orchestrator', () => {
       // ALREADY fenced, so `deleting = :true` still holds and the clear
       // succeeds against a live deletion. Absence of the record is the real
       // claim, so it is asserted atomically alongside the write.
-      scanReturns([fencedProfile('org-wedged')]);
+      scanReturns([guardedProfile('org-wedged')]);
 
       await handler();
 
@@ -680,7 +680,7 @@ describe('account-deletion-orchestrator', () => {
     });
 
     it('leaves the fence alone while a teardown is genuinely in flight', async () => {
-      scanReturns([fencedProfile('org-deleting'), deletionRecord('org-deleting')]);
+      scanReturns([guardedProfile('org-deleting'), deletionRecord('org-deleting')]);
 
       await handler();
 
@@ -692,7 +692,7 @@ describe('account-deletion-orchestrator', () => {
       // the expensive mistake — so "no record in the scan" is never trusted:
       // the transaction's ConditionCheck is what confirms it, and DynamoDB
       // cancels the whole thing when the record turns out to exist.
-      scanReturns([fencedProfile('org-racing')]);
+      scanReturns([guardedProfile('org-racing')]);
       ddbMock.on(TransactWriteItemsCommand).rejects(
         new TransactionCanceledException({
           message: 'cancelled',
@@ -717,7 +717,7 @@ describe('account-deletion-orchestrator', () => {
     it('a transaction cancelled for a TRANSIENT reason is an error, not a declined unwedge', async () => {
       // Throttling and TransactionConflict also cancel a transaction. Reading
       // them as "declined" would silently drop the unwedge and report success.
-      scanReturns([fencedProfile('org-wedged')]);
+      scanReturns([guardedProfile('org-wedged')]);
       ddbMock.on(TransactWriteItemsCommand).rejects(
         new TransactionCanceledException({
           message: 'cancelled',
@@ -743,7 +743,7 @@ describe('account-deletion-orchestrator', () => {
       // A DONE record means the org IS deleted, so a surviving profile is
       // unpurged data — clearing the fence would re-open every fenced writer
       // on an account the user was told is gone.
-      scanReturns([fencedProfile('org-done'), doneRecord('org-done')]);
+      scanReturns([guardedProfile('org-done'), doneRecord('org-done')]);
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
       try {
@@ -757,7 +757,7 @@ describe('account-deletion-orchestrator', () => {
     });
 
     it('does not double-invoke an org the sweep already found', async () => {
-      scanReturns([fencedProfile('org-done'), doneRecord('org-done')]);
+      scanReturns([guardedProfile('org-done'), doneRecord('org-done')]);
       ddbMock.on(QueryCommand).resolves({ Items: [marshall({ sk: 'PROFILE' })] });
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -772,7 +772,7 @@ describe('account-deletion-orchestrator', () => {
     });
 
     it('a failing guard clear is logged and does not abort the run', async () => {
-      scanReturns([fencedProfile('org-wedged'), deletionRecord('org-stale')]);
+      scanReturns([guardedProfile('org-wedged'), deletionRecord('org-stale')]);
       ddbMock.on(TransactWriteItemsCommand).rejects(new Error('DynamoDB unavailable'));
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
