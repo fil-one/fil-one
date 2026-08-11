@@ -93,8 +93,9 @@ export async function createBillingTrial({
     //
     // Its limit matters: Stripe forgets an idempotency key after 24h, so a resume
     // more than a day later mints a duplicate customer and subscription. It no
-    // longer extends the trial — the new subscription carries the ORIGINAL
-    // `trial_end`, which may already be past — so the residual is not a free trial
+    // longer extends the trial by a month — the new subscription carries the stored
+    // `trial_end`, clamped only to Stripe's 48h floor — so the residual is not a
+    // free trial
     // but a stalled future deletion: teardown's multi-customer guard refuses to
     // proceed past two customers for one org. Tracked with the duplicate-customer
     // ticket rather than fixed here.
@@ -194,13 +195,30 @@ export async function createBillingTrial({
  * unconditional; reusing the stored values also keeps Stripe's `trial_end` in step
  * with the record.
  */
+/** Stripe rejects a `trial_end` closer than this; see resolveTrialWindow. */
+const STRIPE_MIN_TRIAL_MS = 48 * 60 * 60 * 1000;
+
 function resolveTrialWindow(
   existing: Record<string, AttributeValue> | undefined,
   now: Date,
 ): { trialStartedAt: string; trialEndsAt: Date; trialEndsAtUnix: number } {
   const trialStartedAt = existing?.trialStartedAt?.S ?? now.toISOString();
-  const trialEndsAt = new Date(
-    existing?.trialEndsAt?.S ?? now.getTime() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000,
-  );
+  const storedEndsMs = Date.parse(existing?.trialEndsAt?.S ?? '');
+  const nominalEndsMs = Number.isNaN(storedEndsMs)
+    ? now.getTime() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000
+    : storedEndsMs;
+
+  // Clamped to Stripe's floor. Stripe rejects a `trial_end` less than 48h out, and
+  // this same value is passed to `subscriptions.create`, so a resume from a row
+  // whose window has elapsed would be rejected on every attempt — the unhealable
+  // row this function was rewritten to eliminate, moved from "returns early
+  // forever" to "errors forever".
+  //
+  // The cost is that such a resume extends the trial by up to ~2 days. That is the
+  // price of one code path: omitting `trial_end` for an elapsed window would be
+  // tidier, but it would create a non-trial subscription while the row this
+  // function writes says `Trialing`, and that mismatch is worse. Against the 30-day
+  // restart this replaced, two days is cheap.
+  const trialEndsAt = new Date(Math.max(nominalEndsMs, now.getTime() + STRIPE_MIN_TRIAL_MS));
   return { trialStartedAt, trialEndsAt, trialEndsAtUnix: Math.floor(trialEndsAt.getTime() / 1000) };
 }
