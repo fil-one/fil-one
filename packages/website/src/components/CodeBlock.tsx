@@ -1,4 +1,4 @@
-import { ClipboardIcon, CheckIcon } from '@phosphor-icons/react/dist/ssr';
+import { CopySimpleIcon, CheckIcon } from '@phosphor-icons/react/dist/ssr';
 import { clsx } from 'clsx';
 import { useCopyToClipboard } from '../lib/use-copy-to-clipboard.js';
 
@@ -6,12 +6,41 @@ export type CodeBlockProps = {
   code: string;
   language?: string;
   className?: string;
+  /**
+   * Lighter presentation for inline/stepped contexts: drops the border and
+   * language header, and reveals the copy control on hover/focus. Use inside a
+   * card that already supplies the surrounding chrome.
+   */
+  minimal?: boolean;
 };
 
-export function CodeBlock({ code, language, className }: CodeBlockProps) {
+export function CodeBlock({ code, language, className, minimal }: CodeBlockProps) {
   const { copied, copy } = useCopyToClipboard();
 
-  const CopyIcon = copied ? CheckIcon : ClipboardIcon;
+  const CopyIcon = copied ? CheckIcon : CopySimpleIcon;
+
+  if (minimal) {
+    return (
+      <div
+        className={clsx(
+          'group relative rounded-lg bg-zinc-50 py-2.5 pr-10 pl-3 font-mono text-[11px] leading-5 text-zinc-800',
+          className,
+        )}
+      >
+        <button
+          type="button"
+          onClick={() => void copy(code)}
+          aria-label={copied ? 'Copied!' : 'Copy code'}
+          className="absolute top-1.5 right-1.5 rounded p-1.5 text-zinc-400 opacity-0 transition group-hover:opacity-100 hover:bg-zinc-200 hover:text-zinc-700 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 max-sm:opacity-100"
+        >
+          <CopyIcon width={14} height={14} />
+        </button>
+        <pre className="overflow-x-auto">
+          <code>{code}</code>
+        </pre>
+      </div>
+    );
+  }
 
   return (
     <div
