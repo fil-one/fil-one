@@ -21,10 +21,7 @@ import {
   createAuroraBucket,
   createPortalClient,
   deleteAuroraAccessKey,
-  deleteAuroraPortalApiKey,
   findAuroraAccessKeyByName,
-  getAuroraPortalApiKey,
-  portalApiKeySsmPath,
 } from '../aurora/aurora-portal.js';
 import {
   getOperationsSamples,
@@ -39,12 +36,7 @@ import {
 } from '../aurora/aurora-backoffice.js';
 import { isOrgSetupComplete } from '../org-setup-status.js';
 import type { OrgProfileItem } from '../org-profile.js';
-import {
-  consoleS3CredentialsSsmPath,
-  deleteConsoleS3Credentials,
-  getConsoleS3Credentials,
-  _resetS3CredentialsCacheForTesting,
-} from '../s3-credentials.js';
+import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
 import { BucketNotFoundError, NotImplementedError } from '../errors.js';
 import type {
   BucketDetails,
@@ -100,8 +92,12 @@ export const auroraOrchestrator = {
   },
 
   async deleteTenant(tenantId: string): Promise<void> {
-    // Aurora exposes no tenant DELETE, so this is disable + secret-shred only
-    // and customer data survives. See
+    // Aurora exposes no tenant DELETE, so this disables the tenant and verifies
+    // it stayed disabled. Nothing else: customer data survives, and so do the
+    // FilOne-held SSM secrets, deliberately — they are the only route back to
+    // this tenant's Portal, so destroying them would foreclose the deferred
+    // data deletion tracked as FIL-919. A disabled tenant renders every
+    // credential inert, which is what makes keeping them safe. See
     // docs/architectural-decisions/2026-08-tenant-deletion-semantics.md.
     //
     // ⚠️ THROWING HERE BLOCKS THE ACCOUNT'S DYNAMODB PURGE. This runs inside
@@ -126,8 +122,10 @@ export const auroraOrchestrator = {
     //
     // TENANT_DELETE_RETRY's budget additionally absorbs a transient 5xx on the
     // verification probe here, rather than escalating it into a blocked purge.
-    const run: AuroraTeardownRun = { consoleKeyRevoked: false, secretsAlreadyShredded: false };
-    await pRetry(() => runAuroraTeardownAttempt(tenantId, run), TENANT_DELETE_RETRY);
+    //
+    // That trade now rests on a single status field: the verification below is
+    // the whole of this teardown's fail-closed behaviour.
+    await pRetry(() => runAuroraTeardownAttempt(tenantId), TENANT_DELETE_RETRY);
   },
 
   async createBucket(tenantId: string, args: CreateBucketArgs): Promise<void> {
@@ -337,26 +335,14 @@ export const auroraOrchestrator = {
 } satisfies ServiceOrchestrator;
 
 /**
- * Carried across the attempts of a single `deleteTenant` call so a later
- * attempt can tell "this run already revoked the console key" from "nobody
- * ever did". Never persisted — a fresh invocation starts pessimistic.
+ * One attempt of the teardown: probe, disable if not already disabled, verify.
+ * Re-probes on every attempt, so a re-attempt re-disables a tenant a competing
+ * writer flipped back to active.
+ *
+ * A tenant Aurora cannot resolve is treated as success — there is nothing left
+ * to disable, and nothing this teardown holds that needs cleaning up.
  */
-interface AuroraTeardownRun {
-  /** This run revoked the console S3 key, or found it already gone upstream. */
-  consoleKeyRevoked: boolean;
-  /**
-   * This pass found BOTH FilOne-held SSM secrets already absent, so an earlier
-   * completed teardown owns the revocation decision. Distinguishes the routine
-   * repeat pass — `purgeRecords` calls `deleteTenant` a second time for late
-   * regions, so every ordinary Aurora deletion runs it twice — from the
-   * genuinely anomalous half-shredded state.
-   */
-  secretsAlreadyShredded: boolean;
-}
-
-// One attempt of the teardown. Re-probes on every attempt, so a re-attempt
-// re-disables a tenant a competing writer flipped back to active.
-async function runAuroraTeardownAttempt(tenantId: string, run: AuroraTeardownRun): Promise<void> {
+async function runAuroraTeardownAttempt(tenantId: string): Promise<void> {
   // Raw ModelsTenantStatus throughout this path, deliberately: the
   // orchestrator-facing mapping collapses Aurora's LOCKED to `undefined`, and
   // `undefined` also means "Aurora sent no status at all". On a destructive
@@ -368,161 +354,13 @@ async function runAuroraTeardownAttempt(tenantId: string, run: AuroraTeardownRun
       cause: probe.cause,
     });
   }
-  if (probe.kind === 'not_found') {
-    await handleUnresolvableTenant(tenantId);
-    return;
-  }
+  if (probe.kind === 'not_found') return;
 
   if (probe.status !== 'DISABLED') {
     await auroraOrchestrator.updateTenantStatus(tenantId, 'disabled');
   }
 
-  // Must precede the SSM deletes below: reaching the Portal needs the portal
-  // API key still in SSM, so afterwards revocation is impossible.
-  await revokeConsoleS3AccessKey(tenantId, run);
-
-  await deleteFilOneHeldSecrets(tenantId);
-
-  // Before the verification, and unconditionally: the manual step is pending
-  // whenever this function is about to report success, whether or not *this*
-  // pass is the one that disabled the tenant. Emitting it only on the
-  // disabling pass, after the verification, let an entire successful teardown
-  // complete without it ever being logged (pass 1 disables and then fails
-  // verification; pass 2 finds the tenant already disabled and no-ops).
-  warnAuroraTenantNeedsManualDeletion(tenantId, run);
-
   await assertTenantDisabledAfterTeardown(tenantId);
-}
-
-// Aurora leaves the tenant and all of its customer data in place; only a human
-// in the backoffice can remove it. Logged on every successful teardown pass.
-function warnAuroraTenantNeedsManualDeletion(tenantId: string, run: AuroraTeardownRun): void {
-  const keyState = describeConsoleKeyOutcome(run);
-  console.warn(
-    `[aurora-orchestrator] Aurora has no remote tenant-deletion API; the tenant is disabled, ` +
-      `${keyState}, and the FilOne-held SSM secrets deleted. The Aurora tenant itself, and all ` +
-      `of its customer data, still requires a manual backoffice deletion`,
-    { tenantId },
-  );
-}
-
-// Says only what this run established. "NOT confirmed revoked" points at a
-// preceding warning, so it may only be used when one was actually emitted.
-function describeConsoleKeyOutcome(run: AuroraTeardownRun): string {
-  if (run.consoleKeyRevoked) return 'its console S3 key revoked';
-  if (run.secretsAlreadyShredded) {
-    return 'its console S3 key settled by the earlier pass that shredded the SSM secrets';
-  }
-  return 'its console S3 key NOT confirmed revoked (see the preceding warning)';
-}
-
-async function deleteFilOneHeldSecrets(tenantId: string): Promise<void> {
-  await deleteAuroraPortalApiKey(getStage(), tenantId);
-  await deleteConsoleS3Credentials(consoleS3CredentialsArgs(tenantId));
-}
-
-// A tenant-scoped 404 is ambiguous and CANNOT be disambiguated upstream.
-// `getTenantStatus` maps ANY 404 to `not_found`, and a wrong
-// AURORA_PARTNER_ID, a misrouted backoffice baseUrl or a wrong-scope token
-// 404s every tenant alike — so acting on one would shred the SSM credentials
-// of a tenant that is still live and still ACTIVE upstream, with its console
-// key unrevoked and no way left to reach the Portal.
-//
-// Corroborating absence from the backoffice was tried and does not work; see
-// the Aurora evidence section of the deletion-semantics ADR (probed 2026-08-10
-// against dev). In short: `GetPartner` 403s for our token, `ListTenants`
-// clamps `pageSize` to 20 so any walk that stops on a short page reports a
-// 239-tenant partner as empty after 20, and `GetTenant` answered 400 rather
-// than the declared 404 for an id that does not resolve.
-//
-// So the decision is made from LOCAL evidence only — whether FilOne still
-// holds the tenant's two SSM secrets — and **no 404 ever deletes anything**:
-//
-//   - both secrets already absent → a previous pass completed this teardown
-//     (or an operator did the manual cleanup below). Nothing is left to do;
-//     this is the idempotent-completion exit.
-//   - either secret still present → refuse, and name the two parameters an
-//     operator must delete by hand once they have confirmed upstream. That
-//     manual deletion is precisely what lets the next pass take the branch
-//     above, so the wedge has a real exit that does not require Aurora
-//     permissions FilOne does not hold.
-async function handleUnresolvableTenant(tenantId: string): Promise<void> {
-  const stage = getStage();
-  const held = await readHeldSecrets(stage, tenantId);
-
-  if (!held.portalApiKey && !held.consoleS3Credentials) {
-    console.log(
-      `[aurora-orchestrator] Aurora tenant ${tenantId} does not resolve and FilOne holds ` +
-        'neither of its SSM secrets, so this teardown has already run to completion; nothing ' +
-        'to do. (The Aurora tenant itself, if it still exists upstream, needs a manual ' +
-        'backoffice deletion.)',
-    );
-    return;
-  }
-
-  const stillHeld = [
-    held.portalApiKey ? portalApiKeySsmPath(stage, tenantId) : null,
-    held.consoleS3Credentials
-      ? consoleS3CredentialsSsmPath(consoleS3CredentialsArgs(tenantId))
-      : null,
-  ].filter((name): name is string => name !== null);
-
-  throw new Error(
-    `Aurora tenant ${tenantId} did not resolve (404) and this teardown will NOT delete its ` +
-      'credentials on an unexplained 404: getTenantStatus reports not_found for ANY 404, so a ' +
-      'wrong AURORA_PARTNER_ID, a misrouted AURORA_BACKOFFICE_URL or a wrong-scope token 404s ' +
-      'a tenant that is still live and ACTIVE upstream. FilOne still holds ' +
-      `${stillHeld.join(' and ')}, which is the only way it can reach that tenant and is ` +
-      'unrecoverable once deleted (processTenantSetup will not re-mint either secret after ' +
-      'auroraSetupStatus goes terminal). To unwedge this deletion an operator must confirm in ' +
-      'the Aurora backoffice that the tenant really is gone and then delete ' +
-      `${stillHeld.length === 1 ? 'that parameter' : 'those parameters'} by hand; the next ` +
-      'teardown pass then finds both secrets absent and completes.',
-  );
-}
-
-/** Which of the two FilOne-held SSM secrets still exist for a tenant. */
-interface HeldAuroraSecrets {
-  portalApiKey: boolean;
-  consoleS3Credentials: boolean;
-}
-
-// Existence read for both FilOne-held secrets, expressed through the getters
-// the rest of this module already uses rather than a second SSM client path.
-// Both translate SSM's ParameterNotFound — and only that — into a
-// `not found in SSM` Error, which revokeConsoleS3AccessKey below already keys
-// off. Every other failure (AccessDenied, throttling) propagates, because
-// "we could not read it" must never be mistaken for "it is gone". Neither
-// secret's value is returned, logged or otherwise retained here.
-async function readHeldSecrets(stage: string, tenantId: string): Promise<HeldAuroraSecrets> {
-  const [portalApiKey, consoleS3Credentials] = await Promise.all([
-    ssmSecretExists(() => getAuroraPortalApiKey(stage, tenantId)),
-    consoleS3CredentialsExist(tenantId),
-  ]);
-  return { portalApiKey, consoleS3Credentials };
-}
-
-function consoleS3CredentialsExist(tenantId: string): Promise<boolean> {
-  return ssmSecretExists(() => getConsoleS3Credentials(consoleS3CredentialsArgs(tenantId)));
-}
-
-function consoleS3CredentialsArgs(tenantId: string) {
-  return { orchestratorId: auroraOrchestrator.id, stage: getStage(), tenantId };
-}
-
-async function ssmSecretExists(read: () => Promise<unknown>): Promise<boolean> {
-  try {
-    await read();
-    return true;
-  } catch (err) {
-    if (isSsmParameterMissingError(err)) return false;
-    throw err;
-  }
-}
-
-/** Both SSM getters in this module report a missing parameter with this wording. */
-function isSsmParameterMissingError(err: unknown): boolean {
-  return err instanceof Error && err.message.includes('not found in SSM');
 }
 
 // Post-teardown verification (see deleteTenant for why re-activation is
@@ -545,116 +383,24 @@ async function assertTenantDisabledAfterTeardown(tenantId: string): Promise<void
 // a transport error or a 404 is a claim the code cannot support.
 function describeFailedVerification(verify: TenantStatusResult): string {
   if (verify.kind === 'error') {
-    return (
-      'The verification probe itself failed, so the tenant status is unknown; this is ' +
-      'usually transient and the retry re-runs the whole teardown.'
-    );
+    return 'The probe itself failed, so the status is unknown; usually transient, and the retry re-runs the teardown.';
   }
   if (verify.kind === 'not_found') {
-    return (
-      'The verification probe returned 404 although the tenant resolved moments earlier, ' +
-      'so the backoffice client stopped resolving mid-teardown rather than the tenant vanishing.'
-    );
+    return 'The probe 404d although the tenant resolved moments earlier — the backoffice client stopped resolving mid-teardown.';
   }
   if (verify.status === 'ACTIVE' || verify.status === 'WRITE_LOCKED') {
-    return (
-      `Aurora reports status=${verify.status}: a competing writer re-activated it — one that ` +
-      'read the org profile before the `deleting` guard landed. Retrying the teardown ' +
-      're-disables it.'
-    );
+    return `Aurora reports status=${verify.status}: a competing writer re-activated it. Retrying re-disables it.`;
   }
   if (verify.status === 'LOCKED') {
-    return (
-      'Aurora reports status=LOCKED, which is read-only rather than "denies all actions", ' +
-      'so the tenant is NOT torn down and this is not a competing writer re-activating it. ' +
-      'The retry does re-issue the disable — the next attempt PATCHes any status other than ' +
-      'DISABLED — so if LOCKED survives the retry budget then Aurora is refusing the ' +
-      'transition or something is re-locking the tenant, and an operator must set it to ' +
-      'DISABLED by hand.'
-    );
+    // LOCKED is read-only, not "denies all actions", so the tenant is not torn
+    // down and this is not a competing writer. The retry does re-issue the
+    // disable, so LOCKED surviving the budget means Aurora is refusing the
+    // transition.
+    return 'Aurora reports status=LOCKED, which is read-only rather than disabled; if it survives the retry budget an operator must set DISABLED by hand.';
   }
-  return (
-    'Aurora returned no tenant status field at all, so the teardown cannot be verified. ' +
-    'Retrying will not change it — this needs an operator, not a competing-writer explanation.'
-  );
+  return 'Aurora returned no tenant status field at all, so the teardown cannot be verified; this needs an operator, not a retry.';
 }
 
-// The tenant's console S3 key is provisioned under this name by
-// createAndStoreS3AccessKey in aurora-tenant-setup.ts.
-const AURORA_CONSOLE_KEY_NAME = 'filone-console';
-
-// Aurora's delete endpoint takes the Portal-internal key id — not the
-// accessKeyId stashed in SSM — so resolve it by the well-known key name.
-// Idempotent: an already-revoked key is success, and so is a portal API key
-// already gone from SSM — but only the first of those is *evidence* of
-// revocation. Anything else propagates so the caller retries while the SSM
-// copies (and thus automated revocation) still exist.
-async function revokeConsoleS3AccessKey(tenantId: string, run: AuroraTeardownRun): Promise<void> {
-  let key: Awaited<ReturnType<typeof findAuroraAccessKeyByName>>;
-  try {
-    key = await findAuroraAccessKeyByName({ tenantId, keyName: AURORA_CONSOLE_KEY_NAME });
-  } catch (err) {
-    if (isSsmParameterMissingError(err)) {
-      await reportUnreachablePortalDuringRevocation(tenantId, run);
-      return;
-    }
-    throw err;
-  }
-  if (!key) {
-    run.consoleKeyRevoked = true;
-    console.log(
-      `[aurora-orchestrator] console S3 key "${AURORA_CONSOLE_KEY_NAME}" is absent from tenant ${tenantId}'s listing; already revoked`,
-    );
-    return;
-  }
-  await deleteAuroraAccessKey({ tenantId, auroraKeyId: key.id });
-  run.consoleKeyRevoked = true;
-}
-
-// The portal API key is gone from SSM, so the Portal cannot be reached and
-// revocation cannot even be attempted. Whether that is benign is decided from
-// local evidence, never from an assumption about what an earlier run did:
-//
-//   - this run already revoked → nothing to report beyond a log.
-//   - the console credentials are gone too → an earlier pass reached
-//     deleteFilOneHeldSecrets, which only ever runs after revocation was
-//     attempted on that pass, so that pass already emitted whatever warning
-//     the outcome deserved. This is the ORDINARY repeat pass: purgeRecords
-//     calls deleteTenant a second time for late regions, so every normal
-//     Aurora deletion lands here once. Warning on it would make the signal
-//     below permanent noise.
-//   - the console credentials survive while the portal key does not → a
-//     genuinely half-shredded state that nothing explains. Warn.
-async function reportUnreachablePortalDuringRevocation(
-  tenantId: string,
-  run: AuroraTeardownRun,
-): Promise<void> {
-  if (run.consoleKeyRevoked) {
-    console.log(
-      `[aurora-orchestrator] portal API key already deleted from SSM for tenant ${tenantId}; ` +
-        'skipping console S3 key revocation — this run already revoked it',
-    );
-    return;
-  }
-  if (!(await consoleS3CredentialsExist(tenantId))) {
-    run.secretsAlreadyShredded = true;
-    console.log(
-      `[aurora-orchestrator] both FilOne-held SSM secrets for tenant ${tenantId} are already ` +
-        'gone, so an earlier teardown pass completed and owns the console S3 key outcome; ' +
-        'skipping revocation',
-    );
-    return;
-  }
-  console.warn(
-    `[aurora-orchestrator] portal API key is not in SSM for tenant ${tenantId}, so console S3 ` +
-      'key revocation could not be attempted or verified. If no earlier pass revoked it, the ' +
-      `"${AURORA_CONSOLE_KEY_NAME}" key may still be LIVE upstream and can no longer be revoked ` +
-      'automatically; it needs a manual Aurora backoffice/portal step',
-    { tenantId },
-  );
-}
-
-// Aurora's metrics API only accepts windows in m/h units, so the
 // orchestrator-agnostic '1d' value is translated before it hits the wire.
 function mapIntervalToAuroraWindow(interval: string): string {
   if (interval === '1d') return '24h';
