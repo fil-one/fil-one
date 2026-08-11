@@ -60,6 +60,7 @@ import type {
   TenantInfo,
   TenantUsageMetrics,
 } from '../service-orchestrator.js';
+import { TENANT_DELETE_RETRY } from '../service-orchestrator.js';
 import type { S3ClientContext } from '../s3-client.js';
 
 export const _resetSsmCacheForTesting = () => _resetS3CredentialsCacheForTesting();
@@ -112,23 +113,19 @@ export const auroraOrchestrator = {
     // the CUSTOMER# billing rows and the deletion challenge, and skips both
     // the second (index-lag) Stripe discovery pass and `markDone`.
     //
-    // It does NOT block everything, and claiming otherwise would overstate the
-    // stakes: `applyDeletionGuards` writes the SUB# `deleted` tombstone at the
-    // TOP of the run (as does the confirm handler before its 200), so every
-    // session is already dead; and the Stripe cancel + tombstone + redaction
-    // job run in the same `Promise.allSettled` batch as this teardown, so the
-    // first-pass redaction is created and persisted even when this throws.
+    // Two things survive a throw here: every session is already dead, because
+    // the SUB# `deleted` tombstone is written at the TOP of the run and by the
+    // confirm handler before its 200; and the first-pass Stripe redaction is
+    // created and persisted independently of this teardown's outcome, since it
+    // runs in the same `Promise.allSettled` batch.
     //
     // The blocked purge is still the accepted trade (a live tenant must never
     // be marked deleted), which is exactly why every failure path here must be
     // exitable by retrying — or, where no retry can exit it, must say plainly
     // what it observed and what an operator has to do.
     //
-    // Same bounded budget as FTH and the shared orchestrator, for the same
-    // reason: to outlast a competing writer that re-activates the tenant
-    // between our disable and our verification, and to absorb a transient 5xx
-    // on the verification probe rather than escalating it into a blocked purge.
-    // Every step below is idempotent, so a re-attempt converges.
+    // TENANT_DELETE_RETRY's budget additionally absorbs a transient 5xx on the
+    // verification probe here, rather than escalating it into a blocked purge.
     const run: AuroraTeardownRun = { consoleKeyRevoked: false, secretsAlreadyShredded: false };
     await pRetry(() => runAuroraTeardownAttempt(tenantId, run), TENANT_DELETE_RETRY);
   },
@@ -338,9 +335,6 @@ export const auroraOrchestrator = {
       }));
   },
 } satisfies ServiceOrchestrator;
-
-// Matches TENANT_DELETE_RETRY in fth-orchestrator.ts and orchestrator.ts.
-const TENANT_DELETE_RETRY = { retries: 3 } as const;
 
 /**
  * Carried across the attempts of a single `deleteTenant` call so a later
@@ -564,9 +558,9 @@ function describeFailedVerification(verify: TenantStatusResult): string {
   }
   if (verify.status === 'ACTIVE' || verify.status === 'WRITE_LOCKED') {
     return (
-      `Aurora reports status=${verify.status}: a competing writer re-activated it (the ` +
-      'trial-lock enforcer in usage-reporting-worker is unfenced, and region-helpers permits ' +
-      'disabled -> active). Retrying the teardown re-disables it.'
+      `Aurora reports status=${verify.status}: a competing writer re-activated it — one that ` +
+      'read the org profile before the `deleting` guard landed. Retrying the teardown ' +
+      're-disables it.'
     );
   }
   if (verify.status === 'LOCKED') {
