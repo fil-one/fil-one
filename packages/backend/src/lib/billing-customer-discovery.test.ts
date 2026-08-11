@@ -113,26 +113,23 @@ describe('discoverBillingCustomer', () => {
     });
   });
 
-  it('rejects rather than escapes an unsearchable userId, and still searches the other members', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  it('fails the whole pass on an unsearchable userId rather than skipping that member', async () => {
+    // Skipping was worse than failing: that member's customer would never be
+    // found, never cancelled and never redacted, and the teardown would still
+    // report success. Throwing keeps the record non-DONE for the re-drive.
     mockCustomersSearch.mockReturnValue(
       stripeSearch([{ id: 'cus_1', metadata: { orgId: ORG_ID } }]),
     );
 
-    const result = await discoverBillingCustomer(ORG_ID, [
-      { userId: "user-1' OR metadata['orgId']:'*" },
-      { userId: 'user-2' },
-    ]);
+    await expect(
+      discoverBillingCustomer(ORG_ID, [
+        { userId: "user-1' OR metadata['orgId']:'*" },
+        { userId: 'user-2' },
+      ]),
+    ).rejects.toThrow(/cannot be searched in Stripe/);
 
-    // The injection attempt never reaches Stripe...
-    expect(searchInputs()).toEqual([{ query: "metadata['userId']:'user-2'", limit: 100 }]);
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining('unsearchable userId'),
-      expect.objectContaining({ orgId: ORG_ID }),
-    );
-    // ...and the well-formed member is still swept.
-    expect(result).toEqual({ customerId: 'cus_1', extraCustomerIds: [] });
-    warn.mockRestore();
+    // The injection attempt never reaches Stripe.
+    expect(searchInputs()).toEqual([]);
   });
 
   it('rejects the whole call when a search fails — there is no snapshot to fall back to', async () => {

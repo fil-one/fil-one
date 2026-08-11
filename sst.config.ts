@@ -1106,11 +1106,9 @@ export default $config({
       extraLink: [...mgmtRuntimeResources, ...(sendGridApiKey ? [sendGridApiKey] : [])],
       extraEnv: {
         AUTH0_MGMT_DOMAIN: auth0MgmtDomain,
-        // FIL-112: when a deletion is already under way this route issues no
-        // code and instead re-invokes the (idempotent) teardown worker, under a
-        // cooldown. It reaches only the never-fenced window — a teardown that
-        // was never scheduled — because once the deletion guards land every
-        // member session is answered 410 and no user can call this route.
+        // FIL-112: this route re-invokes the (idempotent) teardown worker for
+        // stalled deletions — see handlers/create-deletion-challenge.ts for the
+        // reasoning.
         ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
       },
       permissions: [{ actions: ['lambda:InvokeFunction'], resources: [accountDeletionWorker.arn] }],

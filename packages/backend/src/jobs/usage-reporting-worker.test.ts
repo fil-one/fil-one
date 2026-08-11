@@ -104,6 +104,8 @@ vi.mock('../lib/org-profile.js', async (importOriginal) => ({
   getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
 }));
 
+import { orgNotDeletingCheck } from '../lib/org-profile.js';
+
 const ddbMock = mockClient(DynamoDBClient);
 
 process.env.STRIPE_METER_EVENT_NAME = 'storage_usage';
@@ -1225,13 +1227,8 @@ describe('usage-reporting-worker', () => {
 
       const items = ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems!;
       expect(items).toHaveLength(2);
-      expect(items[0].ConditionCheck).toEqual({
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
-        ConditionExpression:
-          'attribute_exists(pk) AND (attribute_not_exists(deleting) OR deleting = :notDeleting)',
-        ExpressionAttributeValues: { ':notDeleting': { BOOL: false } },
-      });
+      // The expression itself is pinned once, in org-profile.test.ts.
+      expect(items[0]).toEqual(orgNotDeletingCheck('org-1'));
       expect(items[1].Put!.TableName).toBe('BillingTable');
     });
 

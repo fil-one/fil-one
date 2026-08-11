@@ -267,7 +267,8 @@ async function updatePaymentMethod(
  * A gone Stripe customer tears the whole account down (FIL-112) — the worker
  * disables every region and purges the data, so there is no local close-out on
  * that path. Idempotent, so a webhook replay is safe; a throw returns 500 and
- * Stripe retries (there is no cron fallback for canceled records).
+ * Stripe retries (no cron fallback for the *close-out* branch's canceled
+ * records; the teardown path is re-driven by the account-deletion orchestrator).
  *
  * The billing orgId is Stripe-metadata-derived, so it is cross-checked against
  * USER#/PROFILE first. Without a verified org nothing is torn down, and the
@@ -548,12 +549,15 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   try {
     const orgId = await resolveOrgIdFromSubscription(userId);
     if (!orgId) return;
-    const retry = WEBHOOK_STATUS_SYNC_RETRY;
-    const out = await syncTenantStatusInProvisionedRegions(orgId, 'active', retry);
-    assertRegionSyncSucceeded(out.outcomes);
+    const { outcomes, refusedForDeletion } = await syncTenantStatusInProvisionedRegions(
+      orgId,
+      'active',
+      WEBHOOK_STATUS_SYNC_RETRY,
+    );
+    assertRegionSyncSucceeded(outcomes);
     // Silent when refused: region-helpers already logged the refusal, and
     // claiming "re-activated" here would be false.
-    if (!out.refusedForDeletion) {
+    if (!refusedForDeletion) {
       console.log('[stripe-webhook] Tenant re-activated', { userId, orgId });
     }
   } catch (error) {

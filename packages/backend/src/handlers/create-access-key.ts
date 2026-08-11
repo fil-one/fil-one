@@ -75,11 +75,11 @@ export async function baseHandler(
   // org has no tenant either, so `ensureTenantReady` below cannot return one
   // (tenant setup's `attribute_exists(pk)` condition refuses to RECORD one on a
   // purged profile), and the fenced write would refuse regardless. Note what
-  // that leaves behind: tenant setup creates the upstream tenant first and only
-  // then fails to persist it (lib/orchestrator/tenant-setup.ts:147), so this
-  // path leaks an orphan upstream tenant rather than short-circuiting — the
-  // known orphan finding (M3 in PR-STACK-REVIEW-539-497.md), not something the
-  // pre-check closes. What matters here is that the two
+  // that leaves behind: a tenant-setup racing the teardown can orphan an upstream
+  // tenant — see the conditional `attribute_not_exists(deleting)` write in
+  // `lib/orchestrator/tenant-setup.ts` `processTenantSetup`, which creates the
+  // upstream tenant before it can fail to record one. The pre-check does not
+  // close that. What matters here is that the two
   // agree on `deleting: false`: if the fence rejected what this accepts, we
   // would mint upstream and then compensate by revoking a healthy org's key.
   const orgProfile = await getOrgProfile(orgId, { consistent: true });
