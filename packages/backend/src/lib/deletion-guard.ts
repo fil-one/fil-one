@@ -1,51 +1,28 @@
-// The DynamoDB *condition* half of the FIL-112 guard; setting deletionRequestedAt lives elsewhere.
 import { ConditionalCheckFailedException, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import type { UpdateItemCommandOutput } from '@aws-sdk/client-dynamodb';
 import { getDynamoClient } from './ddb-client.js';
 import { reportMetric } from './metrics.js';
 
 /**
- * Without this, our own teardown-driven subscriptions.cancel echoes back as
- * webhook events that upsert zombie records or re-activate a disabled tenant.
+ * The billing guard: the condition every write to a customer's billing record
+ * carries, so our own teardown-driven `subscriptions.cancel` cannot echo back as
+ * a webhook event that upserts a zombie record or re-activates a disabled tenant.
  *
- * Scope — what this fence does and does not cover today. It applies to
- * BillingTable `CUSTOMER#{userId}/SUBSCRIPTION` only; it is not a
- * whole-account fence, and it is not applied to every writer in the codebase.
+ * It covers BillingTable `CUSTOMER#{userId}/SUBSCRIPTION` writes and nothing
+ * else, and that narrowness is structural rather than an oversight: an attribute
+ * on a row cannot fence the write that CREATES the row — there is no row yet to
+ * carry it. Record-creating billing writers are therefore held off by the
+ * identity tombstone, and non-BillingTable surfaces (access keys, RAG keys,
+ * bucket rows) by the org-profile `deleting` guard.
  *
- * Guarded here:
- * - `handlers/stripe-webhook.ts` (payment-method, subscription created/updated,
- *   subscription deleted, invoice paid, invoice failed)
- * - `lib/billing-activation.ts` `saveBillingRecord` and
- *   `lib/deleted-customer-cleanup.ts` — both inline the condition and
- *   hand-roll the catch rather than calling {@link sendGuardedBillingUpdate};
- *   the behaviour is identical, the log line is not.
- * - `jobs/grace-period-enforcer.ts` (rejection → outcome `skipped`)
- * - `middleware/subscription-guard.ts` and `handlers/get-billing.ts`
- *   (`cacheStripePrice` + the lazy trial→grace transition)
+ * `deletionRequestedAt` is armed by the account teardown when it claims the
+ * record. Until it is armed the condition reduces to `attribute_exists(pk)`,
+ * which is the half that blocks upsert-driven resurrection of purged records.
  *
- * Known gaps, owned by later branches in the FIL-112 stack — do not read this
- * module as covering them:
- * - `lib/create-billing-trial.ts` — the record-creating write, which this
- *   attribute cannot fence: there is no record left to carry it. Fencing
- *   `transitionExpiredTrial` means the next request finds no item
- *   (`middleware/subscription-guard.ts`) → `ensureTrialEntitlement` →
- *   `createBillingTrial`, which mints a **new** Stripe customer, a **new**
- *   trial subscription, and an unconditional row for a purged user.
- *   `if_not_exists(subscriptionStatus, …)` prevents clobbering, not creation.
- *   Needs a different signal (the identity tombstone / fence B).
- * - `handlers/create-setup-intent.ts` — the `stripeCustomerId` upsert is
- *   unconditioned and the sibling Put is create-only, so both can land after a
- *   purge. Closed by the session/tombstone work.
- * - BillingTable `ORG#{orgId}/USAGE_REPORT#` (`jobs/usage-reporting-worker.ts`)
- *   — unconditioned, and not covered by the teardown's purge prefixes at all.
- * - Every non-BillingTable surface (access keys, RAG keys, bucket rows), which
- *   **will be** fenced on the org profile's `deleting` flag rather than on this
- *   attribute (a later batch); today they are unfenced — that flag has no
- *   reader outside tenant setup.
- *
- * Nothing in this branch *writes* `deletionRequestedAt` — the teardown that
- * sets it lands further up the stack — so here the condition reduces to
- * `attribute_exists(pk)`, which is what blocks upsert-driven resurrection.
+ * `closeOutDeletedCustomer` (lib/deleted-customer-cleanup.ts) inlines this
+ * condition instead of calling {@link sendGuardedBillingUpdate}, on purpose: its
+ * customer-without-record case is expected-benign and must not count into
+ * `BillingDeletionGuardRejected`.
  */
 export const DELETION_GUARD = 'attribute_exists(pk) AND attribute_not_exists(deletionRequestedAt)';
 

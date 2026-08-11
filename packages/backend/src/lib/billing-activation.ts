@@ -1,16 +1,16 @@
 import type Stripe from 'stripe';
 import { Resource } from 'sst';
 import { SubscriptionStatus } from '@filone/shared';
-import { DELETION_GUARD, sendGuardedBillingUpdate } from './deletion-guard.js';
+import { sendGuardedBillingUpdate } from './deletion-guard.js';
 import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
 } from './region-helpers.js';
 
 /**
- * Returns false when {@link DELETION_GUARD} rejects the write — the caller must
- * then skip tenant unlocks. The handler 400s earlier on a missing record, so
- * that only happens when a teardown claimed or purged it mid-request.
+ * Returns false when the billing guard rejects the write — the caller must then
+ * skip tenant unlocks. The handler 400s earlier on a missing record, so that only
+ * happens when a teardown claimed or purged it mid-request.
  */
 export async function saveBillingRecord(
   userId: string,
