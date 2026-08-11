@@ -289,17 +289,14 @@ async function cancelAllSubscriptions(orgId: string, customerIds: string[]): Pro
  * actually holds that invariant against two overlapping workers (whose
  * discovery calls can straddle the Stripe index lag and so disagree). Losing
  * that race is only an error when the two passes genuinely disagree: a pass
- * that discovered nothing accepts the winner's tombstone (see the catch).
+ * that discovered nothing accepts the winner's tombstone (see
+ * {@link resolveTombstoneConflict}).
  */
 async function writeTombstone(orgId: string, customerId: string | undefined): Promise<void> {
   const key = { pk: DeletionKeys.tombstonePk(orgId), sk: DeletionKeys.tombstoneSk() };
   const current = await readTombstone(key);
-  if (current?.stripeCustomerId && customerId && current.stripeCustomerId !== customerId) {
-    throw new Error(
-      `Org ${orgId} tombstone already records Stripe customer ${current.stripeCustomerId} but ` +
-        `discovery found ${customerId}; refusing to overwrite — manual follow-up required`,
-    );
-  }
+  const conflict = disagreesWith(current, customerId);
+  if (conflict) throw mismatchError(orgId, conflict.recorded, conflict.discovered);
 
   const recordedCustomerId = customerId ?? current?.stripeCustomerId;
   // Already exactly right — skip the write rather than re-stamping `deletedAt`
@@ -323,18 +320,47 @@ async function writeTombstone(orgId: string, customerId: string | undefined): Pr
     );
   } catch (err) {
     if (!(err instanceof ConditionalCheckFailedException)) throw err;
-    // A pass that discovered NOTHING had nothing to write, so an overlapping
-    // worker that landed a customer id first has strictly the better tombstone:
-    // accept it instead of failing this whole pass over a benign upgrade. Only
-    // a genuine disagreement (or a still-id-less tombstone, which means the
-    // condition failed for a reason we do not understand) is fatal.
-    if (recordedCustomerId === undefined && (await readTombstone(key))?.stripeCustomerId) return;
-    throw new Error(
-      `Org ${orgId} tombstone was written concurrently while this pass was recording Stripe ` +
-        `customer ${recordedCustomerId ?? '(none discovered)'}; refusing to overwrite — ` +
-        'the next teardown pass re-reads it',
-    );
+    await resolveTombstoneConflict(orgId, key, recordedCustomerId);
   }
+}
+
+/**
+ * Settle a lost tombstone-write race. A pass that discovered NOTHING had
+ * nothing to write, so an overlapping worker that landed a customer id first
+ * has strictly the better tombstone: accept it instead of failing this whole
+ * pass over a benign upgrade. Only a genuine disagreement (or a still-id-less
+ * tombstone, which means the condition failed for a reason we do not
+ * understand) is fatal.
+ */
+async function resolveTombstoneConflict(
+  orgId: string,
+  key: { pk: string; sk: string },
+  recordedCustomerId: string | undefined,
+): Promise<void> {
+  const winner = recordedCustomerId === undefined ? await readTombstone(key) : undefined;
+  if (winner?.stripeCustomerId) return;
+  throw new Error(
+    `Org ${orgId} tombstone was written concurrently while this pass was recording Stripe ` +
+      `customer ${recordedCustomerId ?? '(none discovered)'}; refusing to overwrite — ` +
+      'the next teardown pass re-reads it',
+  );
+}
+
+/** The conflicting pair when the recorded customer contradicts what discovery just found. */
+function disagreesWith(
+  current: OrgTombstoneRecord | undefined,
+  customerId: string | undefined,
+): { recorded: string; discovered: string } | undefined {
+  const recorded = current?.stripeCustomerId;
+  if (!recorded || !customerId || recorded === customerId) return undefined;
+  return { recorded, discovered: customerId };
+}
+
+function mismatchError(orgId: string, recorded: string, discovered: string): Error {
+  return new Error(
+    `Org ${orgId} tombstone already records Stripe customer ${recorded} but discovery found ` +
+      `${discovered}; refusing to overwrite — manual follow-up required`,
+  );
 }
 
 /** Strongly-consistent read of the org's tombstone; absent reads as undefined. */
