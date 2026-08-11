@@ -3,6 +3,7 @@ import { DialogTitle } from '@headlessui/react';
 import { useMutation } from '@tanstack/react-query';
 import { WarningCircleIcon } from '@phosphor-icons/react/dist/ssr';
 import { ApiErrorCode, DELETION_CODE_LENGTH } from '@filone/shared';
+import type { DeletionRateLimitedResponse } from '@filone/shared';
 import { deleteAccount, requestDeletionChallenge } from '../../lib/api.js';
 import { queryClient } from '../../lib/query-client.js';
 import { Button } from '../Button';
@@ -117,7 +118,7 @@ function useDeleteAccountFlow(orgName: string, typedName: string, code: string) 
       // A 429 from the server carries the authoritative cooldown end; feed it
       // into the countdown so the UI mirrors the server-enforced window
       // instead of leaving the button enabled (or on a stale 60s timer).
-      const serverCooldown = (err as { resendAvailableAt?: string }).resendAvailableAt;
+      const serverCooldown = (err as Partial<DeletionRateLimitedResponse>).resendAvailableAt;
       if (serverCooldown) setResendAvailableAt(serverCooldown);
       setCodeError(err instanceof Error ? err.message : 'Failed to send the verification code');
     },
