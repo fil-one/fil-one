@@ -27,7 +27,7 @@ import {
   updateBucketTelemetry,
 } from './bucket-rag-enablement.js';
 import type { BucketRAGEnablementRecord } from './dynamo-records.js';
-import { OrgDeletingError } from './org-profile.js';
+import { OrgDeletingError, orgNotDeletingCheck } from './org-profile.js';
 import { S3Region } from '@filone/shared';
 
 function record(over: Partial<BucketRAGEnablementRecord> = {}): BucketRAGEnablementRecord {
@@ -124,13 +124,8 @@ describe('setBucketRagEnablement', () => {
 
     const items = ddbMock.commandCalls(TransactWriteItemsCommand)[0]!.args[0].input.TransactItems!;
     expect(items).toHaveLength(2);
-    expect(items[0].ConditionCheck).toEqual({
-      TableName: 'UserInfoTable',
-      Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
-      ConditionExpression:
-        'attribute_exists(pk) AND (attribute_not_exists(deleting) OR deleting = :notDeleting)',
-      ExpressionAttributeValues: { ':notDeleting': { BOOL: false } },
-    });
+    // The expression itself is pinned once, in org-profile.test.ts.
+    expect(items[0]).toEqual(orgNotDeletingCheck('org-1'));
     expect(items[1].Put?.TableName).toBe('RagIndexerTable');
   });
 

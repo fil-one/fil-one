@@ -31,6 +31,7 @@ vi.mock('../middleware/subscription-guard.js', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler, handler } from './create-rag-api-key.js';
+import { orgNotDeletingCheck } from '../lib/org-profile.js';
 import { hashRagKeyToken, RagApiKeyKeys } from '../lib/rag-api-keys.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
 
@@ -162,13 +163,8 @@ describe('create-rag-api-key baseHandler', () => {
   it('fences the transaction on the org profile deleting flag as item 0', async () => {
     await baseHandler(createEvent({ keyName: 'ci key' }));
 
-    expect(sentTransactItems()[0].ConditionCheck).toEqual({
-      TableName: 'UserInfoTable',
-      Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
-      ConditionExpression:
-        'attribute_exists(pk) AND (attribute_not_exists(deleting) OR deleting = :notDeleting)',
-      ExpressionAttributeValues: { ':notDeleting': { BOOL: false } },
-    });
+    // The expression itself is pinned once, in org-profile.test.ts.
+    expect(sentTransactItems()[0]).toEqual(orgNotDeletingCheck('org-1'));
   });
 
   it('returns 410 ACCOUNT_DELETED and mints nothing when the fence rejects', async () => {
