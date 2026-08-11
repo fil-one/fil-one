@@ -200,8 +200,11 @@ export async function sendGuardedBillingUpdate(
     );
   } catch (err) {
     if (err instanceof ConditionalCheckFailedException) {
+      // Both the `source` context and the rejection metric are gone, so the key
+      // and the expression are all that identify which writer was refused.
       console.warn('[deletion-guard] Billing record missing or org mid-deletion; skipping update', {
         key: input.Key,
+        updateExpression: input.UpdateExpression,
       });
       return null;
     }

@@ -28,11 +28,11 @@ export async function readDeletionRecord(orgId: string): Promise<OrgDeletionReco
  * it going, long enough that holding down the button cannot fan out Event
  * invokes of a 900s / 1024MB worker.
  */
-export const DELETION_REDRIVE_COOLDOWN_MS = 5 * 60 * 1000;
+export const DELETION_RERUN_COOLDOWN_MS = 5 * 60 * 1000;
 
 /**
  * Claim the right to re-invoke the teardown worker for this org, at most once
- * per {@link DELETION_REDRIVE_COOLDOWN_MS}. The claim is the conditional write
+ * per {@link DELETION_RERUN_COOLDOWN_MS}. The claim is the conditional write
  * itself, so concurrent requests cannot both win.
  *
  * Deliberately does NOT touch `updatedAt`: that field is the orchestrator's
@@ -53,7 +53,7 @@ export async function claimDeletionRerun(orgId: string): Promise<boolean> {
           'attribute_exists(pk) AND (attribute_not_exists(lastAttemptAt) OR lastAttemptAt < :cutoff)',
         ExpressionAttributeValues: marshall({
           ':now': new Date(now).toISOString(),
-          ':cutoff': new Date(now - DELETION_REDRIVE_COOLDOWN_MS).toISOString(),
+          ':cutoff': new Date(now - DELETION_RERUN_COOLDOWN_MS).toISOString(),
         }),
       }),
     );
