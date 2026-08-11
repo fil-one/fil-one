@@ -92,41 +92,16 @@ export const auroraOrchestrator = {
   },
 
   async deleteTenant(tenantId: string): Promise<void> {
-    // Aurora exposes no tenant DELETE, so this disables the tenant and verifies
-    // it stayed disabled. Nothing else: customer data survives, and so do the
-    // FilOne-held SSM secrets, deliberately — they are the only route back to
-    // this tenant's Portal, so destroying them would foreclose the deferred
-    // data deletion tracked as FIL-919. A disabled tenant renders every
-    // credential inert, which is what makes keeping them safe. See
+    // Aurora exposes no tenant DELETE: this disables the tenant and verifies it
+    // stayed disabled. The FilOne-held SSM secrets are retained deliberately —
+    // they are the only route back to this tenant's Portal, which FIL-919's
+    // deferred data deletion needs. See
     // docs/architectural-decisions/2026-08-tenant-deletion-semantics.md.
     //
-    // ⚠️ THROWING HERE BLOCKS THE ACCOUNT'S DYNAMODB PURGE. This runs inside
-    // the account-deletion teardown, whose region loop aggregates orchestrator
-    // failures and rethrows *before* `purgeRecords`. So any error escaping
-    // deleteTenant — including the post-teardown verification below — leaves
-    // in place the ORG# rows (access keys, RAG keys), the RAGKEYHASH# lookup
-    // rows, the USER# profiles, the PII attributes on the SUB# identity rows,
-    // the CUSTOMER# billing rows and the deletion challenge, and skips both
-    // the second (index-lag) Stripe discovery pass and `markDone`.
-    //
-    // Two things survive a throw here: every session is already dead, because
-    // the SUB# `deleted` tombstone is written at the TOP of the run and by the
-    // confirm handler before its 200; and the first-pass Stripe redaction is
-    // created and persisted independently of this teardown's outcome, since it
-    // runs in the same `Promise.allSettled` batch.
-    //
-    // The blocked purge is still the accepted trade (a live tenant must never
-    // be marked deleted), which is exactly why every failure path here must be
-    // exitable by retrying — or, where no retry can exit it, must say plainly
-    // what it observed and what an operator has to do.
-    //
-    // TENANT_DELETE_RETRY's budget additionally absorbs a transient 5xx on the
-    // verification probe here, rather than escalating it into a blocked purge.
-    //
-    // That trade now rests on a single status field: the verification below is
-    // the whole of this teardown's fail-closed behaviour — on every path except
-    // one. A tenant Aurora cannot resolve returns success before the
-    // verification runs, so that path is fail-OPEN by design and warns instead.
+    // Throwing here blocks the account's DynamoDB purge: the teardown's region
+    // loop rethrows before `purgeRecords`. That is the accepted trade — a live
+    // tenant must never be marked deleted — so every failure path must be
+    // exitable by retrying, or say what an operator has to do.
     await pRetry(() => runAuroraTeardownAttempt(tenantId), TENANT_DELETE_RETRY);
   },
 
@@ -154,9 +129,8 @@ export const auroraOrchestrator = {
   },
 
   async listBuckets(tenantId: string, opts: ListBucketsOptions = {}): Promise<BucketSummary[]> {
-    // Aurora returns versioning inline via `flags`, so there's no per-bucket
-    // cost to skip; the option is honored only to keep the contract uniform
-    // with FTH (see ListBucketsOptions).
+    // Versioning arrives inline via `flags`, so skipping it saves nothing; the
+    // option exists only to keep the contract uniform with FTH.
     const includeVersioning = opts.includeVersioning ?? true;
     const client = await createPortalClient(tenantId);
     const { data, error } = await listBuckets({
@@ -336,20 +310,10 @@ export const auroraOrchestrator = {
   },
 } satisfies ServiceOrchestrator;
 
-/**
- * One attempt of the teardown: probe, disable if not already disabled, verify.
- * Re-probes on every attempt, so a re-attempt re-disables a tenant a competing
- * writer flipped back to active.
- *
- * A tenant Aurora cannot resolve is treated as success — there is nothing left
- * to disable, and nothing this teardown holds that needs cleaning up.
- */
+/** One attempt: probe, disable if not already disabled, verify. */
 async function runAuroraTeardownAttempt(tenantId: string): Promise<void> {
-  // Raw ModelsTenantStatus throughout this path, deliberately: the
-  // orchestrator-facing mapping collapses Aurora's LOCKED to `undefined`, and
-  // `undefined` also means "Aurora sent no status at all". On a destructive
-  // path those two must not be confused, and neither may masquerade as
-  // "a competing writer re-activated it".
+  // Raw ModelsTenantStatus, not the orchestrator-facing mapping, which collapses
+  // LOCKED to `undefined` — indistinguishable from Aurora sending no status.
   const probe = await getAuroraTenantStatusApi({ tenantId });
   if (probe.kind === 'error') {
     throw new Error(`Aurora status probe failed while deleting tenant ${tenantId}`, {
@@ -357,13 +321,8 @@ async function runAuroraTeardownAttempt(tenantId: string): Promise<void> {
     });
   }
   if (probe.kind === 'not_found') {
-    // Nothing to disable, so nothing to do — but this is the ONLY teardown path
-    // that reports success without the verification having confirmed anything, so
-    // it must not be silent. A misconfigured backoffice client (wrong base URL,
-    // wrong-scope token) 404s a live tenant identically to an absent one, and
-    // this teardown cannot tell those apart: see the ADR's misrouted-client
-    // scenario. If that happens the account's purge proceeds while the tenant is
-    // still ACTIVE and its access keys still work.
+    // The only path that reports success without verifying anything, so it warns:
+    // a misconfigured backoffice client 404s a live tenant identically.
     console.warn(
       '[aurora-orchestrator] Tenant did not resolve, so the disable was never confirmed; ' +
         'treating as nothing to do. A misconfigured backoffice client 404s live tenants the ' +
@@ -380,11 +339,7 @@ async function runAuroraTeardownAttempt(tenantId: string): Promise<void> {
   await assertTenantDisabledAfterTeardown(tenantId);
 }
 
-// Post-teardown verification (see deleteTenant for why re-activation is
-// possible at all, and for why throwing here is fatal to the account's data
-// purge). Compares Aurora's raw status: the orchestrator-facing mapping turns
-// LOCKED into `undefined`, which is indistinguishable from an absent status
-// field, and neither is evidence of a competing writer.
+// Throwing here is fatal to the account's data purge; see deleteTenant.
 async function assertTenantDisabledAfterTeardown(tenantId: string): Promise<void> {
   const verify = await getAuroraTenantStatusApi({ tenantId });
   if (verify.kind === 'ok' && verify.status === 'DISABLED') return;
@@ -396,8 +351,8 @@ async function assertTenantDisabledAfterTeardown(tenantId: string): Promise<void
   );
 }
 
-// Says only what the probe actually established. Blaming a competing writer for
-// a transport error or a 404 is a claim the code cannot support.
+// Says only what the probe established: a transport error or a 404 is not
+// evidence of a competing writer.
 function describeFailedVerification(verify: TenantStatusResult): string {
   if (verify.kind === 'error') {
     return 'The probe itself failed, so the status is unknown; usually transient, and the retry re-runs the teardown.';
@@ -409,16 +364,12 @@ function describeFailedVerification(verify: TenantStatusResult): string {
     return `Aurora reports status=${verify.status}: a competing writer re-activated it. Retrying re-disables it.`;
   }
   if (verify.status === 'LOCKED') {
-    // LOCKED is read-only, not "denies all actions", so the tenant is not torn
-    // down and this is not a competing writer. The retry does re-issue the
-    // disable, so LOCKED surviving the budget means Aurora is refusing the
-    // transition.
     return 'Aurora reports status=LOCKED, which is read-only rather than disabled; if it survives the retry budget an operator must set DISABLED by hand.';
   }
   return 'Aurora returned no tenant status field at all, so the teardown cannot be verified; this needs an operator, not a retry.';
 }
 
-// orchestrator-agnostic '1d' value is translated before it hits the wire.
+// Aurora's metrics API accepts only m/h units.
 function mapIntervalToAuroraWindow(interval: string): string {
   if (interval === '1d') return '24h';
   return interval;
