@@ -202,9 +202,13 @@ export interface ServiceOrchestrator {
   updateTenantStatus(tenantId: string, status: TenantStatus): Promise<void>;
 
   /**
-   * Permanently deletes the org's tenant — every upstream resource it owns
-   * (buckets, objects, access keys) plus the FilOne-held secrets in SSM. Only
-   * the account-deletion teardown may call this.
+   * Permanently deletes the org's tenant and every upstream resource it owns
+   * (buckets, objects, access keys). Only the account-deletion teardown may
+   * call this.
+   *
+   * FilOne-held SSM secrets are NOT destroyed. They are the only route back to
+   * an upstream tenant, so an orchestrator that cannot delete remotely needs
+   * them to finish the job later.
    *
    * Implementations force the tenant to `disabled` first when the upstream
    * requires it, and MUST take their idempotency from the upstream's own
