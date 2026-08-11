@@ -37,6 +37,14 @@ import {
   sortBuckets,
 } from '../lib/bucket-table.js';
 
+/**
+ * Columns dropped below `sm`. Six columns plus cell padding overflow a phone, and
+ * horizontal scrolling would push the row's action menu off-screen. What's left
+ * is the name, its secondary line (region and storage), and the actions; the
+ * bucket detail page carries the rest.
+ */
+const SECONDARY_COLUMN = 'hidden sm:table-cell';
+
 type BucketsTableProps = {
   buckets: Bucket[];
   onDelete: (bucketName: string) => void;
@@ -96,10 +104,14 @@ export function BucketsTable({ buckets, onDelete }: BucketsTableProps) {
           <Table.Header>
             <Table.Row>
               <Table.Head {...sortProps('bucketName')}>Name</Table.Head>
-              <Table.Head {...sortProps('region')}>Region</Table.Head>
-              <Table.Head {...sortProps('createdAt')}>Created</Table.Head>
-              <Table.Head>Features</Table.Head>
-              <Table.Head>Retention</Table.Head>
+              <Table.Head {...sortProps('region')} className={SECONDARY_COLUMN}>
+                Region
+              </Table.Head>
+              <Table.Head {...sortProps('createdAt')} className={SECONDARY_COLUMN}>
+                Created
+              </Table.Head>
+              <Table.Head className={SECONDARY_COLUMN}>Features</Table.Head>
+              <Table.Head className={SECONDARY_COLUMN}>Retention</Table.Head>
               <Table.Head aria-label="Actions" />
             </Table.Row>
           </Table.Header>
@@ -116,8 +128,10 @@ export function BucketsTable({ buckets, onDelete }: BucketsTableProps) {
 
 /** Versioning and Object Lock. Object Lock requires versioning, so a locked bucket shows both. */
 function BucketFeatures({ bucket }: { bucket: Bucket }) {
+  // Says "None" rather than an em-dash, to match the Retention column beside it:
+  // a dash next to a worded empty state reads as a rendering slip.
   if (!bucket.versioning && !bucket.objectLockEnabled) {
-    return <span className="text-xs text-zinc-500">&mdash;</span>;
+    return <span className="text-xs text-zinc-500">None</span>;
   }
 
   return (
@@ -150,7 +164,7 @@ function BucketRetention({ bucket }: { bucket: Bucket }) {
     bucket.retentionDurationType,
   );
 
-  if (!retention) return <span className="text-xs text-zinc-500">&mdash;</span>;
+  if (!retention) return <span className="text-xs text-zinc-500">No retention</span>;
 
   return (
     <Tooltip content="Applied to objects uploaded from now on" side="top">
@@ -222,7 +236,10 @@ function BucketRow({ bucket, onDelete }: { bucket: Bucket; onDelete: (name: stri
 
   return (
     <Table.Row data-testid="bucket-row" data-bucket-name={bucket.bucketName}>
-      <Table.Cell>
+      {/* py-4 rather than the cell default: this is the only two-line cell, so it
+          sets the row height, and 12px reads tight around a stacked pair. The
+          other cells stay vertically centred against it. */}
+      <Table.Cell className="py-4">
         <div className="flex items-center gap-1.5 leading-tight">
           <Link
             to="/buckets/$bucketName"
@@ -252,9 +269,18 @@ function BucketRow({ bucket, onDelete }: { bucket: Bucket; onDelete: (name: stri
             </Tooltip>
           )}
         </div>
-        <BucketStorageLine bucketName={bucket.bucketName} region={region as S3Region} />
+        {/* The secondary line reserves its height in every state, so a row whose
+            storage read fails doesn't sit shorter than its neighbours. */}
+        <div className="mt-1 flex min-h-4 items-center gap-1.5 text-xs text-zinc-500 tabular-nums">
+          {/* Region rides here below `sm`, where its column is hidden. */}
+          <span className="flex items-center gap-1.5 sm:hidden">
+            <RegionFlag region={region} />
+            {region}
+          </span>
+          <BucketStorageLine bucketName={bucket.bucketName} region={region as S3Region} />
+        </div>
       </Table.Cell>
-      <Table.Cell className="text-xs">
+      <Table.Cell className={`text-xs ${SECONDARY_COLUMN}`}>
         <div className="flex items-center gap-2.5">
           <RegionFlag region={region} />
           <div>
@@ -264,11 +290,13 @@ function BucketRow({ bucket, onDelete }: { bucket: Bucket; onDelete: (name: stri
         </div>
       </Table.Cell>
       {/* text-xs to match the region cell beside it */}
-      <Table.Cell className="text-xs text-zinc-600">{formatDate(bucket.createdAt)}</Table.Cell>
-      <Table.Cell>
+      <Table.Cell className={`text-xs text-zinc-600 ${SECONDARY_COLUMN}`}>
+        {formatDate(bucket.createdAt)}
+      </Table.Cell>
+      <Table.Cell className={SECONDARY_COLUMN}>
         <BucketFeatures bucket={bucket} />
       </Table.Cell>
-      <Table.Cell>
+      <Table.Cell className={SECONDARY_COLUMN}>
         <BucketRetention bucket={bucket} />
       </Table.Cell>
       <Table.Cell className="text-right">

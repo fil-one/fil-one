@@ -34,7 +34,9 @@ export function BucketsToolbar({
   const filtering = hasActiveFilters(filters);
 
   return (
-    <div className="mb-2.5 flex items-center gap-2">
+    // Wraps rather than squeezes: at 375px the search takes the full width and
+    // the filter and count drop to a second line.
+    <div className="mb-2.5 flex flex-wrap items-center gap-2">
       <div className="relative w-full sm:w-64">
         <span className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-zinc-400">
           <MagnifyingGlassIcon size={14} />
