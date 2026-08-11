@@ -136,9 +136,11 @@ function BucketFeatures({ bucket }: { bucket: Bucket }) {
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
+      {/* "Versioning", not "Versioned": the column lists features by name, and the
+          bucket detail card calls it Versioning too. */}
       {bucket.versioning && (
         <Badge color="blue" size="sm" weight="medium">
-          Versioned
+          Versioning
         </Badge>
       )}
       {bucket.objectLockEnabled && (
