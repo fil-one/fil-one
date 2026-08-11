@@ -1,5 +1,8 @@
 # PR stack review — FIL-897 — 2026-08-10
 
+> **Remediated 2026-08-11.** Most findings are applied and three are corrected.
+> See [§10 Status](#10-status-after-remediation) before acting on anything below.
+
 ## 1. Summary
 
 Six PRs across three repositories serve the marketing site and console from `filone.ai`
@@ -536,3 +539,63 @@ none). 8 pre-existing warnings in `src/components/ui/*`. The 24
 `<region>.s3.fil.one` until FIL-627; the `us-east-1` S3 gateway rejecting the alias origin;
 no `X-Robots-Tag` on the console; the accepted mail-reputation coupling between the alias and
 `no-reply@filone.ai`. All four are recorded in the PR bodies as known and accepted.
+
+## 10. Status after remediation
+
+Applied 2026-08-11 across all six PRs, at the **correctness + specification +
+comment-slop** scope. Comment volume in `fil-one/infrastructure` is down from 99 of 161
+added lines to 65; `fil-one/fil-one` shed roughly 60 JSDoc lines. All gates green: 2243
+tests in `fil-one/fil-one`, 32 in `fil-one/website`, both `.tf` files parsing, and the
+Playwright alias-origin check re-run and still passing.
+
+### Three findings this review got wrong
+
+**F-42 — resolvable without the empirical check, and the answer removes a constraint.**
+Filed as a blocker asking whether `getCertificate` matches SANs. It did not need
+resolving: the fix is the same either way. `mostRecent: true` is kept because *any* cert
+replacement transiently leaves two ISSUED certs with the same primary domain — a reason
+that does not depend on SAN matching. The original rationale (a lookup for `app.fil.one`
+matching a cert carrying it as a SAN) is almost certainly false, since the
+`aws_acm_certificate` data source matches the primary domain. **Consequence: the
+`#546 → infrastructure#40` ordering constraint never existed and has been removed from
+every PR description.**
+
+**F-52 — over-confident, and its proposed comment would have replaced one wrong claim
+with another.** The finding asserted that hydration discards the prerendered subtree via
+the `React.lazy` boundary. But `src/App.tsx:31-42` already carries a pre-existing comment
+saying the opposite — first loads "hydrate in place once the chunk arrives" — and records
+that `entry-server.tsx` builds its own *eagerly-resolved* route tree, so the prerender
+path never crosses that Suspense boundary. Whether the alias href comes from
+suspend-and-rerender, hydrate-then-repaint-on-first-state-change, or attribute patching is
+not determinable without executing React. The applied comment therefore states only what
+is verified, plus the re-verify trigger, and asserts no mechanism. **F-51's "headless
+browser" correction stands** — that one is cited on both sides.
+
+**F-50 — did not need the Vercel preview to be de-risked.** Moving the rule to
+`headers[0]` is a no-op under cumulative semantics and the fix under first-match, and the
+only cost under first-match is that alias hosts lose `Cache-Control`, which does not
+matter for an unlisted demo domain. Applied; the `curl` assertions are now a post-deploy
+check rather than a merge gate.
+
+### One coupling the plan missed
+
+**F-40 had to be applied even though it was scoped out.** F-47 removes the normalisation
+in `parseAliasSiteUrls` that F-40's test asserts, so applying F-47 alone would have left a
+failing test. They are one change, not two.
+
+### Still open
+
+**B-1 (F-01) survives as a merge gate on `infrastructure#40`.** Read the speculative plan
+and confirm `app_acm_validation` plans as an update, not a replacement — a replacement
+would briefly drop the validation record for the cert CloudFront is currently serving.
+Needs the HCP `Viewer` role. **F-19** is conditional on the same answer.
+
+**F-18**, the stale `srdjan/fil-897-filone-net-dns-cert` branch name, needs GitHub's
+branch-rename UI. Do it before merge or accept it.
+
+### Deferred by scope, unchanged
+
+`F-31`, `F-32`, `F-33` (naming in `fil-one/fil-one`); `F-35`, `F-38`, `F-39` (test
+hygiene); `F-41`, `F-61`, `F-62` (test polish). `F-34`, `F-36`, `F-68` remain no-change
+verdicts. `F-69` was accepted rather than fixed: `docs.fil.one` and `status.fil.one` links
+still leave the alias, and that is now recorded in the website README.

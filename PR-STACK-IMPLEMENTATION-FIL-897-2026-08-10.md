@@ -1,5 +1,9 @@
 # PR stack implementation plan — FIL-897 — 2026-08-10
 
+> **Executed 2026-08-11.** Nearly every task below is applied; three findings were
+> corrected in the process and one blocker survives. See §10 of the review document
+> for what changed and what is still open. Do not re-run these tasks blind.
+
 Companion to `PR-STACK-REVIEW-FIL-897-2026-08-10.md`. Finding IDs match.
 
 Every fix lands in the branch of the PR that introduced it, so pushing updates the
