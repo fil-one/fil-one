@@ -173,7 +173,7 @@ describe('setBucketRagEnablement', () => {
   });
 
   it('rethrows a persistent non-fence cancellation untouched (after the bounded retry)', async () => {
-    // TransactionConflict is retried by sendFencedWrite — the fence made every
+    // TransactionConflict is retried by sendGuardedWrite — the fence made every
     // write contend on ORG#/PROFILE — but a persistent one still surfaces as
     // the original error, never as OrgDeletingError.
     ddbMock.on(TransactWriteItemsCommand).rejects(

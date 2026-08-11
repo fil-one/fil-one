@@ -8,7 +8,7 @@ import type { BillingInfo, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import type Stripe from 'stripe';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { sendGuardedBillingUpdate } from '../lib/deletion-guard.js';
+import { sendGuardedBillingUpdate } from '../lib/deletion-guards.js';
 import { getStripeClient } from '../lib/stripe-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';

@@ -6,7 +6,7 @@ import {
 import type { Options as RetryOptions } from 'p-retry';
 import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
-import { DELETION_GUARD } from './deletion-guard.js';
+import { DELETION_GUARD } from './deletion-guards.js';
 import { getDynamoClient } from './ddb-client.js';
 import { syncTenantStatusInProvisionedRegions, type RegionSyncOutcome } from './region-helpers.js';
 
@@ -99,7 +99,7 @@ export async function closeOutDeletedCustomer(params: {
   if (!orgId) {
     console.warn('[deleted-customer-cleanup] No orgId — skipping tenant status sync', { userId });
   }
-  // `disabled` is never refused by fence B (teardown needs it), so only the
+  // `disabled` is never refused by the org-profile `deleting` guard (teardown needs it), so only the
   // per-region outcomes matter here.
   const outcomes = orgId
     ? (await syncTenantStatusInProvisionedRegions(orgId, 'disabled', retry)).outcomes

@@ -14,7 +14,7 @@ import {
 } from '@filone/shared';
 import { Resource } from 'sst';
 import { startAccountDeletion } from '../lib/account-deletion-start.js';
-import { sendGuardedBillingUpdate } from '../lib/deletion-guard.js';
+import { sendGuardedBillingUpdate } from '../lib/deletion-guards.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import {
   closeOutDeletedCustomer,
@@ -541,7 +541,7 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   // Best-effort: re-enable the tenant on every orchestrator if recovering from
   // PastDue/GracePeriod. If this fails, the tenant may remain locked until
   // manual intervention. The sync itself now refuses to re-activate an org
-  // whose deletion has started (FIL-112 fence B), which is what previously made
+  // whose deletion has started (FIL-112: the org-profile `deleting` guard), which is what previously made
   // this path able to undo — and, via Aurora's disabled-verification, wedge — a
   // teardown. The TOCTOU is narrowed, not closed: a deletion confirmed between
   // the sync's profile read and its orchestrator call still re-activates

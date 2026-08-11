@@ -10,7 +10,7 @@ import type {
 import { ApiErrorCode, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { sendGuardedBillingUpdate } from '../lib/deletion-guard.js';
+import { sendGuardedBillingUpdate } from '../lib/deletion-guards.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import { ensureTrialEntitlement } from '../lib/trial-entitlement.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';

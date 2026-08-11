@@ -12,7 +12,7 @@ import type { CreateSetupIntentResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { accountDeletedResponse } from '../lib/account-deleted-response.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { sendGuardedBillingUpdate } from '../lib/deletion-guard.js';
+import { sendGuardedBillingUpdate } from '../lib/deletion-guards.js';
 import { isIdentityTombstoned } from '../lib/identity-tombstone.js';
 import { getStripeClient } from '../lib/stripe-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';

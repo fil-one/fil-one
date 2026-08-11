@@ -1,7 +1,7 @@
 import type Stripe from 'stripe';
 import { Resource } from 'sst';
 import { SubscriptionStatus } from '@filone/shared';
-import { sendGuardedBillingUpdate } from './deletion-guard.js';
+import { sendGuardedBillingUpdate } from './deletion-guards.js';
 import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
@@ -71,7 +71,7 @@ export async function unlockAllProvisionedRegions(orgId: string): Promise<void> 
       'active',
     );
     assertRegionSyncSucceeded(outcomes);
-    // Fence B refused the unlock (FIL-112): report that, never "unlocked".
+    // The org-profile `deleting` guard refused the unlock (FIL-112): report that, never "unlocked".
     if (refusedForDeletion) {
       console.warn('[billing-activation] Tenant unlock refused: org deletion in progress', {
         orgId,
