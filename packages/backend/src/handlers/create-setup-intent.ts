@@ -66,21 +66,18 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
       // Deletion-guarded (FIL-112): the record may have been purged or claimed
       // by teardown since the read above. Guard rejection means the account is
       // going away — don't mint a SetupIntent against it.
-      const updated = await sendGuardedBillingUpdate(
-        {
-          TableName: tableName,
-          Key: {
-            pk: { S: `CUSTOMER#${userId}` },
-            sk: { S: 'SUBSCRIPTION' },
-          },
-          UpdateExpression: 'SET stripeCustomerId = :cid, updatedAt = :now',
-          ExpressionAttributeValues: {
-            ':cid': { S: stripeCustomerId },
-            ':now': { S: new Date().toISOString() },
-          },
+      const updated = await sendGuardedBillingUpdate({
+        TableName: tableName,
+        Key: {
+          pk: { S: `CUSTOMER#${userId}` },
+          sk: { S: 'SUBSCRIPTION' },
         },
-        { source: 'create-setup-intent', userId, orgId },
-      );
+        UpdateExpression: 'SET stripeCustomerId = :cid, updatedAt = :now',
+        ExpressionAttributeValues: {
+          ':cid': { S: stripeCustomerId },
+          ':now': { S: new Date().toISOString() },
+        },
+      });
       if (!updated) return accountDeletedResponse();
     }
   } else {

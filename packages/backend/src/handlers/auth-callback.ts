@@ -1,10 +1,8 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { jwtVerify } from 'jose';
 import { OAUTH_STATE_COOKIE, CSRF_COOKIE_NAME } from '@filone/shared';
-import { Resource } from 'sst';
 import {
   COOKIE_NAMES,
   TOKEN_MAX_AGE,
@@ -13,9 +11,9 @@ import {
   makeHintCookieHeader,
   makeClearCookieHeader,
 } from '../lib/response-builder.js';
+import { classifyIdentityRow, readIdentityRow } from '../lib/identity-tombstone.js';
 import { parseCookies } from '../lib/cookies.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
-import { getDynamoClient } from '../lib/ddb-client.js';
 import { getJWKS } from '../lib/token-refresh.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { resolveOrigin } from '../lib/resolve-origin.js';
@@ -110,9 +108,9 @@ async function baseHandler(
 }
 
 /**
- * True when the token's sub (signature-verified first) maps to a tombstoned
- * identity row. Fails open on verify/DynamoDB errors so login gains no hard
- * dependency here — the auth middleware's own tombstone gate backstops it.
+ * True when the token's sub (signature-verified first) maps to an identity that is
+ * deleted or being deleted. Fails open on verify/DynamoDB errors so login gains no
+ * hard dependency here — the auth middleware's own tombstone gate backstops it.
  *
  * Eventually-consistent read (accepted sub-second staleness); resurrection is
  * independently blocked by the `attribute_not_exists(pk)` transact condition
@@ -130,13 +128,10 @@ async function isTombstonedIdentity(
     });
     const sub = payload.sub;
     if (!sub) return false;
-    const { Item } = await getDynamoClient().send(
-      new GetItemCommand({
-        TableName: Resource.UserInfoTable.name,
-        Key: { pk: { S: `SUB#${sub}` }, sk: { S: 'IDENTITY' } },
-      }),
-    );
-    return Item?.deleted?.BOOL === true;
+    // Eventually consistent on purpose (see readIdentityRow), and `!== 'live'`
+    // rather than a `deleted` field test so this reader and the post-write check
+    // cannot drift apart again.
+    return classifyIdentityRow(await readIdentityRow(sub)) !== 'live';
   } catch (err) {
     console.warn('[auth-callback] Tombstone check failed; proceeding with login', { error: err });
     return false;

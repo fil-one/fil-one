@@ -10,7 +10,7 @@ vi.mock('sst', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { isIdentityTombstoned } from './identity-tombstone.js';
+import { classifyIdentityRow, isIdentityTombstoned } from './identity-tombstone.js';
 
 const USER_INFO = { sub: 'auth0|sub-1' };
 
@@ -59,5 +59,45 @@ describe('isIdentityTombstoned', () => {
     expect(input.TableName).toBe('UserInfoTable');
     expect(input.ConsistentRead).toBe(true);
     expect(input.Key).toStrictEqual({ pk: { S: 'SUB#auth0|sub-1' }, sk: { S: 'IDENTITY' } });
+  });
+});
+
+describe('classifyIdentityRow', () => {
+  it('reads a live identity as live', () => {
+    expect(classifyIdentityRow({ userId: { S: 'user-1' } })).toBe('live');
+  });
+
+  it('reads an armed row that still has userId as deleting', () => {
+    // applyDeletionGuards sets deleted/deletedAt at confirm time and leaves
+    // userId alone; the purge REMOVEs it later. That gap IS the in-flight state.
+    expect(classifyIdentityRow({ deleted: { BOOL: true }, userId: { S: 'user-1' } })).toBe(
+      'deleting',
+    );
+  });
+
+  it('reads the post-purge shape as deleted', () => {
+    expect(classifyIdentityRow({ deleted: { BOOL: true } })).toBe('deleted');
+  });
+
+  it('reads an ABSENT row as deleted, never deleting', () => {
+    // The confirm handler upserts this row, so no row at all means the identity
+    // never existed — there is no evidence of an in-flight teardown to report.
+    // Getting this wrong would tell a stranger their deletion was running.
+    expect(classifyIdentityRow(undefined)).toBe('deleted');
+  });
+
+  it('keeps isIdentityTombstoned true for BOTH non-live states', async () => {
+    // The OR this replaced was deliberate: isIdentityTombstoned is the post-write
+    // resurrection check, and a writer must compensate whether the teardown is in
+    // flight or already finished. Narrowing it to the completed case would
+    // silently reopen that window.
+    ddbMock
+      .on(GetItemCommand)
+      .resolves({ Item: { deleted: { BOOL: true }, userId: { S: 'user-1' } } });
+    expect(await isIdentityTombstoned(USER_INFO)).toBe(true);
+
+    ddbMock.reset();
+    ddbMock.on(GetItemCommand).resolves({ Item: { deleted: { BOOL: true } } });
+    expect(await isIdentityTombstoned(USER_INFO)).toBe(true);
   });
 });
