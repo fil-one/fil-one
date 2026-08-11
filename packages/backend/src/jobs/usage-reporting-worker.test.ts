@@ -96,7 +96,7 @@ vi.mock('../lib/fth/fth-orchestrator.js', () => ({ fthOrchestrator }));
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getAvailableOrchestrators: () => [auroraOrchestrator, fthOrchestrator],
 }));
-// Only the profile READ is stubbed; the fence helpers (sendGuardedWrite and the
+// Only the profile READ is stubbed; the fence helpers (sendDeletionGuardedWrite and the
 // real isOrgDeleting predicate) stay real so the fenced audit write is exercised
 // end to end against the DynamoDB mock.
 vi.mock('../lib/org-profile.js', async (importOriginal) => ({

@@ -8,7 +8,7 @@ import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import type { BucketRagEnablementResponse, S3Region } from '@filone/shared';
 import { getDynamoClient } from './ddb-client.js';
-import { sendGuardedWrite } from './org-profile.js';
+import { sendDeletionGuardedWrite } from './org-profile.js';
 import {
   RAGKeys,
   type BucketRAGEnablementRecord,
@@ -91,7 +91,7 @@ export async function setBucketRagEnablement(args: {
     updatedAt: now,
   };
 
-  await sendGuardedWrite(orgId, [
+  await sendDeletionGuardedWrite(orgId, [
     {
       Put: {
         TableName: Resource.RagIndexerTable.name,
@@ -184,7 +184,7 @@ export interface BucketTelemetryUpdate {
  * enablement rows, so post-purge it is already a no-op. It would also import a
  * new failure mode onto a path contracted to be best-effort: a transaction
  * cancelled by contention on `ORG#/PROFILE` is not a conditional-check failure,
- * so once `sendGuardedWrite`'s retry budget was exhausted it would escape this
+ * so once `sendDeletionGuardedWrite`'s retry budget was exhausted it would escape this
  * catch and fail the whole bucket (jobs/rag-indexer-helpers.ts). The writer that
  * matters — the one that can re-create a row and re-animate the indexer — is
  * `setBucketRagEnablement`.

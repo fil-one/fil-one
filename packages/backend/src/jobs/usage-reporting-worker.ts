@@ -27,7 +27,7 @@ import {
   syncTenantStatusInProvisionedRegions,
 } from '../lib/region-helpers.js';
 import { UsageReportKeys } from '../lib/dynamo-records.js';
-import { OrgDeletingError, sendGuardedWrite } from '../lib/org-profile.js';
+import { OrgDeletingError, sendDeletionGuardedWrite } from '../lib/org-profile.js';
 
 export interface UsageReportingWorkerPayload {
   orgId: string;
@@ -547,7 +547,7 @@ async function writeUsageAuditRecord(params: {
   // Skipped rather than thrown: the audit row is the last step of a run whose
   // real work is already done, and failing here would only re-drive that work.
   try {
-    await sendGuardedWrite(params.orgId, [
+    await sendDeletionGuardedWrite(params.orgId, [
       {
         Put: {
           TableName: Resource.BillingTable.name,
