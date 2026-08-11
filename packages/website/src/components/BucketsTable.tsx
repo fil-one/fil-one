@@ -122,11 +122,13 @@ function BucketRow({ bucket, onDelete }: { bucket: Bucket; onDelete: (name: stri
               what gets called out. */}
           {!bucket.isPublic && (
             <Tooltip content="Private bucket" side="top">
+              {/* zinc-500, not zinc-400: non-text graphics need 3:1 against the
+                  row (WCAG 1.4.11) and zinc-400 is 2.56:1 on white. */}
               <LockSimpleIcon
                 size={12}
                 role="img"
                 aria-label="Private bucket"
-                className="text-zinc-400"
+                className="text-zinc-500"
               />
             </Tooltip>
           )}
@@ -152,7 +154,7 @@ function BucketRow({ bucket, onDelete }: { bucket: Bucket; onDelete: (name: stri
             Enabled
           </Badge>
         ) : (
-          <span className="text-xs text-zinc-400">&mdash;</span>
+          <span className="text-xs text-zinc-500">&mdash;</span>
         )}
       </Table.Cell>
       <Table.Cell className="text-right">
