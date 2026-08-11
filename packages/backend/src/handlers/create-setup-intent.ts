@@ -55,9 +55,6 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
       stripeCustomerId = record.stripeCustomerId as string;
     } else {
       // Create Stripe customer and update record (without clobbering existing fields)
-      // Audit note: neither stripe.customers.create site in this handler passes
-      // an idempotency key, so a retried request mints a duplicate customer.
-      // Tracked as a separate follow-up; not changed here.
       const customer = await stripe.customers.create({
         email: email ?? undefined,
         // orgId included so webhook writers can backfill it onto records that
@@ -82,7 +79,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
             ':now': { S: new Date().toISOString() },
           },
         },
-        { handler: 'create-setup-intent', userId, orgId },
+        { source: 'create-setup-intent', userId, orgId },
       );
       if (!updated) return accountDeletedResponse();
     }

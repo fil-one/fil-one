@@ -5,12 +5,19 @@ export type JWKS = ReturnType<typeof createRemoteJWKSet>;
 
 // Module-level JWKS cache — reused across Lambda warm starts. Shared by the
 // auth middleware and the auth-callback handler.
-let cachedJWKS: JWKS | null = null;
+//
+// Keyed by domain, because the key set belongs to the domain: every call site
+// passes the same env var today, but a single slot would hand one Auth0 tenant's
+// keys to another the moment the domain stops being a constant, and the failure
+// mode is accepting tokens signed by the wrong tenant.
+const cachedJWKS = new Map<string, JWKS>();
 
 export function getJWKS(domain: string): JWKS {
-  if (cachedJWKS) return cachedJWKS;
-  cachedJWKS = createRemoteJWKSet(new URL(`https://${domain}/.well-known/jwks.json`));
-  return cachedJWKS;
+  const cached = cachedJWKS.get(domain);
+  if (cached) return cached;
+  const jwks = createRemoteJWKSet(new URL(`https://${domain}/.well-known/jwks.json`));
+  cachedJWKS.set(domain, jwks);
+  return jwks;
 }
 
 export interface NewTokens {
@@ -20,7 +27,7 @@ export interface NewTokens {
 }
 
 /** Exchange the refresh token at Auth0's token endpoint; null on any failure. */
-export async function exchangeRefreshToken(refreshToken: string): Promise<NewTokens | null> {
+async function exchangeRefreshToken(refreshToken: string): Promise<NewTokens | null> {
   const domain = process.env.AUTH0_DOMAIN!;
   const secrets = getAuthSecrets();
   try {

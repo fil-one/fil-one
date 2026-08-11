@@ -23,9 +23,12 @@ import { isIdentityTombstoned } from './identity-tombstone.js';
  * against the tombstone and compensates (deletes the row) if the identity died
  * in between. The only residue is a crash between that Put and the Stripe
  * calls, which leaves a local-only 30-day trial row with no Stripe customer or
- * subscription behind it. That row is never resumed — it simply self-expires
- * through the existing trial → grace → canceled lifecycle, which runs entirely
- * off the stored trialEndsAt and needs no Stripe involvement.
+ * subscription behind it — or, if the crash lands between the two Stripe calls,
+ * a metadata-stamped customer with no subscription. Teardown discovery sweeps
+ * that customer, and the deletion-guarded webhook backfill heals the record
+ * half. That row is never resumed — it simply self-expires through the existing
+ * trial → grace → canceled lifecycle, which runs entirely off the stored
+ * trialEndsAt and needs no Stripe involvement.
  */
 
 export interface EnsureTrialEntitlementParams {
