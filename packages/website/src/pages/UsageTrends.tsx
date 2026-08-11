@@ -16,9 +16,9 @@ import type { UsageTrendsResponse } from '@filone/shared';
 
 import { Heading } from '../components/Heading/Heading';
 import { formatBytes, formatBytesShort } from '@filone/shared';
-import { getActivity } from '../lib/api.js';
+import { getUsageTrends } from '../lib/api.js';
 import { formatDate } from '../lib/time.js';
-import { queryKeys } from '../lib/query-client.js';
+import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { Card } from '../components/Card';
 
 // ---------------------------------------------------------------------------
@@ -55,11 +55,12 @@ export function UsageTrends() {
   const [period, setPeriod] = useState<'7d' | '30d'>('7d');
 
   const { data, isPending } = useQuery({
-    queryKey: queryKeys.activityTrends(period),
-    queryFn: () => getActivity({ period }),
+    queryKey: queryKeys.usageTrends(period),
+    queryFn: () => getUsageTrends(period),
+    staleTime: USAGE_STALE_TIME,
   });
 
-  const trends: UsageTrendsResponse | null = data?.trends ?? null;
+  const trends: UsageTrendsResponse | null = data ?? null;
   const storageSeries = trends?.storage ?? [];
   const latestStorage =
     storageSeries.length > 0 ? storageSeries[storageSeries.length - 1].value : 0;
