@@ -154,7 +154,7 @@ export async function scanRagKeys(orgId: string): Promise<{ pk: string; sk: stri
 // UnprocessedItems means DynamoDB is shedding load — retry with exponential
 // backoff + jitter instead of hammering it in a tight loop, and give up after
 // ~5 attempts (the thrown error keeps the record non-DONE, so the Lambda
-// retry / reconciler re-drives the idempotent purge later).
+// retry / orchestrator re-drives the idempotent purge later).
 const BATCH_DELETE_RETRY: RetryOptions = { retries: 4, minTimeout: 100, randomize: true };
 
 /**

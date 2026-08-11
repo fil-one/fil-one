@@ -68,7 +68,7 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  * Waited out IN-PASS rather than thrown as a retry: this is the ordinary
  * ending of a HEALTHY teardown, and a throw would emit a Lambda `Errors`
  * datapoint (what Grafana alerts on), burn an async retry, inflate
- * `attemptCount` toward the reconciler's stuck threshold, refresh the staleness
+ * `attemptCount` toward the orchestrator's stuck threshold, refresh the staleness
  * window, and re-run every external teardown and the whole purge a second time.
  *
  * The anchor is stamped as the LAST step of the purge and read back in the same
@@ -697,7 +697,7 @@ async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<v
   // while its lookup row, never seen by the earlier sweep, survived forever.
   // Sharing the snapshot closes that: every RAGKEY# row this pass deletes has
   // its lookup deleted too, and a key created after the snapshot keeps BOTH
-  // rows (never a half pair) for the fence and the reconciler to handle.
+  // rows (never a half pair) for the guard and the orchestrator to handle.
   const orgRows = await queryOrgRows(orgId);
 
   // Given one snapshot, the order is chosen for CRASH-CONVERGENCE. `batchDelete`

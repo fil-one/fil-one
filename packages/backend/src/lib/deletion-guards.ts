@@ -52,7 +52,7 @@ export async function applyDeletionGuards(
 
 /**
  * Clear the org-profile `deleting` guard — the supported unwedge (FIL-112), driven by
- * the deletion reconciler when it finds `deleting = true` on an org with NO
+ * the deletion orchestrator when it finds `deleting = true` on an org with NO
  * DELETION record at all. Until this existed, `deleting = true` was written
  * here and cleared nowhere, so such an org could never create an access key or
  * a RAG key, toggle RAG on a bucket, or have a tenant provisioned again.
@@ -62,7 +62,7 @@ export async function applyDeletionGuards(
  * by anything: from the outside that is indistinguishable from a teardown still
  * in flight, and un-fencing a live deletion is the far more expensive mistake.
  * The escape hatch there is manual: an operator deletes the `ORG#{orgId}` /
- * `DELETION` row, after which the next reconciler run clears the guard.
+ * `DELETION` row, after which the next orchestrator run clears the guard.
  *
  * **REMOVE, never `SET deleting = false`.** The read-side fence
  * (`orgNotDeletingCheck`) accepts a literal `false`, but three tenant-setup
@@ -121,7 +121,7 @@ export async function clearOrgDeletionGuard(orgId: string): Promise<boolean> {
  * A transaction reports a failed condition as a CANCELLATION, and cancels for
  * other reasons too — `TransactionConflict`, throttling, capacity. Only a
  * `ConditionalCheckFailed` reason means "the org is not eligible for an
- * unwedge"; the rest are transient and must propagate so the reconciler logs
+ * unwedge"; the rest are transient and must propagate so the orchestrator logs
  * them and the next run retries, rather than being silently read as "declined".
  */
 function isConditionCancellation(err: unknown): boolean {

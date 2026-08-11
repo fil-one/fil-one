@@ -35,7 +35,7 @@ export const DELETION_REDRIVE_COOLDOWN_MS = 5 * 60 * 1000;
  * per {@link DELETION_REDRIVE_COOLDOWN_MS}. The claim is the conditional write
  * itself, so concurrent requests cannot both win.
  *
- * Deliberately does NOT touch `updatedAt`: that field is the reconciler's
+ * Deliberately does NOT touch `updatedAt`: that field is the orchestrator's
  * liveness signal, and letting a user's click refresh it would hide a teardown
  * that has actually stopped making progress.
  *

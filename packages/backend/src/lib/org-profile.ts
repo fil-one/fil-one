@@ -134,7 +134,7 @@ export class OrgDeletingError extends Error {
  *   compensating revoke would then destroy a healthy org's key.
  *
  * The supported unwedge (FIL-112) is `clearOrgDeletionGuard` in
- * lib/deletion-guards.ts, driven by the deletion reconciler. It **REMOVEs**
+ * lib/deletion-guards.ts, driven by the deletion orchestrator. It **REMOVEs**
  * the attribute rather than setting it to `false`, because
  * `lib/orchestrator/tenant-setup.ts`, `lib/fth/fth-tenant-setup.ts` and
  * `lib/aurora/aurora-tenant-setup.ts` condition their tenant-id write on
