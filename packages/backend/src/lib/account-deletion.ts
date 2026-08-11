@@ -83,7 +83,10 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  * dynamo-records.ts), and wedging their teardown forever is strictly worse than
  * running a discovery pass that may be early.
  */
-async function waitOutStripeSearchLag(orgId: string, record: OrgDeletionRecord): Promise<void> {
+function stripeSearchLagRemaining(
+  orgId: string,
+  record: OrgDeletionRecord,
+): { remainingMs: number; clockSkewed: boolean } {
   const deletedAtMs = Date.parse(record.deletedAt ?? '');
   if (Number.isNaN(deletedAtMs)) {
     console.warn(
@@ -91,22 +94,17 @@ async function waitOutStripeSearchLag(orgId: string, record: OrgDeletionRecord):
         'search-index lag as already elapsed',
       { orgId, deletedAt: record.deletedAt },
     );
-    return;
+    return { remainingMs: 0, clockSkewed: false };
   }
   const elapsedMs = Date.now() - deletedAtMs;
-  if (elapsedMs >= STRIPE_SEARCH_LAG_MARGIN_MS) return;
+  if (elapsedMs >= STRIPE_SEARCH_LAG_MARGIN_MS) return { remainingMs: 0, clockSkewed: false };
   // Clamped to the margin: a `deletedAt` in the future (clock skew between the
   // Lambda that stamped it and this one) must never park the pass for longer
   // than the wait it is standing in for.
-  const remainingMs = Math.min(
-    STRIPE_SEARCH_LAG_MARGIN_MS - elapsedMs,
-    STRIPE_SEARCH_LAG_MARGIN_MS,
-  );
-  console.log(
-    "[account-deletion] Waiting out Stripe's search-index lag before the post-purge discovery pass",
-    { orgId, remainingMs, clockSkewed: elapsedMs < 0 },
-  );
-  await sleep(remainingMs);
+  return {
+    remainingMs: Math.min(STRIPE_SEARCH_LAG_MARGIN_MS - elapsedMs, STRIPE_SEARCH_LAG_MARGIN_MS),
+    clockSkewed: elapsedMs < 0,
+  };
 }
 
 /**
@@ -128,7 +126,7 @@ async function waitOutStripeSearchLag(orgId: string, record: OrgDeletionRecord):
  * twice because its customer discovery is index-lagged; see the second call
  * site below. The in-pass wait is deliberate — deferring to a retry instead
  * would double every external teardown and the whole purge; see
- * {@link waitOutStripeSearchLag}.
+ * {@link stripeSearchLagRemainingMs}.
  *
  * `record.status` is read as a plain string: legacy records may still carry
  * an old intermediate status (KEYS_REVOKED, TENANTS_DISABLED, ...) — anything
@@ -174,7 +172,14 @@ export async function runAccountDeletion(orgId: string): Promise<void> {
   // well inside the lag window. Do NOT drop this pass because the first
   // "usually" finds everything — the case it misses is the unredacted-PII bug
   // this design exists to close.
-  await waitOutStripeSearchLag(orgId, record);
+  const lag = stripeSearchLagRemaining(orgId, record);
+  if (lag.remainingMs > 0) {
+    console.log(
+      "[account-deletion] Waiting out Stripe's search-index lag before the post-purge discovery pass",
+      { orgId, remainingMs: lag.remainingMs, clockSkewed: lag.clockSkewed },
+    );
+    await sleep(lag.remainingMs);
+  }
   await cancelStripeAndWriteTombstone(orgId, record, { customerId: firstPassCustomerId });
 
   await markDone(orgId);
@@ -550,7 +555,7 @@ async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<v
 
 /**
  * Record the instant the purge finished — the anchor
- * {@link waitOutStripeSearchLag} measures from, and the best available one: the
+ * {@link stripeSearchLagRemaining} measures from, and the best available one: the
  * fences are re-applied at the top of every pass and the purge has just run, so
  * from here on every writer that CONSULTS the fence is refused. It is not an
  * absolute cutoff: a request that read the profile before the fence landed can
