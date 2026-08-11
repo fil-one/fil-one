@@ -60,8 +60,7 @@ export async function applyDeletionGuards(
  * by anything: from the outside that is indistinguishable from a teardown still
  * in flight, and un-fencing a live deletion is the far more expensive mistake.
  * The escape hatch there is manual: an operator deletes the `ORG#{orgId}` /
- * `DELETION` row, after which the next reconciler run clears the fence. **No
- * runbook documents that yet** — writing one is outstanding follow-up.
+ * `DELETION` row, after which the next reconciler run clears the guard.
  *
  * **REMOVE, never `SET deleting = false`.** The read-side fence
  * (`orgNotDeletingCheck`) accepts a literal `false`, but three tenant-setup
@@ -124,7 +123,6 @@ export async function clearOrgDeletionFence(orgId: string): Promise<boolean> {
  * them and the next run retries, rather than being silently read as "declined".
  */
 function isConditionCancellation(err: unknown): boolean {
-  if (err instanceof ConditionalCheckFailedException) return true;
   if (!(err instanceof TransactionCanceledException)) return false;
   const reasons = err.CancellationReasons ?? [];
   return reasons.some((reason) => reason.Code === 'ConditionalCheckFailed');

@@ -1,16 +1,11 @@
 import {
-  BatchWriteItemCommand,
   ConditionalCheckFailedException,
   DeleteItemCommand,
   GetItemCommand,
   PutItemCommand,
-  QueryCommand,
-  ScanCommand,
   UpdateItemCommand,
-  type AttributeValue,
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
-import pRetry, { type Options as RetryOptions } from 'p-retry';
 import { S3VectorsStore } from '@filone/rag-shared';
 import { Resource } from 'sst';
 import { deleteAuth0User } from './auth0-management.js';
@@ -20,15 +15,23 @@ import { deleteDeletionChallenge } from './deletion-challenge.js';
 import { applyDeletionGuards } from './deletion-guards.js';
 import { readDeletionRecord } from './deletion-record.js';
 import {
+  assertPurgeablePk,
+  batchDelete,
+  purgeBillingOrgRows,
+  purgeRagKeyHashRows,
+  queryOrgRows,
+  scanRagKeys,
+  PURGEABLE_BILLING_PK_PREFIXES,
+  PURGEABLE_USER_INFO_PK_PREFIXES,
+} from './deletion-purge.js';
+import {
   DeletionKeys,
   OrgDeletionStatus,
   RAGKeys,
-  UsageReportKeys,
   type OrgDeletionRecord,
   type OrgTombstoneRecord,
 } from './dynamo-records.js';
 import { getOrgProfile } from './org-profile.js';
-import { RagApiKeyKeys } from './rag-api-keys.js';
 import {
   getRegionsWithTenantIds,
   getRegionsWithTenantIdsForOrg,
@@ -40,26 +43,6 @@ import { getStripeClient } from './stripe-client.js';
 import { redactStripeCustomers } from './stripe-redaction.js';
 
 const dynamo = getDynamoClient();
-
-/**
- * Partition-key prefixes the purge is allowed to delete, per table. Anything
- * outside them — e.g. `EMAIL_NORM#`, the FIL-422 trial-claim record that must
- * survive account deletion — is structurally undeletable: the guard throws
- * before a delete is issued. The trailing `#` matters: it stops a prefix
- * colliding with a longer key family (`ORG#` never matches `ORGANIZATION#`).
- */
-export const PURGEABLE_USER_INFO_PK_PREFIXES = ['ORG#', 'USER#', 'SUB#', 'RAGKEYHASH#'] as const;
-// `ORG#` covers the usage-reporting worker's BillingTable `ORG#{orgId}` /
-// `USAGE_REPORT#{date}` audit rows. The trailing `#` keeps this away from
-// `ORG_TOMBSTONE#`, the PII-free customer reference that must OUTLIVE the purge.
-export const PURGEABLE_BILLING_PK_PREFIXES = ['CUSTOMER#', 'DELETION_CHALLENGE#', 'ORG#'] as const;
-
-/** Blast-radius guard: refuses any purge target outside the purgeable prefixes. */
-export function assertPurgeablePk(pk: string, prefixes: readonly string[]): void {
-  if (!prefixes.some((prefix) => pk.startsWith(prefix))) {
-    throw new Error(`Refusing to purge key outside the purgeable prefixes: ${pk}`);
-  }
-}
 
 /**
  * Stripe Search indexes writes with a lag (~25s, measured 2026-08-07). A
@@ -152,11 +135,9 @@ export interface RunAccountDeletionOptions {
    * so a resurrection that minted a new one trips one guard or the other by
    * construction. Left fatal, they threw before the purge on every single
    * resweep and the zombie rows were never removed. Under `resweep` they become
-   * expected findings — recorded on the DELETION record, reported, and given
-   * their OWN redaction job (established here; driven to completion across
-   * passes, which is what `resurrectedStripeCustomerIds` +
-   * `stripeRedactionJobStatuses` exist to keep happening) — so the DynamoDB
-   * residue always converges. See {@link cancelStripeAndWriteTombstone}.
+   * expected findings — recorded on the DELETION record, reported, and given their
+   * OWN redaction job — so the DynamoDB residue always converges. See
+   * {@link cancelStripeAndWriteTombstone}.
    */
   resweep?: boolean;
 }
@@ -203,13 +184,10 @@ export interface RunAccountDeletionOptions {
  * That leaves the residue gone, the Lambda `Errors` datapoint Grafana alerts on
  * raised, and any Stripe follow-up visible rather than swallowed.
  *
- * Purging the residue does, however, delete the evidence the resurrection sweep
- * detects orgs BY, so the held Stripe failure needs a driver that outlives it.
- * That driver is the record itself: a resurrected customer is written to
- * `resurrectedStripeCustomerIds` and its redaction outcome to
- * `stripeRedactionJobStatuses`, and the sweep re-drives any DONE org whose
- * resurrected customers have no terminal status yet — every data surface clean
- * or not. See `pendingRedactionCustomerIds` in dynamo-records.ts.
+ * The purge deletes the very rows the sweep detects orgs by, so a held Stripe
+ * failure needs a driver that outlives them — the DELETION record itself. See the
+ * `stripeRedaction` surface on `sweepResurrectedOrgs`
+ * (lib/deletion-resurrection-sweep.ts).
  *
  * @param options.resweep run the pass even when the record is DONE. See
  *   {@link RunAccountDeletionOptions}.
@@ -245,13 +223,12 @@ export async function runAccountDeletion(
   // pass before it. On a first teardown nothing is held: the record is still
   // non-DONE and the ordinary re-drive is the right answer.
   //
-  // ONLY the Stripe surface is held, and the asymmetry is the point. Its
-  // failures on a resweep are DETERMINISTIC — the redaction lifecycle needs a
-  // later pass, or a customer needs manual follow-up — so retrying alone never
-  // clears them and the residue would sit there forever. A region/auth0/RAG
-  // failure is a transient outage that the next run genuinely does fix, and
-  // purging the org's rows while one of them is still half-torn-down would
-  // throw away the state that teardown re-reads.
+  // ONLY the Stripe surface is held, and the asymmetry is the point. Its failures
+  // on a resweep are DETERMINISTIC — the redaction lifecycle needs a later pass,
+  // or a customer needs manual follow-up — so retrying alone never clears them. A
+  // region/auth0/RAG failure is a transient outage the next run genuinely does
+  // fix, and purging the org's rows while one is still half-torn-down would throw
+  // away the state teardown re-reads.
   const held: unknown[] = [];
   const holdOnResweep = async (run: () => Promise<void>): Promise<void> => {
     if (!resweep) return run();
@@ -954,150 +931,4 @@ async function bumpAttemptCount(orgId: string): Promise<void> {
       ExpressionAttributeValues: marshall({ ':one': 1, ':now': new Date().toISOString() }),
     }),
   );
-}
-
-/**
- * RAG API keys write a `RAGKEYHASH#{sha256}/LOOKUP` row alongside the org's
- * `RAGKEY#` row (see lib/rag-api-keys.ts). The ORG# partition purge removes
- * the RAGKEY# rows but not the hash lookups — credential-hash residue that
- * would survive an erasure request forever — so derive each lookup pk from
- * the RAGKEY# rows' stored `tokenHash` and delete them explicitly.
- *
- * Takes the partition snapshot the caller already fetched rather than
- * re-querying: sharing one snapshot with the partition delete is what makes the
- * pairing exact, and running before it is what makes a crash between the two
- * recoverable (see the note at the call site).
- */
-async function purgeRagKeyHashRows(orgRows: Record<string, unknown>[]): Promise<void> {
-  const lookupKeys = orgRows
-    .filter((row) => typeof row.sk === 'string' && row.sk.startsWith(RagApiKeyKeys.orgSkPrefix()))
-    .map((row) => row.tokenHash)
-    .filter((tokenHash): tokenHash is string => typeof tokenHash === 'string')
-    .map((tokenHash) => ({ pk: RagApiKeyKeys.lookupPk(tokenHash), sk: RagApiKeyKeys.lookupSk() }));
-  for (const key of lookupKeys) assertPurgeablePk(key.pk, PURGEABLE_USER_INFO_PK_PREFIXES);
-  await batchDelete(Resource.UserInfoTable.name, lookupKeys);
-}
-
-/** The only sk the teardown claims from the BillingTable `ORG#` partition. */
-
-/**
- * Delete the org's BillingTable `ORG#{orgId}` audit rows — the usage-reporting
- * worker's `USAGE_REPORT#{date}` items. Nothing else in the teardown touches
- * this partition (the per-member sweep below handles `CUSTOMER#`), so without
- * this the rows outlive the deletion until their TTL. The
- * `ORG_TOMBSTONE#{orgId}` record is a different partition and is untouched.
- *
- * The sk prefix is part of the contract, not an optimization: this is an
- * unrecoverable delete, and querying the bare partition would silently pull any
- * future `ORG#{orgId}` row into its scope the moment someone adds one. A row
- * that should be purged has to be added here deliberately.
- */
-async function purgeBillingOrgRows(orgId: string): Promise<void> {
-  const rows = await queryPartition(
-    Resource.BillingTable.name,
-    `ORG#${orgId}`,
-    UsageReportKeys.skPrefix,
-  );
-  const keys = rows.map((row) => ({ pk: row.pk as string, sk: row.sk as string }));
-  for (const key of keys) assertPurgeablePk(key.pk, PURGEABLE_BILLING_PK_PREFIXES);
-  await batchDelete(Resource.BillingTable.name, keys);
-}
-
-/** Paged Query of the org's UserInfoTable partition. */
-async function queryOrgRows(orgId: string): Promise<Record<string, unknown>[]> {
-  return queryPartition(Resource.UserInfoTable.name, `ORG#${orgId}`);
-}
-
-/** Paged Query of a partition, optionally narrowed to an sk prefix. */
-async function queryPartition(
-  tableName: string,
-  pk: string,
-  skPrefix?: string,
-): Promise<Record<string, unknown>[]> {
-  const rows: Record<string, unknown>[] = [];
-  let lastEvaluatedKey: Record<string, AttributeValue> | undefined;
-  do {
-    const result = await dynamo.send(
-      new QueryCommand({
-        TableName: tableName,
-        // Strongly consistent: a fenced write that committed just before the
-        // teardown started must be visible to the purge that deletes it. The
-        // resurrection sweep would catch a survivor later, but the primary path
-        // should not lean on the backstop.
-        ConsistentRead: true,
-        KeyConditionExpression: skPrefix ? 'pk = :pk AND begins_with(sk, :skPrefix)' : 'pk = :pk',
-        ExpressionAttributeValues: marshall(
-          skPrefix ? { ':pk': pk, ':skPrefix': skPrefix } : { ':pk': pk },
-        ),
-        ...(lastEvaluatedKey ? { ExclusiveStartKey: lastEvaluatedKey } : {}),
-      }),
-    );
-    rows.push(...(result.Items ?? []).map((item) => unmarshall(item)));
-    lastEvaluatedKey = result.LastEvaluatedKey;
-  } while (lastEvaluatedKey);
-  return rows;
-}
-
-/** One paged full-table Scan matching BOTH of the org's RAG pk prefixes. */
-async function scanRagKeys(orgId: string): Promise<{ pk: string; sk: string }[]> {
-  const keys: { pk: string; sk: string }[] = [];
-  let lastEvaluatedKey: Record<string, AttributeValue> | undefined;
-  do {
-    const result = await dynamo.send(
-      new ScanCommand({
-        TableName: Resource.RagIndexerTable.name,
-        // Same reason as queryPartition. On a Scan this doubles the RCU cost;
-        // the table is small and a missed row survives the purge, so it is worth it.
-        ConsistentRead: true,
-        FilterExpression: 'begins_with(pk, :bucketPrefix) OR begins_with(pk, :checkpointPrefix)',
-        ExpressionAttributeValues: marshall({
-          ':bucketPrefix': `BUCKET#${orgId}#`,
-          ':checkpointPrefix': `INDEXER_CHECKPOINT#${orgId}#`,
-        }),
-        ProjectionExpression: 'pk, sk',
-        ...(lastEvaluatedKey ? { ExclusiveStartKey: lastEvaluatedKey } : {}),
-      }),
-    );
-    keys.push(
-      ...(result.Items ?? []).map((item) => unmarshall(item) as { pk: string; sk: string }),
-    );
-    lastEvaluatedKey = result.LastEvaluatedKey;
-  } while (lastEvaluatedKey);
-  return keys;
-}
-
-// UnprocessedItems means DynamoDB is shedding load — retry with exponential
-// backoff + jitter instead of hammering it in a tight loop, and give up after
-// ~5 attempts (the thrown error keeps the record non-DONE, so the Lambda
-// retry / orchestrator re-drives the idempotent purge later).
-const BATCH_DELETE_RETRY: RetryOptions = { retries: 4, minTimeout: 100, randomize: true };
-
-/**
- * BatchWrite deletes in 25-key chunks, retrying only the UnprocessedItems of
- * each chunk with capped exponential backoff. Exported for direct testing;
- * `retry` is injectable so tests keep timeouts tiny.
- */
-export async function batchDelete(
-  tableName: string,
-  keys: { pk: string; sk: string }[],
-  retry: RetryOptions = BATCH_DELETE_RETRY,
-): Promise<void> {
-  for (let i = 0; i < keys.length; i += 25) {
-    let requests = keys
-      .slice(i, i + 25)
-      .map((key) => ({ DeleteRequest: { Key: marshall({ pk: key.pk, sk: key.sk }) } }));
-    await pRetry(async () => {
-      const result = await dynamo.send(
-        new BatchWriteItemCommand({ RequestItems: { [tableName]: requests } }),
-      );
-      const unprocessed = (result.UnprocessedItems?.[tableName] ?? []) as typeof requests;
-      if (unprocessed.length > 0) {
-        // Narrow the next attempt to what's left, then let pRetry back off.
-        requests = unprocessed;
-        throw new Error(
-          `BatchWriteItem left ${unprocessed.length} unprocessed delete(s) for ${tableName}`,
-        );
-      }
-    }, retry);
-  }
 }
