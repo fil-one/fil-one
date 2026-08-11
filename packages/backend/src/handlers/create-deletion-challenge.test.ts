@@ -32,7 +32,7 @@ vi.mock('../lib/deletion-record.js', () => ({
 
 const mockCreateChallenge = vi.fn();
 vi.mock('../lib/deletion-challenge.js', () => ({
-  createDeletionChallenge: (orgId: string) => mockCreateChallenge(orgId),
+  createDeletionChallenge: (orgId: string, userId: string) => mockCreateChallenge(orgId, userId),
 }));
 
 const mockSendEmail = vi.fn();

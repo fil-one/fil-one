@@ -22,8 +22,14 @@ export type CreateChallengeResult =
 
 export type VerifyChallengeResult = 'ok' | 'invalid' | 'expired_or_locked';
 
-function hashCode(orgId: string, salt: string, code: string): string {
-  return createHash('sha256').update(`${orgId}:${salt}:${code}`).digest('hex');
+/**
+ * The code is bound to the requester, not just the org: `userId` is part of the
+ * hash input, so a code minted for one admin cannot be confirmed by another. A
+ * different admin submitting a perfectly valid code fails the compare and gets
+ * the same answer as a wrong code.
+ */
+function hashCode(orgId: string, userId: string, salt: string, code: string): string {
+  return createHash('sha256').update(`${orgId}:${userId}:${salt}:${code}`).digest('hex');
 }
 
 function challengeKey(orgId: string) {
@@ -34,8 +40,15 @@ function challengeKey(orgId: string) {
  * Issue (or re-issue) the org's deletion code. One live code per org: re-issue
  * resets the verify attempts, but the send count carries across the row's TTL
  * window to cap sends at {@link MAX_SENDS_PER_WINDOW} per hour.
+ *
+ * The code is emailed to the requester's own session address and only they can
+ * confirm with it (see {@link hashCode}), so a re-issue by a second admin
+ * supersedes the first admin's code rather than sharing it.
  */
-export async function createDeletionChallenge(orgId: string): Promise<CreateChallengeResult> {
+export async function createDeletionChallenge(
+  orgId: string,
+  requestedByUserId: string,
+): Promise<CreateChallengeResult> {
   const now = new Date();
   const nowEpoch = Math.floor(now.getTime() / 1000);
   const code = randomInt(0, 10 ** DELETION_CODE_LENGTH)
@@ -62,7 +75,7 @@ export async function createDeletionChallenge(orgId: string): Promise<CreateChal
         ConditionExpression: 'attribute_not_exists(pk) OR #ttl <= :nowEpoch',
         ExpressionAttributeNames: { '#ttl': 'ttl' },
         ExpressionAttributeValues: marshall({
-          ':codeHash': hashCode(orgId, salt, code),
+          ':codeHash': hashCode(orgId, requestedByUserId, salt, code),
           ':salt': salt,
           ':zero': 0,
           ':one': 1,
@@ -98,7 +111,7 @@ export async function createDeletionChallenge(orgId: string): Promise<CreateChal
             'lastSentAt < :cooldownCutoff AND sendCount < :maxSends',
           ExpressionAttributeNames: { '#ttl': 'ttl' },
           ExpressionAttributeValues: marshall({
-            ':codeHash': hashCode(orgId, salt, code),
+            ':codeHash': hashCode(orgId, requestedByUserId, salt, code),
             ':salt': salt,
             ':zero': 0,
             ':one': 1,
@@ -145,9 +158,15 @@ function rateLimitedResult(err: ConditionalCheckFailedException, now: Date): Cre
 /**
  * Verify a submitted code. The attempt is consumed atomically BEFORE the hash
  * comparison so parallel guesses cannot exceed {@link MAX_VERIFY_ATTEMPTS}.
+ *
+ * `userId` is the submitter. A code issued to a different admin cannot be
+ * confirmed here — it fails the compare and reads as `invalid`, indistinguishable
+ * from a wrong code. That costs the submitter one attempt, which is the same
+ * price any wrong code pays.
  */
 export async function verifyDeletionChallenge(
   orgId: string,
+  userId: string,
   code: string,
 ): Promise<VerifyChallengeResult> {
   const key = challengeKey(orgId);
@@ -173,20 +192,24 @@ export async function verifyDeletionChallenge(
     throw err;
   }
 
-  const candidate = Buffer.from(hashCode(orgId, attrs.salt as string, code), 'hex');
+  const candidate = Buffer.from(hashCode(orgId, userId, attrs.salt as string, code), 'hex');
   const stored = Buffer.from(attrs.codeHash as string, 'hex');
   if (candidate.length !== stored.length || !timingSafeEqual(candidate, stored)) {
     return 'invalid';
   }
 
-  // Single-use: the conditional delete makes consumption atomic, so a
-  // concurrent verify that already consumed the row wins and this one fails.
+  // Single-use, and single-use of THIS code. Conditioning on the hash just
+  // verified covers both races: a concurrent verify that already consumed the row
+  // wins and this one fails, and a resend that replaced the code mid-verify is
+  // not destroyed by this delete — otherwise accepting the superseded code would
+  // also burn the fresh one. Existence is implied by the equality.
   try {
     await getDynamoClient().send(
       new DeleteItemCommand({
         TableName: Resource.BillingTable.name,
         Key: key,
-        ConditionExpression: 'attribute_exists(pk)',
+        ConditionExpression: 'codeHash = :verified',
+        ExpressionAttributeValues: marshall({ ':verified': attrs.codeHash as string }),
       }),
     );
   } catch (err) {

@@ -30,7 +30,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   }
 
   // Same admin gate as the confirm endpoint — a non-admin must not be able to
-  // trigger deletion codes at the admins' inboxes.
+  // mint a valid org-deletion code for themselves, nor burn the org's send budget.
   if (!(await isOrgAdmin(orgId, userId))) {
     return new ResponseBuilder()
       .status(403)
@@ -46,7 +46,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
       .build();
   }
 
-  const challenge = await createDeletionChallenge(orgId);
+  const challenge = await createDeletionChallenge(orgId, userId);
   if (challenge.outcome === 'rate_limited') {
     return new ResponseBuilder()
       .status(429)
