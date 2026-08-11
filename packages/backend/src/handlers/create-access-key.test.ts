@@ -67,7 +67,7 @@ function validBody({ keyName, region = 'eu-west-1' }: { keyName?: string; region
 
 /**
  * The `ACCESSKEY#` rows are written through a fenced transaction (FIL-112), so
- * every assertion about "the Put" reads item 1 — item 0 is always the fence-B
+ * every assertion about "the Put" reads item 1 — item 0 is always the deletion-guard
  * ConditionCheck (see sendGuardedWrite).
  */
 function accessKeyPuts() {
@@ -76,14 +76,14 @@ function accessKeyPuts() {
     .map((call) => call.args[0].input.TransactItems![1].Put!);
 }
 
-/** The fence-B ConditionCheck of the first transaction sent. */
-function sentFenceCheck() {
+/** The deletion-guard ConditionCheck of the first transaction sent. */
+function sentGuardCheck() {
   return ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems![0]
     .ConditionCheck;
 }
 
 /** A fence rejection: item 0 (the ConditionCheck) is what DynamoDB cancelled on. */
-function fenceRejection() {
+function guardRejection() {
   return new TransactionCanceledException({
     message: 'cancelled',
     $metadata: {},
@@ -204,7 +204,7 @@ describe('create-access-key baseHandler', () => {
 
       // The expression itself is pinned once, in org-profile.test.ts. Here the
       // contract is that this writer sends exactly that check, unmodified.
-      expect(sentFenceCheck()).toEqual(orgNotDeletingCheck('org-1').ConditionCheck);
+      expect(sentGuardCheck()).toEqual(orgNotDeletingCheck('org-1').ConditionCheck);
     });
 
     it('revokes the key it just minted when the fenced write loses the race', async () => {
@@ -212,7 +212,7 @@ describe('create-access-key baseHandler', () => {
       // the credential exists upstream with no ACCESSKEY# row for teardown to
       // revoke by. Compensate.
       mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
-      ddbMock.on(TransactWriteItemsCommand).rejects(fenceRejection());
+      ddbMock.on(TransactWriteItemsCommand).rejects(guardRejection());
       mockDeleteAccessKey.mockResolvedValue(undefined);
 
       const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
@@ -260,7 +260,7 @@ describe('create-access-key baseHandler', () => {
 
     it('still answers 410 when the compensating revoke itself fails', async () => {
       mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
-      ddbMock.on(TransactWriteItemsCommand).rejects(fenceRejection());
+      ddbMock.on(TransactWriteItemsCommand).rejects(guardRejection());
       mockDeleteAccessKey.mockRejectedValue(new Error('orchestrator down'));
 
       const result = await baseHandler(
@@ -282,7 +282,7 @@ describe('create-access-key baseHandler', () => {
         accessKeyId: 'AKIA1234567890',
         createdAt: '2026-03-10T00:00:00Z',
       });
-      ddbMock.on(TransactWriteItemsCommand).rejects(fenceRejection());
+      ddbMock.on(TransactWriteItemsCommand).rejects(guardRejection());
 
       const result = await baseHandler(
         buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO }),
@@ -297,7 +297,7 @@ describe('create-access-key baseHandler', () => {
       // now is the fenced transaction, and the fence rejected it.
       expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
       expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
-      expect(sentFenceCheck()?.Key).toEqual({ pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } });
+      expect(sentGuardCheck()?.Key).toEqual({ pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } });
     });
   });
 
