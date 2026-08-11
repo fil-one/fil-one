@@ -239,6 +239,49 @@ describe('authMiddleware', () => {
       expect(mockFetch).not.toHaveBeenCalled();
     });
 
+    it('returns ACCOUNT_DELETION_IN_PROGRESS while the teardown is still in flight', async () => {
+      // Confirm arms `deleted` and leaves `userId`; the purge REMOVEs it. So the
+      // same row the gate already reads tells the two apart at no extra cost, and
+      // a user mid-deletion gets a distinct code rather than being told their
+      // account is already gone.
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: true } });
+
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: {
+            pk: { S: `SUB#${MOCK_SUB}` },
+            sk: { S: 'IDENTITY' },
+            deleted: { BOOL: true },
+            deletedAt: { S: '2026-07-10T00:00:00.000Z' },
+            // Still present: the purge has not run yet.
+            userId: { S: 'user-1' },
+            orgId: { S: 'org-1' },
+          },
+        });
+
+      const { before } = authMiddleware();
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+      });
+
+      const result = (await before(buildMiddyRequest(event))) as APIGatewayProxyStructuredResultV2;
+
+      expect(result.statusCode).toBe(410);
+      expect(JSON.parse(result.body!)).toEqual({
+        message: 'Account deletion is in progress',
+        code: ApiErrorCode.ACCOUNT_DELETION_IN_PROGRESS,
+      });
+      // Still a dead session either way.
+      expect(result.cookies ?? []).toEqual(
+        expect.arrayContaining([expect.stringContaining('hs_access_token=;')]),
+      );
+    });
+
     it('returns 410 ACCOUNT_DELETED when the tombstone is found via the refresh path', async () => {
       // An expired access token routes through attachIdentity's refresh instead
       // of tryValidateAccessToken's rethrow, so the tombstone gate has to hold on
