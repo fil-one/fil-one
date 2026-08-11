@@ -23,6 +23,7 @@ import {
   DeletionKeys,
   OrgDeletionStatus,
   RAGKeys,
+  UsageReportKeys,
   type OrgDeletionRecord,
   type OrgTombstoneRecord,
 } from './dynamo-records.js';
@@ -49,10 +50,8 @@ const dynamo = getDynamoClient();
  */
 export const PURGEABLE_USER_INFO_PK_PREFIXES = ['ORG#', 'USER#', 'SUB#', 'RAGKEYHASH#'] as const;
 // `ORG#` covers the usage-reporting worker's BillingTable `ORG#{orgId}` /
-// `USAGE_REPORT#{date}` audit rows. They were previously outside this list, so
-// nothing purged them and they survived a completed deletion until their
-// 365-day TTL. The trailing `#` keeps this away from `ORG_TOMBSTONE#`, the
-// PII-free customer reference that must OUTLIVE the purge.
+// `USAGE_REPORT#{date}` audit rows. The trailing `#` keeps this away from
+// `ORG_TOMBSTONE#`, the PII-free customer reference that must OUTLIVE the purge.
 export const PURGEABLE_BILLING_PK_PREFIXES = ['CUSTOMER#', 'DELETION_CHALLENGE#', 'ORG#'] as const;
 
 /** Blast-radius guard: refuses any purge target outside the purgeable prefixes. */
@@ -123,7 +122,7 @@ async function waitOutStripeSearchLag(orgId: string, record: OrgDeletionRecord):
     STRIPE_SEARCH_LAG_MARGIN_MS - elapsedMs,
     STRIPE_SEARCH_LAG_MARGIN_MS,
   );
-  console.warn(
+  console.log(
     "[account-deletion] Waiting out Stripe's search-index lag before the post-purge discovery pass",
     { orgId, remainingMs, clockSkewed: elapsedMs < 0 },
   );
@@ -199,7 +198,7 @@ export async function runAccountDeletion(orgId: string): Promise<void> {
   await cancelStripeAndWriteTombstone(orgId, record, { customerId: firstPassCustomerId });
 
   await markDone(orgId);
-  console.warn('[account-deletion] Teardown complete', { orgId });
+  console.log('[account-deletion] Teardown complete', { orgId });
 }
 
 // ---------------------------------------------------------------------------
@@ -257,7 +256,12 @@ async function cancelStripeAndWriteTombstone(
   return customerId;
 }
 
-/** Cancel every live subscription of every given customer; already-gone is success. */
+/**
+ * Cancel every live subscription of every given customer; already-gone is success.
+ *
+ * Sequential on purpose (upstream pacing); the pass re-drives, so convergence
+ * does not need settleAll here.
+ */
 async function cancelAllSubscriptions(orgId: string, customerIds: string[]): Promise<void> {
   for (const customerId of customerIds) {
     for (const subscriptionId of await cancellableSubscriptionIds(orgId, customerId)) {
@@ -265,7 +269,7 @@ async function cancelAllSubscriptions(orgId: string, customerIds: string[]): Pro
         await getStripeClient().subscriptions.cancel(subscriptionId);
       } catch (err) {
         if (!isStripeAlreadyCanceled(err)) throw err;
-        console.warn('[account-deletion] Subscription already canceled/missing', {
+        console.log('[account-deletion] Subscription already canceled/missing', {
           orgId,
           subscriptionId,
         });
@@ -420,7 +424,7 @@ async function cancellableSubscriptionIds(orgId: string, customerId: string): Pr
     }
   } catch (err) {
     if ((err as { code?: string }).code !== 'resource_missing') throw err;
-    console.warn('[account-deletion] Stripe customer already deleted; nothing to cancel', {
+    console.log('[account-deletion] Stripe customer already deleted; nothing to cancel', {
       orgId,
       stripeCustomerId: customerId,
     });
@@ -445,6 +449,10 @@ function isStripeAlreadyCanceled(err: unknown): boolean {
   return isInvalidRequest && /already canceled/i.test(e.message ?? '');
 }
 
+/**
+ * Sequential on purpose (upstream pacing); the pass re-drives, so convergence
+ * does not need settleAll here.
+ */
 async function deleteAuth0Users(record: OrgDeletionRecord): Promise<void> {
   for (const member of record.members) {
     if (member.sub) await deleteAuth0User(member.sub);
@@ -758,7 +766,6 @@ async function purgeRagKeyHashRows(orgRows: Record<string, unknown>[]): Promise<
 }
 
 /** The only sk the teardown claims from the BillingTable `ORG#` partition. */
-const USAGE_REPORT_SK_PREFIX = 'USAGE_REPORT#';
 
 /**
  * Delete the org's BillingTable `ORG#{orgId}` audit rows — the usage-reporting
@@ -776,7 +783,7 @@ async function purgeBillingOrgRows(orgId: string): Promise<void> {
   const rows = await queryPartition(
     Resource.BillingTable.name,
     `ORG#${orgId}`,
-    USAGE_REPORT_SK_PREFIX,
+    UsageReportKeys.skPrefix,
   );
   const keys = rows.map((row) => ({ pk: row.pk as string, sk: row.sk as string }));
   for (const key of keys) assertPurgeablePk(key.pk, PURGEABLE_BILLING_PK_PREFIXES);
@@ -800,6 +807,11 @@ async function queryPartition(
     const result = await dynamo.send(
       new QueryCommand({
         TableName: tableName,
+        // Strongly consistent: a fenced write that committed just before the
+        // teardown started must be visible to the purge that deletes it. The
+        // resurrection sweep would catch a survivor later, but the primary path
+        // should not lean on the backstop.
+        ConsistentRead: true,
         KeyConditionExpression: skPrefix ? 'pk = :pk AND begins_with(sk, :skPrefix)' : 'pk = :pk',
         ExpressionAttributeValues: marshall(
           skPrefix ? { ':pk': pk, ':skPrefix': skPrefix } : { ':pk': pk },
@@ -821,6 +833,9 @@ async function scanRagKeys(orgId: string): Promise<{ pk: string; sk: string }[]>
     const result = await dynamo.send(
       new ScanCommand({
         TableName: Resource.RagIndexerTable.name,
+        // Same reason as queryPartition. On a Scan this doubles the RCU cost;
+        // the table is small and a missed row survives the purge, so it is worth it.
+        ConsistentRead: true,
         FilterExpression: 'begins_with(pk, :bucketPrefix) OR begins_with(pk, :checkpointPrefix)',
         ExpressionAttributeValues: marshall({
           ':bucketPrefix': `BUCKET#${orgId}#`,

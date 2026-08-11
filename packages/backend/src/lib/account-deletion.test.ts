@@ -971,6 +971,30 @@ describe('runAccountDeletion — live Stripe customer discovery', () => {
     warn.mockRestore();
   });
 
+  it('a second-pass Stripe failure on an ordinary run keeps the record non-DONE but stamps purgedAt', async () => {
+    // The ordering contract, on a FIRST teardown rather than a resweep: the
+    // purge has already happened and must not be undone or repeated needlessly,
+    // so `purgedAt` is stamped — but the pass still failed, so DONE must not be
+    // written. Moving markDone ahead of the second pass would make the record
+    // inert with the late customer's PII still in Stripe.
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    // First pass finds nothing and succeeds; the post-purge pass throws.
+    mockCustomersSearch.mockReturnValueOnce(stripeSearch([])).mockImplementation(() => {
+      throw new Error('Stripe customer search failed');
+    });
+
+    await expect(runAccountDeletion(ORG_ID)).rejects.toThrow(/Stripe customer search failed/);
+
+    // The purge ran and is recorded, so a re-drive waits out the lag from here
+    // rather than starting the margin again.
+    const purgeStamps = ddbMock
+      .commandCalls(UpdateItemCommand)
+      .filter((c) => c.args[0].input.UpdateExpression?.includes('purgedAt'));
+    expect(purgeStamps).toHaveLength(1);
+    // But the teardown did not finish.
+    expect(doneWrites()).toHaveLength(0);
+  });
+
   it('multiple discovered customers: cancels ALL of them, then refuses to finish', async () => {
     // The org ↔ customer relationship is 1:1 by domain. If it ever breaks,
     // billing must still stop everywhere — but a single-customer tombstone and
@@ -1145,7 +1169,7 @@ describe('runAccountDeletion — live Stripe customer discovery', () => {
       });
 
     vi.useFakeTimers();
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const run = runAccountDeletion(ORG_ID);
     // An hour of skew must not park the pass for an hour — one margin, no more.
     await vi.advanceTimersByTimeAsync(60_000);
@@ -1153,11 +1177,11 @@ describe('runAccountDeletion — live Stripe customer discovery', () => {
     vi.useRealTimers();
 
     expect(doneWrites()).toHaveLength(1);
-    expect(warn).toHaveBeenCalledWith(
+    expect(log).toHaveBeenCalledWith(
       expect.stringContaining("Waiting out Stripe's search-index lag"),
       expect.objectContaining({ remainingMs: 60_000, clockSkewed: true }),
     );
-    warn.mockRestore();
+    log.mockRestore();
   });
 
   it('writes the tombstone conditionally so an overlapping worker cannot swap the customer id', async () => {
