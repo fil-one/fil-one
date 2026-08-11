@@ -1,15 +1,11 @@
-import { ConditionalCheckFailedException, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import type Stripe from 'stripe';
 import { Resource } from 'sst';
 import { SubscriptionStatus } from '@filone/shared';
-import { DELETION_GUARD } from './deletion-guard.js';
-import { getDynamoClient } from './ddb-client.js';
+import { DELETION_GUARD, sendGuardedBillingUpdate } from './deletion-guard.js';
 import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
 } from './region-helpers.js';
-
-const dynamo = getDynamoClient();
 
 /**
  * Returns false when {@link DELETION_GUARD} rejects the write — the caller must
@@ -35,9 +31,9 @@ export async function saveBillingRecord(
     paymentMethodExpYear = pm.card.exp_year;
   }
 
-  try {
-    await dynamo.send(
-      new UpdateItemCommand({
+  return (
+    (await sendGuardedBillingUpdate(
+      {
         TableName: Resource.BillingTable.name,
         Key: {
           pk: { S: `CUSTOMER#${userId}` },
@@ -45,7 +41,6 @@ export async function saveBillingRecord(
         },
         UpdateExpression:
           'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now REMOVE trialEndsAt',
-        ConditionExpression: DELETION_GUARD,
         ExpressionAttributeValues: {
           ':subId': { S: subscription.id },
           ':status': { S: mappedStatus },
@@ -59,19 +54,10 @@ export async function saveBillingRecord(
           ':expYear': { N: String(paymentMethodExpYear) },
           ':now': { S: new Date().toISOString() },
         },
-      }),
-    );
-  } catch (err) {
-    if (err instanceof ConditionalCheckFailedException) {
-      console.warn(
-        '[billing-activation] Billing record missing or org mid-deletion; skipping save',
-        { userId, subscriptionId: subscription.id },
-      );
-      return false;
-    }
-    throw err;
-  }
-  return true;
+      },
+      { source: 'billing-activation', userId, subscriptionId: subscription.id },
+    )) !== null
+  );
 }
 
 // Unlocks the org's tenant on every orchestrator where it exists (Aurora, FTH,

@@ -20,6 +20,11 @@ vi.mock('./service-orchestrator-registry.js', () => ({
   getAvailableOrchestrators: () => [],
 }));
 
+const mockReportMetric = vi.fn();
+vi.mock('./metrics.js', () => ({
+  reportMetric: (...args: unknown[]) => mockReportMetric(...args),
+}));
+
 const ddbMock = mockClient(DynamoDBClient);
 
 import { saveBillingRecord } from './billing-activation.js';
@@ -41,6 +46,7 @@ function mockSubscription(): Stripe.Subscription {
 describe('saveBillingRecord', () => {
   beforeEach(() => {
     ddbMock.reset();
+    mockReportMetric.mockClear();
   });
 
   it('writes the record under the FIL-112 deletion guard and returns true', async () => {
@@ -78,8 +84,14 @@ describe('saveBillingRecord', () => {
     expect(saved).toBe(false);
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('mid-deletion'),
-      expect.objectContaining({ userId: USER_ID }),
+      expect.objectContaining({ source: 'billing-activation', userId: USER_ID }),
     );
+    // Alarmable, not just logged: this rejection is the one that stops an
+    // activation from unlocking tenants a teardown is disabling.
+    expect(mockReportMetric.mock.calls[0][0]).toMatchObject({
+      source: 'billing-activation',
+      BillingDeletionGuardRejected: 1,
+    });
     warnSpy.mockRestore();
   });
 
