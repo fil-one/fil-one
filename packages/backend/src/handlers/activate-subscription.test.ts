@@ -649,6 +649,50 @@ describe('activate-subscription handler', () => {
     );
   });
 
+  it('does not raise a manual-cleanup alarm when the teardown already canceled the subscription', async () => {
+    // The guard rejected because a teardown owns the record, and cancelling the
+    // org's subscriptions is one of the things a teardown does — so losing this
+    // race is the common case, not an operator problem.
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // vi.spyOn returns the SAME spy when the method is already spied, so these
+    // carry the previous test's calls until cleared.
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    errorSpy.mockClear();
+    logSpy.mockClear();
+    ddbMock
+      .on(GetItemCommand)
+      .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) });
+    ddbMock.on(UpdateItemCommand).rejects(
+      new ConditionalCheckFailedException({
+        message: 'The conditional request failed',
+        $metadata: {},
+      }),
+    );
+    mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
+    mockSubscriptionsCancel.mockRejectedValue(
+      Object.assign(new Error('A subscription can only be canceled once'), {
+        type: 'invalid_request_error',
+      }),
+    );
+
+    const result = await handler(
+      buildEvent({
+        userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+        method: 'POST',
+        rawPath: '/api/billing/activate',
+      }),
+      {} as never,
+    );
+
+    expect((result as { statusCode: number }).statusCode).toBe(410);
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('already canceled by the teardown'),
+      expect.objectContaining({ userId: 'user-1', subscriptionId: 'sub_test_456' }),
+    );
+  });
+
   it('returns 500 when updateTenantStatus fails', async () => {
     ddbMock
       .on(GetItemCommand)

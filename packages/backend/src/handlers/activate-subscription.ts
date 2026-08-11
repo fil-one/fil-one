@@ -164,11 +164,19 @@ async function persistBillingAndUnlock(params: {
         subscriptionId: subscription.id,
       });
     } catch (error) {
-      console.error(
-        '[activate-subscription] Failed to cancel subscription after deletion-guard rejection; ' +
-          'it may keep billing a deleted account and needs manual cleanup',
-        { userId, subscriptionId: subscription.id, error },
-      );
+      if (isAlreadyCanceled(error)) {
+        console.log(
+          '[activate-subscription] Subscription already canceled by the teardown; nothing to ' +
+            'clean up',
+          { userId, subscriptionId: subscription.id },
+        );
+      } else {
+        console.error(
+          '[activate-subscription] Failed to cancel subscription after deletion-guard rejection; ' +
+            'it may keep billing a deleted account and needs manual cleanup',
+          { userId, subscriptionId: subscription.id, error },
+        );
+      }
     }
     return accountDeletedResponse();
   }
@@ -178,6 +186,21 @@ async function persistBillingAndUnlock(params: {
   // teardown deletes the tenants themselves.
   await unlockAllProvisionedRegions(orgId);
   return null;
+}
+
+/**
+ * The cancel above raced the teardown and lost, which is the common case rather
+ * than a failure: the guard rejected precisely because a teardown owns this
+ * record, and cancelling the org's subscriptions is one of the things it does.
+ *
+ * Stripe ships no dedicated code for it. Cancelling an already-canceled
+ * subscription returns `invalid_request_error` with "A subscription can only be
+ * canceled once"; `resource_missing` means the subscription (or its customer) is
+ * gone, which Stripe cancels on its behalf.
+ */
+function isAlreadyCanceled(error: unknown): boolean {
+  const e = error as { code?: string; message?: string };
+  return e.code === 'resource_missing' || /can only be canceled once/i.test(e.message ?? '');
 }
 
 type ActivatableRecord =
