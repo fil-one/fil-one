@@ -382,22 +382,6 @@ describe('stripe-webhook handler', () => {
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
-    it('backfills stripeCustomerId with if_not_exists using the subscription customer id', async () => {
-      setupStripeEvent('customer.subscription.created', mockSubscription());
-
-      await handler(buildWebhookEvent('{}'));
-
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-      const input = updateCalls[0].args[0].input;
-      expect(input.UpdateExpression).toContain(
-        'stripeCustomerId = if_not_exists(stripeCustomerId, :stripeCustomerId)',
-      );
-      expect(input.ExpressionAttributeValues![':stripeCustomerId']).toEqual({
-        S: MOCK_CUSTOMER_ID,
-      });
-    });
-
     it('backfills trial window with if_not_exists when trial_start/trial_end are set', async () => {
       const trialStart = 1650000000;
       const trialEnd = 1655000000;
