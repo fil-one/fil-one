@@ -15,6 +15,8 @@ vi.mock('sst', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
+process.env.FILONE_STAGE = 'test';
+
 import { baseHandler } from './list-access-keys.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
@@ -290,7 +292,7 @@ describe('list-access-keys baseHandler', () => {
     expect(input).toStrictEqual({
       TableName: 'UserInfoTable',
       KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
-      FilterExpression: 'bucketScope = :all OR contains(buckets, :bucket)',
+      FilterExpression: '(bucketScope = :all OR contains(buckets, :bucket))',
       ExpressionAttributeValues: {
         ':pk': { S: 'ORG#org-1' },
         ':skPrefix': { S: 'ACCESSKEY#' },
@@ -300,7 +302,7 @@ describe('list-access-keys baseHandler', () => {
     });
   });
 
-  it('does not add FilterExpression when no bucket query param', async () => {
+  it('does not add FilterExpression when no bucket or region query param', async () => {
     ddbMock.on(QueryCommand).resolves({ Items: [] });
 
     const event = buildEvent({ userInfo: USER_INFO });
@@ -309,10 +311,91 @@ describe('list-access-keys baseHandler', () => {
     const calls = ddbMock.commandCalls(QueryCommand);
     const input = calls[0].args[0].input;
     expect(input.FilterExpression).toBeUndefined();
+    expect(input.ExpressionAttributeNames).toBeUndefined();
     expect(input.ExpressionAttributeValues).toStrictEqual({
       ':pk': { S: 'ORG#org-1' },
       ':skPrefix': { S: 'ACCESSKEY#' },
     });
+  });
+
+  it('filters on region alone, matching only that region', async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+    const event = buildEvent({
+      userInfo: USER_INFO,
+      queryStringParameters: { region: 'us-east-1' },
+    });
+    await baseHandler(event);
+
+    const input = ddbMock.commandCalls(QueryCommand)[0].args[0].input;
+    expect(input).toStrictEqual({
+      TableName: 'UserInfoTable',
+      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
+      FilterExpression: '#region = :region',
+      ExpressionAttributeNames: { '#region': 'region' },
+      ExpressionAttributeValues: {
+        ':pk': { S: 'ORG#org-1' },
+        ':skPrefix': { S: 'ACCESSKEY#' },
+        ':region': { S: 'us-east-1' },
+      },
+    });
+  });
+
+  it('also matches region-less legacy rows when filtering on eu-west-1', async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+    const event = buildEvent({
+      userInfo: USER_INFO,
+      queryStringParameters: { region: 'eu-west-1' },
+    });
+    await baseHandler(event);
+
+    const input = ddbMock.commandCalls(QueryCommand)[0].args[0].input;
+    expect(input.FilterExpression).toBe('(#region = :region OR attribute_not_exists(#region))');
+    expect(input.ExpressionAttributeNames).toStrictEqual({ '#region': 'region' });
+    expect(input.ExpressionAttributeValues).toStrictEqual({
+      ':pk': { S: 'ORG#org-1' },
+      ':skPrefix': { S: 'ACCESSKEY#' },
+      ':region': { S: 'eu-west-1' },
+    });
+  });
+
+  it('combines the bucket and region filters', async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+    const event = buildEvent({
+      userInfo: USER_INFO,
+      queryStringParameters: { bucket: 'my-bucket', region: 'us-east-1' },
+    });
+    await baseHandler(event);
+
+    const input = ddbMock.commandCalls(QueryCommand)[0].args[0].input;
+    expect(input).toStrictEqual({
+      TableName: 'UserInfoTable',
+      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
+      FilterExpression: '(bucketScope = :all OR contains(buckets, :bucket)) AND #region = :region',
+      ExpressionAttributeNames: { '#region': 'region' },
+      ExpressionAttributeValues: {
+        ':pk': { S: 'ORG#org-1' },
+        ':skPrefix': { S: 'ACCESSKEY#' },
+        ':all': { S: 'all' },
+        ':bucket': { S: 'my-bucket' },
+        ':region': { S: 'us-east-1' },
+      },
+    });
+  });
+
+  it('returns 400 for an unsupported region without querying DynamoDB', async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+    const event = buildEvent({
+      userInfo: USER_INFO,
+      queryStringParameters: { region: 'mars-north-1' },
+    });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(400);
+    expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(0);
   });
 
   it('returns mapped keys when bucket filter is applied', async () => {
@@ -381,20 +464,20 @@ describe('list-access-keys baseHandler', () => {
 
     const event = buildEvent({
       userInfo: USER_INFO,
-      queryStringParameters: { bucket: 'target-bucket' },
+      queryStringParameters: { bucket: 'target-bucket', region: 'us-east-1' },
     });
 
     await expect(baseHandler(event)).rejects.toThrow('DDB unavailable');
     expect(consoleError).toHaveBeenCalledWith('[list-access-keys] Access key query failed', {
       orgId: 'org-1',
       bucketFilter: 'target-bucket',
-      filtered: true,
+      regionFilter: 'us-east-1',
       error: failure,
     });
     consoleError.mockRestore();
   });
 
-  it('records the unfiltered branch when no bucket filter is supplied', async () => {
+  it('records the unfiltered branch when no bucket or region filter is supplied', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     ddbMock.on(QueryCommand).rejects(new Error('DDB unavailable'));
 
@@ -403,7 +486,7 @@ describe('list-access-keys baseHandler', () => {
     await expect(baseHandler(event)).rejects.toThrow('DDB unavailable');
     expect(consoleError).toHaveBeenCalledWith(
       '[list-access-keys] Access key query failed',
-      expect.objectContaining({ bucketFilter: null, filtered: false }),
+      expect.objectContaining({ bucketFilter: null, regionFilter: null }),
     );
     consoleError.mockRestore();
   });

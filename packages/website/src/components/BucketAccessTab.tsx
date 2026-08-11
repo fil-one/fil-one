@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { PlusIcon } from '@phosphor-icons/react/dist/ssr';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
-import type { AccessKey, ListAccessKeysResponse } from '@filone/shared';
+import type { AccessKey, ListAccessKeysResponse, S3Region } from '@filone/shared';
 
 import { apiRequest } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
@@ -16,7 +16,7 @@ import { Spinner } from './Spinner';
 export type BucketAccessTabProps = {
   bucketName: string;
   s3Endpoint: string;
-  region: string;
+  region: S3Region;
   accessKeys: AccessKey[];
   accessKeysLoading: boolean;
   onCreateOpen: () => void;
@@ -38,7 +38,7 @@ export function BucketAccessTab({
     mutationFn: (id: string) => apiRequest(`/access-keys/${id}`, { method: 'DELETE' }),
     onSuccess: (_, id) => {
       queryClient.setQueryData<ListAccessKeysResponse>(
-        queryKeys.bucketAccessKeys(bucketName),
+        queryKeys.bucketAccessKeys(bucketName, region),
         (old) => (old ? { keys: old.keys.filter((k) => k.id !== id) } : old),
       );
       void queryClient.invalidateQueries({ queryKey: queryKeys.accessKeys });
