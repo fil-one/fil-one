@@ -154,6 +154,7 @@ describe('grace-period-enforcer', () => {
     const update = canceledUpdate();
     expect(update).toBeDefined();
     expect(update!.args[0].input.ConditionExpression).toBe(
+      // deliberate literal: canary against silent changes to DELETION_GUARD
       'attribute_exists(pk) AND attribute_not_exists(deletionRequestedAt)',
     );
   });

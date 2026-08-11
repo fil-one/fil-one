@@ -1,5 +1,6 @@
 // The DynamoDB *condition* half of the FIL-112 guard; setting deletionRequestedAt lives elsewhere.
 import { ConditionalCheckFailedException, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import type { UpdateItemCommandOutput } from '@aws-sdk/client-dynamodb';
 import { getDynamoClient } from './ddb-client.js';
 import { reportMetric } from './metrics.js';
 
@@ -85,7 +86,7 @@ function emitGuardRejection(context: Record<string, unknown>): void {
 export async function sendGuardedBillingUpdate(
   input: Omit<ConstructorParameters<typeof UpdateItemCommand>[0], 'ConditionExpression'>,
   context: Record<string, unknown>,
-): Promise<import('@aws-sdk/client-dynamodb').UpdateItemCommandOutput | null> {
+): Promise<UpdateItemCommandOutput | null> {
   try {
     return await dynamo.send(
       new UpdateItemCommand({ ...input, ConditionExpression: DELETION_GUARD }),
