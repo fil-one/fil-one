@@ -33,31 +33,28 @@ export async function saveBillingRecord(
   }
 
   return (
-    (await sendGuardedBillingUpdate(
-      {
-        TableName: Resource.BillingTable.name,
-        Key: {
-          pk: { S: `CUSTOMER#${userId}` },
-          sk: { S: 'SUBSCRIPTION' },
-        },
-        UpdateExpression:
-          'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now REMOVE trialEndsAt',
-        ExpressionAttributeValues: {
-          ':subId': { S: subscription.id },
-          ':status': { S: mappedStatus },
-          ':periodEnd': {
-            S: new Date(subscription.items.data[0].current_period_end * 1000).toISOString(),
-          },
-          ':pmId': { S: paymentMethodId },
-          ':last4': { S: paymentMethodLast4 },
-          ':brand': { S: paymentMethodBrand },
-          ':expMonth': { N: String(paymentMethodExpMonth) },
-          ':expYear': { N: String(paymentMethodExpYear) },
-          ':now': { S: new Date().toISOString() },
-        },
+    (await sendGuardedBillingUpdate({
+      TableName: Resource.BillingTable.name,
+      Key: {
+        pk: { S: `CUSTOMER#${userId}` },
+        sk: { S: 'SUBSCRIPTION' },
       },
-      { source: 'billing-activation', userId, subscriptionId: subscription.id },
-    )) !== null
+      UpdateExpression:
+        'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now REMOVE trialEndsAt',
+      ExpressionAttributeValues: {
+        ':subId': { S: subscription.id },
+        ':status': { S: mappedStatus },
+        ':periodEnd': {
+          S: new Date(subscription.items.data[0].current_period_end * 1000).toISOString(),
+        },
+        ':pmId': { S: paymentMethodId },
+        ':last4': { S: paymentMethodLast4 },
+        ':brand': { S: paymentMethodBrand },
+        ':expMonth': { N: String(paymentMethodExpMonth) },
+        ':expYear': { N: String(paymentMethodExpYear) },
+        ':now': { S: new Date().toISOString() },
+      },
+    })) !== null
   );
 }
 

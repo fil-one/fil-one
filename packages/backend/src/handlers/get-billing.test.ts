@@ -624,7 +624,7 @@ describe('get-billing baseHandler', () => {
     expect(result.statusCode).toBe(200);
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('org mid-deletion'),
-      expect.objectContaining({ source: 'get-billing.cacheStripePrice' }),
+      expect.objectContaining({ key: expect.anything() }),
     );
   });
 
@@ -667,7 +667,7 @@ describe('get-billing baseHandler', () => {
     expect(body.subscription.status).toBe(SubscriptionStatus.GracePeriod);
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('org mid-deletion'),
-      expect.objectContaining({ source: 'get-billing.evaluateStatusTransitions' }),
+      expect.objectContaining({ key: expect.anything() }),
     );
   });
 
