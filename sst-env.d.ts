@@ -150,6 +150,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "GetUsageTrends": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "GracePeriodEnforcer": {
       "name": string
       "type": "sst.aws.Function"

@@ -1,6 +1,6 @@
 import type { BadgeColor } from '../components/Badge.js';
 
-export const INSTATUS_PAGE_URL = 'https://fil-one.instatus.com';
+export const INSTATUS_PAGE_URL = 'https://status.fil.one';
 export const INSTATUS_SUMMARY_URL = `${INSTATUS_PAGE_URL}/summary.json`;
 
 export type InstatusSummary = {
