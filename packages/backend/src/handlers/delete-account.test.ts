@@ -284,6 +284,28 @@ describe('delete-account baseHandler', () => {
     expect(written.tenantIds.aurora).toBe('aurora-t-1');
   });
 
+  it('snapshots members at strong consistency — a stale read strands a member forever', async () => {
+    // The snapshot is the only member list teardown ever acts on, and acting on
+    // it is irreversible: a member missed here is never tombstoned, their Auth0
+    // user is never deleted and Stripe is never searched for their customer,
+    // while the DELETION record still reaches DONE.
+    await baseHandler(makeEvent());
+
+    const memberQueries = ddbMock
+      .commandCalls(QueryCommand)
+      .map((c) => c.args[0].input)
+      .filter((input) => input.ExpressionAttributeValues?.[':member']?.S === 'MEMBER#');
+    expect(memberQueries).not.toHaveLength(0);
+    for (const query of memberQueries) expect(query.ConsistentRead).toBe(true);
+
+    const profileReads = ddbMock
+      .commandCalls(BatchGetItemCommand)
+      .map((c) => c.args[0].input.RequestItems!['UserInfoTable'])
+      .filter((request) => request !== undefined);
+    expect(profileReads).not.toHaveLength(0);
+    for (const request of profileReads) expect(request.ConsistentRead).toBe(true);
+  });
+
   it('paginates the MEMBER# query so a truncated page cannot silently drop members from the snapshot', async () => {
     // Two pages: user-1, then (via LastEvaluatedKey) user-2. A 1MB-truncated
     // single query would have missed user-2 — leaving their Auth0 user alive.

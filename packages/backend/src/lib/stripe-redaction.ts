@@ -110,33 +110,37 @@ export async function redactStripeCustomers(
 /**
  * Drive one customer's redaction to its next legal state.
  *
- * A stored job id is only usable for this customer if the job actually COVERS
- * them, and that is asked of Stripe rather than assumed: records written before
- * job ids were keyed carry a single un-keyed `stripeRedactionJobId` with no
- * note of whom it covers, and treating it as covering everyone is exactly the
- * bug that let a resurrected customer's PII survive un-redacted forever. The
- * job GET that answers the question is the same one
- * {@link advanceRedactionJob} needs, so the common path still costs one call.
+ * A stored job id is only usable for this customer if Stripe still has that job
+ * and it actually COVERS them, and that is asked rather than assumed — a stored
+ * job that has gone away would wedge the teardown forever, and one that covers
+ * somebody else would let this customer's PII survive un-redacted. The job GET
+ * that answers the question is the same one {@link advanceRedactionJob} needs,
+ * so the common path still costs one call.
+ *
+ * A stored id proven unusable is REPLACED, not raced: `establishRedactionJob` is
+ * told which id it is superseding so its write is a compare-and-swap on that
+ * customer's slot. Without that the fresh job could never be persisted (the slot
+ * is occupied), and the pass would go straight back to driving the unusable id.
  */
 async function redactStripeCustomer(
   orgId: string,
   record: OrgDeletionRecord,
   customerId: string,
 ): Promise<void> {
-  const stored = record.stripeRedactionJobIds?.[customerId] ?? record.stripeRedactionJobId;
+  const stored = record.stripeRedactionJobIds?.[customerId];
   if (stored) {
     const job = await fetchRedactionJob(stored);
     if (job && (job.objects?.customers ?? []).includes(customerId)) {
       return advanceRedactionJob(orgId, record, customerId, job);
     }
     console.warn(
-      '[stripe-redaction] Stored redaction job does not cover this customer; establishing one ' +
-        'for it instead of skipping the redaction',
+      '[stripe-redaction] Stored redaction job is gone or does not cover this customer; ' +
+        'establishing one for it instead of skipping the redaction',
       { orgId, customerId, storedJobId: stored, jobFound: job !== undefined },
     );
   }
 
-  const established = await establishRedactionJob(orgId, record, customerId);
+  const established = await establishRedactionJob(orgId, record, customerId, stored);
   if (!established) {
     // The customer is gone from Stripe, so there is nothing to redact and no
     // later pass could do anything different. Terminal, and recorded as such —
@@ -152,11 +156,15 @@ async function redactStripeCustomer(
  * reports the customer is already in another (live) redaction job, recover and
  * persist THAT job's id so its lifecycle gets driven instead of the redaction
  * being skipped. Returns `null` only when the customer no longer exists.
+ *
+ * @param replacing the stored job id this call has proven unusable, if any; the
+ *   persist then swaps that exact id rather than requiring an empty slot.
  */
 async function establishRedactionJob(
   orgId: string,
   record: OrgDeletionRecord,
   customerId: string,
+  replacing?: string,
 ): Promise<string | null> {
   let created: StripeRedactionJob | undefined;
   try {
@@ -177,13 +185,13 @@ async function establishRedactionJob(
     // complete — recover its id and drive ITS lifecycle instead of skipping
     // redaction, or the original job sits unvalidated forever.
     const recovered = await findRedactionJobIdForCustomer(orgId, customerId);
-    return persistRedactionJobId(orgId, record, customerId, recovered);
+    return persistRedactionJobId(orgId, record, customerId, recovered, replacing);
   }
 
   // Persist may lose against a concurrent worker — the stored id wins, and
   // only OUR freshly created job gets the initial validate kick (the stored
   // one's lifecycle is driven by advanceRedactionJob).
-  const jobId = await persistRedactionJobId(orgId, record, customerId, created.id);
+  const jobId = await persistRedactionJobId(orgId, record, customerId, created.id, replacing);
   if (jobId === created.id) {
     await stripeRawRequest('POST', `/v1/privacy/redaction_jobs/${jobId}/validate`);
   }
@@ -314,17 +322,20 @@ function redactionNotReadyError(orgId: string, jobId: string, status: string): E
 }
 
 /**
- * Persist the redaction job id under the customer it covers — but only if none
- * is stored for that customer yet. Two overlapping workers can each
- * create/recover a job; an unconditional SET would let the loser overwrite the
- * winner and leave a duplicate redaction job driving nowhere. On a conditional
- * failure the stored id wins: it is re-read and returned so the caller drives
- * THAT job.
+ * Persist the redaction job id under the customer it covers, as a
+ * compare-and-swap on that customer's slot: either the slot is empty, or it
+ * still holds exactly the id the caller proved unusable. Two overlapping workers
+ * can each create/recover a job; an unconditional SET would let the loser
+ * overwrite the winner and leave a duplicate redaction job driving nowhere. On a
+ * conditional failure the stored id wins: it is re-read and returned so the
+ * caller drives THAT job.
  *
  * Keyed by customer rather than one id per record because a resweep discovers
  * a customer the original teardown never saw; a single slot made the second
  * customer's redaction unreachable (it read as "already have a job").
  *
+ * @param replacing the id currently in the slot that this write supersedes. Only
+ *   set by the coverage check; without it the write requires an empty slot.
  * @returns the effective job id — `jobId` when this write won, otherwise the
  *          id another worker persisted first.
  */
@@ -333,6 +344,7 @@ async function persistRedactionJobId(
   record: OrgDeletionRecord,
   customerId: string,
   jobId: string,
+  replacing?: string,
 ): Promise<string> {
   try {
     // A nested SET cannot address a path inside a map that does not exist yet,
@@ -346,12 +358,14 @@ async function persistRedactionJobId(
         TableName: Resource.UserInfoTable.name,
         Key: marshall({ pk: DeletionKeys.deletionPk(orgId), sk: DeletionKeys.deletionSk() }),
         UpdateExpression: 'SET stripeRedactionJobIds.#cid = :jobId, updatedAt = :now',
-        ConditionExpression:
-          'attribute_exists(pk) AND attribute_not_exists(stripeRedactionJobIds.#cid)',
+        ConditionExpression: replacing
+          ? 'attribute_exists(pk) AND stripeRedactionJobIds.#cid = :replacing'
+          : 'attribute_exists(pk) AND attribute_not_exists(stripeRedactionJobIds.#cid)',
         ExpressionAttributeNames: { '#cid': customerId },
         ExpressionAttributeValues: marshall({
           ':jobId': jobId,
           ':now': new Date().toISOString(),
+          ...(replacing ? { ':replacing': replacing } : {}),
         }),
       }),
     );
@@ -361,9 +375,9 @@ async function persistRedactionJobId(
     if (!(err instanceof ConditionalCheckFailedException)) throw err;
     const stored = (await readDeletionRecord(orgId))?.stripeRedactionJobIds?.[customerId];
     if (!stored) {
-      // The condition can only fail because the id exists or the record is
-      // gone (the seed above fails only for the latter); either way a missing
-      // id on re-read needs a retry, not a guess.
+      // The condition can only fail because another worker moved the slot or the
+      // record is gone (the seed above fails only for the latter); either way a
+      // missing id on re-read needs a retry, not a guess.
       throw new Error(
         `Deletion record for org ${orgId} rejected redaction job id ${jobId} for customer ` +
           `${customerId} but no stored id was found on re-read; the next teardown pass retries`,

@@ -21,11 +21,15 @@ const BATCH_GET_RETRY: RetryOptions = { retries: 4, minTimeout: 100, randomize: 
  *
  * Items come back unordered and missing keys are simply absent, so callers
  * must index the result by pk rather than zip it against the input.
+ *
+ * @param opts.consistent read at strong consistency (double the RCUs). Set it
+ *   where a row missing from the result is acted on irreversibly; leave it off
+ *   where a stale read only costs another pass.
  */
 export async function batchGet(
   tableName: string,
   keys: { pk: string; sk: string }[],
-  retry: RetryOptions = BATCH_GET_RETRY,
+  opts: { consistent?: boolean; retry?: RetryOptions } = {},
 ): Promise<Record<string, unknown>[]> {
   const items: Record<string, unknown>[] = [];
   for (let i = 0; i < keys.length; i += MAX_KEYS_PER_BATCH) {
@@ -34,7 +38,11 @@ export async function batchGet(
       .map((key) => marshall({ pk: key.pk, sk: key.sk }));
     await pRetry(async () => {
       const result = await dynamo.send(
-        new BatchGetItemCommand({ RequestItems: { [tableName]: { Keys: pending } } }),
+        new BatchGetItemCommand({
+          RequestItems: {
+            [tableName]: { Keys: pending, ...(opts.consistent ? { ConsistentRead: true } : {}) },
+          },
+        }),
       );
       items.push(...(result.Responses?.[tableName] ?? []).map((item) => unmarshall(item)));
       const unprocessed = result.UnprocessedKeys?.[tableName]?.Keys ?? [];
@@ -45,7 +53,7 @@ export async function batchGet(
           `BatchGetItem left ${unprocessed.length} unprocessed key(s) for ${tableName}`,
         );
       }
-    }, retry);
+    }, opts.retry ?? BATCH_GET_RETRY);
   }
   return items;
 }

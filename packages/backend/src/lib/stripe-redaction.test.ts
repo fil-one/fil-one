@@ -147,9 +147,11 @@ describe('redactStripeCustomers', () => {
     mockRawRequest.mockClear();
     stubRedactionJob('ready');
 
-    await redactStripeCustomers(ORG_ID, deletionRecord({ stripeRedactionJobId: 'prj_1' }), [
-      CUSTOMER,
-    ]);
+    await redactStripeCustomers(
+      ORG_ID,
+      deletionRecord({ stripeRedactionJobIds: { [CUSTOMER]: 'prj_1' } }),
+      [CUSTOMER],
+    );
 
     expect(rawRequestCalls()).toEqual([
       'GET /v1/privacy/redaction_jobs/prj_1',
@@ -160,19 +162,20 @@ describe('redactStripeCustomers', () => {
   it('treats an already redacting/succeeded job as done on re-entry', async () => {
     stubRedactionJob('redacting');
 
-    await redactStripeCustomers(ORG_ID, deletionRecord({ stripeRedactionJobId: 'prj_1' }), [
-      CUSTOMER,
-    ]);
+    await redactStripeCustomers(
+      ORG_ID,
+      deletionRecord({ stripeRedactionJobIds: { [CUSTOMER]: 'prj_1' } }),
+      [CUSTOMER],
+    );
 
     expect(rawRequestCalls()).toEqual(['GET /v1/privacy/redaction_jobs/prj_1']);
   });
 
   it('does NOT let a stored job covering a different customer short-circuit this one (resweep)', async () => {
-    // The resurrection case: the completed teardown stored a job for cus_1, and
-    // a post-purge createBillingTrial minted cus_2. Keying job ids by customer
-    // is what stops cus_2 reading as "already redacted" — the old single-slot
-    // `stripeRedactionJobId` made every resweep skip the new customer entirely,
-    // so its PII stayed in Stripe forever.
+    // The resurrection case: a completed teardown's job covers cus_1, and a
+    // post-purge createBillingTrial minted cus_2. Coverage is asked of Stripe
+    // rather than assumed, so cus_2 never reads as "already redacted" — that is
+    // what left a resurrected customer's PII in Stripe forever.
     mockRawRequest.mockImplementation((method: string, path: string) => {
       if (path === '/v1/privacy/redaction_jobs/prj_1') {
         return Promise.resolve({ id: 'prj_1', status: 'ready', objects: { customers: ['cus_1'] } });
@@ -186,23 +189,74 @@ describe('redactStripeCustomers', () => {
       return Promise.resolve({ id: 'prj_2' });
     });
 
-    await redactStripeCustomers(ORG_ID, deletionRecord({ stripeRedactionJobId: 'prj_1' }), [
-      'cus_2',
-    ]);
+    await redactStripeCustomers(
+      ORG_ID,
+      deletionRecord({ stripeRedactionJobIds: { cus_2: 'prj_1' } }),
+      ['cus_2'],
+    );
 
     expect(mockRawRequest).toHaveBeenCalledWith('POST', '/v1/privacy/redaction_jobs', {
       objects: { customers: ['cus_2'] },
     });
     expect(rawRequestCalls()).toEqual([
-      // The stored (legacy, un-keyed) id is checked against Stripe rather than
-      // assumed to cover whoever is being redacted.
+      // The stored id is checked against Stripe rather than assumed to cover
+      // whoever is being redacted.
       'GET /v1/privacy/redaction_jobs/prj_1',
       'POST /v1/privacy/redaction_jobs',
       'POST /v1/privacy/redaction_jobs/prj_2/validate',
       'GET /v1/privacy/redaction_jobs/prj_2',
       'POST /v1/privacy/redaction_jobs/prj_2/run',
     ]);
-    expect(jobIdWrites()[0].args[0].input.ExpressionAttributeNames?.['#cid']).toBe('cus_2');
+    // The fresh id is swapped in against the id proven unusable. Requiring an
+    // EMPTY slot here would make the write impossible and send the pass straight
+    // back to driving prj_1.
+    const write = jobIdWrites()[0].args[0].input;
+    expect(write.ExpressionAttributeNames?.['#cid']).toBe('cus_2');
+    expect(write.ConditionExpression).toBe(
+      'attribute_exists(pk) AND stripeRedactionJobIds.#cid = :replacing',
+    );
+    expect(write.ExpressionAttributeValues?.[':replacing']?.S).toBe('prj_1');
+    expect(write.ExpressionAttributeValues?.[':jobId']?.S).toBe('prj_2');
+  });
+
+  it('replaces a stored job Stripe no longer has instead of wedging on it', async () => {
+    // The branch fetchRedactionJob exists for: a GET that 404s must not
+    // propagate, or every later pass repeats the same failure forever.
+    mockRawRequest.mockImplementation((method: string, path: string) => {
+      if (path === '/v1/privacy/redaction_jobs/prj_gone') {
+        return Promise.reject(
+          Object.assign(new Error('No such redaction job'), { code: 'resource_missing' }),
+        );
+      }
+      if (method === 'POST' && path === '/v1/privacy/redaction_jobs') {
+        return Promise.resolve({ id: 'prj_new', status: 'created' });
+      }
+      if (method === 'GET') {
+        return Promise.resolve({
+          id: 'prj_new',
+          status: 'ready',
+          objects: { customers: [CUSTOMER] },
+        });
+      }
+      return Promise.resolve({ id: 'prj_new' });
+    });
+
+    await redactStripeCustomers(
+      ORG_ID,
+      deletionRecord({ stripeRedactionJobIds: { [CUSTOMER]: 'prj_gone' } }),
+      [CUSTOMER],
+    );
+
+    expect(rawRequestCalls()).toEqual([
+      'GET /v1/privacy/redaction_jobs/prj_gone',
+      'POST /v1/privacy/redaction_jobs',
+      'POST /v1/privacy/redaction_jobs/prj_new/validate',
+      'GET /v1/privacy/redaction_jobs/prj_new',
+      'POST /v1/privacy/redaction_jobs/prj_new/run',
+    ]);
+    expect(jobIdWrites()[0].args[0].input.ExpressionAttributeValues?.[':replacing']?.S).toBe(
+      'prj_gone',
+    );
   });
 
   it('attempts every customer even when the first one throws', async () => {
@@ -435,7 +489,11 @@ describe('redactStripeCustomers', () => {
     stubRedactionJob('failed');
 
     await expect(
-      redactStripeCustomers(ORG_ID, deletionRecord({ stripeRedactionJobId: 'prj_1' }), [CUSTOMER]),
+      redactStripeCustomers(
+        ORG_ID,
+        deletionRecord({ stripeRedactionJobIds: { [CUSTOMER]: 'prj_1' } }),
+        [CUSTOMER],
+      ),
     ).rejects.toThrow(/unexpected status "failed"/);
   });
 
@@ -453,9 +511,11 @@ describe('redactStripeCustomers', () => {
     it('records an already-succeeded job', async () => {
       stubRedactionJob('succeeded');
 
-      await redactStripeCustomers(ORG_ID, deletionRecord({ stripeRedactionJobId: 'prj_1' }), [
-        CUSTOMER,
-      ]);
+      await redactStripeCustomers(
+        ORG_ID,
+        deletionRecord({ stripeRedactionJobIds: { [CUSTOMER]: 'prj_1' } }),
+        [CUSTOMER],
+      );
 
       expect(statusWrites()).toEqual([{ customerId: CUSTOMER, status: 'succeeded' }]);
     });
@@ -464,9 +524,11 @@ describe('redactStripeCustomers', () => {
       stubRedactionJob('validating');
 
       await expect(
-        redactStripeCustomers(ORG_ID, deletionRecord({ stripeRedactionJobId: 'prj_1' }), [
-          CUSTOMER,
-        ]),
+        redactStripeCustomers(
+          ORG_ID,
+          deletionRecord({ stripeRedactionJobIds: { [CUSTOMER]: 'prj_1' } }),
+          [CUSTOMER],
+        ),
       ).rejects.toThrow(/not ready yet/);
 
       // Non-terminal: the org must keep being re-driven.
@@ -477,9 +539,11 @@ describe('redactStripeCustomers', () => {
       stubRedactionJob('failed');
 
       await expect(
-        redactStripeCustomers(ORG_ID, deletionRecord({ stripeRedactionJobId: 'prj_1' }), [
-          CUSTOMER,
-        ]),
+        redactStripeCustomers(
+          ORG_ID,
+          deletionRecord({ stripeRedactionJobIds: { [CUSTOMER]: 'prj_1' } }),
+          [CUSTOMER],
+        ),
       ).rejects.toThrow(/unexpected status "failed"/);
 
       expect(statusWrites()).toEqual([{ customerId: CUSTOMER, status: 'failed' }]);
@@ -489,9 +553,11 @@ describe('redactStripeCustomers', () => {
       stubRedactionJob('some_new_stripe_status');
 
       await expect(
-        redactStripeCustomers(ORG_ID, deletionRecord({ stripeRedactionJobId: 'prj_1' }), [
-          CUSTOMER,
-        ]),
+        redactStripeCustomers(
+          ORG_ID,
+          deletionRecord({ stripeRedactionJobIds: { [CUSTOMER]: 'prj_1' } }),
+          [CUSTOMER],
+        ),
       ).rejects.toThrow(/unexpected status "some_new_stripe_status"/);
 
       expect(statusWrites()).toEqual([]);
