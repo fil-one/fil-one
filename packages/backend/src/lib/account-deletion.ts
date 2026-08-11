@@ -253,7 +253,7 @@ async function cancelStripeAndWriteTombstone(
   }
 
   await writeTombstone(orgId, customerId);
-  await redactStripeCustomers(orgId, record, customerId);
+  await redactStripeCustomers(orgId, record, customerId ? [customerId] : []);
   return customerId;
 }
 

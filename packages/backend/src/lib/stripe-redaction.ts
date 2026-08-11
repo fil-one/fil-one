@@ -40,36 +40,84 @@ const REDACTION_JOB_PAGE_SIZE = 100;
 const REDACTION_JOB_MAX_PAGES = 100;
 
 /**
- * Redact the canceled customer's PII via Stripe's Redaction Jobs API. The org
- * ↔ Stripe customer relationship is 1:1 by domain, so exactly one customer is
- * redacted per teardown. The pinned SDK (22.0.2) has no
- * `privacy.redactionJobs` namespace, so the REST endpoints are driven through
- * `stripe.rawRequest`.
+ * Redact the canceled customers' PII via Stripe's Redaction Jobs API. The org
+ * ↔ Stripe customer relationship is 1:1 by domain, so an ordinary teardown
+ * passes exactly one id. The pinned SDK (22.0.2) has no `privacy.redactionJobs`
+ * namespace, so the REST endpoints are driven through `stripe.rawRequest`.
  *
  * Job lifecycle: created → (validate) → validating → ready → (run) →
  * redacting → succeeded. Validation is asynchronous, so a single pass may find
- * the job short of `ready`; the job id is persisted on the DELETION record at
- * creation, and a not-yet-ready job throws so the record stays non-DONE and
- * the Lambda retry / reconciler advances the SAME job (never a duplicate) on
- * the next pass. `redacting`/`succeeded` count as done — redaction is
- * irreversible once running.
+ * the job short of `ready`; each job id is persisted on the DELETION record at
+ * creation KEYED BY THE CUSTOMER IT COVERS, and a not-yet-ready job throws so
+ * the record stays non-DONE and the Lambda retry / reconciler advances the SAME
+ * job (never a duplicate) on the next pass. `redacting`/`succeeded` count as
+ * done — redaction is irreversible once running.
+ *
+ * Every customer is ATTEMPTED before the group fails: a not-yet-ready job for
+ * one customer throws by design, and letting that skip the next customer would
+ * mean a permanently failed job on one customer blocks another's redaction
+ * forever. Sequential, because the passes share the in-memory record. A lone
+ * failure is rethrown as itself rather than wrapped — the "not ready yet" /
+ * "unexpected status" messages ARE the operator signal.
  */
 export async function redactStripeCustomers(
   orgId: string,
   record: OrgDeletionRecord,
-  customerId: string | undefined,
+  customerIds: readonly string[],
 ): Promise<void> {
-  if (!customerId) return;
+  const failures: unknown[] = [];
+  for (const customerId of customerIds) {
+    try {
+      await redactStripeCustomer(orgId, record, customerId);
+    } catch (err) {
+      failures.push(err);
+    }
+  }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) {
+    throw new AggregateError(
+      failures,
+      `Stripe redaction failed for ${failures.length} of org ${orgId}'s customers`,
+    );
+  }
+}
 
-  let jobId = record.stripeRedactionJobId;
-  if (!jobId) {
-    const established = await establishRedactionJob(orgId, customerId);
-    if (!established) return; // customer missing — nothing to redact
-    jobId = established;
-    record.stripeRedactionJobId = jobId;
+/**
+ * Drive one customer's redaction to its next legal state.
+ *
+ * A stored job id is only usable for this customer if Stripe still has that job
+ * and it actually COVERS them, and that is asked rather than assumed — a stored
+ * job that has gone away would wedge the teardown forever, and one that covers
+ * somebody else would let this customer's PII survive un-redacted. The job GET
+ * that answers the question is the same one {@link advanceRedactionJob} needs,
+ * so the common path still costs one call.
+ *
+ * A stored id proven unusable is REPLACED, not raced: `establishRedactionJob` is
+ * told which id it is superseding so its write is a compare-and-swap on that
+ * customer's slot. Without that the fresh job could never be persisted (the slot
+ * is occupied), and the pass would go straight back to driving the unusable id.
+ */
+async function redactStripeCustomer(
+  orgId: string,
+  record: OrgDeletionRecord,
+  customerId: string,
+): Promise<void> {
+  const stored = record.stripeRedactionJobIds?.[customerId];
+  if (stored) {
+    const job = await fetchRedactionJob(stored);
+    if (job && (job.objects?.customers ?? []).includes(customerId)) {
+      return advanceRedactionJob(orgId, job);
+    }
+    console.warn(
+      '[stripe-redaction] Stored redaction job is gone or does not cover this customer; ' +
+        'establishing one for it instead of skipping the redaction',
+      { orgId, customerId, storedJobId: stored, jobFound: job !== undefined },
+    );
   }
 
-  await advanceRedactionJob(orgId, jobId);
+  const established = await establishRedactionJob(orgId, record, customerId, stored);
+  if (!established) return; // customer missing — nothing to redact
+  await advanceRedactionJob(orgId, await requireRedactionJob(established));
 }
 
 /**
@@ -77,8 +125,16 @@ export async function redactStripeCustomers(
  * reports the customer is already in another (live) redaction job, recover and
  * persist THAT job's id so its lifecycle gets driven instead of the redaction
  * being skipped. Returns `null` only when the customer no longer exists.
+ *
+ * @param replacing the stored job id this call has proven unusable, if any; the
+ *   persist then swaps that exact id rather than requiring an empty slot.
  */
-async function establishRedactionJob(orgId: string, customerId: string): Promise<string | null> {
+async function establishRedactionJob(
+  orgId: string,
+  record: OrgDeletionRecord,
+  customerId: string,
+  replacing?: string,
+): Promise<string | null> {
   let created: StripeRedactionJob | undefined;
   try {
     created = await stripeRawRequest<StripeRedactionJob>('POST', '/v1/privacy/redaction_jobs', {
@@ -97,13 +153,14 @@ async function establishRedactionJob(orgId: string, customerId: string): Promise
     // created one but crashed before persisting its id). That job is NOT
     // complete — recover its id and drive ITS lifecycle instead of skipping
     // redaction, or the original job sits unvalidated forever.
-    return persistRedactionJobId(orgId, await findRedactionJobIdForCustomer(orgId, customerId));
+    const recovered = await findRedactionJobIdForCustomer(orgId, customerId);
+    return persistRedactionJobId(orgId, record, customerId, recovered, replacing);
   }
 
   // Persist may lose against a concurrent worker — the stored id wins, and
   // only OUR freshly created job gets the initial validate kick (the stored
   // one's lifecycle is driven by advanceRedactionJob).
-  const jobId = await persistRedactionJobId(orgId, created.id);
+  const jobId = await persistRedactionJobId(orgId, record, customerId, created.id, replacing);
   if (jobId === created.id) {
     await stripeRawRequest('POST', `/v1/privacy/redaction_jobs/${jobId}/validate`);
   }
@@ -159,12 +216,29 @@ async function findRedactionJobIdForCustomer(orgId: string, customerId: string):
   );
 }
 
-/** GET the job's current status and take the one legal step toward `succeeded`. */
-async function advanceRedactionJob(orgId: string, jobId: string): Promise<void> {
-  const job = await stripeRawRequest<StripeRedactionJob>(
-    'GET',
-    `/v1/privacy/redaction_jobs/${jobId}`,
-  );
+/**
+ * GET a redaction job by id. A job Stripe no longer knows about reads as
+ * `undefined` rather than throwing: the only caller is the stored-id coverage
+ * check, for which "gone" and "does not cover this customer" have the same
+ * answer — establish a fresh job.
+ */
+async function fetchRedactionJob(jobId: string): Promise<StripeRedactionJob | undefined> {
+  try {
+    return await requireRedactionJob(jobId);
+  } catch (err) {
+    if ((err as { code?: string }).code !== 'resource_missing') throw err;
+    return undefined;
+  }
+}
+
+/** GET a redaction job by id; a missing job is an error here. */
+async function requireRedactionJob(jobId: string): Promise<StripeRedactionJob> {
+  return stripeRawRequest<StripeRedactionJob>('GET', `/v1/privacy/redaction_jobs/${jobId}`);
+}
+
+/** Take the one legal step toward `succeeded` for an already-fetched job. */
+async function advanceRedactionJob(orgId: string, job: StripeRedactionJob): Promise<void> {
+  const jobId = job.id;
   switch (job.status) {
     case 'succeeded':
     case 'redacting':
@@ -195,48 +269,95 @@ function redactionNotReadyError(orgId: string, jobId: string, status: string): E
 }
 
 /**
- * Persist the redaction job id — but only if none is stored yet. Two
- * overlapping workers can each create/recover a job; an unconditional SET
- * would let the loser overwrite the winner and leave a duplicate redaction job
- * driving nowhere. On a conditional failure the stored id wins: it is re-read
- * and returned so the caller drives THAT job.
+ * Persist the redaction job id under the customer it covers, as a
+ * compare-and-swap on that customer's slot: either the slot is empty, or it
+ * still holds exactly the id the caller proved unusable. Two overlapping workers
+ * can each create/recover a job; an unconditional SET would let the loser
+ * overwrite the winner and leave a duplicate redaction job driving nowhere. On a
+ * conditional failure the stored id wins: it is re-read and returned so the
+ * caller drives THAT job.
  *
+ * @param replacing the id currently in the slot that this write supersedes. Only
+ *   set by the coverage check; without it the write requires an empty slot.
  * @returns the effective job id — `jobId` when this write won, otherwise the
  *          id another worker persisted first.
  */
-async function persistRedactionJobId(orgId: string, jobId: string): Promise<string> {
+async function persistRedactionJobId(
+  orgId: string,
+  record: OrgDeletionRecord,
+  customerId: string,
+  jobId: string,
+  replacing?: string,
+): Promise<string> {
   try {
+    // A nested SET cannot address a path inside a map that does not exist yet,
+    // so seed it first. Idempotent, and only reached when a job is established.
+    // INSIDE the try: its `attribute_exists(pk)` fails the same way the write
+    // below does when the DELETION record is gone, and outside it that surfaced
+    // as a bare ConditionalCheckFailedException naming nothing.
+    await seedMapAttribute(orgId, 'stripeRedactionJobIds');
     await dynamo.send(
       new UpdateItemCommand({
         TableName: Resource.UserInfoTable.name,
         Key: marshall({ pk: DeletionKeys.deletionPk(orgId), sk: DeletionKeys.deletionSk() }),
-        UpdateExpression: 'SET stripeRedactionJobId = :jobId, updatedAt = :now',
-        ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(stripeRedactionJobId)',
+        UpdateExpression: 'SET stripeRedactionJobIds.#cid = :jobId, updatedAt = :now',
+        ConditionExpression: replacing
+          ? 'attribute_exists(pk) AND stripeRedactionJobIds.#cid = :replacing'
+          : 'attribute_exists(pk) AND attribute_not_exists(stripeRedactionJobIds.#cid)',
+        ExpressionAttributeNames: { '#cid': customerId },
         ExpressionAttributeValues: marshall({
           ':jobId': jobId,
           ':now': new Date().toISOString(),
+          ...(replacing ? { ':replacing': replacing } : {}),
         }),
       }),
     );
+    rememberJobId(record, customerId, jobId);
     return jobId;
   } catch (err) {
     if (!(err instanceof ConditionalCheckFailedException)) throw err;
-    const stored = (await readDeletionRecord(orgId))?.stripeRedactionJobId;
+    const stored = (await readDeletionRecord(orgId))?.stripeRedactionJobIds?.[customerId];
     if (!stored) {
-      // The condition can only fail because the id exists or the record is
-      // gone; either way a missing id on re-read needs a retry, not a guess.
+      // The condition can only fail because another worker moved the slot or the
+      // record is gone (the seed above fails only for the latter); either way a
+      // missing id on re-read needs a retry, not a guess.
       throw new Error(
-        `Deletion record for org ${orgId} rejected redaction job id ${jobId} but no stored id ` +
-          'was found on re-read; the next teardown pass retries',
+        `Deletion record for org ${orgId} rejected redaction job id ${jobId} for customer ` +
+          `${customerId} but no stored id was found on re-read; the next teardown pass retries`,
       );
     }
     console.warn('[stripe-redaction] Redaction job id already persisted by a concurrent worker', {
       orgId,
+      customerId,
       jobId,
       storedJobId: stored,
     });
+    rememberJobId(record, customerId, stored);
     return stored;
   }
+}
+
+/**
+ * Create a keyed map attribute on the DELETION record if it has none, so the
+ * nested `SET map.#key` write above has a parent to address — a nested SET
+ * cannot create the map itself. Idempotent; leaves an existing map intact.
+ */
+async function seedMapAttribute(orgId: string, attribute: string): Promise<void> {
+  await dynamo.send(
+    new UpdateItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: marshall({ pk: DeletionKeys.deletionPk(orgId), sk: DeletionKeys.deletionSk() }),
+      UpdateExpression: 'SET #attr = if_not_exists(#attr, :empty)',
+      ConditionExpression: 'attribute_exists(pk)',
+      ExpressionAttributeNames: { '#attr': attribute },
+      ExpressionAttributeValues: marshall({ ':empty': {} }),
+    }),
+  );
+}
+
+/** Keep the in-memory record in step, so a later pass in THIS run sees the id. */
+function rememberJobId(record: OrgDeletionRecord, customerId: string, jobId: string): void {
+  record.stripeRedactionJobIds = { ...(record.stripeRedactionJobIds ?? {}), [customerId]: jobId };
 }
 
 async function stripeRawRequest<T = unknown>(

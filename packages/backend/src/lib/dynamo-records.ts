@@ -301,10 +301,13 @@ export interface OrgDeletionRecord {
    */
   tenantIds?: Record<string, string>;
   /**
-   * Stripe Redaction Job driving the org customer's PII erasure, persisted at
-   * creation so retries advance the same job instead of creating duplicates.
+   * Stripe customer id → the Redaction Job erasing that customer's PII,
+   * persisted at creation so retries advance the same job instead of creating
+   * duplicates. Keyed by customer because a job id on its own does not say whom
+   * it covers: a teardown that faces more than one customer must not have the
+   * second one's redaction short-circuited by the first one's job.
    */
-  stripeRedactionJobId?: string;
+  stripeRedactionJobIds?: Record<string, string>;
   /**
    * When the record purge first completed — i.e. when the fences and the purge
    * were both done and no writer could still mint a Stripe customer for this
