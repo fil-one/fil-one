@@ -39,7 +39,7 @@ describe('account-deletion-worker handler', () => {
 
   it('a healthy pass emits no Lambda Errors datapoint, even though it waits on Stripe', async () => {
     // The wait for Stripe's search-index lag happens IN-PASS (see
-    // waitOutStripeSearchLag). If it were deferred by throwing, every healthy
+    // stripeSearchLagRemaining). If it were deferred by throwing, every healthy
     // deletion would produce an `Errors` datapoint — the metric the Grafana
     // MetricStream alerts on — and burn an async retry per teardown.
     mockRunAccountDeletion.mockResolvedValue(undefined);

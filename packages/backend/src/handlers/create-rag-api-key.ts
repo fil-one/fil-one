@@ -6,7 +6,7 @@ import { CreateRagApiKeySchema } from '@filone/shared';
 import type { CreateRagApiKeyResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { accountDeletedResponse } from '../lib/account-deleted-response.js';
-import { OrgDeletingError, sendGuardedWrite } from '../lib/org-profile.js';
+import { OrgDeletingError, sendDeletionGuardedWrite } from '../lib/org-profile.js';
 import {
   RagApiKeyKeys,
   generateRagKeyToken,
@@ -70,7 +70,7 @@ export async function baseHandler(
   // LOOKUP row (bearer-auth entry point) must never diverge.
   //
   // FIL-112: the transaction is additionally fenced on the org's `deleting`
-  // flag (sendGuardedWrite). Without it, `attribute_not_exists(pk)` — which only
+  // flag (sendDeletionGuardedWrite). Without it, `attribute_not_exists(pk)` — which only
   // stops key-id collisions — lets a request authenticated just before the
   // deletion confirm mint a WORKING bearer credential into a partition the
   // teardown has already purged. Fencing here (rather than pre-checking) keeps
@@ -79,7 +79,7 @@ export async function baseHandler(
   // window: `deleting = true` at confirm, and the purged-profile state after —
   // see the coverage note on orgNotDeletingCheck.
   try {
-    await sendGuardedWrite(orgId, [
+    await sendDeletionGuardedWrite(orgId, [
       {
         Put: {
           TableName: Resource.UserInfoTable.name,

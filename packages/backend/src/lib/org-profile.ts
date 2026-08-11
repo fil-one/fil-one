@@ -94,7 +94,7 @@ export function assertOrgNotDeleting(orgProfile: OrgProfileItem | undefined, org
   }
 }
 
-/** Raised by {@link sendGuardedWrite} when the org-profile `deleting` guard rejected the write. */
+/** Raised by {@link sendDeletionGuardedWrite} when the org-profile `deleting` guard rejected the write. */
 export class OrgDeletingError extends Error {
   readonly orgId: string;
 
@@ -177,7 +177,7 @@ const FENCED_WRITE_RETRY: RetryOptions = { retries: 2, minTimeout: 50, randomize
  * the guarded writes and the fence evaluation commit or fail together, so a
  * teardown arming `deleting` concurrently cannot land between them.
  */
-export async function sendGuardedWrite(
+export async function sendDeletionGuardedWrite(
   orgId: string,
   writes: TransactWriteItem[],
   retry: RetryOptions = FENCED_WRITE_RETRY,

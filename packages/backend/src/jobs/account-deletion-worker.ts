@@ -26,7 +26,7 @@ export async function handler(event: AccountDeletionWorkerPayload): Promise<void
     await runAccountDeletion(orgId);
   } catch (err) {
     // Only genuine failures reach here. A healthy pass that has to wait out
-    // Stripe's search-index lag waits IN-PASS (see waitOutStripeSearchLag) and
+    // Stripe's search-index lag waits IN-PASS (see stripeSearchLagRemaining) and
     // never throws, so an `Errors` datapoint from this function always means
     // something is actually wrong — which is what makes it alertable.
     console.error('[account-deletion-worker] Teardown step failed; will be retried', {
