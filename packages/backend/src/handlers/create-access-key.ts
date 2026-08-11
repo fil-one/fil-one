@@ -196,7 +196,7 @@ async function recordIssuedAccessKey(args: {
   }
 }
 
-interface CleanOrphanedKeysParams {
+interface CompensateOrphanedKeyParams {
   orgId: string;
   tenantId: string;
   /** Orchestrator id of the key issued by THIS request — never any other key. */
@@ -229,7 +229,7 @@ async function cleanOrphanedKeys({
   tenantId,
   keyId,
   orchestrator,
-}: CleanOrphanedKeysParams): Promise<void> {
+}: CompensateOrphanedKeyParams): Promise<void> {
   console.warn(
     '[create-access-key] Deletion guard rejected the key record mid-flight; revoking the key just minted',
     { orgId, tenantId, keyId, orchestrator: orchestrator.id },

@@ -79,16 +79,10 @@ export async function createBillingTrial({
     // returning: returning is what left an incomplete row permanent.
     //
     // Safe because both Stripe calls below are idempotency-keyed per user
-    // (`billing-trial-${userId}` / `billing-trial-sub-${userId}`), so the loser's
-    // calls return the winner's objects rather than minting a second pair. That
-    // keying is the whole reason resuming is allowed here.
-    //
-    // Its limit matters: Stripe forgets an idempotency key after 24h. So this
-    // protects a concurrent race and a prompt retry — not a resume attempted a day
-    // or more after the row was written, which would mint a fresh customer and
-    // subscription. A resume that late also silently restarts the trial clock,
-    // since `trialEndsAt` is recomputed from now rather than preserved from the
-    // existing row.
+    // (`billing-trial-${userId}` / `billing-trial-sub-${userId}`), so a
+    // concurrent provisioner cannot mint a second customer or subscription — the
+    // loser's calls return the winner's objects. That keying is the whole reason
+    // resuming is allowed here.
     console.info('[create-billing-trial] Billing record already exists — resuming provisioning', {
       userId,
       orgId,

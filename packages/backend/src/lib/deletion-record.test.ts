@@ -14,7 +14,7 @@ vi.mock('sst', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { claimDeletionRerun, DELETION_RERUN_COOLDOWN_MS } from './deletion-record.js';
+import { claimDeletionRerun, DELETION_REDRIVE_COOLDOWN_MS } from './deletion-record.js';
 
 const ORG_ID = 'org-123';
 const NOW = new Date('2026-08-10T12:00:00.000Z');
@@ -53,7 +53,7 @@ describe('claimDeletionRerun', () => {
     );
     expect(input.ExpressionAttributeValues?.[':now']?.S).toBe(NOW.toISOString());
     expect(input.ExpressionAttributeValues?.[':cutoff']?.S).toBe(
-      new Date(NOW.getTime() - DELETION_RERUN_COOLDOWN_MS).toISOString(),
+      new Date(NOW.getTime() - DELETION_REDRIVE_COOLDOWN_MS).toISOString(),
     );
   });
 
