@@ -22,7 +22,7 @@ import { getStripeClient } from './stripe-client.js';
  * customer relationship is 1:1 by domain, so `extraCustomerIds` is an
  * invariant violation the caller must refuse to resolve on its own.
  */
-export interface DiscoveredBillingCustomer {
+interface DiscoveredBillingCustomer {
   /** The org's Stripe customer; absent when it never had one. */
   customerId?: string;
   /** Any further distinct customers found — an invariant violation. */
@@ -60,11 +60,14 @@ export async function discoverBillingCustomer(
 
   for (const member of members) {
     if (!SEARCHABLE_USER_ID.test(member.userId)) {
-      console.warn('[billing-customer-discovery] Skipping member with an unsearchable userId', {
-        orgId,
-        memberUserId: member.userId,
-      });
-      continue;
+      // Fail loud rather than skip. Skipping means this member's customer is
+      // never found, so it is never cancelled and its PII is never redacted —
+      // and the teardown still reports success. Throwing keeps the DELETION
+      // record non-DONE, so the pass retries and the stuck gauge surfaces it.
+      throw new Error(
+        `Org ${orgId} has a member whose userId cannot be searched in Stripe ` +
+          `(${member.userId}); refusing to complete a teardown that would skip them`,
+      );
     }
 
     try {

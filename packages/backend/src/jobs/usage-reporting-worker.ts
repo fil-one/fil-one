@@ -26,6 +26,7 @@ import {
   getProvisionedRegions,
   syncTenantStatusInProvisionedRegions,
 } from '../lib/region-helpers.js';
+import { UsageReportKeys } from '../lib/dynamo-records.js';
 import { OrgDeletingError, sendFencedWrite } from '../lib/org-profile.js';
 
 export interface UsageReportingWorkerPayload {
@@ -537,7 +538,7 @@ async function writeUsageAuditRecord(params: {
           TableName: Resource.BillingTable.name,
           Item: marshall({
             pk: `ORG#${params.orgId}`,
-            sk: `USAGE_REPORT#${params.reportDate}`,
+            sk: UsageReportKeys.sk(params.reportDate),
             orgId: params.orgId,
             subscriptionId: params.subscriptionId,
             stripeCustomerId: params.stripeCustomerId,

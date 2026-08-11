@@ -46,6 +46,7 @@ process.env.FILONE_STAGE = 'test';
 const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler } from './create-access-key.js';
+import { orgNotDeletingCheck } from '../lib/org-profile.js';
 import { AccessKeyAlreadyExistsError } from '../lib/errors.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
@@ -201,13 +202,9 @@ describe('create-access-key baseHandler', () => {
         buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO }),
       );
 
-      expect(sentFenceCheck()).toEqual({
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
-        ConditionExpression:
-          'attribute_exists(pk) AND (attribute_not_exists(deleting) OR deleting = :notDeleting)',
-        ExpressionAttributeValues: { ':notDeleting': { BOOL: false } },
-      });
+      // The expression itself is pinned once, in org-profile.test.ts. Here the
+      // contract is that this writer sends exactly that check, unmodified.
+      expect(sentFenceCheck()).toEqual(orgNotDeletingCheck('org-1').ConditionCheck);
     });
 
     it('revokes the key it just minted when the fenced write loses the race', async () => {

@@ -446,6 +446,17 @@ export const DeletionKeys = {
 } as const;
 
 /**
+ * The usage-reporting worker's BillingTable audit rows, hanging off the org's
+ * `ORG#{orgId}` partition. Shared by the writer and the teardown's purge: if the
+ * two definitions drifted, the rows would survive a completed deletion until
+ * their 365-day TTL.
+ */
+export const UsageReportKeys = {
+  skPrefix: 'USAGE_REPORT#',
+  sk: (reportDate: string): string => `USAGE_REPORT#${reportDate}`,
+} as const;
+
+/**
  * Key builders for the RAG records above. Centralizing the pk/sk shapes keeps
  * the partition design (and the per-bucket `begins_with MANIFEST#` query)
  * consistent across handlers and jobs.
