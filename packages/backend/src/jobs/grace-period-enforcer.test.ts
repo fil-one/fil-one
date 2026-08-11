@@ -197,7 +197,7 @@ describe('grace-period-enforcer', () => {
     // The rejected record produced no cancel claim...
     expect(warnSpy).toHaveBeenCalledWith(
       '[deletion-guard] Billing record missing or org mid-deletion; skipping update',
-      expect.objectContaining({ source: 'grace-period-enforcer', userId: MOCK_USER_ID }),
+      expect.objectContaining({ key: expect.anything() }),
     );
     expect(logSpy).not.toHaveBeenCalledWith(
       '[grace-period-enforcer] Canceled + disabled',

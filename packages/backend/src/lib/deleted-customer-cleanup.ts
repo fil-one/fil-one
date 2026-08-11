@@ -1,12 +1,8 @@
-import {
-  ConditionalCheckFailedException,
-  GetItemCommand,
-  UpdateItemCommand,
-} from '@aws-sdk/client-dynamodb';
+import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import type { Options as RetryOptions } from 'p-retry';
 import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
-import { DELETION_GUARD } from './deletion-guards.js';
+import { sendGuardedBillingUpdate } from './deletion-guards.js';
 import { getDynamoClient } from './ddb-client.js';
 import { syncTenantStatusInProvisionedRegions, type RegionSyncOutcome } from './region-helpers.js';
 
@@ -107,35 +103,23 @@ export async function closeOutDeletedCustomer(params: {
   if (outcomes.some((o) => o.outcome === 'error')) return { outcomes, billingCanceled: false };
 
   const now = new Date().toISOString();
-  try {
-    await dynamo.send(
-      new UpdateItemCommand({
-        TableName: Resource.BillingTable.name,
-        Key: {
-          pk: { S: `CUSTOMER#${userId}` },
-          sk: { S: 'SUBSCRIPTION' },
-        },
-        UpdateExpression:
-          'SET subscriptionStatus = :status, canceledAt = :now, updatedAt = :now REMOVE gracePeriodEndsAt',
-        ExpressionAttributeValues: {
-          ':status': { S: SubscriptionStatus.Canceled },
-          ':now': { S: now },
-        },
-        // A teardown's own subscriptions.cancel echoes back here as a webhook;
-        // this write must not touch (or re-upsert) a record it owns.
-        ConditionExpression: DELETION_GUARD,
-      }),
-    );
-  } catch (err) {
-    if (err instanceof ConditionalCheckFailedException) {
-      // Customer without a billing record (created outside the app, record
-      // already removed, or org mid-deletion) — nothing to cancel.
-      console.warn('[deleted-customer-cleanup] No billing record to cancel or org mid-deletion', {
-        userId,
-      });
-      return { outcomes, billingCanceled: false };
-    }
-    throw err;
-  }
-  return { outcomes, billingCanceled: true };
+  // A teardown's own subscriptions.cancel echoes back here as a webhook; the
+  // guard is what stops this write touching (or re-upserting) a record it owns.
+  // A rejection is expected-benign here — a customer without a billing record,
+  // created outside the app or already removed — so it reads as "nothing to
+  // cancel" rather than a failure.
+  const applied = await sendGuardedBillingUpdate({
+    TableName: Resource.BillingTable.name,
+    Key: {
+      pk: { S: `CUSTOMER#${userId}` },
+      sk: { S: 'SUBSCRIPTION' },
+    },
+    UpdateExpression:
+      'SET subscriptionStatus = :status, canceledAt = :now, updatedAt = :now REMOVE gracePeriodEndsAt',
+    ExpressionAttributeValues: {
+      ':status': { S: SubscriptionStatus.Canceled },
+      ':now': { S: now },
+    },
+  });
+  return { outcomes, billingCanceled: applied !== null };
 }
