@@ -17,6 +17,7 @@ import { readDeletionRecord } from './deletion-record.js';
 import {
   assertPurgeablePk,
   batchDelete,
+  PURGEABLE_RAG_INDEXER_PK_PREFIXES,
   purgeBillingOrgRows,
   purgeRagKeyHashRows,
   queryOrgRows,
@@ -662,7 +663,7 @@ async function purgeRagData(orgId: string): Promise<void> {
     // INDEXER_CHECKPOINT# pks parse to undefined and are skipped inside.
     await dropVectorIndexForPk(vectorStore, key.pk);
   }
-  await batchDelete(Resource.RagIndexerTable.name, keys);
+  await batchDelete(Resource.RagIndexerTable.name, keys, PURGEABLE_RAG_INDEXER_PK_PREFIXES);
 }
 
 /** Drop the S3 Vectors index behind a BUCKET# pk; already-gone is success. */
@@ -720,8 +721,7 @@ async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<v
   const orgKeys = orgRows
     .filter((row) => row.sk !== DeletionKeys.deletionSk())
     .map((row) => ({ pk: row.pk as string, sk: row.sk as string }));
-  for (const key of orgKeys) assertPurgeablePk(key.pk, PURGEABLE_USER_INFO_PK_PREFIXES);
-  await batchDelete(Resource.UserInfoTable.name, orgKeys);
+  await batchDelete(Resource.UserInfoTable.name, orgKeys, PURGEABLE_USER_INFO_PK_PREFIXES);
 
   // BillingTable `ORG#{orgId}` — the usage-reporting worker's audit rows.
   await purgeBillingOrgRows(orgId);

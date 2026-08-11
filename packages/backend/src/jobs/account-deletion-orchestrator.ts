@@ -128,7 +128,7 @@ export async function handler(): Promise<void> {
   const statusByOrgId = new Map(
     scanned.deletions.map((record) => [record.pk.slice('ORG#'.length), record.status]),
   );
-  const guards = await clearStaleDeletionGuards(scanned.fencedOrgIds, statusByOrgId, deadline);
+  const guards = await clearStaleDeletionGuards(scanned.guardedOrgIds, statusByOrgId, deadline);
 
   const candidates = sweepCandidates(done, now);
   const swept = await sweepResurrectedOrgs({
@@ -350,14 +350,14 @@ function mergeResurrected(swept: ResurrectedOrg[], fromFences: string[]): Resurr
  *   it are counted, not dropped silently, and stay fenced for the next run.
  */
 async function clearStaleDeletionGuards(
-  fencedOrgIds: string[],
+  guardedOrgIds: string[],
   statusByOrgId: Map<string, string>,
   deadline: number,
 ): Promise<{ unwedged: number; resweepOrgIds: string[]; skipped: number }> {
   const resweepOrgIds: string[] = [];
   let unwedged = 0;
   let skipped = 0;
-  for (const orgId of fencedOrgIds) {
+  for (const orgId of guardedOrgIds) {
     const scannedStatus = statusByOrgId.get(orgId);
     if (scannedStatus !== undefined) {
       if (scannedStatus === OrgDeletionStatus.Done) resweepOrgIds.push(orgId);
@@ -389,7 +389,7 @@ async function clearStaleDeletionGuards(
     console.warn(
       '[account-deletion-orchestrator] Budget expired before every guarded org was swept; ' +
         'the rest stay fenced until the next run',
-      { skipped, fenced: fencedOrgIds.length },
+      { skipped, guarded: guardedOrgIds.length },
     );
   }
   return { unwedged, resweepOrgIds, skipped };
@@ -435,7 +435,7 @@ type ScannedDeletion = IncompleteDeletion &
 interface ScanResult {
   deletions: ScannedDeletion[];
   /** Orgs whose PROFILE row still carries `deleting = true`. */
-  fencedOrgIds: string[];
+  guardedOrgIds: string[];
   /** Orgs named by a surviving `RAGKEYHASH#{hash}/LOOKUP` row. */
   ragKeyHashOrgIds: Set<string>;
 }
@@ -452,7 +452,7 @@ interface ScanResult {
 // their own (much cheaper — no RCU-relevant filter) path, but at least the
 // per-org Scan cost disappears.
 async function scanUserInfoTable(): Promise<ScanResult> {
-  const result: ScanResult = { deletions: [], fencedOrgIds: [], ragKeyHashOrgIds: new Set() };
+  const result: ScanResult = { deletions: [], guardedOrgIds: [], ragKeyHashOrgIds: new Set() };
   let lastEvaluatedKey: Record<string, AttributeValue> | undefined;
   do {
     const page = await dynamo.send(
@@ -497,6 +497,6 @@ async function scanUserInfoTable(): Promise<ScanResult> {
 function routeScannedRow(row: Record<string, unknown>, into: ScanResult): void {
   const pk = typeof row.pk === 'string' ? row.pk : '';
   if (row.sk === 'DELETION') into.deletions.push(row as unknown as ScannedDeletion);
-  else if (row.sk === 'PROFILE') into.fencedOrgIds.push(pk.slice('ORG#'.length));
+  else if (row.sk === 'PROFILE') into.guardedOrgIds.push(pk.slice('ORG#'.length));
   else if (typeof row.orgId === 'string' && row.orgId) into.ragKeyHashOrgIds.add(row.orgId);
 }

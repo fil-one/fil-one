@@ -73,7 +73,7 @@ const ORG_PROBE_PAGE_SIZE = 25;
  *   ran against a row written after the teardown finished.)
  * - **orgRows** — any UserInfoTable `ORG#{orgId}` row other than the DELETION
  *   record itself, which is retained forever as the audit record. Catches a
- *   surviving PROFILE (which re-opens every fence-B writer), access keys and
+ *   surviving PROFILE (which re-opens every guarded writer), access keys and
  *   RAG key records.
  * - **ragIndex** — RagIndexerTable per-bucket RAG enablement rows. Only the
  *   enablement row is probed: it is the self-sustaining one that

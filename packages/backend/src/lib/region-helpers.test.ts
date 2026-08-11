@@ -9,7 +9,7 @@ const mockGetOrgProfile = vi.fn<(orgId: string) => Promise<OrgProfileItem | unde
   async (orgId: string) => fakeOrgProfile(orgId),
 );
 // Only the read is stubbed — `isOrgDeleting` stays real so the fence is
-// exercised as the predicate every other fence-B reader uses.
+// exercised as the predicate every other `deleting` reader uses.
 vi.mock('./org-profile.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./org-profile.js')>()),
   getOrgProfile: (...args: unknown[]) => mockGetOrgProfile(...(args as [string])),

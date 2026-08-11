@@ -96,7 +96,7 @@ function provisioned(orchestrator: ReturnType<typeof makeOrchestrator>, tenantId
   return { orchestrator, tenantId } as unknown as ProvisionedRegion;
 }
 
-/** The `ORG#{orgId}/PROFILE` item the worker's fence-B read returns. */
+/** The `ORG#{orgId}/PROFILE` item the worker's `deleting` read returns. */
 function profileItem(over: Record<string, unknown> = {}) {
   return marshall({ pk: 'ORG#org-1', sk: 'PROFILE', ...over });
 }
