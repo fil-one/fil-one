@@ -175,7 +175,24 @@ export const fthOrchestrator = {
     return mapWithConcurrency(buckets, BUCKET_DETAIL_CONCURRENCY, async (b) => {
       const [versioning, lock] = await Promise.all([
         includeVersioning ? getBucketVersioning(s3, b.name) : Promise.resolve(false),
-        opts.includeObjectLock ? getBucketObjectLock(s3, b.name) : Promise.resolve(null),
+        // A failed object-lock read degrades this row rather than the whole
+        // listing: getBucketObjectLock rethrows anything that isn't a missing
+        // configuration, so one bucket denying GetObjectLockConfiguration would
+        // otherwise 500 the buckets page. Versioning still propagates, since the
+        // object browser's behaviour depends on it.
+        //
+        // `null` means the bucket has no lock configuration; `undefined` means we
+        // couldn't find out, which is why the two aren't collapsed.
+        opts.includeObjectLock
+          ? getBucketObjectLock(s3, b.name).catch((err: unknown) => {
+              console.warn('[fth] Failed to load object-lock state for bucket', {
+                tenantId,
+                bucketName: b.name,
+                error: err,
+              });
+              return undefined;
+            })
+          : Promise.resolve(undefined),
       ]);
 
       return {
@@ -185,9 +202,9 @@ export const fthOrchestrator = {
         isPublic: false,
         versioning,
         encrypted: true,
-        // getBucketObjectLock returns null when the bucket has no lock
-        // configuration at all, which is the same story as "not enabled".
-        ...(opts.includeObjectLock && { objectLockEnabled: lock?.objectLockEnabled ?? false }),
+        // Reported only when the read succeeded. Left unset after a failure, so a
+        // locked bucket is never shown as unlocked on the strength of an error.
+        ...(lock !== undefined && { objectLockEnabled: lock?.objectLockEnabled ?? false }),
         ...(lock?.defaultRetention && { defaultRetention: lock.defaultRetention }),
         ...(lock?.retentionDuration != null && { retentionDuration: lock.retentionDuration }),
         ...(lock?.retentionDurationType && {

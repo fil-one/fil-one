@@ -785,6 +785,27 @@ describe('fthOrchestrator.listBuckets', () => {
     });
   });
 
+  it('degrades one bucket rather than the listing when its object-lock read fails', async () => {
+    ssmMock.on(GetParameterCommand).resolves({
+      Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
+    });
+    s3Mock.on(ListBucketsCommand).resolves({
+      Buckets: [{ Name: 'b1', CreationDate: new Date('2026-01-01T00:00:00Z') }],
+    });
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
+    // Anything other than a missing configuration is rethrown by
+    // getBucketObjectLock, which would otherwise fail the whole page.
+    s3Mock.on(GetObjectLockConfigurationCommand).rejects(new Error('AccessDenied'));
+
+    const result = await fthOrchestrator.listBuckets(fthClientId, { includeObjectLock: true });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.versioning).toBe(true);
+    // Left unset, not false: a locked bucket must not read as unlocked because
+    // the read failed.
+    expect(result[0]?.objectLockEnabled).toBeUndefined();
+  });
+
   it('skips GetObjectLockConfiguration unless includeObjectLock is set', async () => {
     ssmMock.on(GetParameterCommand).resolves({
       Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
