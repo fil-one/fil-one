@@ -182,11 +182,15 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     },
   });
 
-  // Access keys scoped to this bucket
+  // Access keys scoped to this bucket. Access keys are region-scoped, so the
+  // region is part of the filter: a key from another region — even one scoped to
+  // all buckets — cannot operate on this bucket.
   const { data: accessKeysData, isPending: accessKeysLoading } = useQuery({
-    queryKey: queryKeys.bucketAccessKeys(bucketName),
-    queryFn: () =>
-      apiRequest<ListAccessKeysResponse>(`/access-keys?bucket=${encodeURIComponent(bucketName)}`),
+    queryKey: queryKeys.bucketAccessKeys(bucketName, region),
+    queryFn: () => {
+      const params = new URLSearchParams({ bucket: bucketName, region });
+      return apiRequest<ListAccessKeysResponse>(`/access-keys?${params.toString()}`);
+    },
   });
   const accessKeys = accessKeysData?.keys ?? [];
 
