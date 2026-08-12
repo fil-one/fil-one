@@ -288,11 +288,18 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
           </span>
           <span className="mx-2 text-zinc-400">&bull;</span>
           <span className="text-xs text-zinc-500">Created {formatDateTime(bucket.createdAt)}</span>
+          <span className="mx-2 text-zinc-400">&bull;</span>
+          {/* Stated once, quietly. It's on for every bucket, so a card of its own
+              was a constant that couldn't tell you anything. */}
+          <span className="text-xs text-zinc-500">Encrypted at rest</span>
         </p>
       )}
 
       {bucket && (
-        <div className="mb-6 grid grid-cols-3 gap-4">
+        // Responsive rather than a fixed three columns: at 375px three columns
+        // crushed the cards, and with four of them the fourth was orphaned at a
+        // third of the width on a row of its own.
+        <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <BucketPropertyCards bucket={bucket} />
         </div>
       )}
