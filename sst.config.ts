@@ -1034,6 +1034,16 @@ export default $config({
       ],
       extraEnv: { ACCOUNT_DELETION_ENABLED: accountDeletionEnabled },
     });
+    addRoute({
+      method: 'POST',
+      routePath: '/api/account/deletion/confirm',
+      handler: 'confirm-account-deletion',
+      // The member snapshot, tenant-id read and step-up enrollment lookup do not
+      // fit the 10s default.
+      timeout: '30 seconds',
+      extraLink: [deletionChallengeTable, deletionCodeHmacKey, ...mgmtRuntimeResources],
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+    });
 
     // ── Usage reporting (cron-based) ────────────────────────────────
     const usageWorker = createFn('UsageReportingWorker', {
