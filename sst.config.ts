@@ -1063,6 +1063,25 @@ export default $config({
       },
     });
 
+    // The other half of the invoke's at-most-once delivery: a confirm whose
+    // invoke never landed, a worker that exhausted its retries, and a pass
+    // killed mid-purge all converge on the record and get re-driven here.
+    const accountDeletionSweeper = createFn('AccountDeletionSweeper', {
+      handler: 'packages/backend/src/jobs/account-deletion-sweeper.handler',
+      link: [userInfoTable],
+      environment: {
+        ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
+      },
+      timeout: '300 seconds',
+      memory: '256 MB',
+      permissions: [{ actions: ['lambda:InvokeFunction'], resources: [accountDeletionWorker.arn] }],
+    });
+
+    new sst.aws.CronV2('AccountDeletionSweepCron', {
+      schedule: 'rate(15 minutes)',
+      function: accountDeletionSweeper.arn,
+    });
+
     // No subscriptionGuardMiddleware on these: it blocks writes for cancelled
     // and inactive subscriptions, the population most likely to be leaving.
     addRoute({
