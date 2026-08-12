@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { PlusIcon } from '@phosphor-icons/react/dist/ssr';
+import { CloudArrowUpIcon } from '@phosphor-icons/react/dist/ssr';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { Heading } from '../components/Heading/Heading';
@@ -261,22 +261,29 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
         <Heading tag="h1" size="xl">
           {bucketName}
         </Heading>
-        <Button
-          id="upload-object-button"
-          variant="primary"
-          size="sm"
-          icon={PlusIcon}
-          iconPosition="right"
-          onClick={() =>
-            void navigate({
-              to: '/buckets/$bucketName/upload',
-              params: { bucketName },
-              search: { region },
-            })
-          }
-        >
-          Upload object
-        </Button>
+        {/* Hidden while the bucket is empty: the empty state carries the sole
+            upload CTA then, so two identical primary actions never compete. Once
+            objects exist the empty state is gone and this is the only one. The
+            cloud glyph leads the label, echoing that empty state's icon. */}
+        {versions.length > 0 && (
+          <Button
+            id="upload-object-button"
+            variant="primary"
+            size="sm"
+            icon={CloudArrowUpIcon}
+            iconSize={18}
+            iconPosition="left"
+            onClick={() =>
+              void navigate({
+                to: '/buckets/$bucketName/upload',
+                params: { bucketName },
+                search: { region },
+              })
+            }
+          >
+            Upload object
+          </Button>
+        )}
       </div>
 
       {bucket && (
@@ -288,10 +295,6 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
           </span>
           <span className="mx-2 text-zinc-400">&bull;</span>
           <span className="text-xs text-zinc-500">Created {formatDateTime(bucket.createdAt)}</span>
-          <span className="mx-2 text-zinc-400">&bull;</span>
-          {/* Stated once, quietly. It's on for every bucket, so a card of its own
-              was a constant that couldn't tell you anything. */}
-          <span className="text-xs text-zinc-500">Encrypted at rest</span>
         </p>
       )}
 
