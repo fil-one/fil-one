@@ -10,11 +10,11 @@ import { Breadcrumb } from '../components/Breadcrumb';
 import { Alert } from '../components/Alert';
 import { Spinner } from '../components/Spinner';
 import { AddBucketKeyModal } from '../components/AddBucketKeyModal';
-import { BucketPropertyCards } from '../components/BucketPropertiesCard';
+import { BucketProperties } from '../components/BucketPropertiesCard';
 import { ObjectBrowser, countObjects } from '../components/ObjectBrowser';
 import { BucketAccessTab } from '../components/BucketAccessTab';
 import type { S3ObjectVersion, S3Region } from '@filone/shared';
-import { getS3Endpoint, formatBytes } from '@filone/shared';
+import { getS3Endpoint } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
 
 import type {
@@ -25,7 +25,6 @@ import type {
   BucketAnalyticsResponse,
 } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
-import { formatDateTime } from '../lib/time.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
 import { queryKeys } from '../lib/query-client.js';
 import { batchPresign } from '../lib/use-presign.js';
@@ -34,11 +33,6 @@ import {
   parseListObjectsResponse,
   executePresignedUrl,
 } from '../lib/aurora-s3.js';
-
-function formatStorage(bytesUsed: number | undefined): string {
-  if (bytesUsed === undefined) return '—';
-  return formatBytes(bytesUsed);
-}
 
 // Analytics has the full-bucket count; the listing is a single page (max 1000
 // entries) so counting it undercounts large buckets. Fall back to the listing
@@ -257,7 +251,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     <div className="px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
       <Breadcrumb items={[{ label: 'Buckets', href: '/buckets' }, { label: bucketName }]} />
 
-      <div className="mt-4 mb-2 flex items-center justify-between">
+      <div className="mt-4 flex items-center justify-between">
         <Heading tag="h1" size="xl">
           {bucketName}
         </Heading>
@@ -279,23 +273,12 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
         </Button>
       </div>
 
-      {bucket && (
-        <p className="mb-6 text-sm">
-          <span className="text-zinc-700">{region}</span>
-          <span className="mx-2 text-zinc-400">&bull;</span>
-          <span className="text-xs text-zinc-500">
-            {formatStorage(analyticsData?.bytesUsed)} used
-          </span>
-          <span className="mx-2 text-zinc-400">&bull;</span>
-          <span className="text-xs text-zinc-500">Created {formatDateTime(bucket.createdAt)}</span>
-        </p>
-      )}
-
-      {bucket && (
-        <div className="mb-6 grid grid-cols-3 gap-4">
-          <BucketPropertyCards bucket={bucket} />
-        </div>
-      )}
+      {/* Region, storage and creation date used to sit in a bullet-separated line
+          here and again in the cards below, in two different visual languages.
+          They're all properties of the bucket, so they live in one place now.
+          BucketProperties owns its own spacing, since the expander changes how
+          much room it needs. */}
+      {bucket && <BucketProperties bucket={bucket} analytics={analyticsData} />}
 
       <Tabs>
         <TabList>

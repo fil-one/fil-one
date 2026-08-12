@@ -1,66 +1,56 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 
-import type { Bucket } from '@filone/shared';
+import type { Bucket, BucketAnalyticsResponse } from '@filone/shared';
+import { S3Region } from '@filone/shared';
 
-import { BucketPropertyCards } from './BucketPropertiesCard';
+import { BucketProperties } from './BucketPropertiesCard';
 
-const baseBucket: Bucket = {
-  bucketName: 'my-bucket',
-  region: 'us-east-1',
-  createdAt: '2026-01-15T00:00:00Z',
+const bucket: Bucket = {
+  bucketName: 'customer-exports',
+  region: S3Region.EuWest1,
+  createdAt: '2026-04-17T09:24:00Z',
   isPublic: false,
+  versioning: true,
+  objectLockEnabled: false,
+  encrypted: true,
 };
 
-function BucketPropertyCardsWrapper({ bucket }: { bucket: Bucket }) {
-  return (
-    <div className="grid grid-cols-3 gap-4">
-      <BucketPropertyCards bucket={bucket} />
-    </div>
-  );
-}
+const analytics: BucketAnalyticsResponse = { objectCount: 1, bytesUsed: 72_192 };
 
-const meta: Meta<typeof BucketPropertyCardsWrapper> = {
-  title: 'Components/BucketPropertiesCard',
-  component: BucketPropertyCardsWrapper,
+const meta: Meta<typeof BucketProperties> = {
+  title: 'Components/BucketProperties',
+  component: BucketProperties,
+  parameters: { layout: 'padded' },
+  args: { bucket, analytics },
 };
 
 export default meta;
-type Story = StoryObj<typeof BucketPropertyCardsWrapper>;
+type Story = StoryObj<typeof BucketProperties>;
 
-export const PlainBucket: Story = {
-  args: { bucket: baseBucket },
-};
+export const Default: Story = {};
 
-export const VersioningEnabled: Story = {
-  args: { bucket: { ...baseBucket, versioning: true } },
-};
-
-export const ObjectLockNoRetention: Story = {
-  args: { bucket: { ...baseBucket, versioning: true, objectLockEnabled: true } },
-};
-
-export const GovernanceRetentionDays: Story = {
+/** Object Lock on, with the default retention policy that used to orphan a card. */
+export const WithRetention: Story = {
   args: {
     bucket: {
-      ...baseBucket,
-      versioning: true,
+      ...bucket,
       objectLockEnabled: true,
       defaultRetention: 'governance',
-      retentionDuration: 30,
+      retentionDuration: 15,
       retentionDurationType: 'd',
     },
   },
 };
 
-export const ComplianceRetentionYears: Story = {
+/** Nothing enabled, in the US region. */
+export const Minimal: Story = {
   args: {
-    bucket: {
-      ...baseBucket,
-      versioning: true,
-      objectLockEnabled: true,
-      defaultRetention: 'compliance',
-      retentionDuration: 7,
-      retentionDurationType: 'y',
-    },
+    bucket: { ...bucket, region: S3Region.UsEast1, versioning: false },
+    analytics: { objectCount: 0, bytesUsed: 0 },
   },
+};
+
+/** Analytics still in flight: the value is held rather than shown as "0 B". */
+export const LoadingStorage: Story = {
+  args: { analytics: undefined },
 };
