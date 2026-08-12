@@ -16,6 +16,7 @@ import {
 
 import { Badge } from './Badge';
 import { Button } from './Button';
+import { Checkbox } from './Checkbox';
 import { CopyButton } from './CopyButton';
 import { Table } from './Table/Table';
 import { formatDate } from '../lib/time.js';
@@ -188,9 +189,13 @@ function ActionMenu({ onDelete }: { onDelete: () => void }) {
 
 export type AccessKeysTableProps = {
   keys: AccessKey[];
+  showRegion?: boolean;
   showBuckets?: boolean;
   showPermissions?: boolean;
+  showCreated?: boolean;
   onDelete?: (id: string) => Promise<void>;
+  /** Enables row selection and a bulk-delete toolbar. */
+  onBulkDelete?: (ids: string[]) => Promise<void>;
   onCreateOpen?: () => void;
   emptyTitle?: string;
   emptyDescription?: string;
@@ -198,16 +203,33 @@ export type AccessKeysTableProps = {
 
 export function AccessKeysTable({
   keys,
+  showRegion = false,
   showBuckets = false,
   showPermissions = false,
+  showCreated = false,
   onDelete,
+  onBulkDelete,
   onCreateOpen,
   emptyTitle = 'No API keys yet',
   emptyDescription = 'Generate credentials to connect your applications via S3-compatible API',
 }: AccessKeysTableProps) {
+  const selectable = Boolean(onBulkDelete);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+
+  // Drop any selected ids that no longer exist (e.g. after a delete).
+  useEffect(() => {
+    setSelected((prev) => {
+      if (prev.size === 0) return prev;
+      const existing = new Set(keys.map((k) => k.id));
+      const next = new Set<string>();
+      for (const id of prev) if (existing.has(id)) next.add(id);
+      return next.size === prev.size ? prev : next;
+    });
+  }, [keys]);
+
   if (keys.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white px-6 py-16 text-center">
+      <div className="flex flex-col items-center justify-center rounded-xl border border-zinc-200 bg-white px-6 py-16 text-center">
         <IconBox icon={KeyIcon} size="md" color="blue" className="mb-4" />
         <p className="mb-1 text-sm font-medium text-zinc-900">{emptyTitle}</p>
         <p className="mb-4 max-w-xs text-sm text-zinc-500">{emptyDescription}</p>
@@ -220,86 +242,168 @@ export function AccessKeysTable({
     );
   }
 
+  const allSelected = selected.size === keys.length;
+
+  function toggleAll() {
+    setSelected(allSelected ? new Set() : new Set(keys.map((k) => k.id)));
+  }
+
+  function toggleOne(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   return (
-    <Table>
-      <Table.Header>
-        <Table.Row>
-          <Table.Head>Name</Table.Head>
-          {showBuckets && <Table.Head className="hidden lg:table-cell">Buckets</Table.Head>}
-          {showPermissions && <Table.Head className="hidden md:table-cell">Permissions</Table.Head>}
-          <Table.Head className="hidden sm:table-cell">Status</Table.Head>
-          <Table.Head className="hidden md:table-cell">Last Used</Table.Head>
-          {onDelete && (
-            <Table.Head>
-              <span className="sr-only">Actions</span>
-            </Table.Head>
-          )}
-        </Table.Row>
-      </Table.Header>
-      <Table.Body>
-        {keys.map((key) => (
-          <Table.Row key={key.id} data-testid="access-key-row" data-access-key-id={key.accessKeyId}>
-            {/* Name + Access Key ID */}
-            <Table.Cell>
-              <p className="text-xs font-medium text-zinc-900">{key.keyName}</p>
-              <div className="flex items-center gap-1">
-                <p className="font-mono text-xs text-zinc-500">{key.accessKeyId}</p>
-                <CopyButton value={key.accessKeyId} />
-              </div>
-              {/* Status shown inline on small screens */}
-              <div className="mt-1 sm:hidden">
-                <StatusBadge status={key.status} />
-              </div>
-            </Table.Cell>
-
-            {/* Buckets */}
-            {showBuckets && (
-              <Table.Cell className="hidden lg:table-cell">
-                <div className="flex flex-wrap gap-1">
-                  {key.bucketScope === 'all' ? (
-                    <Badge color="grey" size="sm">
-                      All Buckets
-                    </Badge>
-                  ) : (
-                    (key.buckets ?? []).map((b) => (
-                      <Badge key={b} color="grey" size="sm">
-                        {b}
-                      </Badge>
-                    ))
-                  )}
-                </div>
-              </Table.Cell>
+    <>
+      {selectable && selected.size > 0 && (
+        <div className="mb-3 flex items-center justify-between rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+          <span className="text-sm text-zinc-600">{selected.size} selected</span>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+              Clear
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              icon={TrashIcon}
+              onClick={() => void onBulkDelete?.(Array.from(selected))}
+            >
+              Delete
+            </Button>
+          </div>
+        </div>
+      )}
+      <Table>
+        <Table.Header>
+          <Table.Row>
+            {selectable && (
+              <Table.Head className="w-0">
+                <Checkbox checked={allSelected} onChange={toggleAll} aria-label="Select all keys" />
+              </Table.Head>
             )}
-
-            {/* Permissions */}
+            <Table.Head>Name</Table.Head>
+            {showRegion && <Table.Head className="hidden sm:table-cell">Region</Table.Head>}
+            {showBuckets && <Table.Head className="hidden lg:table-cell">Buckets</Table.Head>}
             {showPermissions && (
-              <Table.Cell className="hidden md:table-cell">
-                <PermissionBadges
-                  permissions={key.permissions ?? []}
-                  granularPermissions={key.granularPermissions ?? []}
-                />
-              </Table.Cell>
+              <Table.Head className="hidden md:table-cell">Permissions</Table.Head>
             )}
-
-            {/* Status */}
-            <Table.Cell className="hidden sm:table-cell">
-              <StatusBadge status={key.status} />
-            </Table.Cell>
-
-            {/* Last Used */}
-            <Table.Cell className="hidden md:table-cell text-xs text-zinc-500">
-              {key.lastUsedAt ? formatDate(key.lastUsedAt) : 'Never'}
-            </Table.Cell>
-
-            {/* Actions */}
+            <Table.Head className="hidden sm:table-cell">Status</Table.Head>
+            {showCreated && <Table.Head className="hidden lg:table-cell">Created</Table.Head>}
+            <Table.Head className="hidden md:table-cell">Last Used</Table.Head>
             {onDelete && (
-              <Table.Cell className="text-right">
-                <ActionMenu onDelete={() => void onDelete(key.id)} />
-              </Table.Cell>
+              <Table.Head>
+                <span className="sr-only">Actions</span>
+              </Table.Head>
             )}
           </Table.Row>
-        ))}
-      </Table.Body>
-    </Table>
+        </Table.Header>
+        <Table.Body>
+          {keys.map((key) => {
+            const isSelected = selected.has(key.id);
+            return (
+              <Table.Row
+                key={key.id}
+                data-testid="access-key-row"
+                data-access-key-id={key.accessKeyId}
+                className={isSelected ? 'bg-brand-50/40' : undefined}
+              >
+                {selectable && (
+                  <Table.Cell className="w-0">
+                    <Checkbox
+                      checked={isSelected}
+                      onChange={() => toggleOne(key.id)}
+                      aria-label={`Select ${key.keyName}`}
+                    />
+                  </Table.Cell>
+                )}
+
+                {/* Name + Access Key ID */}
+                <Table.Cell>
+                  <p className="text-xs font-medium text-zinc-900">{key.keyName}</p>
+                  <div className="flex items-center gap-1">
+                    <p className="font-mono text-xs text-zinc-500">{key.accessKeyId}</p>
+                    <CopyButton value={key.accessKeyId} />
+                  </div>
+                  {/* Status shown inline on small screens */}
+                  <div className="mt-1 sm:hidden">
+                    <StatusBadge status={key.status} />
+                  </div>
+                </Table.Cell>
+
+                {/* Region */}
+                {showRegion && (
+                  <Table.Cell className="hidden sm:table-cell">
+                    {key.region ? (
+                      <Badge color="grey" size="sm">
+                        {key.region}
+                      </Badge>
+                    ) : (
+                      <span className="text-zinc-400">-</span>
+                    )}
+                  </Table.Cell>
+                )}
+
+                {/* Buckets */}
+                {showBuckets && (
+                  <Table.Cell className="hidden lg:table-cell">
+                    <div className="flex flex-wrap gap-1">
+                      {key.bucketScope === 'all' ? (
+                        <Badge color="grey" size="sm">
+                          All Buckets
+                        </Badge>
+                      ) : (
+                        (key.buckets ?? []).map((b) => (
+                          <Badge key={b} color="grey" size="sm">
+                            {b}
+                          </Badge>
+                        ))
+                      )}
+                    </div>
+                  </Table.Cell>
+                )}
+
+                {/* Permissions */}
+                {showPermissions && (
+                  <Table.Cell className="hidden md:table-cell">
+                    <PermissionBadges
+                      permissions={key.permissions ?? []}
+                      granularPermissions={key.granularPermissions ?? []}
+                    />
+                  </Table.Cell>
+                )}
+
+                {/* Status */}
+                <Table.Cell className="hidden sm:table-cell">
+                  <StatusBadge status={key.status} />
+                </Table.Cell>
+
+                {/* Created */}
+                {showCreated && (
+                  <Table.Cell className="hidden text-xs text-zinc-500 lg:table-cell">
+                    {formatDate(key.createdAt)}
+                  </Table.Cell>
+                )}
+
+                {/* Last Used */}
+                <Table.Cell className="hidden text-xs text-zinc-500 md:table-cell">
+                  {key.lastUsedAt ? formatDate(key.lastUsedAt) : 'Never'}
+                </Table.Cell>
+
+                {/* Actions */}
+                {onDelete && (
+                  <Table.Cell className="text-right">
+                    <ActionMenu onDelete={() => void onDelete(key.id)} />
+                  </Table.Cell>
+                )}
+              </Table.Row>
+            );
+          })}
+        </Table.Body>
+      </Table>
+    </>
   );
 }

@@ -44,16 +44,20 @@ type AccessKeysTabProps = {
   keys: AccessKey[];
   onCreateOpen: () => void;
   onDelete: (id: string) => Promise<void>;
+  onBulkDelete: (ids: string[]) => Promise<void>;
 };
 
-function AccessKeysTab({ keys, onCreateOpen, onDelete }: AccessKeysTabProps) {
+function AccessKeysTab({ keys, onCreateOpen, onDelete, onBulkDelete }: AccessKeysTabProps) {
   return (
     <>
       <AccessKeysTable
         keys={keys}
+        showRegion
         showBuckets
         showPermissions
+        showCreated
         onDelete={onDelete}
+        onBulkDelete={onBulkDelete}
         onCreateOpen={onCreateOpen}
       />
       {keys.length === 0 && (
@@ -161,7 +165,7 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 
   return (
     <div className="mt-6 flex flex-col gap-10">
-      {/* Connection: the canonical facts you need to connect. Region leads — it drives the rest. */}
+      {/* Connection: the canonical facts you need to connect. Region leads since it drives the rest. */}
       <section>
         <Heading tag="h3" size="sm" className="mb-3">
           Connection
@@ -321,6 +325,23 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 // Page
 // ---------------------------------------------------------------------------
 
+/** Copy for the delete-confirmation dialog, adapted to how many keys are selected. */
+function deleteDialogCopy(count: number) {
+  if (count > 1) {
+    return {
+      title: `Delete ${count} access keys`,
+      description: `These ${count} access keys will be permanently revoked. Any applications using them will lose access immediately.`,
+      confirmLabel: `Delete ${count} keys`,
+    };
+  }
+  return {
+    title: 'Delete access key',
+    description:
+      'This access key will be permanently revoked. Any applications using it will lose access immediately.',
+    confirmLabel: 'Delete key',
+  };
+}
+
 export function ApiKeysPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -333,35 +354,43 @@ export function ApiKeysPage() {
   const keys = data?.keys ?? [];
 
   const [tabIndex, setTabIndex] = useState(0);
-  const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
+  const [confirmDeleteIds, setConfirmDeleteIds] = useState<string[] | null>(null);
 
-  const deleteKeyMutation = useMutation({
-    mutationFn: (id: string) => apiRequest(`/access-keys/${id}`, { method: 'DELETE' }),
-    onSuccess: (_, id) => {
+  const deleteKeysMutation = useMutation({
+    mutationFn: (ids: string[]) =>
+      Promise.all(ids.map((id) => apiRequest(`/access-keys/${id}`, { method: 'DELETE' }))),
+    onSuccess: (_, ids) => {
+      const removed = new Set(ids);
       queryClient.setQueryData<ListAccessKeysResponse>(queryKeys.accessKeys, (old) =>
-        old ? { keys: old.keys.filter((k) => k.id !== id) } : old,
+        old ? { keys: old.keys.filter((k) => !removed.has(k.id)) } : old,
       );
       void queryClient.invalidateQueries({ queryKey: queryKeys.accessKeys });
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
-      toast.success('Access key deleted');
+      toast.success(ids.length === 1 ? 'Access key deleted' : `${ids.length} access keys deleted`);
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete key');
+      toast.error(err instanceof Error ? err.message : 'Failed to delete keys');
     },
   });
 
   async function handleDelete(id: string) {
-    setConfirmDeleteKey(id);
+    setConfirmDeleteIds([id]);
   }
 
-  async function confirmDeleteKeyAction() {
-    if (!confirmDeleteKey) return;
+  async function handleBulkDelete(ids: string[]) {
+    setConfirmDeleteIds(ids);
+  }
+
+  async function confirmDeleteAction() {
+    if (!confirmDeleteIds) return;
     try {
-      await deleteKeyMutation.mutateAsync(confirmDeleteKey);
+      await deleteKeysMutation.mutateAsync(confirmDeleteIds);
     } catch {
       // error handled by mutation.onError
     }
   }
+
+  const goToCreate = () => void navigate({ to: '/api-keys/create' });
 
   if (isPending) {
     return (
@@ -395,7 +424,7 @@ export function ApiKeysPage() {
           variant="ghost"
           size="sm"
           icon={PlusIcon}
-          onClick={() => void navigate({ to: '/api-keys/create' })}
+          onClick={goToCreate}
         >
           Create new key
         </Button>
@@ -411,8 +440,9 @@ export function ApiKeysPage() {
           <TabPanel>
             <AccessKeysTab
               keys={keys}
-              onCreateOpen={() => void navigate({ to: '/api-keys/create' })}
+              onCreateOpen={goToCreate}
               onDelete={handleDelete}
+              onBulkDelete={handleBulkDelete}
             />
           </TabPanel>
           <TabPanel>
@@ -422,12 +452,10 @@ export function ApiKeysPage() {
       </Tabs>
 
       <ConfirmDialog
-        open={confirmDeleteKey !== null}
-        onClose={() => setConfirmDeleteKey(null)}
-        onConfirm={confirmDeleteKeyAction}
-        title="Delete access key"
-        description="This access key will be permanently revoked. Any applications using it will lose access immediately."
-        confirmLabel="Delete key"
+        open={confirmDeleteIds !== null}
+        onClose={() => setConfirmDeleteIds(null)}
+        onConfirm={confirmDeleteAction}
+        {...deleteDialogCopy(confirmDeleteIds?.length ?? 0)}
       />
     </PageLayout>
   );
