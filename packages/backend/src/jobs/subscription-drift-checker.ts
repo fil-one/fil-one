@@ -4,7 +4,7 @@ import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { reportMetric } from '../lib/metrics.js';
-import { getOrgProfile, type OrgProfileItem } from '../lib/org-profile.js';
+import { getOrgProfile, isOrgDeletedOrDeleting, type OrgProfileItem } from '../lib/org-profile.js';
 import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.js';
 import type { ServiceOrchestrator } from '../lib/service-orchestrator.js';
 
@@ -42,6 +42,10 @@ export async function handler(): Promise<void> {
   );
 
   for (const candidate of uniqueCandidates) {
+    // A tenant mid-teardown looks out of sync but is not drift, so it is left
+    // out of the stats rather than reported.
+    if (await isOrgDeletedOrDeleting(candidate.orgId)) continue;
+
     // A failed PROFILE read counts as probeFailed on every orchestrator so a
     // transient DDB error skips just this candidate, not the whole run.
     let orgProfile;

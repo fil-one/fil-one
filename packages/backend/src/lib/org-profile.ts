@@ -53,6 +53,20 @@ export async function isOrgDeleting(
   return orgProfile?.deleting?.BOOL === true;
 }
 
+/**
+ * Whether background work should leave this org alone — it is being deleted,
+ * or its profile row is already gone.
+ *
+ * Distinct from {@link isOrgDeleting}, which reports false for a missing row.
+ * That is right for request paths, where the row always exists and a stale read
+ * must not refuse a live org; it is wrong for a scheduled job, whose whole
+ * candidate list can outlive the rows it was built from.
+ */
+export async function isOrgDeletedOrDeleting(orgId: string): Promise<boolean> {
+  const orgProfile = await getOrgProfile(orgId, { consistent: true });
+  return orgProfile === undefined || orgProfile.deleting?.BOOL === true;
+}
+
 /** Thrown when a write is refused because the org is being deleted. */
 export class OrgDeletingError extends Error {
   readonly orgId: string;

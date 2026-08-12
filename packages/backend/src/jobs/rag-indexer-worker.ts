@@ -18,6 +18,7 @@ import { updateBucketTelemetry } from '../lib/bucket-rag-enablement.js';
 import { indexBucket } from './rag-indexer-helpers.js';
 import { reportMetric } from '../lib/metrics.js';
 import { S3Region } from '@filone/shared';
+import { isOrgDeletedOrDeleting } from '../lib/org-profile.js';
 
 const LOG = '[rag-indexer-worker]';
 
@@ -64,6 +65,14 @@ export async function handler(
   let regionFailures = 0;
 
   try {
+    // Vectors and manifest rows written now are residue the purge has already
+    // swept past, and nothing else collects them.
+    if (await isOrgDeletedOrDeleting(orgId)) {
+      console.warn(`${LOG} Org is deleted or being deleted, skipping`, { orgId });
+      emitWorkerInvocation('success', Date.now() - start, { regionsProcessed, regionFailures });
+      return;
+    }
+
     const regions = await getProvisionedRegions(orgId);
     if (regions.length === 0) {
       console.warn(`${LOG} Org not provisioned in any available region, skipping`, { orgId });

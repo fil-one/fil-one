@@ -18,6 +18,7 @@ const ddbMock = mockClient(DynamoDBClient);
 
 import {
   getOrgProfile,
+  isOrgDeletedOrDeleting,
   isOrgDeleting,
   orgNotDeletingCheck,
   OrgDeletingError,
@@ -99,6 +100,41 @@ describe('isOrgDeleting', () => {
 
     await isOrgDeleting('org-1', { consistent: true });
     expect(ddbMock.commandCalls(GetItemCommand)[1]!.args[0].input).toMatchObject({
+      ConsistentRead: true,
+    });
+  });
+});
+
+describe('isOrgDeletedOrDeleting', () => {
+  beforeEach(() => {
+    ddbMock.reset();
+  });
+
+  it('is true while deleting', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: { deleting: { BOOL: true } } });
+    await expect(isOrgDeletedOrDeleting('org-1')).resolves.toBe(true);
+  });
+
+  // The difference from isOrgDeleting: a scheduled job's candidate list can
+  // outlive the rows it was built from, so a missing profile means gone.
+  it('is true once the profile row is purged', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+
+    await expect(isOrgDeletedOrDeleting('org-1')).resolves.toBe(true);
+    await expect(isOrgDeleting('org-1')).resolves.toBe(false);
+  });
+
+  it('is false for a live org', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: { pk: { S: 'ORG#org-1' } } });
+    await expect(isOrgDeletedOrDeleting('org-1')).resolves.toBe(false);
+  });
+
+  it('always reads consistently', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+
+    await isOrgDeletedOrDeleting('org-1');
+
+    expect(ddbMock.commandCalls(GetItemCommand)[0]!.args[0].input).toMatchObject({
       ConsistentRead: true,
     });
   });

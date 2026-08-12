@@ -3,6 +3,7 @@ import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import { isOrgDeletedOrDeleting } from '../lib/org-profile.js';
 import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
@@ -43,6 +44,12 @@ export async function handler(): Promise<void> {
 
   for (const candidate of candidates) {
     try {
+      // Cancelling and disabling is teardown's job now, and would race it.
+      if (await isOrgDeletedOrDeleting(candidate.orgId)) {
+        skipped++;
+        continue;
+      }
+
       const outcome = await processCandidate(candidate, billingTableName, now);
       if (outcome === 'canceled') canceled++;
       else if (outcome === 'write_locked') writeLocked++;
