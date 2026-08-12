@@ -224,6 +224,14 @@ describe('auroraOrchestrator', () => {
     });
   });
 
+  describe('deleteTenant', () => {
+    it('throws NotImplementedError — Aurora exposes no tenant DELETE (FIL-919)', async () => {
+      await expect(auroraOrchestrator.deleteTenant('aurora-t-1')).rejects.toBeInstanceOf(
+        NotImplementedError,
+      );
+    });
+  });
+
   describe('listBuckets', () => {
     it('calls the Aurora Portal with the shared instrumented client', async () => {
       mockPortalListBuckets.mockResolvedValue({ data: { items: [] }, error: undefined });

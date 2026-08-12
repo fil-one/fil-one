@@ -392,6 +392,17 @@ describe('FthClient endpoint coverage', () => {
     );
   });
 
+  it('deleteClient sends DELETE to the client resource', async () => {
+    fetchMock = mockFetch(204);
+    client = buildClient({ fetch: fetchMock });
+
+    await client.deleteClient('client-1');
+
+    const req = lastRequest(fetchMock);
+    expect(req.method).toBe('DELETE');
+    expect(req.url).toBe('https://api.fortilyx.com/management/v1/clients/client-1');
+  });
+
   it('updateClientStatus PATCHes the client with the status body', async () => {
     fetchMock = mockFetch(204);
     client = buildClient({ fetch: fetchMock });

@@ -31,6 +31,7 @@ const mockGetTenant = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockCreateAccessKey = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockListAccessKeys = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockDeleteAccessKey = vi.fn((_o: Record<string, unknown>) => ({}));
+const mockDeleteTenant = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetTenantMetrics = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetBucketMetrics = vi.fn((_o: Record<string, unknown>) => ({}));
 
@@ -38,6 +39,7 @@ vi.mock('@filone/orchestrator-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
   postTenantsByTenantIdStatus: (o: Record<string, unknown>) => mockSetStatus(o),
   getTenantsByTenantId: (o: Record<string, unknown>) => mockGetTenant(o),
+  deleteTenantsByTenantId: (o: Record<string, unknown>) => mockDeleteTenant(o),
   postTenantsByTenantIdAccessKeys: (o: Record<string, unknown>) => mockCreateAccessKey(o),
   getTenantsByTenantIdAccessKeys: (o: Record<string, unknown>) => mockListAccessKeys(o),
   deleteTenantsByTenantIdAccessKeysByAccessKeyId: (o: Record<string, unknown>) =>
@@ -201,6 +203,67 @@ describe('updateTenantStatus', () => {
     await expect(orchestrator.updateTenantStatus(tenantId, 'write-locked')).rejects.toThrow(
       `Failed to set tenant ${tenantId} status to "write-locked"`,
     );
+  });
+});
+
+describe('deleteTenant', () => {
+  it('disables the tenant before deleting it', async () => {
+    mockSetStatus.mockResolvedValue(noContent());
+    mockDeleteTenant.mockResolvedValue(noContent());
+
+    await orchestrator.deleteTenant(tenantId);
+
+    expect(mockSetStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ path: { tenantId }, body: { status: 'disabled' } }),
+    );
+    expect(mockDeleteTenant).toHaveBeenCalledWith(
+      expect.objectContaining({ client: MOCK_CLIENT, path: { tenantId }, throwOnError: false }),
+    );
+    expect(mockSetStatus.mock.invocationCallOrder[0]!).toBeLessThan(
+      mockDeleteTenant.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('re-disables and retries when a competing writer causes a 409', async () => {
+    vi.useFakeTimers();
+    mockSetStatus.mockResolvedValue(noContent());
+    mockDeleteTenant
+      .mockResolvedValueOnce(fail(409, 'tenant is not disabled'))
+      .mockResolvedValue(noContent());
+
+    const promise = orchestrator.deleteTenant(tenantId);
+    await vi.runAllTimersAsync();
+    await promise;
+
+    expect(mockDeleteTenant).toHaveBeenCalledTimes(2);
+    expect(mockSetStatus).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it('does not retry a 404, since an already-deleted tenant answers 204', async () => {
+    mockSetStatus.mockResolvedValue(noContent());
+    mockDeleteTenant.mockResolvedValue(fail(404, 'not found'));
+
+    await expect(orchestrator.deleteTenant(tenantId)).rejects.toThrow(
+      `forge tenant ${tenantId} did not resolve`,
+    );
+    expect(mockDeleteTenant).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws once the retry budget is exhausted', async () => {
+    vi.useFakeTimers();
+    mockSetStatus.mockResolvedValue(noContent());
+    mockDeleteTenant.mockResolvedValue(fail(500, 'boom'));
+
+    const promise = orchestrator.deleteTenant(tenantId).catch((e: unknown) => e);
+    await vi.runAllTimersAsync();
+
+    expect(await promise).toMatchObject({
+      message: `Failed to delete forge tenant ${tenantId}`,
+    });
+    // 1 initial + 3 retries
+    expect(mockDeleteTenant).toHaveBeenCalledTimes(4);
+    vi.useRealTimers();
   });
 });
 

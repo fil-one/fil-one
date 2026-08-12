@@ -9,6 +9,12 @@ import type {
 import type { S3ClientContext } from './s3-client.js';
 import type { OrgProfileItem } from './org-profile.js';
 
+// Retry budget for {@link ServiceOrchestrator.deleteTenant}. A DELETE 409s
+// unless the tenant is already `disabled`; both calls are synchronous, so a 409
+// means a competing writer re-activated it in between. Each attempt re-disables,
+// and the budget outlasts that writer.
+export const TENANT_DELETE_RETRY = { retries: 3 } as const;
+
 export interface BucketSummary {
   bucketName: string;
   region: S3Region;
@@ -200,6 +206,17 @@ export interface ServiceOrchestrator {
    * orchestrator API only and does not write to DDB.
    */
   updateTenantStatus(tenantId: string, status: TenantStatus): Promise<void>;
+
+  /**
+   * Permanently deletes the tenant and everything it owns (buckets, objects,
+   * access keys). Irreversible and synchronous.
+   *
+   * MUST be idempotent: upstream answers 204 for an already-deleted tenant, so
+   * no not-found tolerance is needed. A 404 means the id never resolved —
+   * misrouted endpoint or wrong-scope token — and must throw, or a live tenant
+   * gets reported as torn down.
+   */
+  deleteTenant(tenantId: string): Promise<void>;
 
   /**
    * Reads the tenant's current live status from this orchestrator's API. Like

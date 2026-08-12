@@ -80,6 +80,12 @@ export const auroraOrchestrator = {
     await updateAuroraTenantStatusApi({ tenantId, status: mapToModelsTenantStatus(status) });
   },
 
+  async deleteTenant(_tenantId: string): Promise<void> {
+    // Aurora's Backoffice and Portal APIs expose no tenant DELETE; it is
+    // adopting the generic Management API contract, which supplies one.
+    throw new NotImplementedError('Aurora tenant deletion is not yet supported. See FIL-919.');
+  },
+
   async getTenantStatus(tenantId: string): Promise<TenantStatusProbe> {
     const result = await getAuroraTenantStatusApi({ tenantId });
     if (result.kind !== 'ok') return result;

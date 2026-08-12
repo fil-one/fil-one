@@ -13,7 +13,7 @@
 //     speaks S3 directly against the orchestrator's S3 gateway using the
 //     `filone-console` system key stashed in SSM during setup.
 
-import pRetry from 'p-retry';
+import pRetry, { AbortError } from 'p-retry';
 import type { S3Region, TenantStatus } from '@filone/shared';
 import type { AccessKeyPermission, GranularPermission } from '@filone/shared';
 import {
@@ -39,6 +39,7 @@ import type {
   TenantStatusProbe,
   TenantUsageMetrics,
 } from '../service-orchestrator.js';
+import { TENANT_DELETE_RETRY } from '../service-orchestrator.js';
 import type { OrgProfileItem } from '../org-profile.js';
 import type { S3ClientContext } from '../s3-client.js';
 import { createS3Client } from '../s3-client.js';
@@ -54,6 +55,7 @@ import {
 import { getConsoleS3Credentials } from '../s3-credentials.js';
 import {
   createClient,
+  deleteTenantsByTenantId,
   deleteTenantsByTenantIdAccessKeysByAccessKeyId,
   getTenantsByTenantId,
   getTenantsByTenantIdAccessKeys,
@@ -104,6 +106,20 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
   };
   const tenantIdAttribute = `${config.id}TenantId`;
 
+  // Same lowercase-dashed status values as the contract, so no mapping is
+  // needed. Setting the same status twice is a no-op upstream.
+  const setTenantStatus = async (tenantId: string, status: TenantStatus): Promise<void> => {
+    const { error } = await postTenantsByTenantIdStatus({
+      client,
+      path: { tenantId },
+      body: { status },
+      throwOnError: false,
+    });
+    if (error) {
+      throw new Error(`Failed to set tenant ${tenantId} status to "${status}"`, { cause: error });
+    }
+  };
+
   const getS3ClientContext = async (tenantId: string): Promise<S3ClientContext> => {
     const credentials = await getConsoleS3Credentials({
       orchestratorId: config.id,
@@ -135,18 +151,27 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
     },
 
     async updateTenantStatus(tenantId: string, status: TenantStatus): Promise<void> {
-      // The contract uses the same lowercase-dashed status values, so no
-      // mapping is needed. Setting the same status twice is a no-op upstream;
-      // transient failures are retried by the caller (region-helpers).
-      const { error } = await postTenantsByTenantIdStatus({
-        client,
-        path: { tenantId },
-        body: { status },
-        throwOnError: false,
-      });
-      if (error) {
-        throw new Error(`Failed to set tenant ${tenantId} status to "${status}"`, { cause: error });
-      }
+      await setTenantStatus(tenantId, status);
+    },
+
+    async deleteTenant(tenantId: string): Promise<void> {
+      await pRetry(async () => {
+        await setTenantStatus(tenantId, 'disabled');
+        const { error, response } = await deleteTenantsByTenantId({
+          client,
+          path: { tenantId },
+          throwOnError: false,
+        });
+        if (error) {
+          // Already-deleted is 204, so a 404 means the id never resolved.
+          if (response?.status === 404) {
+            throw new AbortError(
+              `${config.id} tenant ${tenantId} did not resolve (HTTP 404) — check the endpoint and token scope`,
+            );
+          }
+          throw new Error(`Failed to delete ${config.id} tenant ${tenantId}`, { cause: error });
+        }
+      }, TENANT_DELETE_RETRY);
     },
 
     async getTenantStatus(tenantId: string): Promise<TenantStatusProbe> {

@@ -38,6 +38,7 @@ const mockFthClient = vi.hoisted(() => ({
   createAccessKey: vi.fn(),
   listAccessKeys: vi.fn(),
   deleteAccessKey: vi.fn(),
+  deleteClient: vi.fn(),
   listStorageUsers: vi.fn(),
   getClient: (...args: unknown[]) => mockGetClient(...args),
   getClientMetricsTimeseries: (...args: unknown[]) => mockGetClientMetricsTimeseries(...args),
@@ -165,6 +166,65 @@ describe('fthOrchestrator.updateTenantStatus', () => {
     await expect(fthOrchestrator.updateTenantStatus(fthClientId, 'write-locked')).rejects.toThrow(
       'FTH error',
     );
+  });
+});
+
+describe('fthOrchestrator.deleteTenant', () => {
+  it('disables the tenant before deleting it', async () => {
+    mockUpdateClientStatus.mockResolvedValue(undefined);
+    mockFthClient.deleteClient.mockResolvedValue(undefined);
+
+    await fthOrchestrator.deleteTenant(fthClientId);
+
+    expect(mockUpdateClientStatus).toHaveBeenCalledWith(fthClientId, { status: 'disabled' });
+    expect(mockFthClient.deleteClient).toHaveBeenCalledWith(fthClientId);
+    expect(mockUpdateClientStatus.mock.invocationCallOrder[0]!).toBeLessThan(
+      mockFthClient.deleteClient.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('re-disables and retries when a competing writer causes a conflict', async () => {
+    vi.useFakeTimers();
+    mockUpdateClientStatus.mockResolvedValue(undefined);
+    mockFthClient.deleteClient
+      .mockRejectedValueOnce(new FthConflictError('not disabled', { message: 'not disabled' }))
+      .mockResolvedValue(undefined);
+
+    const promise = fthOrchestrator.deleteTenant(fthClientId);
+    await vi.runAllTimersAsync();
+    await promise;
+
+    expect(mockFthClient.deleteClient).toHaveBeenCalledTimes(2);
+    expect(mockUpdateClientStatus).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it('does not retry a not-found, since an already-deleted tenant answers 204', async () => {
+    mockUpdateClientStatus.mockResolvedValue(undefined);
+    mockFthClient.deleteClient.mockRejectedValue(
+      new FthNotFoundError('not found', { message: 'not found' }),
+    );
+
+    await expect(fthOrchestrator.deleteTenant(fthClientId)).rejects.toThrow(
+      `FTH tenant ${fthClientId} did not resolve`,
+    );
+    expect(mockFthClient.deleteClient).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws once the retry budget is exhausted', async () => {
+    vi.useFakeTimers();
+    mockUpdateClientStatus.mockResolvedValue(undefined);
+    mockFthClient.deleteClient.mockRejectedValue(new FthApiError(500, 'boom', undefined));
+
+    const promise = fthOrchestrator.deleteTenant(fthClientId).catch((e: unknown) => e);
+    await vi.runAllTimersAsync();
+
+    expect(await promise).toMatchObject({
+      message: `Failed to delete FTH tenant ${fthClientId}`,
+    });
+    // 1 initial + 3 retries
+    expect(mockFthClient.deleteClient).toHaveBeenCalledTimes(4);
+    vi.useRealTimers();
   });
 });
 
