@@ -67,6 +67,9 @@ export default $config({
     ];
     const grafanaLokiAuth = new sst.Secret('GrafanaLokiAuth');
     const hubSpotServiceKey = new sst.Secret('HubSpotServiceKey');
+    // Keys the deletion-code HMAC, so a table dump alone cannot enumerate a
+    // six-digit space offline.
+    const deletionCodeHmacKey = new sst.Secret('DeletionCodeHmacKey');
     const sendGridApiKey = isStaging || isProduction ? new sst.Secret('SendGridApiKey') : undefined;
     const AWS_CACHING_DISABLED_POLICY = '4135ea2d-6df8-44a3-9df3-4b5a84be39ad';
 
@@ -119,6 +122,15 @@ export default $config({
         sk: 'string',
       },
       primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
+      ttl: 'ttl',
+    });
+
+    // Short-lived account-deletion codes. Its own table so TTL is not enabled
+    // on UserInfoTable (a stray `ttl` there would hard-delete account data),
+    // and so only the deletion routes are granted the credential.
+    const deletionChallengeTable = new sst.aws.Dynamo('DeletionChallengeTable', {
+      fields: { pk: 'string' },
+      primaryIndex: { hashKey: 'pk' },
       ttl: 'ttl',
     });
 
@@ -1000,6 +1012,20 @@ export default $config({
             $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/stripe-webhook-secret`,
           ],
         },
+      ],
+    });
+
+    // ── Account deletion ─────────────────────────────────────────────
+    // No subscriptionGuardMiddleware on these: it blocks writes for cancelled
+    // and inactive subscriptions, the population most likely to be leaving.
+    addRoute({
+      method: 'POST',
+      routePath: '/api/account/deletion',
+      handler: 'request-account-deletion',
+      extraLink: [
+        deletionChallengeTable,
+        deletionCodeHmacKey,
+        ...(sendGridApiKey ? [sendGridApiKey] : []),
       ],
     });
 
