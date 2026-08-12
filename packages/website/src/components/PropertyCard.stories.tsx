@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { ClockCounterClockwiseIcon, HourglassIcon, LockIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { PropertyCard } from './PropertyCard';
 
@@ -6,9 +7,11 @@ const meta: Meta<typeof PropertyCard> = {
   title: 'Components/PropertyCard',
   component: PropertyCard,
   args: {
-    label: 'Encryption',
-    value: 'Enabled',
-    tooltip: 'Always on. All data is encrypted at rest.',
+    icon: HourglassIcon,
+    label: 'Retention',
+    value: 'Compliance · 15 days',
+    enabled: true,
+    tooltip: 'Applied to every object in this bucket.',
   },
 };
 
@@ -19,6 +22,7 @@ export const Default: Story = {};
 
 export const Enabled: Story = {
   args: {
+    icon: ClockCounterClockwiseIcon,
     label: 'Versioning',
     value: 'Enabled',
     enabled: true,
@@ -28,6 +32,7 @@ export const Enabled: Story = {
 
 export const Disabled: Story = {
   args: {
+    icon: LockIcon,
     label: 'Object Lock',
     value: 'Disabled',
     enabled: false,
