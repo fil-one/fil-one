@@ -111,8 +111,8 @@ export default $config({
     });
 
     // RAG indexer's own store: per-object chunk manifests
-    // (BUCKET#{region}#{bucket} / MANIFEST#{objectKey}) and resumable indexer
-    // checkpoints (INDEXER_CHECKPOINT#{region}#{bucket} / CHECKPOINT). Kept out
+    // (BUCKET#{orgId}#{region}#{bucket} / MANIFEST#{objectKey}) and resumable indexer
+    // checkpoints (INDEXER_CHECKPOINT#{orgId}#{region}#{bucket} / CHECKPOINT). Kept out
     // of UserInfoTable so this high-churn, indexer-derived state doesn't mix with
     // user/org data. TTL attribute expires stale checkpoints (see
     // rag-indexer-manifest.ts).
