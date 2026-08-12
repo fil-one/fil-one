@@ -3,6 +3,7 @@ import {
   CreateIndexCommand,
   DeleteIndexCommand,
   DeleteVectorsCommand,
+  NotFoundException,
   PutVectorsCommand,
   type QueryOutputVector,
   QueryVectorsCommand,
@@ -357,6 +358,18 @@ describe('S3VectorsStore', () => {
         vectorBucketName: VECTOR_BUCKET,
         indexName: QUALIFIED_INDEX,
       });
+    });
+
+    it('is idempotent: a missing index (NotFoundException) does not throw', async () => {
+      s3vMock
+        .on(DeleteIndexCommand)
+        .rejects(new NotFoundException({ message: 'index not found', $metadata: {} }));
+      await expect(makeStore().dropIndex(ORG, REGION, INDEX)).resolves.toBeUndefined();
+    });
+
+    it('propagates non-not-found errors', async () => {
+      s3vMock.on(DeleteIndexCommand).rejects(new Error('boom'));
+      await expect(makeStore().dropIndex(ORG, REGION, INDEX)).rejects.toThrow('boom');
     });
   });
 });
