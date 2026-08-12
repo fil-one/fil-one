@@ -21,10 +21,12 @@ import { Route as bucketIntelligenceRoute } from './routes/_app/bucket-intellige
 import { Route as aiAgentToolkitRoute } from './routes/_app/ai-agent-toolkit.js';
 import { Route as verifyEmailRoute } from './routes/verify-email.js';
 import { RouteErrorPage, RouteNotFoundPage } from './components/RouteRecoveryPage.js';
+import { Route as accountDeletedRoute } from './routes/account-deleted.js';
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
   verifyEmailRoute,
+  accountDeletedRoute,
   authRoute.addChildren([signInRoute, signUpRoute, loginErrorRoute]),
   appRoute.addChildren([
     dashboardRoute,

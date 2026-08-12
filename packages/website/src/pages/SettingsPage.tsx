@@ -9,6 +9,7 @@ import { Heading } from '../components/Heading/Heading';
 import { PageLayout } from '../components/PageLayout.js';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
+import { DeleteAccountModal } from '../components/DeleteAccountModal';
 import { IconBox } from '../components/IconBox';
 import { FormField } from '../components/FormField';
 import { Input } from '../components/Input';
@@ -431,16 +432,33 @@ function SecuritySection({ me }: { me: MeResponse }) {
 // Danger zone
 // ---------------------------------------------------------------------------
 
-function DangerSection() {
+function DangerSection({ me }: { me: MeResponse }) {
+  const [modalOpen, setModalOpen] = useState(false);
+
   return (
     <Card>
-      <p className="text-sm font-medium text-zinc-900">Delete account</p>
-      <p className="text-xs text-zinc-500 mt-1">
-        To permanently delete your account and all data, email{' '}
-        <Link href="mailto:support@fil.one" variant="accent">
-          support@fil.one
-        </Link>
-      </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-zinc-900">Delete organization</p>
+          <p className="text-xs text-zinc-500 mt-1">
+            Permanently deletes {me.orgName} and everything in it. This cannot be undone.
+          </p>
+        </div>
+        <Button variant="destructive" onClick={() => setModalOpen(true)}>
+          Delete
+        </Button>
+      </div>
+
+      <DeleteAccountModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        orgName={me.orgName}
+        // A full document load, not a router navigation: the session is dead, so
+        // every cached query would refetch into a 410 on the way out.
+        onDeleted={() => {
+          window.location.href = '/account-deleted';
+        }}
+      />
     </Card>
   );
 }
@@ -474,7 +492,7 @@ export function SettingsPage() {
         <ProfileSection me={me} />
         <NotificationsSection />
         <SecuritySection me={me} />
-        <DangerSection />
+        <DangerSection me={me} />
       </div>
     </PageLayout>
   );

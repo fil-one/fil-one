@@ -35,6 +35,31 @@ export function logout(): void {
   window.location.href = `${API_URL}/logout`;
 }
 
+/** The bare identity probe. `/me/profile` and friends are ordinary endpoints. */
+function isSessionProbe(path: string): boolean {
+  return path === '/me' || path.startsWith('/me?');
+}
+
+/**
+ * Always throws, so query-client will not retry. Navigates only when the
+ * *session probe* is what reported it, so a 410 arriving mid-action surfaces as
+ * an error on that action rather than yanking the page out from under it; the
+ * next probe redirects.
+ *
+ * Not /login — the Auth0 SSO session would silently re-authenticate the deleted
+ * identity and loop.
+ */
+function throwAccountDeleted(status: number, fromSessionProbe: boolean): never {
+  if (fromSessionProbe && !isRedirecting) {
+    isRedirecting = true;
+    window.location.href = '/account-deleted';
+  }
+  throw Object.assign(new Error('This account has been deleted.'), {
+    status,
+    code: ApiErrorCode.ACCOUNT_DELETED,
+  });
+}
+
 /**
  * Wrapper around fetch for all Fil.one API calls.
  * - Always sends HttpOnly auth cookies via credentials: 'include'
@@ -57,6 +82,19 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
     credentials: 'include',
     headers,
   });
+
+  // Checked ahead of the status branches: the backend emits this code as 410,
+  // and 410 also carries an expired deletion code, so status alone cannot
+  // identify it. `clone()` leaves the body unread for the branches below.
+  if (!response.ok) {
+    const body = (await response
+      .clone()
+      .json()
+      .catch(() => ({}))) as { code?: string };
+    if (body.code === ApiErrorCode.ACCOUNT_DELETED) {
+      throwAccountDeleted(response.status, isSessionProbe(path));
+    }
+  }
 
   if (response.status === 401) {
     const body = (await response
@@ -113,12 +151,18 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
     const error = (await response.json().catch(() => ({}))) as {
       message?: string;
       code?: ApiErrorCode;
+      resendAvailableAt?: string;
     };
     // Carry the backend's error code through so callers can render specific copy
-    // (e.g. BUCKET_NOT_EMPTY) instead of only the generic message.
+    // (e.g. BUCKET_NOT_EMPTY), or honour a server-set cooldown (the deletion 429
+    // carries resendAvailableAt).
     throw Object.assign(
       new Error(error.message ?? `Request failed with status ${response.status}`),
-      { status: response.status, ...(error.code && { code: error.code }) },
+      {
+        status: response.status,
+        ...(error.code && { code: error.code }),
+        ...(error.resendAvailableAt && { resendAvailableAt: error.resendAvailableAt }),
+      },
     );
   }
 
@@ -132,10 +176,13 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
 // ── Me / Org API ────────────────────────────────────────────────────────
 
 import type {
+  ConfirmAccountDeletionResponse,
+  DeleteAccountRequest,
   MeResponse,
+  RegenerateRecoveryCodeResponse,
+  RequestAccountDeletionResponse,
   UpdateProfileRequest,
   UpdateProfileResponse,
-  RegenerateRecoveryCodeResponse,
 } from '@filone/shared';
 
 export function getMe(options?: { forceRefresh?: boolean; include?: 'mfa' }): Promise<MeResponse> {
@@ -149,6 +196,26 @@ export function getMe(options?: { forceRefresh?: boolean; include?: 'mfa' }): Pr
 export function updateProfile(data: UpdateProfileRequest): Promise<UpdateProfileResponse> {
   return apiRequest<UpdateProfileResponse>('/me/profile', {
     method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+// ── Account deletion ────────────────────────────────────────────────────
+
+/**
+ * Emails a verification code to the signed-in admin. Answers
+ * `deletion_in_progress` instead when the deletion is already confirmed.
+ */
+export function requestAccountDeletion(): Promise<RequestAccountDeletionResponse> {
+  return apiRequest<RequestAccountDeletionResponse>('/account/deletion', { method: 'POST' });
+}
+
+/** Terminal: there is no undo, no grace period and no cancel endpoint. */
+export function confirmAccountDeletion(
+  data: DeleteAccountRequest,
+): Promise<ConfirmAccountDeletionResponse> {
+  return apiRequest<ConfirmAccountDeletionResponse>('/account/deletion/confirm', {
+    method: 'POST',
     body: JSON.stringify(data),
   });
 }
