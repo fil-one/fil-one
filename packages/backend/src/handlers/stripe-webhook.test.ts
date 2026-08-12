@@ -370,6 +370,7 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
+        ConditionExpression: 'attribute_exists(pk)',
         UpdateExpression:
           'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now REMOVE gracePeriodEndsAt, canceledAt',
         ExpressionAttributeValues: {
@@ -573,6 +574,7 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
+        ConditionExpression: 'attribute_exists(pk)',
         UpdateExpression:
           'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now REMOVE gracePeriodEndsAt, canceledAt',
         ExpressionAttributeValues: {
@@ -655,6 +657,7 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
+        ConditionExpression: 'attribute_exists(pk)',
         UpdateExpression:
           'SET paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now',
         ExpressionAttributeValues: {
@@ -665,7 +668,6 @@ describe('stripe-webhook handler', () => {
           ':expYear': { N: String(MOCK_PM_EXP_YEAR) },
           ':now': { S: expect.any(String) },
         },
-        ConditionExpression: 'attribute_exists(pk)',
       });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -793,6 +795,7 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
+        ConditionExpression: 'attribute_exists(pk)',
         UpdateExpression:
           'SET subscriptionStatus = :status, canceledAt = :now, gracePeriodEndsAt = :grace, updatedAt = :now',
         ExpressionAttributeValues: {
@@ -1120,6 +1123,7 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
+        ConditionExpression: 'attribute_exists(pk)',
         UpdateExpression:
           'SET subscriptionStatus = :active, lastPaymentAt = :now, updatedAt = :now REMOVE gracePeriodEndsAt, lastPaymentFailedAt, canceledAt',
         ExpressionAttributeValues: {
@@ -1225,6 +1229,7 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
+        ConditionExpression: 'attribute_exists(pk)',
         UpdateExpression:
           'SET subscriptionStatus = :status, lastPaymentFailedAt = :failedAt, updatedAt = :now',
         ExpressionAttributeValues: {

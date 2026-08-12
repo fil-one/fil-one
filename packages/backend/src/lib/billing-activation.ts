@@ -1,14 +1,11 @@
-import { UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import type Stripe from 'stripe';
 import { Resource } from 'sst';
 import { SubscriptionStatus } from '@filone/shared';
-import { getDynamoClient } from './ddb-client.js';
+import { sendGuardedBillingUpdate } from './billing-guard.js';
 import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
 } from './region-helpers.js';
-
-const dynamo = getDynamoClient();
 
 export async function saveBillingRecord(
   userId: string,
@@ -29,8 +26,8 @@ export async function saveBillingRecord(
     paymentMethodExpYear = pm.card.exp_year;
   }
 
-  await dynamo.send(
-    new UpdateItemCommand({
+  await sendGuardedBillingUpdate(
+    {
       TableName: Resource.BillingTable.name,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -51,7 +48,8 @@ export async function saveBillingRecord(
         ':expYear': { N: String(paymentMethodExpYear) },
         ':now': { S: new Date().toISOString() },
       },
-    }),
+    },
+    { userId, caller: 'subscription activation' },
   );
 }
 
