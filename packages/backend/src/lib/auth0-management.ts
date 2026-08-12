@@ -65,6 +65,28 @@ export async function updateAuth0User(sub: string, data: Record<string, unknown>
 }
 
 /**
+ * Permanently delete the Auth0 user. Requires `delete:users`.
+ *
+ * A 404 is success: account teardown re-runs on every retry, so the second pass
+ * always finds the user already gone. Warned rather than silent, because a 404
+ * can equally mean a bad `sub`.
+ */
+export async function deleteAuth0User(sub: string): Promise<void> {
+  const domain = getMgmtDomain();
+  const token = await getManagementToken();
+  const resp = await fetch(`https://${domain}/api/v2/users/${encodeURIComponent(sub)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (resp.status === 404) {
+    console.warn('[auth0] delete user returned 404, treating as already deleted', { sub });
+    return;
+  }
+  await throwIfNotOk(resp, 'Auth0 delete user failed');
+}
+
+/**
  * Trigger Auth0 to send a verification email to the user.
  * Requires the `create:user_tickets` scope on the M2M app.
  */

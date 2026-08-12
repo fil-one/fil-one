@@ -1021,6 +1021,40 @@ export default $config({
     // step with packages/website/src/lib/account-deletion.ts.
     const accountDeletionEnabled = 'false';
 
+    // Catches payloads that exhaust Lambda's async retries. The sweeper
+    // re-drives independently off the DELETION record, so this is for triage
+    // rather than recovery.
+    const accountDeletionDlq = new sst.aws.Queue('AccountDeletionDlq');
+
+    const accountDeletionWorker = createFn('AccountDeletionWorker', {
+      handler: 'packages/backend/src/jobs/account-deletion-worker.handler',
+      link: [
+        billingTable,
+        userInfoTable,
+        ragIndexerTable,
+        ragVectorBucket,
+        stripeSecretKey,
+        ...managementApiTokens,
+        ...mgmtRuntimeResources,
+      ],
+      environment: { ...orchestratorEnv, AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+      // The purge pages whole partitions; a pass that runs out of time resumes
+      // against a smaller one next time.
+      timeout: '900 seconds',
+      memory: '1024 MB',
+      permissions: [
+        ...ragPermissions,
+        { actions: ['sqs:SendMessage'], resources: [accountDeletionDlq.arn] },
+      ],
+    });
+
+    new aws.lambda.FunctionEventInvokeConfig('AccountDeletionWorkerInvokeConfig', {
+      functionName: accountDeletionWorker.name,
+      destinationConfig: {
+        onFailure: { destination: accountDeletionDlq.arn },
+      },
+    });
+
     // No subscriptionGuardMiddleware on these: it blocks writes for cancelled
     // and inactive subscriptions, the population most likely to be leaving.
     addRoute({
@@ -1045,7 +1079,9 @@ export default $config({
       extraEnv: {
         AUTH0_MGMT_DOMAIN: auth0MgmtDomain,
         ACCOUNT_DELETION_ENABLED: accountDeletionEnabled,
+        ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
       },
+      permissions: [{ actions: ['lambda:InvokeFunction'], resources: [accountDeletionWorker.arn] }],
     });
 
     // ── Usage reporting (cron-based) ────────────────────────────────
