@@ -1,22 +1,31 @@
 import { useId, useState } from 'react';
-import { CaretDownIcon } from '@phosphor-icons/react/dist/ssr';
+import { CaretDownIcon, QuestionIcon } from '@phosphor-icons/react/dist/ssr';
 
 import type { Bucket, BucketAnalyticsResponse } from '@filone/shared';
 import { S3_REGION, formatBytes, getRegionLabel } from '@filone/shared';
 
-import { RegionFlag } from './RegionFlag';
+import { Tooltip } from './Tooltip';
 import { formatDate, formatDateTime } from '../lib/time.js';
 import { formatRetention } from '../lib/retention.js';
 
 /**
- * The bucket's properties, as a line rather than a wall.
+ * The bucket's properties: one uniform line, with configuration behind Details.
  *
- * This page exists to browse objects. Four bordered cards with 40px icon tiles
- * spent the top of it on configuration that's read once, and the fixed
- * three-column grid orphaned the fourth card whenever a retention policy
- * existed. What stays inline is what you actually scan (where it is, how big,
- * how old) plus the protection state, which changes what deleting or
- * overwriting an object on this page does. The rest expands on request.
+ * This page exists to browse objects, and these are short facts about a
+ * container. They were four bordered cards with 40px icon tiles, whose fixed
+ * three-column grid orphaned the fourth card whenever a bucket had a retention
+ * policy.
+ *
+ * Two rules the earlier attempts broke:
+ *
+ * - **The line stays uniform.** Every fact is the same size and colour. A
+ *   green-dotted chip among plain text read as a different kind of thing and
+ *   drew the eye to the least urgent fact on the page.
+ * - **Details reveals what the line doesn't say.** Configuration (versioning,
+ *   object lock, retention, encryption) lives only there, so opening it is
+ *   worth the click. The trigger sits inline at the end of the line, not
+ *   right-aligned, where it would stack under the page's primary action and
+ *   compete with it.
  */
 export function BucketProperties({
   bucket,
@@ -36,51 +45,33 @@ export function BucketProperties({
   );
 
   return (
-    <div className="mt-2 mb-6">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm sm:gap-x-3">
-        <span className="flex items-center gap-2 text-zinc-700">
-          <RegionFlag region={region} />
-          {getRegionLabel(region)}
-        </span>
+    <div className="mt-1.5 mb-6">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-zinc-500">
+        <span title={region}>{getRegionLabel(region)}</span>
 
         <Separator />
-        <span className="text-zinc-500 tabular-nums">
-          {analytics ? (
-            `${formatBytes(analytics.bytesUsed)} used`
-          ) : (
-            // Held rather than shown as "0 B used", which is a different claim.
-            <span className="inline-block h-3.5 w-20 animate-pulse rounded bg-zinc-100" />
-          )}
-        </span>
+        {analytics ? (
+          <span className="tabular-nums">{formatBytes(analytics.bytesUsed)} used</span>
+        ) : (
+          // Held rather than shown as "0 B used", which is a different claim.
+          <span className="inline-block h-3.5 w-20 animate-pulse rounded bg-zinc-100" />
+        )}
 
         <Separator />
-        <span className="text-zinc-500">Created {formatDate(bucket.createdAt)}</span>
+        {/* The date reads here; the exact timestamp is on the title and in the
+            panel, since its timezone wrapped a line to say something nobody came
+            to this page for. */}
+        <span title={formatDateTime(bucket.createdAt)}>Created {formatDate(bucket.createdAt)}</span>
 
-        {/* Protection earns its place on the line because it changes what happens
-            when you delete or overwrite an object here. Absent when off: "no
-            object lock" is the unremarkable case, and a row of "Disabled" chips
-            would be noise on every ordinary bucket. */}
-        {bucket.versioning && (
-          <>
-            <Separator />
-            <Chip>Versioning</Chip>
-          </>
-        )}
-        {bucket.objectLockEnabled && (
-          <>
-            <Separator />
-            <Chip>Object Lock{retention ? ` · ${retention}` : ''}</Chip>
-          </>
-        )}
-
+        <Separator />
         <button
           type="button"
           onClick={() => setExpanded((open) => !open)}
           aria-expanded={expanded}
           aria-controls={detailsId}
-          className="flex items-center gap-1 rounded-sm text-xs text-zinc-500 transition-colors hover:text-zinc-900 focus-visible:brand-outline sm:ml-auto"
+          className="flex items-center gap-1 rounded-sm transition-colors hover:text-zinc-900 focus-visible:brand-outline"
         >
-          {expanded ? 'Hide details' : 'Details'}
+          Details
           <CaretDownIcon
             size={11}
             weight="bold"
@@ -93,41 +84,36 @@ export function BucketProperties({
       {expanded && (
         <dl
           id={detailsId}
-          // A fixed grid rather than flex-wrap: the property count is constant
-          // (retention reads "None" when unset), so three columns divide evenly
-          // into two rows and nothing is left stretched across a line of its own.
-          className="mt-3 grid gap-x-8 gap-y-5 rounded-lg border border-zinc-200 bg-white px-5 py-4 sm:grid-cols-2 lg:grid-cols-3"
+          // Dense label/value rows, not a block per fact. An earlier pass set a
+          // sentence of help text under every value, which made six short facts
+          // 350px tall and read like a manual.
+          className="mt-2.5 grid gap-x-10 gap-y-0.5 rounded-lg border border-zinc-200 bg-white px-4 py-2.5 sm:grid-cols-2 lg:grid-cols-3"
         >
-          <Property label="Versioning" hint="Keeps multiple versions of each object">
+          <Row label="Versioning" hint="Keeps multiple versions of each object">
             <State on={bucket.versioning ?? false} />
-          </Property>
+          </Row>
 
-          <Property
+          <Row
             label="Object Lock"
             hint="Prevents deletion or modification during a retention period"
           >
             <State on={bucket.objectLockEnabled ?? false} />
-          </Property>
+          </Row>
 
-          <Property
-            label="Default retention"
+          <Row
+            label="Retention"
             hint="Applied to objects uploaded from now on; existing objects keep the policy they were uploaded under"
           >
-            {retention ?? <span className="text-zinc-500">None</span>}
-          </Property>
+            {retention ?? <span className="text-zinc-400">None</span>}
+          </Row>
 
-          <Property label="Encryption" hint="Always on. All data is encrypted at rest.">
+          <Row label="Encryption">
             <State on />
-          </Property>
+          </Row>
 
-          {/* The full timestamp lives here rather than on the line above, where
-              its timezone wrapped to a second row to say something nobody came
-              to this page for. */}
-          <Property label="Created">{formatDateTime(bucket.createdAt)}</Property>
+          <Row label="Created">{formatDateTime(bucket.createdAt)}</Row>
 
-          <Property label="Region">
-            {getRegionLabel(region)} <span className="text-zinc-500">({region})</span>
-          </Property>
+          <Row label="Region">{region}</Row>
         </dl>
       )}
     </div>
@@ -135,7 +121,7 @@ export function BucketProperties({
 }
 
 /**
- * Only where items share a line. Below `sm` the facts wrap one per line, and a
+ * Only where facts share a line. Below `sm` they wrap one per line, and a
  * separator then dangles at the end of a line separating nothing.
  */
 function Separator() {
@@ -146,22 +132,14 @@ function Separator() {
   );
 }
 
-/** A protection feature that's on. Absent when off, so it never reads as a status field. */
-function Chip({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="flex items-center gap-1.5 text-xs text-zinc-600">
-      <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-green-500" />
-      {children}
-    </span>
-  );
-}
-
 /**
- * The hint sits under the value rather than behind a `?` tooltip: in a panel the
- * reader opened deliberately there's room to just say it, and hiding an
- * explanation behind a hover inside a disclosure is one reveal too many.
+ * One row: label, then value beside it on a fixed label column.
+ *
+ * Not `justify-between`: that works in Linear's narrow sidebar, but in a wide
+ * three-column grid it throws the value hundreds of pixels from its label and
+ * the pair stops reading as a pair.
  */
-function Property({
+function Row({
   label,
   hint,
   children,
@@ -171,10 +149,19 @@ function Property({
   children: React.ReactNode;
 }) {
   return (
-    <div>
-      <dt className="text-xs text-zinc-500">{label}</dt>
-      <dd className="mt-1 text-sm text-zinc-900">{children}</dd>
-      {hint && <p className="mt-1 text-xs leading-relaxed text-zinc-500">{hint}</p>}
+    <div className="flex items-baseline gap-3 py-1">
+      <dt className="flex w-24 shrink-0 items-center gap-1 text-xs text-zinc-500">
+        {label}
+        {/* Only on the terms that aren't self-evident beside their value, and as a
+            question mark rather than a dotted underline: underlined labels read
+            like broken links. */}
+        {hint && (
+          <Tooltip content={hint} side="bottom" focusable label={`About ${label}`}>
+            <QuestionIcon size={11} className="text-zinc-400 hover:text-zinc-600" aria-hidden />
+          </Tooltip>
+        )}
+      </dt>
+      <dd className="min-w-0 truncate text-xs text-zinc-900">{children}</dd>
     </div>
   );
 }
