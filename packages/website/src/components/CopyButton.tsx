@@ -16,6 +16,9 @@ export function CopyButton({ value, size = 'sm', ...rest }: CopyButtonProps) {
     <IconButton
       {...rest}
       icon={copied ? CheckIcon : CopySimpleIcon}
+      // Green confirms the copy succeeded; hover is pinned too so the tick
+      // doesn't fall back to zinc mid-hover during its brief success window.
+      className={copied ? 'text-green-600 hover:text-green-600' : undefined}
       size={size}
       aria-label={copied ? 'Copied to clipboard' : 'Copy to clipboard'}
       onClick={() => void copy(value)}
