@@ -24,6 +24,7 @@ vi.mock('./stripe-client.js', () => ({
 vi.mock('sst', () => ({
   Resource: {
     BillingTable: { name: 'BillingTable' },
+    UserInfoTable: { name: 'UserInfoTable' },
     StripeSecretKey: { value: 'sk_test_fake' },
     StripePriceId: { value: 'price_test_fake' },
   },
@@ -32,6 +33,7 @@ vi.mock('sst', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 import { createBillingTrial } from './create-billing-trial.js';
+import { OrgDeletingError } from './org-profile.js';
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -53,6 +55,23 @@ describe('createBillingTrial', () => {
         data: [{ current_period_start: 1700000000, current_period_end: 1701209600 }],
       },
     });
+  });
+
+  // The DynamoDB write below is deliberately unconditional, so it cannot be
+  // guarded — and a Stripe customer minted here is invisible to teardown's
+  // snapshot, so nothing would ever cancel or delete it.
+  it('mints nothing for an org that is being deleted', async () => {
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } } })
+      .resolves({ Item: { pk: { S: 'ORG#org-1' }, deleting: { BOOL: true } } });
+
+    await expect(
+      createBillingTrial({ userId: 'user-1', orgId: 'org-1', email: 'test@example.com' }),
+    ).rejects.toBeInstanceOf(OrgDeletingError);
+
+    expect(mockCustomersCreate).not.toHaveBeenCalled();
+    expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
   it('creates Stripe customer, subscription, and DynamoDB trial record', async () => {

@@ -15,7 +15,8 @@ import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.js';
 import { saveBillingRecord, unlockAllProvisionedRegions } from '../lib/billing-activation.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
+import { isOrgDeleting } from '../lib/org-profile.js';
+import { accountDeletedResponse, ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -48,6 +49,10 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .build();
   }
   const { useSavedPaymentMethod, promotionCode } = parsed.data;
+
+  // Before any Stripe call: a subscription created here is billable and is not
+  // in the teardown snapshot, so nothing would cancel it.
+  if (await isOrgDeleting(orgId, { consistent: true })) return accountDeletedResponse();
 
   // 2. Get customer record from billing table
   const record = await getCustomerBillingRecord(userId);
