@@ -67,6 +67,7 @@ type AccessKeysTabProps = {
   onCreateOpen?: () => void;
   /** Absent for a role that cannot revoke them — the table drops the column. */
   onDelete?: (id: string) => Promise<void>;
+  onBulkDelete?: (ids: string[]) => Promise<void>;
   /** Whether a row's Revoke belongs to this caller. */
   canRevoke?: (key: AccessKey) => boolean;
   /** Absent for a role that cannot mint keys — the table drops the action. */
@@ -80,6 +81,7 @@ function AccessKeysTab({
   keys,
   onCreateOpen,
   onDelete,
+  onBulkDelete,
   canRevoke,
   onRotate,
   canRotate,
@@ -92,7 +94,9 @@ function AccessKeysTab({
         showRegion
         showBuckets
         showPermissions
+        showCreated
         onDelete={onDelete}
+        onBulkDelete={onBulkDelete}
         canDelete={canRevoke}
         onRotate={onRotate}
         canRotate={canRotate}
@@ -124,6 +128,7 @@ function AccessKeysPanel({
   errorMessage,
   onCreateOpen,
   onDelete,
+  onBulkDelete,
   canRevoke,
   onRotate,
   canRotate,
@@ -167,6 +172,7 @@ function AccessKeysPanel({
       keys={keys}
       onCreateOpen={onCreateOpen}
       onDelete={onDelete}
+      onBulkDelete={onBulkDelete}
       canRevoke={canRevoke}
       onRotate={onRotate}
       canRotate={canRotate}
@@ -269,7 +275,7 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 
   return (
     <div className="mt-6 flex flex-col gap-10">
-      {/* Connection: the canonical facts you need to connect. Region leads — it drives the rest. */}
+      {/* Connection: the canonical facts you need to connect. Region leads since it drives the rest. */}
       <section>
         <Heading tag="h3" size="sm" className="mb-3">
           Connection
@@ -446,6 +452,23 @@ function CreateKeyAction({ onCreate }: { onCreate: () => void }) {
   );
 }
 
+/** Copy for the delete-confirmation dialog, adapted to how many keys are selected. */
+function deleteDialogCopy(count: number) {
+  if (count > 1) {
+    return {
+      title: `Delete ${count} access keys`,
+      description: `These ${count} access keys will be permanently revoked. Any applications using them will lose access immediately.`,
+      confirmLabel: `Delete ${count} keys`,
+    };
+  }
+  return {
+    title: 'Delete access key',
+    description:
+      'This access key will be permanently revoked. Any applications using it will lose access immediately.',
+    confirmLabel: 'Delete key',
+  };
+}
+
 export function ApiKeysPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -475,31 +498,37 @@ export function ApiKeysPage() {
   const creatorFor = useKeyCreators(mayList);
 
   const [tabIndex, setTabIndex] = useState(0);
-  const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
+  const [confirmDeleteIds, setConfirmDeleteIds] = useState<string[] | null>(null);
 
-  const deleteKeyMutation = useMutation({
-    mutationFn: (id: string) => apiRequest(`/access-keys/${id}`, { method: 'DELETE' }),
-    onSuccess: (_, id) => {
+  const deleteKeysMutation = useMutation({
+    mutationFn: (ids: string[]) =>
+      Promise.all(ids.map((id) => apiRequest(`/access-keys/${id}`, { method: 'DELETE' }))),
+    onSuccess: (_, ids) => {
+      const removed = new Set(ids);
       queryClient.setQueryData<ListAccessKeysResponse>(queryKeys.accessKeys, (old) =>
-        old ? { keys: old.keys.filter((k) => k.id !== id) } : old,
+        old ? { keys: old.keys.filter((k) => !removed.has(k.id)) } : old,
       );
       void queryClient.invalidateQueries({ queryKey: queryKeys.accessKeys });
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
-      toast.success('Access key deleted');
+      toast.success(ids.length === 1 ? 'Access key deleted' : `${ids.length} access keys deleted`);
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete key');
+      toast.error(err instanceof Error ? err.message : 'Failed to delete keys');
     },
   });
 
   async function handleDelete(id: string) {
-    setConfirmDeleteKey(id);
+    setConfirmDeleteIds([id]);
   }
 
-  async function confirmDeleteKeyAction() {
-    if (!confirmDeleteKey) return;
+  async function handleBulkDelete(ids: string[]) {
+    setConfirmDeleteIds(ids);
+  }
+
+  async function confirmDeleteAction() {
+    if (!confirmDeleteIds) return;
     try {
-      await deleteKeyMutation.mutateAsync(confirmDeleteKey);
+      await deleteKeysMutation.mutateAsync(confirmDeleteIds);
     } catch {
       // error handled by mutation.onError
     }
@@ -559,6 +588,7 @@ export function ApiKeysPage() {
               errorMessage={error?.message}
               onCreateOpen={mayCreate ? openCreateKey : undefined}
               onDelete={handleDelete}
+              onBulkDelete={handleBulkDelete}
               canRevoke={mayRevoke}
               onRotate={rotation.request}
               canRotate={rotation.canRotate}
@@ -572,12 +602,10 @@ export function ApiKeysPage() {
       </Tabs>
 
       <ConfirmDialog
-        open={confirmDeleteKey !== null}
-        onClose={() => setConfirmDeleteKey(null)}
-        onConfirm={confirmDeleteKeyAction}
-        title="Delete access key"
-        description="This access key will be permanently revoked. Any applications using it will lose access immediately."
-        confirmLabel="Delete key"
+        open={confirmDeleteIds !== null}
+        onClose={() => setConfirmDeleteIds(null)}
+        onConfirm={confirmDeleteAction}
+        {...deleteDialogCopy(confirmDeleteIds?.length ?? 0)}
       />
 
       <ConfirmDialog
