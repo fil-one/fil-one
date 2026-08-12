@@ -33,6 +33,7 @@ process.env.FILONE_STAGE = 'test';
 process.env.FTH_MANAGEMENT_API_URL = 'https://api.fortilyx.test';
 
 import { ensureTenantReady } from './fth-tenant-setup.js';
+import { OrgDeletingError } from '../org-profile.js';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 const fthClientId = '42';
@@ -83,6 +84,29 @@ describe('ensureTenantReady', () => {
 
     expect(result).toBe(fthClientId);
     expect(mockFthClient.createClient).not.toHaveBeenCalled();
+  });
+
+  // Before any upstream call: refusing only the final pointer write would
+  // leave the client, its console key and its SSM secret orphaned.
+  it('refuses a deleting org without provisioning anything', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: { ...profileItem({}), deleting: { BOOL: true } } });
+
+    await expect(ensureTenantReady(fthClient, orgId)).rejects.toBeInstanceOf(OrgDeletingError);
+    expect(mockFthClient.createClient).not.toHaveBeenCalled();
+    expect(ssmMock.commandCalls(PutParameterCommand)).toHaveLength(0);
+  });
+
+  it('conditions the pointer write so it cannot resurrect a purged profile', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: profileItem({}) });
+    ddbMock.on(UpdateItemCommand).resolves({});
+    ssmMock.on(PutParameterCommand).resolves({});
+    stubSetupApiCalls();
+
+    await ensureTenantReady(fthClient, orgId);
+
+    expect(ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input.ConditionExpression).toBe(
+      'attribute_exists(pk) AND attribute_not_exists(deleting)',
+    );
   });
 
   it('creates client, storage user, access key, SSM cred and PROFILE row on first run', async () => {

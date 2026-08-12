@@ -33,6 +33,7 @@ const ssmMock = mockClient(SSMClient);
 const client = 'mock-management-client' as unknown as Client;
 
 import { ensureTenantReady, CONSOLE_KEY_NAME } from './tenant-setup.js';
+import { OrgDeletingError } from '../org-profile.js';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 const deps = { client, id: 'forge', stage: 'test', region: 'us-east-1' };
@@ -89,6 +90,27 @@ describe('ensureTenantReady', () => {
     expect(mockPutTenant).not.toHaveBeenCalled();
     // The read must be strongly consistent so a just-finished setup is seen.
     expect(ddbMock.commandCalls(GetItemCommand)[0].args[0].input.ConsistentRead).toBe(true);
+  });
+
+  // Before any upstream call: refusing only the final pointer write would
+  // leave the tenant, its console key and its SSM secret orphaned.
+  it('refuses a deleting org without provisioning anything', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: { ...profileItem({}), deleting: { BOOL: true } } });
+
+    await expect(ensureTenantReady(deps, orgId)).rejects.toBeInstanceOf(OrgDeletingError);
+    expect(mockPutTenant).not.toHaveBeenCalled();
+    expect(mockCreateAccessKey).not.toHaveBeenCalled();
+    expect(ssmMock.commandCalls(PutParameterCommand)).toHaveLength(0);
+  });
+
+  it('conditions the pointer write so it cannot resurrect a purged profile', async () => {
+    stubHappyPath();
+
+    await ensureTenantReady(deps, orgId);
+
+    expect(ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input.ConditionExpression).toBe(
+      'attribute_exists(pk) AND attribute_not_exists(deleting)',
+    );
   });
 
   it('provisions tenant, console key, SSM cred and PROFILE row on first run', async () => {

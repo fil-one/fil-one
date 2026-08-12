@@ -18,6 +18,7 @@ vi.mock('./auth.js', () => ({
   authMiddleware: vi.fn(() => ({ before: mockCookieBefore, after: mockCookieAfter })),
 }));
 
+import { ApiErrorCode } from '@filone/shared';
 import { ragQueryAuthMiddleware } from './rag-query-auth.js';
 import { hashRagKeyToken, RagApiKeyKeys } from '../lib/rag-api-keys.js';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
@@ -58,7 +59,17 @@ function stubKeyRecords(orgRecordOverrides: Record<string, unknown> = {}) {
       Key: { pk: { S: RagApiKeyKeys.orgPk(ORG_ID) }, sk: { S: RagApiKeyKeys.orgSk(KEY_ID) } },
     })
     .resolves({ Item: marshall({ ...ORG_RECORD, ...orgRecordOverrides }) });
+  // The deletion fence, read after the key resolves.
+  ddbMock
+    .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'PROFILE' } } })
+    .resolves({ Item: { pk: { S: `ORG#${ORG_ID}` } } });
   ddbMock.on(UpdateItemCommand).resolves({});
+}
+
+function stubOrgDeleting() {
+  ddbMock
+    .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'PROFILE' } } })
+    .resolves({ Item: { pk: { S: `ORG#${ORG_ID}` }, deleting: { BOOL: true } } });
 }
 
 function bearerEvent({
@@ -180,6 +191,20 @@ describe('ragQueryAuthMiddleware', () => {
   });
 
   describe('bearer success', () => {
+    // A RAG key has no session behind it, so the SUB# tombstone that kills
+    // cookie auth never applies — this is the only fence it meets.
+    it('410s a valid key whose org is being deleted', async () => {
+      stubKeyRecords();
+      stubOrgDeleting();
+
+      const { response } = await runBefore(bearerEvent({ authorization: `Bearer ${TOKEN}` }));
+
+      expect(response?.statusCode).toBe(410);
+      expect(JSON.parse((response?.body as string) ?? '{}').code).toBe(
+        ApiErrorCode.ACCOUNT_DELETED,
+      );
+    });
+
     it('attaches synthetic userInfo built from the key record (scope=all)', async () => {
       stubKeyRecords();
       const event = bearerEvent({ authorization: `Bearer ${TOKEN}` });

@@ -9,6 +9,7 @@ import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, PutParameterCommand } from '@aws-sdk/client-ssm';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../ddb-client.js';
+import { OrgDeletingError } from '../org-profile.js';
 import type { FthManagementClient } from './fth-management-client.js';
 
 const FTH_FULL_PERMISSIONS = [
@@ -46,6 +47,9 @@ export async function ensureTenantReady(
   try {
     return await processTenantSetup(client, orgId);
   } catch (err) {
+    // Not a setup failure: retrying will never succeed, so it must not become
+    // a "try again in a moment".
+    if (err instanceof OrgDeletingError) throw err;
     console.error('[fth-tenant-setup] setup failed', {
       orgId,
       error: format(err),
@@ -76,6 +80,11 @@ async function processTenantSetup(client: FthManagementClient, orgId: string): P
   if (existingTenantId) {
     return existingTenantId;
   }
+
+  // Before any upstream call: the tenant, its console key and its SSM secret
+  // are all created below, and refusing only the pointer write at the end
+  // would leave every one of them orphaned.
+  if (existing.Item?.deleting?.BOOL === true) throw new OrgDeletingError(orgId);
 
   const fthClient = await client.createClient({
     externalId: orgId,
@@ -125,6 +134,10 @@ async function processTenantSetup(client: FthManagementClient, orgId: string): P
       TableName: Resource.UserInfoTable.name,
       Key: key,
       UpdateExpression: 'SET fthTenantId = :tenantId, updatedAt = :now',
+      // attribute_exists(pk) is the anti-resurrection half: UpdateItem creates the
+      // item when absent, so after the purge an unconditional write would put the
+      // ORG profile row back as a stub.
+      ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
       ExpressionAttributeValues: {
         ':tenantId': { S: tenantId },
         ':now': { S: new Date().toISOString() },

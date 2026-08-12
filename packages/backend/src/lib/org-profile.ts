@@ -41,11 +41,15 @@ export async function getOrgProfile(
 }
 
 /**
- * Whether the org is being deleted. Absent means "not deleting", so a stale
- * read fails open — callers must fetch the profile with `{ consistent: true }`
- * or the fence can be missed.
+ * Whether the org is being deleted. The fence fails open when absent, so pass
+ * `{ consistent: true }` anywhere the answer gates a write — a stale read can
+ * miss a fence that has already landed.
  */
-export function isOrgDeleting(orgProfile: OrgProfileItem | undefined): boolean {
+export async function isOrgDeleting(
+  orgId: string,
+  options?: { consistent?: boolean },
+): Promise<boolean> {
+  const orgProfile = await getOrgProfile(orgId, options);
   return orgProfile?.deleting?.BOOL === true;
 }
 
