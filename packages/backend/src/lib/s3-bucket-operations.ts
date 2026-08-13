@@ -2,6 +2,7 @@
 
 import {
   CreateBucketCommand,
+  DeleteBucketCommand,
   GetBucketVersioningCommand,
   GetObjectCommand,
   GetObjectLockConfigurationCommand,
@@ -208,4 +209,23 @@ export async function getObjectBytes(
     bytes,
     ...(result.ContentType && { contentType: result.ContentType }),
   };
+}
+
+export async function deleteBucket(s3: S3Client, bucketName: string): Promise<void> {
+  try {
+    await s3.send(
+      new DeleteBucketCommand({
+        Bucket: bucketName,
+      }),
+    );
+  } catch (err) {
+    const name = (err as { name?: string }).name;
+
+    // Already deleted — treat as success
+    if (name === 'NoSuchBucket') {
+      return;
+    }
+
+    throw err;
+  }
 }

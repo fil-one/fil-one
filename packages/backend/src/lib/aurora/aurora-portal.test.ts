@@ -14,10 +14,12 @@ const mockGetAccessKeyById = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockCreateClient = vi.fn((_config: Record<string, unknown>) => 'mock-portal-client');
 
 const mockDeleteAccessKey = vi.fn((_options: Record<string, unknown>) => ({}));
+const mockDeleteBucket = vi.fn((_options: Record<string, unknown>) => ({}));
 
 vi.mock('@filone/aurora-portal-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
   createBucket: (options: Record<string, unknown>) => mockPostBucket(options),
+  deleteBucket: (options: Record<string, unknown>) => mockDeleteBucket(options),
   createS3AccessKey: (options: Record<string, unknown>) => mockPostAccessKeys(options),
   listS3AccessKeys: (options: Record<string, unknown>) => mockGetAccessKeys(options),
   getS3AccessKey: (options: Record<string, unknown>) => mockGetAccessKeyById(options),
@@ -38,6 +40,7 @@ import {
   createAuroraAccessKey,
   createAuroraBucket,
   createPortalClient,
+  deleteAuroraBucket,
   findAuroraAccessKeyByName,
   getAuroraPortalApiKey,
   _resetSsmCacheForTesting,
@@ -225,6 +228,86 @@ describe('createAuroraBucket', () => {
     expect(body).not.toHaveProperty('versioning');
     expect(body).not.toHaveProperty('lock');
     expect(body).not.toHaveProperty('defaultRetention');
+  });
+});
+
+describe('deleteAuroraBucket', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ssmMock.reset();
+    _resetSsmCacheForTesting();
+  });
+
+  it('creates the portal client with the tenant API key header', async () => {
+    setupSsmMock('my-secret-key');
+    mockDeleteBucket.mockResolvedValue({ error: undefined });
+
+    await deleteAuroraBucket({ tenantId: 'tenant-1', bucketName: 'my-bucket' });
+
+    expect(mockCreateClient).toHaveBeenCalledWith({
+      baseUrl: 'https://api.portal.test.example.com/api',
+      headers: { 'X-Api-Key': 'my-secret-key' },
+    });
+  });
+
+  it('calls the portal deleteBucket with the tenantId and bucketName path', async () => {
+    setupSsmMock();
+    mockDeleteBucket.mockResolvedValue({ error: undefined });
+
+    await deleteAuroraBucket({ tenantId: 'tenant-1', bucketName: 'my-bucket' });
+
+    expect(mockDeleteBucket).toHaveBeenCalledWith({
+      client: 'mock-portal-client',
+      path: { tenantId: 'tenant-1', bucketName: 'my-bucket' },
+      throwOnError: false,
+    });
+  });
+
+  it('resolves on a successful (204) response', async () => {
+    setupSsmMock();
+    mockDeleteBucket.mockResolvedValue({ error: undefined, response: { status: 204 } });
+
+    await expect(
+      deleteAuroraBucket({ tenantId: 'tenant-1', bucketName: 'my-bucket' }),
+    ).resolves.toBeUndefined();
+  });
+
+  // Delete is idempotent: a 404 means the bucket is already gone, which is success.
+  it('treats a 404 response as success (already deleted)', async () => {
+    setupSsmMock();
+    mockDeleteBucket.mockResolvedValue({
+      error: { message: 'Not found' },
+      response: { status: 404 },
+    });
+
+    await expect(
+      deleteAuroraBucket({ tenantId: 'tenant-1', bucketName: 'my-bucket' }),
+    ).resolves.toBeUndefined();
+  });
+
+  // A non-empty bucket (409) is a real failure and must surface, not be swallowed.
+  it('throws on a 409 conflict (bucket still has objects/versions)', async () => {
+    setupSsmMock();
+    mockDeleteBucket.mockResolvedValue({
+      error: { message: "Can't delete a bucket with objects/versions present" },
+      response: { status: 409 },
+    });
+
+    await expect(
+      deleteAuroraBucket({ tenantId: 'tenant-1', bucketName: 'my-bucket' }),
+    ).rejects.toThrow('Failed to delete Aurora bucket "my-bucket" for tenant tenant-1');
+  });
+
+  it('throws on a non-404 API error', async () => {
+    setupSsmMock();
+    mockDeleteBucket.mockResolvedValue({
+      error: { message: 'Internal server error' },
+      response: { status: 500 },
+    });
+
+    await expect(
+      deleteAuroraBucket({ tenantId: 'tenant-1', bucketName: 'my-bucket' }),
+    ).rejects.toThrow('Failed to delete Aurora bucket "my-bucket" for tenant tenant-1');
   });
 });
 

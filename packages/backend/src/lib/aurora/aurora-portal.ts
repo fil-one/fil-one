@@ -8,6 +8,7 @@ import {
   deleteS3AccessKey,
   getS3AccessKey,
   listS3AccessKeys,
+  deleteBucket,
 } from '@filone/aurora-portal-client';
 import type {
   AccessKeyPermission,
@@ -352,4 +353,30 @@ export async function getAuroraPortalApiKey(stage: string, tenantId: string): Pr
 
   ssmCache.set(cacheKey, apiKey);
   return apiKey;
+}
+
+export async function deleteAuroraBucket({
+  tenantId,
+  bucketName,
+}: {
+  tenantId: string;
+  bucketName: string;
+}) {
+  const client = await createPortalClient(tenantId);
+
+  const { error, response } = await deleteBucket({
+    client,
+    path: { tenantId, bucketName },
+    throwOnError: false,
+  });
+
+  if (error) {
+    if (response?.status === 404) {
+      // Already deleted — treat as success
+      return;
+    }
+    throw new Error(`Failed to delete Aurora bucket "${bucketName}" for tenant ${tenantId}`, {
+      cause: error,
+    });
+  }
 }

@@ -68,6 +68,29 @@ describe('delete-bucket baseHandler', () => {
     expect(mockOrchestratorDeleteBucket).not.toHaveBeenCalled();
   });
 
+  it('returns 204 with an empty body and calls orchestrator.deleteBucket on success', async () => {
+    mockOrchestratorDeleteBucket.mockResolvedValue(undefined);
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    event.pathParameters = { name: 'my-bucket' };
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(204);
+    expect(result.body).toBe('');
+    expect(mockOrchestratorDeleteBucket).toHaveBeenCalledWith('aurora-t-1', 'my-bucket');
+  });
+
+  it('passes the tenantId from isTenantReady through to deleteBucket', async () => {
+    mockIsTenantReady.mockReturnValue('tenant-xyz');
+    mockOrchestratorDeleteBucket.mockResolvedValue(undefined);
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    event.pathParameters = { name: 'some-bucket' };
+    await baseHandler(event);
+
+    expect(mockOrchestratorDeleteBucket).toHaveBeenCalledWith('tenant-xyz', 'some-bucket');
+  });
+
   it('returns 501 when the orchestrator throws NotImplementedError', async () => {
     mockOrchestratorDeleteBucket.mockRejectedValue(
       new NotImplementedError('Aurora bucket deletion is not yet supported. See FIL-204.'),
@@ -79,5 +102,16 @@ describe('delete-bucket baseHandler', () => {
 
     expect(result.statusCode).toBe(501);
     expect(mockOrchestratorDeleteBucket).toHaveBeenCalledWith('aurora-t-1', 'my-bucket');
+  });
+
+  // Only NotImplementedError is translated to a response here; every other
+  // failure propagates to errorHandlerMiddleware (which renders the 5xx).
+  it('rethrows non-NotImplementedError failures from the orchestrator', async () => {
+    mockOrchestratorDeleteBucket.mockRejectedValue(new Error('S3 gateway unavailable'));
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    event.pathParameters = { name: 'my-bucket' };
+
+    await expect(baseHandler(event)).rejects.toThrow('S3 gateway unavailable');
   });
 });
