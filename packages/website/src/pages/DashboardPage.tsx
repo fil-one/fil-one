@@ -38,7 +38,7 @@ function planDisplayName(planId: PlanId): string {
     case PlanId.FreeTrial:
       return 'Free trial';
     case PlanId.PayAsYouGo:
-      return 'Pay As You Go';
+      return 'Pay as you go';
     case PlanId.None:
       return 'No plan';
     default:
