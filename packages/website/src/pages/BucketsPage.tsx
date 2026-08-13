@@ -9,7 +9,6 @@ import { Badge } from '../components/Badge';
 import { Button } from '../components/Button';
 import { IconButton } from '../components/IconButton';
 import { Spinner } from '../components/Spinner';
-import { Tooltip } from '../components/Tooltip';
 import { Table } from '../components/Table/Table';
 import { useToast } from '../components/Toast';
 import { EmptyStateCard } from '../components/EmptyStateCard';
@@ -164,17 +163,11 @@ export function BucketsPage() {
                   </div>
                 </Table.Cell>
                 <Table.Cell className="text-right">
-                  <Tooltip
-                    content="Deleting buckets is not available yet"
-                    side="left"
-                    className="align-middle"
-                  >
-                    <IconButton
-                      icon={TrashIcon}
-                      aria-label={`Delete bucket ${bucket.bucketName}`}
-                      onClick={() => deleteBucketMutation.mutate(bucket.bucketName)}
-                    />
-                  </Tooltip>
+                  <IconButton
+                    icon={TrashIcon}
+                    aria-label={`Delete bucket ${bucket.bucketName}`}
+                    onClick={() => deleteBucketMutation.mutate(bucket.bucketName)}
+                  />
                 </Table.Cell>
               </Table.Row>
             ))}
