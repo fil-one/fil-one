@@ -1,293 +1,24 @@
-import { Fragment, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import {
-  CaretDownIcon,
-  CaretRightIcon,
-  CloudArrowUpIcon,
-  DownloadSimpleIcon,
-  FileIcon,
-  FolderIcon,
-  TrashIcon,
-} from '@phosphor-icons/react/dist/ssr';
+import { CloudArrowUpIcon } from '@phosphor-icons/react/dist/ssr';
 
-import { formatBytes } from '@filone/shared';
 import type { S3ObjectVersion, S3Region } from '@filone/shared';
 
+import { Alert } from './Alert';
 import { Button } from './Button';
+import { Checkbox } from './Checkbox';
 import { ConfirmDialog } from './ConfirmDialog';
 import { EmptyStateCard } from './EmptyStateCard';
-import { IconButton } from './IconButton';
-import { Spinner } from './Spinner';
 import { Table } from './Table/Table';
-import { VersionRowBadge, truncateVersionId } from './VersionHistoryCard';
-import { formatDate } from '../lib/time.js';
+import { BulkActionsBar, FolderRow, ObjectEntryRows } from './ObjectBrowserRows';
+import type { RowActions, RowSelection } from './ObjectBrowserRows';
+import type { ObjectDeleteTarget } from '../lib/use-object-actions.js';
+import type { BrowseEntry } from '../lib/object-grouping.js';
+import { getEntriesAtPrefix, groupVersionsByKey } from '../lib/object-grouping.js';
+import type { ObjectSelection, SelectableVersion } from '../lib/object-selection.js';
+import { descendantSelectionIds, useObjectSelection } from '../lib/object-selection.js';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-interface VersionGroup {
-  key: string;
-  latest: S3ObjectVersion;
-  versions: S3ObjectVersion[];
-  versionCount: number;
-}
-
-function groupVersionsByKey(versions: S3ObjectVersion[]): VersionGroup[] {
-  const groups = new Map<string, S3ObjectVersion[]>();
-  for (const v of versions) {
-    const existing = groups.get(v.key) ?? [];
-    existing.push(v);
-    groups.set(v.key, existing);
-  }
-  return Array.from(groups.entries()).map(([key, vers]) => {
-    const latest = vers.find((v) => v.isLatest) ?? vers[0];
-    return { key, latest, versions: vers, versionCount: vers.length };
-  });
-}
-
-/**
- * Count distinct object keys in a flat list of versions. Shares grouping logic
- * with the browser so the count always matches the rendered rows.
- */
-export function countObjects(versions: S3ObjectVersion[]): number {
-  return groupVersionsByKey(versions).length;
-}
-
-type BrowseEntry =
-  | { kind: 'folder'; name: string; prefix: string }
-  | { kind: 'object'; name: string; group: VersionGroup };
-
-function getEntriesAtPrefix(groups: VersionGroup[], prefix: string): BrowseEntry[] {
-  const folders = new Set<string>();
-  const files: BrowseEntry[] = [];
-
-  for (const group of groups) {
-    if (!group.key.startsWith(prefix)) continue;
-    const remainder = group.key.slice(prefix.length);
-    const slashIdx = remainder.indexOf('/');
-    if (slashIdx === -1) {
-      files.push({ kind: 'object', name: remainder, group });
-    } else {
-      folders.add(remainder.slice(0, slashIdx));
-    }
-  }
-
-  const folderEntries: BrowseEntry[] = [...folders]
-    .sort()
-    .map((f) => ({ kind: 'folder', name: f, prefix: `${prefix}${f}/` }));
-
-  files.sort((a, b) => a.name.localeCompare(b.name));
-
-  return [...folderEntries, ...files];
-}
-
-// ---------------------------------------------------------------------------
-// Row action buttons
-// ---------------------------------------------------------------------------
-
-function VersionActions({
-  version,
-  groupKey,
-  downloading,
-  onDownload,
-  onRequestDelete,
-  label,
-}: {
-  version: S3ObjectVersion;
-  groupKey: string;
-  downloading: string | null;
-  onDownload: (key: string, versionId?: string) => void;
-  onRequestDelete: (key: string, versionId: string) => void;
-  label: string;
-}) {
-  return (
-    <div className="flex items-center justify-end gap-1">
-      {!version.isDeleteMarker &&
-        (downloading === groupKey ? (
-          // Same footprint as the IconButton it replaces while the download runs.
-          <span className="inline-flex items-center justify-center p-1.5 text-zinc-500">
-            <Spinner ariaLabel="Downloading" size={18} />
-          </span>
-        ) : (
-          <IconButton
-            icon={DownloadSimpleIcon}
-            aria-label={`Download ${label}`}
-            size="md"
-            onClick={() => onDownload(groupKey, version.versionId)}
-          />
-        ))}
-      <IconButton
-        icon={TrashIcon}
-        aria-label={`Delete ${label}`}
-        size="md"
-        // Same IconButton as the others, but the hover keeps a danger cue since
-        // this deletes directly (twMerge lets it win over the base zinc hover).
-        className="hover:text-red-600"
-        onClick={() => onRequestDelete(groupKey, version.versionId)}
-      />
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Sub-row for expanded older versions
-// ---------------------------------------------------------------------------
-
-function VersionSubRow({
-  version,
-  groupKey,
-  displayName,
-  downloading,
-  onDownload,
-  onRequestDelete,
-  onNavigate,
-}: {
-  version: S3ObjectVersion;
-  groupKey: string;
-  displayName: string;
-  downloading: string | null;
-  onDownload: (key: string, versionId?: string) => void;
-  onRequestDelete: (key: string, versionId: string) => void;
-  onNavigate: (key: string, versionId: string) => void;
-}) {
-  return (
-    <Table.Row
-      data-testid="object-version-row"
-      data-version-id={version.versionId}
-      className="cursor-pointer bg-zinc-50/50 hover:bg-zinc-100/50"
-      role="button"
-      tabIndex={0}
-      onClick={() => onNavigate(groupKey, version.versionId)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') onNavigate(groupKey, version.versionId);
-      }}
-    >
-      <Table.Cell className="py-3 pr-4 pl-10">
-        <div className="flex items-center gap-2 text-zinc-500">
-          <FileIcon size={14} className="shrink-0 text-zinc-300" aria-hidden="true" />
-          {displayName}
-        </div>
-      </Table.Cell>
-      <Table.Cell className="font-mono text-xs text-zinc-500" title={version.versionId}>
-        {truncateVersionId(version.versionId)}
-      </Table.Cell>
-      <Table.Cell>
-        <VersionRowBadge version={version} />
-      </Table.Cell>
-      <Table.Cell className="text-zinc-500">
-        {version.isDeleteMarker ? '\u2014' : formatBytes(version.sizeBytes)}
-      </Table.Cell>
-      <Table.Cell className="text-zinc-500">{formatDate(version.lastModified)}</Table.Cell>
-      <Table.Cell onClick={(e) => e.stopPropagation()}>
-        <VersionActions
-          version={version}
-          groupKey={groupKey}
-          downloading={downloading}
-          onDownload={onDownload}
-          onRequestDelete={onRequestDelete}
-          label={`version ${version.versionId}`}
-        />
-      </Table.Cell>
-    </Table.Row>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Latest version row (primary row for each object key)
-// ---------------------------------------------------------------------------
-
-function LatestVersionRow({
-  entry,
-  group,
-  isExpanded,
-  versioningEnabled,
-  onToggleExpand,
-  downloading,
-  onDownload,
-  onRequestDelete,
-  onNavigate,
-}: {
-  entry: { name: string };
-  group: VersionGroup;
-  isExpanded: boolean;
-  versioningEnabled: boolean;
-  onToggleExpand: (key: string) => void;
-  downloading: string | null;
-  onDownload: (key: string, versionId?: string) => void;
-  onRequestDelete: (key: string, versionId: string) => void;
-  onNavigate: (key: string, versionId: string) => void;
-}) {
-  const hasMultipleVersions = versioningEnabled && group.versionCount > 1;
-
-  return (
-    <Table.Row
-      data-testid="object-row"
-      data-object-key={group.key}
-      className="cursor-pointer"
-      role="button"
-      tabIndex={0}
-      onClick={() => onNavigate(group.key, group.latest.versionId)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') onNavigate(group.key, group.latest.versionId);
-      }}
-    >
-      <Table.Cell>
-        <div className="flex items-center gap-2 font-medium text-zinc-900" title={group.key}>
-          {hasMultipleVersions ? (
-            <button
-              type="button"
-              className="shrink-0 text-zinc-400 hover:text-zinc-700"
-              aria-label={isExpanded ? 'Collapse versions' : 'Expand versions'}
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleExpand(group.key);
-              }}
-            >
-              {isExpanded ? (
-                <CaretDownIcon size={14} aria-hidden="true" />
-              ) : (
-                <CaretRightIcon size={14} aria-hidden="true" />
-              )}
-            </button>
-          ) : (
-            <FileIcon size={16} className="shrink-0 text-zinc-400" aria-hidden="true" />
-          )}
-          {entry.name}
-          {hasMultipleVersions && (
-            <span className="ml-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-500">
-              {group.versionCount} versions
-            </span>
-          )}
-        </div>
-      </Table.Cell>
-      {versioningEnabled && (
-        <>
-          <Table.Cell className="font-mono text-xs text-zinc-500" title={group.latest.versionId}>
-            {truncateVersionId(group.latest.versionId)}
-          </Table.Cell>
-          <Table.Cell>
-            <VersionRowBadge version={{ ...group.latest, isLatest: true }} />
-          </Table.Cell>
-        </>
-      )}
-      <Table.Cell className="text-zinc-600">
-        {group.latest.isDeleteMarker ? '\u2014' : formatBytes(group.latest.sizeBytes)}
-      </Table.Cell>
-      <Table.Cell className="text-zinc-600">{formatDate(group.latest.lastModified)}</Table.Cell>
-      <Table.Cell onClick={(e) => e.stopPropagation()}>
-        <VersionActions
-          version={group.latest}
-          groupKey={group.key}
-          downloading={downloading}
-          onDownload={onDownload}
-          onRequestDelete={onRequestDelete}
-          label={entry.name}
-        />
-      </Table.Cell>
-    </Table.Row>
-  );
-}
+export { countObjects } from '../lib/object-grouping.js';
 
 // ---------------------------------------------------------------------------
 // Prefix breadcrumb
@@ -334,6 +65,161 @@ function PrefixBreadcrumb({
   );
 }
 
+/**
+ * Shown when the bucket holds more objects than one listing page returns. The
+ * count in the tab header comes from analytics and covers the whole bucket, so
+ * without this the table silently disagrees with it.
+ */
+function TruncatedListingNotice({
+  loadedCount,
+  totalObjectCount,
+  selectable,
+}: {
+  loadedCount: number;
+  totalObjectCount?: number;
+  selectable: boolean;
+}) {
+  const total =
+    totalObjectCount !== undefined
+      ? `${totalObjectCount.toLocaleString()} objects`
+      : 'more objects';
+  const scope = selectable
+    ? ' Selection and delete apply only to the objects listed here.'
+    : ' Open a folder to browse the rest.';
+
+  return (
+    <div className="mb-3">
+      <Alert
+        variant="amber"
+        title={`Showing the first ${loadedCount.toLocaleString()}`}
+        description={`This bucket holds ${total}.${scope}`}
+      />
+    </div>
+  );
+}
+
+function EmptyBucketState({ bucketName, region }: { bucketName: string; region: S3Region }) {
+  const navigate = useNavigate();
+  return (
+    <div className="mt-4">
+      <EmptyStateCard
+        icon={CloudArrowUpIcon}
+        title="No objects yet"
+        description="Upload your first object to this bucket"
+      >
+        {/* Text-only: the cloud tile directly above already speaks "upload",
+            so a glyph on the button here would just repeat it. */}
+        <Button
+          id="object-browser-upload-button"
+          variant="primary"
+          onClick={() =>
+            void navigate({
+              to: '/buckets/$bucketName/upload',
+              params: { bucketName },
+              search: { region },
+            })
+          }
+        >
+          Upload object
+        </Button>
+      </EmptyStateCard>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Object table
+// ---------------------------------------------------------------------------
+
+function ObjectTable({
+  entries,
+  latestVersions,
+  versioningEnabled,
+  expandedKeys,
+  onToggleExpand,
+  onPrefixChange,
+  actions,
+  selection,
+  rowSelection,
+  idsAtPrefix,
+  listingTruncated,
+}: {
+  entries: BrowseEntry[];
+  latestVersions: SelectableVersion[];
+  versioningEnabled: boolean;
+  expandedKeys: Set<string>;
+  onToggleExpand: (key: string) => void;
+  onPrefixChange: (prefix: string) => void;
+  actions: RowActions;
+  selection: ObjectSelection;
+  rowSelection: RowSelection;
+  idsAtPrefix: string[];
+  listingTruncated: boolean;
+}) {
+  const allSelected = selection.areAllSelected(idsAtPrefix);
+
+  return (
+    <Table>
+      <Table.Header>
+        <Table.Row>
+          {rowSelection.selectable && (
+            <Table.Head className="w-0 pr-0">
+              <Checkbox
+                checked={allSelected}
+                onChange={() => selection.setMany(idsAtPrefix, !allSelected)}
+                aria-label={listingTruncated ? 'Select all loaded objects' : 'Select all objects'}
+              />
+            </Table.Head>
+          )}
+          <Table.Head>Name</Table.Head>
+          {versioningEnabled && (
+            <>
+              <Table.Head>Version</Table.Head>
+              <Table.Head>Status</Table.Head>
+            </>
+          )}
+          <Table.Head>Size</Table.Head>
+          <Table.Head>Last Modified</Table.Head>
+          <Table.Head aria-label="Actions" />
+        </Table.Row>
+      </Table.Header>
+      <Table.Body>
+        {entries.map((entry) => {
+          if (entry.kind === 'folder') {
+            const folderIds = descendantSelectionIds(latestVersions, entry.prefix);
+            const folderSelected = selection.areAllSelected(folderIds);
+            return (
+              <FolderRow
+                key={`folder:${entry.prefix}`}
+                name={entry.name}
+                prefix={entry.prefix}
+                versioningEnabled={versioningEnabled}
+                onPrefixChange={onPrefixChange}
+                selectable={rowSelection.selectable}
+                isSelected={folderSelected}
+                onToggleSelect={() => selection.setMany(folderIds, !folderSelected)}
+              />
+            );
+          }
+
+          return (
+            <ObjectEntryRows
+              key={`object:${entry.group.key}`}
+              name={entry.name}
+              group={entry.group}
+              isExpanded={expandedKeys.has(entry.group.key)}
+              versioningEnabled={versioningEnabled}
+              onToggleExpand={onToggleExpand}
+              actions={actions}
+              selection={rowSelection}
+            />
+          );
+        })}
+      </Table.Body>
+    </Table>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -348,6 +234,16 @@ export type ObjectBrowserProps = {
   onDownload: (key: string, versionId?: string) => void;
   downloading: string | null;
   onDelete: (key: string, versionId?: string) => Promise<void>;
+  /** Enables row selection and a bulk-delete toolbar. */
+  onBulkDelete?: (targets: ObjectDeleteTarget[]) => Promise<void>;
+  /**
+   * True when the listing is a partial page. Selection can only ever cover the
+   * objects actually loaded, so the browser says so rather than implying that
+   * "select all" reaches the whole bucket.
+   */
+  listingTruncated?: boolean;
+  /** Full bucket object count from analytics, shown alongside the loaded count. */
+  totalObjectCount?: number;
 };
 
 export function ObjectBrowser({
@@ -360,13 +256,19 @@ export function ObjectBrowser({
   onDownload,
   downloading,
   onDelete,
+  onBulkDelete,
+  listingTruncated = false,
+  totalObjectCount,
 }: ObjectBrowserProps) {
   const navigate = useNavigate();
   const [confirmDelete, setConfirmDelete] = useState<{
     key: string;
     versionId?: string;
   } | null>(null);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
+  const selection = useObjectSelection(versions);
+  const selectedCount = selection.selected.size;
 
   function toggleExpand(key: string) {
     setExpandedKeys((prev) => {
@@ -377,48 +279,36 @@ export function ObjectBrowser({
     });
   }
 
-  function requestDelete(key: string, versionId: string) {
-    setConfirmDelete({ key, versionId });
-  }
+  const rowActions: RowActions = {
+    downloading,
+    onDownload,
+    onRequestDelete: (key, versionId) => setConfirmDelete({ key, versionId }),
+    onNavigate: (key, versionId) => {
+      void navigate({
+        to: '/buckets/$bucketName/objects',
+        params: { bucketName },
+        search: { key, region, ...(versionId && { versionId }) },
+      });
+    },
+  };
+
+  const rowSelection: RowSelection = {
+    selectable: Boolean(onBulkDelete),
+    isSelected: (id) => selection.selected.has(id),
+    onToggle: selection.toggle,
+  };
 
   if (versions.length === 0) {
-    return (
-      <div className="mt-4">
-        <EmptyStateCard
-          icon={CloudArrowUpIcon}
-          title="No objects yet"
-          description="Upload your first object to this bucket"
-        >
-          {/* Text-only: the cloud tile directly above already speaks "upload",
-              so a glyph on the button here would just repeat it. */}
-          <Button
-            id="object-browser-upload-button"
-            variant="primary"
-            onClick={() =>
-              void navigate({
-                to: '/buckets/$bucketName/upload',
-                params: { bucketName },
-                search: { region },
-              })
-            }
-          >
-            Upload object
-          </Button>
-        </EmptyStateCard>
-      </div>
-    );
+    return <EmptyBucketState bucketName={bucketName} region={region} />;
   }
 
   const groups = groupVersionsByKey(versions);
   const entries = getEntriesAtPrefix(groups, currentPrefix);
-
-  function navigateToObject(key: string, versionId?: string) {
-    void navigate({
-      to: '/buckets/$bucketName/objects',
-      params: { bucketName },
-      search: { key, region, ...(versionId && { versionId }) },
-    });
-  }
+  const latestVersions: SelectableVersion[] = groups.map((group) => ({
+    key: group.key,
+    versionId: group.latest.versionId,
+  }));
+  const idsAtPrefix = descendantSelectionIds(latestVersions, currentPrefix);
 
   return (
     <div className="mt-4">
@@ -430,96 +320,40 @@ export function ObjectBrowser({
         />
       )}
 
+      {listingTruncated && (
+        <TruncatedListingNotice
+          loadedCount={groups.length}
+          totalObjectCount={totalObjectCount}
+          selectable={rowSelection.selectable}
+        />
+      )}
+
+      {rowSelection.selectable && selectedCount > 0 && (
+        <BulkActionsBar
+          count={selectedCount}
+          onClear={selection.clear}
+          onDelete={() => setConfirmBulkDelete(true)}
+        />
+      )}
+
       {entries.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white px-6 py-16 text-center">
           <p className="text-sm text-zinc-500">No objects at this path</p>
         </div>
       ) : (
-        <Table>
-          <Table.Header>
-            <Table.Row>
-              <Table.Head>Name</Table.Head>
-              {versioningEnabled && (
-                <>
-                  <Table.Head>Version</Table.Head>
-                  <Table.Head>Status</Table.Head>
-                </>
-              )}
-              <Table.Head>Size</Table.Head>
-              <Table.Head>Last Modified</Table.Head>
-              <Table.Head aria-label="Actions" />
-            </Table.Row>
-          </Table.Header>
-          <Table.Body>
-            {entries.map((entry) => {
-              if (entry.kind === 'folder') {
-                return (
-                  <Table.Row
-                    key={`folder:${entry.prefix}`}
-                    data-testid="folder-row"
-                    data-folder-prefix={entry.prefix}
-                    className="cursor-pointer"
-                    onClick={() => onPrefixChange(entry.prefix)}
-                  >
-                    <Table.Cell>
-                      <div className="flex items-center gap-2 font-medium text-zinc-900">
-                        <FolderIcon
-                          size={16}
-                          className="shrink-0 text-zinc-400"
-                          aria-hidden="true"
-                        />
-                        {entry.name}
-                      </div>
-                    </Table.Cell>
-                    {versioningEnabled && (
-                      <>
-                        <Table.Cell className="text-zinc-400">&mdash;</Table.Cell>
-                        <Table.Cell className="text-zinc-400">&mdash;</Table.Cell>
-                      </>
-                    )}
-                    <Table.Cell className="text-zinc-400">&mdash;</Table.Cell>
-                    <Table.Cell className="text-zinc-400">&mdash;</Table.Cell>
-                    <Table.Cell />
-                  </Table.Row>
-                );
-              }
-
-              const { group } = entry;
-              const isExpanded = expandedKeys.has(group.key);
-
-              return (
-                <Fragment key={`object:${group.key}`}>
-                  <LatestVersionRow
-                    entry={entry}
-                    group={group}
-                    isExpanded={isExpanded}
-                    versioningEnabled={versioningEnabled}
-                    onToggleExpand={toggleExpand}
-                    downloading={downloading}
-                    onDownload={onDownload}
-                    onRequestDelete={requestDelete}
-                    onNavigate={navigateToObject}
-                  />
-                  {isExpanded &&
-                    group.versions
-                      .filter((v) => v !== group.latest)
-                      .map((version) => (
-                        <VersionSubRow
-                          key={`version:${group.key}:${version.versionId}`}
-                          version={version}
-                          groupKey={group.key}
-                          displayName={entry.name}
-                          downloading={downloading}
-                          onDownload={onDownload}
-                          onRequestDelete={requestDelete}
-                          onNavigate={navigateToObject}
-                        />
-                      ))}
-                </Fragment>
-              );
-            })}
-          </Table.Body>
-        </Table>
+        <ObjectTable
+          entries={entries}
+          latestVersions={latestVersions}
+          versioningEnabled={versioningEnabled}
+          expandedKeys={expandedKeys}
+          onToggleExpand={toggleExpand}
+          onPrefixChange={onPrefixChange}
+          actions={rowActions}
+          selection={selection}
+          rowSelection={rowSelection}
+          idsAtPrefix={idsAtPrefix}
+          listingTruncated={listingTruncated}
+        />
       )}
 
       <ConfirmDialog
@@ -531,6 +365,18 @@ export function ObjectBrowser({
         }}
         title="Delete object"
         description="This object will be permanently deleted. This action cannot be undone."
+        confirmLabel="Delete"
+      />
+
+      <ConfirmDialog
+        open={confirmBulkDelete}
+        onClose={() => setConfirmBulkDelete(false)}
+        onConfirm={async () => {
+          await onBulkDelete?.(selection.targets());
+          selection.clear();
+        }}
+        title={`Delete ${selectedCount} ${selectedCount === 1 ? 'item' : 'items'}`}
+        description={`${selectedCount === 1 ? 'This item' : `These ${selectedCount} items`} will be permanently deleted. This action cannot be undone.`}
         confirmLabel="Delete"
       />
     </div>
