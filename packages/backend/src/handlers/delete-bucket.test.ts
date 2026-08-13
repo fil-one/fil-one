@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NotImplementedError } from '../lib/errors.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -89,19 +88,6 @@ describe('delete-bucket baseHandler', () => {
     await baseHandler(event);
 
     expect(mockOrchestratorDeleteBucket).toHaveBeenCalledWith('tenant-xyz', 'some-bucket');
-  });
-
-  it('returns 501 when the orchestrator throws NotImplementedError', async () => {
-    mockOrchestratorDeleteBucket.mockRejectedValue(
-      new NotImplementedError('Aurora bucket deletion is not yet supported. See FIL-204.'),
-    );
-
-    const event = buildEvent({ userInfo: USER_INFO });
-    event.pathParameters = { name: 'my-bucket' };
-    const result = await baseHandler(event);
-
-    expect(result.statusCode).toBe(501);
-    expect(mockOrchestratorDeleteBucket).toHaveBeenCalledWith('aurora-t-1', 'my-bucket');
   });
 
   // Only NotImplementedError is translated to a response here; every other

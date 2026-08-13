@@ -5,7 +5,6 @@ import { S3_REGION } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { getOrgProfile } from '../lib/org-profile.js';
-import { NotImplementedError } from '../lib/errors.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -36,17 +35,7 @@ export async function baseHandler(
       .build();
   }
 
-  try {
-    await orchestrator.deleteBucket(tenantId, bucketName);
-  } catch (err) {
-    if (err instanceof NotImplementedError) {
-      return new ResponseBuilder()
-        .status(501)
-        .body<ErrorResponse>({ message: 'Bucket deletion is not yet supported for this region' })
-        .build();
-    }
-    throw err;
-  }
+  await orchestrator.deleteBucket(tenantId, bucketName);
 
   return {
     statusCode: 204,
