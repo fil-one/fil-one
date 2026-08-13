@@ -168,7 +168,7 @@ describe('list-buckets baseHandler (single-region)', () => {
     const event = buildEvent({ userInfo: USER_INFO });
     await baseHandler(event);
 
-    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1', { includeObjectLock: true });
+    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1');
   });
 
   it('consults the orchestrator registry to fan out across available regions', async () => {
@@ -274,8 +274,8 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
         },
       ],
     });
-    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1', { includeObjectLock: true });
-    expect(fth.listBuckets).toHaveBeenCalledWith('fth-t-9', { includeObjectLock: true });
+    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1');
+    expect(fth.listBuckets).toHaveBeenCalledWith('fth-t-9');
   });
 
   it('sorts buckets alphabetically by name across regions', async () => {

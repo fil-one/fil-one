@@ -25,7 +25,6 @@ import { useToast } from './Toast';
 import { FILONE_STAGE } from '../env.js';
 import { useCopyToClipboard } from '../lib/use-copy-to-clipboard.js';
 import { formatDate } from '../lib/time.js';
-import { formatRetention } from '../lib/retention.js';
 import {
   DEFAULT_BUCKET_SORT,
   EMPTY_BUCKET_FILTERS,
@@ -38,7 +37,7 @@ import {
 } from '../lib/bucket-table.js';
 
 /**
- * Columns dropped below `sm`. Six columns plus cell padding overflow a phone, and
+ * Columns dropped below `sm`. Five columns plus cell padding overflow a phone, and
  * horizontal scrolling would push the row's action menu off-screen. What's left
  * is the name, its secondary line (region and storage), and the actions; the
  * bucket detail page carries the rest.
@@ -110,19 +109,7 @@ export function BucketsTable({ buckets, onDelete }: BucketsTableProps) {
               <Table.Head {...sortProps('createdAt')} className={SECONDARY_COLUMN}>
                 Created
               </Table.Head>
-              <Table.Head className={SECONDARY_COLUMN}>Features</Table.Head>
-              <Table.Head className={SECONDARY_COLUMN}>
-                {/* The explanation lives on the header, not on every row: one
-                    keyboard stop rather than one per bucket, for a fact that
-                    doesn't vary by row. */}
-                <Tooltip
-                  content="A default policy applies to objects uploaded from now on"
-                  side="top"
-                  focusable
-                >
-                  Retention
-                </Tooltip>
-              </Table.Head>
+              <Table.Head className={SECONDARY_COLUMN}>Versioning</Table.Head>
               <Table.Head aria-label="Actions" />
             </Table.Row>
           </Table.Header>
@@ -137,49 +124,24 @@ export function BucketsTable({ buckets, onDelete }: BucketsTableProps) {
   );
 }
 
-/** Versioning and Object Lock. Object Lock requires versioning, so a locked bucket shows both. */
-function BucketFeatures({ bucket }: { bucket: Bucket }) {
-  // Says "None" rather than an em-dash, to match the Retention column beside it:
-  // a dash next to a worded empty state reads as a rendering slip.
-  if (!bucket.versioning && !bucket.objectLockEnabled) {
-    return <span className="text-xs text-zinc-500">None</span>;
+/**
+ * Whether versioning is on. Object Lock and its retention policy aren't shown in
+ * the list: reading them costs a call per bucket, and the bucket detail card
+ * carries that state instead. Versioning rides along on the listing, so it stays,
+ * as its own column now that it's the only feature here.
+ */
+function BucketVersioning({ bucket }: { bucket: Bucket }) {
+  if (bucket.versioning) {
+    return (
+      <Badge color="blue" size="sm" weight="medium">
+        Enabled
+      </Badge>
+    );
   }
 
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {/* "Versioning", not "Versioned": the column lists features by name, and the
-          bucket detail card calls it Versioning too. */}
-      {bucket.versioning && (
-        <Badge color="blue" size="sm" weight="medium">
-          Versioning
-        </Badge>
-      )}
-      {bucket.objectLockEnabled && (
-        <Badge color="amber" size="sm" weight="medium">
-          Object Lock
-        </Badge>
-      )}
-    </div>
-  );
-}
-
-/**
- * The bucket's default retention policy, as mode and duration.
- *
- * Not a date: what a bucket holds is the policy applied to new objects, so the
- * retain-until date differs per object by upload time. That date lives on the
- * object, from GetObjectRetention, and the object detail page shows it there.
- */
-function BucketRetention({ bucket }: { bucket: Bucket }) {
-  const retention = formatRetention(
-    bucket.defaultRetention,
-    bucket.retentionDuration,
-    bucket.retentionDurationType,
-  );
-
-  if (!retention) return <span className="text-xs text-zinc-500">No retention</span>;
-
-  return <span className="text-xs text-zinc-900">{retention}</span>;
+  // Quiet text, not a badge: an off state shouldn't draw the eye the way the
+  // enabled one does.
+  return <span className="text-xs text-zinc-500">Disabled</span>;
 }
 
 /**
@@ -303,10 +265,7 @@ function BucketRow({ bucket, onDelete }: { bucket: Bucket; onDelete: (name: stri
         {formatDate(bucket.createdAt)}
       </Table.Cell>
       <Table.Cell className={SECONDARY_COLUMN}>
-        <BucketFeatures bucket={bucket} />
-      </Table.Cell>
-      <Table.Cell className={SECONDARY_COLUMN}>
-        <BucketRetention bucket={bucket} />
+        <BucketVersioning bucket={bucket} />
       </Table.Cell>
       <Table.Cell className="text-right">
         <BucketRowActions bucket={bucket} region={region} onDelete={onDelete} />
