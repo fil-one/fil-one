@@ -173,9 +173,6 @@ export function BucketsPage() {
                       icon={TrashIcon}
                       aria-label={`Delete bucket ${bucket.bucketName}`}
                       onClick={() => deleteBucketMutation.mutate(bucket.bucketName)}
-                      // TODO: enable bucket deletion after Aurora implements this operation
-                      // https://linear.app/filecoin-foundation/issue/FIL-204/delete-bucket
-                      disabled
                     />
                   </Tooltip>
                 </Table.Cell>
