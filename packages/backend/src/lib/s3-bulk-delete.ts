@@ -192,8 +192,12 @@ async function deleteViaMultiDelete(
   const failures: BulkDeleteFailure[] = [];
 
   for (const batch of chunk(targets, MULTI_DELETE_BATCH_SIZE)) {
-    // Quiet mode returns only the errors, so the response stays small on the
-    // happy path; successes are inferred from the batch size.
+    // Quiet mode asks S3 to return only the errors, so the response stays small
+    // on the happy path. Successes are inferred as batch size minus errors, and
+    // result.Deleted is deliberately ignored: a gateway that returns Deleted
+    // entries anyway (Quiet is a request, not a guarantee everywhere) must not
+    // change the count. Errors are always authoritative, so the tally holds
+    // regardless of whether a given gateway honors Quiet.
     const result = await s3.send(
       new DeleteObjectsCommand({
         Bucket: bucket,
