@@ -113,7 +113,12 @@ async function enumerateAllVersionsPage(
     .filter((item) => item.Key !== undefined)
     .map((item) => ({
       key: item.Key!,
-      ...(item.VersionId && { versionId: item.VersionId }),
+      // A non-versioned (or versioning-suspended) bucket reports every object as
+      // the literal "null" version. Deleting by that id is a version-scoped
+      // delete (s3:DeleteObjectVersion), which such a bucket neither needs nor
+      // reliably permits, so it comes back AccessDenied. Drop it and issue a
+      // plain object delete instead.
+      ...(item.VersionId && item.VersionId !== 'null' && { versionId: item.VersionId }),
     }));
 
   const nextKeyMarker = result.IsTruncated ? result.NextKeyMarker : undefined;

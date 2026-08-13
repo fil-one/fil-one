@@ -175,7 +175,7 @@ function BulkDeleteOutcome({ job }: { job: BulkDeleteJob }) {
       <Alert
         variant="amber"
         title={`Deleted ${job.deletedCount.toLocaleString()}, ${job.failedCount.toLocaleString()} left`}
-        description={`${job.failedCount.toLocaleString()} objects could not be deleted, usually because they are under a retention lock. ${describeFirstFailure(job)}`}
+        description={`${job.failedCount.toLocaleString()} objects could not be deleted. ${describeFirstFailure(job)}`}
       />
     );
   }
