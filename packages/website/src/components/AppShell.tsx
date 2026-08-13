@@ -80,6 +80,16 @@ type AppShellProps = {
   children: React.ReactNode;
 };
 
+// Grace-period banner copy. `graceDays` is null when the deadline is unknown
+// and clamped to >= 0 elsewhere, so treat 0/null as "no countdown".
+function gracePeriodMessage(graceDays: number | null): string {
+  if (graceDays && graceDays > 0) {
+    const unit = graceDays === 1 ? 'day' : 'days';
+    return `Your free trial has expired. ${graceDays} ${unit} left to upgrade or download your data.`;
+  }
+  return 'Your free trial has expired. Upgrade or download your data to keep access.';
+}
+
 export function AppShell({ children }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -157,7 +167,7 @@ export function AppShell({ children }: AppShellProps) {
       {tenantStatus === 'write-locked' && (
         <Banner variant="warning" action={{ label: 'Upgrade', href: '/billing' }}>
           {isGracePeriod
-            ? `Your free trial has expired.${graceDays !== null ? ` ${graceDays} days left` : ''} to upgrade or download your data.`
+            ? gracePeriodMessage(graceDays)
             : 'Storage limit exceeded. Uploads are disabled. Delete files or upgrade to resume.'}
         </Banner>
       )}
