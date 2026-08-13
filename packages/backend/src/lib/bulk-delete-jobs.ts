@@ -94,6 +94,15 @@ export async function createBulkDeleteJob(args: CreateJobArgs): Promise<BulkDele
   return record;
 }
 
+/**
+ * Read a job row.
+ *
+ * Consistent reads are deliberate on both of this function's callers. The
+ * duplicate-submit path reads immediately after a failed conditional put, and an
+ * eventually consistent read there can miss the row that just caused the
+ * failure. Polling benefits too: a stale read would let the reported progress
+ * appear to move backwards between ticks.
+ */
 export async function getBulkDeleteJob(
   orgId: string,
   jobId: string,
@@ -105,6 +114,7 @@ export async function getBulkDeleteJob(
         pk: { S: BulkDeleteKeys.jobPk(orgId) },
         sk: { S: BulkDeleteKeys.jobSk(jobId) },
       },
+      ConsistentRead: true,
     }),
   );
   if (!Item) return undefined;

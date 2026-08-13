@@ -1,4 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { mockClient } from 'aws-sdk-client-mock';
+import {
+  ConditionalCheckFailedException,
+  DynamoDBClient,
+  GetItemCommand,
+  PutItemCommand,
+} from '@aws-sdk/client-dynamodb';
+import { marshall } from '@aws-sdk/util-dynamodb';
 
 import {
   BulkDeleteJobStatus,
@@ -8,8 +16,24 @@ import {
   type BulkDeleteFailure,
 } from '@filone/shared';
 
-import { applyPageResult, failJob, finalizeJob, toApiJob } from './bulk-delete-jobs.js';
+vi.mock('sst', () => ({ Resource: { BulkDeleteTable: { name: 'BulkDeleteTable' } } }));
+
+import {
+  BulkDeleteJobExistsError,
+  applyPageResult,
+  createBulkDeleteJob,
+  failJob,
+  finalizeJob,
+  getBulkDeleteJob,
+  toApiJob,
+} from './bulk-delete-jobs.js';
 import type { BulkDeleteJobRecord } from './dynamo-records.js';
+
+const ddbMock = mockClient(DynamoDBClient);
+
+beforeEach(() => {
+  ddbMock.reset();
+});
 
 function job(overrides: Partial<BulkDeleteJobRecord> = {}): BulkDeleteJobRecord {
   return {
@@ -158,5 +182,89 @@ describe('toApiJob', () => {
     const api = toApiJob(job());
     expect(api).not.toHaveProperty('completedAt');
     expect(api).not.toHaveProperty('error');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Persistence
+// ---------------------------------------------------------------------------
+
+const createArgs = {
+  jobId: 'job-1',
+  orgId: 'org-1',
+  region: S3Region.EuWest1,
+  bucketName: 'bucket',
+  prefix: '',
+  scope: BulkDeleteScope.AllVersions,
+};
+
+function conditionalFailure() {
+  return new ConditionalCheckFailedException({ $metadata: {}, message: 'exists' });
+}
+
+describe('createBulkDeleteJob', () => {
+  it('writes the row guarded so a second job cannot start under the same id', async () => {
+    ddbMock.on(PutItemCommand).resolves({});
+
+    const record = await createBulkDeleteJob(createArgs);
+
+    expect(record.status).toBe(BulkDeleteJobStatus.Pending);
+    const input = ddbMock.commandCalls(PutItemCommand)[0].args[0].input;
+    expect(input.ConditionExpression).toBe('attribute_not_exists(pk) AND attribute_not_exists(sk)');
+  });
+
+  it('surfaces the running job when the same idempotency key is submitted twice', async () => {
+    ddbMock.on(PutItemCommand).rejects(conditionalFailure());
+    ddbMock.on(GetItemCommand).resolves({
+      Item: marshall({ ...job(), deletedCount: 40, status: BulkDeleteJobStatus.Running }),
+    });
+
+    await expect(createBulkDeleteJob(createArgs)).rejects.toThrow(BulkDeleteJobExistsError);
+  });
+
+  /**
+   * The row that caused the conditional failure must be readable straight after,
+   * so the recovery lookup is a consistent read. Without it this raced and the
+   * caller saw a 500 instead of its own job.
+   */
+  it('reads the existing job consistently', async () => {
+    ddbMock.on(PutItemCommand).rejects(conditionalFailure());
+    ddbMock.on(GetItemCommand).resolves({ Item: marshall(job()) });
+
+    await expect(createBulkDeleteJob(createArgs)).rejects.toThrow(BulkDeleteJobExistsError);
+    expect(ddbMock.commandCalls(GetItemCommand)[0].args[0].input.ConsistentRead).toBe(true);
+  });
+
+  it('propagates the original error if the conflicting row cannot be read', async () => {
+    ddbMock.on(PutItemCommand).rejects(conditionalFailure());
+    ddbMock.on(GetItemCommand).resolves({});
+
+    // Deliberate: a vanished row means something other than a duplicate submit,
+    // so the underlying failure surfaces rather than being reported as a
+    // successful no-op that silently deletes nothing.
+    await expect(createBulkDeleteJob(createArgs)).rejects.toThrow(ConditionalCheckFailedException);
+  });
+
+  it('lets an unrelated write failure through untouched', async () => {
+    ddbMock.on(PutItemCommand).rejects(new Error('throughput exceeded'));
+
+    await expect(createBulkDeleteJob(createArgs)).rejects.toThrow('throughput exceeded');
+    expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(0);
+  });
+});
+
+describe('getBulkDeleteJob', () => {
+  it('returns undefined for a job that does not exist', async () => {
+    ddbMock.on(GetItemCommand).resolves({});
+    expect(await getBulkDeleteJob('org-1', 'nope')).toBeUndefined();
+  });
+
+  it('reads consistently so polled progress never moves backwards', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: marshall(job({ deletedCount: 12 })) });
+
+    const record = await getBulkDeleteJob('org-1', 'job-1');
+
+    expect(record?.deletedCount).toBe(12);
+    expect(ddbMock.commandCalls(GetItemCommand)[0].args[0].input.ConsistentRead).toBe(true);
   });
 });
