@@ -42,12 +42,12 @@
 //   ./bin/revert-access-key-granular-permissions.ts
 //
 // Target staging (AWS account 654654381893):
-//   pnpx sst shell --stage staging -- node ./bin/revert-access-key-granular-permissions.ts --dry-run
-//   pnpx sst shell --stage staging -- node ./bin/revert-access-key-granular-permissions.ts
+//   pnpm exec sst shell --stage staging -- node ./bin/revert-access-key-granular-permissions.ts --dry-run
+//   pnpm exec sst shell --stage staging -- node ./bin/revert-access-key-granular-permissions.ts
 //
 // Target production (AWS account 811430801166):
-//   pnpx sst shell --stage production -- node ./bin/revert-access-key-granular-permissions.ts --dry-run
-//   pnpx sst shell --stage production -- node ./bin/revert-access-key-granular-permissions.ts
+//   pnpm exec sst shell --stage production -- node ./bin/revert-access-key-granular-permissions.ts --dry-run
+//   pnpm exec sst shell --stage production -- node ./bin/revert-access-key-granular-permissions.ts
 //
 // There is no DynamoDB PITR/backup, so the per-row `before -> after` log is the only
 // audit trail — capture stdout when running for real, e.g. `... | tee revert.log`.
@@ -62,8 +62,8 @@ import { readFileSync } from 'node:fs';
 // Re-exec under `sst shell` if SST resources aren't available
 if (!process.env.SST_RESOURCE_App) {
   execFileSync(
-    'pnpx',
-    ['sst', 'shell', '--', 'node', import.meta.filename, ...process.argv.slice(2)],
+    'pnpm',
+    ['exec', 'sst', 'shell', '--', 'node', import.meta.filename, ...process.argv.slice(2)],
     { stdio: 'inherit' },
   );
   process.exit(0);
