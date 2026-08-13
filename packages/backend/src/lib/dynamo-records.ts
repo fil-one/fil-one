@@ -1,5 +1,10 @@
 import { S3Region } from '@filone/shared';
-import type { SubscriptionStatus } from '@filone/shared';
+import type {
+  BulkDeleteFailure,
+  BulkDeleteJobStatus,
+  BulkDeleteScope,
+  SubscriptionStatus,
+} from '@filone/shared';
 
 /** UserInfoTable — pk: ORG#{orgId}, sk: ACCESSKEY#{id} */
 export interface AccessKeyRecord {
@@ -244,4 +249,59 @@ export const RAGKeys = {
   checkpointPk: (orgId: string, region: S3Region, bucketName: string): string =>
     `INDEXER_CHECKPOINT#${orgId}#${region}#${bucketName}`,
   checkpointSk: (): string => 'CHECKPOINT',
+} as const;
+
+/**
+ * A user-initiated bulk deletion of a bucket's objects, resumable across Lambda
+ * invocations the way {@link RagIndexerCheckpointRecord} is: the worker persists
+ * its listing cursor whenever it runs out of time budget, then re-invokes itself
+ * and picks up where it stopped.
+ *
+ * `jobId` is the caller's idempotency key, so a retried create resolves to the
+ * same row and a conditional put is all the protection needed against a double
+ * submit starting a second deletion.
+ *
+ * BulkDeleteTable — pk: BULKDELETE#{orgId}, sk: JOB#{jobId}
+ */
+export interface BulkDeleteJobRecord {
+  pk: string;
+  sk: string;
+  jobId: string;
+  orgId: string;
+  region: S3Region;
+  bucketName: string;
+  /** Empty string means the whole bucket. */
+  prefix: string;
+  scope: BulkDeleteScope;
+  status: BulkDeleteJobStatus;
+  deletedCount: number;
+  failedCount: number;
+  /** Bounded sample; `failedCount` is the authoritative total. */
+  failures: BulkDeleteFailure[];
+  /** Listing resume point; absent once the walk is exhausted. */
+  cursor?: BulkDeleteCursorRecord;
+  /**
+   * Whether to keep attempting batched DeleteObjects. Cleared permanently for
+   * the job once a gateway has been seen to reject it, so the fallback is
+   * decided once rather than re-probed on every page.
+   */
+  multiDelete: boolean;
+  startedAt: string; // ISO-8601
+  updatedAt: string; // ISO-8601
+  completedAt?: string; // ISO-8601
+  /** Present when status is `failed`. */
+  error?: string;
+  ttl: number; // epoch seconds; DynamoDB TTL expiry
+}
+
+/** Persisted form of the S3 listing cursor (see s3-bulk-delete). */
+export interface BulkDeleteCursorRecord {
+  continuationToken?: string;
+  keyMarker?: string;
+  versionIdMarker?: string;
+}
+
+export const BulkDeleteKeys = {
+  jobPk: (orgId: string): string => `BULKDELETE#${orgId}`,
+  jobSk: (jobId: string): string => `JOB#${jobId}`,
 } as const;

@@ -101,6 +101,23 @@ export type {
 
 export { PresignOpSchema, PresignRequestSchema } from './api/presign.js';
 
+export type {
+  BulkDeleteFailure,
+  BulkDeleteJob,
+  CreateBulkDeleteJobRequest,
+  CreateBulkDeleteJobResponse,
+  GetBulkDeleteJobResponse,
+} from './api/bulk-delete.js';
+
+export {
+  BulkDeleteJobStatus,
+  BulkDeleteScope,
+  CreateBulkDeleteJobSchema,
+  MAX_REPORTED_BULK_DELETE_FAILURES,
+  TERMINAL_BULK_DELETE_STATUSES,
+  isTerminalBulkDeleteStatus,
+} from './api/bulk-delete.js';
+
 export {
   QueryBucketSchema,
   QUERY_DEFAULT_TOP_K,

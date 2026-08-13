@@ -1,0 +1,123 @@
+// Starts a bulk deletion of a bucket's objects and hands the work to the
+// bulk-delete worker. Returns immediately with a job the client can poll, since
+// a large bucket takes far longer than a request can stay open.
+
+import middy from '@middy/core';
+import httpHeaderNormalizer from '@middy/http-header-normalizer';
+import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
+import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
+import { Resource } from 'sst';
+
+import {
+  CreateBulkDeleteJobSchema,
+  S3Region,
+  isSupportedRegion,
+  type CreateBulkDeleteJobResponse,
+  type ErrorResponse,
+} from '@filone/shared';
+
+import {
+  BulkDeleteJobExistsError,
+  createBulkDeleteJob,
+  toApiJob,
+} from '../lib/bulk-delete-jobs.js';
+import { getOrgProfile } from '../lib/org-profile.js';
+import {
+  ResponseBuilder,
+  tenantNotReadyResponse,
+  unsupportedRegionResponse,
+} from '../lib/response-builder.js';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
+import type { AuthenticatedEvent } from '../lib/user-context.js';
+import { getUserInfo } from '../lib/user-context.js';
+import { authMiddleware } from '../middleware/auth.js';
+import { csrfMiddleware } from '../middleware/csrf.js';
+import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
+
+const lambda = new LambdaClient({});
+
+export async function baseHandler(
+  event: AuthenticatedEvent,
+): Promise<APIGatewayProxyStructuredResultV2> {
+  const { orgId } = getUserInfo(event);
+  const bucketName = event.pathParameters?.name;
+
+  if (!bucketName) {
+    return new ResponseBuilder()
+      .status(400)
+      .body<ErrorResponse>({ message: 'Bucket name is required' })
+      .build();
+  }
+
+  const region = event.queryStringParameters?.region ?? S3Region.EuWest1;
+  if (!isSupportedRegion(region, process.env.FILONE_STAGE!)) {
+    return unsupportedRegionResponse(region);
+  }
+
+  let body: unknown;
+  try {
+    body = JSON.parse(event.body ?? '{}');
+  } catch {
+    return new ResponseBuilder()
+      .status(400)
+      .body<ErrorResponse>({ message: 'Invalid JSON body' })
+      .build();
+  }
+
+  const parsed = CreateBulkDeleteJobSchema.safeParse(body);
+  if (!parsed.success) {
+    return new ResponseBuilder()
+      .status(400)
+      .body<ErrorResponse>({ message: parsed.error.issues[0].message })
+      .build();
+  }
+
+  const orchestrator = getOrchestratorForRegion(region);
+  const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
+  if (!tenantId) return tenantNotReadyResponse();
+
+  const { prefix, scope, idempotencyKey } = parsed.data;
+
+  // The idempotency key doubles as the job id, so a resubmitted request lands on
+  // the existing row instead of starting a second deletion.
+  try {
+    const job = await createBulkDeleteJob({
+      jobId: idempotencyKey,
+      orgId,
+      region,
+      bucketName,
+      prefix,
+      scope,
+    });
+
+    await lambda.send(
+      new InvokeCommand({
+        FunctionName: Resource.BulkDeleteWorker.name,
+        InvocationType: 'Event',
+        Payload: Buffer.from(JSON.stringify({ orgId, jobId: job.jobId })),
+      }),
+    );
+
+    return new ResponseBuilder()
+      .status(202)
+      .body<CreateBulkDeleteJobResponse>({ job: toApiJob(job) })
+      .build();
+  } catch (err) {
+    if (err instanceof BulkDeleteJobExistsError) {
+      // Same request arriving twice: hand back the job already running.
+      return new ResponseBuilder()
+        .status(200)
+        .body<CreateBulkDeleteJobResponse>({ job: toApiJob(err.job) })
+        .build();
+    }
+    throw err;
+  }
+}
+
+export const handler = middy(baseHandler)
+  .use(httpHeaderNormalizer())
+  .use(authMiddleware())
+  .use(csrfMiddleware())
+  .use(subscriptionGuardMiddleware(AccessLevel.Write))
+  .use(errorHandlerMiddleware());

@@ -122,6 +122,18 @@ export default $config({
       ttl: 'ttl',
     });
 
+    // User-initiated bulk deletions (BULKDELETE#{orgId} / JOB#{jobId}). Kept
+    // separate from UserInfoTable because a running job rewrites its row on
+    // every listing page, and finished jobs expire on their own via TTL.
+    const bulkDeleteTable = new sst.aws.Dynamo('BulkDeleteTable', {
+      fields: {
+        pk: 'string',
+        sk: 'string',
+      },
+      primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
+      ttl: 'ttl',
+    });
+
     // ── S3 Bucket for user file storage ──────────────────────────────
     const userFilesBucket = new sst.aws.Bucket('UserFilesBucket');
 
@@ -445,6 +457,7 @@ export default $config({
     const allResources = [
       billingTable,
       userInfoTable,
+      bulkDeleteTable,
       userFilesBucket,
       ragVectorBucket,
       auth0ClientId,
@@ -546,7 +559,7 @@ export default $config({
       handler: string;
       extraEnv?: Record<string, $util.Input<string>>;
       permissions?: sst.aws.FunctionPermissionArgs[];
-      extraLink?: (typeof allResources)[number][];
+      extraLink?: ((typeof allResources)[number] | sst.aws.Function)[];
       provisionedConcurrency?: number;
       memory?: sst.aws.FunctionArgs['memory'];
       timeout?: sst.aws.FunctionArgs['timeout'];
@@ -659,6 +672,53 @@ export default $config({
       handler: 'delete-bucket',
       extraEnv: { ...fthEnv, ...forgeEnv },
       permissions: s3DataPlanePermissions,
+    });
+
+    // ── Bulk object deletion (API → worker, resumed by self re-invoke) ──
+    // Empties a bucket, or a prefix within one, by walking the listing and
+    // deleting page by page. A bucket can hold far more objects than one
+    // invocation can process, so the worker checkpoints its listing cursor and
+    // re-invokes itself; it needs the full Lambda timeout and permission to
+    // call itself. DeleteBucket requires an empty bucket, so this is the step
+    // that makes deleting a non-trivial bucket possible at all.
+    const bulkDeleteWorker = createFn('BulkDeleteWorker', {
+      handler: 'packages/backend/src/jobs/bulk-delete-worker.handler',
+      link: [bulkDeleteTable, userInfoTable, ...managementApiTokens],
+      environment: { ...sharedEnv, ...fthEnv, ...forgeEnv, ...orchestratorEnv },
+      timeout: '900 seconds',
+      memory: '512 MB',
+      permissions: s3DataPlanePermissions,
+    });
+    // The worker continues a long job by invoking itself, so its execution role
+    // needs InvokeFunction on its own ARN. Attached after creation because the
+    // ARN is not knowable inside the function's own definition.
+    new aws.iam.RolePolicy('BulkDeleteWorkerSelfInvoke', {
+      role: bulkDeleteWorker.nodes.role.name,
+      policy: bulkDeleteWorker.arn.apply((arn) =>
+        JSON.stringify({
+          Version: '2012-10-17',
+          Statement: [{ Effect: 'Allow', Action: 'lambda:InvokeFunction', Resource: arn }],
+        }),
+      ),
+    });
+
+    addRoute({
+      method: 'POST',
+      routePath: '/api/buckets/{name}/bulk-delete',
+      handler: 'create-bulk-delete-job',
+      extraEnv: { ...fthEnv, ...forgeEnv },
+      extraLink: [bulkDeleteWorker],
+      permissions: [
+        {
+          actions: ['lambda:InvokeFunction'],
+          resources: [bulkDeleteWorker.arn],
+        },
+      ],
+    });
+    addRoute({
+      method: 'GET',
+      routePath: '/api/bulk-delete-jobs/{jobId}',
+      handler: 'get-bulk-delete-job',
     });
     addRoute({
       method: 'GET',
