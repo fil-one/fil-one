@@ -1,7 +1,6 @@
 import { Fragment, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import {
-  ArrowUpIcon,
   CaretDownIcon,
   CaretRightIcon,
   CloudArrowUpIcon,
@@ -17,6 +16,7 @@ import type { S3ObjectVersion, S3Region } from '@filone/shared';
 import { Button } from './Button';
 import { ConfirmDialog } from './ConfirmDialog';
 import { EmptyStateCard } from './EmptyStateCard';
+import { IconButton } from './IconButton';
 import { Spinner } from './Spinner';
 import { Table } from './Table/Table';
 import { VersionRowBadge, truncateVersionId } from './VersionHistoryCard';
@@ -102,30 +102,30 @@ function VersionActions({
   label: string;
 }) {
   return (
-    <div className="flex items-center justify-end gap-2">
-      {!version.isDeleteMarker && (
-        <button
-          type="button"
-          aria-label={`Download ${label}`}
-          onClick={() => onDownload(groupKey, version.versionId)}
-          disabled={downloading === groupKey}
-          className="text-zinc-400 hover:text-brand-600 disabled:opacity-50"
-        >
-          {downloading === groupKey ? (
-            <Spinner ariaLabel="Downloading" size={16} />
-          ) : (
-            <DownloadSimpleIcon size={16} aria-hidden="true" />
-          )}
-        </button>
-      )}
-      <button
-        type="button"
+    <div className="flex items-center justify-end gap-1">
+      {!version.isDeleteMarker &&
+        (downloading === groupKey ? (
+          // Same footprint as the IconButton it replaces while the download runs.
+          <span className="inline-flex items-center justify-center p-1.5 text-zinc-500">
+            <Spinner ariaLabel="Downloading" size={18} />
+          </span>
+        ) : (
+          <IconButton
+            icon={DownloadSimpleIcon}
+            aria-label={`Download ${label}`}
+            size="md"
+            onClick={() => onDownload(groupKey, version.versionId)}
+          />
+        ))}
+      <IconButton
+        icon={TrashIcon}
         aria-label={`Delete ${label}`}
+        size="md"
+        // Same IconButton as the others, but the hover keeps a danger cue since
+        // this deletes directly (twMerge lets it win over the base zinc hover).
+        className="hover:text-red-600"
         onClick={() => onRequestDelete(groupKey, version.versionId)}
-        className="text-zinc-400 hover:text-red-500"
-      >
-        <TrashIcon size={16} aria-hidden="true" />
-      </button>
+      />
     </div>
   );
 }
@@ -389,10 +389,11 @@ export function ObjectBrowser({
           title="No objects yet"
           description="Upload your first object to this bucket"
         >
+          {/* Text-only: the cloud tile directly above already speaks "upload",
+              so a glyph on the button here would just repeat it. */}
           <Button
             id="object-browser-upload-button"
             variant="primary"
-            icon={ArrowUpIcon}
             onClick={() =>
               void navigate({
                 to: '/buckets/$bucketName/upload',

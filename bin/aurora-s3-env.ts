@@ -13,7 +13,7 @@ if (!orgId) {
 
 // Re-exec under `sst shell` if SST resources aren't available
 if (!process.env.SST_RESOURCE_App) {
-  execFileSync('pnpx', ['sst', 'shell', 'node', import.meta.filename, orgId], {
+  execFileSync('pnpm', ['exec', 'sst', 'shell', 'node', import.meta.filename, orgId], {
     stdio: 'inherit',
   });
   process.exit(0);

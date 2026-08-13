@@ -14,6 +14,7 @@ const meta: Meta<typeof Button> = {
     },
     size: { control: 'select', options: ['sm', 'md', 'lg'] },
     iconPosition: { control: 'select', options: ['left', 'right'] },
+    iconSize: { control: 'number' },
   },
 };
 
@@ -22,6 +23,19 @@ type Story = StoryObj<typeof Button>;
 
 export const Default: Story = {
   args: { variant: 'primary', children: 'Create bucket' },
+};
+
+// iconSize overrides the size-derived glyph (sm=14) so it can carry more weight
+// without enlarging the whole control — used by the bucket Upload object button.
+export const CustomIconSize: Story = {
+  args: {
+    variant: 'primary',
+    size: 'sm',
+    icon: PlusIcon,
+    iconPosition: 'left',
+    iconSize: 18,
+    children: 'Upload object',
+  },
 };
 
 const icons: Record<ButtonVariant, typeof PlusIcon> = {

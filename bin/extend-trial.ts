@@ -29,9 +29,13 @@ if (!Number.isFinite(days) || days <= 0) {
 
 // Re-exec under `sst shell` if SST resources aren't available
 if (!process.env.SST_RESOURCE_App) {
-  execFileSync('pnpx', ['sst', 'shell', 'node', import.meta.filename, ...process.argv.slice(2)], {
-    stdio: 'inherit',
-  });
+  execFileSync(
+    'pnpm',
+    ['exec', 'sst', 'shell', 'node', import.meta.filename, ...process.argv.slice(2)],
+    {
+      stdio: 'inherit',
+    },
+  );
   process.exit(0);
 }
 
