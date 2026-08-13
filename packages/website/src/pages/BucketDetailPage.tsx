@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { PlusIcon } from '@phosphor-icons/react/dist/ssr';
+import { CloudArrowUpIcon } from '@phosphor-icons/react/dist/ssr';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { Heading } from '../components/Heading/Heading';
@@ -261,22 +261,29 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
         <Heading tag="h1" size="xl">
           {bucketName}
         </Heading>
-        <Button
-          id="upload-object-button"
-          variant="primary"
-          size="sm"
-          icon={PlusIcon}
-          iconPosition="right"
-          onClick={() =>
-            void navigate({
-              to: '/buckets/$bucketName/upload',
-              params: { bucketName },
-              search: { region },
-            })
-          }
-        >
-          Upload object
-        </Button>
+        {/* Hidden while the bucket is empty: the empty state carries the sole
+            upload CTA then, so two identical primary actions never compete. Once
+            objects exist the empty state is gone and this is the only one. The
+            cloud glyph leads the label, echoing that empty state's icon. */}
+        {versions.length > 0 && (
+          <Button
+            id="upload-object-button"
+            variant="primary"
+            size="sm"
+            icon={CloudArrowUpIcon}
+            iconSize={18}
+            iconPosition="left"
+            onClick={() =>
+              void navigate({
+                to: '/buckets/$bucketName/upload',
+                params: { bucketName },
+                search: { region },
+              })
+            }
+          >
+            Upload object
+          </Button>
+        )}
       </div>
 
       {bucket && (
@@ -292,7 +299,10 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
       )}
 
       {bucket && (
-        <div className="mb-6 grid grid-cols-3 gap-4">
+        // Responsive rather than a fixed three columns: at 375px three columns
+        // crushed the cards, and with four of them the fourth was orphaned at a
+        // third of the width on a row of its own.
+        <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <BucketPropertyCards bucket={bucket} />
         </div>
       )}
