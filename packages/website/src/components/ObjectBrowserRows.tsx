@@ -11,8 +11,6 @@ import {
 import { formatBytes } from '@filone/shared';
 import type { S3ObjectVersion } from '@filone/shared';
 
-import { Button } from './Button';
-import { Checkbox } from './Checkbox';
 import { IconButton } from './IconButton';
 import { Spinner } from './Spinner';
 import { Table } from './Table/Table';
@@ -35,22 +33,6 @@ export type RowSelection = {
   isSelected: (id: string) => boolean;
   onToggle: (id: string) => void;
 };
-
-function SelectCell({
-  checked,
-  onToggle,
-  label,
-}: {
-  checked: boolean;
-  onToggle: () => void;
-  label: string;
-}) {
-  return (
-    <Table.Cell className="w-0 pr-0" onClick={(e) => e.stopPropagation()}>
-      <Checkbox checked={checked} onChange={onToggle} aria-label={label} />
-    </Table.Cell>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Row action buttons
@@ -121,7 +103,10 @@ function VersionSubRow({
     <Table.Row
       data-testid="object-version-row"
       data-version-id={version.versionId}
-      className={`cursor-pointer hover:bg-zinc-100/50 ${isSelected ? 'bg-brand-50/40' : 'bg-zinc-50/50'}`}
+      selected={isSelected}
+      // Sub-rows sit on a tint of their own to read as nested. Applied only when
+      // unselected so it never competes with the selected background.
+      className={`cursor-pointer ${isSelected ? '' : 'bg-zinc-50/50 hover:bg-zinc-100/50'}`}
       role="button"
       tabIndex={0}
       onClick={() => actions.onNavigate(groupKey, version.versionId)}
@@ -130,9 +115,9 @@ function VersionSubRow({
       }}
     >
       {selection.selectable && (
-        <SelectCell
+        <Table.SelectCell
           checked={isSelected}
-          onToggle={() => selection.onToggle(id)}
+          onChange={() => selection.onToggle(id)}
           label={`Select version ${version.versionId} of ${displayName}`}
         />
       )}
@@ -237,7 +222,8 @@ function LatestVersionRow({
     <Table.Row
       data-testid="object-row"
       data-object-key={group.key}
-      className={`cursor-pointer ${isSelected ? 'bg-brand-50/40' : ''}`}
+      selected={isSelected}
+      className="cursor-pointer"
       role="button"
       tabIndex={0}
       onClick={() => actions.onNavigate(group.key, group.latest.versionId)}
@@ -247,9 +233,9 @@ function LatestVersionRow({
       }}
     >
       {selection.selectable && (
-        <SelectCell
+        <Table.SelectCell
           checked={isSelected}
-          onToggle={() => selection.onToggle(id)}
+          onChange={() => selection.onToggle(id)}
           label={`Select ${name}`}
         />
       )}
@@ -359,13 +345,14 @@ export function FolderRow({
     <Table.Row
       data-testid="folder-row"
       data-folder-prefix={prefix}
-      className={`cursor-pointer ${isSelected ? 'bg-brand-50/40' : ''}`}
+      selected={isSelected}
+      className="cursor-pointer"
       onClick={() => onPrefixChange(prefix)}
     >
       {selectable && (
-        <SelectCell
+        <Table.SelectCell
           checked={isSelected}
-          onToggle={onToggleSelect}
+          onChange={onToggleSelect}
           label={`Select everything in ${name}`}
         />
       )}
@@ -385,39 +372,5 @@ export function FolderRow({
       <Table.Cell className="text-zinc-400">&mdash;</Table.Cell>
       <Table.Cell />
     </Table.Row>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Bulk selection toolbar
-// ---------------------------------------------------------------------------
-
-export function BulkActionsBar({
-  count,
-  onClear,
-  onDelete,
-}: {
-  count: number;
-  onClear: () => void;
-  onDelete: () => void;
-}) {
-  return (
-    <div className="mb-3 flex flex-col gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-      <span className="text-sm text-zinc-600">{count} selected</span>
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" size="sm" onClick={onClear}>
-          Clear
-        </Button>
-        <Button
-          id="object-browser-bulk-delete-button"
-          variant="destructive"
-          size="sm"
-          icon={TrashIcon}
-          onClick={onDelete}
-        >
-          Delete
-        </Button>
-      </div>
-    </div>
   );
 }

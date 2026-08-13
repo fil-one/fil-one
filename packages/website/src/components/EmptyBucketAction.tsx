@@ -31,11 +31,14 @@ export function EmptyBucketAction({
 
   return (
     <>
+      {/* iconSize matches the Upload button beside it: `sm` defaults to 14, and
+          that button overrides to 18, which also makes it taller. */}
       <Button
         id="empty-bucket-button"
         variant="ghost"
         size="sm"
         icon={TrashIcon}
+        iconSize={18}
         onClick={() => setOpen(true)}
       >
         Empty bucket

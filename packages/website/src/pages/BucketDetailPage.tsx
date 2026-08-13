@@ -41,13 +41,25 @@ function formatStorage(bytesUsed: number | undefined): string {
   return formatBytes(bytesUsed);
 }
 
-// Analytics has the full-bucket count; the listing is a single page (max 1000
-// entries) so counting it undercounts large buckets. Fall back to the listing
-// count only while analytics is loading (or if it fails).
+/**
+ * Object count for the tab label.
+ *
+ * A complete listing is the better source: it is exact, current, and counts the
+ * same things the table and its selection do. Analytics cannot match it on
+ * either front. It comes from `getBucketUsageMetrics` at a one-day interval, so
+ * it is the most recent daily sample rather than a live count and lags anything
+ * uploaded or deleted since, and being a usage metric it does not count keys
+ * whose current version is a delete marker, which the listing does.
+ *
+ * Analytics is still right for a truncated listing, where the browser genuinely
+ * cannot know the total, so it is used only there.
+ */
 function displayObjectCount(
   analytics: BucketAnalyticsResponse | undefined,
   versions: S3ObjectVersion[],
+  listingTruncated: boolean,
 ): number {
+  if (!listingTruncated) return countObjects(versions);
   return analytics?.objectCount ?? countObjects(versions);
 }
 
@@ -352,7 +364,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
       <Tabs>
         <TabList>
           <Tab testId="bucket-objects-tab">
-            Objects ({displayObjectCount(analyticsData, versions).toLocaleString()})
+            Objects ({displayObjectCount(analyticsData, versions, isTruncated).toLocaleString()})
           </Tab>
           <Tab testId="bucket-keys-tab">
             API Keys{!accessKeysQuery.isPending && ` (${accessKeys.length.toLocaleString()})`}

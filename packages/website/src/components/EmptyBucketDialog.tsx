@@ -8,6 +8,7 @@ import { Alert } from './Alert';
 import { Button } from './Button';
 import { IconBox } from './IconBox';
 import { Input } from './Input';
+import { Label } from './Label';
 import { Modal, ModalBody, ModalFooter } from './Modal';
 import { ProgressBar } from './ProgressBar';
 import { Spinner } from './Spinner';
@@ -68,13 +69,12 @@ export function EmptyBucketDialog({
           </div>
 
           {!started && (
-            <div className="mt-2 w-full text-left">
-              <label
-                htmlFor="empty-bucket-confirm"
-                className="mb-1 block text-xs font-medium text-zinc-700"
-              >
-                Type <span className="font-mono text-zinc-900">{bucketName}</span> to confirm
-              </label>
+            <div className="mt-2 flex w-full flex-col gap-1 text-left">
+              {/* Label rather than FormField: the copy carries the bucket name
+                  as inline markup, and FormField's label is a plain string. */}
+              <Label htmlFor="empty-bucket-confirm">
+                Type <span className="font-mono">{bucketName}</span> to confirm
+              </Label>
               <Input
                 id="empty-bucket-confirm"
                 value={typedName}

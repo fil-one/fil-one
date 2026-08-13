@@ -6,11 +6,11 @@ import type { S3ObjectVersion, S3Region } from '@filone/shared';
 
 import { Alert } from './Alert';
 import { Button } from './Button';
-import { Checkbox } from './Checkbox';
 import { ConfirmDialog } from './ConfirmDialog';
 import { EmptyStateCard } from './EmptyStateCard';
 import { Table } from './Table/Table';
-import { BulkActionsBar, FolderRow, ObjectEntryRows } from './ObjectBrowserRows';
+import { FolderRow, ObjectEntryRows } from './ObjectBrowserRows';
+import { BulkActionsBar } from './BulkActionsBar';
 import type { RowActions, RowSelection } from './ObjectBrowserRows';
 import type { ObjectDeleteTarget } from '../lib/use-object-actions.js';
 import type { BrowseEntry } from '../lib/object-grouping.js';
@@ -163,13 +163,11 @@ function ObjectTable({
       <Table.Header>
         <Table.Row>
           {rowSelection.selectable && (
-            <Table.Head className="w-0 pr-0">
-              <Checkbox
-                checked={allSelected}
-                onChange={() => selection.setMany(idsAtPrefix, !allSelected)}
-                aria-label={listingTruncated ? 'Select all loaded objects' : 'Select all objects'}
-              />
-            </Table.Head>
+            <Table.SelectHead
+              checked={allSelected}
+              onChange={() => selection.setMany(idsAtPrefix, !allSelected)}
+              label={listingTruncated ? 'Select all loaded objects' : 'Select all objects'}
+            />
           )}
           <Table.Head>Name</Table.Head>
           {versioningEnabled && (
@@ -333,6 +331,7 @@ export function ObjectBrowser({
           count={selectedCount}
           onClear={selection.clear}
           onDelete={() => setConfirmBulkDelete(true)}
+          deleteButtonId="object-browser-bulk-delete-button"
         />
       )}
 
