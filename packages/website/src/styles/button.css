@@ -100,7 +100,7 @@
       @apply border border-zinc-200 bg-white text-zinc-700;
 
       &:focus-visible {
-        @apply outline-2 outline-offset-0;
+        @apply outline-2 outline-offset-0 outline-brand-600;
       }
 
       &:not(:disabled) {
@@ -172,6 +172,13 @@
       & .split-button__main:not(:disabled):hover,
       & .split-button__caret:not(:disabled):hover {
         @apply bg-zinc-50;
+      }
+
+      /* The caret sets outline-none in its base rule, so without this the ghost
+         variant gives keyboard users no focus ring at all. */
+      & .split-button__main:not(:disabled):focus-visible,
+      & .split-button__caret:not(:disabled):focus-visible {
+        @apply bg-zinc-50 outline-2 outline-offset-0 outline-brand-600;
       }
 
       & .split-button__divider {
