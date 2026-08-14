@@ -40,6 +40,19 @@ export interface KeyActivity extends BaseActivity {
 
 export type RecentActivity = BucketActivity | ObjectActivity | KeyActivity;
 
+/**
+ * Human labels for activity actions. The resource is already named and badged
+ * on the row, so the label carries only what happened.
+ */
+export const ACTIVITY_ACTION_LABELS: Record<RecentActivity['action'], string> = {
+  'bucket.created': 'Created',
+  'bucket.deleted': 'Deleted',
+  'object.uploaded': 'Uploaded',
+  'object.deleted': 'Deleted',
+  'key.created': 'Created',
+  'key.deleted': 'Deleted',
+};
+
 export interface RecentActivityResponse {
   activities: RecentActivity[];
 }
