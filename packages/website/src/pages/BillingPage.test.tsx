@@ -104,7 +104,7 @@ describe('BillingPage — inactive subscription', () => {
     mockGetBilling.mockResolvedValue(trialingBilling());
     const { container } = renderPage();
 
-    await screen.findByText('Free Trial');
+    await screen.findByText('Free trial');
     const cta = container.querySelector('#billing-plan-cta-button');
     expect(cta).toHaveTextContent('Upgrade now');
     expect(mockGetInvoices).not.toHaveBeenCalled();
