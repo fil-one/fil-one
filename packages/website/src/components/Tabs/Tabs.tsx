@@ -40,9 +40,9 @@ export type TabPanelProps = {
 
 export function Tabs({ children, defaultIndex = 0, selectedIndex, onChange }: TabsProps) {
   // Controlled when `selectedIndex` is supplied; otherwise uncontrolled via `defaultIndex`.
-  // Passing both to Headless UI's TabGroup triggers a controlled/uncontrolled warning.
-  const modeProps =
-    selectedIndex === undefined ? { defaultIndex } : { selectedIndex, defaultIndex: undefined };
+  // Headless UI's TabGroup reads the mode off `selectedIndex` alone (it defaults the prop
+  // to null and treats non-null as controlled), so `defaultIndex` is dead weight there.
+  const modeProps = selectedIndex === undefined ? { defaultIndex } : { selectedIndex };
   return (
     <TabGroup {...modeProps} onChange={onChange}>
       {children}
