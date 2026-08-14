@@ -70,7 +70,31 @@ export const CompletedWithErrors: Story = {
       status: BulkDeleteJobStatus.CompletedWithErrors,
       deletedCount: 19_988,
       failedCount: 12,
-      failures: [{ key: 'legal/contract.pdf', code: 'AccessDenied', message: 'under retention' }],
+      failures: Array.from({ length: 12 }, (_, i) => ({
+        key: `legal/contract-${i}.pdf`,
+        code: 'AccessDenied',
+        message: 'under retention',
+      })),
+      completedAt: '2026-04-01T10:04:00Z',
+    }),
+  },
+};
+
+/**
+ * When more objects failed than we hold reasons for (the failure sample is
+ * capped), we state the count without claiming a single cause.
+ */
+export const CompletedWithManyErrors: Story = {
+  args: {
+    job: job({
+      status: BulkDeleteJobStatus.CompletedWithErrors,
+      deletedCount: 4_800,
+      failedCount: 2_400,
+      failures: Array.from({ length: 100 }, (_, i) => ({
+        key: `legal/contract-${i}.pdf`,
+        code: 'AccessDenied',
+        message: 'under retention',
+      })),
       completedAt: '2026-04-01T10:04:00Z',
     }),
   },

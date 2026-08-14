@@ -54,7 +54,12 @@ export interface BulkDeleteFailure {
   key: string;
   versionId?: string;
   code: string;
-  message: string;
+  /**
+   * The gateway's human-readable reason, when it gave one. Absent means no
+   * message came back (only the `code`), so callers must not assume a reason is
+   * always present.
+   */
+  message?: string;
 }
 
 export interface BulkDeleteJob {

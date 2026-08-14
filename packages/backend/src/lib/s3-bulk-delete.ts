@@ -183,7 +183,9 @@ export async function deleteTargets(options: DeleteTargetsOptions): Promise<Dele
         key: error.Key ?? '(unknown)',
         ...(error.VersionId && { versionId: error.VersionId }),
         code: error.Code ?? 'Unknown',
-        message: error.Message ?? 'Delete failed',
+        // Only carry a message when the gateway actually gave one; a synthesized
+        // placeholder would read as a bogus reason in the UI.
+        ...(error.Message && { message: error.Message }),
       });
     }
     deleted += batch.length - errors.length;

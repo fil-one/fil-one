@@ -224,6 +224,17 @@ describe('deleteTargets', () => {
     ]);
   });
 
+  it('omits the message when the gateway gives none, rather than synthesizing one', async () => {
+    s3Mock.on(DeleteObjectsCommand).resolves({
+      Errors: [{ Key: 'locked.txt', Code: 'AccessDenied' }],
+    });
+
+    const result = await deleteTargets({ s3, bucket, targets: [{ key: 'locked.txt' }] });
+
+    expect(result.failures).toEqual([{ key: 'locked.txt', code: 'AccessDenied' }]);
+    expect(result.failures[0]).not.toHaveProperty('message');
+  });
+
   it('propagates a batch-level failure rather than swallowing it', async () => {
     // A whole-request rejection (not per-key errors) means the page did not
     // complete; it must surface so the worker records the job as failed rather

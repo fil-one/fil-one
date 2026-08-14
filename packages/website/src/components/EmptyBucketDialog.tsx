@@ -175,7 +175,7 @@ function BulkDeleteOutcome({ job }: { job: BulkDeleteJob }) {
       <Alert
         variant="amber"
         title={`Deleted ${job.deletedCount.toLocaleString()}, ${job.failedCount.toLocaleString()} left`}
-        description={`${job.failedCount.toLocaleString()} objects could not be deleted. ${describeFirstFailure(job)}`}
+        description={describeFailures(job)}
       />
     );
   }
@@ -189,8 +189,28 @@ function BulkDeleteOutcome({ job }: { job: BulkDeleteJob }) {
   );
 }
 
-function describeFirstFailure(job: BulkDeleteJob): string {
-  const first = job.failures[0];
-  if (!first) return '';
-  return `First: ${first.key} (${first.code}).`;
+/**
+ * Explain why objects survived, collectively rather than by naming a file. We
+ * state a reason only when the gateway gave a human message for every recorded
+ * failure and they all agree (object-lock retention is the usual one). When any
+ * reason is missing, they differ, or more objects failed than we hold reasons
+ * for, we keep to the count rather than claim a cause that might not hold. The
+ * per-object detail (including any retention window) lives on the object.
+ */
+function describeFailures(job: BulkDeleteJob): string {
+  const count = job.failedCount;
+  const noun = count === 1 ? 'object' : 'objects';
+  const lead = `${count.toLocaleString()} ${noun} couldn't be deleted`;
+
+  const messages = job.failures.map((f) => f.message?.trim()).filter((m): m is string => !!m);
+  const reasons = new Set(messages);
+  // Every one of the failed objects contributed the same message. `messages`
+  // reaching `count` also implies we hold a reason for all of them (the sample
+  // was not capped), so the collective claim is safe.
+  if (messages.length === count && reasons.size === 1) {
+    const [reason] = reasons;
+    const subject = count === 1 ? "it's" : "they're";
+    return `${lead} because ${subject} ${reason}.`;
+  }
+  return `${lead}.`;
 }
