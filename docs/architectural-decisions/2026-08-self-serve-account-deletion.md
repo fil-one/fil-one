@@ -40,7 +40,7 @@ sequenceDiagram
 
 After the transaction is committed deletion worker is invoked. In the case of invocation failing the deletion will be picked up within up to 30 minutes by the cron worker and a new invocation will be issued. Confirm does not fail the request when the invocation fails, since the record is the source of truth rather than the invocation.
 
-### 2. Teardown is idempotent; recovery means re-running the teardown job
+### 2. Teardown is idempotent; error recovery means re-running the teardown job
 
 Given that every step of the teardown is idempotent, recovery simply means re-running the whole teardown. With idempotency being a property of the teardown / deletion worker we were able to avoid usage of state machines and need for checkpointing.
 
