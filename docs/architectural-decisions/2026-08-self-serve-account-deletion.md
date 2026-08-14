@@ -63,8 +63,6 @@ Due to our system having multiple write paths multiple deletion guards / fences 
 
 None of the three covers the other two. `deleting` cannot guard a write that creates its own row, as there is no row yet to carry the condition. The identity flag stops the user but not third-party callbacks made on their behalf. `attribute_exists(pk)` covers the billing rows both of the others miss.
 
-**NOTE:** tenant setup conditions on `attribute_not_exists(deleting)`. Setting `deleting: false` to unblock an org releases the other checks while leaving tenant setup refused permanently. The attribute has to be removed instead.
-
 ### 4. Confirmation is terminal
 
 There are no soft-deletion windows, no restore paths, etc. The safeguard sits ahead of the confirmation instead: a code emailed to the requesting admin, plus typing the org name.
