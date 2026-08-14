@@ -6,7 +6,7 @@ import { SidebarNav } from './SidebarNav';
 import { Banner } from './Banner';
 import { getUsage, getBilling, getMe, logout } from '../lib/api';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
-import { daysUntil } from '../lib/time.js';
+import { daysUntil, pluralizeDays } from '../lib/time.js';
 
 function MobileUserMenu() {
   const [open, setOpen] = useState(false);
@@ -91,8 +91,7 @@ export function gracePeriodMessage(graceDays: number | null): string {
   if (graceDays === 0) {
     return 'Your free trial has expired, and your account will be disabled later today. Upgrade to keep access or download your data immediately.';
   }
-  const unit = graceDays === 1 ? 'day' : 'days';
-  return `Your free trial has expired. ${graceDays} ${unit} left to upgrade or download your data.`;
+  return `Your free trial has expired. ${pluralizeDays(graceDays)} left to upgrade or download your data.`;
 }
 
 export function AppShell({ children }: AppShellProps) {

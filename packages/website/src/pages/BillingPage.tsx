@@ -23,7 +23,7 @@ import { SubscriptionStatus, TB_BYTES, getUsageLimits } from '@filone/shared';
 import type { CreateSetupIntentResponse } from '@filone/shared';
 
 import { apiRequest, getUsage, getBilling, getInvoices, activateSubscription } from '../lib/api.js';
-import { daysUntil, formatDate } from '../lib/time.js';
+import { daysRemainingLabel, daysUntil, formatDate } from '../lib/time.js';
 import { ChoosePlanDialog } from '../components/billing/ChoosePlanDialog.js';
 import { AddPaymentDialog } from '../components/billing/AddPaymentDialog.js';
 import { ContactSalesDialog } from '../components/billing/ContactSalesDialog.js';
@@ -283,7 +283,7 @@ export function BillingPage() {
             <button type="button" onClick={handleUpdatePayment} className="font-semibold underline">
               update your payment method
             </button>{' '}
-            to avoid losing access.{graceDays !== null ? ` ${graceDays} days remaining.` : ''}
+            to avoid losing access.{graceDays !== null ? ` ${daysRemainingLabel(graceDays)}.` : ''}
           </span>
         </div>
       )}
@@ -332,7 +332,7 @@ export function BillingPage() {
                   {isActive || isPastDue
                     ? payAsYouGoSubtitle
                     : isGracePeriod
-                      ? `Read-only access${graceDays !== null ? ` — ${graceDays} days remaining` : ''}`
+                      ? `Read-only access${graceDays !== null ? `. ${daysRemainingLabel(graceDays)}` : ''}`
                       : isCanceled
                         ? 'Subscription inactive'
                         : isInactive

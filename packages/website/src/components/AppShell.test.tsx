@@ -28,7 +28,8 @@ vi.mock('../lib/query-client.js', () => ({
   USAGE_STALE_TIME: 5 * 60_000,
 }));
 
-vi.mock('../lib/time.js', () => ({
+vi.mock(import('../lib/time.js'), async (importOriginal) => ({
+  ...(await importOriginal()),
   daysUntil: vi.fn(() => 5),
   formatDateTime: vi.fn(() => '2026-06-30'),
 }));
