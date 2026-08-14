@@ -95,12 +95,17 @@ async function processTenantSetup(client: FthManagementClient, orgId: string): P
     idempotencyKey: `console-${stage}-${tenantId}`,
   });
 
-  const accessKey = await client.createAccessKey(tenantId, String(storageUser.id), {
+  const accessKey = await client.createAccessKey(tenantId, storageUser.id, {
     name: 'filone-console',
     permissions: [...FTH_FULL_PERMISSIONS],
     buckets: [],
     expiresAt: null,
-    idempotencyKey: `${orgId}-console-key`,
+    // Scoped to the tenant and storage user rather than to orgId. A key derived from orgId alone
+    // stays constant while the path does not. An org that gets re-provisioned onto a new FTH client
+    // and storage user would replay such a key against a path it was never minted for, and fail
+    // with 409 "idempotency key replay with different payload" — permanently, since nothing about
+    // the key would ever change again.
+    idempotencyKey: `console-key-${stage}-${tenantId}-${storageUser.id}`,
   });
 
   await ssm.send(
