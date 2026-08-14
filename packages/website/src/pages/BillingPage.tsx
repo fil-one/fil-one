@@ -470,7 +470,11 @@ export function BillingPage() {
                     {storageLimit > 0 && ` / ${formatBytes(storageLimit)}`}
                   </span>
                 </div>
-                <ProgressBar value={storagePct} size="md" label="Storage usage" />
+                {/* Only meaningful against a finite allowance — pay-as-you-go
+                    storage is unlimited, so there is nothing to fill toward. */}
+                {storageLimit > 0 && (
+                  <ProgressBar value={storagePct} size="md" label="Storage usage" />
+                )}
               </div>
 
               {/* Egress bar (trial only) */}
