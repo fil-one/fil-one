@@ -348,16 +348,6 @@ function NotificationsSection() {
       description="Manage your notification preferences"
     >
       <div className="flex flex-col gap-3">
-        <div className="opacity-50">
-          <ToggleRow
-            label="Email notifications"
-            description="Get notified about your uploads and when approaching storage limits"
-            enabled={false}
-            disabled
-          />
-          <p className="text-xs text-zinc-400 italic">Coming soon</p>
-        </div>
-        <div className="h-px bg-[#e1e4ea]" />
         <ToggleRow
           label="Marketing emails"
           description="Receive updates about new features"
