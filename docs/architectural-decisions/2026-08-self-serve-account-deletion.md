@@ -99,7 +99,7 @@ Cancellation is a separate step because `customers.del` cancels subscriptions si
 
 A single best effort attempt it made to collect the user payment. A declined card must not block the teardown, and it does not need to: an outstanding invoice does not block customer deletion and stays open for finance afterwards.
 
-Deleting the customer deletes all if it's payment information. Invoices and charges are unaffected and keep referencing the customer id, so finance keeps the linkage either way.
+Deleting the customer deletes all of their payment information. Invoices and charges are unaffected and keep referencing the customer id, so finance keeps the linkage either way.
 
 **NOTE:** There is a possibility for us to not be able to bill the deleted customer in case the deletion happends before the first usage reporting.
 
