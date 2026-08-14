@@ -38,7 +38,6 @@ function record(overrides: Partial<BulkDeleteJobRecord> = {}): BulkDeleteJobReco
     deletedCount: 1200,
     failedCount: 0,
     failures: [],
-    multiDelete: true,
     startedAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:01:00.000Z',
     ttl: 1,
