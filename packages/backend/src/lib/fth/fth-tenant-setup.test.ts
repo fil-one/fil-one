@@ -114,7 +114,7 @@ describe('ensureTenantReady', () => {
       serviceUserId,
       expect.objectContaining({
         name: 'filone-console',
-        idempotencyKey: `${orgId}-console-key`,
+        idempotencyKey: `console-key-test-${fthClientId}-${serviceUserId}`,
       }),
     );
 
@@ -131,6 +131,40 @@ describe('ensureTenantReady', () => {
     expect(updateCalls[0].args[0].input.ExpressionAttributeValues).toMatchObject({
       ':tenantId': { S: fthClientId },
     });
+  });
+
+  // This test describes an error we experienced in e2e tests,
+  // after the org was re-provisioned onto a new FTH client and storage user.
+  it('varies the access-key idempotency key when the org is re-provisioned', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: profileItem({}) });
+    ddbMock.on(UpdateItemCommand).resolves({});
+    ssmMock.on(PutParameterCommand).resolves({});
+    stubSetupApiCalls();
+
+    await ensureTenantReady(fthClient, orgId);
+
+    // Re-provisioning lands the org on a new client and storage user.
+    mockFthClient.createClient.mockResolvedValue({
+      id: '99',
+      externalId: orgId,
+      displayName: `FilOne test ${orgId}`,
+      createdAt: '2026-01-01T00:00:00Z',
+    });
+    mockFthClient.createStorageUser.mockResolvedValue({
+      id: '13',
+      userCode: 'filone-console',
+      displayName: 'FilOne Console User',
+      email: 'console-test-99@filone.internal',
+      role: 'storage_user',
+      createdAt: '2026-01-01T00:00:00Z',
+    });
+
+    await ensureTenantReady(fthClient, orgId);
+
+    const idempotencyKeys = mockFthClient.createAccessKey.mock.calls.map(
+      ([, , args]) => args.idempotencyKey,
+    );
+    expect(new Set(idempotencyKeys).size).toBe(2);
   });
 
   it('returns null when setup throws', async () => {
