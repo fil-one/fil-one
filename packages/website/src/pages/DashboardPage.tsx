@@ -297,7 +297,10 @@ export function DashboardPage() {
               {planDisplayName(billing.subscription.planId)}
             </span>
             {isTrialing && (
-              <p className="mt-0.5 text-[11px] text-zinc-500">1 TB storage &amp; egress included</p>
+              <p className="mt-0.5 text-[11px] text-zinc-500">
+                {formatBytes(limits.storageLimitBytes)} storage ·{' '}
+                {formatBytes(limits.egressLimitBytes)} egress included
+              </p>
             )}
             {isInactive && (
               <p className="mt-0.5 text-[11px] text-zinc-500">
