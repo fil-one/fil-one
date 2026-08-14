@@ -54,7 +54,7 @@ export function SaveCredentialsModal({ open, onDone, credentials }: SaveCredenti
         <div className="mb-4">
           <Alert
             variant="amber"
-            description="Save your credentials in a safe place. Do not share your secret key with anyone."
+            description="This is the only time your secret key is shown — copy or download it now. Store it somewhere safe and never share it."
           />
         </div>
 
