@@ -120,7 +120,10 @@ async function submitUploadExpectingSuccess(
 // selects the in-memory file under the given object name, and submits. Stops
 // at submit so callers can assert success or failure for their role.
 async function submitUpload(page: Page, bucketName: string, objectName: string): Promise<void> {
-  await page.locator('#upload-object-button').click();
+  // The page header CTA renders only for non-empty buckets; an empty bucket
+  // offers the upload CTA in the object browser's empty state instead. The
+  // unpaid role's buckets are always empty, since that role can never upload.
+  await page.locator('#upload-object-button, #object-browser-upload-button').first().click();
   await expect(page).toHaveURL((url) => url.pathname === `/buckets/${bucketName}/upload`);
 
   // Setting files directly on the (hidden) files input triggers React's
