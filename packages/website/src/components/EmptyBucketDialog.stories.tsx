@@ -42,12 +42,22 @@ type Story = StoryObj<typeof EmptyBucketDialog>;
 /** Delete is disabled until the bucket name is typed exactly. */
 export const Confirmation: Story = {};
 
-export const NoObjectCount: Story = {
-  args: { totalObjectCount: undefined },
+/** The gap between confirming and the job existing: the button holds a spinner. */
+export const Starting: Story = {
+  args: { starting: true },
 };
 
 export const InProgress: Story = {
   args: {
+    job: job({ deletedCount: 7400 }),
+    isRunning: true,
+  },
+};
+
+/** Without a total there is nothing to measure against, so no progress bar. */
+export const InProgressWithoutTotal: Story = {
+  args: {
+    totalObjectCount: undefined,
     job: job({ deletedCount: 7400 }),
     isRunning: true,
   },

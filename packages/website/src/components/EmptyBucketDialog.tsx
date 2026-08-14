@@ -1,12 +1,11 @@
 import { useState } from 'react';
 import { DialogTitle } from '@headlessui/react';
-import { WarningCircleIcon } from '@phosphor-icons/react/dist/ssr';
+import { CheckCircleIcon, WarningCircleIcon, WarningIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { BulkDeleteJobStatus, type BulkDeleteJob } from '@filone/shared';
 
-import { Alert } from './Alert';
 import { Button } from './Button';
-import { IconBox } from './IconBox';
+import { IconBox, type IconBoxColor } from './IconBox';
 import { Input } from './Input';
 import { Label } from './Label';
 import { Modal, ModalBody, ModalFooter } from './Modal';
@@ -45,6 +44,9 @@ export function EmptyBucketDialog({
   // Once the job exists the work is server-side, so there is nothing left to
   // confirm and closing the dialog does not stop it.
   const started = job !== null;
+  // A finished job takes over the icon and the title rather than reporting
+  // itself in a banner underneath them, which would state the outcome twice.
+  const outcome = job && !isRunning ? describeOutcome(job) : null;
 
   function handleClose() {
     setTypedName('');
@@ -54,11 +56,17 @@ export function EmptyBucketDialog({
   return (
     <Modal open={open} onClose={handleClose} size="sm" testId="empty-bucket-dialog">
       <ModalBody>
-        <div className="flex flex-col items-center gap-3 px-2 pt-6 pb-0 text-center">
-          <IconBox icon={WarningCircleIcon} color="red" size="lg" />
-          <div className="flex flex-col gap-1">
+        {/* No horizontal padding: the input and the alerts share the footer's
+            px-6 so their edges line up with the buttons. */}
+        <div className="flex flex-col items-center gap-3 pt-6 pb-0 text-center">
+          <IconBox
+            icon={outcome?.icon ?? WarningCircleIcon}
+            color={outcome?.color ?? 'red'}
+            size="lg"
+          />
+          <div className="flex w-full flex-col gap-1">
             <DialogTitle as="p" className="text-base font-medium text-zinc-900">
-              Empty this bucket
+              {outcome?.title ?? 'Empty this bucket'}
             </DialogTitle>
             <BulkDeleteBody
               bucketName={bucketName}
@@ -88,10 +96,13 @@ export function EmptyBucketDialog({
       </ModalBody>
       <ModalFooter>
         <div className="flex w-full gap-3">
+          {/* Close spans the footer on its own; before that, Cancel takes only
+              the width its label needs so the longer destructive label (and its
+              spinner) stay on one line. */}
           <Button
             id="empty-bucket-cancel-button"
             variant="ghost"
-            className="flex-1"
+            className={started ? 'flex-1' : undefined}
             onClick={handleClose}
           >
             {started ? 'Close' : 'Cancel'}
@@ -104,8 +115,16 @@ export function EmptyBucketDialog({
               disabled={!confirmed || starting}
               onClick={onConfirm}
             >
-              {starting && <Spinner ariaLabel="Starting deletion" size={14} />}
-              Delete everything
+              {/* Button wraps its children in a plain span, so the spinner's
+                  block-level root would sit above the label. This row keeps
+                  them side by side, and text-current keeps the arc the same
+                  colour as the label rather than brand blue. */}
+              <span className="inline-flex items-center gap-2">
+                {starting && (
+                  <Spinner ariaLabel="Starting deletion" size={14} colorClassName="text-current" />
+                )}
+                Delete everything
+              </span>
             </Button>
           )}
         </div>
@@ -126,13 +145,12 @@ function BulkDeleteBody({
   isRunning: boolean;
 }) {
   if (!job) {
-    const count =
-      totalObjectCount !== undefined
-        ? `all ${totalObjectCount.toLocaleString()} objects`
-        : 'every object';
+    // No count here: the bucket's object count comes from analytics and lags
+    // recent writes, so a stale number on a permanent-delete confirmation would
+    // be worse than none.
     return (
       <p className="text-sm text-zinc-500">
-        This permanently deletes {count} in {bucketName}, including every previous version. It
+        This permanently deletes all objects in {bucketName}, including every previous version. It
         cannot be undone.
       </p>
     );
@@ -156,37 +174,47 @@ function BulkDeleteBody({
     );
   }
 
-  return <BulkDeleteOutcome job={job} />;
+  return <p className="text-sm text-zinc-500">{describeOutcome(job).description}</p>;
 }
 
-function BulkDeleteOutcome({ job }: { job: BulkDeleteJob }) {
+type Outcome = {
+  icon: typeof WarningCircleIcon;
+  color: IconBoxColor;
+  title: string;
+  description: string;
+};
+
+/** The icon, title and copy a finished job replaces the header with. */
+function describeOutcome(job: BulkDeleteJob): Outcome {
   if (job.status === BulkDeleteJobStatus.Failed) {
-    return (
-      <Alert
-        variant="red"
-        title="Deletion stopped"
-        description={job.error ?? 'The deletion could not be completed.'}
-      />
-    );
+    return {
+      icon: WarningCircleIcon,
+      color: 'red',
+      title: 'Deletion stopped',
+      description: job.error ?? 'The deletion could not be completed.',
+    };
   }
 
   if (job.status === BulkDeleteJobStatus.CompletedWithErrors) {
-    return (
-      <Alert
-        variant="amber"
-        title={`Deleted ${job.deletedCount.toLocaleString()}, ${job.failedCount.toLocaleString()} left`}
-        description={describeFailures(job)}
-      />
-    );
+    // The counts belong in the description as two sentences. Joining them in
+    // the title ("Deleted 4,800, 2,400 left") put a clause comma next to the
+    // thousands separators, so the numbers were hard to read apart.
+    const deletedNoun = job.deletedCount === 1 ? 'object' : 'objects';
+    return {
+      icon: WarningIcon,
+      color: 'amber',
+      title: 'Some objects remain',
+      description: `Deleted ${job.deletedCount.toLocaleString()} ${deletedNoun}. ${describeFailures(job)}`,
+    };
   }
 
-  return (
-    <Alert
-      variant="green"
-      title="Bucket emptied"
-      description={`Deleted ${job.deletedCount.toLocaleString()} objects.`}
-    />
-  );
+  const noun = job.deletedCount === 1 ? 'object' : 'objects';
+  return {
+    icon: CheckCircleIcon,
+    color: 'green',
+    title: 'Bucket empty',
+    description: `Deleted ${job.deletedCount.toLocaleString()} ${noun}.`,
+  };
 }
 
 /**
