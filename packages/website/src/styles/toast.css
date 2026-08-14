@@ -28,7 +28,7 @@
   .toast-close {
     @apply flex cursor-pointer items-center justify-center rounded p-0.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700;
 
-    &:focus {
+    &:focus-visible {
       @apply brand-outline;
     }
   }
