@@ -280,9 +280,6 @@ async function handleSubscriptionUpdate(
       subscriptionId: subscription.id,
       customerId,
     });
-    // The billing record is deliberately not written for these statuses, but a
-    // contact left holding a stale `trialing` is how a paying customer receives
-    // a deletion warning. This resolves to `unknown`, which the sequence excludes.
     await syncHubSpotStatusBestEffort({
       userId: subscription.metadata?.userId,
       status: fromInternalStatus(mappedStatus),

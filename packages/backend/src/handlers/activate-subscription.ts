@@ -216,10 +216,6 @@ async function createOrUpdateSubscription({
     items: [{ price: secrets.STRIPE_PRICE_ID }],
     default_payment_method: paymentMethodId,
     ...(discounts ? { discounts } : {}),
-    // userId is load-bearing: handleSubscriptionDeleted reads it off the
-    // subscription — not the customer, which may be deleted by then — and throws
-    // without it. orgId is for consistency with the other two creation sites and
-    // feeds the webhook's orgIdBackfill.
     metadata: { userId, ...(orgId ? { orgId } : {}) },
     expand: ['latest_invoice.payment_intent', 'default_payment_method'],
   });
