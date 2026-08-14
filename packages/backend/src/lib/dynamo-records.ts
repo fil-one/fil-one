@@ -280,12 +280,6 @@ export interface BulkDeleteJobRecord {
   failures: BulkDeleteFailure[];
   /** Listing resume point; absent once the walk is exhausted. */
   cursor?: BulkDeleteCursorRecord;
-  /**
-   * Whether to keep attempting batched DeleteObjects. Cleared permanently for
-   * the job once a gateway has been seen to reject it, so the fallback is
-   * decided once rather than re-probed on every page.
-   */
-  multiDelete: boolean;
   startedAt: string; // ISO-8601
   updatedAt: string; // ISO-8601
   completedAt?: string; // ISO-8601

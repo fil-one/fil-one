@@ -2,6 +2,8 @@
 // every page, so these helpers keep the marshalling and the failure-list cap in
 // one place rather than spread across the worker and the handlers.
 
+import { createHash } from 'node:crypto';
+
 import {
   ConditionalCheckFailedException,
   GetItemCommand,
@@ -32,13 +34,14 @@ const JOB_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 export class BulkDeleteJobExistsError extends Error {
   constructor(public readonly job: BulkDeleteJobRecord) {
-    super('A bulk delete job already exists for this idempotency key');
+    super('A bulk delete job already exists for this request');
     this.name = 'BulkDeleteJobExistsError';
   }
 }
 
 export interface CreateJobArgs {
-  jobId: string;
+  /** Caller-supplied UUID that makes a retry of the same submission idempotent. */
+  idempotencyKey: string;
   orgId: string;
   region: S3Region;
   bucketName: string;
@@ -48,12 +51,44 @@ export interface CreateJobArgs {
 }
 
 /**
- * Create a job row, failing if one already exists for the same id. Because the
- * id is the caller's idempotency key, a duplicate submit lands here and the
+ * Derive the job id from the request rather than trusting the caller's key
+ * verbatim. Folding every parameter into the id means a resubmit is treated as
+ * the same job only when it targets the same bucket, prefix and scope: reusing
+ * an idempotency key against different arguments yields a different id and its
+ * own job, instead of silently attaching to an unrelated deletion.
+ *
+ * The idempotency key stays in the hash so two distinct user actions on the same
+ * bucket start separate jobs. That is deliberate: a job may already have walked
+ * past an object a second user has since uploaded, and only a fresh job re-reads
+ * the listing. Concurrent jobs against one bucket are safe because each owns its
+ * own row and DeleteObjects is idempotent, so the walks converge on an empty
+ * bucket.
+ */
+export function deriveBulkDeleteJobId(
+  args: Pick<
+    CreateJobArgs,
+    'idempotencyKey' | 'orgId' | 'region' | 'bucketName' | 'prefix' | 'scope'
+  >,
+): string {
+  const canonical = JSON.stringify([
+    args.orgId,
+    args.region,
+    args.bucketName,
+    args.prefix,
+    args.scope,
+    args.idempotencyKey,
+  ]);
+  return createHash('sha256').update(canonical).digest('hex');
+}
+
+/**
+ * Create a job row, failing if one already exists for the same derived id. A
+ * duplicate submit (same arguments and idempotency key) lands here and the
  * existing job is returned to the caller instead of a second deletion starting.
  */
 export async function createBulkDeleteJob(args: CreateJobArgs): Promise<BulkDeleteJobRecord> {
-  const { jobId, orgId, region, bucketName, prefix, scope, now = new Date() } = args;
+  const { orgId, region, bucketName, prefix, scope, now = new Date() } = args;
+  const jobId = deriveBulkDeleteJobId(args);
   const timestamp = now.toISOString();
 
   const record: BulkDeleteJobRecord = {
@@ -69,7 +104,6 @@ export async function createBulkDeleteJob(args: CreateJobArgs): Promise<BulkDele
     deletedCount: 0,
     failedCount: 0,
     failures: [],
-    multiDelete: true,
     startedAt: timestamp,
     updatedAt: timestamp,
     ttl: Math.floor(now.getTime() / 1000) + JOB_TTL_SECONDS,
@@ -80,7 +114,10 @@ export async function createBulkDeleteJob(args: CreateJobArgs): Promise<BulkDele
       new PutItemCommand({
         TableName: Resource.BulkDeleteTable.name,
         Item: marshall(record, { removeUndefinedValues: true }),
-        ConditionExpression: 'attribute_not_exists(pk) AND attribute_not_exists(sk)',
+        // The item is keyed by pk+sk, so guarding on the sort key alone is
+        // enough to reject only a re-put of this exact job; other jobs in the
+        // same org (same pk, different sk) are unaffected.
+        ConditionExpression: 'attribute_not_exists(sk)',
       }),
     );
   } catch (err) {
@@ -138,7 +175,7 @@ export async function putBulkDeleteJob(record: BulkDeleteJobRecord): Promise<voi
  */
 export function applyPageResult(
   record: BulkDeleteJobRecord,
-  page: { deleted: number; failures: BulkDeleteFailure[]; multiDeleteUnsupported: boolean },
+  page: { deleted: number; failures: BulkDeleteFailure[] },
   now = new Date(),
 ): BulkDeleteJobRecord {
   const remainingSlots = Math.max(0, MAX_REPORTED_BULK_DELETE_FAILURES - record.failures.length);
@@ -149,7 +186,6 @@ export function applyPageResult(
     deletedCount: record.deletedCount + page.deleted,
     failedCount: record.failedCount + page.failures.length,
     failures: [...record.failures, ...page.failures.slice(0, remainingSlots)],
-    multiDelete: record.multiDelete && !page.multiDeleteUnsupported,
     updatedAt: now.toISOString(),
   };
 }

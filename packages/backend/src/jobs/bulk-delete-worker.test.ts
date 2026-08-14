@@ -8,7 +8,6 @@ import type { BulkDeleteJobRecord } from '../lib/dynamo-records.js';
 vi.mock('sst', () => ({
   Resource: {
     BulkDeleteTable: { name: 'BulkDeleteTable' },
-    BulkDeleteWorker: { name: 'BulkDeleteWorker' },
   },
 }));
 
@@ -76,7 +75,6 @@ function job(overrides: Partial<BulkDeleteJobRecord> = {}): BulkDeleteJobRecord 
     deletedCount: 0,
     failedCount: 0,
     failures: [],
-    multiDelete: true,
     startedAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     ttl: 1,
@@ -98,7 +96,8 @@ function lastSavedJob(): BulkDeleteJobRecord {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockDelete.mockResolvedValue({ deleted: 0, failures: [], multiDeleteUnsupported: false });
+  process.env.BULK_DELETE_WORKER_FUNCTION_NAME = 'filone-test-BulkDeleteWorker';
+  mockDelete.mockResolvedValue({ deleted: 0, failures: [] });
 });
 
 describe('bulk-delete worker', () => {
@@ -115,6 +114,15 @@ describe('bulk-delete worker', () => {
     expect(mockPutJob).not.toHaveBeenCalled();
   });
 
+  it('skips a job already in the completed-with-errors terminal state', async () => {
+    // finalizeJob clears the cursor for this status too, so a duplicate Event
+    // re-invocation must not restart the listing walk from the beginning.
+    mockGetJob.mockResolvedValue(job({ status: BulkDeleteJobStatus.CompletedWithErrors }));
+    await handler(payload, context, generousBudget);
+    expect(mockEnumerate).not.toHaveBeenCalled();
+    expect(mockPutJob).not.toHaveBeenCalled();
+  });
+
   it('walks every page and completes in one invocation', async () => {
     mockGetJob.mockResolvedValue(job());
     mockEnumerate
@@ -123,7 +131,7 @@ describe('bulk-delete worker', () => {
         nextCursor: { keyMarker: 'a.txt' },
       })
       .mockResolvedValueOnce({ targets: [{ key: 'b.txt' }] });
-    mockDelete.mockResolvedValue({ deleted: 1, failures: [], multiDeleteUnsupported: false });
+    mockDelete.mockResolvedValue({ deleted: 1, failures: [] });
 
     await handler(payload, context, generousBudget);
 
@@ -164,7 +172,6 @@ describe('bulk-delete worker', () => {
     mockDelete.mockResolvedValue({
       deleted: 0,
       failures: [{ key: 'locked.txt', code: 'AccessDenied', message: 'under retention' }],
-      multiDeleteUnsupported: false,
     });
 
     await handler(payload, context, generousBudget);
@@ -172,21 +179,6 @@ describe('bulk-delete worker', () => {
     const saved = lastSavedJob();
     expect(saved.status).toBe(BulkDeleteJobStatus.CompletedWithErrors);
     expect(saved.failedCount).toBe(1);
-  });
-
-  it('stops attempting batched deletes once the gateway rejects them', async () => {
-    mockGetJob.mockResolvedValue(job());
-    mockEnumerate
-      .mockResolvedValueOnce({ targets: [{ key: 'a.txt' }], nextCursor: { keyMarker: 'a.txt' } })
-      .mockResolvedValueOnce({ targets: [{ key: 'b.txt' }] });
-    mockDelete
-      .mockResolvedValueOnce({ deleted: 1, failures: [], multiDeleteUnsupported: true })
-      .mockResolvedValueOnce({ deleted: 1, failures: [], multiDeleteUnsupported: false });
-
-    await handler(payload, context, generousBudget);
-
-    // Second page must not re-probe the unsupported batch API.
-    expect(mockDelete.mock.calls[1][0].multiDelete).toBe(false);
   });
 
   it('records a failure status when the run throws', async () => {
@@ -198,6 +190,36 @@ describe('bulk-delete worker', () => {
     const saved = lastSavedJob();
     expect(saved.status).toBe(BulkDeleteJobStatus.Failed);
     expect(saved.error).toBe('listing blew up');
+  });
+
+  it('preserves progress from completed pages when a later page throws', async () => {
+    mockGetJob.mockResolvedValue(job());
+    mockEnumerate
+      .mockResolvedValueOnce({ targets: [{ key: 'a.txt' }], nextCursor: { keyMarker: 'a.txt' } })
+      .mockRejectedValueOnce(new Error('listing blew up on page 2'));
+    mockDelete.mockResolvedValueOnce({ deleted: 1, failures: [] });
+
+    await handler(payload, context, generousBudget);
+
+    const saved = lastSavedJob();
+    expect(saved.status).toBe(BulkDeleteJobStatus.Failed);
+    // The first page's deletion must not be lost by failing on the stale
+    // start-of-invocation record.
+    expect(saved.deletedCount).toBe(1);
+  });
+
+  it('fails the job when its own function name is not configured', async () => {
+    delete process.env.BULK_DELETE_WORKER_FUNCTION_NAME;
+    mockGetJob.mockResolvedValue(job());
+    mockEnumerate.mockResolvedValue({
+      targets: [{ key: 'a.txt' }],
+      nextCursor: { keyMarker: 'a.txt' },
+    });
+
+    await handler(payload, context, () => 0);
+
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(lastSavedJob().status).toBe(BulkDeleteJobStatus.Failed);
   });
 
   it('fails the job when the tenant is not provisioned in the region', async () => {

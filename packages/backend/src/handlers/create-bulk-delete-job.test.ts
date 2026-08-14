@@ -57,7 +57,6 @@ function record(overrides: Partial<BulkDeleteJobRecord> = {}): BulkDeleteJobReco
     deletedCount: 0,
     failedCount: 0,
     failures: [],
-    multiDelete: true,
     startedAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     ttl: 1,
@@ -95,9 +94,9 @@ describe('create-bulk-delete-job', () => {
     expect(sendMock).toHaveBeenCalledTimes(1);
   });
 
-  it('uses the idempotency key as the job id', async () => {
+  it('passes the idempotency key through so the job id can be derived from it', async () => {
     await baseHandler(event({ idempotencyKey }));
-    expect(mockCreate.mock.calls[0][0].jobId).toBe(idempotencyKey);
+    expect(mockCreate.mock.calls[0][0].idempotencyKey).toBe(idempotencyKey);
   });
 
   it('defaults to the whole bucket and all versions', async () => {

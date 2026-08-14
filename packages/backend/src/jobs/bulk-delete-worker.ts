@@ -12,9 +12,8 @@
 
 import type { Context } from 'aws-lambda';
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
-import { Resource } from 'sst';
 
-import { BulkDeleteJobStatus } from '@filone/shared';
+import { isTerminalBulkDeleteStatus } from '@filone/shared';
 
 import {
   applyPageResult,
@@ -62,13 +61,18 @@ export async function handler(
     console.error(`${LOG} Job not found`, { orgId, jobId });
     return;
   }
-  if (job.status === BulkDeleteJobStatus.Completed || job.status === BulkDeleteJobStatus.Failed) {
+  if (isTerminalBulkDeleteStatus(job.status)) {
     console.warn(`${LOG} Job already finished, skipping`, { jobId, status: job.status });
     return;
   }
 
+  // Track the freshest job state so the failure path records progress made this
+  // invocation rather than regressing to the start-of-invocation counts.
+  let latestJob = job;
   try {
-    const outcome = await runPages(job, deadlineEpochMs);
+    const outcome = await runPages(job, deadlineEpochMs, (progressed) => {
+      latestJob = progressed;
+    });
     if (outcome.exhausted) {
       await putBulkDeleteJob(finalizeJob(outcome.job));
       console.log(`${LOG} Job complete`, {
@@ -86,7 +90,7 @@ export async function handler(
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Bulk delete failed';
     console.error(`${LOG} Job failed`, { jobId, error: err });
-    await putBulkDeleteJob(failJob(job, message));
+    await putBulkDeleteJob(failJob(latestJob, message));
   }
 }
 
@@ -99,6 +103,7 @@ interface RunOutcome {
 async function runPages(
   initial: BulkDeleteJobRecord,
   deadlineEpochMs: number,
+  onProgress: (job: BulkDeleteJobRecord) => void,
 ): Promise<RunOutcome> {
   const s3 = createS3Client(await resolveClientContext(initial));
   let job = initial;
@@ -117,10 +122,10 @@ async function runPages(
       s3,
       bucket: job.bucketName,
       targets: page.targets,
-      multiDelete: job.multiDelete,
     });
 
     job = { ...applyPageResult(job, result), cursor: page.nextCursor };
+    onProgress(job);
 
     if (!page.nextCursor) return { job, exhausted: true };
 
@@ -147,9 +152,16 @@ async function resolveClientContext(job: BulkDeleteJobRecord) {
 }
 
 async function reinvoke(payload: BulkDeleteWorkerPayload): Promise<void> {
+  // The worker cannot link to itself at creation, so `Resource.BulkDeleteWorker`
+  // is not injected here; its own function name arrives via env instead (see
+  // sst.config.ts). Mirrors RAG_INDEXER_WORKER_FUNCTION_NAME / USAGE_WORKER_*.
+  const functionName = process.env.BULK_DELETE_WORKER_FUNCTION_NAME;
+  if (!functionName) {
+    throw new Error('BULK_DELETE_WORKER_FUNCTION_NAME is not set');
+  }
   await lambda.send(
     new InvokeCommand({
-      FunctionName: Resource.BulkDeleteWorker.name,
+      FunctionName: functionName,
       InvocationType: 'Event',
       Payload: Buffer.from(JSON.stringify(payload)),
     }),

@@ -79,11 +79,12 @@ export async function baseHandler(
 
   const { prefix, scope, idempotencyKey } = parsed.data;
 
-  // The idempotency key doubles as the job id, so a resubmitted request lands on
-  // the existing row instead of starting a second deletion.
+  // The job id is derived from the request (bucket, prefix, scope and the
+  // idempotency key), so a resubmit of the same request lands on the existing
+  // row instead of starting a second deletion. See deriveBulkDeleteJobId.
   try {
     const job = await createBulkDeleteJob({
-      jobId: idempotencyKey,
+      idempotencyKey,
       orgId,
       region,
       bucketName,

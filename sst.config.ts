@@ -684,7 +684,14 @@ export default $config({
     const bulkDeleteWorker = createFn('BulkDeleteWorker', {
       handler: 'packages/backend/src/jobs/bulk-delete-worker.handler',
       link: [bulkDeleteTable, userInfoTable, ...managementApiTokens],
-      environment: { ...sharedEnv, ...fthEnv, ...forgeEnv, ...orchestratorEnv },
+      // The worker resumes a long job by invoking itself, but a function cannot
+      // link to itself at creation, so its own name is injected as a
+      // deterministic string rather than through `Resource`. Kept in sync with
+      // the physical name in createFn (`filone-${stage}-${fnName}`).
+      environment: {
+        ...orchestratorEnv,
+        BULK_DELETE_WORKER_FUNCTION_NAME: $interpolate`filone-${$app.stage}-BulkDeleteWorker`,
+      },
       timeout: '900 seconds',
       memory: '512 MB',
       permissions: s3DataPlanePermissions,

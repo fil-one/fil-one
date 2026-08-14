@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
-  DeleteObjectCommand,
   DeleteObjectsCommand,
   ListObjectVersionsCommand,
   ListObjectsV2Command,
@@ -10,12 +9,7 @@ import {
 
 import { BulkDeleteScope } from '@filone/shared';
 
-import {
-  deleteTargets,
-  enumerateDeletionPage,
-  isUnsupportedOperationError,
-  type BulkDeleteTarget,
-} from './s3-bulk-delete.js';
+import { deleteTargets, enumerateDeletionPage, type BulkDeleteTarget } from './s3-bulk-delete.js';
 import { createS3Client } from './s3-client.js';
 
 const s3Mock = mockClient(S3Client);
@@ -34,13 +28,6 @@ const bucket = 'test-bucket';
 beforeEach(() => {
   s3Mock.reset();
 });
-
-function unsupported(status: number) {
-  return Object.assign(new Error('not implemented'), {
-    name: 'NotImplemented',
-    $metadata: { httpStatusCode: status },
-  });
-}
 
 // ---------------------------------------------------------------------------
 // enumerateDeletionPage
@@ -175,10 +162,10 @@ describe('enumerateDeletionPage — all versions scope', () => {
 // deleteTargets
 // ---------------------------------------------------------------------------
 
-describe('deleteTargets — batched path', () => {
+describe('deleteTargets', () => {
   it('does nothing for an empty target list', async () => {
     const result = await deleteTargets({ s3, bucket, targets: [] });
-    expect(result).toEqual({ deleted: 0, failures: [], multiDeleteUnsupported: false });
+    expect(result).toEqual({ deleted: 0, failures: [] });
     expect(s3Mock.commandCalls(DeleteObjectsCommand)).toHaveLength(0);
   });
 
@@ -236,41 +223,11 @@ describe('deleteTargets — batched path', () => {
       { key: 'locked.txt', code: 'AccessDenied', message: 'Object is under retention' },
     ]);
   });
-});
 
-describe('deleteTargets — per-object fallback', () => {
-  it('uses individual deletes when multiDelete is off', async () => {
-    s3Mock.on(DeleteObjectCommand).resolves({});
-
-    const result = await deleteTargets({
-      s3,
-      bucket,
-      targets: [{ key: 'a.txt' }, { key: 'b.txt' }],
-      multiDelete: false,
-    });
-
-    expect(s3Mock.commandCalls(DeleteObjectsCommand)).toHaveLength(0);
-    expect(s3Mock.commandCalls(DeleteObjectCommand)).toHaveLength(2);
-    expect(result.deleted).toBe(2);
-    expect(result.multiDeleteUnsupported).toBe(false);
-  });
-
-  it('falls back and flags the gateway when DeleteObjects is not implemented', async () => {
-    s3Mock.on(DeleteObjectsCommand).rejects(unsupported(501));
-    s3Mock.on(DeleteObjectCommand).resolves({});
-
-    const result = await deleteTargets({
-      s3,
-      bucket,
-      targets: [{ key: 'a.txt' }, { key: 'b.txt' }],
-    });
-
-    expect(result.deleted).toBe(2);
-    expect(result.multiDeleteUnsupported).toBe(true);
-    expect(s3Mock.commandCalls(DeleteObjectCommand)).toHaveLength(2);
-  });
-
-  it('propagates a genuine batch failure instead of silently retrying', async () => {
+  it('propagates a batch-level failure rather than swallowing it', async () => {
+    // A whole-request rejection (not per-key errors) means the page did not
+    // complete; it must surface so the worker records the job as failed rather
+    // than counting the page as deleted.
     s3Mock.on(DeleteObjectsCommand).rejects(
       Object.assign(new Error('boom'), {
         name: 'InternalError',
@@ -281,55 +238,5 @@ describe('deleteTargets — per-object fallback', () => {
     await expect(deleteTargets({ s3, bucket, targets: [{ key: 'a.txt' }] })).rejects.toThrow(
       'boom',
     );
-    expect(s3Mock.commandCalls(DeleteObjectCommand)).toHaveLength(0);
-  });
-
-  it('records a failure per rejected object and keeps going', async () => {
-    s3Mock.on(DeleteObjectCommand).rejects(new Error('denied'));
-
-    const result = await deleteTargets({
-      s3,
-      bucket,
-      targets: [{ key: 'a.txt' }, { key: 'b.txt' }],
-      multiDelete: false,
-    });
-
-    expect(result.deleted).toBe(0);
-    expect(result.failures).toHaveLength(2);
-    expect(result.failures[0].message).toBe('denied');
-  });
-
-  it('deletes every target even when more targets than the concurrency limit', async () => {
-    s3Mock.on(DeleteObjectCommand).resolves({});
-    const targets = Array.from({ length: 100 }, (_, i) => ({ key: `obj-${i}` }));
-
-    const result = await deleteTargets({
-      s3,
-      bucket,
-      targets,
-      multiDelete: false,
-      concurrency: 4,
-    });
-
-    expect(result.deleted).toBe(100);
-    expect(s3Mock.commandCalls(DeleteObjectCommand)).toHaveLength(100);
-  });
-});
-
-describe('isUnsupportedOperationError', () => {
-  it('recognizes 501 and 405 responses', () => {
-    expect(isUnsupportedOperationError(unsupported(501))).toBe(true);
-    expect(isUnsupportedOperationError(unsupported(405))).toBe(true);
-  });
-
-  it('recognizes the error codes gateways use', () => {
-    expect(isUnsupportedOperationError({ Code: 'NotImplemented' })).toBe(true);
-    expect(isUnsupportedOperationError({ name: 'MethodNotAllowed' })).toBe(true);
-  });
-
-  it('rejects ordinary failures and non-objects', () => {
-    expect(isUnsupportedOperationError(new Error('boom'))).toBe(false);
-    expect(isUnsupportedOperationError(null)).toBe(false);
-    expect(isUnsupportedOperationError('nope')).toBe(false);
   });
 });

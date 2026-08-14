@@ -22,6 +22,7 @@ import {
   BulkDeleteJobExistsError,
   applyPageResult,
   createBulkDeleteJob,
+  deriveBulkDeleteJobId,
   failJob,
   finalizeJob,
   getBulkDeleteJob,
@@ -49,7 +50,6 @@ function job(overrides: Partial<BulkDeleteJobRecord> = {}): BulkDeleteJobRecord 
     deletedCount: 0,
     failedCount: 0,
     failures: [],
-    multiDelete: true,
     startedAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     ttl: 1,
@@ -65,16 +65,8 @@ const now = new Date('2026-02-01T00:00:00.000Z');
 
 describe('applyPageResult', () => {
   it('accumulates deleted and failed counts across pages', () => {
-    const first = applyPageResult(
-      job(),
-      { deleted: 10, failures: [failure('a')], multiDeleteUnsupported: false },
-      now,
-    );
-    const second = applyPageResult(
-      first,
-      { deleted: 5, failures: [failure('b')], multiDeleteUnsupported: false },
-      now,
-    );
+    const first = applyPageResult(job(), { deleted: 10, failures: [failure('a')] }, now);
+    const second = applyPageResult(first, { deleted: 5, failures: [failure('b')] }, now);
 
     expect(second.deletedCount).toBe(15);
     expect(second.failedCount).toBe(2);
@@ -82,30 +74,9 @@ describe('applyPageResult', () => {
   });
 
   it('marks the job running and stamps updatedAt', () => {
-    const result = applyPageResult(
-      job(),
-      { deleted: 1, failures: [], multiDeleteUnsupported: false },
-      now,
-    );
+    const result = applyPageResult(job(), { deleted: 1, failures: [] }, now);
     expect(result.status).toBe(BulkDeleteJobStatus.Running);
     expect(result.updatedAt).toBe(now.toISOString());
-  });
-
-  it('turns multiDelete off permanently once the gateway rejects it', () => {
-    const disabled = applyPageResult(
-      job(),
-      { deleted: 1, failures: [], multiDeleteUnsupported: true },
-      now,
-    );
-    expect(disabled.multiDelete).toBe(false);
-
-    // A later page that did not re-probe must not turn it back on.
-    const later = applyPageResult(
-      disabled,
-      { deleted: 1, failures: [], multiDeleteUnsupported: false },
-      now,
-    );
-    expect(later.multiDelete).toBe(false);
   });
 
   it('caps the retained failure list while still counting every failure', () => {
@@ -113,11 +84,7 @@ describe('applyPageResult', () => {
       failure(`key-${i}`),
     );
 
-    const result = applyPageResult(
-      job(),
-      { deleted: 0, failures: many, multiDeleteUnsupported: false },
-      now,
-    );
+    const result = applyPageResult(job(), { deleted: 0, failures: many }, now);
 
     expect(result.failures).toHaveLength(MAX_REPORTED_BULK_DELETE_FAILURES);
     expect(result.failedCount).toBe(many.length);
@@ -131,11 +98,7 @@ describe('applyPageResult', () => {
       failedCount: MAX_REPORTED_BULK_DELETE_FAILURES,
     });
 
-    const result = applyPageResult(
-      full,
-      { deleted: 0, failures: [failure('new')], multiDeleteUnsupported: false },
-      now,
-    );
+    const result = applyPageResult(full, { deleted: 0, failures: [failure('new')] }, now);
 
     expect(result.failures).toHaveLength(MAX_REPORTED_BULK_DELETE_FAILURES);
     expect(result.failedCount).toBe(MAX_REPORTED_BULK_DELETE_FAILURES + 1);
@@ -190,7 +153,7 @@ describe('toApiJob', () => {
 // ---------------------------------------------------------------------------
 
 const createArgs = {
-  jobId: 'job-1',
+  idempotencyKey: '3f1a6b2c-8d4e-4f0a-9b3c-1d2e3f4a5b6c',
   orgId: 'org-1',
   region: S3Region.EuWest1,
   bucketName: 'bucket',
@@ -202,15 +165,30 @@ function conditionalFailure() {
   return new ConditionalCheckFailedException({ $metadata: {}, message: 'exists' });
 }
 
+describe('deriveBulkDeleteJobId', () => {
+  it('is stable for the same request', () => {
+    expect(deriveBulkDeleteJobId(createArgs)).toBe(deriveBulkDeleteJobId(createArgs));
+  });
+
+  it('changes when any argument changes, so reusing a key elsewhere is a new job', () => {
+    const base = deriveBulkDeleteJobId(createArgs);
+    expect(deriveBulkDeleteJobId({ ...createArgs, bucketName: 'other' })).not.toBe(base);
+    expect(deriveBulkDeleteJobId({ ...createArgs, prefix: 'photos/' })).not.toBe(base);
+    expect(deriveBulkDeleteJobId({ ...createArgs, scope: BulkDeleteScope.Current })).not.toBe(base);
+    expect(deriveBulkDeleteJobId({ ...createArgs, idempotencyKey: 'other-key' })).not.toBe(base);
+  });
+});
+
 describe('createBulkDeleteJob', () => {
-  it('writes the row guarded so a second job cannot start under the same id', async () => {
+  it('writes the row under the derived id, guarded so it cannot start twice', async () => {
     ddbMock.on(PutItemCommand).resolves({});
 
     const record = await createBulkDeleteJob(createArgs);
 
     expect(record.status).toBe(BulkDeleteJobStatus.Pending);
+    expect(record.jobId).toBe(deriveBulkDeleteJobId(createArgs));
     const input = ddbMock.commandCalls(PutItemCommand)[0].args[0].input;
-    expect(input.ConditionExpression).toBe('attribute_not_exists(pk) AND attribute_not_exists(sk)');
+    expect(input.ConditionExpression).toBe('attribute_not_exists(sk)');
   });
 
   it('surfaces the running job when the same idempotency key is submitted twice', async () => {
