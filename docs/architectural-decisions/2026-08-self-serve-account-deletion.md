@@ -42,7 +42,7 @@ After the transaction is committed deletion worker is invoked. In the case of in
 
 ### 2. Teardown is idempotent; error recovery means re-running the teardown job
 
-Given that every step of the teardown is idempotent, recovery simply means re-running the whole teardown. With idempotency being a property of the teardown / deletion worker we were able to avoid usage of state machines and need for checkpointing.
+Given that every step of the teardown is idempotent, recovering from errors simply means re-running the whole teardown. With idempotency being a property of the teardown / deletion worker we were able to avoid usage of state machines and need for checkpointing.
 
 This works because no teardown step is asynchronous on the vendor side. Every external call either finishes inside the call or fails. A step that reports its progress asynchronously would break the model and should reopen this ADR rather than add progress tracking to the record.
 
