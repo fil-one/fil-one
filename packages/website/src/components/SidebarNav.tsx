@@ -336,6 +336,7 @@ export function SidebarNav({
               ref={userButtonRef}
               type="button"
               data-testid="user-profile"
+              aria-label={`User menu for ${displayName}`}
               onClick={() => setUserMenuOpen((o) => !o)}
               className={[
                 'flex items-center rounded-lg hover:bg-zinc-100',
