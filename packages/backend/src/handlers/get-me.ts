@@ -1,10 +1,10 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import type { MeResponse, OrgMembershipSummary } from '@filone/shared';
+import type { MeResponse } from '@filone/shared';
+import { permissionsForRole } from '@filone/shared';
 import { getOrgProfile } from '../lib/org-profile.js';
-import { listMemberships } from '../lib/org-membership.js';
-import type { OrgMembershipRecord } from '../lib/org-membership.js';
+import { summarizeMemberships } from '../lib/org-membership.js';
 import { hasRagAccess } from '../middleware/rag-access.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import {
@@ -17,30 +17,8 @@ import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
-/**
- * Names each membership for the org switcher. The active org's name is already
- * in hand; every other org costs one profile GetItem, which stays cheap while a
- * second membership can only arrive through an invitation.
- */
-async function summarizeMemberships(
-  memberships: OrgMembershipRecord[],
-  activeOrgId: string,
-  activeOrgName: string,
-): Promise<OrgMembershipSummary[]> {
-  return Promise.all(
-    memberships.map(async (membership) => ({
-      orgId: membership.orgId,
-      orgName:
-        membership.orgId === activeOrgId
-          ? activeOrgName
-          : ((await getOrgProfile(membership.orgId))?.name?.S ?? ''),
-      role: membership.role,
-    })),
-  );
-}
-
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
-  const { orgId, userId, email, emailVerified, sub, name, picture, membership, permissions } =
+  const { orgId, userId, email, emailVerified, sub, name, picture, membership } =
     getUserInfo(event);
 
   const includeMfa = event.queryStringParameters?.include === 'mfa';
@@ -49,12 +27,21 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   // Verified-only — never gate access off an unverified email claim.
   const verifiedEmail = getVerifiedEmail(event);
 
+  // The switcher names the active org from this same read rather than a second
+  // one, so the memberships join the round of reads already in flight.
+  const activeOrgProfile = getOrgProfile(orgId);
+
   const [orgProfile, enrollments, passkeys, ragAccess, memberships] = await Promise.all([
-    getOrgProfile(orgId),
+    activeOrgProfile,
     includeMfa ? getMfaEnrollments(sub) : Promise.resolve([]),
     includeMfa && connectionType === 'auth0' ? getPasskeyAuthenticators(sub) : Promise.resolve([]),
     hasRagAccess(verifiedEmail),
-    listMemberships(userId),
+    summarizeMemberships({
+      userId,
+      activeOrgId: orgId,
+      activeRole: membership?.role,
+      activeOrgName: activeOrgProfile.then((profile) => profile?.name?.S ?? ''),
+    }),
   ]);
 
   const orgName = orgProfile?.name?.S ?? '';
@@ -83,8 +70,11 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     ragAccess,
     userId,
     ...(membership && { role: membership.role }),
-    permissions: [...(permissions ?? [])],
-    memberships: await summarizeMemberships(memberships, orgId, orgName),
+    // Derived from the role on the way out rather than cached beside it, and
+    // handed over as the registry's own frozen row — the console reads it, the
+    // server enforces it, and neither gets a copy that can drift.
+    permissions: permissionsForRole(membership?.role ?? ''),
+    memberships,
   };
 
   return new ResponseBuilder().status(200).body(body).build();

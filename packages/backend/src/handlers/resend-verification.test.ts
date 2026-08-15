@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { OrgRole } from '@filone/shared';
+import { sstResourceMock } from '../test/sst-resource-mock.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -11,17 +13,7 @@ vi.mock('../lib/auth0-management.js', () => ({
   sendVerificationEmail: (...args: unknown[]) => mockSendVerificationEmail(...args),
 }));
 
-vi.mock('sst', () => ({
-  Resource: {
-    UserInfoTable: { name: 'UserInfoTable' },
-    OrgTable: { name: 'OrgTable' },
-    Auth0ClientId: { value: 'test-client-id' },
-    Auth0ClientSecret: { value: 'test-client-secret' },
-    Auth0MgmtRuntimeClientId: { value: 'test-mgmt-runtime-client-id' },
-    Auth0MgmtRuntimeClientSecret: { value: 'test-mgmt-runtime-client-secret' },
-    AuroraBackofficeToken: { value: 'test-aurora-token' },
-  },
-}));
+vi.mock('sst', () => sstResourceMock());
 
 vi.mock('../lib/auth-secrets.js', () => ({
   getAuthSecrets: () => ({
@@ -78,7 +70,11 @@ describe('POST /api/me/resend-verification handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
-    stubMembershipRead(ddbMock, { orgId: MOCK_ORG_ID, userId: MOCK_USER_ID });
+    stubMembershipRead(ddbMock, {
+      orgId: MOCK_ORG_ID,
+      userId: MOCK_USER_ID,
+      role: OrgRole.Owner,
+    });
     mockSendVerificationEmail.mockResolvedValue(undefined);
 
     mockJwtVerify

@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { OrgRole } from '@filone/shared';
+import { sstResourceMock } from '../test/sst-resource-mock.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -20,17 +22,7 @@ vi.mock('../lib/auth0-management.js', () => ({
   updateAuth0User: (...args: unknown[]) => mockUpdateAuth0User(...args),
 }));
 
-vi.mock('sst', () => ({
-  Resource: {
-    UserInfoTable: { name: 'UserInfoTable' },
-    OrgTable: { name: 'OrgTable' },
-    Auth0ClientId: { value: 'test-client-id' },
-    Auth0ClientSecret: { value: 'test-client-secret' },
-    Auth0MgmtClientId: { value: 'test-mgmt-client-id' },
-    Auth0MgmtClientSecret: { value: 'test-mgmt-client-secret' },
-    AuroraBackofficeToken: { value: 'test-aurora-token' },
-  },
-}));
+vi.mock('sst', () => sstResourceMock());
 
 vi.mock('../lib/auth-secrets.js', () => ({
   getAuthSecrets: () => ({
@@ -120,7 +112,11 @@ describe('DELETE /api/mfa/enrollments/{enrollmentId} handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
-    stubMembershipRead(ddbMock, { orgId: MOCK_ORG_ID, userId: MOCK_USER_ID });
+    stubMembershipRead(ddbMock, {
+      orgId: MOCK_ORG_ID,
+      userId: MOCK_USER_ID,
+      role: OrgRole.Owner,
+    });
   });
 
   it('deletes WebAuthn enrollment via authentication-methods and does not clear flag when other enrollments remain', async () => {

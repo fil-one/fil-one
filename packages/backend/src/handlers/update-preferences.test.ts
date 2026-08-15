@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { OrgRole } from '@filone/shared';
+import { sstResourceMock } from '../test/sst-resource-mock.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -14,16 +16,7 @@ vi.mock('../lib/hubspot-client.js', () => ({
 
 const MARKETING_SUBSCRIPTION_ID = 2233676376;
 
-vi.mock('sst', () => ({
-  Resource: {
-    UserInfoTable: { name: 'UserInfoTable' },
-    OrgTable: { name: 'OrgTable' },
-    Auth0ClientId: { value: 'test-client-id' },
-    Auth0ClientSecret: { value: 'test-client-secret' },
-    AuroraBackofficeToken: { value: 'test-aurora-token' },
-    HubSpotServiceKey: { value: 'test-hubspot-key' },
-  },
-}));
+vi.mock('sst', () => sstResourceMock());
 
 vi.mock('../lib/auth-secrets.js', () => ({
   getAuthSecrets: () => ({
@@ -81,7 +74,11 @@ describe('PATCH /api/me/preferences handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
-    stubMembershipRead(ddbMock, { orgId: MOCK_ORG_ID, userId: MOCK_USER_ID });
+    stubMembershipRead(ddbMock, {
+      orgId: MOCK_ORG_ID,
+      userId: MOCK_USER_ID,
+      role: OrgRole.Owner,
+    });
     mockUpdateSubscriptionStatus.mockResolvedValue(undefined);
 
     mockJwtVerify.mockResolvedValue({

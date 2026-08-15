@@ -1,5 +1,4 @@
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
-import type { Permission } from '@filone/shared';
 import type { OrgMembership } from './org-membership.js';
 
 export interface UserInfo {
@@ -18,13 +17,12 @@ export interface UserInfo {
    *
    * Absent on the RAG bearer branch, which bypasses `authMiddleware` entirely
    * and resolves the key creator's membership itself once enforcement ships.
+   *
+   * The permissions it carries are not cached beside it: `permissionsForRole`
+   * is a table lookup, and a second copy of derived state is one more thing
+   * that can disagree with the row.
    */
   membership?: OrgMembership;
-  /**
-   * Permissions derived from {@link UserInfo.membership}. Absent means the same
-   * as empty to every caller: no permission is held.
-   */
-  permissions?: readonly Permission[];
 }
 
 export interface AuthenticatedEvent extends APIGatewayProxyEventV2 {

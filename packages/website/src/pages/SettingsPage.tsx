@@ -154,7 +154,19 @@ function applyProfileUpdate(result: {
       // An email change always resets verification — reflect it immediately so
       // the verify-email gate in _app.tsx re-triggers without a /me round-trip.
       ...(result.email !== undefined ? { email: result.email, emailVerified: false } : {}),
-      ...(result.orgName !== undefined ? { orgName: result.orgName } : {}),
+      ...(result.orgName !== undefined
+        ? {
+            orgName: result.orgName,
+            // The switcher reads the same name from `memberships`; patching one
+            // and not the other renames the org in the header and leaves the
+            // old name in the list until /me is refetched.
+            memberships: old.memberships?.map((membership) =>
+              membership.orgId === old.orgId
+                ? { ...membership, orgName: result.orgName as string }
+                : membership,
+            ),
+          }
+        : {}),
     };
   };
 }

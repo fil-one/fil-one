@@ -6,16 +6,13 @@ import {
   PutItemCommand,
   QueryCommand,
 } from '@aws-sdk/client-dynamodb';
+import { sstResourceMock } from '../test/sst-resource-mock.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('sst', () => ({
-  Resource: {
-    UserInfoTable: { name: 'UserInfoTable' },
-  },
-}));
+vi.mock('sst', () => sstResourceMock());
 
 const mockEnsureTenantReady = vi.fn();
 const mockIssueAccessKey = vi.fn();
@@ -43,7 +40,6 @@ const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler } from './create-access-key.js';
 import { AccessKeyAlreadyExistsError } from '../lib/errors.js';
-import { ACCESS_KEY_POLICY_VERSION } from '../lib/dynamo-records.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
@@ -178,7 +174,7 @@ describe('create-access-key baseHandler', () => {
     const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
     expect(item.createdBy.S).toBe('user-1');
     expect(item.creatorEmail.S).toBe('alice@example.com');
-    expect(item.policyVersion.S).toBe(ACCESS_KEY_POLICY_VERSION);
+    expect(item.policyVersion.S).toBe('pre-member-scope');
   });
 
   it('leaves the creator email off when the address is unverified', async () => {
@@ -194,7 +190,7 @@ describe('create-access-key baseHandler', () => {
     const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
     expect(item.createdBy.S).toBe('user-1');
     expect(item.creatorEmail).toBeUndefined();
-    expect(item.policyVersion.S).toBe(ACCESS_KEY_POLICY_VERSION);
+    expect(item.policyVersion.S).toBe('pre-member-scope');
   });
 
   it('returns 400 when keyName is missing', async () => {
@@ -428,6 +424,11 @@ describe('create-access-key baseHandler', () => {
       accessKeyId: { S: 'AKIA1234567890' },
       createdAt: { S: '2026-03-10T00:00:00Z' },
       status: { S: 'active' },
+      // Attributed to the caller who retried, and flagged as such: a key with
+      // no owner at all is the worse record.
+      createdBy: { S: 'user-1' },
+      policyVersion: { S: 'pre-member-scope' },
+      recovered: { BOOL: true },
     });
   });
 
