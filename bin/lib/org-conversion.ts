@@ -13,8 +13,12 @@
 // the backend's `./x.js` specifiers (no .js -> .ts fallback) nor the `OrgRole`
 // enum (not erasable syntax), so a bin script cannot import from either package
 // — the same constraint bin/backfill-access-key-granular-permissions.ts records
-// for its permission map. Keep this file in sync with those two by hand; the
-// key shapes are pinned by tests in ./org-conversion.test.ts.
+// for its permission map.
+//
+// The mirror does not drift silently: ./org-conversion.test.ts imports both
+// canonical sources and asserts the values here equal them. Vitest resolves the
+// workspace packages that Node's type stripping cannot, so the test can hold
+// the runtime mirror to the definitions it copies.
 
 import type { AttributeValue, TransactWriteItem } from '@aws-sdk/client-dynamodb';
 
@@ -28,6 +32,7 @@ export const OrgKeys = {
   userPk: (userId: string): string => `USER#${userId}`,
   userPkPrefix: (): string => 'USER#',
   membershipSk: (orgId: string): string => `MEMBERSHIP#${orgId}`,
+  membershipSkPrefix: (): string => 'MEMBERSHIP#',
 } as const;
 
 /**
@@ -45,6 +50,18 @@ export const CONVERTED_ROLE = 'owner';
 export const LEGACY_ROLE = 'admin';
 /** Mirror of `OrgMembershipSource` — how a converted member came to be a member. */
 export const CONVERSION_SOURCE = 'conversion';
+
+/**
+ * The `joinedAt` written when neither the legacy row nor the org profile
+ * records one.
+ *
+ * `OrgMembershipRecord` in packages/backend/src/lib/org-membership.ts declares
+ * `joinedAt` required, so the attribute is always written. Every org profile
+ * signup has ever written carries `createdAt`, which makes this the value for
+ * rows older than that field — and the epoch says "not recorded" to anyone
+ * reading the row, which a conversion-day timestamp would not.
+ */
+export const UNKNOWN_JOINED_AT = '1970-01-01T00:00:00.000Z';
 
 /** `ORG#{orgId}` -> orgId. Undefined for any other shape; org ids contain no `#`. */
 export function parseOrgPk(pk: string): string | undefined {
@@ -117,13 +134,23 @@ export interface ConvertPlan {
   kind: 'convert';
   orgId: string;
   userId: string;
-  /** Carried from the legacy row, or the org profile's `createdAt` for a repair. Omitted when neither records one. */
-  joinedAt?: string;
+  /**
+   * The legacy row's value, else the org profile's `createdAt`, else
+   * {@link UNKNOWN_JOINED_AT}. Always written — the inverse item's type
+   * requires it.
+   */
+  joinedAt: string;
   /** The role as stored, so the log names what was read rather than what was expected. */
   fromRole?: string;
   origin: ConversionOrigin;
   /** Whether a legacy UserInfoTable `MEMBER#` row remains to be deleted afterwards. */
   legacyRow: boolean;
+  /**
+   * Whether `ORG#{orgId}/META` is already there — after a revert, which leaves
+   * META behind by design. The conversion then writes the two membership items
+   * and not the counter.
+   */
+  metaExists: boolean;
 }
 
 export interface AlreadyConvertedPlan {
@@ -161,21 +188,27 @@ export function classifyOrg(state: OrgState, knownUserIds: ReadonlySet<string>):
     );
   }
 
+  // A legacy row decides the org before META is consulted. META outlives both a
+  // removed membership and a revert, and the revert restores the legacy row
+  // without touching META — so an org holding a legacy row and no OrgTable
+  // member is waiting to be converted, whatever META says. Reading META first
+  // made every reverted org an anomaly and the revert one-way.
+  const legacy = state.legacyMembers[0];
+  if (legacy) return classifyWithMemberRow(state, legacy, knownUserIds);
+
   if (state.hasMeta && state.orgTableMemberUserIds.length === 0) {
-    // Nothing in this script writes META without a membership, so the org was
-    // converted or signed up and its member removed afterwards. Repairing it
-    // from PROFILE.createdBy would resurrect a membership somebody deleted.
+    // No legacy row to go back to, and nothing writes META without a
+    // membership, so the org was converted or signed up and its member removed
+    // afterwards. Repairing it from PROFILE.createdBy would resurrect a
+    // membership somebody deleted.
     return anomaly(
       state.orgId,
       'membership-removed',
-      'META exists with no membership row — the org was already handled and its member removed since',
+      'META exists with no membership row and no legacy row — the org was already handled and its member removed since',
     );
   }
 
-  const legacy = state.legacyMembers[0];
-  return legacy
-    ? classifyWithMemberRow(state, legacy, knownUserIds)
-    : classifyWithoutMemberRow(state, knownUserIds);
+  return classifyWithoutMemberRow(state, knownUserIds);
 }
 
 function classifyWithMemberRow(
@@ -217,10 +250,11 @@ function classifyWithMemberRow(
     kind: 'convert',
     orgId,
     userId,
-    ...(legacy.joinedAt ? { joinedAt: legacy.joinedAt } : {}),
+    joinedAt: legacy.joinedAt ?? state.profile.createdAt ?? UNKNOWN_JOINED_AT,
     ...(role ? { fromRole: role } : {}),
     origin: 'member-row',
     legacyRow: true,
+    metaExists: state.hasMeta,
   };
 }
 
@@ -255,9 +289,10 @@ function classifyWithoutMemberRow(state: OrgState, knownUserIds: ReadonlySet<str
     kind: 'convert',
     orgId,
     userId: createdBy,
-    ...(state.profile.createdAt ? { joinedAt: state.profile.createdAt } : {}),
+    joinedAt: state.profile.createdAt ?? UNKNOWN_JOINED_AT,
     origin: 'org-profile',
     legacyRow: false,
+    metaExists: state.hasMeta,
   };
 }
 
@@ -266,25 +301,29 @@ function anomaly(orgId: string, reason: AnomalyReason, detail: string): AnomalyP
 }
 
 /**
- * The three OrgTable items one org's conversion writes, as a single transaction.
+ * The OrgTable items one org's conversion writes, as a single transaction.
  *
  * Every item is conditional on its own absence, which is what makes the write
  * safe to repeat and safe to race: a re-run and a signup that happened after the
  * write path deployed both lose the condition rather than overwriting a live
  * membership. The transaction is all-or-nothing, so an org is never left with a
  * canonical row and no inverse item.
+ *
+ * The META item is written only for an org that has none. A cancelled condition
+ * cancels the whole transaction, so including a `attribute_not_exists` Put for
+ * a META row that is already there would fail the two membership writes beside
+ * it — which is the state every reverted org is in, since the revert leaves
+ * META alone. The existing counter already reads `ownerCount: 1`, the truth for
+ * an org of one, so leaving it untouched is also the right value.
  */
 export function buildConversionTransactItems(
   plan: ConvertPlan,
   orgTableName: string,
 ): TransactWriteItem[] {
-  const { orgId, userId, joinedAt } = plan;
-  // Omitted rather than invented when the source row records no timestamp: the
-  // attribute is optional on the membership record, and a fabricated join date
-  // would be indistinguishable from a real one.
-  const joined: Record<string, AttributeValue> = joinedAt ? { joinedAt: { S: joinedAt } } : {};
+  const { orgId, userId, joinedAt, metaExists } = plan;
+  const joined: Record<string, AttributeValue> = { joinedAt: { S: joinedAt } };
 
-  return [
+  const items: TransactWriteItem[] = [
     {
       Put: {
         TableName: orgTableName,
@@ -310,7 +349,10 @@ export function buildConversionTransactItems(
         ConditionExpression: 'attribute_not_exists(pk)',
       },
     },
-    {
+  ];
+
+  if (!metaExists) {
+    items.push({
       Put: {
         TableName: orgTableName,
         Item: {
@@ -320,8 +362,10 @@ export function buildConversionTransactItems(
         },
         ConditionExpression: 'attribute_not_exists(pk)',
       },
-    },
-  ];
+    });
+  }
+
+  return items;
 }
 
 /** The legacy UserInfoTable membership row's key — deleted only after its OrgTable transaction succeeds. */
@@ -334,6 +378,23 @@ export interface ConvertedMembership {
   orgId: string;
   userId: string;
   joinedAt?: string;
+  /** The role as stored. Anything but `owner` is a row somebody has changed since. */
+  role?: string;
+}
+
+/**
+ * Whether the revert will act on a membership, decided from the same values the
+ * transaction's condition tests.
+ *
+ * The scan already filters on `source`, so the role is what is left to check —
+ * and checking it here rather than only in DynamoDB is what makes the dry run
+ * honest: a row the transaction would decline is reported as a skip before the
+ * run, so the plan's count is the count the execute run produces. The condition
+ * still guards the write, for rows that change between the scan and the
+ * transaction.
+ */
+export function willRevert(membership: ConvertedMembership): boolean {
+  return membership.role === CONVERTED_ROLE;
 }
 
 /**
@@ -403,6 +464,8 @@ export interface ScanCounts {
   /** Matched rows whose key parsed as none of the three shapes above. */
   unparsedRows: number;
   orgTableMemberRows: number;
+  /** `USER#{userId}/MEMBERSHIP#{orgId}` items — one per canonical membership row. */
+  orgTableInverseRows: number;
   orgTableMetaRows: number;
 }
 
@@ -413,6 +476,8 @@ export interface PlanCounts {
   repairFromProfile: number;
   alreadyConverted: number;
   legacyRowsPendingDelete: number;
+  /** Conversions that also write a META counter — the rest already have one. */
+  metaToWrite: number;
   anomalies: number;
 }
 
@@ -423,6 +488,7 @@ export function summarizePlans(plans: readonly OrgPlan[]): PlanCounts {
     repairFromProfile: 0,
     alreadyConverted: 0,
     legacyRowsPendingDelete: 0,
+    metaToWrite: 0,
     anomalies: 0,
   };
 
@@ -430,6 +496,7 @@ export function summarizePlans(plans: readonly OrgPlan[]): PlanCounts {
     if (plan.kind === 'convert') {
       if (plan.origin === 'member-row') counts.convertFromMemberRow++;
       else counts.repairFromProfile++;
+      if (!plan.metaExists) counts.metaToWrite++;
     } else if (plan.kind === 'already-converted') {
       counts.alreadyConverted++;
       if (plan.legacyRowPending) counts.legacyRowsPendingDelete++;
@@ -448,10 +515,12 @@ export function summarizePlans(plans: readonly OrgPlan[]): PlanCounts {
 export function formatPlanReport(scan: ScanCounts, plans: readonly OrgPlan[]): string {
   const counts = summarizePlans(plans);
   const writes = counts.convertFromMemberRow + counts.repairFromProfile;
+  // Two membership items each, plus a META counter for every org that has none.
+  const items = writes * 2 + counts.metaToWrite;
   const lines = [
     `Matched in UserInfoTable: ${scan.userInfoRows} rows — ${scan.orgProfiles} org profiles, ${scan.legacyMemberRows} legacy MEMBER# rows, ${scan.userProfiles} user profiles`,
     ...(scan.unparsedRows > 0 ? [`  Unrecognized key shapes, ignored: ${scan.unparsedRows}`] : []),
-    `Matched in OrgTable: ${scan.orgTableMemberRows} MEMBER# rows, ${scan.orgTableMetaRows} META rows`,
+    `Matched in OrgTable: ${scan.orgTableMemberRows} MEMBER# rows, ${scan.orgTableInverseRows} MEMBERSHIP# inverse items, ${scan.orgTableMetaRows} META rows`,
     '',
     `Orgs scanned: ${counts.orgs}`,
     ...alignedCounts([
@@ -463,7 +532,7 @@ export function formatPlanReport(scan: ScanCounts, plans: readonly OrgPlan[]): s
     ]),
     '',
     ...formatAnomalies(plans),
-    `Writes ${writes} orgs (${writes * 3} OrgTable items) and deletes ${counts.convertFromMemberRow + counts.legacyRowsPendingDelete} legacy MEMBER# rows.`,
+    `Writes ${writes} orgs (${items} OrgTable items, of which ${counts.metaToWrite} META counters) and deletes ${counts.convertFromMemberRow + counts.legacyRowsPendingDelete} legacy MEMBER# rows.`,
   ];
 
   return lines.join('\n');
