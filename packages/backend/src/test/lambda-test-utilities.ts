@@ -1,6 +1,6 @@
 import type { Request } from '@middy/core';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, Context } from 'aws-lambda';
-import { GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { GetItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
 import type {
   DynamoDBClientResolvedConfig,
   ServiceInputTypes,
@@ -12,38 +12,77 @@ import { OrgKeys } from '../lib/org-membership.js';
 import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.js';
 
 /** What `mockClient(DynamoDBClient)` returns. */
-export type DynamoMock = AwsStub<
-  ServiceInputTypes,
-  ServiceOutputTypes,
-  DynamoDBClientResolvedConfig
->;
+type DynamoMock = AwsStub<ServiceInputTypes, ServiceOutputTypes, DynamoDBClientResolvedConfig>;
+
+const STUB_JOINED_AT = '2026-01-01T00:00:00.000Z';
+
+// The `sst` resource mock lives in ./sst-resource-mock.js, which imports
+// nothing: a `vi.mock('sst', …)` factory reaching this module would read a
+// binding that is still initializing, since this one imports `sst` transitively.
 
 /**
  * Answer the OrgTable membership read `authMiddleware` makes on every
- * authenticated request. Without a `role` the row is absent, which the
- * transition fallback resolves as Owner — the stub then exists only so the
- * mocked client answers the read at all.
+ * authenticated request. The role is required: a test that does not say which
+ * role its caller holds is not describing a request the middleware can serve,
+ * and absence is its own case — stub it with {@link stubAbsentMembershipRead}.
  */
 export function stubMembershipRead(
   ddbMock: DynamoMock,
-  { orgId, userId, role }: { orgId: string; userId: string; role?: OrgRole },
+  { orgId, userId, role }: { orgId: string; userId: string; role: OrgRole },
 ): void {
   ddbMock
     .on(GetItemCommand, {
       TableName: 'OrgTable',
       Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: OrgKeys.memberSk(userId) } },
     })
-    .resolves(
-      role
-        ? {
-            Item: {
-              role: { S: role },
-              joinedAt: { S: '2026-01-01T00:00:00.000Z' },
-              source: { S: 'signup' },
-            },
-          }
-        : {},
-    );
+    .resolves({
+      Item: {
+        pk: { S: OrgKeys.orgPk(orgId) },
+        sk: { S: OrgKeys.memberSk(userId) },
+        role: { S: role },
+        joinedAt: { S: STUB_JOINED_AT },
+        source: { S: 'signup' },
+      },
+    });
+}
+
+/** No membership row — a pre-conversion account, which resolves as Owner. */
+export function stubAbsentMembershipRead(
+  ddbMock: DynamoMock,
+  { orgId, userId }: { orgId: string; userId: string },
+): void {
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'OrgTable',
+      Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: OrgKeys.memberSk(userId) } },
+    })
+    .resolves({});
+}
+
+/** Answer the inverse-item Query behind `MeResponse.memberships`. */
+export function stubMembershipList(
+  ddbMock: DynamoMock,
+  {
+    userId,
+    orgs,
+  }: { userId: string; orgs: Array<{ orgId: string; role: OrgRole; joinedAt?: string }> },
+): void {
+  ddbMock
+    .on(QueryCommand, {
+      TableName: 'OrgTable',
+      ExpressionAttributeValues: {
+        ':pk': { S: OrgKeys.userPk(userId) },
+        ':skPrefix': { S: OrgKeys.membershipSkPrefix() },
+      },
+    })
+    .resolves({
+      Items: orgs.map((org) => ({
+        pk: { S: OrgKeys.userPk(userId) },
+        sk: { S: OrgKeys.membershipSk(org.orgId) },
+        role: { S: org.role },
+        joinedAt: { S: org.joinedAt ?? STUB_JOINED_AT },
+      })),
+    });
 }
 
 type NormalizedHeaderEvent = {

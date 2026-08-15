@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { ApiErrorCode } from '@filone/shared';
+import { OrgRole } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.js';
 
 // ---------------------------------------------------------------------------
@@ -76,7 +77,11 @@ describe('PATCH /api/me/profile handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
-    stubMembershipRead(ddbMock, { orgId: MOCK_ORG_ID, userId: MOCK_USER_ID });
+    stubMembershipRead(ddbMock, {
+      orgId: MOCK_ORG_ID,
+      userId: MOCK_USER_ID,
+      role: OrgRole.Owner,
+    });
     mockUpdateAuth0User.mockResolvedValue(undefined);
     mockSendVerificationEmail.mockResolvedValue(undefined);
 

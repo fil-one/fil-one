@@ -5,7 +5,7 @@ import type {
   APIGatewayProxyStructuredResultV2,
   Context,
 } from 'aws-lambda';
-import { GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
+import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
 import { Resource } from 'sst';
 import type { UserInfo } from '../lib/user-context.js';
@@ -21,9 +21,10 @@ import {
 } from '../lib/response-builder.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { resolveAuth0Domain } from '../lib/auth0-domain.js';
-import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { OrgKeys, membershipPermissions, resolveMembership } from '../lib/org-membership.js';
+import { createNewUserAndOrg } from '../lib/account-creation.js';
+import { resolveMembership } from '../lib/org-membership.js';
+import type { OrgMembership } from '../lib/org-membership.js';
 import { deriveOrgName } from '../lib/suggest-org-name.js';
 import { ensureTrialEntitlement } from '../lib/trial-entitlement.js';
 
@@ -108,6 +109,21 @@ function emailNotVerifiedResponse(): APIGatewayProxyStructuredResultV2 {
     .body<ErrorResponse>({
       message: 'Email verification required',
       code: ApiErrorCode.EMAIL_NOT_VERIFIED,
+    })
+    .build();
+}
+
+/**
+ * The caller authenticated, but OrgTable would not say what they may do. A
+ * retryable failure of ours, so it is a 503 rather than a 401 that would send
+ * the console through a pointless refresh, or a 403 that would read as a
+ * revoked membership.
+ */
+function membershipUnavailableResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(503)
+    .body<ErrorResponse>({
+      message: 'We could not read your organization membership. Please try again in a moment.',
     })
     .build();
 }
@@ -246,10 +262,6 @@ async function attachIdentity({
   picture: string | null;
 }): Promise<void> {
   const resolved = await resolveUserAndOrg(sub, email, emailVerified, name);
-  // One more GetItem in a middleware that already makes one. Reading the role
-  // per request rather than carrying it in the token is what makes a role
-  // change take effect on the next request, with no invalidation machinery.
-  const membership = await resolveMembership(resolved.orgId, resolved.userId);
   (
     event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }
   ).userInfo = {
@@ -260,9 +272,60 @@ async function attachIdentity({
     emailVerified,
     name: name ?? undefined,
     picture: picture ?? undefined,
-    membership,
-    permissions: membershipPermissions(membership),
+    // Set only when this request created the account: the signup transaction
+    // wrote the row, so re-reading it would be a race against its own write.
+    ...(resolved.membership ? { membership: resolved.membership } : {}),
   };
+}
+
+/**
+ * Resolve the caller's membership in the active org, once authentication has
+ * succeeded.
+ *
+ * Its own step, outside token validation's catch-all: an OrgTable outage is not
+ * a bad token, and reading it as one costs the caller a 401 plus a refresh they
+ * did not need. One more GetItem in a middleware that already makes one —
+ * reading the role per request rather than carrying it in the token is what
+ * makes a role change take effect on the next request, with no invalidation
+ * machinery.
+ *
+ * Returns a response when the read fails, and undefined when it succeeds.
+ */
+async function attachMembership(
+  event: APIGatewayProxyEventV2,
+): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
+  const userInfo = (
+    event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }
+  ).userInfo;
+  if (userInfo.membership) return undefined;
+
+  try {
+    userInfo.membership =
+      (await resolveMembership(userInfo.orgId, userInfo.userId)) ?? transitionOwner(userInfo);
+    return undefined;
+  } catch (err) {
+    console.error('[auth] OrgTable membership read failed — cannot resolve the role', {
+      orgId: userInfo.orgId,
+      userId: userInfo.userId,
+      error: err,
+    });
+    return membershipUnavailableResponse();
+  }
+}
+
+/**
+ * TRANSITION — deleted post-conversion. Accounts created before membership
+ * moved into OrgTable have no row there, and some early identities never had
+ * one at all. Every such account is an org of one, so resolving an absent row
+ * as Owner preserves exactly today's authority. The conversion backfills the
+ * rows; once its zero-count scan is verified, this default goes and an absent
+ * row becomes a denial.
+ *
+ * It lives here rather than in the data layer because the invite and removal
+ * paths read the same row and must treat absence as denial.
+ */
+function transitionOwner(userInfo: UserInfo): OrgMembership {
+  return { orgId: userInfo.orgId, userId: userInfo.userId, role: OrgRole.Owner };
 }
 
 // ---------------------------------------------------------------------------
@@ -273,6 +336,8 @@ interface ResolvedIdentity {
   userId: string;
   orgId: string;
   email: string | null;
+  /** Present only on the signup branch, which just wrote the membership row. */
+  membership?: OrgMembership;
 }
 
 async function resolveUserAndOrg(
@@ -327,7 +392,7 @@ async function resolveUserAndOrg(
   const orgId = crypto.randomUUID();
   const orgName = deriveOrgName(name ?? undefined, email ?? undefined);
 
-  await createNewUserAndOrg({ sub, userId, orgId, orgName });
+  const membership = await createNewUserAndOrg({ sub, userId, orgId, orgName });
 
   // Tenant setup is deferred until the user creates their first bucket or access
   // key — see docs/architectural-decisions/2026-05-13-synchronous-tenant-setup-on-first-resource.md.
@@ -336,7 +401,7 @@ async function resolveUserAndOrg(
   // a transient failure must not block login — the subscription guard retries later.
   await ensureTrialEntitlementBestEffort({ sub, userId, orgId, email, emailVerified });
 
-  return { userId, orgId, email };
+  return { userId, orgId, email, membership };
 }
 
 /**
@@ -357,101 +422,6 @@ async function ensureTrialEntitlementBestEffort(
       orgId: params.orgId,
     });
   }
-}
-
-async function createNewUserAndOrg({
-  sub,
-  userId,
-  orgId,
-  orgName,
-}: {
-  sub: string;
-  userId: string;
-  orgId: string;
-  orgName: string;
-}) {
-  const tableName = Resource.UserInfoTable.name;
-  const orgTableName = Resource.OrgTable.name;
-  const now = new Date().toISOString();
-
-  // Spans both tables: identity, profiles, and the owner count live in
-  // UserInfoTable, membership in OrgTable.
-  await getDynamoClient().send(
-    new TransactWriteItemsCommand({
-      TransactItems: [
-        {
-          Put: {
-            TableName: tableName,
-            Item: {
-              pk: { S: `SUB#${sub}` },
-              sk: { S: 'IDENTITY' },
-              userId: { S: userId },
-              orgId: { S: orgId },
-              createdAt: { S: now },
-            },
-            ConditionExpression: 'attribute_not_exists(pk)',
-          },
-        },
-        {
-          Put: {
-            TableName: tableName,
-            Item: {
-              pk: { S: `USER#${userId}` },
-              sk: { S: 'PROFILE' },
-              sub: { S: sub },
-              orgId: { S: orgId },
-              createdAt: { S: now },
-            },
-          },
-        },
-        {
-          Put: {
-            TableName: tableName,
-            Item: {
-              pk: { S: `ORG#${orgId}` },
-              sk: { S: 'PROFILE' },
-              name: { S: orgName },
-              auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
-              createdBy: { S: userId },
-              createdAt: { S: now },
-              // The last-Owner invariant lives here. Stamped from day one so no
-              // org is ever created without it and the conversion has nothing
-              // to repair for accounts created while it runs.
-              ownerCount: { N: '1' },
-            },
-          },
-        },
-        {
-          // Authoritative membership. The account's creator owns it: an org of
-          // one whose single member can do everything, which is what every
-          // account is until invitations ship.
-          Put: {
-            TableName: orgTableName,
-            Item: {
-              pk: { S: OrgKeys.orgPk(orgId) },
-              sk: { S: OrgKeys.memberSk(userId) },
-              role: { S: OrgRole.Owner },
-              joinedAt: { S: now },
-              source: { S: 'signup' },
-            },
-          },
-        },
-        {
-          // Inverse item, written in the same transaction so a membership and
-          // the list it appears in can never disagree about a role.
-          Put: {
-            TableName: orgTableName,
-            Item: {
-              pk: { S: OrgKeys.userPk(userId) },
-              sk: { S: OrgKeys.membershipSk(orgId) },
-              role: { S: OrgRole.Owner },
-              joinedAt: { S: now },
-            },
-          },
-        },
-      ],
-    }),
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -524,6 +494,41 @@ function verifiedEmailGate(
   return claims.emailVerified ? undefined : emailNotVerifiedResponse();
 }
 
+/**
+ * Carry the rotated cookies on a response the before hook returns itself.
+ *
+ * Returning a response from `before` short-circuits the whole chain, the after
+ * hook included (@middy/core 7.2.2 runs the after stack only when the request
+ * carries no `earlyResponse`), so a refresh that already happened has to set
+ * its own cookies here. Otherwise the caller's old refresh token is spent at
+ * Auth0 and the new one never reaches them — one denial becomes a logout.
+ */
+function withRefreshedCookies(
+  request: AuthMiddlewareRequest,
+  response: APIGatewayProxyStructuredResultV2,
+): APIGatewayProxyStructuredResultV2 {
+  const { newTokens } = request.internal;
+  if (newTokens) setCookiesFromTokens(response, newTokens);
+  return response;
+}
+
+/**
+ * What runs after a token proves the caller's identity, on both the
+ * access-token and the refresh branch: the verified-email gate, then the
+ * membership read. Identical on both so a failure cannot depend on which
+ * branch authenticated the request.
+ */
+async function completeAuthentication(
+  request: AuthMiddlewareRequest,
+  requireVerifiedEmail: boolean,
+): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
+  const gated = verifiedEmailGate(requireVerifiedEmail, request);
+  if (gated) return withRefreshedCookies(request, gated);
+
+  const membershipFailure = await attachMembership(request.event);
+  return membershipFailure ? withRefreshedCookies(request, membershipFailure) : undefined;
+}
+
 // eslint-disable-next-line max-lines-per-function
 export function authMiddleware(options: AuthMiddlewareOptions = {}) {
   const { requireVerifiedEmail = true } = options;
@@ -582,7 +587,7 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
         accessToken,
         failureLabel: '[auth] Access token verification failed',
       });
-      if (ok) return verifiedEmailGate(requireVerifiedEmail, request);
+      if (ok) return completeAuthentication(request, requireVerifiedEmail);
     }
 
     // Step 2: Attempt token refresh (always runs when forceRefresh=1)
@@ -608,7 +613,7 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
           name: refreshedClaims.name,
           picture: refreshedClaims.picture,
         });
-        return verifiedEmailGate(requireVerifiedEmail, request);
+        return completeAuthentication(request, requireVerifiedEmail);
       }
       if (forceRefresh) {
         console.error(
@@ -630,7 +635,7 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
         accessToken,
         failureLabel: '[auth] Fallback access token validation failed',
       });
-      if (ok) return verifiedEmailGate(requireVerifiedEmail, request);
+      if (ok) return completeAuthentication(request, requireVerifiedEmail);
     }
 
     console.warn('[auth] Returning 401 — no valid tokens');

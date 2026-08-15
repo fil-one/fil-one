@@ -1,13 +1,16 @@
 import { GetItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
+import type { AttributeValue } from '@aws-sdk/client-dynamodb';
+import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import { OrgRole, isOrgRole, permissionsForRole } from '@filone/shared';
-import type { Permission } from '@filone/shared';
+import type { OrgMembershipSummary } from '@filone/shared';
 import { getDynamoClient } from './ddb-client.js';
+import { resolveOrgName } from './org-profile.js';
 
 /**
- * Organization membership and invitations, in OrgTable.
+ * Organization membership, in OrgTable.
  *
- * Four row shapes, all pk/sk (the table has no GSIs, like every other table
+ * Three row shapes, all pk/sk (the table has no GSIs, like every other table
  * here), plus one key reserved for SSO:
  * - `ORG#{orgId}` / `MEMBER#{userId}` — the authoritative membership: role,
  *   when and how the member joined.
@@ -16,33 +19,38 @@ import { getDynamoClient } from './ddb-client.js';
  *   `RAGKEYHASH#…/LOOKUP`. Written in the same transaction as the canonical
  *   row on create, delete, and every role change, so the two can never
  *   disagree about a role.
- * - `ORG#{orgId}` / `INVITE#{inviteId}` — the canonical invitation.
- * - `INVITETOKEN#{sha256(token)}` / `LOOKUP` — resolves an accept link to its
- *   invitation. The row keeps the token's hash, never the token.
+ * - `ORG#{orgId}` / `META` — org-level counters owned by this module, starting
+ *   with `ownerCount`, the last-Owner invariant. It sits beside the rows it
+ *   counts so every owner-set transaction is single-table.
+ *
+ * The invitation rows (`INVITE#`, `INVITETOKEN#`) arrive with the invitations
+ * PR, which adds their key builders here.
  *
  * The org profile row stays in UserInfoTable (`ORG#{orgId}/PROFILE`), so the
- * transactions that change the set of Owners span both tables.
+ * transactions that change an org's name and its membership span both tables.
  */
+
+/** The inverse item's sort-key prefix, shared by the builder and the parser. */
+const membershipSkPrefix = (): string => 'MEMBERSHIP#';
+
 export const OrgKeys = {
   orgPk: (orgId: string): string => `ORG#${orgId}`,
   memberSk: (userId: string): string => `MEMBER#${userId}`,
   memberSkPrefix: (): string => 'MEMBER#',
+  orgMetaSk: (): string => 'META',
   userPk: (userId: string): string => `USER#${userId}`,
   membershipSk: (orgId: string): string => `MEMBERSHIP#${orgId}`,
-  membershipSkPrefix: (): string => 'MEMBERSHIP#',
+  membershipSkPrefix,
   /**
    * Inverse of {@link membershipSk}. Org ids are UUIDs and contain no `#`, so
    * the split is unambiguous; returns undefined for any other shape. The
    * inverse item stores no `orgId` attribute — the sort key is the org id.
    */
   parseMembershipSk: (sk: string): string | undefined => {
-    const orgId = sk.startsWith('MEMBERSHIP#') ? sk.slice('MEMBERSHIP#'.length) : undefined;
+    const prefix = membershipSkPrefix();
+    const orgId = sk.startsWith(prefix) ? sk.slice(prefix.length) : undefined;
     return orgId && !orgId.includes('#') ? orgId : undefined;
   },
-  inviteSk: (inviteId: string): string => `INVITE#${inviteId}`,
-  inviteSkPrefix: (): string => 'INVITE#',
-  inviteTokenPk: (tokenHash: string): string => `INVITETOKEN#${tokenHash}`,
-  inviteTokenSk: (): string => 'LOOKUP',
   /**
    * Reserved for SSO: an Auth0 organization id resolves to the FilOne org it
    * was created for. Nothing writes this row in M1 — reserving the key now
@@ -55,131 +63,237 @@ export const OrgKeys = {
 /** How a member came to be in the org. SCIM provisioning extends this later. */
 export type OrgMembershipSource = 'signup' | 'conversion' | 'invitation';
 
-/** OrgTable — pk: ORG#{orgId}, sk: MEMBER#{userId} (unmarshalled shape). */
-export interface OrgMemberRecord {
+/**
+ * OrgTable — pk: ORG#{orgId}, sk: MEMBER#{userId}. The authoritative membership
+ * and what `userInfo.membership` carries: the row itself rather than a
+ * flattened permission list, because member bucket scope (FIL-1017) lands here
+ * and its consumers then read it with no new plumbing.
+ *
+ * `orgId` and `userId` are derived from the key; neither is a stored attribute.
+ * Everything the row records about how the member joined is optional, because a
+ * membership created before those attributes existed carries none of them.
+ */
+export interface OrgMembership {
   orgId: string;
   userId: string;
   role: OrgRole;
-  joinedAt: string;
-  source: OrgMembershipSource;
+  joinedAt?: string;
+  source?: OrgMembershipSource;
   /** The member who issued the invitation, when `source` is `invitation`. */
   invitedBy?: string;
 }
 
-/** OrgTable — pk: USER#{userId}, sk: MEMBERSHIP#{orgId} (unmarshalled shape). */
+/**
+ * OrgTable — pk: USER#{userId}, sk: MEMBERSHIP#{orgId}. The inverse item, whose
+ * `orgId` likewise comes from the sort key.
+ */
 export interface OrgMembershipRecord {
   orgId: string;
   role: OrgRole;
   joinedAt: string;
 }
 
-/**
- * A resolved membership, as exposed on `userInfo.membership`. It is the
- * `MEMBER#` row itself rather than a flattened permission list: member bucket
- * scope lands on this row, and its consumers then read it with no new plumbing.
- * The row's own fields are optional here because the transition fallback below
- * resolves a membership no row supplied.
- */
-export interface OrgMembership extends Partial<OrgMemberRecord> {
-  orgId: string;
-  userId: string;
-  role: OrgRole;
+/** OrgTable — pk: ORG#{orgId}, sk: META. Org-level counters. */
+export interface OrgMetaRecord {
+  /**
+   * Members holding {@link OrgRole.Owner}. Every transaction that changes the
+   * owner set carries its delta, and the guard against removing the last Owner
+   * is that update's own condition.
+   */
+  ownerCount: number;
 }
 
 /**
- * The caller's membership in an org, or the Owner fallback below.
+ * A stored row minus its keys, typed as a partial of the record it belongs to.
  *
- * TRANSITION — remove with the conversion. Accounts created before membership
- * moved into OrgTable have no row here, and some early identities never had one
- * at all. Every such account is an org of one, so resolving an absent row as
- * Owner preserves exactly today's authority. The conversion backfills the rows;
- * once its zero-count scan is verified, this fallback is deleted and an absent
- * row becomes a denial.
+ * The whole item is decoded rather than picked attribute by attribute, so a
+ * field this module does not name yet — member bucket scope is the next one —
+ * reaches its consumers without a change here. The keys are dropped because
+ * `pk`/`sk` are addresses, not membership data.
+ */
+function decodeRow<T>(item: Record<string, AttributeValue>): Partial<T> {
+  const { pk: _pk, sk: _sk, ...attributes } = unmarshall(item);
+  return attributes as Partial<T>;
+}
+
+/**
+ * The caller's membership in an org, or undefined when no row exists.
+ *
+ * Absence is reported honestly: the transition default that reads an absent row
+ * as Owner belongs to `authMiddleware`, because the invite and removal paths
+ * built on this helper must treat absence as denial.
+ *
+ * Read consistently — a membership written moments earlier (signup, an accepted
+ * invitation, a role change) must not read as absent, and absence is the input
+ * to that default.
  */
 export async function resolveMembership(
   orgId: string,
   userId: string,
-  opts?: { consistentRead?: boolean },
-): Promise<OrgMembership> {
+): Promise<OrgMembership | undefined> {
   const { Item } = await getDynamoClient().send(
     new GetItemCommand({
       TableName: Resource.OrgTable.name,
       Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: OrgKeys.memberSk(userId) } },
-      ...(opts?.consistentRead ? { ConsistentRead: true } : {}),
+      ConsistentRead: true,
     }),
   );
 
-  if (!Item) {
-    return { orgId, userId, role: OrgRole.Owner };
-  }
+  if (!Item) return undefined;
 
-  const storedRole = Item.role?.S ?? '';
+  const attributes = decodeRow<OrgMembership>(Item);
+  const storedRole = attributes.role ?? '';
   if (!isOrgRole(storedRole)) {
-    // Kept as stored rather than coerced: an unrecognized role carries no
-    // permissions, so it fails closed. Log it — the only way one gets here is
-    // a bad write or a conversion that missed a value.
+    // Kept as stored rather than coerced or dropped: an unrecognized role
+    // carries no permissions, so it fails closed, while returning undefined
+    // would hand the row to the middleware's Owner default. Log it — the only
+    // way one gets here is a bad write or a conversion that missed a value.
     console.error('[org-membership] Membership row carries an unrecognized role', {
       orgId,
       userId,
+      role: storedRole,
     });
   }
 
-  return {
-    orgId,
-    userId,
-    role: storedRole as OrgRole,
-    ...(Item.joinedAt?.S ? { joinedAt: Item.joinedAt.S } : {}),
-    ...(Item.source?.S ? { source: Item.source.S as OrgMembershipSource } : {}),
-    ...(Item.invitedBy?.S ? { invitedBy: Item.invitedBy.S } : {}),
-  };
-}
-
-/** The permissions a resolved membership carries. */
-export function membershipPermissions(membership: OrgMembership): readonly Permission[] {
-  return permissionsForRole(membership.role);
+  return { ...attributes, orgId, userId, role: storedRole as OrgRole };
 }
 
 /**
- * Every org the user belongs to, from the inverse items. One Query, no index.
- * Rows whose sort key is not a well-formed `MEMBERSHIP#{orgId}` are skipped
- * rather than surfaced as an org with an empty id.
+ * The most inverse items one Query walk will collect. An org of one has a
+ * single row and an invited user a handful; a user with more memberships than
+ * this is a bug or an attack, and truncating names both in the log rather than
+ * paging forever on the login path.
+ */
+const MAX_MEMBERSHIPS = 100;
+
+/**
+ * Every org the user belongs to, from the inverse items. One Query, no index,
+ * paged because a Query returns at most 1 MB per call.
+ *
+ * A row is dropped when its sort key is not a well-formed `MEMBERSHIP#{orgId}`
+ * or its role is not one of the four, rather than surfaced as an org with an
+ * empty id or a role nothing can authorize. Both drops are logged with the
+ * offending value: the only way one gets written is a bad write or a conversion
+ * that missed a value, and a silent drop hides exactly that.
  */
 export async function listMemberships(userId: string): Promise<OrgMembershipRecord[]> {
-  const { Items } = await getDynamoClient().send(
-    new QueryCommand({
-      TableName: Resource.OrgTable.name,
-      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
-      ExpressionAttributeValues: {
-        ':pk': { S: OrgKeys.userPk(userId) },
-        ':skPrefix': { S: OrgKeys.membershipSkPrefix() },
-      },
-    }),
-  );
+  const memberships: OrgMembershipRecord[] = [];
+  let startKey: Record<string, AttributeValue> | undefined;
 
-  return (Items ?? []).flatMap((item) => {
-    const orgId = OrgKeys.parseMembershipSk(item.sk?.S ?? '');
-    if (!orgId) return [];
-    return [
-      {
-        orgId,
-        role: (item.role?.S ?? '') as OrgRole,
-        joinedAt: item.joinedAt?.S ?? '',
-      },
-    ];
-  });
+  do {
+    const { Items, LastEvaluatedKey } = await getDynamoClient().send(
+      new QueryCommand({
+        TableName: Resource.OrgTable.name,
+        KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
+        ExpressionAttributeValues: {
+          ':pk': { S: OrgKeys.userPk(userId) },
+          ':skPrefix': { S: OrgKeys.membershipSkPrefix() },
+        },
+        // Consistent for the same reason as the membership read: an org joined
+        // moments ago must appear in the list the console switches on.
+        ConsistentRead: true,
+        ...(startKey ? { ExclusiveStartKey: startKey } : {}),
+      }),
+    );
+
+    for (const item of Items ?? []) {
+      const record = toMembershipRecord(item, userId);
+      if (record) memberships.push(record);
+    }
+
+    if (memberships.length >= MAX_MEMBERSHIPS) {
+      console.error('[org-membership] Membership list truncated at the cap', {
+        userId,
+        cap: MAX_MEMBERSHIPS,
+      });
+      return memberships.slice(0, MAX_MEMBERSHIPS);
+    }
+
+    startKey = LastEvaluatedKey;
+  } while (startKey);
+
+  return memberships;
+}
+
+function toMembershipRecord(
+  item: Record<string, AttributeValue>,
+  userId: string,
+): OrgMembershipRecord | undefined {
+  const sk = item.sk?.S ?? '';
+  const orgId = OrgKeys.parseMembershipSk(sk);
+  if (!orgId) {
+    console.error('[org-membership] Inverse item has no well-formed membership key — dropped', {
+      userId,
+      sk,
+    });
+    return undefined;
+  }
+
+  const attributes = decodeRow<OrgMembershipRecord>(item);
+  const storedRole = attributes.role ?? '';
+  if (!isOrgRole(storedRole)) {
+    console.error('[org-membership] Inverse item carries an unrecognized role — dropped', {
+      userId,
+      orgId,
+      role: storedRole,
+    });
+    return undefined;
+  }
+
+  return { joinedAt: '', ...attributes, orgId, role: storedRole };
+}
+
+/**
+ * Every org the caller belongs to, named for the org switcher.
+ *
+ * The active org is always in the list. Its inverse item may not exist yet
+ * during the conversion window, and a response whose `role` named an org its
+ * `memberships` did not contain would contradict itself.
+ *
+ * The active org's name is the read the caller is already making, passed in
+ * rather than repeated; every other org costs one profile GetItem, which stays
+ * cheap while a second membership can only arrive through an invitation. A
+ * profile that cannot be read leaves that org unnamed rather than failing the
+ * response.
+ */
+export async function summarizeMemberships({
+  userId,
+  activeOrgId,
+  activeRole,
+  activeOrgName,
+}: {
+  userId: string;
+  activeOrgId: string;
+  activeRole?: OrgRole;
+  activeOrgName: Promise<string>;
+}): Promise<OrgMembershipSummary[]> {
+  const memberships = await listMemberships(userId);
+  const rows =
+    activeRole && !memberships.some((membership) => membership.orgId === activeOrgId)
+      ? [{ orgId: activeOrgId, role: activeRole, joinedAt: '' }, ...memberships]
+      : memberships;
+
+  return Promise.all(
+    rows.map(async (row) => ({
+      orgId: row.orgId,
+      orgName: row.orgId === activeOrgId ? await activeOrgName : await resolveOrgName(row.orgId),
+      role: row.role,
+    })),
+  );
 }
 
 /**
  * TRANSITION — the account-deletion stack's role gate, re-read from OrgTable.
  * The UserInfoTable `MEMBER#` row it used to read stops existing when the
- * conversion moves membership here, so the gate resolves through the same
- * fallback as every other membership read. Deletion authority is `org.delete`,
- * which keeps the answer tied to the matrix instead of a role comparison.
- * The consistent read is deliberate: this authorizes destroying the org, so a
- * just-revoked role must not pass on a stale replica. Folded into
- * `authorize('org.delete')` when enforcement lands.
+ * conversion moves membership here. An absent row resolves as Owner — the same
+ * transition default `authMiddleware` applies, repeated here because this gate
+ * must authorize pre-conversion accounts too, and it is the read consistency
+ * above that keeps a just-revoked role from passing. Deletion authority is
+ * `org.delete`, which ties the answer to the matrix instead of a role
+ * comparison. Folded into `authorize('org.delete')` when enforcement lands.
  */
 export async function isOrgAdmin(orgId: string, userId: string): Promise<boolean> {
-  const membership = await resolveMembership(orgId, userId, { consistentRead: true });
-  return membershipPermissions(membership).includes('org.delete');
+  const membership = await resolveMembership(orgId, userId);
+  const role = membership?.role ?? OrgRole.Owner;
+  return permissionsForRole(role).includes('org.delete');
 }

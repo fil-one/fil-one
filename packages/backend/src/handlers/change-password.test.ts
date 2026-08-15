@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { OrgRole } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.js';
 
 // ---------------------------------------------------------------------------
@@ -101,7 +102,11 @@ describe('POST /api/me/change-password handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
-    stubMembershipRead(ddbMock, { orgId: MOCK_ORG_ID, userId: MOCK_USER_ID });
+    stubMembershipRead(ddbMock, {
+      orgId: MOCK_ORG_ID,
+      userId: MOCK_USER_ID,
+      role: OrgRole.Owner,
+    });
     mockInitiatePasswordReset.mockResolvedValue(undefined);
   });
 

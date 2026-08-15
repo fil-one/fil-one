@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { OrgRole } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.js';
 
 // ---------------------------------------------------------------------------
@@ -107,7 +108,11 @@ describe('POST /api/mfa/disable handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
-    stubMembershipRead(ddbMock, { orgId: MOCK_ORG_ID, userId: MOCK_USER_ID });
+    stubMembershipRead(ddbMock, {
+      orgId: MOCK_ORG_ID,
+      userId: MOCK_USER_ID,
+      role: OrgRole.Owner,
+    });
   });
 
   it('disables MFA and deletes authenticators for database connection users', async () => {

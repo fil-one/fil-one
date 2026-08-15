@@ -35,6 +35,7 @@ const dynamo = new DynamoDBClient({});
 const tables: Array<{ name: string; tableName: string }> = [
   { name: 'BillingTable', tableName: Resource.BillingTable.name },
   { name: 'UserInfoTable', tableName: Resource.UserInfoTable.name },
+  { name: 'OrgTable', tableName: Resource.OrgTable.name },
 ];
 
 for (const { name, tableName } of tables) {
