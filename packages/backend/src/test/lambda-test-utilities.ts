@@ -7,8 +7,9 @@ import type {
   ServiceOutputTypes,
 } from '@aws-sdk/client-dynamodb';
 import type { AwsStub } from 'aws-sdk-client-mock';
-import type { OrgRole } from '@filone/shared';
+import { OrgRole } from '@filone/shared';
 import { OrgKeys } from '../lib/org-membership.js';
+import type { OrgMembership } from '../lib/org-membership.js';
 import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.js';
 
 /** What `mockClient(DynamoDBClient)` returns. */
@@ -46,7 +47,16 @@ export function stubMembershipRead(
     });
 }
 
-/** No membership row — a pre-conversion account, which resolves as Owner. */
+/**
+ * The membership row `authMiddleware` would have attached for a caller in this
+ * role — what a handler test hands to {@link buildEvent} when the role is the
+ * point of the test.
+ */
+export function membershipFor(orgId: string, userId: string, role: OrgRole): OrgMembership {
+  return { orgId, userId, role, joinedAt: STUB_JOINED_AT, source: 'signup' };
+}
+
+/** No membership row — the caller is not a member, and `authorize` refuses. */
 export function stubAbsentMembershipRead(
   ddbMock: DynamoMock,
   { orgId, userId }: { orgId: string; userId: string },
@@ -105,6 +115,30 @@ interface BuildEventProps {
   method?: string;
 }
 
+/**
+ * The `userInfo` a handler actually sees, which after enforcement always
+ * carries a membership: a request whose caller has no row never reaches a
+ * handler, because `authorize` refused it. Absent the key, the caller is an
+ * Owner — the role every existing account holds — so a test about a handler's
+ * own logic says nothing about roles. Passing `membership: undefined`
+ * explicitly is how a test describes a caller with no row.
+ *
+ * That the gate is installed at all is not left to these fixtures: the manifest
+ * coverage test proves every declared route composes `authorize`, and
+ * authorize's own tests prove what each role may do.
+ */
+function buildUserInfo(userInfo: BuildEventUserInfo): UserInfo {
+  return {
+    sub: 'auth0|test-sub-id',
+    ...userInfo,
+    emailVerified: userInfo.emailVerified ?? true,
+    membership:
+      'membership' in userInfo
+        ? userInfo.membership
+        : membershipFor(userInfo.orgId, userInfo.userId, OrgRole.Owner),
+  };
+}
+
 export function buildEvent(
   props: BuildEventProps & { userInfo: BuildEventUserInfo },
 ): AuthenticatedEvent & NormalizedHeaderEvent;
@@ -140,15 +174,7 @@ export function buildEvent(
       stage: '$default',
       time: '01/Jan/2024:00:00:00 +0000',
       timeEpoch: 1704067200000,
-      ...(props?.userInfo
-        ? {
-            userInfo: {
-              sub: 'auth0|test-sub-id',
-              ...props.userInfo,
-              emailVerified: props.userInfo.emailVerified ?? true,
-            },
-          }
-        : {}),
+      ...(props?.userInfo ? { userInfo: buildUserInfo(props.userInfo) } : {}),
       ...props?.requestContext,
     },
     isBase64Encoded: false,

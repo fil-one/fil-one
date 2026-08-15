@@ -43,8 +43,13 @@ vi.mock('../lib/org-profile.js', () => ({
 
 process.env.FILONE_STAGE = 'test';
 
-import { baseHandler } from './list-buckets.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+vi.mock('../middleware/auth.js', () => ({
+  authMiddleware: () => ({ before: () => undefined }),
+}));
+
+import { baseHandler, handler } from './list-buckets.js';
+import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { describeRoleEnforcement } from '../test/role-enforcement.js';
 import { S3_REGION, S3Region } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
@@ -434,4 +439,10 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
     expect(consoleError).not.toHaveBeenCalled();
     consoleError.mockRestore();
   });
+});
+
+describeRoleEnforcement({
+  permission: 'buckets.read',
+  invoke: (membership) =>
+    handler(buildEvent({ userInfo: { ...USER_INFO, membership } }), buildContext()),
 });

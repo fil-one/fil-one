@@ -37,9 +37,14 @@ vi.mock('../lib/org-profile.js', async () => ({
   isOrgDeleting: (...args: Parameters<typeof mockIsOrgDeleting>) => mockIsOrgDeleting(...args),
 }));
 
-import { baseHandler } from './create-bucket.js';
+vi.mock('../middleware/auth.js', () => ({
+  authMiddleware: () => ({ before: () => undefined }),
+}));
+
+import { baseHandler, handler } from './create-bucket.js';
 import { BucketAlreadyExistsError, BucketConfigurationError } from '../lib/errors.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { describeRoleEnforcement } from '../test/role-enforcement.js';
 import { S3_REGION, S3Region } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
@@ -257,4 +262,10 @@ describe('create-bucket baseHandler', () => {
       process.env.FILONE_STAGE = previous;
     }
   });
+});
+
+describeRoleEnforcement({
+  permission: 'buckets.create',
+  invoke: (membership) =>
+    handler(buildEvent({ userInfo: { ...USER_INFO, membership } }), buildContext()),
 });

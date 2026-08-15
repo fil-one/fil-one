@@ -2,9 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
-import { SubscriptionStatus } from '@filone/shared';
+import { OrgRole, SubscriptionStatus } from '@filone/shared';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import type { OrgMembership } from '../lib/org-membership.js';
+import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -59,7 +61,16 @@ vi.mock('../lib/stripe-client.js', () => ({
   }),
 }));
 
-// Must mock auth/csrf middleware to pass through
+// Must mock auth/csrf middleware to pass through. The membership is what
+// `authorize` reads next, so the role the caller holds is a variable: every
+// test but the enforcement block runs as the Owner, which is the only role
+// `billing.manage` reaches.
+let callerMembership: OrgMembership | undefined = {
+  orgId: 'org-1',
+  userId: 'user-1',
+  role: OrgRole.Owner,
+};
+
 vi.mock('../middleware/auth.js', () => ({
   authMiddleware: () => ({
     before: async (request: { event: { requestContext: { userInfo: unknown } } }) => {
@@ -67,6 +78,7 @@ vi.mock('../middleware/auth.js', () => ({
         userId: 'user-1',
         email: 'test@example.com',
         orgId: 'org-1',
+        membership: callerMembership,
       };
     },
   }),
@@ -835,4 +847,23 @@ describe('activate-subscription handler', () => {
       });
     });
   });
+});
+
+describeRoleEnforcement({
+  permission: 'billing.manage',
+  invoke: async (membership) => {
+    // This chain's auth mock builds userInfo itself, so the role travels here.
+    callerMembership = membership;
+    const result = await handler(
+      buildEvent({
+        userInfo: { userId: 'user-1', orgId: 'org-1' },
+        method: 'POST',
+        rawPath: '/api/billing/activate',
+        body: '{}',
+      }),
+      buildContext(),
+    );
+    callerMembership = { orgId: 'org-1', userId: 'user-1', role: OrgRole.Owner };
+    return result;
+  },
 });

@@ -31,6 +31,7 @@ const ddbMock = mockClient(DynamoDBClient);
 import { baseHandler, handler } from './delete-rag-api-key.js';
 import { RagApiKeyKeys } from '../lib/rag-api-keys.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { describeRoleEnforcement } from '../test/role-enforcement.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1', emailVerified: true };
@@ -160,4 +161,10 @@ describe('delete-rag-api-key handler (allowlist gate)', () => {
     expect(result).toMatchObject({ statusCode: 204 });
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
   });
+});
+
+describeRoleEnforcement({
+  permission: 'keys.manage_all',
+  invoke: (membership) =>
+    handler(buildEvent({ userInfo: { ...USER_INFO, membership } }), buildContext()),
 });

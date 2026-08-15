@@ -24,8 +24,13 @@ vi.mock('../lib/org-profile.js', () => ({
 
 process.env.FILONE_STAGE = 'test';
 
-import { baseHandler } from './get-bucket.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+vi.mock('../middleware/auth.js', () => ({
+  authMiddleware: () => ({ before: () => undefined }),
+}));
+
+import { baseHandler, handler } from './get-bucket.js';
+import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { describeRoleEnforcement } from '../test/role-enforcement.js';
 import { fakeOrchestrator, tenantFor, type FakeOrchestrator } from '../test/fake-orchestrator.js';
 import { S3_REGION, S3Region } from '@filone/shared';
 
@@ -271,4 +276,10 @@ describe('get-bucket baseHandler', () => {
       process.env.FILONE_STAGE = previous;
     }
   });
+});
+
+describeRoleEnforcement({
+  permission: 'buckets.read',
+  invoke: (membership) =>
+    handler(buildEvent({ userInfo: { ...USER_INFO, membership } }), buildContext()),
 });

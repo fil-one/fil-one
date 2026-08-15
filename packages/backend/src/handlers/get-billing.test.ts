@@ -30,8 +30,13 @@ vi.mock('../lib/stripe-client.js', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { baseHandler } from './get-billing.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+vi.mock('../middleware/auth.js', () => ({
+  authMiddleware: () => ({ before: () => undefined }),
+}));
+
+import { baseHandler, handler } from './get-billing.js';
+import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -891,4 +896,10 @@ describe('get-billing baseHandler', () => {
       },
     });
   });
+});
+
+describeRoleEnforcement({
+  permission: 'billing.view',
+  invoke: (membership) =>
+    handler(buildEvent({ userInfo: { ...USER_INFO, membership } }), buildContext()),
 });

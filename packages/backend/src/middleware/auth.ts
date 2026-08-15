@@ -9,7 +9,7 @@ import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
 import { Resource } from 'sst';
 import type { UserInfo } from '../lib/user-context.js';
-import { ApiErrorCode, OrgRole } from '@filone/shared';
+import { ApiErrorCode } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
 import {
   accountDeletedResponse,
@@ -289,6 +289,11 @@ async function attachIdentity({
  * makes a role change take effect on the next request, with no invalidation
  * machinery.
  *
+ * An absent row is left absent. The conversion has backfilled every account, so
+ * absence now means the caller is not a member, and `authorize` turns it into a
+ * 403 — while `/api/me`, which carries no role gate, still answers with no role
+ * and an empty permission set so the console can say so.
+ *
  * Returns a response when the read fails, and undefined when it succeeds.
  */
 async function attachMembership(
@@ -300,8 +305,7 @@ async function attachMembership(
   if (userInfo.membership) return undefined;
 
   try {
-    userInfo.membership =
-      (await resolveMembership(userInfo.orgId, userInfo.userId)) ?? transitionOwner(userInfo);
+    userInfo.membership = await resolveMembership(userInfo.orgId, userInfo.userId);
     return undefined;
   } catch (err) {
     console.error('[auth] OrgTable membership read failed — cannot resolve the role', {
@@ -311,21 +315,6 @@ async function attachMembership(
     });
     return membershipUnavailableResponse();
   }
-}
-
-/**
- * TRANSITION — deleted post-conversion. Accounts created before membership
- * moved into OrgTable have no row there, and some early identities never had
- * one at all. Every such account is an org of one, so resolving an absent row
- * as Owner preserves exactly today's authority. The conversion backfills the
- * rows; once its zero-count scan is verified, this default goes and an absent
- * row becomes a denial.
- *
- * It lives here rather than in the data layer because the invite and removal
- * paths read the same row and must treat absence as denial.
- */
-function transitionOwner(userInfo: UserInfo): OrgMembership {
-  return { orgId: userInfo.orgId, userId: userInfo.userId, role: OrgRole.Owner };
 }
 
 // ---------------------------------------------------------------------------
@@ -497,13 +486,17 @@ function verifiedEmailGate(
 /**
  * Carry the rotated cookies on a response the before hook returns itself.
  *
+ * Exported for the gates that run after this middleware in the same before
+ * stack — `authorize` on the RAG query route's cookie branch — which short-
+ * circuit for the same reason and would otherwise drop the same cookies.
+ *
  * Returning a response from `before` short-circuits the whole chain, the after
  * hook included (@middy/core 7.2.2 runs the after stack only when the request
  * carries no `earlyResponse`), so a refresh that already happened has to set
  * its own cookies here. Otherwise the caller's old refresh token is spent at
  * Auth0 and the new one never reaches them — one denial becomes a logout.
  */
-function withRefreshedCookies(
+export function withRefreshedCookies(
   request: AuthMiddlewareRequest,
   response: APIGatewayProxyStructuredResultV2,
 ): APIGatewayProxyStructuredResultV2 {

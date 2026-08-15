@@ -395,20 +395,19 @@ describe('GET /api/me handler', () => {
       ]);
     });
 
-    it('reports Owner when no membership row exists yet (pre-conversion accounts)', async () => {
+    it('reports no role at all when no membership row exists', async () => {
       profileResolves();
       stubAbsentMembershipRead(ddbMock, { orgId: MOCK_ORG_ID, userId: MOCK_USER_ID });
       stubMembershipList(ddbMock, { userId: MOCK_USER_ID, orgs: [] });
 
       const body = parseBody(await handler(authenticatedEvent(), buildContext()));
 
-      expect(body.role).toBe(OrgRole.Owner);
-      expect(body.permissions).toStrictEqual([...ROLE_PERMISSIONS[OrgRole.Owner]]);
-      // The active org is in the list even before its inverse item exists —
-      // a role naming an org the memberships omit would contradict itself.
-      expect(body.memberships).toStrictEqual([
-        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', role: OrgRole.Owner },
-      ]);
+      // /api/me is a `self` route and answers without a role gate, which is
+      // what lets the console tell a caller they are not a member rather than
+      // showing them an empty console. Every gated route refuses them.
+      expect(body.role).toBeUndefined();
+      expect(body.permissions).toStrictEqual([]);
+      expect(body.memberships).toStrictEqual([]);
     });
 
     it('never 500s when another org profile cannot be read', async () => {

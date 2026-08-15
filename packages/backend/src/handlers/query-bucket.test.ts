@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('sst', () => ({
   Resource: {
     UserInfoTable: { name: 'UserInfoTable' },
+    OrgTable: { name: 'OrgTable' },
     RagVectorBucket: { name: 'RagVectorBucket' },
   },
 }));
@@ -85,9 +86,9 @@ process.env.FILONE_STAGE = 'test';
 
 import { baseHandler, handler } from './query-bucket.js';
 import { hashRagKeyToken, RagApiKeyKeys } from '../lib/rag-api-keys.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { buildEvent, buildContext, stubMembershipRead } from '../test/lambda-test-utilities.js';
 import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.js';
-import { S3Region } from '@filone/shared';
+import { OrgRole, S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 
 // ---------------------------------------------------------------------------
@@ -614,6 +615,9 @@ describe('query-bucket handler (RAG API key bearer auth)', () => {
         Key: { pk: { S: RagApiKeyKeys.orgPk('org-1') }, sk: { S: RagApiKeyKeys.orgSk('key-1') } },
       })
       .resolves({ Item: marshall({ ...KEY_RECORD, ...overrides }) });
+    // The key's authority is its creator's membership, which the bearer path
+    // reads before it lets the request through.
+    stubMembershipRead(ddbMock, { orgId: 'org-1', userId: 'user-1', role: OrgRole.Member });
     ddbMock.on(UpdateItemCommand).resolves({});
   }
 

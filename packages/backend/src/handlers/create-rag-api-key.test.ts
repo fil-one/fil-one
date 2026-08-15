@@ -34,6 +34,7 @@ import { baseHandler, handler } from './create-rag-api-key.js';
 import { OrgDeletingError } from '../lib/org-profile.js';
 import { hashRagKeyToken, RagApiKeyKeys } from '../lib/rag-api-keys.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
 const USER_INFO = {
   userId: 'user-1',
@@ -219,4 +220,10 @@ describe('create-rag-api-key handler (allowlist gate)', () => {
     expect(result.statusCode).toBe(201);
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
   });
+});
+
+describeRoleEnforcement({
+  permission: 'keys.create',
+  invoke: (membership) =>
+    handler(buildEvent({ userInfo: { ...USER_INFO, membership } }), buildContext()),
 });
