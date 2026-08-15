@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Usage: ./bin/convert-orgs-to-orgtable.ts [--execute]
+// Usage: ./bin/convert-orgs-to-orgtable.ts --stage <name> [--execute] [--verify] [--force-unlock]
 //
 // Moves organization membership out of UserInfoTable and into OrgTable, and
 // converts the legacy `admin` role to `owner` on the way (IAM M1, FIL-1013).
@@ -10,7 +10,7 @@
 // Per org, in one OrgTable transaction:
 //   ORG#{orgId}   / MEMBER#{userId}      role=owner, joinedAt, source=conversion
 //   USER#{userId} / MEMBERSHIP#{orgId}   the inverse item
-//   ORG#{orgId}   / META                 ownerCount=1
+//   ORG#{orgId}   / META                 ownerCount=1, for an org that has none
 // then the legacy UserInfoTable `ORG#{orgId}/MEMBER#{userId}` row is deleted —
 // only after that transaction has succeeded.
 //
@@ -22,71 +22,54 @@
 // the already-converted count, and every anomaly — before it writes anything,
 // in both modes. Pass --execute to apply it.
 //
-//   ./bin/convert-orgs-to-orgtable.ts              # dry run
-//   ./bin/convert-orgs-to-orgtable.ts --execute
+// --stage is required and has no default: the target account is a decision, not
+// something to inherit from whatever the shell was last used for. The run
+// re-execs itself under `sst shell --stage <name>`, then asserts the resolved
+// table names carry `filone-<stage>-` before reading anything.
 //
-// Target staging (AWS account 654654381893):
-//   pnpm exec sst shell --stage staging -- node ./bin/convert-orgs-to-orgtable.ts
-//   pnpm exec sst shell --stage staging -- node ./bin/convert-orgs-to-orgtable.ts --execute
+//   ./bin/convert-orgs-to-orgtable.ts --stage staging
+//   ./bin/convert-orgs-to-orgtable.ts --stage staging --execute
+//   ./bin/convert-orgs-to-orgtable.ts --stage production --verify
 //
-// Target production (AWS account 811430801166):
-//   pnpm exec sst shell --stage production -- node ./bin/convert-orgs-to-orgtable.ts
-//   pnpm exec sst shell --stage production -- node ./bin/convert-orgs-to-orgtable.ts --execute
+// Staging is AWS account 654654381893, production 811430801166. Confirm the
+// stage and the table names printed at startup before running with --execute.
 //
-// The `--` between `--stage <name>` and `node` keeps `sst shell` from parsing
-// `--execute` as one of its own flags. Confirm the stage printed at startup
-// before running with --execute.
+// --verify re-derives the classification and prints PASS/FAIL per check — the
+// gate the enforcement PR merges on. It writes nothing.
+//
+// An --execute run holds a lock row in OrgTable so the conversion and the
+// revert can never run at once. --force-unlock drops a lock a crashed run left
+// behind.
 //
 // There is no DynamoDB PITR/backup, so the per-org log is the only audit trail —
-// capture stdout when running for real, e.g. `... --execute | tee convert.log`.
+// capture the whole run when running for real:
+//   ... --execute 2>&1 | tee convert.log
 //
-// Preconditions, verification queries, and the revert procedure:
+// Preconditions, verification, and the revert procedure:
 // docs/OrgConversionRunbook.md. The revert is ./bin/revert-org-conversion.ts.
 
-import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-const USAGE = 'Usage: ./bin/convert-orgs-to-orgtable.ts [--execute]  (dry run by default)';
+import { parseCli } from './lib/args.ts';
+import { ensureSstShell } from './lib/stage.ts';
 
-if (process.argv.includes('--help') || process.argv.includes('-h')) {
-  console.log(USAGE);
-  console.log('Runbook: docs/OrgConversionRunbook.md');
-  process.exit(0);
-}
+const cli = parseCli({
+  script: './bin/convert-orgs-to-orgtable.ts',
+  flags: ['--verify', '--force-unlock'],
+  help: [
+    '--verify        Re-check both tables and print PASS/FAIL. Writes nothing.',
+    '--force-unlock  Drop the run lock a crashed --execute run left behind.',
+  ],
+});
 
-const KNOWN_FLAGS = new Set(['--execute', '--dry-run']);
-const unknownFlags = process.argv.slice(2).filter((arg) => !KNOWN_FLAGS.has(arg));
-if (unknownFlags.length > 0) {
-  console.error(`Unrecognized argument(s): ${unknownFlags.join(' ')}`);
-  console.error(USAGE);
-  process.exit(1);
-}
-
-// --dry-run is accepted as a no-op so the flag from the other bin/ migrations
-// never reads as "execute"; a run carrying both stays a dry run.
-const execute = process.argv.includes('--execute') && !process.argv.includes('--dry-run');
-
-// Re-exec under `sst shell` if SST resources aren't available
-if (!process.env.SST_RESOURCE_App) {
-  execFileSync(
-    'pnpm',
-    ['exec', 'sst', 'shell', '--', 'node', import.meta.filename, ...process.argv.slice(2)],
-    { stdio: 'inherit' },
-  );
-  process.exit(0);
-}
+ensureSstShell(cli.stage, import.meta.filename, cli.argv);
 
 import { Resource } from 'sst';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
-import {
-  DeleteItemCommand,
-  DynamoDBClient,
-  GetItemCommand,
-  ScanCommand,
-  TransactionCanceledException,
-  TransactWriteItemsCommand,
-} from '@aws-sdk/client-dynamodb';
+import { DeleteItemCommand, DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { decodeRow, scanAll, text, transactWithRetry } from './lib/dynamo.ts';
+import { acquireRunLock, forceUnlock } from './lib/run-lock.ts';
+import { assertStageResources, awsRegionForStage } from './lib/stage.ts';
 import {
   buildConversionTransactItems,
   classifyOrg,
@@ -97,41 +80,34 @@ import {
   parseMemberSk,
   parseOrgPk,
   parseUserPk,
+  UNKNOWN_JOINED_AT,
   UserInfoKeys,
 } from './lib/org-conversion.ts';
 import type { ConvertPlan, OrgPlan, OrgState, ScanCounts } from './lib/org-conversion.ts';
+import { formatVerifyReport, verifyConversion } from './lib/org-verify.ts';
 
 /** Pause between orgs that write, so a few thousand transactions stay polite to a shared table. */
 const WRITE_DELAY_MS = 50;
 
 const userInfoTable = Resource.UserInfoTable.name;
 const orgTable = Resource.OrgTable.name;
-const stage = readFileSync('.sst/stage', 'utf8').trim();
 
-// `sst shell --stage X` leaves .sst/stage untouched, so the stage we were asked
-// for and the resources we actually resolved can disagree. SST default-names
-// the table `filone-<stage>-UserInfoTableTable`; assert the match rather than
-// trusting the flag — the banner below is the operator's only confirmation of
-// which data this run is about to rewrite. (Same guard as
-// bin/reset-region-provisioning.ts.)
-if (!userInfoTable.includes(`filone-${stage}-`) || !orgTable.includes(`filone-${stage}-`)) {
-  console.error(
-    `Stage mismatch: .sst/stage says "${stage}" but resolved tables "${userInfoTable}" and "${orgTable}".`,
-  );
-  process.exit(1);
-}
+assertStageResources(cli.stage, { UserInfoTable: userInfoTable, OrgTable: orgTable });
 
-// Mirrors the region logic in sst.config.ts app() — don't trust ambient
-// AWS_REGION for staging/production, whose home region is fixed.
-const awsRegion =
-  stage === 'staging' || stage === 'production'
-    ? 'us-east-2'
-    : (process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? 'us-west-2');
-
+const awsRegion = awsRegionForStage(cli.stage);
 const dynamo = new DynamoDBClient({ region: awsRegion });
 
+const verify = cli.flag('--verify');
+const execute = cli.execute && !verify;
+
+if (cli.flag('--force-unlock')) {
+  await forceUnlock(dynamo, orgTable);
+  process.exit(0);
+}
+
+const mode = verify ? 'VERIFY — ' : execute ? 'EXECUTE — ' : 'DRY-RUN — ';
 console.log(
-  `${execute ? 'EXECUTE — ' : 'DRY-RUN — '}Converting org membership into OrgTable (stage="${stage}", region=${awsRegion})`,
+  `${mode}Converting org membership into OrgTable (stage="${cli.stage}", region=${awsRegion})`,
 );
 console.log(`  UserInfoTable: ${userInfoTable}`);
 console.log(`  OrgTable:      ${orgTable}`);
@@ -144,6 +120,7 @@ const scan: ScanCounts = {
   userProfiles: 0,
   unparsedRows: 0,
   orgTableMemberRows: 0,
+  orgTableInverseRows: 0,
   orgTableMetaRows: 0,
 };
 
@@ -163,48 +140,57 @@ function orgState(orgId: string): OrgState {
   return created;
 }
 
+/** The UserInfoTable attributes the conversion projects, as one decoded row. */
+interface UserInfoRow {
+  pk: string;
+  sk: string;
+  role: string;
+  joinedAt: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+/** The OrgTable attributes the conversion projects. */
+interface OrgTableRow {
+  pk: string;
+  sk: string;
+}
+
 /**
  * One pass over UserInfoTable collects everything the classification needs: org
  * profiles (the repair source), the legacy membership rows, and the set of user
  * ids that have a profile (a membership naming anyone else is an anomaly).
  */
 async function scanUserInfoTable(): Promise<void> {
-  let lastKey: Record<string, AttributeValue> | undefined;
+  const items = scanAll(dynamo, {
+    TableName: userInfoTable,
+    FilterExpression:
+      '(begins_with(pk, :orgPrefix) AND (sk = :profile OR begins_with(sk, :memberPrefix)))' +
+      ' OR (begins_with(pk, :userPrefix) AND sk = :profile)',
+    // No `email`: the oldest membership rows still carry one, but the project
+    // stopped storing it deliberately (commit 4f02a70, "removing stored email
+    // entirely to resolve issues when email is changed"), so it is not carried
+    // into OrgTable and goes with the deleted row.
+    ProjectionExpression: 'pk, sk, #role, joinedAt, createdBy, createdAt',
+    ExpressionAttributeNames: { '#role': 'role' },
+    ExpressionAttributeValues: {
+      ':orgPrefix': { S: OrgKeys.orgPkPrefix() },
+      ':userPrefix': { S: OrgKeys.userPkPrefix() },
+      ':profile': { S: UserInfoKeys.profileSk() },
+      ':memberPrefix': { S: OrgKeys.memberSkPrefix() },
+    },
+  });
 
-  do {
-    const result = await dynamo.send(
-      new ScanCommand({
-        TableName: userInfoTable,
-        FilterExpression:
-          '(begins_with(pk, :orgPrefix) AND (sk = :profile OR begins_with(sk, :memberPrefix)))' +
-          ' OR (begins_with(pk, :userPrefix) AND sk = :profile)',
-        // No `email`: the oldest membership rows still carry one, but the
-        // project stopped storing it deliberately (commit 4f02a70, "removing
-        // stored email entirely to resolve issues when email is changed"), so
-        // it is not carried into OrgTable and goes with the deleted row.
-        ProjectionExpression: 'pk, sk, #role, joinedAt, createdBy, createdAt',
-        ExpressionAttributeNames: { '#role': 'role' },
-        ExpressionAttributeValues: {
-          ':orgPrefix': { S: OrgKeys.orgPkPrefix() },
-          ':userPrefix': { S: OrgKeys.userPkPrefix() },
-          ':profile': { S: UserInfoKeys.profileSk() },
-          ':memberPrefix': { S: OrgKeys.memberSkPrefix() },
-        },
-        ExclusiveStartKey: lastKey,
-      }),
-    );
-    lastKey = result.LastEvaluatedKey;
-
-    for (const item of result.Items ?? []) {
-      scan.userInfoRows++;
-      collectUserInfoRow(item);
-    }
-  } while (lastKey);
+  for await (const item of items) {
+    scan.userInfoRows++;
+    collectUserInfoRow(item);
+  }
 }
 
 function collectUserInfoRow(item: Record<string, AttributeValue>): void {
-  const pk = item.pk?.S ?? '';
-  const sk = item.sk?.S ?? '';
+  const row = decodeRow<UserInfoRow>(item);
+  const pk = text(row.pk) ?? '';
+  const sk = text(row.sk) ?? '';
 
   const userId = parseUserPk(pk);
   if (userId && sk === UserInfoKeys.profileSk()) {
@@ -221,9 +207,11 @@ function collectUserInfoRow(item: Record<string, AttributeValue>): void {
 
   if (sk === UserInfoKeys.profileSk()) {
     scan.orgProfiles++;
+    const createdBy = text(row.createdBy);
+    const createdAt = text(row.createdAt);
     orgState(orgId).profile = {
-      ...(item.createdBy?.S ? { createdBy: item.createdBy.S } : {}),
-      ...(item.createdAt?.S ? { createdAt: item.createdAt.S } : {}),
+      ...(createdBy ? { createdBy } : {}),
+      ...(createdAt ? { createdAt } : {}),
     };
     return;
   }
@@ -233,58 +221,64 @@ function collectUserInfoRow(item: Record<string, AttributeValue>): void {
     scan.unparsedRows++;
     return;
   }
+  const role = text(row.role);
+  const joinedAt = text(row.joinedAt);
   scan.legacyMemberRows++;
   orgState(orgId).legacyMembers.push({
     userId: memberId,
-    ...(item.role?.S ? { role: item.role.S } : {}),
-    ...(item.joinedAt?.S ? { joinedAt: item.joinedAt.S } : {}),
+    ...(role ? { role } : {}),
+    ...(joinedAt ? { joinedAt } : {}),
   });
 }
 
 /**
  * OrgTable's existing rows: memberships from previous runs and from signups
- * since the write path deployed, plus the META rows. META is read because it
- * outlives a removed membership — an org with META and no member has been
- * handled already, and repairing it from `PROFILE.createdBy` would put back a
- * membership somebody deleted.
+ * since the write path deployed, their inverse items, and the META rows. META
+ * is read because it outlives a removed membership — an org with META, no
+ * member and no legacy row has been handled already, and repairing it from
+ * `PROFILE.createdBy` would put back a membership somebody deleted. The inverse
+ * items are counted so `--verify` can hold them against the canonical rows.
  */
 async function scanOrgTable(): Promise<void> {
-  let lastKey: Record<string, AttributeValue> | undefined;
+  const items = scanAll(dynamo, {
+    TableName: orgTable,
+    FilterExpression:
+      '(begins_with(pk, :orgPrefix) AND (begins_with(sk, :memberPrefix) OR sk = :meta))' +
+      ' OR (begins_with(pk, :userPrefix) AND begins_with(sk, :membershipPrefix))',
+    ProjectionExpression: 'pk, sk',
+    ExpressionAttributeValues: {
+      ':orgPrefix': { S: OrgKeys.orgPkPrefix() },
+      ':userPrefix': { S: OrgKeys.userPkPrefix() },
+      ':memberPrefix': { S: OrgKeys.memberSkPrefix() },
+      ':membershipPrefix': { S: OrgKeys.membershipSkPrefix() },
+      ':meta': { S: OrgKeys.orgMetaSk() },
+    },
+  });
 
-  do {
-    const result = await dynamo.send(
-      new ScanCommand({
-        TableName: orgTable,
-        FilterExpression:
-          'begins_with(pk, :orgPrefix) AND (begins_with(sk, :memberPrefix) OR sk = :meta)',
-        ProjectionExpression: 'pk, sk',
-        ExpressionAttributeValues: {
-          ':orgPrefix': { S: OrgKeys.orgPkPrefix() },
-          ':memberPrefix': { S: OrgKeys.memberSkPrefix() },
-          ':meta': { S: OrgKeys.orgMetaSk() },
-        },
-        ExclusiveStartKey: lastKey,
-      }),
-    );
-    lastKey = result.LastEvaluatedKey;
+  for await (const item of items) {
+    const row = decodeRow<OrgTableRow>(item);
+    const pk = text(row.pk) ?? '';
+    const sk = text(row.sk) ?? '';
 
-    for (const item of result.Items ?? []) {
-      const orgId = parseOrgPk(item.pk?.S ?? '');
-      if (!orgId) continue;
-      const sk = item.sk?.S ?? '';
-
-      if (sk === OrgKeys.orgMetaSk()) {
-        scan.orgTableMetaRows++;
-        orgState(orgId).hasMeta = true;
-        continue;
-      }
-
-      const userId = parseMemberSk(sk);
-      if (!userId) continue;
-      scan.orgTableMemberRows++;
-      orgState(orgId).orgTableMemberUserIds.push(userId);
+    if (parseUserPk(pk)) {
+      scan.orgTableInverseRows++;
+      continue;
     }
-  } while (lastKey);
+
+    const orgId = parseOrgPk(pk);
+    if (!orgId) continue;
+
+    if (sk === OrgKeys.orgMetaSk()) {
+      scan.orgTableMetaRows++;
+      orgState(orgId).hasMeta = true;
+      continue;
+    }
+
+    const userId = parseMemberSk(sk);
+    if (!userId) continue;
+    scan.orgTableMemberRows++;
+    orgState(orgId).orgTableMemberUserIds.push(userId);
+  }
 }
 
 async function deleteLegacyRow(orgId: string, userId: string): Promise<void> {
@@ -309,57 +303,68 @@ type ApplyOutcome = 'converted' | 'raced' | 'conflict';
 /**
  * Apply one org's conversion.
  *
- * A cancelled transaction means one of the three conditions lost, which is
- * either a previous run or a signup that beat us to the org. Neither is an
- * error and neither may be overwritten, so the row is re-read consistently: if
+ * A cancelled transaction is read for what it says. A failed condition is
+ * either a previous run or a signup that beat us to the org: neither is an
+ * error and neither may be overwritten, so the row is re-read consistently — if
  * the membership this plan would have written is there, the org is done and its
  * legacy row is cleaned up; if it is not, the org is left alone and reported.
+ * Throttling and transaction conflicts are retried; anything else stops the run
+ * rather than being filed as an org that needs a human.
  */
 async function applyConversion(plan: ConvertPlan): Promise<ApplyOutcome> {
   const { orgId, userId } = plan;
+  const row = `${OrgKeys.orgPk(orgId)} ${OrgKeys.memberSk(userId)}`;
 
-  try {
-    await dynamo.send(
-      new TransactWriteItemsCommand({
-        TransactItems: buildConversionTransactItems(plan, orgTable),
-      }),
+  const conditionFailed = await transactWithRetry(
+    dynamo,
+    buildConversionTransactItems(plan, orgTable),
+    row,
+  );
+
+  if (conditionFailed && !(await hasOrgTableMembership(orgId, userId))) {
+    console.log(
+      `  CONFLICT ${row} — transaction cancelled (${conditionFailed.join(',')}) and no membership row exists; left for manual review`,
     );
-  } catch (err) {
-    if (!(err instanceof TransactionCanceledException)) throw err;
-
-    if (!(await hasOrgTableMembership(orgId, userId))) {
-      const reasons = (err.CancellationReasons ?? []).map((reason) => reason.Code).join(',');
-      console.warn(
-        `  CONFLICT ${OrgKeys.orgPk(orgId)} ${OrgKeys.memberSk(userId)} — transaction cancelled (${reasons}) and no membership row exists; left for manual review`,
-      );
-      return 'conflict';
-    }
-
-    if (plan.legacyRow) await deleteLegacyRow(orgId, userId);
-    return 'raced';
+    return 'conflict';
   }
 
   if (plan.legacyRow) await deleteLegacyRow(orgId, userId);
-  return 'converted';
+  return conditionFailed ? 'raced' : 'converted';
 }
 
+/**
+ * One org's conversion, as the audit log records it.
+ *
+ * The role is named as read, not as expected, and the repair cohort names the
+ * user it grants: the conversion invents that membership from
+ * `PROFILE.createdBy`, and this line is the only record of who received it.
+ */
 function describe(plan: ConvertPlan): string {
-  const joined = plan.joinedAt ? `joinedAt=${plan.joinedAt}` : 'joinedAt=(none recorded)';
-  // The role as read, not as expected: this log is the only record of what the
-  // row said before it was deleted.
+  const joined =
+    plan.joinedAt === UNKNOWN_JOINED_AT
+      ? `joinedAt=${UNKNOWN_JOINED_AT} (none recorded)`
+      : `joinedAt=${plan.joinedAt}`;
   const origin =
     plan.origin === 'member-row'
       ? `${OrgKeys.memberSk(plan.userId)} ${plan.fromRole ?? '(no role)'}->${CONVERTED_ROLE}`
-      : `repaired from PROFILE.createdBy -> ${CONVERTED_ROLE}`;
-  return `${OrgKeys.orgPk(plan.orgId)} ${origin} ${joined} source=conversion`;
+      : `${OrgKeys.memberSk(plan.userId)} granted ${CONVERTED_ROLE} from PROFILE.createdBy`;
+  const meta = plan.metaExists ? ' META=exists' : ' META=new';
+  return `${OrgKeys.orgPk(plan.orgId)} ${origin} ${joined} source=conversion${meta}`;
 }
 
 await scanUserInfoTable();
 await scanOrgTable();
 
-const plans: OrgPlan[] = [...orgs.values()]
+const states = [...orgs.values()];
+const plans: OrgPlan[] = states
   .map((state) => classifyOrg(state, knownUserIds))
   .sort((a, b) => a.orgId.localeCompare(b.orgId));
+
+if (verify) {
+  const checks = verifyConversion(states, plans, scan);
+  console.log(formatVerifyReport(checks));
+  process.exit(checks.some((check) => !check.pass) ? 1 : 0);
+}
 
 console.log(formatPlanReport(scan, plans));
 console.log('');
@@ -369,74 +374,121 @@ const outcomes = {
   repaired: 0,
   alreadyConverted: 0,
   raced: 0,
-  conflict: 0,
   legacyDeleted: 0,
+  staleLegacyDeleted: 0,
+  transactionConflict: 0,
+  legacyDeleteConflict: 0,
   anomalies: 0,
 };
 
-for (const plan of plans) {
-  if (plan.kind === 'anomaly') {
-    outcomes.anomalies++;
-    continue;
-  }
+// Held for the whole write phase: the revert moves the same rows the other way,
+// and one landing between this run's OrgTable transaction and its legacy-row
+// delete would leave an org with neither membership.
+const lock = execute
+  ? await acquireRunLock(dynamo, orgTable, {
+      script: 'convert-orgs-to-orgtable.ts',
+      stage: cli.stage,
+    })
+  : undefined;
 
-  if (plan.kind === 'already-converted') {
-    outcomes.alreadyConverted++;
-    if (!plan.legacyRowPending) continue;
-    console.log(
-      `  ${execute ? '' : '[dry-run] '}${OrgKeys.orgPk(plan.orgId)} already in OrgTable — deleting the legacy ${OrgKeys.memberSk(plan.userId)} row`,
-    );
-    if (!execute) continue;
+try {
+  for (const plan of plans) {
+    if (plan.kind === 'anomaly') {
+      outcomes.anomalies++;
+      continue;
+    }
 
-    // The scan is minutes old by the time this runs, and a legacy row may only
-    // be deleted while the OrgTable row that replaced it exists, so the
-    // replacement is re-read consistently rather than trusted from the scan.
-    if (await hasOrgTableMembership(plan.orgId, plan.userId)) {
-      await deleteLegacyRow(plan.orgId, plan.userId);
-      outcomes.legacyDeleted++;
-    } else {
-      console.warn(
-        `  CONFLICT ${OrgKeys.orgPk(plan.orgId)} ${OrgKeys.memberSk(plan.userId)} — the OrgTable membership is gone; legacy row kept`,
+    if (plan.kind === 'already-converted') {
+      outcomes.alreadyConverted++;
+      if (!plan.legacyRowPending) continue;
+
+      const row = `${OrgKeys.orgPk(plan.orgId)} ${OrgKeys.memberSk(plan.userId)}`;
+      if (!execute) {
+        console.log(`  [dry-run] SKIPPED ${row} already in OrgTable — deleting its legacy row`);
+        continue;
+      }
+
+      // The scan is minutes old by the time this runs, and a legacy row may
+      // only be deleted while the OrgTable row that replaced it exists, so the
+      // replacement is re-read consistently rather than trusted from the scan.
+      if (await hasOrgTableMembership(plan.orgId, plan.userId)) {
+        await deleteLegacyRow(plan.orgId, plan.userId);
+        outcomes.legacyDeleted++;
+        outcomes.staleLegacyDeleted++;
+        console.log(`  SKIPPED ${row} already in OrgTable — legacy row deleted`);
+      } else {
+        outcomes.legacyDeleteConflict++;
+        console.log(`  CONFLICT ${row} — the OrgTable membership is gone; legacy row kept`);
+      }
+      await sleep(WRITE_DELAY_MS);
+      continue;
+    }
+
+    if (!execute) {
+      console.log(
+        `  [dry-run] ${plan.origin === 'member-row' ? 'CONVERT' : 'REPAIR'} ${describe(plan)}`,
       );
-      outcomes.conflict++;
+      continue;
+    }
+
+    const outcome = await applyConversion(plan);
+    if (outcome === 'converted') {
+      if (plan.origin === 'member-row') outcomes.converted++;
+      else outcomes.repaired++;
+      if (plan.legacyRow) outcomes.legacyDeleted++;
+      console.log(`  ${plan.origin === 'member-row' ? 'CONVERTED' : 'REPAIRED'} ${describe(plan)}`);
+    } else if (outcome === 'raced') {
+      outcomes.raced++;
+      if (plan.legacyRow) outcomes.legacyDeleted++;
+      console.log(
+        `  RACED ${OrgKeys.orgPk(plan.orgId)} ${OrgKeys.memberSk(plan.userId)} — a concurrent write created the membership first${plan.legacyRow ? '; legacy row deleted' : ''}`,
+      );
+    } else {
+      outcomes.transactionConflict++;
     }
     await sleep(WRITE_DELAY_MS);
-    continue;
   }
-
-  console.log(`  ${execute ? '' : '[dry-run] '}${describe(plan)}`);
-  if (!execute) continue;
-
-  const outcome = await applyConversion(plan);
-  if (outcome === 'converted') {
-    if (plan.origin === 'member-row') outcomes.converted++;
-    else outcomes.repaired++;
-    if (plan.legacyRow) outcomes.legacyDeleted++;
-  } else if (outcome === 'raced') {
-    outcomes.raced++;
-    if (plan.legacyRow) outcomes.legacyDeleted++;
-  } else {
-    outcomes.conflict++;
-  }
-  await sleep(WRITE_DELAY_MS);
+} finally {
+  await lock?.release();
 }
+
+const planned = summarize();
 
 console.log('');
 if (execute) {
-  console.log(`Converted (from legacy MEMBER# rows):  ${outcomes.converted}`);
-  console.log(`Repaired (from PROFILE.createdBy):     ${outcomes.repaired}`);
-  console.log(`Already converted before this run:     ${outcomes.alreadyConverted}`);
-  console.log(`Raced (a concurrent write got there first): ${outcomes.raced}`);
-  console.log(`Legacy MEMBER# rows deleted:           ${outcomes.legacyDeleted}`);
-  console.log(`Conflicts (manual review):             ${outcomes.conflict}`);
-  console.log(`Anomalies (untouched):                 ${outcomes.anomalies}`);
+  console.log(`Converted (from legacy MEMBER# rows):        ${outcomes.converted}`);
+  console.log(`Repaired (from PROFILE.createdBy):           ${outcomes.repaired}`);
+  console.log(`Already converted before this run:           ${outcomes.alreadyConverted}`);
+  console.log(`Raced (a concurrent write got there first):  ${outcomes.raced}`);
+  console.log(`Legacy MEMBER# rows deleted:                 ${outcomes.legacyDeleted}`);
+  console.log(`Conflicts — transaction (manual review):     ${outcomes.transactionConflict}`);
+  console.log(`Conflicts — stale legacy row kept:           ${outcomes.legacyDeleteConflict}`);
+  console.log(`Anomalies (untouched):                       ${outcomes.anomalies}`);
   console.log('');
-  console.log("The plan's Convert + Repair equals Converted + Repaired + Raced + Conflicts.");
-  console.log('Run the verification queries in docs/OrgConversionRunbook.md and record the');
-  console.log('remaining legacy MEMBER# row count — the enforcement PR merges on that number.');
-  if (outcomes.conflict > 0) process.exitCode = 1;
+  console.log(
+    `Convert + Repair (${planned.writes}) = Converted + Repaired + Raced + transaction conflicts (${
+      outcomes.converted + outcomes.repaired + outcomes.raced + outcomes.transactionConflict
+    }).`,
+  );
+  console.log(
+    `Stale legacy rows in the plan (${planned.staleLegacyRows}) = deleted (${outcomes.staleLegacyDeleted}) + stale-row conflicts (${outcomes.legacyDeleteConflict}).`,
+  );
+  console.log('');
+  console.log('Now run --verify against the same stage and record its result — the enforcement');
+  console.log('PR merges on a PASS. See docs/OrgConversionRunbook.md.');
+  if (outcomes.transactionConflict > 0 || outcomes.legacyDeleteConflict > 0) process.exitCode = 1;
 } else {
   console.log('Dry run only — nothing was written.');
   console.log('Disposition every anomaly above, then re-run with --execute.');
 }
 console.log('Done.');
+
+function summarize(): { writes: number; staleLegacyRows: number } {
+  let writes = 0;
+  let staleLegacyRows = 0;
+  for (const plan of plans) {
+    if (plan.kind === 'convert') writes++;
+    else if (plan.kind === 'already-converted' && plan.legacyRowPending) staleLegacyRows++;
+  }
+  return { writes, staleLegacyRows };
+}

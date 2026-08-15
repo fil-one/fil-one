@@ -98,3 +98,11 @@ aws iam list-roles --query 'length(Roles)' --output text
 | `aurora-preview-url.ts`        | Pre-signed GetObject URL for an Aurora object, plus a billing report for the owning account (deletion state, Stripe dashboard link, subscription status, latest usage) |
 | `aurora-demo.ts`               | Demo script for Aurora S3 operations                                                                                                                                   |
 | `account-deletion.ts`          | Report an org's account-deletion state, and start or re-drive the teardown worker                                                                                      |
+
+### Shared helpers (`bin/lib/`)
+
+| Module      | What it holds                                                                             |
+| ----------- | ----------------------------------------------------------------------------------------- |
+| `args.ts`   | `--stage` (required, no default), `--execute`/`--dry-run`, usage and help                 |
+| `stage.ts`  | The `sst shell --stage` re-exec, the resolved-resource-name assertion, the region mapping |
+| `dynamo.ts` | Paging a Scan to the end, decoding rows, and retrying a cancelled transaction             |

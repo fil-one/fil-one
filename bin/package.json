@@ -18,6 +18,8 @@
     "stripe": "^22.0.2"
   },
   "devDependencies": {
+    "@filone/backend": "workspace:*",
+    "@filone/shared": "workspace:*",
     "vitest": "^4.1.2"
   }
 }
