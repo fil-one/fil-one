@@ -41,8 +41,13 @@ vi.mock('../lib/org-profile.js', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { baseHandler } from './delete-access-key.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+vi.mock('../middleware/auth.js', () => ({
+  authMiddleware: () => ({ before: () => undefined }),
+}));
+
+import { baseHandler, handler } from './delete-access-key.js';
+import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { describeRoleEnforcement } from '../test/role-enforcement.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
@@ -154,4 +159,10 @@ describe('delete-access-key baseHandler', () => {
     await expect(baseHandler(eventWithKey(KEY_ID))).rejects.toThrow('Aurora API error');
     expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
   });
+});
+
+describeRoleEnforcement({
+  permission: 'keys.manage_all',
+  invoke: (membership) =>
+    handler(buildEvent({ userInfo: { ...USER_INFO, membership } }), buildContext()),
 });

@@ -6,6 +6,7 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 vi.mock('sst', () => ({
   Resource: {
     UserInfoTable: { name: 'UserInfoTable' },
+    OrgTable: { name: 'OrgTable' },
   },
 }));
 
@@ -16,13 +17,24 @@ const mockCookieBefore = vi.fn();
 const mockCookieAfter = vi.fn();
 vi.mock('./auth.js', () => ({
   authMiddleware: vi.fn(() => ({ before: mockCookieBefore, after: mockCookieAfter })),
+  withRefreshedCookies: (
+    _request: unknown,
+    response: APIGatewayProxyStructuredResultV2,
+  ): APIGatewayProxyStructuredResultV2 => response,
 }));
 
-import { ApiErrorCode } from '@filone/shared';
+import { ApiErrorCode, OrgRole } from '@filone/shared';
 import { ragQueryAuthMiddleware } from './rag-query-auth.js';
 import { hashRagKeyToken, RagApiKeyKeys } from '../lib/rag-api-keys.js';
-import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
-import type { UserInfo } from '../lib/user-context.js';
+import { OrgKeys } from '../lib/org-membership.js';
+import {
+  buildEvent,
+  buildMiddyRequest,
+  membershipFor,
+  stubAbsentMembershipRead,
+  stubMembershipRead,
+} from '../test/lambda-test-utilities.js';
+import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.js';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 
 const ddbMock = mockClient(DynamoDBClient);
@@ -35,6 +47,7 @@ const TOKEN = 'sk_rag_0123456789abcdefghijklmnopqrstuvwxyzABCDEF';
 const TOKEN_HASH = hashRagKeyToken(TOKEN);
 const KEY_ID = 'key-1';
 const ORG_ID = 'org-A';
+const CREATOR_ID = 'user-creator';
 
 const ORG_RECORD = {
   pk: RagApiKeyKeys.orgPk(ORG_ID),
@@ -43,7 +56,7 @@ const ORG_RECORD = {
   keyPrefix: TOKEN.slice(0, 12),
   tokenHash: TOKEN_HASH,
   bucketScope: 'all',
-  createdBy: 'user-creator',
+  createdBy: CREATOR_ID,
   creatorEmail: 'creator@example.com',
   createdAt: '2026-07-01T00:00:00Z',
 };
@@ -63,6 +76,9 @@ function stubKeyRecords(orgRecordOverrides: Record<string, unknown> = {}) {
   ddbMock
     .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'PROFILE' } } })
     .resolves({ Item: { pk: { S: `ORG#${ORG_ID}` } } });
+  // The key's authority is its creator's membership, and the default creator
+  // is still in the org.
+  stubMembershipRead(ddbMock, { orgId: ORG_ID, userId: CREATOR_ID, role: OrgRole.Member });
   ddbMock.on(UpdateItemCommand).resolves({});
 }
 
@@ -96,7 +112,8 @@ function getUserInfo(event: APIGatewayProxyEventV2): UserInfo | undefined {
 }
 
 async function runBefore(event: APIGatewayProxyEventV2) {
-  const middleware = ragQueryAuthMiddleware();
+  // The manifest's cookieRequires for POST /api/buckets/{name}/query.
+  const middleware = ragQueryAuthMiddleware({ cookieRequires: 'buckets.read' });
   const request = buildMiddyRequest(event);
   const response = (await middleware.before(request as Parameters<typeof middleware.before>[0])) as
     | APIGatewayProxyStructuredResultV2
@@ -120,10 +137,12 @@ describe('ragQueryAuthMiddleware', () => {
 
   describe('dispatch', () => {
     it('delegates to the cookie middleware when no Authorization header is present', async () => {
-      const event = bearerEvent();
+      const event = buildEvent({ userInfo: { userId: 'console-user', orgId: ORG_ID } });
+      event.pathParameters = { name: 'my-bucket' };
       const { middleware, request } = await runBefore(event);
 
       expect(mockCookieBefore).toHaveBeenCalledOnce();
+      // The cookie middleware makes the reads; this one adds none of its own.
       expect(ddbMock.calls()).toHaveLength(0);
 
       await middleware.after(request as Parameters<typeof middleware.after>[0]);
@@ -214,11 +233,28 @@ describe('ragQueryAuthMiddleware', () => {
       expect(response).toBeUndefined();
       expect(getUserInfo(event)).toEqual({
         sub: `ragkey|${KEY_ID}`,
-        userId: 'user-creator',
+        userId: CREATOR_ID,
         orgId: ORG_ID,
         email: 'creator@example.com',
         emailVerified: true,
         name: 'ci key',
+        // The creator's row, so downstream reads see a real role rather than a
+        // caller with no membership at all.
+        membership: membershipFor(ORG_ID, CREATOR_ID, OrgRole.Member),
+      });
+    });
+
+    it('reads the creator membership consistently, like the cookie path', async () => {
+      stubKeyRecords();
+      await runBefore(bearerEvent({ authorization: `Bearer ${TOKEN}` }));
+
+      const membershipRead = ddbMock
+        .commandCalls(GetItemCommand)
+        .map((call) => call.args[0].input)
+        .find((input) => input.TableName === 'OrgTable');
+      expect(membershipRead).toMatchObject({
+        Key: { pk: { S: OrgKeys.orgPk(ORG_ID) }, sk: { S: OrgKeys.memberSk(CREATOR_ID) } },
+        ConsistentRead: true,
       });
     });
 
@@ -270,6 +306,80 @@ describe('ragQueryAuthMiddleware', () => {
 
       expect(response).toBeUndefined();
       expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(TOKEN);
+    });
+  });
+
+  describe('the creator membership behind a bearer token', () => {
+    it('refuses a key whose creator is no longer a member', async () => {
+      stubKeyRecords();
+      stubAbsentMembershipRead(ddbMock, { orgId: ORG_ID, userId: CREATOR_ID });
+      vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const { response } = await runBefore(bearerEvent({ authorization: `Bearer ${TOKEN}` }));
+
+      expect(response?.statusCode).toBe(403);
+      expect(JSON.parse(response?.body ?? '{}')).toEqual({
+        message: 'You are not a member of this organization.',
+        code: ApiErrorCode.NOT_A_MEMBER,
+      });
+      // A dead key leaves no trace of having worked.
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    });
+
+    it('strips the credential even on the denial', async () => {
+      stubKeyRecords();
+      stubAbsentMembershipRead(ddbMock, { orgId: ORG_ID, userId: CREATOR_ID });
+      vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const event = bearerEvent({ authorization: `Bearer ${TOKEN}` });
+
+      await runBefore(event);
+
+      expect(event.headers.authorization).toBeUndefined();
+    });
+  });
+
+  describe('the cookie caller on the same route', () => {
+    function cookieCaller(role: OrgRole | undefined) {
+      mockCookieBefore.mockImplementation((request: { event: APIGatewayProxyEventV2 }) => {
+        (request.event as AuthenticatedEvent).requestContext.userInfo = buildEvent({
+          userInfo: {
+            userId: 'console-user',
+            orgId: ORG_ID,
+            membership: role ? membershipFor(ORG_ID, 'console-user', role) : undefined,
+          },
+        }).requestContext.userInfo;
+        return undefined;
+      });
+    }
+
+    it('passes a role holding the declared cookie requirement', async () => {
+      cookieCaller(OrgRole.ReadOnly);
+
+      const { response } = await runBefore(bearerEvent());
+
+      expect(response).toBeUndefined();
+    });
+
+    it('refuses a caller with no membership row', async () => {
+      cookieCaller(undefined);
+      vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const { response } = await runBefore(bearerEvent());
+
+      expect(response?.statusCode).toBe(403);
+      expect(JSON.parse(response?.body ?? '{}').code).toBe(ApiErrorCode.NOT_A_MEMBER);
+    });
+
+    it('returns the cookie middleware failure unchanged', async () => {
+      const unauthorized = { statusCode: 401, body: '{}' };
+      mockCookieBefore.mockResolvedValue(unauthorized);
+
+      const { response } = await runBefore(bearerEvent());
+
+      expect(response).toBe(unauthorized);
     });
   });
 

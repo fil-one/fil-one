@@ -6,13 +6,15 @@ import type {
   Context,
 } from 'aws-lambda';
 import { S3Region } from '@filone/shared';
-import type { ErrorResponse } from '@filone/shared';
+import type { ErrorResponse, Permission } from '@filone/shared';
 import { isOrgDeleting } from '../lib/org-profile.js';
 import { accountDeletedResponse, ResponseBuilder } from '../lib/response-builder.js';
-import type { UserInfo } from '../lib/user-context.js';
+import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.js';
 import { findRagKeyByToken, ragKeyAllowsBucket, touchRagKeyLastUsed } from '../lib/rag-api-keys.js';
-import { authMiddleware } from './auth.js';
-import type { AuthMiddlewareOptions } from './auth.js';
+import { resolveMembership } from '../lib/org-membership.js';
+import { authMiddleware, withRefreshedCookies } from './auth.js';
+import type { AuthInternal, AuthMiddlewareOptions } from './auth.js';
+import { requireMembership, requirePermission } from './authorize.js';
 
 /**
  * Auth dispatcher for the RAG query endpoint: cookie session OR RAG API key.
@@ -30,9 +32,17 @@ import type { AuthMiddlewareOptions } from './auth.js';
  * and the handler's isSupportedRegion / tenant-scoped bucket lookup) keeps
  * enforcing exactly as it does for cookie callers. Revoking the creator's
  * allowlist entry or subscription therefore disables their keys immediately.
+ *
+ * The two callers are authorized differently, as the route manifest declares.
+ * The bearer token carries its own authority, and what it needs from the org is
+ * that its creator is still in it: this path reads the creator's membership
+ * itself — the cookie middleware it bypassed would have — and refuses the
+ * request when the row is gone, so a removed member's keys die with their
+ * membership instead of outliving it. A caller arriving with a cookie session
+ * is an ordinary console user and is gated on the manifest's `cookieRequires`.
  */
 
-interface RagQueryAuthInternal extends Record<string, unknown> {
+interface RagQueryAuthInternal extends AuthInternal {
   /** Set when the cookie path handled the request, so only then does the cookie after-hook (token refresh) run. */
   usedCookieAuth?: boolean;
 }
@@ -94,6 +104,14 @@ async function bearerAuth(
     return bucketNotFoundResponse();
   }
 
+  // The token has served its purpose — strip it so nothing downstream (error
+  // handlers, debug logging) can ever echo it.
+  delete event.headers.authorization;
+
+  // Read consistently, exactly as the cookie path does: a key minted moments
+  // after its creator joined must not query as a non-member.
+  const membership = await resolveMembership(record.orgId, record.createdBy);
+
   const userInfo: UserInfo = {
     sub: `ragkey|${record.keyId}`,
     userId: record.createdBy,
@@ -102,20 +120,34 @@ async function bearerAuth(
     // creatorEmail was captured via getVerifiedEmail at creation time.
     emailVerified: true,
     name: record.keyName,
+    ...(membership ? { membership } : {}),
   };
   (
     event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }
   ).userInfo = userInfo;
 
-  // The token has served its purpose — strip it so nothing downstream (error
-  // handlers, debug logging) can ever echo it.
-  delete event.headers.authorization;
+  // A creator who has left the org takes their keys with them. Refused before
+  // last-used is stamped, so a dead key leaves no trace of having worked. The
+  // membership is attached above either way, because the denial reads it back
+  // out of `userInfo` like every other gate does.
+  const notAMember = requireMembership(event as AuthenticatedEvent);
+  if (notAMember) return notAMember;
 
   await touchRagKeyLastUsed(record.orgId, record.keyId);
   return undefined;
 }
 
-export function ragQueryAuthMiddleware(options: AuthMiddlewareOptions = {}) {
+export interface RagQueryAuthOptions extends AuthMiddlewareOptions {
+  /**
+   * The route manifest's `cookieRequires`: what a caller arriving with a cookie
+   * session instead of a bearer token must hold. Passed in rather than read
+   * from the manifest so the requirement sits in the handler's own chain, where
+   * every other route's requirement is.
+   */
+  cookieRequires: Permission;
+}
+
+export function ragQueryAuthMiddleware({ cookieRequires, ...options }: RagQueryAuthOptions) {
   const cookieAuth = authMiddleware(options);
 
   const before = (async (
@@ -124,7 +156,13 @@ export function ragQueryAuthMiddleware(options: AuthMiddlewareOptions = {}) {
     const authHeader = request.event.headers?.authorization;
     if (authHeader === undefined) {
       request.internal.usedCookieAuth = true;
-      return cookieAuth.before(request);
+      const failure = await cookieAuth.before(request);
+      if (failure) return failure;
+      // The cookie caller is an ordinary console user reading bucket contents.
+      // Returning here short-circuits the after stack, so a rotated cookie set
+      // rides the denial — otherwise one refused query logs the caller out.
+      const denied = requirePermission(request.event as AuthenticatedEvent, cookieRequires);
+      return denied ? withRefreshedCookies(request, denied) : undefined;
     }
     return bearerAuth(request, authHeader);
   }) as (

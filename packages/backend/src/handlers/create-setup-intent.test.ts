@@ -29,8 +29,13 @@ vi.mock('sst', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { baseHandler } from './create-setup-intent.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+vi.mock('../middleware/auth.js', () => ({
+  authMiddleware: () => ({ before: () => undefined }),
+}));
+
+import { baseHandler, handler } from './create-setup-intent.js';
+import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
 const USER_ID = 'user-1';
 const ORG_ID = 'org-1';
@@ -131,4 +136,13 @@ describe('create-setup-intent baseHandler', () => {
     await expect(baseHandler(setupIntentEvent())).rejects.toThrow('Service unavailable');
     expect(mockSetupIntentsCreate).not.toHaveBeenCalled();
   });
+});
+
+describeRoleEnforcement({
+  permission: 'billing.manage',
+  invoke: (membership) =>
+    handler(
+      buildEvent({ userInfo: { ...{ userId: 'user-1', orgId: 'org-1' }, membership } }),
+      buildContext(),
+    ),
 });

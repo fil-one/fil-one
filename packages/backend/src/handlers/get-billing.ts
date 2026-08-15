@@ -13,6 +13,7 @@ import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { authorize } from '../middleware/authorize.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import type { StripePriceDetails, SubscriptionRecord } from '../lib/dynamo-records.js';
 
@@ -415,4 +416,5 @@ function buildBillingResponse(
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
+  .use(authorize('billing.view'))
   .use(errorHandlerMiddleware());

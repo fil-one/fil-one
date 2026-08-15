@@ -57,6 +57,7 @@ process.env.FILONE_STAGE = 'test';
 
 import { baseHandler, handler } from './get-bucket-rag-enablement.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { describeRoleEnforcement } from '../test/role-enforcement.js';
 import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.js';
 import { S3_REGION, S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -302,4 +303,10 @@ describe('get-bucket-rag-enablement handler (RAG access gate)', () => {
     expect(result.statusCode).toBe(200);
     expect(mockGetEnablement).toHaveBeenCalled();
   });
+});
+
+describeRoleEnforcement({
+  permission: 'buckets.read',
+  invoke: (membership) =>
+    handler(buildEvent({ userInfo: { ...USER_INFO, membership } }), buildContext()),
 });

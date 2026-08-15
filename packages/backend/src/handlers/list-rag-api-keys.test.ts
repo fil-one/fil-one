@@ -22,6 +22,7 @@ const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler, handler } from './list-rag-api-keys.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1', emailVerified: true };
 
@@ -141,4 +142,10 @@ describe('list-rag-api-keys handler (allowlist gate)', () => {
     expect(result.statusCode).toBe(200);
     expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(1);
   });
+});
+
+describeRoleEnforcement({
+  permission: 'keys.manage_all',
+  invoke: (membership) =>
+    handler(buildEvent({ userInfo: { ...USER_INFO, membership } }), buildContext()),
 });
