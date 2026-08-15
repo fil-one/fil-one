@@ -12,7 +12,7 @@ import {
   GetItemCommand,
   TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
-import { ApiErrorCode, OrgRole, Stage } from '@filone/shared';
+import { ApiErrorCode, OrgRole, ROLE_PERMISSIONS, Stage } from '@filone/shared';
 import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../lib/org-setup-status.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { sstResourceMock } from '../test/sst-resource-mock.js';
@@ -91,6 +91,17 @@ function getUserInfoFromEvent(event: APIGatewayProxyEventV2) {
   return (event as AuthenticatedEvent).requestContext.userInfo;
 }
 
+/**
+ * What `userInfo` carries when OrgTable holds no membership row: the transition
+ * fallback resolves Owner, which is every pre-conversion account's authority.
+ */
+function ownerFallback(orgId: string, userId: string) {
+  return {
+    membership: { orgId, userId, role: OrgRole.Owner },
+    permissions: ROLE_PERMISSIONS[OrgRole.Owner],
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -103,6 +114,10 @@ describe('authMiddleware', () => {
     // stubbed (the org-profile fence read) resolves undefined and throws.
     ddbMock.on(GetItemCommand).resolves({});
     uuidCallCount = 0;
+    // Every authenticated request reads the membership row. Default: no row,
+    // which is what a pre-conversion account looks like; tests that care about
+    // a role stub the read again with one.
+    ddbMock.on(GetItemCommand, { TableName: 'OrgTable' }).resolves({});
   });
 
   describe('before hook', () => {
@@ -232,6 +247,7 @@ describe('authMiddleware', () => {
         emailVerified: false,
         name: undefined,
         picture: undefined,
+        ...ownerFallback(existingOrgId, existingUserId),
       });
     });
 
@@ -337,6 +353,58 @@ describe('authMiddleware', () => {
       });
     });
 
+    it('resolves the role from the membership row and derives its permissions', async () => {
+      const existingUserId = 'existing-user-uuid';
+      const existingOrgId = 'existing-org-uuid';
+
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: { userId: { S: existingUserId }, orgId: { S: existingOrgId } },
+        });
+
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'OrgTable',
+          Key: {
+            pk: { S: `ORG#${existingOrgId}` },
+            sk: { S: `MEMBER#${existingUserId}` },
+          },
+        })
+        .resolves({
+          Item: {
+            role: { S: OrgRole.ReadOnly },
+            joinedAt: { S: '2026-02-02T00:00:00.000Z' },
+            source: { S: 'invitation' },
+            invitedBy: { S: 'inviter-user-id' },
+          },
+        });
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+      });
+
+      await before(buildMiddyRequest(event));
+
+      const userInfo = getUserInfoFromEvent(event);
+      expect(userInfo.membership).toStrictEqual({
+        orgId: existingOrgId,
+        userId: existingUserId,
+        role: OrgRole.ReadOnly,
+        joinedAt: '2026-02-02T00:00:00.000Z',
+        source: 'invitation',
+        invitedBy: 'inviter-user-id',
+      });
+      expect(userInfo.permissions).toStrictEqual(ROLE_PERMISSIONS[OrgRole.ReadOnly]);
+    });
+
     it('extracts name and picture from ID token claims', async () => {
       const existingUserId = 'existing-user-uuid';
       const existingOrgId = 'existing-org-uuid';
@@ -398,6 +466,7 @@ describe('authMiddleware', () => {
         emailVerified: true,
         name: MOCK_NAME,
         picture: MOCK_PICTURE,
+        ...ownerFallback(existingOrgId, existingUserId),
       });
     });
 
@@ -465,6 +534,7 @@ describe('authMiddleware', () => {
         emailVerified: true,
         name: MOCK_NAME,
         picture: MOCK_PICTURE,
+        ...ownerFallback(existingOrgId, existingUserId),
       });
     });
 
@@ -519,6 +589,7 @@ describe('authMiddleware', () => {
         emailVerified: false,
         name: undefined,
         picture: undefined,
+        ...ownerFallback(existingOrgId, existingUserId),
       });
     });
 
@@ -549,6 +620,7 @@ describe('authMiddleware', () => {
         emailVerified: false,
         name: undefined,
         picture: undefined,
+        ...ownerFallback(MOCK_ORG_ID, MOCK_USER_ID),
       });
     });
 
@@ -579,6 +651,7 @@ describe('authMiddleware', () => {
         emailVerified: false,
         name: 'Alice Johnson',
         picture: undefined,
+        ...ownerFallback(MOCK_ORG_ID, MOCK_USER_ID),
       });
 
       const transactCalls = ddbMock.commandCalls(TransactWriteItemsCommand);
@@ -622,17 +695,31 @@ describe('authMiddleware', () => {
               auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
               createdBy: { S: MOCK_USER_ID },
               createdAt: { S: expect.any(String) },
+              ownerCount: { N: '1' },
             },
           },
         },
-        // Org membership
+        // Org membership — authoritative, in OrgTable, and the creator owns it
         {
           Put: {
-            TableName: 'UserInfoTable',
+            TableName: 'OrgTable',
             Item: {
               pk: { S: `ORG#${MOCK_ORG_ID}` },
               sk: { S: `MEMBER#${MOCK_USER_ID}` },
-              role: { S: OrgRole.Admin },
+              role: { S: OrgRole.Owner },
+              joinedAt: { S: expect.any(String) },
+              source: { S: 'signup' },
+            },
+          },
+        },
+        // Inverse item — same transaction, so the two can never disagree
+        {
+          Put: {
+            TableName: 'OrgTable',
+            Item: {
+              pk: { S: `USER#${MOCK_USER_ID}` },
+              sk: { S: `MEMBERSHIP#${MOCK_ORG_ID}` },
+              role: { S: OrgRole.Owner },
               joinedAt: { S: expect.any(String) },
             },
           },
@@ -764,6 +851,7 @@ describe('authMiddleware', () => {
         emailVerified: false,
         name: undefined,
         picture: undefined,
+        ...ownerFallback(existingOrgId, existingUserId),
       });
       expect(request.internal.newTokens).toEqual({
         access_token: 'new-access-token',

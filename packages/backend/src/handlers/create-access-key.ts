@@ -21,12 +21,30 @@ import {
   tenantNotReadyResponse,
   unsupportedRegionResponse,
 } from '../lib/response-builder.js';
+import { ACCESS_KEY_POLICY_VERSION } from '../lib/dynamo-records.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
+
+/**
+ * Who minted a key and under what policy. Un-backfillable — a key created
+ * before these attributes existed has no owner forever — so it is stamped from
+ * the first write even though the surfaces that read it come later. The email
+ * is verified-only, matching the RAG-key shape: an unverified address must
+ * never be the name attached to a credential.
+ */
+function keyAttribution(event: AuthenticatedEvent) {
+  const { userId } = getUserInfo(event);
+  const creatorEmail = getVerifiedEmail(event);
+  return {
+    createdBy: userId,
+    ...(creatorEmail ? { creatorEmail } : {}),
+    policyVersion: ACCESS_KEY_POLICY_VERSION,
+  };
+}
 
 // TODO: Refactor the handler, reducing its complexity and removing the ignore eslint directive.
 // https://linear.app/filecoin-foundation/issue/FIL-320/refactor-create-access-key-handler
@@ -108,6 +126,7 @@ export async function baseHandler(
         bucketScope,
         buckets,
         expiresAt,
+        attribution: keyAttribution(event),
       }),
     }),
   );
@@ -134,6 +153,7 @@ function buildAccessKeyItem({
   bucketScope,
   buckets,
   expiresAt,
+  attribution,
 }: {
   orgId: string;
   accessKey: IssuedAccessKey;
@@ -144,6 +164,7 @@ function buildAccessKeyItem({
   bucketScope: CreateAccessKeyRequest['bucketScope'];
   buckets: string[] | undefined;
   expiresAt: string | null;
+  attribution: ReturnType<typeof keyAttribution>;
 }) {
   return marshall({
     pk: `ORG#${orgId}`,
@@ -158,6 +179,7 @@ function buildAccessKeyItem({
     bucketScope,
     ...(buckets ? { buckets } : {}),
     ...(expiresAt ? { expiresAt } : {}),
+    ...attribution,
   });
 }
 

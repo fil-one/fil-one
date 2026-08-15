@@ -6,6 +6,16 @@ import type {
   SubscriptionStatus,
 } from '@filone/shared';
 
+/**
+ * The authority a key was minted under. Keys created before roles existed carry
+ * no marker at all; `pre-member-scope` means the creator's role capped the key's
+ * permissions but member bucket scope did not yet exist to cap its buckets.
+ * Both cohorts are what the non-conforming-key review has to find, and neither
+ * is recoverable after the fact, which is why the marker ships with the roles
+ * rather than with the surfaces that read it.
+ */
+export const ACCESS_KEY_POLICY_VERSION = 'pre-member-scope';
+
 /** UserInfoTable — pk: ORG#{orgId}, sk: ACCESSKEY#{id} */
 export interface AccessKeyRecord {
   pk: string;
@@ -14,6 +24,12 @@ export interface AccessKeyRecord {
   accessKeyId: string;
   createdAt: string;
   status: string;
+  /** The FilOne user who minted the key. Absent on keys older than roles. */
+  createdBy?: string;
+  /** The creator's verified email at creation time, for display without a join. */
+  creatorEmail?: string;
+  /** See {@link ACCESS_KEY_POLICY_VERSION}. */
+  policyVersion?: string;
 }
 
 /**

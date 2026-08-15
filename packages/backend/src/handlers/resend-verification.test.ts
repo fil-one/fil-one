@@ -34,7 +34,7 @@ process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
 import { handler } from './resend-verification.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { buildEvent, buildContext, stubMembershipRead } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -69,6 +69,7 @@ describe('POST /api/me/resend-verification handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
+    stubMembershipRead(ddbMock, { orgId: MOCK_ORG_ID, userId: MOCK_USER_ID });
     mockSendVerificationEmail.mockResolvedValue(undefined);
 
     mockJwtVerify

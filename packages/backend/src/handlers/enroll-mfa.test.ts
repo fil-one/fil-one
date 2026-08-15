@@ -35,7 +35,7 @@ process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
 import { handler } from './enroll-mfa.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { buildEvent, buildContext, stubMembershipRead } from '../test/lambda-test-utilities.js';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
@@ -102,6 +102,7 @@ describe('POST /api/mfa/enroll handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
+    stubMembershipRead(ddbMock, { orgId: MOCK_ORG_ID, userId: MOCK_USER_ID });
   });
 
   it('flags user for enrollment and returns 200 for database connection users', async () => {

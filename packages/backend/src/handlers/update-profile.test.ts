@@ -43,7 +43,7 @@ process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
 import { handler } from './update-profile.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { buildEvent, buildContext, stubMembershipRead } from '../test/lambda-test-utilities.js';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
@@ -76,6 +76,7 @@ describe('PATCH /api/me/profile handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
+    stubMembershipRead(ddbMock, { orgId: MOCK_ORG_ID, userId: MOCK_USER_ID });
     mockUpdateAuth0User.mockResolvedValue(undefined);
     mockSendVerificationEmail.mockResolvedValue(undefined);
 

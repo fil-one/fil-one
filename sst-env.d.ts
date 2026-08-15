@@ -238,6 +238,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "OrgTable": {
+      "name": string
+      "type": "sst.aws.Dynamo"
+    }
     "OtelFirehoseBackup": {
       "name": string
       "type": "sst.aws.Bucket"
