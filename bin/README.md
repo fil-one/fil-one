@@ -88,6 +88,8 @@ aws iam list-roles --query 'length(Roles)' --output text
 
 | Script                         | Purpose                                                                                                                                                                |
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `convert-orgs-to-orgtable.ts`  | Move org membership into OrgTable, `admin` → `owner` (runbook: [docs/OrgConversionRunbook.md](../docs/OrgConversionRunbook.md))                                        |
+| `revert-org-conversion.ts`     | Undo `convert-orgs-to-orgtable.ts`                                                                                                                                     |
 | `tail-logs.sh`                 | Tail CloudWatch logs for a Lambda function                                                                                                                             |
 | `tail-tenant-setup-logs.sh`    | Tail logs for the Aurora tenant setup Lambda                                                                                                                           |
 | `reset-db.ts`                  | Reset the Aurora database for a stage                                                                                                                                  |
