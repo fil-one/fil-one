@@ -3,13 +3,14 @@ import { PERMISSIONS } from './permissions.js';
 import { ROUTE_MANIFEST } from './route-manifest.js';
 import type { RouteManifestEntry } from './route-manifest.js';
 
-const entries: readonly RouteManifestEntry[] = ROUTE_MANIFEST;
+const entries = ROUTE_MANIFEST;
 
 describe('ROUTE_MANIFEST', () => {
   it('lists every registered route once', () => {
-    // 38 routes are registered via addRoute in sst.config.ts. The backend's
-    // completeness test walks src/handlers/; this pins the count so a route
-    // added to the config without a manifest entry is visible here too.
+    // 38 routes are registered via addRoute in sst.config.ts. The enforcement
+    // PR adds the backend completeness test that walks src/handlers/; this pins
+    // the count so a route added to the config without a manifest entry is
+    // visible here too.
     expect(entries).toHaveLength(38);
     const keys = entries.map((route) => `${route.method} ${route.path}`);
     expect(new Set(keys).size).toBe(keys.length);
@@ -27,11 +28,25 @@ describe('ROUTE_MANIFEST', () => {
     expect(ungated).toStrictEqual([]);
   });
 
-  it('leaves public, webhook, and bearer routes without a requirement', () => {
+  it('leaves the routes that bypass the cookie session without a role gate', () => {
     const misdeclared = entries
       .filter((route) => route.category !== 'authenticated' && route.requires !== undefined)
       .map((route) => route.handler);
     expect(misdeclared).toStrictEqual([]);
+  });
+
+  it('gives the cookie fallback a requirement on bearer routes and nowhere else', () => {
+    // A bearer token carries its own authority; the cookie caller on the same
+    // route is an ordinary console user and needs a permission.
+    const withCookieGate = entries
+      .filter((route) => route.cookieRequires !== undefined)
+      .map((route) => route.handler);
+    expect(withCookieGate).toStrictEqual(['query-bucket']);
+
+    const bearerWithoutCookieGate = entries
+      .filter((route) => route.category === 'bearer' && route.cookieRequires === undefined)
+      .map((route) => route.handler);
+    expect(bearerWithoutCookieGate).toStrictEqual([]);
   });
 
   it('requires only declared permissions or the two in-registry markers', () => {
@@ -39,6 +54,9 @@ describe('ROUTE_MANIFEST', () => {
     for (const route of entries) {
       if (route.requires !== undefined) {
         expect(allowed.has(route.requires)).toBe(true);
+      }
+      if (route.cookieRequires !== undefined) {
+        expect(new Set<string>(PERMISSIONS).has(route.cookieRequires)).toBe(true);
       }
     }
   });
@@ -52,21 +70,32 @@ describe('ROUTE_MANIFEST', () => {
     expect(byCategory('bearer')).toStrictEqual(['query-bucket']);
   });
 
-  it('checks the multi-operation routes in their handlers', () => {
-    // presign serves read/write/delete through one route; update-profile can
-    // rename the org. Both requirements depend on the request body.
+  it('checks the routes whose requirement depends on the request in their handlers', () => {
+    // presign serves seven operations through one route; update-profile can
+    // rename the org; set-bucket-rag-enablement creates or discards an index
+    // depending on the flag; create-access-key caps the new key at the
+    // creator's own authority.
     const inHandler = entries
       .filter((route) => route.requires === 'in-handler')
       .map((route) => route.handler);
-    expect(inHandler.sort()).toStrictEqual(['presign', 'update-profile']);
+    expect(inHandler.sort()).toStrictEqual([
+      'create-access-key',
+      'presign',
+      'set-bucket-rag-enablement',
+      'update-profile',
+    ]);
   });
 
   it('keeps the self-service marker on the caller-only routes', () => {
     // 'self' waives the role gate, so it must never reach a route that touches
-    // org state: every route carrying it lives under /api/me or /api/mfa.
+    // org state: every route carrying it is /api/me itself or lives under
+    // /api/me/ or /api/mfa/. Matching the bare prefix would let /api/members
+    // through.
+    const isSelfServicePath = (path: string) =>
+      path === '/api/me' || path.startsWith('/api/me/') || path.startsWith('/api/mfa/');
     const offOrg = entries
       .filter((route) => route.requires === 'self')
-      .filter((route) => !route.path.startsWith('/api/me') && !route.path.startsWith('/api/mfa'))
+      .filter((route) => !isSelfServicePath(route.path))
       .map((route) => route.path);
     expect(offOrg).toStrictEqual([]);
   });

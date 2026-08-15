@@ -70,6 +70,7 @@ export {
   permissionsForRole,
   roleHasPermission,
   canManageTargetRole,
+  canChangeRole,
 } from './permissions.js';
 export type { Permission } from './permissions.js';
 
