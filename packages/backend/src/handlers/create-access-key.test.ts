@@ -43,6 +43,7 @@ const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler } from './create-access-key.js';
 import { AccessKeyAlreadyExistsError } from '../lib/errors.js';
+import { ACCESS_KEY_POLICY_VERSION } from '../lib/dynamo-records.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
@@ -162,6 +163,38 @@ describe('create-access-key baseHandler', () => {
     // Secret must NOT be stored
     expect(item.accessKeySecret).toBeUndefined();
     expect(item.secretAccessKey).toBeUndefined();
+  });
+
+  it('records who minted the key and the policy era it was minted under', async () => {
+    ddbMock.on(PutItemCommand).resolves({});
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+
+    const event = buildEvent({
+      body: validBody({ keyName: 'My Key' }),
+      userInfo: { ...USER_INFO, email: 'alice@example.com', emailVerified: true },
+    });
+    await baseHandler(event);
+
+    const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+    expect(item.createdBy.S).toBe('user-1');
+    expect(item.creatorEmail.S).toBe('alice@example.com');
+    expect(item.policyVersion.S).toBe(ACCESS_KEY_POLICY_VERSION);
+  });
+
+  it('leaves the creator email off when the address is unverified', async () => {
+    ddbMock.on(PutItemCommand).resolves({});
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+
+    const event = buildEvent({
+      body: validBody({ keyName: 'My Key' }),
+      userInfo: { ...USER_INFO, email: 'alice@example.com', emailVerified: false },
+    });
+    await baseHandler(event);
+
+    const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+    expect(item.createdBy.S).toBe('user-1');
+    expect(item.creatorEmail).toBeUndefined();
+    expect(item.policyVersion.S).toBe(ACCESS_KEY_POLICY_VERSION);
   });
 
   it('returns 400 when keyName is missing', async () => {

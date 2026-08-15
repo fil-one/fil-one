@@ -23,6 +23,7 @@ import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { resolveAuth0Domain } from '../lib/auth0-domain.js';
 import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import { OrgKeys, membershipPermissions, resolveMembership } from '../lib/org-membership.js';
 import { deriveOrgName } from '../lib/suggest-org-name.js';
 import { ensureTrialEntitlement } from '../lib/trial-entitlement.js';
 
@@ -245,6 +246,10 @@ async function attachIdentity({
   picture: string | null;
 }): Promise<void> {
   const resolved = await resolveUserAndOrg(sub, email, emailVerified, name);
+  // One more GetItem in a middleware that already makes one. Reading the role
+  // per request rather than carrying it in the token is what makes a role
+  // change take effect on the next request, with no invalidation machinery.
+  const membership = await resolveMembership(resolved.orgId, resolved.userId);
   (
     event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }
   ).userInfo = {
@@ -255,6 +260,8 @@ async function attachIdentity({
     emailVerified,
     name: name ?? undefined,
     picture: picture ?? undefined,
+    membership,
+    permissions: membershipPermissions(membership),
   };
 }
 
@@ -364,8 +371,11 @@ async function createNewUserAndOrg({
   orgName: string;
 }) {
   const tableName = Resource.UserInfoTable.name;
+  const orgTableName = Resource.OrgTable.name;
   const now = new Date().toISOString();
 
+  // Spans both tables: identity, profiles, and the owner count live in
+  // UserInfoTable, membership in OrgTable.
   await getDynamoClient().send(
     new TransactWriteItemsCommand({
       TransactItems: [
@@ -404,16 +414,37 @@ async function createNewUserAndOrg({
               auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
               createdBy: { S: userId },
               createdAt: { S: now },
+              // The last-Owner invariant lives here. Stamped from day one so no
+              // org is ever created without it and the conversion has nothing
+              // to repair for accounts created while it runs.
+              ownerCount: { N: '1' },
             },
           },
         },
         {
+          // Authoritative membership. The account's creator owns it: an org of
+          // one whose single member can do everything, which is what every
+          // account is until invitations ship.
           Put: {
-            TableName: tableName,
+            TableName: orgTableName,
             Item: {
-              pk: { S: `ORG#${orgId}` },
-              sk: { S: `MEMBER#${userId}` },
-              role: { S: OrgRole.Admin },
+              pk: { S: OrgKeys.orgPk(orgId) },
+              sk: { S: OrgKeys.memberSk(userId) },
+              role: { S: OrgRole.Owner },
+              joinedAt: { S: now },
+              source: { S: 'signup' },
+            },
+          },
+        },
+        {
+          // Inverse item, written in the same transaction so a membership and
+          // the list it appears in can never disagree about a role.
+          Put: {
+            TableName: orgTableName,
+            Item: {
+              pk: { S: OrgKeys.userPk(userId) },
+              sk: { S: OrgKeys.membershipSk(orgId) },
+              role: { S: OrgRole.Owner },
               joinedAt: { S: now },
             },
           },

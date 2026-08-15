@@ -1,6 +1,50 @@
 import type { Request } from '@middy/core';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, Context } from 'aws-lambda';
+import { GetItemCommand } from '@aws-sdk/client-dynamodb';
+import type {
+  DynamoDBClientResolvedConfig,
+  ServiceInputTypes,
+  ServiceOutputTypes,
+} from '@aws-sdk/client-dynamodb';
+import type { AwsStub } from 'aws-sdk-client-mock';
+import type { OrgRole } from '@filone/shared';
+import { OrgKeys } from '../lib/org-membership.js';
 import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.js';
+
+/** What `mockClient(DynamoDBClient)` returns. */
+export type DynamoMock = AwsStub<
+  ServiceInputTypes,
+  ServiceOutputTypes,
+  DynamoDBClientResolvedConfig
+>;
+
+/**
+ * Answer the OrgTable membership read `authMiddleware` makes on every
+ * authenticated request. Without a `role` the row is absent, which the
+ * transition fallback resolves as Owner — the stub then exists only so the
+ * mocked client answers the read at all.
+ */
+export function stubMembershipRead(
+  ddbMock: DynamoMock,
+  { orgId, userId, role }: { orgId: string; userId: string; role?: OrgRole },
+): void {
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'OrgTable',
+      Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: OrgKeys.memberSk(userId) } },
+    })
+    .resolves(
+      role
+        ? {
+            Item: {
+              role: { S: role },
+              joinedAt: { S: '2026-01-01T00:00:00.000Z' },
+              source: { S: 'signup' },
+            },
+          }
+        : {},
+    );
+}
 
 type NormalizedHeaderEvent = {
   headers: Record<string, string>;

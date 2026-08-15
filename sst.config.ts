@@ -113,6 +113,20 @@ export default $config({
       primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
     });
 
+    // Organization membership and invitations: ORG#{orgId}/MEMBER#{userId},
+    // its USER#{userId}/MEMBERSHIP#{orgId} inverse item, ORG#{orgId}/INVITE#{id}
+    // and the INVITETOKEN#{hash}/LOOKUP row that resolves an accept link. Its
+    // own table rather than more sort keys in UserInfoTable: membership is read
+    // on every authenticated request and nothing needs it co-located with the
+    // identity, entitlement, and RAG-key rows already sharing those partitions.
+    const orgTable = new sst.aws.Dynamo('OrgTable', {
+      fields: {
+        pk: 'string',
+        sk: 'string',
+      },
+      primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
+    });
+
     // RAG indexer's own store: per-object chunk manifests
     // (BUCKET#{orgId}#{region}#{bucket} / MANIFEST#{objectKey}) and resumable indexer
     // checkpoints (INDEXER_CHECKPOINT#{orgId}#{region}#{bucket} / CHECKPOINT). Kept out
@@ -501,6 +515,7 @@ export default $config({
     const allResources = [
       billingTable,
       userInfoTable,
+      orgTable,
       userFilesBucket,
       ragVectorBucket,
       auth0ClientId,

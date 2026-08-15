@@ -1,4 +1,6 @@
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
+import type { Permission } from '@filone/shared';
+import type { OrgMembership } from './org-membership.js';
 
 export interface UserInfo {
   sub: string;
@@ -8,6 +10,21 @@ export interface UserInfo {
   emailVerified: boolean;
   name?: string;
   picture?: string;
+  /**
+   * The caller's membership row in {@link UserInfo.orgId}, set by
+   * `authMiddleware` on every cookie-authenticated request. The row rather than
+   * a flattened role so the member bucket scope that lands on it reaches its
+   * consumers with no new plumbing.
+   *
+   * Absent on the RAG bearer branch, which bypasses `authMiddleware` entirely
+   * and resolves the key creator's membership itself once enforcement ships.
+   */
+  membership?: OrgMembership;
+  /**
+   * Permissions derived from {@link UserInfo.membership}. Absent means the same
+   * as empty to every caller: no permission is held.
+   */
+  permissions?: readonly Permission[];
 }
 
 export interface AuthenticatedEvent extends APIGatewayProxyEventV2 {
