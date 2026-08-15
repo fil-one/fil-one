@@ -1,13 +1,14 @@
-import { OrgRole } from './api/org.js';
+import { OrgRole, isOrgRole } from './api/org.js';
 
 /**
  * The console permission registry: the vocabulary every authorization check
  * speaks, plus the fixed role → permission table behind it.
  *
  * Four roles and a closed permission set need no policy engine, so this is
- * plain data — a string-literal union and an `as const` table — read by the
- * backend's `authorize()` middleware and shipped to the console on
- * `MeResponse.permissions` so the UI hides what the server would refuse.
+ * plain data — a string-literal union and a fixed table. The enforcement PR
+ * points the backend's `authorize()` middleware at it and ships the caller's
+ * set to the console on `MeResponse.permissions`, so the UI hides what the
+ * server would refuse.
  *
  * Nothing here is customer-authored or runtime-editable. Changing a role's
  * capabilities means changing {@link ROLE_PERMISSIONS}.
@@ -49,7 +50,11 @@ export const PERMISSIONS = [
   'keys.manage_all',
   /** Read the org's audit log (viewer ships in M2). */
   'audit.view',
-  /** Grant privileged operations such as retention and legal hold (M2). */
+  /**
+   * Manage privileged-operation grants — the M2 grant-management authority.
+   * Holding it confers no privileged operation; it is the right to grant one to
+   * a member. Reading retention state is an ordinary `objects.read`.
+   */
   'privileged.grant',
 ] as const;
 
@@ -60,9 +65,13 @@ export type Permission = (typeof PERMISSIONS)[number];
  * Member of ReadOnly, but the sets are written out rather than derived: the
  * matrix is a product decision, and a spread chain would make an intended
  * exception look like a bug.
+ *
+ * Typed as `Record<OrgRole, readonly Permission[]>` rather than as its literal
+ * shape so a consumer can ask `.includes(permission)` of any row, and frozen so
+ * the table a caller reads is the table this file declares.
  */
-export const ROLE_PERMISSIONS = {
-  [OrgRole.Owner]: [
+export const ROLE_PERMISSIONS: Record<OrgRole, readonly Permission[]> = Object.freeze({
+  [OrgRole.Owner]: Object.freeze([
     'members.read',
     'members.manage',
     'owners.manage',
@@ -82,8 +91,8 @@ export const ROLE_PERMISSIONS = {
     'keys.manage_all',
     'audit.view',
     'privileged.grant',
-  ],
-  [OrgRole.Admin]: [
+  ] as const),
+  [OrgRole.Admin]: Object.freeze([
     'members.read',
     'members.manage',
     'org.rename',
@@ -98,8 +107,8 @@ export const ROLE_PERMISSIONS = {
     'keys.manage_own',
     'keys.manage_all',
     'audit.view',
-  ],
-  [OrgRole.Member]: [
+  ] as const),
+  [OrgRole.Member]: Object.freeze([
     'members.read',
     'buckets.read',
     'buckets.create',
@@ -108,14 +117,18 @@ export const ROLE_PERMISSIONS = {
     'objects.delete',
     'keys.create',
     'keys.manage_own',
-  ],
-  [OrgRole.ReadOnly]: ['members.read', 'buckets.read', 'objects.read'],
-} as const satisfies Record<OrgRole, readonly Permission[]>;
+  ] as const),
+  [OrgRole.ReadOnly]: Object.freeze(['members.read', 'buckets.read', 'objects.read'] as const),
+});
+
+/** The permission set of anything that is not one of the four roles. */
+const NO_PERMISSIONS: readonly Permission[] = Object.freeze([]);
 
 /**
- * Role ordering, highest authority first. Used for the target ceiling below and
- * for presenting roles in a stable order; it is not itself an authorization
- * check — {@link ROLE_PERMISSIONS} is.
+ * Role ordering, highest authority first, for presenting roles in a stable
+ * order and for asserting that the matrix nests. No authorization check reads
+ * it: the target ceiling below is expressed in permissions, not in rank, so
+ * that "who may touch an Owner" stays a matrix question.
  */
 export const ROLE_RANK = {
   [OrgRole.Owner]: 3,
@@ -127,13 +140,22 @@ export const ROLE_RANK = {
 /**
  * The permissions a role holds, or an empty list for a value that is not one of
  * the four roles — a membership row carrying an unknown role grants nothing.
+ *
+ * The parameter is `string` because every caller is holding a value read out of
+ * DynamoDB: taking the raw value keeps the fail-closed branch reachable instead
+ * of casting past it. The own-property check is what keeps an inherited key such
+ * as `'constructor'` from resolving to something that is not a permission list —
+ * `Object.hasOwn` semantics, spelled the ES2020 way because the console
+ * compiles this file at that target.
  */
-export function permissionsForRole(role: OrgRole): readonly Permission[] {
-  return ROLE_PERMISSIONS[role] ?? [];
+export function permissionsForRole(role: string): readonly Permission[] {
+  return isOrgRole(role) && Object.prototype.hasOwnProperty.call(ROLE_PERMISSIONS, role)
+    ? ROLE_PERMISSIONS[role]
+    : NO_PERMISSIONS;
 }
 
 /** Whether a role holds a permission. Unknown roles hold none. */
-export function roleHasPermission(role: OrgRole, permission: Permission): boolean {
+export function roleHasPermission(role: string, permission: Permission): boolean {
   return permissionsForRole(role).includes(permission);
 }
 
@@ -143,12 +165,27 @@ export function roleHasPermission(role: OrgRole, permission: Permission): boolea
  * `owners.manage`. Removal counts, otherwise deleting an Owner would reach what
  * demoting one forbids.
  *
- * Applies to the target's current role when changing or removing a member, and
- * to the requested role when inviting or promoting; a role change must clear
- * both.
+ * This is the ceiling for a single role: the target's current role when
+ * removing a member, the requested role when inviting. A role change clears the
+ * ceiling on both roles, which is {@link canChangeRole}.
+ *
+ * A target role that is not one of the four is unmanageable rather than
+ * ordinary — otherwise a stored `'billing'` or a mis-cased `'Owner'` would miss
+ * the Owner branch and be managed under `members.manage`.
  */
-export function canManageTargetRole(actorRole: OrgRole, targetRole: OrgRole): boolean {
+export function canManageTargetRole(actorRole: string, targetRole: string): boolean {
+  if (!isOrgRole(targetRole)) return false;
   return targetRole === OrgRole.Owner
     ? roleHasPermission(actorRole, 'owners.manage')
     : roleHasPermission(actorRole, 'members.manage');
+}
+
+/**
+ * Whether an actor may move a member from one role to another. A role change is
+ * two reaches — at the member as they are and at the member as they would be —
+ * so both must clear the ceiling: an Admin can neither demote an Owner nor
+ * promote anyone to Owner.
+ */
+export function canChangeRole(actorRole: string, fromRole: string, toRole: string): boolean {
+  return canManageTargetRole(actorRole, fromRole) && canManageTargetRole(actorRole, toRole);
 }

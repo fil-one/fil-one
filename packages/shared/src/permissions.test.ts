@@ -4,6 +4,7 @@ import {
   PERMISSIONS,
   ROLE_PERMISSIONS,
   ROLE_RANK,
+  canChangeRole,
   canManageTargetRole,
   permissionsForRole,
   roleHasPermission,
@@ -87,6 +88,13 @@ describe('ROLE_PERMISSIONS', () => {
     ]);
   });
 
+  it('is frozen, table and rows, so a consumer cannot edit the matrix it reads', () => {
+    expect(Object.isFrozen(ROLE_PERMISSIONS)).toBe(true);
+    for (const role of ALL_ROLES) {
+      expect(Object.isFrozen(ROLE_PERMISSIONS[role])).toBe(true);
+    }
+  });
+
   it('nests the roles: each holds everything the role below it holds', () => {
     const byDescendingRank = [...ALL_ROLES].sort((a, b) => ROLE_RANK[b] - ROLE_RANK[a]);
     expect(byDescendingRank).toStrictEqual([
@@ -117,10 +125,20 @@ describe('roleHasPermission', () => {
     expect(roleHasPermission(OrgRole.ReadOnly, 'keys.create')).toBe(false);
   });
 
-  it('grants nothing for a role value outside the enum', () => {
-    const unknown = 'billing' as OrgRole;
-    expect(permissionsForRole(unknown)).toStrictEqual([]);
-    expect(roleHasPermission(unknown, 'members.read')).toBe(false);
+  // A membership row is a DynamoDB string attribute, so the lookup has to be
+  // total: any value at all resolves to a permission set, and only the four
+  // roles resolve to a non-empty one.
+  it.each([
+    ['the pre-M1 label that is not a role', 'billing'],
+    ['a role name in the wrong case', 'Owner'],
+    ['the empty string', ''],
+    ['an inherited method name', 'constructor'],
+    ['the prototype itself', '__proto__'],
+    ['another inherited method name', 'toString'],
+    ['hasOwnProperty', 'hasOwnProperty'],
+  ])('grants nothing for %s', (_label, role) => {
+    expect(permissionsForRole(role)).toStrictEqual([]);
+    expect(roleHasPermission(role, 'members.read')).toBe(false);
   });
 });
 
@@ -146,5 +164,48 @@ describe('canManageTargetRole', () => {
     // reaches what demoting one forbids.
     expect(canManageTargetRole(OrgRole.Admin, OrgRole.Owner)).toBe(false);
     expect(roleHasPermission(OrgRole.Admin, 'owners.manage')).toBe(false);
+  });
+
+  it.each([
+    ['the pre-M1 label that is not a role', 'billing'],
+    ['a role name in the wrong case', 'Owner'],
+    ['an inherited method name', 'constructor'],
+    ['the empty string', ''],
+  ])('refuses an Owner a target carrying %s', (_label, target) => {
+    // An unrecognized target must not fall through to the members.manage
+    // branch: a stored 'Owner' would then be managed as if it were a Member.
+    expect(canManageTargetRole(OrgRole.Owner, target)).toBe(false);
+    expect(canManageTargetRole(OrgRole.Admin, target)).toBe(false);
+  });
+
+  it('refuses an actor whose own role is unrecognized', () => {
+    expect(canManageTargetRole('billing', OrgRole.Member)).toBe(false);
+  });
+});
+
+describe('canChangeRole', () => {
+  it.each([
+    [OrgRole.Owner, OrgRole.Member, OrgRole.Admin, true],
+    [OrgRole.Owner, OrgRole.Admin, OrgRole.Owner, true],
+    [OrgRole.Owner, OrgRole.Owner, OrgRole.Member, true],
+    [OrgRole.Admin, OrgRole.Member, OrgRole.ReadOnly, true],
+    [OrgRole.Admin, OrgRole.ReadOnly, OrgRole.Admin, true],
+    [OrgRole.Member, OrgRole.ReadOnly, OrgRole.Member, false],
+    [OrgRole.ReadOnly, OrgRole.ReadOnly, OrgRole.Member, false],
+  ])('%s changing %s → %s is %s', (actor, from, to, expected) => {
+    expect(canChangeRole(actor, from, to)).toBe(expected);
+  });
+
+  it('holds an Admin to the ceiling at both ends of the change', () => {
+    // Promotion reaches the role being granted; demotion reaches the role being
+    // taken away. An Admin clears neither where an Owner is involved.
+    expect(canChangeRole(OrgRole.Admin, OrgRole.Member, OrgRole.Owner)).toBe(false);
+    expect(canChangeRole(OrgRole.Admin, OrgRole.Owner, OrgRole.Member)).toBe(false);
+    expect(canChangeRole(OrgRole.Owner, OrgRole.Member, OrgRole.Owner)).toBe(true);
+  });
+
+  it('refuses a change touching a role value outside the enum', () => {
+    expect(canChangeRole(OrgRole.Owner, 'billing', OrgRole.Member)).toBe(false);
+    expect(canChangeRole(OrgRole.Owner, OrgRole.Member, 'billing')).toBe(false);
   });
 });

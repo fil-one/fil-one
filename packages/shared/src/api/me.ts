@@ -36,7 +36,7 @@ export interface MeResponse {
    * table the server enforces. The server remains the enforcement point; the UI
    * only hides what would be refused.
    */
-  permissions?: Permission[];
+  permissions?: readonly Permission[];
   /** Every org the caller belongs to, for the org switcher. */
   memberships?: OrgMembershipSummary[];
 }

@@ -2,10 +2,11 @@ import type { Permission } from './permissions.js';
 
 /**
  * Every API route, its authentication category, and what it requires of the
- * caller. Declared rather than implied so route coverage is machine-checkable:
- * a backend test walks `packages/backend/src/handlers/` and fails on any
- * handler missing from this manifest, which makes "we forgot to gate the new
- * route" a red build instead of an open door.
+ * caller. Declared rather than implied so route coverage becomes
+ * machine-checkable: the enforcement PR adds a backend test that walks
+ * `packages/backend/src/handlers/` and fails on any handler missing from this
+ * manifest, which makes "we forgot to gate the new route" a red build instead
+ * of an open door.
  *
  * The manifest is the source of truth for what `authorize()` installs; it does
  * not itself enforce anything.
@@ -18,9 +19,11 @@ export type RouteCategory =
   /** No Middy chain; authenticated by the provider's request signature. */
   | 'webhook'
   /** RAG bearer token resolved by `ragQueryAuthMiddleware`, which bypasses
-   * `authMiddleware` entirely on that branch and resolves the key creator's
-   * membership itself. The same route still accepts a cookie session when no
-   * `Authorization` header is present. */
+   * `authMiddleware` entirely on that branch and builds the caller from the key
+   * record; the enforcement PR adds the creator-membership resolution on this
+   * path, so that a revoked creator loses the key's authority. The same route
+   * still accepts a cookie session when no `Authorization` header is present,
+   * and that caller is gated on {@link RouteManifestEntry.cookieRequires}. */
   | 'bearer';
 
 /**
@@ -44,9 +47,15 @@ export interface RouteManifestEntry {
   category: RouteCategory;
   /** Set on `authenticated` routes, absent on every other category. */
   requires?: RouteRequirement;
+  /**
+   * Set on `bearer` routes, which accept two kinds of caller. The bearer token
+   * carries its own authority; a caller arriving with a cookie session instead
+   * is an ordinary console user and holds this permission or is refused.
+   */
+  cookieRequires?: Permission;
 }
 
-export const ROUTE_MANIFEST = [
+export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
   // ── Buckets ──────────────────────────────────────────────────────
   {
     method: 'GET',
@@ -91,19 +100,32 @@ export const ROUTE_MANIFEST = [
     requires: 'buckets.read',
   },
   // Turning indexing on for a bucket is a bucket-configuration write, so it
-  // sits with bucket creation rather than with object writes.
+  // sits with bucket creation rather than with object writes; turning it off
+  // discards the index, which is destructive configuration and sits with bucket
+  // deletion. The handler branches on the body: `enabled: true` needs
+  // `buckets.create`, `enabled: false` needs `buckets.delete`.
   {
     method: 'POST',
     path: '/api/buckets/{name}/rag/enabled',
     handler: 'set-bucket-rag-enablement',
     category: 'authenticated',
-    requires: 'buckets.create',
+    requires: 'in-handler',
   },
 
   // ── Objects ──────────────────────────────────────────────────────
-  // One route serves read, write, and delete presigns, so the check branches
-  // per requested operation next to the existing trial checks. A batch with any
-  // denied operation is rejected whole.
+  // One route serves all seven presign operations, so the check branches per
+  // requested operation next to the existing trial checks:
+  //   getObject, headObject, listObjects, listObjectVersions → objects.read
+  //   putObject                                              → objects.write
+  //   deleteObject                                           → objects.delete
+  //   getObjectRetention                                     → objects.read
+  // A batch with any denied operation is rejected whole.
+  //
+  // getObjectRetention reads retention state rather than changing it, and the
+  // PRD's auditor path grants exactly that read. A presign that mutates
+  // retention or legal hold is a different matter: it is redeemed at the vendor
+  // where its use cannot be logged, so if one is ever added it must be gated on
+  // an explicit privileged grant rather than on a general object permission.
   {
     method: 'POST',
     path: '/api/presign',
@@ -113,37 +135,45 @@ export const ROUTE_MANIFEST = [
   },
 
   // ── Keys ─────────────────────────────────────────────────────────
-  // Listing and revoking are `keys.manage_own`; reaching another member's key
-  // additionally needs `keys.manage_all`, which the handlers check once keys
-  // carry a creator (M2).
+  // Listing and revoking are `keys.manage_all`, because no handler can yet tell
+  // whose key it is holding: keys gain `createdBy` in this milestone, and until
+  // a creator predicate exists, `keys.manage_own` would name a narrowing nobody
+  // performs and hand a Member the whole org's key inventory. The enforcement PR
+  // relaxes list and delete to `keys.manage_own` in the same change that adds
+  // the predicate.
   {
     method: 'GET',
     path: '/api/access-keys',
     handler: 'list-access-keys',
     category: 'authenticated',
-    requires: 'keys.manage_own',
+    requires: 'keys.manage_all',
   },
+  // `keys.create` is the entry gate, and the creator-authority cap runs in the
+  // handler on top of it: the requested key permissions are intersected with the
+  // creator's own, so a key can never carry more than the member minting it.
   {
     method: 'POST',
     path: '/api/access-keys',
     handler: 'create-access-key',
     category: 'authenticated',
-    requires: 'keys.create',
+    requires: 'in-handler',
   },
   {
     method: 'DELETE',
     path: '/api/access-keys/{keyId}',
     handler: 'delete-access-key',
     category: 'authenticated',
-    requires: 'keys.manage_own',
+    requires: 'keys.manage_all',
   },
   {
     method: 'GET',
     path: '/api/rag-api-keys',
     handler: 'list-rag-api-keys',
     category: 'authenticated',
-    requires: 'keys.manage_own',
+    requires: 'keys.manage_all',
   },
+  // A RAG key carries no permission vocabulary to intersect — it queries the
+  // buckets its creator could query — so creation needs no in-handler cap.
   {
     method: 'POST',
     path: '/api/rag-api-keys',
@@ -156,15 +186,19 @@ export const ROUTE_MANIFEST = [
     path: '/api/rag-api-keys/{keyId}',
     handler: 'delete-rag-api-key',
     category: 'authenticated',
-    requires: 'keys.manage_own',
+    requires: 'keys.manage_all',
   },
 
   // ── RAG query ────────────────────────────────────────────────────
+  // Dual auth: a bearer token authenticates itself, and the same route falls
+  // back to the cookie session when no `Authorization` header is present. The
+  // cookie caller is gated like any other read of bucket contents.
   {
     method: 'POST',
     path: '/api/buckets/{name}/query',
     handler: 'query-bucket',
     category: 'bearer',
+    cookieRequires: 'buckets.read',
   },
 
   // ── Auth ─────────────────────────────────────────────────────────
@@ -256,21 +290,29 @@ export const ROUTE_MANIFEST = [
   },
 
   // ── Usage and activity ───────────────────────────────────────────
+  // Bytes stored and bytes served are storage telemetry, not payment data, and
+  // the console fetches them on every page — gating them on `billing.view`
+  // would leave a Member or ReadOnly staring at a blank console. Money lives
+  // under /api/billing and keeps `billing.view`.
   {
     method: 'GET',
     path: '/api/usage',
     handler: 'get-usage',
     category: 'authenticated',
-    requires: 'billing.view',
+    requires: 'buckets.read',
   },
   {
     method: 'GET',
     path: '/api/usage/trends',
     handler: 'get-usage-trends',
     category: 'authenticated',
-    requires: 'billing.view',
+    requires: 'buckets.read',
   },
   // A synthesized feed of bucket, object, and key events — not the audit log.
+  // The route requirement is only half the gate. The enforcement PR also
+  // filters the feed itself, dropping key-lifecycle entries for a caller
+  // holding no `keys.*` permission; today the feed hands a ReadOnly member the
+  // org's key inventory.
   {
     method: 'GET',
     path: '/api/activity',
@@ -318,4 +360,4 @@ export const ROUTE_MANIFEST = [
 
   // ── Webhooks ─────────────────────────────────────────────────────
   { method: 'POST', path: '/api/stripe/webhook', handler: 'stripe-webhook', category: 'webhook' },
-] as const satisfies readonly RouteManifestEntry[];
+];
