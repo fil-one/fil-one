@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { OrgRole } from '@filone/shared';
+import { seedPermissions } from '../lib/test-permissions.js';
 import { S3Region } from '@filone/shared';
 import type { RagApiKey } from '@filone/shared';
 
@@ -47,8 +49,11 @@ function bucket(over: Partial<RagBucket> = {}): RagBucket {
   };
 }
 
-function renderTab(buckets: RagBucket[] = [bucket()]) {
+function renderTab(buckets: RagBucket[] = [bucket()], role = OrgRole.Owner) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // Key controls are gated on `keys.*`, so the caller's role has to be known
+  // before the tab renders.
+  seedPermissions(client, role);
   return render(
     <QueryClientProvider client={client}>
       <ToastProvider>
@@ -189,5 +194,25 @@ describe('RagApiKeysTab', () => {
 
     expect(await screen.findByText('quota exceeded')).toBeInTheDocument();
     expect(screen.queryByTestId('rag-key-token')).not.toBeInTheDocument();
+  });
+});
+
+describe('RagApiKeysTab — permissions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockList.mockResolvedValue({ keys: [] });
+  });
+
+  it('offers key creation to a Member', async () => {
+    renderTab([bucket()], OrgRole.Member);
+
+    expect(await screen.findByRole('button', { name: 'Create API key' })).toBeInTheDocument();
+  });
+
+  it('hides key creation from ReadOnly', async () => {
+    renderTab([bucket()], OrgRole.ReadOnly);
+
+    await screen.findByText('No API keys yet');
+    expect(screen.queryByRole('button', { name: 'Create API key' })).not.toBeInTheDocument();
   });
 });

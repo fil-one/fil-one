@@ -6,6 +6,8 @@ import type { AccessKey, ListAccessKeysResponse, S3Region } from '@filone/shared
 
 import { apiRequest } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
+import { useHasPermission } from '../lib/use-permissions.js';
+import { RequirePermission } from './RequirePermission';
 import { useToast } from './Toast';
 import { AccessEndpointsCard } from './AccessEndpointsCard';
 import { AccessKeysTable } from './AccessKeysTable';
@@ -33,6 +35,8 @@ export function BucketAccessTab({
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
+  const mayCreate = useHasPermission('keys.create');
+  const mayRevoke = useHasPermission('keys.manage_all');
 
   const deleteKeyMutation = useMutation({
     mutationFn: (id: string) => apiRequest(`/access-keys/${id}`, { method: 'DELETE' }),
@@ -67,9 +71,11 @@ export function BucketAccessTab({
           <h2 className="text-base font-medium text-zinc-900">API keys</h2>
           <p className="text-sm text-zinc-500">Keys with access to this bucket</p>
         </div>
-        <Button variant="ghost" size="sm" icon={PlusIcon} onClick={onCreateOpen}>
-          Add key
-        </Button>
+        <RequirePermission permission="keys.create">
+          <Button variant="ghost" size="sm" icon={PlusIcon} onClick={onCreateOpen}>
+            Add key
+          </Button>
+        </RequirePermission>
       </div>
 
       {accessKeysLoading ? (
@@ -80,8 +86,8 @@ export function BucketAccessTab({
         <AccessKeysTable
           keys={accessKeys}
           showPermissions
-          onDelete={async (id) => setConfirmDeleteKey(id)}
-          onCreateOpen={onCreateOpen}
+          onDelete={mayRevoke ? async (id) => setConfirmDeleteKey(id) : undefined}
+          onCreateOpen={mayCreate ? onCreateOpen : undefined}
           emptyTitle="No access keys yet"
           emptyDescription="Create an access key to connect via the S3 API"
         />

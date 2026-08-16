@@ -22,6 +22,8 @@ import { FILONE_STAGE } from '../env';
 import { apiRequest } from '../lib/api.js';
 import { useCopyToClipboard } from '../lib/use-copy-to-clipboard.js';
 import { queryKeys } from '../lib/query-client.js';
+import { RequirePermission } from '../components/RequirePermission';
+import { useHasPermission } from '../lib/use-permissions.js';
 
 // ---------------------------------------------------------------------------
 // Tab 1: Access Keys
@@ -29,8 +31,10 @@ import { queryKeys } from '../lib/query-client.js';
 
 type AccessKeysTabProps = {
   keys: AccessKey[];
-  onCreateOpen: () => void;
-  onDelete: (id: string) => Promise<void>;
+  /** Absent for a role that cannot mint keys — the table drops the control. */
+  onCreateOpen?: () => void;
+  /** Absent for a role that cannot revoke them — the table drops the column. */
+  onDelete?: (id: string) => Promise<void>;
 };
 
 function AccessKeysTab({ keys, onCreateOpen, onDelete }: AccessKeysTabProps) {
@@ -371,10 +375,33 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 // Page
 // ---------------------------------------------------------------------------
 
+/** Minting keys is `keys.create`, which ReadOnly does not hold. */
+function CreateKeyAction({ onCreate }: { onCreate: () => void }) {
+  return (
+    <RequirePermission permission="keys.create">
+      <Button
+        id="api-keys-create-button"
+        variant="ghost"
+        size="sm"
+        icon={PlusIcon}
+        onClick={onCreate}
+      >
+        Create new key
+      </Button>
+    </RequirePermission>
+  );
+}
+
 export function ApiKeysPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const mayCreate = useHasPermission('keys.create');
+  // Listing and revoking are `keys.manage_all` until a creator predicate
+  // exists — see the route manifest's note on the key routes.
+  const mayRevoke = useHasPermission('keys.manage_all');
+
+  const openCreateKey = () => void navigate({ to: '/api-keys/create' });
 
   const { data, isPending, isError, error } = useQuery({
     queryKey: queryKeys.accessKeys,
@@ -438,17 +465,7 @@ export function ApiKeysPage() {
       title="API Keys"
       headingId="api-keys-heading"
       description="Manage credentials and connect via S3-compatible API"
-      action={
-        <Button
-          id="api-keys-create-button"
-          variant="ghost"
-          size="sm"
-          icon={PlusIcon}
-          onClick={() => void navigate({ to: '/api-keys/create' })}
-        >
-          Create new key
-        </Button>
-      }
+      action={<CreateKeyAction onCreate={openCreateKey} />}
     >
       <Tabs>
         <TabList>
@@ -460,8 +477,8 @@ export function ApiKeysPage() {
           <TabPanel>
             <AccessKeysTab
               keys={keys}
-              onCreateOpen={() => void navigate({ to: '/api-keys/create' })}
-              onDelete={handleDelete}
+              onCreateOpen={mayCreate ? openCreateKey : undefined}
+              onDelete={mayRevoke ? handleDelete : undefined}
             />
           </TabPanel>
           <TabPanel>

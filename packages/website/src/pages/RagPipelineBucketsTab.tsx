@@ -4,6 +4,7 @@ import { formatBytes } from '@filone/shared';
 
 import { Alert } from '../components/Alert.js';
 import { BucketActionMenu } from '../components/BucketActionMenu.js';
+import { RequirePermission } from '../components/RequirePermission.js';
 import { BucketDrawer } from '../components/BucketDrawer.js';
 import { BucketStatus } from '../components/BucketStatus.js';
 import { Button } from '../components/Button.js';
@@ -139,18 +140,25 @@ function BucketRow({
                 <Button data-testid="bucket-row-ask" variant="ghost" size="sm" onClick={onAsk}>
                   {isBucketQueryable(bucket) ? 'Ask questions' : 'View details'}
                 </Button>
-                <BucketActionMenu onDisable={onToggle} />
+                {/* Turning indexing off discards the index, so it sits with
+                    bucket deletion; turning it on is a configuration write and
+                    sits with bucket creation. Asking questions needs neither. */}
+                <RequirePermission permission="buckets.delete">
+                  <BucketActionMenu onDisable={onToggle} />
+                </RequirePermission>
               </>
             ) : (
-              <Button
-                data-testid="bucket-row-index"
-                variant="primary"
-                size="sm"
-                disabled={pending}
-                onClick={onToggle}
-              >
-                {pending ? 'Starting…' : 'Index'}
-              </Button>
+              <RequirePermission permission="buckets.create">
+                <Button
+                  data-testid="bucket-row-index"
+                  variant="primary"
+                  size="sm"
+                  disabled={pending}
+                  onClick={onToggle}
+                >
+                  {pending ? 'Starting…' : 'Index'}
+                </Button>
+              </RequirePermission>
             )}
           </div>
         </div>

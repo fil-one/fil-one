@@ -21,6 +21,7 @@ import { ApiErrorCode, DOCS_URL, S3_REGION, getRegionLabel } from '@filone/share
 import { apiRequest } from '../lib/api.js';
 import { formatDate } from '../lib/time.js';
 import { queryKeys } from '../lib/query-client.js';
+import { RequirePermission } from '../components/RequirePermission';
 
 // Linked from the "bucket is not empty" toast, next to the thing it explains —
 // the docs page covers emptying a bucket with the S3 CLI.
@@ -109,15 +110,17 @@ export function BucketsPage() {
       title="Buckets"
       description="Organize and manage your storage containers"
       action={
-        <Button
-          id="buckets-create-button"
-          variant="ghost"
-          size="sm"
-          icon={PlusIcon}
-          onClick={() => navigate({ to: '/buckets/create' })}
-        >
-          Create bucket
-        </Button>
+        <RequirePermission permission="buckets.create">
+          <Button
+            id="buckets-create-button"
+            variant="ghost"
+            size="sm"
+            icon={PlusIcon}
+            onClick={() => navigate({ to: '/buckets/create' })}
+          >
+            Create bucket
+          </Button>
+        </RequirePermission>
       }
     >
       {/* Content: empty state or table */}
@@ -127,14 +130,16 @@ export function BucketsPage() {
           title="No buckets yet"
           description="Create your first bucket to start storing objects"
         >
-          <Button
-            id="buckets-empty-create-button"
-            variant="primary"
-            icon={PlusIcon}
-            onClick={() => navigate({ to: '/buckets/create' })}
-          >
-            Create bucket
-          </Button>
+          <RequirePermission permission="buckets.create">
+            <Button
+              id="buckets-empty-create-button"
+              variant="primary"
+              icon={PlusIcon}
+              onClick={() => navigate({ to: '/buckets/create' })}
+            >
+              Create bucket
+            </Button>
+          </RequirePermission>
         </EmptyStateCard>
       ) : (
         <Table>
@@ -200,11 +205,17 @@ export function BucketsPage() {
                   </div>
                 </Table.Cell>
                 <Table.Cell className="text-right">
-                  <IconButton
-                    icon={TrashIcon}
-                    aria-label={`Delete bucket ${bucket.bucketName}`}
-                    onClick={() => setConfirmDeleteBucket(bucket.bucketName)}
-                  />
+                  {/* Deletion is `buckets.delete`: Owner and Admin only. The
+                      control is absent for everyone else rather than disabled —
+                      a disabled Delete button invites a support question about
+                      a capability the member will never have. */}
+                  <RequirePermission permission="buckets.delete">
+                    <IconButton
+                      icon={TrashIcon}
+                      aria-label={`Delete bucket ${bucket.bucketName}`}
+                      onClick={() => setConfirmDeleteBucket(bucket.bucketName)}
+                    />
+                  </RequirePermission>
                 </Table.Cell>
               </Table.Row>
             ))}

@@ -29,6 +29,7 @@ import { AddPaymentDialog } from '../components/billing/AddPaymentDialog.js';
 import { ContactSalesDialog } from '../components/billing/ContactSalesDialog.js';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { Overline } from '../components/Overline';
+import { RequirePermission } from '../components/RequirePermission';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -58,8 +59,37 @@ function SkeletonCard({ height = 'h-36' }: { height?: string }) {
 // Page
 // ---------------------------------------------------------------------------
 
-// eslint-disable-next-line max-lines-per-function, complexity/complexity
+/**
+ * Money is Owner-and-Admin territory: `billing.view` reads usage and invoices,
+ * `billing.manage` changes the plan or the card. A Member or ReadOnly holds
+ * neither, and every query on this page would 403, so the page says so instead
+ * of rendering an error for each one.
+ */
 export function BillingPage() {
+  return (
+    <RequirePermission
+      permission="billing.view"
+      pending={
+        <PageLayout title="Billing" description="Manage your plan, usage, and payment methods">
+          <SkeletonCard height="h-40" />
+        </PageLayout>
+      }
+      fallback={
+        <PageLayout title="Billing" description="Manage your plan, usage, and payment methods">
+          <div className="rounded-xl border border-zinc-200 bg-white p-6 text-sm text-zinc-600">
+            Billing is managed by your organization&rsquo;s owners and admins. Ask one of them for
+            plan or invoice details.
+          </div>
+        </PageLayout>
+      }
+    >
+      <BillingDetails />
+    </RequirePermission>
+  );
+}
+
+// eslint-disable-next-line max-lines-per-function, complexity/complexity
+function BillingDetails() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -383,14 +413,16 @@ export function BillingPage() {
                 <p className="text-[13px] font-medium text-zinc-900">
                   Ready to unlock unlimited storage?
                 </p>
-                <Button
-                  id="billing-upgrade-button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleUpgradeClick}
-                >
-                  Upgrade
-                </Button>
+                <RequirePermission permission="billing.manage">
+                  <Button
+                    id="billing-upgrade-button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleUpgradeClick}
+                  >
+                    Upgrade
+                  </Button>
+                </RequirePermission>
               </div>
             )}
 
@@ -398,14 +430,16 @@ export function BillingPage() {
             {(isActive || isPastDue) && (
               <div className="flex items-center justify-between border-t border-zinc-100 pt-3">
                 <span className="text-[12px] text-zinc-500">Billed monthly</span>
-                <Button
-                  id="billing-manage-plan-button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleUpdatePayment}
-                >
-                  Manage plan
-                </Button>
+                <RequirePermission permission="billing.manage">
+                  <Button
+                    id="billing-manage-plan-button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleUpdatePayment}
+                  >
+                    Manage plan
+                  </Button>
+                </RequirePermission>
               </div>
             )}
 
@@ -427,16 +461,18 @@ export function BillingPage() {
                       ? 'Upgrade to keep your data and unlock unlimited storage'
                       : 'Reactivate your subscription to restore full access'}
                 </p>
-                <Button
-                  id="billing-reactivate-button"
-                  variant={isCanceled ? 'destructive' : 'warning'}
-                  size="sm"
-                  icon={ArrowRightIcon}
-                  iconPosition="right"
-                  onClick={handleUpgradeClick}
-                >
-                  {isTrialExpiredGrace ? 'Upgrade' : 'Reactivate'}
-                </Button>
+                <RequirePermission permission="billing.manage">
+                  <Button
+                    id="billing-reactivate-button"
+                    variant={isCanceled ? 'destructive' : 'warning'}
+                    size="sm"
+                    icon={ArrowRightIcon}
+                    iconPosition="right"
+                    onClick={handleUpgradeClick}
+                  >
+                    {isTrialExpiredGrace ? 'Upgrade' : 'Reactivate'}
+                  </Button>
+                </RequirePermission>
               </div>
             )}
           </div>
@@ -536,28 +572,32 @@ export function BillingPage() {
                     {String(billing.paymentMethod.expYear).slice(-2)}
                   </p>
                 </div>
-                <Button
-                  id="billing-update-payment-button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleUpdatePayment}
-                >
-                  Update
-                </Button>
+                <RequirePermission permission="billing.manage">
+                  <Button
+                    id="billing-update-payment-button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleUpdatePayment}
+                  >
+                    Update
+                  </Button>
+                </RequirePermission>
               </div>
             ) : (
               <div className="flex items-center gap-3 rounded-lg border border-dashed border-zinc-200 bg-zinc-50/30 p-[13px] w-full">
                 <IconBox icon={CreditCardIcon} color="grey" size="sm" />
                 <span className="flex-1 text-[13px] text-zinc-500">No payment method added</span>
-                <Button
-                  id="billing-add-payment-button"
-                  variant="ghost"
-                  size="sm"
-                  icon={CreditCardIcon}
-                  onClick={handleUpgradeClick}
-                >
-                  Add
-                </Button>
+                <RequirePermission permission="billing.manage">
+                  <Button
+                    id="billing-add-payment-button"
+                    variant="ghost"
+                    size="sm"
+                    icon={CreditCardIcon}
+                    onClick={handleUpgradeClick}
+                  >
+                    Add
+                  </Button>
+                </RequirePermission>
               </div>
             )}
           </div>
@@ -673,15 +713,17 @@ export function BillingPage() {
                   goes through a fresh SetupIntent rather than a saved-card
                   reactivation the backend would reject. */}
               {(isTrialing || isGracePeriod || isCanceled || isInactive) && (
-                <Button
-                  id="billing-plan-cta-button"
-                  variant="primary"
-                  icon={LightningIcon}
-                  onClick={handleUpgradeClick}
-                  className="w-full justify-center"
-                >
-                  {isTrialing ? 'Upgrade now' : isInactive ? 'Choose a plan' : 'Reactivate'}
-                </Button>
+                <RequirePermission permission="billing.manage">
+                  <Button
+                    id="billing-plan-cta-button"
+                    variant="primary"
+                    icon={LightningIcon}
+                    onClick={handleUpgradeClick}
+                    className="w-full justify-center"
+                  >
+                    {isTrialing ? 'Upgrade now' : isInactive ? 'Choose a plan' : 'Reactivate'}
+                  </Button>
+                </RequirePermission>
               )}
             </div>
           </div>
