@@ -1,8 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { S3Region } from '@filone/shared';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { OrgRole, S3Region } from '@filone/shared';
 
 import { BucketsTab, type RagBucket } from './RagPipelineBucketsTab.js';
+import { seedPermissions } from '../lib/test-permissions.js';
 
 // ---------------------------------------------------------------------------
 // Mocks — the query playground client (only touched once a drawer opens, which
@@ -30,16 +32,22 @@ function bucket(over: Partial<RagBucket> = {}): RagBucket {
   };
 }
 
-function renderTab(buckets: RagBucket[]) {
+function renderTab(buckets: RagBucket[], role = OrgRole.Owner) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // Index / Stop-indexing are gated on the bucket permissions, so the caller's
+  // role has to be in the cache before the rows render.
+  seedPermissions(client, role);
   return render(
-    <BucketsTab
-      buckets={buckets}
-      isLoading={false}
-      isError={false}
-      errorMessage={undefined}
-      togglingBucket={null}
-      onConfirmToggle={() => undefined}
-    />,
+    <QueryClientProvider client={client}>
+      <BucketsTab
+        buckets={buckets}
+        isLoading={false}
+        isError={false}
+        errorMessage={undefined}
+        togglingBucket={null}
+        onConfirmToggle={() => undefined}
+      />
+    </QueryClientProvider>,
   );
 }
 
@@ -189,5 +197,36 @@ describe('BucketsTab — before the first indexing pass', () => {
     expect(action).toHaveTextContent('Ask questions');
     expect(screen.getByTestId('bucket-row-stat-files')).toHaveTextContent('847');
     expect(screen.getByTestId('bucket-status')).toHaveTextContent('Ready');
+  });
+});
+
+describe('BucketsTab — permissions', () => {
+  it('offers Index to a Member, who may create buckets', () => {
+    renderTab([bucket({ enabled: false })], OrgRole.Member);
+
+    expect(screen.getByRole('button', { name: 'Index' })).toBeInTheDocument();
+  });
+
+  it('hides Index from ReadOnly', () => {
+    renderTab([bucket({ enabled: false })], OrgRole.ReadOnly);
+
+    expect(screen.queryByRole('button', { name: 'Index' })).not.toBeInTheDocument();
+  });
+
+  it.each([OrgRole.Member, OrgRole.ReadOnly])(
+    'hides the stop-indexing menu from %s — that discards the index',
+    (role) => {
+      renderTab([bucket({ enabled: true })], role);
+
+      expect(screen.queryByRole('button', { name: 'Bucket actions' })).not.toBeInTheDocument();
+      // Reading the bucket is still theirs.
+      expect(screen.getByTestId('bucket-row-ask')).toBeInTheDocument();
+    },
+  );
+
+  it('shows the stop-indexing menu to an Admin', () => {
+    renderTab([bucket({ enabled: true })], OrgRole.Admin);
+
+    expect(screen.getByRole('button', { name: 'Bucket actions' })).toBeInTheDocument();
   });
 });

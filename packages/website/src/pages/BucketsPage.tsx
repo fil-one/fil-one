@@ -14,6 +14,7 @@ import { TableSkeleton, type SkeletonColumn } from '../components/Table/TableSke
 import { useBucketsListing } from '../lib/use-buckets-listing.js';
 import { useDeleteBucket } from '../lib/use-delete-bucket.js';
 import { DEFAULT_BUCKET_SORT, EMPTY_BUCKET_FILTERS } from '../lib/bucket-table.js';
+import { RequirePermission } from '../components/RequirePermission';
 
 // Mirrors BucketsTable's columns (labels and breakpoints) so the loading
 // placeholder drops the same columns at the same widths as the real table.
@@ -51,15 +52,17 @@ export function BucketsPage() {
   // Shared across every state so navigating to Buckets never blanks the header
   // or takes the Create action away while the list loads.
   const createAction = (
-    <Button
-      id="buckets-create-button"
-      variant="ghost"
-      size="sm"
-      icon={PlusIcon}
-      onClick={() => navigate({ to: '/buckets/create' })}
-    >
-      Create bucket
-    </Button>
+    <RequirePermission permission="buckets.create">
+      <Button
+        id="buckets-create-button"
+        variant="ghost"
+        size="sm"
+        icon={PlusIcon}
+        onClick={() => navigate({ to: '/buckets/create' })}
+      >
+        Create bucket
+      </Button>
+    </RequirePermission>
   );
 
   if (isPending) {
@@ -106,14 +109,16 @@ export function BucketsPage() {
           title="No buckets yet"
           description="Create your first bucket to start storing objects"
         >
-          <Button
-            id="buckets-empty-create-button"
-            variant="primary"
-            icon={PlusIcon}
-            onClick={() => navigate({ to: '/buckets/create' })}
-          >
-            Create bucket
-          </Button>
+          <RequirePermission permission="buckets.create">
+            <Button
+              id="buckets-empty-create-button"
+              variant="primary"
+              icon={PlusIcon}
+              onClick={() => navigate({ to: '/buckets/create' })}
+            >
+              Create bucket
+            </Button>
+          </RequirePermission>
         </EmptyStateCard>
       ) : (
         <BucketsTable

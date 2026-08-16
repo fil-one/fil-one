@@ -1,7 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, fireEvent } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { OrgRole } from '@filone/shared';
 
 import { SidebarNav } from './SidebarNav';
+import { seedPermissions } from '../lib/test-permissions.js';
 
 // Render <a>/no-op router primitives so SidebarNav can mount without a router.
 vi.mock('@tanstack/react-router', () => ({
@@ -41,14 +44,18 @@ vi.mock('./StatusIndicator.js', () => ({
   StatusIndicator: () => <div data-testid="status-indicator" />,
 }));
 
-vi.mock('../lib/api.js', () => ({ logout: vi.fn() }));
+vi.mock('../lib/api.js', () => ({ logout: vi.fn(), getMe: vi.fn() }));
 
 // Mirrors how AppShell mounts the sidebar twice: the visible desktop sidebar
 // plus the mobile drawer copy. The drawer copy must not duplicate the
 // page-unique e2e selectors, or Playwright strict-mode locators break.
-function renderBothSidebars() {
+function renderBothSidebars(role = OrgRole.Owner) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // The Billing entry is gated on `billing.view`, so the role has to be known
+  // before the nav renders.
+  seedPermissions(client, role);
   return render(
-    <>
+    <QueryClientProvider client={client}>
       <SidebarNav collapsed={false} onToggle={() => {}} showTestIds={true} />
       <SidebarNav
         collapsed={false}
@@ -57,7 +64,7 @@ function renderBothSidebars() {
         showUserProfile={false}
         showTestIds={false}
       />
-    </>,
+    </QueryClientProvider>,
   );
 }
 
@@ -96,12 +103,33 @@ describe('SidebarNav e2e selector uniqueness (desktop + drawer mounted)', () => 
   });
 });
 
+describe('SidebarNav — the Billing entry', () => {
+  it('renders for a role that may see billing', () => {
+    const { container } = renderBothSidebars(OrgRole.Admin);
+
+    expect(container.querySelectorAll('[data-testid="nav-billing"]')).toHaveLength(1);
+  });
+
+  it.each([OrgRole.Member, OrgRole.ReadOnly])('is absent for %s', (role) => {
+    // Every query on that page would 403; offering the link is a dead end.
+    const { container } = renderBothSidebars(role);
+
+    expect(container.querySelectorAll('[data-testid="nav-billing"]')).toHaveLength(0);
+    // Settings is every member's own account and stays.
+    expect(container.querySelectorAll('[data-testid="nav-settings"]')).toHaveLength(1);
+  });
+});
+
+// Collapsed mode hides the display name and the avatar is decorative, so the
+// button's own label is the only accessible name left.
 describe('SidebarNav user profile accessible name', () => {
-  // Collapsed mode hides the display name and the avatar is decorative, so the
-  // button's own label is the only accessible name left.
   it.each([true, false])('names the user-profile button when collapsed=%s', (collapsed) => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seedPermissions(client, OrgRole.Owner);
     const { getByTestId } = render(
-      <SidebarNav collapsed={collapsed} onToggle={() => {}} showTestIds={true} />,
+      <QueryClientProvider client={client}>
+        <SidebarNav collapsed={collapsed} onToggle={() => {}} showTestIds={true} />
+      </QueryClientProvider>,
     );
     expect(getByTestId('user-profile')).toHaveAccessibleName('User menu for Ada');
   });

@@ -31,6 +31,7 @@ import { useToast } from '../components/Toast/index.js';
 import { createRagApiKey, deleteRagApiKey, listRagApiKeys } from '../lib/rag-api-keys-api.js';
 import { bucketKey, type RagBucket } from '../lib/rag-bucket-api.js';
 import { queryKeys } from '../lib/query-client.js';
+import { RequirePermission } from '../components/RequirePermission.js';
 import { ApiReference } from './RagPipelineTabs.js';
 import { formatDate } from '../lib/time.js';
 
@@ -345,15 +346,17 @@ export function RagApiKeysTab({ buckets }: { buckets: RagBucket[] }) {
           API Keys
         </Heading>
         {!showEmptyState && (
-          <Button
-            variant="primary"
-            size="sm"
-            icon={PlusIcon}
-            className="mt-1 flex-shrink-0"
-            onClick={() => setCreateOpen(true)}
-          >
-            Create API key
-          </Button>
+          <RequirePermission permission="keys.create">
+            <Button
+              variant="primary"
+              size="sm"
+              icon={PlusIcon}
+              className="mt-1 flex-shrink-0"
+              onClick={() => setCreateOpen(true)}
+            >
+              Create API key
+            </Button>
+          </RequirePermission>
         )}
       </div>
 
@@ -376,9 +379,11 @@ export function RagApiKeysTab({ buckets }: { buckets: RagBucket[] }) {
               Create a key to query your indexed buckets from your app or agent.
             </p>
           </div>
-          <Button variant="primary" size="sm" icon={PlusIcon} onClick={() => setCreateOpen(true)}>
-            Create API key
-          </Button>
+          <RequirePermission permission="keys.create">
+            <Button variant="primary" size="sm" icon={PlusIcon} onClick={() => setCreateOpen(true)}>
+              Create API key
+            </Button>
+          </RequirePermission>
         </div>
       )}
 
@@ -413,11 +418,13 @@ export function RagApiKeysTab({ buckets }: { buckets: RagBucket[] }) {
                   {k.lastUsedAt ? formatDate(k.lastUsedAt) : 'Never'}
                 </Table.Cell>
                 <Table.Cell className="text-right">
-                  <IconButton
-                    icon={TrashIcon}
-                    aria-label={`Delete API key ${k.keyName}`}
-                    onClick={() => setDeleteTarget(k)}
-                  />
+                  <RequirePermission permission="keys.manage_all">
+                    <IconButton
+                      icon={TrashIcon}
+                      aria-label={`Delete API key ${k.keyName}`}
+                      onClick={() => setDeleteTarget(k)}
+                    />
+                  </RequirePermission>
                 </Table.Cell>
               </Table.Row>
             ))}

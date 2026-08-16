@@ -17,7 +17,9 @@ import {
 import { Link, useMatchRoute } from '@tanstack/react-router';
 
 import { DOCS_URL } from '@filone/shared';
+import type { Permission } from '@filone/shared';
 import { logout } from '../lib/api.js';
+import { usePermissions } from '../lib/use-permissions.js';
 import { useSidebarData } from './use-sidebar-data.js';
 
 import { StatusBanners } from './SidebarStatusBanners.js';
@@ -137,44 +139,54 @@ function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps
   );
 }
 
-const utilityNavItems: NavItem[] = [
-  { path: '/billing', icon: CreditCardIcon, label: 'Billing', testId: 'nav-billing' },
+// Billing carries a permission; Settings is every member's own account.
+const utilityNavItems: (NavItem & { permission?: Permission })[] = [
+  {
+    path: '/billing',
+    icon: CreditCardIcon,
+    label: 'Billing',
+    testId: 'nav-billing',
+    permission: 'billing.view',
+  },
   { path: '/settings', icon: GearIcon, label: 'Settings', testId: 'nav-settings' },
 ];
 
 function UtilityNavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps) {
+  const { has } = usePermissions();
   return (
     <div className="p-2 flex flex-col gap-0.5">
-      {utilityNavItems.map(({ path, icon: Icon, label, testId }) => {
-        const isActive = Boolean(matchRoute({ to: path }));
-        const link = (
-          <Link
-            key={path}
-            to={path}
-            data-testid={showTestIds ? testId : undefined}
-            aria-label={label}
-            onClick={onClose}
-            className={[
-              'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
-              collapsed ? 'justify-center' : '',
-              isActive ? 'bg-brand-50 text-brand-700' : 'text-zinc-600 hover:bg-zinc-100',
-            ]
-              .filter(Boolean)
-              .join(' ')}
-          >
-            <Icon size={18} className={`flex-shrink-0 ${isActive ? '' : 'text-zinc-400'}`} />
-            {!collapsed && <span>{label}</span>}
-          </Link>
-        );
-        if (collapsed) {
-          return (
-            <Tooltip key={path} content={label} side="right">
-              {link}
-            </Tooltip>
+      {utilityNavItems
+        .filter((item) => !item.permission || has(item.permission))
+        .map(({ path, icon: Icon, label, testId }) => {
+          const isActive = Boolean(matchRoute({ to: path }));
+          const link = (
+            <Link
+              key={path}
+              to={path}
+              data-testid={showTestIds ? testId : undefined}
+              aria-label={label}
+              onClick={onClose}
+              className={[
+                'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
+                collapsed ? 'justify-center' : '',
+                isActive ? 'bg-brand-50 text-brand-700' : 'text-zinc-600 hover:bg-zinc-100',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+            >
+              <Icon size={18} className={`flex-shrink-0 ${isActive ? '' : 'text-zinc-400'}`} />
+              {!collapsed && <span>{label}</span>}
+            </Link>
           );
-        }
-        return <div key={path}>{link}</div>;
-      })}
+          if (collapsed) {
+            return (
+              <Tooltip key={path} content={label} side="right">
+                {link}
+              </Tooltip>
+            );
+          }
+          return <div key={path}>{link}</div>;
+        })}
     </div>
   );
 }

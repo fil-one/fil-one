@@ -40,6 +40,8 @@ import type {
   UpdateProfileRequest,
 } from '@filone/shared';
 import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
+import { RequirePermission } from '../components/RequirePermission';
+import { useHasPermission } from '../lib/use-permissions.js';
 
 // ---------------------------------------------------------------------------
 // Section card wrapper
@@ -269,12 +271,13 @@ function useProfileForm(me: MeResponse) {
     }
   }, [me, initialized]);
 
+  const mayRename = useHasPermission('org.rename');
   const nameChanged = !social && name !== (me.name ?? '');
   const emailChanged = !social && email !== (me.email ?? '');
   // Against the trimmed value, because trimmed is what gets sent: otherwise a
   // trailing space alone counts as a change and the save renames the org to the
   // name it already has.
-  const orgNameChanged = orgName.trim() !== (me.orgName ?? '');
+  const orgNameChanged = mayRename && orgName.trim() !== (me.orgName ?? '');
   const hasChanges = nameChanged || emailChanged || orgNameChanged;
 
   /** Reflect what landed, in the form and in the cache the rest of the app reads. */
@@ -390,14 +393,25 @@ function ProfileSection({ me }: { me: MeResponse }) {
               )}
             </FormField>
           </div>
+          {/* The company name is the organization's, not the caller's: it goes
+              to PATCH /api/org behind `org.rename`. A member who cannot rename
+              it still sees it, read-only, because it names the org they are
+              working in. */}
           <div className="flex flex-1 flex-col">
             <FormField label="Company name" htmlFor="profile-org-name">
-              <Input
-                id="profile-org-name"
-                value={form.orgName}
-                onChange={form.setOrgName}
-                placeholder="Your company"
-              />
+              <RequirePermission
+                permission="org.rename"
+                fallback={
+                  <Input id="profile-org-name" value={form.orgName} onChange={() => {}} disabled />
+                }
+              >
+                <Input
+                  id="profile-org-name"
+                  value={form.orgName}
+                  onChange={form.setOrgName}
+                  placeholder="Your company"
+                />
+              </RequirePermission>
             </FormField>
           </div>
         </div>

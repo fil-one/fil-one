@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { OrgRole } from '@filone/shared';
+import { seedPermissions } from '../lib/test-permissions.js';
 import {
   createMemoryHistory,
   createRootRoute,
@@ -104,7 +106,8 @@ const ENABLEMENT: Record<string, BucketRagEnablementResponse> = {
 
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  client.setQueryData(queryKeys.me, ME);
+  // The page's own /me fixture, plus the permissions its gated controls read.
+  seedPermissions(client, OrgRole.Owner, ME);
 
   const rootRoute = createRootRoute({ component: () => <RagPipelinePage /> });
   const objectsRoute = createRoute({
@@ -397,6 +400,7 @@ describe('RagPipelinePage — API Keys tab', () => {
 describe('RagPipelinePage — access gate', () => {
   it('renders a not-available state when the user lacks RAG access', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seedPermissions(client);
     client.setQueryData(queryKeys.me, { ...ME, ragAccess: false });
 
     const rootRoute = createRootRoute({ component: () => <RagPipelinePage /> });
