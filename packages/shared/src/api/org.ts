@@ -34,3 +34,16 @@ export const OrgNameSchema = z
     ORG_NAME_PATTERN,
     'Organization name can only contain letters, numbers, spaces, hyphens, and periods',
   );
+
+/**
+ * `PATCH /api/org` — renaming the organization, which is `org.rename` and
+ * therefore its own endpoint rather than a field on the profile a member
+ * updates about themselves.
+ */
+export const UpdateOrgSchema = z.object({ name: OrgNameSchema });
+
+export type UpdateOrgRequest = z.infer<typeof UpdateOrgSchema>;
+
+export interface UpdateOrgResponse {
+  name: string;
+}

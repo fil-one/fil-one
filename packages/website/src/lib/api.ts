@@ -182,6 +182,8 @@ import type {
   MeResponse,
   RegenerateRecoveryCodeResponse,
   RequestAccountDeletionResponse,
+  UpdateOrgRequest,
+  UpdateOrgResponse,
   UpdateProfileRequest,
   UpdateProfileResponse,
 } from '@filone/shared';
@@ -196,6 +198,18 @@ export function getMe(options?: { forceRefresh?: boolean; include?: 'mfa' }): Pr
 
 export function updateProfile(data: UpdateProfileRequest): Promise<UpdateProfileResponse> {
   return apiRequest<UpdateProfileResponse>('/me/profile', {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+/**
+ * Rename the organization. Its own endpoint because it is its own permission —
+ * `org.rename`, which Member and ReadOnly do not hold — while the profile call
+ * above changes only the caller's own account.
+ */
+export function updateOrg(data: UpdateOrgRequest): Promise<UpdateOrgResponse> {
+  return apiRequest<UpdateOrgResponse>('/org', {
     method: 'PATCH',
     body: JSON.stringify(data),
   });

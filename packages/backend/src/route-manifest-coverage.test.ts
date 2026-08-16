@@ -118,6 +118,17 @@ describe('route manifest coverage', () => {
     expect(ungated).toStrictEqual([]);
   });
 
+  it('checks the in-handler routes against the same registry', () => {
+    // A route whose requirement depends on the request body cannot install a
+    // fixed permission, but it must still speak this registry: `authorize`'s
+    // exported check is the one enforcement idiom, and a handler marked
+    // in-handler that calls nothing is a route with no gate at all.
+    const unchecked = byRequirement('in-handler')
+      .filter((route) => !/\brequirePermission\(/.test(handlerSource(route.handler)))
+      .map((route) => route.handler);
+    expect(unchecked).toStrictEqual([]);
+  });
+
   it('leaves the self-service routes without an org-permission gate', () => {
     // `self` waives the role gate: changing your own password or unenrolling
     // your own authenticator is not an org action, and gating it on a role

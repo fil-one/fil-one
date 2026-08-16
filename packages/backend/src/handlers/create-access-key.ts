@@ -3,11 +3,18 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { CreateAccessKeySchema, S3Region, isSupportedRegion } from '@filone/shared';
+import {
+  ApiErrorCode,
+  CreateAccessKeySchema,
+  S3Region,
+  excessKeyPermissions,
+  isSupportedRegion,
+} from '@filone/shared';
 import type {
   CreateAccessKeyRequest,
   CreateAccessKeyResponse,
   ErrorResponse,
+  ExcessKeyPermission,
 } from '@filone/shared';
 import { Resource } from 'sst';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
@@ -26,7 +33,7 @@ import type { AccessKeyRecord } from '../lib/dynamo-records.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { requireMembershipMiddleware } from '../middleware/authorize.js';
+import { requireMembershipMiddleware, requirePermission } from '../middleware/authorize.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
@@ -36,27 +43,15 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  let body: unknown;
-  try {
-    body = JSON.parse(event.body ?? '{}');
-  } catch {
-    return new ResponseBuilder()
-      .status(400)
-      .body<ErrorResponse>({ message: 'Invalid JSON body' })
-      .build();
-  }
+  const parsed = parseRequest(event.body);
+  if ('error' in parsed) return parsed.error;
 
-  const parsed = CreateAccessKeySchema.safeParse(body);
-  if (!parsed.success) {
-    return new ResponseBuilder()
-      .status(400)
-      .body<ErrorResponse>({ message: parsed.error.issues[0].message })
-      .build();
-  }
+  const { keyName, permissions, granularPermissions, bucketScope, region } = parsed.request;
+  const buckets = bucketScope === 'specific' ? (parsed.request.buckets ?? []) : undefined;
+  const expiresAt = parsed.request.expiresAt ?? null;
 
-  const { keyName, permissions, granularPermissions, bucketScope, region } = parsed.data;
-  const buckets = bucketScope === 'specific' ? (parsed.data.buckets ?? []) : undefined;
-  const expiresAt = parsed.data.expiresAt ?? null;
+  const denied = checkKeyPermissions(event, parsed.request);
+  if (denied) return denied;
 
   const { orgId, userId } = getUserInfo(event);
   const attribution = keyAttribution({ userId, creatorEmail: getVerifiedEmail(event) });
@@ -167,6 +162,73 @@ function buildAccessKeyItem({
     ...(expiresAt ? { expiresAt } : {}),
     ...attribution,
   });
+}
+
+/** The request body, or the 400 that says why it is not one. */
+function parseRequest(
+  rawBody: string | undefined,
+): { request: CreateAccessKeyRequest } | { error: APIGatewayProxyStructuredResultV2 } {
+  let body: unknown;
+  try {
+    body = JSON.parse(rawBody ?? '{}');
+  } catch {
+    return {
+      error: new ResponseBuilder()
+        .status(400)
+        .body<ErrorResponse>({ message: 'Invalid JSON body' })
+        .build(),
+    };
+  }
+
+  const parsed = CreateAccessKeySchema.safeParse(body);
+  if (!parsed.success) {
+    return {
+      error: new ResponseBuilder()
+        .status(400)
+        .body<ErrorResponse>({ message: parsed.error.issues[0].message })
+        .build(),
+    };
+  }
+
+  return { request: parsed.data };
+}
+
+/**
+ * Two checks, in the order a denial should read.
+ *
+ * First `keys.create`, the entry gate — a ReadOnly member mints no keys at all.
+ * Then the creator-authority cap: the requested key permissions are intersected
+ * with the caller's own, so a key can never carry more than the member minting
+ * it. Without the cap the console matrix is decoration, because a SigV4 key is
+ * redeemed over S3 where no role check runs until M3: a Member denied
+ * `buckets.delete` in the console would simply mint a key and delete buckets
+ * with it.
+ *
+ * The denial names the offending permissions, because "your role does not
+ * permit this key" against a form with eight checkboxes is not actionable.
+ */
+function checkKeyPermissions(
+  event: AuthenticatedEvent,
+  request: CreateAccessKeyRequest,
+): APIGatewayProxyStructuredResultV2 | undefined {
+  const denied = requirePermission(event, 'keys.create');
+  if (denied) return denied;
+
+  const excess = excessKeyPermissions(getUserInfo(event).membership?.role ?? '', request);
+  if (excess.length === 0) return undefined;
+
+  return new ResponseBuilder()
+    .status(403)
+    .body<ErrorResponse>({
+      message: `A key cannot carry more than you do. Your role does not permit: ${nameExcess(excess)}.`,
+      code: ApiErrorCode.FORBIDDEN_ROLE,
+    })
+    .build();
+}
+
+function nameExcess(excess: ExcessKeyPermission[]): string {
+  return excess.map(({ keyPermission }) => keyPermission).join(', ');
+
 }
 
 interface RecoverDuplicateKeyParams {

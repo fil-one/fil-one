@@ -117,21 +117,13 @@ describe('PATCH /api/me/profile handler', () => {
     ddbMock.on(UpdateItemCommand).resolves({});
   });
 
-  it('updates orgName in DynamoDB', async () => {
+  it('will not rename the org: that field left this endpoint', async () => {
+    // Renaming is `org.rename` and lives at PATCH /api/org. A body carrying
+    // only the org name now says nothing this endpoint can act on.
     const result = await handler(profileEvent({ orgName: 'New Corp' }), buildContext());
 
-    expect(result).toMatchObject({
-      statusCode: 200,
-      body: JSON.stringify({ orgName: 'New Corp' }),
-    });
-
-    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(updateCalls).toHaveLength(1);
-    expect(updateCalls[0].args[0].input).toMatchObject({
-      TableName: 'UserInfoTable',
-      Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-      ExpressionAttributeValues: { ':name': { S: 'New Corp' } },
-    });
+    expect(result).toMatchObject({ statusCode: 400 });
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
   it('updates name via Auth0 Management API for database users', async () => {
@@ -273,31 +265,6 @@ describe('PATCH /api/me/profile handler', () => {
     const result = await handler(profileEvent({ name: '' }), buildContext());
 
     expect(result).toMatchObject({ statusCode: 400 });
-  });
-
-  it('returns 400 for too-short orgName', async () => {
-    const result = await handler(profileEvent({ orgName: 'A' }), buildContext());
-
-    expect(result).toMatchObject({ statusCode: 400 });
-  });
-
-  it('returns 400 when orgName contains special characters', async () => {
-    const result = await handler(profileEvent({ orgName: 'Acme @Corp!' }), buildContext());
-
-    expect(result).toMatchObject({
-      statusCode: 400,
-      body: expect.stringContaining('letters, numbers, spaces, hyphens, and periods'),
-    });
-    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-  });
-
-  it('accepts orgName with dots and hyphens', async () => {
-    const result = await handler(profileEvent({ orgName: 'Acme-Corp Inc.' }), buildContext());
-
-    expect(result).toMatchObject({
-      statusCode: 200,
-      body: JSON.stringify({ orgName: 'Acme-Corp Inc.' }),
-    });
   });
 
   it('returns 400 for invalid JSON body', async () => {

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { OrgRole } from '@filone/shared';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
@@ -64,7 +65,7 @@ vi.mock('../middleware/auth.js', () => ({
 }));
 
 import { baseHandler, handler } from './get-activity.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { buildEvent, buildContext, membershipFor } from '../test/lambda-test-utilities.js';
 import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
 // ---------------------------------------------------------------------------
@@ -509,6 +510,63 @@ describe('get-activity baseHandler', () => {
       // The error is swallowed per-region, so the surrounding phase still succeeds.
       expect(emittedPhases()).toContain('fetchBucketActivities');
     });
+  });
+});
+
+describe('key activity and the keys.* permissions', () => {
+  // The route requirement is only half the gate: this feed carries key
+  // lifecycle entries, and a caller who may not touch keys should not be handed
+  // the org's key inventory by the dashboard.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ddbMock.reset();
+    mockListBuckets.mockResolvedValue([{ bucketName: 'b1', createdAt: '2026-01-01T00:00:00Z' }]);
+    mockGetAvailableOrchestrators.mockReturnValue([mockOrchestrator]);
+    setTenant(AURORA_TENANT_ID);
+    ddbMock
+      .on(QueryCommand, {
+        ExpressionAttributeValues: {
+          ':pk': { S: `ORG#${USER_INFO.orgId}` },
+          ':skPrefix': { S: 'ACCESSKEY#' },
+        },
+      })
+      .resolves({ Items: [keyItem('key-1', 'my-api-key', '2026-01-02T00:00:00Z')] });
+  });
+
+  async function activityFor(role: OrgRole) {
+    const event = buildEvent({
+      userInfo: {
+        ...USER_INFO,
+        membership: membershipFor(USER_INFO.orgId, USER_INFO.userId, role),
+      },
+    });
+    const result = await baseHandler(event);
+    return JSON.parse(String(result.body)).activities as { resourceType: string }[];
+  }
+
+  it.each([OrgRole.Owner, OrgRole.Admin, OrgRole.Member])(
+    'shows key activity to %s',
+    async (role) => {
+      expect((await activityFor(role)).map((a) => a.resourceType)).toContain('key');
+    },
+  );
+
+  it('hides key activity from ReadOnly, who holds no keys.* permission', async () => {
+    const activities = await activityFor(OrgRole.ReadOnly);
+
+    expect(activities.map((a) => a.resourceType)).toStrictEqual(['bucket']);
+  });
+
+  it('does not even read the key rows for a caller who may not see them', async () => {
+    await activityFor(OrgRole.ReadOnly);
+
+    // A read nobody may see is a read worth not making.
+    const keyQueries = ddbMock
+      .commandCalls(QueryCommand)
+      .filter(
+        (call) => call.args[0].input.ExpressionAttributeValues?.[':skPrefix']?.S === 'ACCESSKEY#',
+      );
+    expect(keyQueries).toStrictEqual([]);
   });
 });
 

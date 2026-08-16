@@ -7,11 +7,12 @@ const entries = ROUTE_MANIFEST;
 
 describe('ROUTE_MANIFEST', () => {
   it('lists every registered route once', () => {
-    // 40 routes are registered via addRoute in sst.config.ts — the 38 from
-    // before this stack plus the two account-deletion routes. The backend's
-    // completeness test walks src/handlers/; this pins the count so a route
-    // added to the config without a manifest entry is visible here too.
-    expect(entries).toHaveLength(40);
+    // 41 routes are registered via addRoute in sst.config.ts — the org-rename
+    // endpoint and the two account-deletion routes joined the original 38. The
+    // backend's manifest coverage test walks src/handlers/ and is the real
+    // completeness check; this pins the count so a route added to the config
+    // without a manifest entry is visible here too.
+    expect(entries).toHaveLength(41);
     const keys = entries.map((route) => `${route.method} ${route.path}`);
     expect(new Set(keys).size).toBe(keys.length);
   });
@@ -71,10 +72,9 @@ describe('ROUTE_MANIFEST', () => {
   });
 
   it('checks the routes whose requirement depends on the request in their handlers', () => {
-    // presign serves seven operations through one route; update-profile can
-    // rename the org; set-bucket-rag-enablement creates or discards an index
-    // depending on the flag; create-access-key caps the new key at the
-    // creator's own authority.
+    // presign serves seven operations through one route;
+    // set-bucket-rag-enablement creates or discards an index depending on the
+    // flag; create-access-key caps the new key at the creator's own authority.
     const inHandler = entries
       .filter((route) => route.requires === 'in-handler')
       .map((route) => route.handler);
@@ -82,7 +82,6 @@ describe('ROUTE_MANIFEST', () => {
       'create-access-key',
       'presign',
       'set-bucket-rag-enablement',
-      'update-profile',
     ]);
   });
 

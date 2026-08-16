@@ -9,7 +9,6 @@ import * as psl from 'psl';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
-import { SanitizedOrgNameSchema } from '../lib/org-name-validation.js';
 import {
   updateAuth0User,
   sendVerificationEmail,
@@ -33,8 +32,15 @@ function isDisposableDomain(domain: string): boolean {
   return registrable !== null && registrable !== domain && DISPOSABLE_DOMAINS.has(registrable);
 }
 
+/**
+ * PATCH /api/me/profile — the caller's own name and email, and nothing else.
+ *
+ * A `self` route in the manifest: membership in the active org is the whole
+ * requirement, and no role gates it. Renaming the organization moved to
+ * `PATCH /api/org`, which is `org.rename`.
+ */
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
-  const { orgId, sub } = getUserInfo(event);
+  const { sub } = getUserInfo(event);
   let body: unknown;
   try {
     body = JSON.parse(event.body ?? '{}');
@@ -67,12 +73,6 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     const error = await applyEmailUpdate(sub, social, parsed.data.email);
     if (error) return error;
     response.email = parsed.data.email;
-  }
-
-  if (parsed.data.orgName !== undefined) {
-    const result = await applyOrgNameUpdate(orgId, parsed.data.orgName);
-    if ('error' in result) return result.error;
-    response.orgName = result.sanitized;
   }
 
   if (response.name !== undefined || response.email !== undefined) {
@@ -150,39 +150,6 @@ async function applyEmailUpdate(
   return undefined;
 }
 
-async function applyOrgNameUpdate(
-  orgId: string,
-  orgName: string,
-): Promise<{ error: APIGatewayProxyResultV2 } | { sanitized: string }> {
-  const sanitizeResult = SanitizedOrgNameSchema.safeParse(orgName);
-  if (!sanitizeResult.success) {
-    return {
-      error: new ResponseBuilder()
-        .status(400)
-        .body<ErrorResponse>({ message: sanitizeResult.error.issues[0].message })
-        .build(),
-    };
-  }
-  const sanitized = sanitizeResult.data;
-
-  await getDynamoClient().send(
-    new UpdateItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: {
-        pk: { S: `ORG#${orgId}` },
-        sk: { S: 'PROFILE' },
-      },
-      UpdateExpression: 'SET #name = :name',
-      ConditionExpression: 'attribute_exists(pk)',
-      ExpressionAttributeNames: { '#name': 'name' },
-      ExpressionAttributeValues: {
-        ':name': { S: sanitized },
-      },
-    }),
-  );
-  return { sanitized };
-}
-
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   // Opt out of the verified-email gate: users must be able to correct a
@@ -190,8 +157,9 @@ export const handler = middy(baseHandler)
   // email_verified to false and re-trigger verification, so this cannot be
   // used to bypass the gate.
   .use(authMiddleware({ requireVerifiedEmail: false }))
-  // The org rename in this body needs `org.rename`, which the handler checks
-  // when the field is present. Membership is required either way.
+  // Nothing here needs a role, but it does need a caller who is in the org:
+  // these fields belong to a membership, and a request without one is refused
+  // rather than written.
   .use(requireMembershipMiddleware())
   .use(csrfMiddleware())
   .use(errorHandlerMiddleware());
