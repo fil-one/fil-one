@@ -142,6 +142,22 @@ export default $config({
       },
     });
 
+    // Audit events: ORG#{orgId} / {iso8601}#{eventId}, so one Query per org
+    // returns its history in the order it happened. Its own table because its
+    // lifecycle is its own — the TTL that expires an event after 90 days
+    // (packages/shared/src/audit.ts) must never be able to reach a membership,
+    // profile, or billing row that happened to share a partition. Written only
+    // through lib/audit.ts, which appends an event in the same transaction as
+    // the mutation it records.
+    const auditTable = new sst.aws.Dynamo('AuditTable', {
+      fields: {
+        pk: 'string',
+        sk: 'string',
+      },
+      primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
+      ttl: 'ttl',
+    });
+
     // RAG indexer's own store: per-object chunk manifests
     // (BUCKET#{orgId}#{region}#{bucket} / MANIFEST#{objectKey}) and resumable indexer
     // checkpoints (INDEXER_CHECKPOINT#{orgId}#{region}#{bucket} / CHECKPOINT). Kept out
@@ -541,6 +557,7 @@ export default $config({
       userInfoTable,
       bulkDeleteTable,
       orgTable,
+      auditTable,
       userFilesBucket,
       ragVectorBucket,
       auth0ClientId,

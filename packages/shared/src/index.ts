@@ -66,6 +66,29 @@ export {
 export type { UpdateOrgRequest, UpdateOrgResponse } from './api/org.js';
 
 export {
+  AUDIT_EVENT_TYPES,
+  AUDIT_ACTOR_KINDS,
+  AUDIT_EVENT_PHASES,
+  AUDIT_RETENTION_DAYS,
+  AUDIT_KEY_ID_SUFFIX_LENGTH,
+  PROHIBITED_AUDIT_CONTENT,
+  PROHIBITED_AUDIT_FIELD_PATTERNS,
+  auditKeyIdSuffix,
+  isAuditEventType,
+} from './audit.js';
+export type {
+  AuditActor,
+  AuditActorKind,
+  AuditEvent,
+  AuditEventDetails,
+  AuditEventPhase,
+  AuditEventRecord,
+  AuditEventType,
+  AuditKeyKind,
+  AuditMembershipSource,
+} from './audit.js';
+
+export {
   PERMISSIONS,
   ROLE_PERMISSIONS,
   ROLE_RANK,
