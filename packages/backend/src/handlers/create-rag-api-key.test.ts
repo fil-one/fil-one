@@ -7,11 +7,9 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 
-vi.mock('sst', () => ({
-  Resource: {
-    UserInfoTable: { name: 'UserInfoTable' },
-  },
-}));
+import { sstResourceMock } from '../test/sst-resource-mock.js';
+
+vi.mock('sst', () => sstResourceMock());
 
 const ddbMock = mockClient(DynamoDBClient);
 
@@ -84,7 +82,7 @@ describe('create-rag-api-key baseHandler', () => {
     expect(body.bucketScope).toBe('all');
 
     const items = sentTransactItems();
-    expect(items).toHaveLength(2);
+    expect(items).toHaveLength(3);
     const orgItem = unmarshall(items[0].Put!.Item!);
     const lookupItem = unmarshall(items[1].Put!.Item!);
 
@@ -104,6 +102,32 @@ describe('create-rag-api-key baseHandler', () => {
     // Both puts are guarded against overwriting an existing item.
     expect(items[0].Put!.ConditionExpression).toBe('attribute_not_exists(pk)');
     expect(items[1].Put!.ConditionExpression).toBe('attribute_not_exists(pk)');
+  });
+
+  it('records the mint in the same transaction as the rows', async () => {
+    const result = await baseHandler(createEvent({ keyName: 'ci key' }));
+
+    const body = JSON.parse(result.body ?? '{}');
+    const items = sentTransactItems();
+    const event = unmarshall(items[2].Put!.Item!);
+
+    expect(items[2].Put!.TableName).toBe('AuditTable');
+    expect(items[2].Put!.ConditionExpression).toBe('attribute_not_exists(pk)');
+    expect(event).toMatchObject({
+      pk: 'ORG#org-1',
+      type: 'key.created',
+      orgId: 'org-1',
+      subject: `key:${body.id}`,
+      actor: { kind: 'user', id: 'user-1', email: 'dev@example.com' },
+      details: { keyKind: 'rag', keyName: 'ci key' },
+    });
+    // Minted here rather than at a vendor, so the whole mutation is one
+    // transaction and there is no intent to correlate.
+    expect(event.phase).toBeUndefined();
+    // Neither the token nor its display prefix — which is the token's own
+    // leading characters — reaches the log.
+    expect(JSON.stringify(event)).not.toContain(body.token);
+    expect(JSON.stringify(event)).not.toContain(body.keyPrefix);
   });
 
   it('persists (region, name) bucket scope pairs for specific keys', async () => {

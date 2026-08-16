@@ -1,16 +1,17 @@
-import { GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
+import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
+import { AuditSubjects, auditEvent, commitAudited } from '../lib/audit.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { keyScope, notYourKeyResponse, withinScope } from '../lib/key-scope.js';
 import { RagApiKeyKeys } from '../lib/rag-api-keys.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { authorize } from '../middleware/authorize.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
@@ -45,7 +46,8 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
       .build();
   }
 
-  const { orgId } = getUserInfo(event);
+  const { orgId, userId } = getUserInfo(event);
+  const email = getVerifiedEmail(event);
 
   const { Item } = await dynamo.send(
     new GetItemCommand({
@@ -60,33 +62,40 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   // a Member revokes the keys they minted and no others.
   if (!withinScope(keyScope(event), { createdBy: Item?.createdBy?.S })) return notYourKeyResponse();
 
+  const keyName = Item?.keyName?.S;
+
   try {
-    await dynamo.send(
-      new TransactWriteItemsCommand({
-        TransactItems: [
-          {
-            Delete: {
-              TableName: Resource.UserInfoTable.name,
-              Key: marshall({ pk: RagApiKeyKeys.orgPk(orgId), sk: RagApiKeyKeys.orgSk(keyId) }),
-              ConditionExpression: 'attribute_exists(pk)',
-            },
+    await commitAudited({
+      items: [
+        {
+          Delete: {
+            TableName: Resource.UserInfoTable.name,
+            Key: marshall({ pk: RagApiKeyKeys.orgPk(orgId), sk: RagApiKeyKeys.orgSk(keyId) }),
+            ConditionExpression: 'attribute_exists(pk)',
           },
-          {
-            Delete: {
-              TableName: Resource.UserInfoTable.name,
-              Key: marshall({
-                pk: RagApiKeyKeys.lookupPk(tokenHash),
-                sk: RagApiKeyKeys.lookupSk(),
-              }),
-              // The lookup row must point back at the caller's org, or the
-              // whole transaction cancels.
-              ConditionExpression: 'orgId = :orgId',
-              ExpressionAttributeValues: { ':orgId': { S: orgId } },
-            },
+        },
+        {
+          Delete: {
+            TableName: Resource.UserInfoTable.name,
+            Key: marshall({
+              pk: RagApiKeyKeys.lookupPk(tokenHash),
+              sk: RagApiKeyKeys.lookupSk(),
+            }),
+            // The lookup row must point back at the caller's org, or the
+            // whole transaction cancels.
+            ConditionExpression: 'orgId = :orgId',
+            ExpressionAttributeValues: { ':orgId': { S: orgId } },
           },
-        ],
+        },
+      ],
+      event: auditEvent({
+        type: 'key.revoked',
+        actor: { kind: 'user', id: userId, ...(email ? { email } : {}) },
+        orgId,
+        subject: AuditSubjects.key(keyId),
+        details: { keyKind: 'rag', ...(keyName ? { keyName } : {}) },
       }),
-    );
+    });
   } catch (err) {
     // A concurrent delete of the same key cancels the transaction — the key is
     // gone either way, so report it as not found rather than a server error.

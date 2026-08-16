@@ -6,13 +6,11 @@ import {
   GetItemCommand,
   TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
-import { marshall } from '@aws-sdk/util-dynamodb';
+import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 
-vi.mock('sst', () => ({
-  Resource: {
-    UserInfoTable: { name: 'UserInfoTable' },
-  },
-}));
+import { sstResourceMock } from '../test/sst-resource-mock.js';
+
+vi.mock('sst', () => sstResourceMock());
 
 // The role-enforcement block at the bottom runs the route's real chain. Auth is
 // stubbed so the caller arrives on the event; csrf and the subscription guard
@@ -77,13 +75,42 @@ describe('delete-rag-api-key baseHandler', () => {
 
     const items =
       ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems ?? [];
-    expect(items).toHaveLength(2);
+    expect(items).toHaveLength(3);
     expect(items[0].Delete!.Key).toEqual(marshall({ pk: 'ORG#org-1', sk: 'RAGKEY#key-1' }));
     expect(items[1].Delete!.Key).toEqual(
       marshall({ pk: RagApiKeyKeys.lookupPk(TOKEN_HASH), sk: RagApiKeyKeys.lookupSk() }),
     );
     expect(items[1].Delete!.ConditionExpression).toBe('orgId = :orgId');
     expect(items[1].Delete!.ExpressionAttributeValues).toEqual({ ':orgId': { S: 'org-1' } });
+  });
+
+  it('records the revocation in the same transaction as the deletes', async () => {
+    ddbMock.on(GetItemCommand).resolves({
+      Item: marshall({
+        pk: 'ORG#org-1',
+        sk: 'RAGKEY#key-1',
+        tokenHash: TOKEN_HASH,
+        keyName: 'ci key',
+      }),
+    });
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+    await baseHandler(deleteEvent('key-1'));
+
+    const items =
+      ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems ?? [];
+    expect(items[2].Put!.TableName).toBe('AuditTable');
+    expect(items[2].Put!.ConditionExpression).toBe('attribute_not_exists(pk)');
+    expect(unmarshall(items[2].Put!.Item!)).toMatchObject({
+      pk: 'ORG#org-1',
+      type: 'key.revoked',
+      orgId: 'org-1',
+      subject: 'key:key-1',
+      actor: { kind: 'user', id: 'user-1' },
+      details: { keyKind: 'rag', keyName: 'ci key' },
+    });
+    // The token hash is the credential's lookup key and never reaches the log.
+    expect(JSON.stringify(items[2])).not.toContain(TOKEN_HASH);
   });
 
   it('returns 404 for a keyId the org does not own (partition miss)', async () => {

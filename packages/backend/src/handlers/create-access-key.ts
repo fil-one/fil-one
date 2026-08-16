@@ -1,4 +1,4 @@
-import { PutItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
+import { QueryCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
@@ -7,15 +7,24 @@ import {
   ApiErrorCode,
   CreateAccessKeySchema,
   S3Region,
+  auditKeyIdSuffix,
   excessKeyPermissions,
   isSupportedRegion,
 } from '@filone/shared';
 import type {
+  AuditActor,
   CreateAccessKeyRequest,
   CreateAccessKeyResponse,
   ErrorResponse,
 } from '@filone/shared';
 import { Resource } from 'sst';
+import {
+  AuditSubjects,
+  appendAuditEvent,
+  auditEvent,
+  commitAudited,
+  newCorrelationId,
+} from '../lib/audit.js';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.js';
 import type { IssuedAccessKey, ServiceOrchestrator } from '../lib/service-orchestrator.js';
@@ -54,7 +63,13 @@ export async function baseHandler(
   if (denied) return denied;
 
   const { orgId, userId } = getUserInfo(event);
-  const attribution = keyAttribution({ userId, creatorEmail: getVerifiedEmail(event) });
+  const creatorEmail = getVerifiedEmail(event);
+  const attribution = keyAttribution({ userId, creatorEmail });
+  const actor: AuditActor = {
+    kind: 'user',
+    id: userId,
+    ...(creatorEmail ? { email: creatorEmail } : {}),
+  };
 
   if (!isSupportedRegion(region, process.env.FILONE_STAGE!)) {
     return unsupportedRegionResponse(region);
@@ -68,6 +83,9 @@ export async function baseHandler(
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
 
+  const correlationId = newCorrelationId();
+  await recordMintIntent({ orgId, keyName, region, actor, correlationId });
+
   let accessKey: IssuedAccessKey;
   try {
     accessKey = await orchestrator.issueAccessKey(tenantId, {
@@ -79,7 +97,16 @@ export async function baseHandler(
     });
   } catch (err) {
     if (err instanceof AccessKeyAlreadyExistsError) {
-      await recoverDuplicateKey({ orgId, tenantId, keyName, region, orchestrator, attribution });
+      await recoverDuplicateKey({
+        orgId,
+        tenantId,
+        keyName,
+        region,
+        orchestrator,
+        attribution,
+        actor,
+        correlationId,
+      });
       return new ResponseBuilder()
         .status(409)
         .body<ErrorResponse>({ message: 'An access key with this name already exists' })
@@ -94,23 +121,30 @@ export async function baseHandler(
     throw err;
   }
 
-  await getDynamoClient().send(
-    new PutItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Item: buildAccessKeyItem({
-        orgId,
-        accessKey,
-        keyName,
-        region,
-        permissions,
-        granularPermissions,
-        bucketScope,
-        buckets,
-        expiresAt,
-        attribution,
-      }),
-    }),
-  );
+  await recordMintedKey({
+    row: {
+      pk: `ORG#${orgId}`,
+      sk: `ACCESSKEY#${accessKey.id}`,
+      keyName,
+      accessKeyId: accessKey.accessKeyId,
+      createdAt: accessKey.createdAt,
+      status: 'active',
+      region,
+      permissions,
+      ...(granularPermissions?.length ? { granularPermissions } : {}),
+      bucketScope,
+      ...(buckets ? { buckets } : {}),
+      ...(expiresAt ? { expiresAt } : {}),
+      ...attribution,
+    },
+    keyId: accessKey.id,
+    accessKeyId: accessKey.accessKeyId,
+    keyName,
+    region,
+    orgId,
+    actor,
+    correlationId,
+  });
 
   return new ResponseBuilder()
     .status(201)
@@ -124,43 +158,88 @@ export async function baseHandler(
     .build();
 }
 
-function buildAccessKeyItem({
+/**
+ * Record that a key is about to be minted, before the vendor is called.
+ *
+ * The credential is created at the storage vendor before anything local is
+ * written, and a fail-closed local write afterwards would leave a live SigV4
+ * key with no record at all. So the intent goes down first. It cannot name the
+ * key — the id comes back from the vendor — which is what makes a dangling
+ * intent legible: a key was asked for by this name and no completion followed.
+ */
+async function recordMintIntent({
   orgId,
-  accessKey,
   keyName,
   region,
-  permissions,
-  granularPermissions,
-  bucketScope,
-  buckets,
-  expiresAt,
-  attribution,
+  actor,
+  correlationId,
 }: {
   orgId: string;
-  accessKey: IssuedAccessKey;
   keyName: string;
   region: S3Region;
-  permissions: CreateAccessKeyRequest['permissions'];
-  granularPermissions: CreateAccessKeyRequest['granularPermissions'];
-  bucketScope: CreateAccessKeyRequest['bucketScope'];
-  buckets: string[] | undefined;
-  expiresAt: string | null;
-  attribution: Pick<AccessKeyRecord, 'createdBy' | 'creatorEmail' | 'policyVersion'>;
-}) {
-  return marshall({
-    pk: `ORG#${orgId}`,
-    sk: `ACCESSKEY#${accessKey.id}`,
-    keyName,
-    accessKeyId: accessKey.accessKeyId,
-    createdAt: accessKey.createdAt,
-    status: 'active',
-    region,
-    permissions,
-    ...(granularPermissions?.length ? { granularPermissions } : {}),
-    bucketScope,
-    ...(buckets ? { buckets } : {}),
-    ...(expiresAt ? { expiresAt } : {}),
-    ...attribution,
+  actor: AuditActor;
+  correlationId: string;
+}): Promise<void> {
+  await appendAuditEvent(
+    auditEvent({
+      type: 'key.created',
+      phase: 'intent',
+      correlationId,
+      actor,
+      orgId,
+      subject: AuditSubjects.org(orgId),
+      details: { keyKind: 's3', keyName, region },
+    }),
+  );
+}
+
+/**
+ * Write the key's row and the completion event as one transaction, so the
+ * record of a live credential cannot be the half that fails.
+ *
+ * Both mint paths land here — the ordinary one and the duplicate recovery — so
+ * a key row and its event are written the same way whichever attempt produced
+ * the credential.
+ */
+async function recordMintedKey({
+  row,
+  keyId,
+  accessKeyId,
+  keyName,
+  region,
+  orgId,
+  actor,
+  correlationId,
+  recovered,
+}: {
+  row: Record<string, unknown>;
+  keyId: string;
+  accessKeyId: string;
+  keyName: string;
+  region: S3Region;
+  orgId: string;
+  actor: AuditActor;
+  correlationId: string;
+  recovered?: true;
+}): Promise<void> {
+  await commitAudited({
+    items: [{ Put: { TableName: Resource.UserInfoTable.name, Item: marshall(row) } }],
+    event: auditEvent({
+      type: 'key.created',
+      phase: 'completion',
+      correlationId,
+      actor,
+      orgId,
+      subject: AuditSubjects.key(keyId),
+      details: {
+        keyKind: 's3',
+        keyName,
+        region,
+        // The id the console shows, by its last characters only.
+        keyIdSuffix: auditKeyIdSuffix(accessKeyId),
+        ...(recovered ? { recovered } : {}),
+      },
+    }),
   });
 }
 
@@ -202,6 +281,9 @@ interface RecoverDuplicateKeyParams {
   region: S3Region;
   orchestrator: ServiceOrchestrator;
   attribution: Pick<AccessKeyRecord, 'createdBy' | 'creatorEmail' | 'policyVersion'>;
+  actor: AuditActor;
+  /** The intent this attempt already wrote — the recovery completes that one. */
+  correlationId: string;
 }
 
 async function recoverDuplicateKey({
@@ -211,6 +293,8 @@ async function recoverDuplicateKey({
   region,
   orchestrator,
   attribution,
+  actor,
+  correlationId,
 }: RecoverDuplicateKeyParams): Promise<void> {
   // Check if we already have a DynamoDB record for this key
   const { Items: existingKeys } = await getDynamoClient().send(
@@ -245,26 +329,34 @@ async function recoverDuplicateKey({
     return;
   }
 
-  await getDynamoClient().send(
-    new PutItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Item: marshall({
-        pk: `ORG#${orgId}`,
-        sk: `ACCESSKEY#${recovered.id}`,
-        keyName,
-        accessKeyId: recovered.accessKeyId,
-        createdAt: recovered.createdAt,
-        status: 'active',
-        region,
-        // Attributed to the caller who retried, which in practice is the same
-        // person whose first attempt minted the key at the provider. A key with
-        // no owner at all is the worse outcome, and `recovered` keeps the
-        // record honest about which of the two this is.
-        ...attribution,
-        recovered: true,
-      }),
-    }),
-  );
+  // The completion the earlier attempt never got to write. It closes this
+  // request's intent, and `recovered` says the credential it names was minted
+  // by a request whose own intent is still dangling.
+  await recordMintedKey({
+    row: {
+      pk: `ORG#${orgId}`,
+      sk: `ACCESSKEY#${recovered.id}`,
+      keyName,
+      accessKeyId: recovered.accessKeyId,
+      createdAt: recovered.createdAt,
+      status: 'active',
+      region,
+      // Attributed to the caller who retried, which in practice is the same
+      // person whose first attempt minted the key at the provider. A key with
+      // no owner at all is the worse outcome, and `recovered` keeps the
+      // record honest about which of the two this is.
+      ...attribution,
+      recovered: true,
+    },
+    keyId: recovered.id,
+    accessKeyId: recovered.accessKeyId,
+    keyName,
+    region,
+    orgId,
+    actor,
+    correlationId,
+    recovered: true,
+  });
 
   console.warn(
     `Recovered DynamoDB record for access key "${keyName}" (id=${recovered.id}) for org ${orgId} using ${orchestrator.id} orchestrator`,
