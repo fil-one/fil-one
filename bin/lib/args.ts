@@ -11,6 +11,8 @@ export interface CliSpec {
   script: string;
   /** Extra boolean flags, e.g. `--verify`. */
   flags?: readonly string[];
+  /** Extra flags that take a value, e.g. `--accept-anomalies <orgId,orgId>`. */
+  options?: readonly string[];
   /** One line per flag worth explaining, printed under the usage line. */
   help?: readonly string[];
 }
@@ -22,6 +24,8 @@ export interface Cli {
   execute: boolean;
   /** Whether one of the spec's extra flags was passed. */
   flag(name: string): boolean;
+  /** The value given to one of the spec's extra options, if it was passed. */
+  option(name: string): string | undefined;
   /** The arguments to forward when re-execing under `sst shell`. */
   argv: readonly string[];
 }
@@ -41,7 +45,8 @@ export function parseCli(spec: CliSpec): Cli {
   }
 
   const known = new Set<string>([...SHARED_FLAGS, ...(spec.flags ?? [])]);
-  const { stage, passed } = read(argv, known, usageLine);
+  const valued = new Set<string>(spec.options ?? []);
+  const { stage, passed, values } = read(argv, known, valued, usageLine);
 
   return {
     stage,
@@ -49,12 +54,16 @@ export function parseCli(spec: CliSpec): Cli {
     // reads as "execute"; a run carrying both stays a dry run.
     execute: passed.has('--execute') && !passed.has('--dry-run'),
     flag: (name: string) => passed.has(name),
+    option: (name: string) => values.get(name),
     argv,
   };
 }
 
 function usage(spec: CliSpec): string {
-  const extras = (spec.flags ?? []).map((flag) => ` [${flag}]`).join('');
+  const extras = [
+    ...(spec.flags ?? []).map((flag) => ` [${flag}]`),
+    ...(spec.options ?? []).map((option) => ` [${option} <value>]`),
+  ].join('');
   return `Usage: ${spec.script} --stage <name> [--execute]${extras}`;
 }
 
@@ -69,25 +78,28 @@ function printHelp(spec: CliSpec, usageLine: string): void {
 function read(
   argv: readonly string[],
   known: ReadonlySet<string>,
+  valued: ReadonlySet<string>,
   usageLine: string,
-): { stage: string; passed: Set<string> } {
+): { stage: string; passed: Set<string>; values: Map<string, string> } {
   const passed = new Set<string>();
+  const values = new Map<string, string>();
   let stage: string | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
-    if (arg !== '--stage') {
+    if (arg !== '--stage' && !valued.has(arg)) {
       if (!known.has(arg)) fail(`Unrecognized argument: ${arg}`, usageLine);
       passed.add(arg);
       continue;
     }
     const value = argv[++i];
-    if (!value || value.startsWith('--')) fail('Missing value for --stage.', usageLine);
-    stage = value;
+    if (!value || value.startsWith('--')) fail(`Missing value for ${arg}.`, usageLine);
+    if (arg === '--stage') stage = value;
+    else values.set(arg, value);
   }
 
   if (!stage) fail('Missing required --stage.', usageLine);
-  return { stage, passed };
+  return { stage, passed, values };
 }
 
 function fail(message: string, usageLine: string): never {
