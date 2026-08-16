@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ROUTE_MANIFEST } from '@filone/shared';
-import type { RouteManifestEntry } from '@filone/shared';
+import type { Permission, RouteManifestEntry } from '@filone/shared';
 
 /**
  * The manifest's completeness check, which only the backend can make: the
@@ -38,9 +38,26 @@ function handlerSource(handler: string): string {
   return readFileSync(path.join(HANDLERS_DIR, `${handler}.ts`), 'utf8');
 }
 
+/** A manifest value inside a regexp: `buckets.read` must not match `bucketsxread`. */
+function literal(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /** `authorize('buckets.read')`, however the formatter spaces it. */
-function installsAuthorize(source: string, permission: string): boolean {
-  return new RegExp(`authorize\\(\\s*['"]${permission}['"]\\s*\\)`).test(source);
+function installsAuthorize(source: string, permission: Permission): boolean {
+  return new RegExp(`authorize\\(\\s*['"]${literal(permission)}['"]\\s*\\)`).test(source);
+}
+
+/**
+ * Whether a gate is installed and installed before the subscription guard.
+ * Both `.use()` calls are in the same chain expression, so their order in the
+ * file is the order the request meets them.
+ */
+function gateRunsFirst(source: string, gate: string): boolean {
+  const gateAt = source.indexOf(`.use(${gate}`);
+  const guardAt = source.indexOf('.use(subscriptionGuardMiddleware(');
+  if (gateAt === -1) return false;
+  return guardAt === -1 || gateAt < guardAt;
 }
 
 const byRequirement = (requires: RouteManifestEntry['requires']) =>
@@ -48,12 +65,18 @@ const byRequirement = (requires: RouteManifestEntry['requires']) =>
     (route) => route.category === 'authenticated' && route.requires === requires,
   );
 
-const permissionGated = ROUTE_MANIFEST.filter(
-  (route) =>
-    route.category === 'authenticated' &&
-    route.requires !== undefined &&
-    route.requires !== 'self' &&
-    route.requires !== 'in-handler',
+/**
+ * The gated routes with their declared permission, narrowed rather than cast:
+ * the permission each route is checked for comes from the manifest entry
+ * itself, so a test can never assert against a requirement the manifest does
+ * not declare.
+ */
+const permissionGated: { handler: string; permission: Permission }[] = ROUTE_MANIFEST.filter(
+  (route) => route.category === 'authenticated',
+).flatMap((route) =>
+  route.requires === undefined || route.requires === 'self' || route.requires === 'in-handler'
+    ? []
+    : [{ handler: route.handler, permission: route.requires }],
 );
 
 describe('route manifest coverage', () => {
@@ -67,16 +90,38 @@ describe('route manifest coverage', () => {
 
   it('installs authorize with the declared permission on every gated route', () => {
     const missing = permissionGated
-      .filter((route) => !installsAuthorize(handlerSource(route.handler), route.requires as string))
-      .map((route) => `${route.handler} (${route.requires})`);
+      .filter((route) => !installsAuthorize(handlerSource(route.handler), route.permission))
+      .map((route) => `${route.handler} (${route.permission})`);
     expect(missing).toStrictEqual([]);
   });
 
+  it('runs the authorization gate before the billing read on every gated route', () => {
+    // Order, not just presence: a non-member must get an authorization error
+    // rather than a billing error, and must not cost a BillingTable read to be
+    // refused. `.use()` order is chain order, so source order is the check.
+    const outOfOrder = permissionGated
+      .filter((route) => !gateRunsFirst(handlerSource(route.handler), 'authorize('))
+      .map((route) => route.handler);
+    expect(outOfOrder).toStrictEqual([]);
+  });
+
+  it('gates the in-handler routes on membership, ahead of the billing read', () => {
+    // A route whose permission depends on the body still has a requirement that
+    // does not: being in the org. Left to the handler alone, this PR would ship
+    // four routes a non-member reaches, and their denials would be invisible to
+    // NotAMemberDenialCount.
+    const ungated = byRequirement('in-handler')
+      .filter(
+        (route) => !gateRunsFirst(handlerSource(route.handler), 'requireMembershipMiddleware('),
+      )
+      .map((route) => route.handler);
+    expect(ungated).toStrictEqual([]);
+  });
+
   it('leaves the self-service routes without an org-permission gate', () => {
-    // `self` means membership in the active org is the whole requirement:
-    // changing your own password or unenrolling your own authenticator is not
-    // an org action, and gating it on a role would lock a ReadOnly member out
-    // of their own account.
+    // `self` waives the role gate: changing your own password or unenrolling
+    // your own authenticator is not an org action, and gating it on a role
+    // would lock a ReadOnly member out of their own account.
     const gated = byRequirement('self')
       .filter((route) => /\bauthorize\(/.test(handlerSource(route.handler)))
       .map((route) => route.handler);
@@ -96,7 +141,7 @@ describe('route manifest coverage', () => {
     const missing = ROUTE_MANIFEST.filter((route) => route.category === 'bearer')
       .filter(
         (route) =>
-          !new RegExp(`cookieRequires:\\s*['"]${route.cookieRequires}['"]`).test(
+          !new RegExp(`cookieRequires:\\s*['"]${literal(route.cookieRequires ?? '')}['"]`).test(
             handlerSource(route.handler),
           ),
       )

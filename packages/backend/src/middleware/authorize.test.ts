@@ -1,9 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { OrgRole, ApiErrorCode, ROLE_PERMISSIONS, PERMISSIONS } from '@filone/shared';
 import type { Permission } from '@filone/shared';
-import { authorize, requireMembership, requirePermission } from './authorize.js';
-import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
-import { expectErrorResponse } from '../test/assert-helpers.js';
+import {
+  authorize,
+  requireMembership,
+  requireMembershipMiddleware,
+  requirePermission,
+} from './authorize.js';
+import { buildEvent, buildMiddyRequest, NO_MEMBERSHIP } from '../test/lambda-test-utilities.js';
+import {
+  expectErrorResponse,
+  expectRefreshedCookies,
+  REFRESHED_TOKENS,
+} from '../test/assert-helpers.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import type { OrgMembership } from '../lib/org-membership.js';
 
@@ -25,12 +34,18 @@ function eventFor(membership?: { role: string }): AuthenticatedEvent {
     userInfo: {
       userId: USER_ID,
       orgId: ORG_ID,
-      // Explicitly undefined is how a caller with no row is spelled.
+      // NO_MEMBERSHIP, not undefined: the fixture's default is an Owner, so a
+      // caller with no row has to be named.
       membership: membership
         ? ({ orgId: ORG_ID, userId: USER_ID, ...membership } as OrgMembership)
-        : undefined,
+        : NO_MEMBERSHIP,
     },
   });
+}
+
+/** What a chain missing `authMiddleware` hands the gate: an event with no userInfo. */
+function unauthenticatedEvent(): AuthenticatedEvent {
+  return buildEvent() as unknown as AuthenticatedEvent;
 }
 
 function runAuthorize(permission: Permission, event: AuthenticatedEvent) {
@@ -97,8 +112,12 @@ describe('authorize', () => {
     });
 
     it('refuses a row whose role is not one of the four', () => {
-      // The value every pre-M1 row carried is deliberately not a role here: a
-      // conversion that missed one must deny, not silently grant Admin's set.
+      // A membership row is a DynamoDB string: whatever a bad write or a
+      // half-finished conversion leaves in that column has to deny rather than
+      // resolve to somebody's permission set. (The legacy value itself is
+      // `admin`, which is a real role — what keeps pre-conversion rows out of
+      // this gate is that they live in UserInfoTable, which `resolveMembership`
+      // never reads.)
       const result = runAuthorize('buckets.read', eventFor({ role: 'billing' }));
 
       expectErrorResponse(result, 403, FORBIDDEN_BODY);
@@ -151,6 +170,101 @@ describe('authorize', () => {
 
     it('refuses an absent row', () => {
       expectErrorResponse(requireMembership(eventFor()), 403, NOT_A_MEMBER_BODY);
+    });
+
+    it('refuses a request that never met authMiddleware, rather than throwing', () => {
+      // A chain assembled without the auth middleware has no caller to
+      // authorize. A TypeError here would surface as a 500 and read as an
+      // outage; the honest answer is the same 403 an unknown caller gets.
+      const event = unauthenticatedEvent();
+
+      expectErrorResponse(requireMembership(event), 403, NOT_A_MEMBER_BODY);
+    });
+
+    it('says the chain is miswired, and does not count it as a lockout', () => {
+      const errors = vi.mocked(console.error);
+      requireMembership(unauthenticatedEvent());
+
+      expect(errors.mock.calls[0]?.[0]).toContain('missing authMiddleware');
+      // NotAMemberDenialCount means "the conversion missed a cohort". A route
+      // that was assembled wrong must not page the person reading that alarm.
+      expect(emittedMetrics()).toStrictEqual([]);
+    });
+
+    it('counts a revoked key creator apart from an unconverted account', () => {
+      // The runbook reads NotAMemberDenialCount as a lockout to investigate.
+      // A key whose creator left the org is the design working as intended, so
+      // it gets its own metric rather than inflating that one.
+      const event = buildEvent({
+        userInfo: {
+          userId: USER_ID,
+          orgId: ORG_ID,
+          membership: NO_MEMBERSHIP,
+          apiKeySession: true,
+        },
+      });
+
+      expectErrorResponse(requireMembership(event), 403, NOT_A_MEMBER_BODY);
+      expect(emittedMetrics()).toStrictEqual([
+        {
+          _aws: {
+            Timestamp: expect.any(Number),
+            CloudWatchMetrics: [
+              {
+                Namespace: 'FilOne',
+                Dimensions: [['route']],
+                Metrics: [{ Name: 'RevokedKeyCreatorDenialCount', Unit: 'Count' }],
+              },
+            ],
+          },
+          route: 'GET /test',
+          RevokedKeyCreatorDenialCount: 1,
+        },
+      ]);
+    });
+  });
+
+  describe('requireMembershipMiddleware', () => {
+    const run = (event: AuthenticatedEvent, internal?: Record<string, unknown>) =>
+      requireMembershipMiddleware().before(buildMiddyRequest(event, internal && { internal }));
+
+    it('passes any member, whatever their role', () => {
+      expect(run(eventFor({ role: OrgRole.ReadOnly }))).toBeUndefined();
+    });
+
+    it('refuses a caller with no membership row', () => {
+      expectErrorResponse(run(eventFor()), 403, NOT_A_MEMBER_BODY);
+    });
+
+    it('carries the rotated cookies on its denial', () => {
+      const result = run(eventFor(), { newTokens: REFRESHED_TOKENS });
+
+      expectRefreshedCookies(result);
+    });
+  });
+
+  describe('a denial after a token refresh', () => {
+    it('carries the rotated cookies rather than logging the caller out', () => {
+      // authMiddleware refreshed the session on this same request. Returning a
+      // response here skips the after hook that would have set the cookies, so
+      // the refused request would otherwise spend the old refresh token and
+      // hand back nothing.
+      const request = buildMiddyRequest(eventFor({ role: OrgRole.ReadOnly }), {
+        internal: { newTokens: REFRESHED_TOKENS },
+      });
+
+      const result = authorize('buckets.delete').before(request);
+
+      expect((result as { statusCode?: number })?.statusCode).toBe(403);
+      expectRefreshedCookies(result);
+    });
+
+    it('does the same for a caller with no membership row', () => {
+      const request = buildMiddyRequest(eventFor(), {
+        internal: { newTokens: REFRESHED_TOKENS },
+      });
+
+      expectRefreshedCookies(authorize('buckets.read').before(request));
     });
   });
 

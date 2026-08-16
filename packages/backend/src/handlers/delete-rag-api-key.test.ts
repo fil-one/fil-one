@@ -16,6 +16,9 @@ vi.mock('sst', () => ({
 // Full-chain gate tests exercise the REAL ragAccessMiddleware (allowlist check);
 // auth/csrf/subscription are stubbed to pass-through so the gate is tested in isolation.
 vi.mock('../middleware/auth.js', () => ({
+  // Every gate downstream of the auth middleware returns its denials through
+  // this helper, so the partial mock has to carry it.
+  withRefreshedCookies: (_request: unknown, response: unknown) => response,
   authMiddleware: () => ({ before: () => undefined }),
 }));
 vi.mock('../middleware/csrf.js', () => ({

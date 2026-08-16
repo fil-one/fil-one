@@ -21,6 +21,12 @@ vi.mock('./auth.js', () => ({
     _request: unknown,
     response: APIGatewayProxyStructuredResultV2,
   ): APIGatewayProxyStructuredResultV2 => response,
+  // The bearer path answers a failed membership read with the cookie path's own
+  // 503; only its status matters here.
+  membershipUnavailableResponse: (): APIGatewayProxyStructuredResultV2 => ({
+    statusCode: 503,
+    body: JSON.stringify({ message: 'We could not read your organization membership.' }),
+  }),
 }));
 
 import { ApiErrorCode, OrgRole } from '@filone/shared';
@@ -31,6 +37,7 @@ import {
   buildEvent,
   buildMiddyRequest,
   membershipFor,
+  NO_MEMBERSHIP,
   stubAbsentMembershipRead,
   stubMembershipRead,
 } from '../test/lambda-test-utilities.js';
@@ -128,6 +135,12 @@ async function runBefore(event: APIGatewayProxyEventV2) {
 describe('ragQueryAuthMiddleware', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Implementations, not just call records: the cookie-path tests install
+    // their own `before`, and a leftover one makes the next test's result
+    // depend on file order. Reset targets these two rather than every mock,
+    // because the module factory's own vi.fn is what returns them.
+    mockCookieBefore.mockReset();
+    mockCookieAfter.mockReset();
     ddbMock.reset();
   });
 
@@ -238,6 +251,9 @@ describe('ragQueryAuthMiddleware', () => {
         email: 'creator@example.com',
         emailVerified: true,
         name: 'ci key',
+        // Says out loud that `sub` names a key rather than a person: the
+        // subscription guard reads it and provisions no trial.
+        apiKeySession: true,
         // The creator's row, so downstream reads see a real role rather than a
         // caller with no membership at all.
         membership: membershipFor(ORG_ID, CREATOR_ID, OrgRole.Member),
@@ -327,6 +343,44 @@ describe('ragQueryAuthMiddleware', () => {
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
 
+    it('counts the denial apart from an account the conversion missed', async () => {
+      stubKeyRecords();
+      stubAbsentMembershipRead(ddbMock, { orgId: ORG_ID, userId: CREATOR_ID });
+      const written: string[] = [];
+      vi.spyOn(process.stdout, 'write').mockImplementation((chunk: string | Uint8Array) => {
+        written.push(chunk.toString());
+        return true;
+      });
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      await runBefore(bearerEvent({ authorization: `Bearer ${TOKEN}` }));
+
+      // NotAMemberDenialCount is the conversion's lockout alarm; a revoked key
+      // creator is the design working and must not read as one.
+      const emitted = written.join('');
+      expect(emitted).toContain('RevokedKeyCreatorDenialCount');
+      expect(emitted).not.toContain('NotAMemberDenialCount');
+    });
+
+    it('answers a failed membership read with a retryable 503, not a revocation', async () => {
+      // An OrgTable outage read as an absent row would revoke every live key
+      // for its duration. Same answer the cookie path gives.
+      stubKeyRecords();
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'OrgTable',
+          Key: { pk: { S: OrgKeys.orgPk(ORG_ID) }, sk: { S: OrgKeys.memberSk(CREATOR_ID) } },
+        })
+        .rejects(new Error('throttled'));
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const { response } = await runBefore(bearerEvent({ authorization: `Bearer ${TOKEN}` }));
+
+      expect(response?.statusCode).toBe(503);
+      // Nothing ran as this key: no last-used stamp, no downstream chain.
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    });
+
     it('strips the credential even on the denial', async () => {
       stubKeyRecords();
       stubAbsentMembershipRead(ddbMock, { orgId: ORG_ID, userId: CREATOR_ID });
@@ -347,7 +401,7 @@ describe('ragQueryAuthMiddleware', () => {
           userInfo: {
             userId: 'console-user',
             orgId: ORG_ID,
-            membership: role ? membershipFor(ORG_ID, 'console-user', role) : undefined,
+            membership: role ? membershipFor(ORG_ID, 'console-user', role) : NO_MEMBERSHIP,
           },
         }).requestContext.userInfo;
         return undefined;

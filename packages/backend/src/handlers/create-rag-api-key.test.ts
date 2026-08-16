@@ -18,6 +18,9 @@ vi.mock('sst', () => ({
 // against DynamoDB); auth/csrf/subscription are covered by their own suites and
 // stubbed to pass-through here so the allowlist gate can be tested in isolation.
 vi.mock('../middleware/auth.js', () => ({
+  // Every gate downstream of the auth middleware returns its denials through
+  // this helper, so the partial mock has to carry it.
+  withRefreshedCookies: (_request: unknown, response: unknown) => response,
   authMiddleware: () => ({ before: () => undefined }),
 }));
 vi.mock('../middleware/csrf.js', () => ({

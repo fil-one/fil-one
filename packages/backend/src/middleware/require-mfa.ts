@@ -10,7 +10,7 @@ import { getMfaEnrollments, MFA_GUARDIAN_TYPES } from '../lib/auth0-management.j
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
-import { getVerifiedIdTokenClaims } from './auth.js';
+import { getVerifiedIdTokenClaims, withRefreshedCookies } from './auth.js';
 
 /**
  * Gate handlers that require a strong-auth session. Reads the OIDC `amr`
@@ -38,7 +38,11 @@ export function requireMfa() {
     request: Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>,
   ): Promise<APIGatewayProxyStructuredResultV2 | void> => {
     const { amr } = getVerifiedIdTokenClaims(request);
-    if (!amr.includes('mfa') && !amr.includes('phr')) return stepUpResponse();
+    // Through withRefreshedCookies: a step-up prompt must not also cost the
+    // caller the session this request just rotated.
+    if (!amr.includes('mfa') && !amr.includes('phr')) {
+      return withRefreshedCookies(request, stepUpResponse());
+    }
   };
 
   return { before } satisfies MiddlewareObj<APIGatewayProxyEventV2, APIGatewayProxyResultV2>;

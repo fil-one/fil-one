@@ -14,6 +14,7 @@ import { ResponseBuilder } from '../lib/response-builder.js';
 import { ensureTrialEntitlement } from '../lib/trial-entitlement.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
+import { withRefreshedCookies } from './auth.js';
 
 export enum AccessLevel {
   Read = 'read',
@@ -26,7 +27,13 @@ const dynamo = getDynamoClient();
 
 export function subscriptionGuardMiddleware(accessLevel: AccessLevel) {
   return {
-    before: (request: GuardRequest) => runSubscriptionGuard(request, accessLevel),
+    // Every denial carries the rotated cookies: returning a response from a
+    // before hook skips the after stack that would otherwise set them, and a
+    // billing block must not also log the caller out.
+    before: async (request: GuardRequest) => {
+      const denied = await runSubscriptionGuard(request, accessLevel);
+      return denied ? withRefreshedCookies(request, denied) : undefined;
+    },
   } satisfies MiddlewareObj<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>;
 }
 
@@ -35,7 +42,7 @@ async function runSubscriptionGuard(
   accessLevel: AccessLevel,
 ): Promise<APIGatewayProxyStructuredResultV2 | void> {
   const event = request.event as AuthenticatedEvent;
-  const { sub, userId, orgId, email, emailVerified } = getUserInfo(event);
+  const { sub, userId, orgId, email, emailVerified, apiKeySession } = getUserInfo(event);
   const tableName = Resource.BillingTable.name;
 
   // Consistent read so a trial just written by the auth middleware (same request)
@@ -51,8 +58,15 @@ async function runSubscriptionGuard(
     }),
   );
 
-  // No billing record → only entitled (verified, claim-owning) users get a trial.
+  // No billing record → only entitled (verified, claim-owning) users get a
+  // trial, and only a person can claim one. An API key session is not a login:
+  // its `sub` names the key rather than an identity row, so claiming the
+  // entitlement under it would write a trial keyed to a credential and stamp
+  // the claim flag on a row that does not exist. A key whose org has no billing
+  // record is simply not entitled.
   if (!result.Item) {
+    if (apiKeySession) return buildInactiveResponse();
+
     const entitled = await ensureTrialEntitlement({
       sub,
       userId,

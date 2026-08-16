@@ -100,9 +100,22 @@ type NormalizedHeaderEvent = {
   rawHeaders: Record<string, string>;
 };
 
-type BuildEventUserInfo = Omit<UserInfo, 'emailVerified' | 'sub'> & {
+/**
+ * How a test names the caller's membership.
+ *
+ * `'absent'` rather than `undefined`, because a conditional spread
+ * (`...(role ? { membership } : {})`) turns "no membership" into "key not
+ * present", and a fixture that reads absence off the key would then hand a
+ * denial test the default Owner and pass for the wrong reason. The value has to
+ * be said out loud.
+ */
+export const NO_MEMBERSHIP = 'absent';
+
+type BuildEventUserInfo = Omit<UserInfo, 'emailVerified' | 'sub' | 'membership'> & {
   emailVerified?: boolean;
   sub?: string;
+  /** The caller's row, or {@link NO_MEMBERSHIP} for a caller who has none. */
+  membership?: OrgMembership | typeof NO_MEMBERSHIP;
 };
 
 interface BuildEventProps {
@@ -118,24 +131,27 @@ interface BuildEventProps {
 /**
  * The `userInfo` a handler actually sees, which after enforcement always
  * carries a membership: a request whose caller has no row never reaches a
- * handler, because `authorize` refused it. Absent the key, the caller is an
- * Owner — the role every existing account holds — so a test about a handler's
- * own logic says nothing about roles. Passing `membership: undefined`
- * explicitly is how a test describes a caller with no row.
+ * handler, because `authorize` refused it. Say nothing about membership and the
+ * caller is an Owner — the role every existing account holds — so a test about
+ * a handler's own logic says nothing about roles. Pass
+ * {@link NO_MEMBERSHIP} to describe a caller with no row.
  *
  * That the gate is installed at all is not left to these fixtures: the manifest
  * coverage test proves every declared route composes `authorize`, and
  * authorize's own tests prove what each role may do.
  */
 function buildUserInfo(userInfo: BuildEventUserInfo): UserInfo {
+  const { membership, ...rest } = userInfo;
+  const resolved =
+    membership === undefined
+      ? membershipFor(userInfo.orgId, userInfo.userId, OrgRole.Owner)
+      : membership;
+
   return {
     sub: 'auth0|test-sub-id',
-    ...userInfo,
+    ...rest,
     emailVerified: userInfo.emailVerified ?? true,
-    membership:
-      'membership' in userInfo
-        ? userInfo.membership
-        : membershipFor(userInfo.orgId, userInfo.userId, OrgRole.Owner),
+    ...(resolved === NO_MEMBERSHIP ? {} : { membership: resolved }),
   };
 }
 

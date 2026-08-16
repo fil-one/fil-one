@@ -30,6 +30,9 @@ vi.mock('sst', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 vi.mock('../middleware/auth.js', () => ({
+  // Every gate downstream of the auth middleware returns its denials through
+  // this helper, so the partial mock has to carry it.
+  withRefreshedCookies: (_request: unknown, response: unknown) => response,
   authMiddleware: () => ({ before: () => undefined }),
 }));
 

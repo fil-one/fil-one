@@ -118,8 +118,11 @@ function emailNotVerifiedResponse(): APIGatewayProxyStructuredResultV2 {
  * retryable failure of ours, so it is a 503 rather than a 401 that would send
  * the console through a pointless refresh, or a 403 that would read as a
  * revoked membership.
+ *
+ * Exported for the RAG bearer path, which resolves the key creator's membership
+ * itself and owes a failed read the same answer this one gives.
  */
-function membershipUnavailableResponse(): APIGatewayProxyStructuredResultV2 {
+export function membershipUnavailableResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(503)
     .body<ErrorResponse>({
@@ -486,21 +489,24 @@ function verifiedEmailGate(
 /**
  * Carry the rotated cookies on a response the before hook returns itself.
  *
- * Exported for the gates that run after this middleware in the same before
- * stack — `authorize` on the RAG query route's cookie branch — which short-
- * circuit for the same reason and would otherwise drop the same cookies.
+ * Every gate that runs after this middleware in the same before stack owes its
+ * denials this call — `authorize`, the membership gate, CSRF, the subscription
+ * guard, the RAG access gate, the MFA gate. Returning a response from `before`
+ * short-circuits the whole chain, the after hook included (@middy/core 7.2.2
+ * runs the after stack only when the request carries no `earlyResponse`), so a
+ * refresh that already happened has to set its own cookies here. Otherwise the
+ * caller's old refresh token is spent at Auth0 and the new one never reaches
+ * them — one denial becomes a logout on every tab.
  *
- * Returning a response from `before` short-circuits the whole chain, the after
- * hook included (@middy/core 7.2.2 runs the after stack only when the request
- * carries no `earlyResponse`), so a refresh that already happened has to set
- * its own cookies here. Otherwise the caller's old refresh token is spent at
- * Auth0 and the new one never reaches them — one denial becomes a logout.
+ * Takes the plain request type and reads `internal` through {@link AuthInternal},
+ * the same way `getVerifiedIdTokenClaims` does, so a middleware downstream of
+ * this one can call it without restating the internal shape.
  */
 export function withRefreshedCookies(
-  request: AuthMiddlewareRequest,
+  request: Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>,
   response: APIGatewayProxyStructuredResultV2,
 ): APIGatewayProxyStructuredResultV2 {
-  const { newTokens } = request.internal;
+  const { newTokens } = request.internal as AuthInternal;
   if (newTokens) setCookiesFromTokens(response, newTokens);
   return response;
 }
