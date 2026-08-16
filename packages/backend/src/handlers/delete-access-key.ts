@@ -1,17 +1,25 @@
-import { DeleteItemCommand, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import { ErrorResponse, S3Region } from '@filone/shared';
+import type { AuditActor } from '@filone/shared';
 import { Resource } from 'sst';
+import {
+  AuditSubjects,
+  appendAuditEvent,
+  auditEvent,
+  commitAudited,
+  newCorrelationId,
+} from '../lib/audit.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { keyScope, notYourKeyResponse, withinScope } from '../lib/key-scope.js';
 import { ResponseBuilder, tenantNotReadyResponse } from '../lib/response-builder.js';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { getOrgProfile } from '../lib/org-profile.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { authorize } from '../middleware/authorize.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
@@ -29,7 +37,9 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
       .build();
   }
 
-  const { orgId } = getUserInfo(event);
+  const { orgId, userId } = getUserInfo(event);
+  const email = getVerifiedEmail(event);
+  const actor: AuditActor = { kind: 'user', id: userId, ...(email ? { email } : {}) };
 
   // Verify the key belongs to this org
   const { Item } = await dynamo.send(
@@ -63,14 +73,47 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) return tenantNotReadyResponse();
 
-  await orchestrator.deleteAccessKey(tenantId, keyId);
+  // Revocation happens at the vendor first and cannot join the local
+  // transaction, so it gets the same intent/completion pair a mint does: an
+  // intent that never completes says a credential was revoked at the vendor
+  // while its local row may still be listed.
+  const correlationId = newCorrelationId();
+  const keyName = Item.keyName?.S;
+  const details = { keyKind: 's3' as const, region, ...(keyName ? { keyName } : {}) };
 
-  await dynamo.send(
-    new DeleteItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: marshall({ pk: `ORG#${orgId}`, sk: `ACCESSKEY#${keyId}` }),
+  await appendAuditEvent(
+    auditEvent({
+      type: 'key.revoked',
+      phase: 'intent',
+      correlationId,
+      actor,
+      orgId,
+      subject: AuditSubjects.key(keyId),
+      details,
     }),
   );
+
+  await orchestrator.deleteAccessKey(tenantId, keyId);
+
+  await commitAudited({
+    items: [
+      {
+        Delete: {
+          TableName: Resource.UserInfoTable.name,
+          Key: marshall({ pk: `ORG#${orgId}`, sk: `ACCESSKEY#${keyId}` }),
+        },
+      },
+    ],
+    event: auditEvent({
+      type: 'key.revoked',
+      phase: 'completion',
+      correlationId,
+      actor,
+      orgId,
+      subject: AuditSubjects.key(keyId),
+      details,
+    }),
+  });
 
   return { statusCode: 204, body: '' };
 }

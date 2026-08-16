@@ -36,8 +36,15 @@ const MOCK_NAME = 'Test User';
 
 let uuidCallCount = 0;
 const MOCK_UUIDS = [MOCK_USER_ID, MOCK_ORG_ID];
+const realRandomUUID = crypto.randomUUID.bind(crypto);
+// The seeded pair is the user id and the org id, in the order signup mints
+// them. Every id after those — the audit event's, and the CSRF token's — stays
+// random, so a test that pins the first two does not silently hand a later
+// caller `undefined`.
 vi.spyOn(crypto, 'randomUUID').mockImplementation(
-  () => MOCK_UUIDS[uuidCallCount++] as `${string}-${string}-${string}-${string}-${string}`,
+  () =>
+    (MOCK_UUIDS[uuidCallCount++] ??
+      realRandomUUID()) as `${string}-${string}-${string}-${string}-${string}`,
 );
 
 vi.mock('sst', () => sstResourceMock());
@@ -851,6 +858,29 @@ describe('authMiddleware', () => {
               role: { S: OrgRole.Owner },
               joinedAt: { S: expect.any(String) },
             },
+          },
+        },
+        // The org.created event, sixth item: an org cannot come into existence
+        // unrecorded, because the rows that create it and the row that records
+        // it are the same transaction.
+        {
+          Put: {
+            TableName: 'AuditTable',
+            Item: {
+              pk: { S: `ORG#${MOCK_ORG_ID}` },
+              sk: { S: expect.any(String) },
+              eventId: { S: expect.any(String) },
+              type: { S: 'org.created' },
+              actor: {
+                M: { kind: { S: 'user' }, id: { S: MOCK_USER_ID }, email: { S: MOCK_EMAIL } },
+              },
+              orgId: { S: MOCK_ORG_ID },
+              subject: { S: `org:${MOCK_ORG_ID}` },
+              details: { M: { orgName: { S: 'Alice Org' }, source: { S: 'signup' } } },
+              createdAt: { S: expect.any(String) },
+              ttl: { N: expect.any(String) },
+            },
+            ConditionExpression: 'attribute_not_exists(pk)',
           },
         },
       ]);

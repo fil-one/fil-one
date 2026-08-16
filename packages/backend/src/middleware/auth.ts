@@ -384,7 +384,13 @@ async function resolveUserAndOrg(
   const orgId = crypto.randomUUID();
   const orgName = deriveOrgName(name ?? undefined, email ?? undefined);
 
-  const membership = await createNewUserAndOrg({ sub, userId, orgId, orgName });
+  const membership = await createNewUserAndOrg({
+    sub,
+    userId,
+    orgId,
+    orgName,
+    email: email ?? undefined,
+  });
 
   // Tenant setup is deferred until the user creates their first bucket or access
   // key — see docs/architectural-decisions/2026-05-13-synchronous-tenant-setup-on-first-resource.md.

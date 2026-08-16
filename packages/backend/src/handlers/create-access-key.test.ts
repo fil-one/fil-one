@@ -5,7 +5,9 @@ import {
   GetItemCommand,
   PutItemCommand,
   QueryCommand,
+  TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
+import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.js';
 
@@ -89,6 +91,39 @@ function issuedAccessKey() {
 // Tests
 // ---------------------------------------------------------------------------
 
+/**
+ * The two writes a mint makes: the intent, put on its own before the vendor
+ * call, and the transaction carrying the key row with its completion event.
+ */
+function stubWrites() {
+  ddbMock.on(PutItemCommand).resolves({});
+  ddbMock.on(TransactWriteItemsCommand).resolves({});
+}
+
+/** Every transaction that wrote a key row (one per mint, or none). */
+function keyRowWrites() {
+  return ddbMock.commandCalls(TransactWriteItemsCommand);
+}
+
+/** The key row itself, the first item of that transaction. */
+function keyRow() {
+  const calls = keyRowWrites();
+  expect(calls).toHaveLength(1);
+  return calls[0].args[0].input.TransactItems![0].Put!.Item!;
+}
+
+/** The completion event, which rides beside it. */
+function completionEvent() {
+  return unmarshall(keyRowWrites()[0].args[0].input.TransactItems![1].Put!.Item!);
+}
+
+/** The intent events, written before the vendor was called. */
+function intentEvents() {
+  return ddbMock
+    .commandCalls(PutItemCommand)
+    .map((call) => unmarshall(call.args[0].input.Item ?? {}));
+}
+
 describe('create-access-key baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -124,7 +159,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('returns 201 with keyName, accessKeyId, and secretAccessKey on success', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
@@ -142,7 +177,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('calls orchestrator.issueAccessKey with correct params', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
@@ -158,15 +193,13 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('stores access key in DynamoDB without the secret', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
     await baseHandler(event);
 
-    const putCalls = ddbMock.commandCalls(PutItemCommand);
-    expect(putCalls).toHaveLength(1);
-    const item = putCalls[0].args[0].input.Item!;
+    const item = keyRow();
     expect(item.pk.S).toBe('ORG#org-1');
     expect(item.sk.S).toBe('ACCESSKEY#aurora-key-1');
     expect(item.keyName.S).toBe('My Key');
@@ -181,7 +214,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('records who minted the key and the policy era it was minted under', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({
@@ -190,14 +223,14 @@ describe('create-access-key baseHandler', () => {
     });
     await baseHandler(event);
 
-    const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+    const item = keyRow();
     expect(item.createdBy.S).toBe('user-1');
     expect(item.creatorEmail.S).toBe('alice@example.com');
     expect(item.policyVersion.S).toBe('pre-member-scope');
   });
 
   it('leaves the creator email off when the address is unverified', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({
@@ -206,7 +239,7 @@ describe('create-access-key baseHandler', () => {
     });
     await baseHandler(event);
 
-    const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+    const item = keyRow();
     expect(item.createdBy.S).toBe('user-1');
     expect(item.creatorEmail).toBeUndefined();
     expect(item.policyVersion.S).toBe('pre-member-scope');
@@ -241,7 +274,7 @@ describe('create-access-key baseHandler', () => {
   }
 
   it('trims whitespace from keyName', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({
@@ -265,7 +298,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('passes YYYY-MM-DD expiresAt through as-is', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({
@@ -287,7 +320,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('stores the YYYY-MM-DD expiresAt in DynamoDB (not RFC3339)', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({
@@ -302,7 +335,7 @@ describe('create-access-key baseHandler', () => {
     });
     await baseHandler(event);
 
-    const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+    const item = keyRow();
     expect(item.expiresAt.S).toBe('2026-06-01');
   });
 
@@ -369,7 +402,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('drives tenant setup via ensureTenantReady before creating the access key', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
@@ -384,7 +417,7 @@ describe('create-access-key baseHandler', () => {
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
 
     await expect(baseHandler(event)).rejects.toThrow('Aurora API error');
-    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    expect(keyRowWrites()).toHaveLength(0);
   });
 
   it('returns 409 when the orchestrator rejects duplicate key name and key exists in DynamoDB', async () => {
@@ -410,7 +443,69 @@ describe('create-access-key baseHandler', () => {
     expect(body).toStrictEqual({
       message: 'An access key with this name already exists',
     });
-    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    expect(keyRowWrites()).toHaveLength(0);
+  });
+
+  it('records an intent before the vendor mints, and a completion with the row', async () => {
+    stubWrites();
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+
+    await baseHandler(
+      buildEvent({
+        body: validBody({ keyName: 'My Key' }),
+        userInfo: { ...USER_INFO, email: 'alice@example.com', emailVerified: true },
+      }),
+    );
+
+    const [intent] = intentEvents();
+    const completion = completionEvent();
+
+    // The intent cannot name a key the vendor has not returned yet, which is
+    // what makes a dangling one legible: a key was asked for by this name and
+    // no completion followed.
+    expect(intent).toMatchObject({
+      pk: 'ORG#org-1',
+      type: 'key.created',
+      phase: 'intent',
+      subject: 'org:org-1',
+      actor: { kind: 'user', id: 'user-1', email: 'alice@example.com' },
+      details: { keyKind: 's3', keyName: 'My Key', region: 'eu-west-1' },
+    });
+    expect(completion).toMatchObject({
+      type: 'key.created',
+      phase: 'completion',
+      subject: 'key:aurora-key-1',
+      details: { keyKind: 's3', keyName: 'My Key', keyIdSuffix: '7890' },
+    });
+    expect(completion.correlationId).toBe(intent.correlationId);
+  });
+
+  it('keeps the minted credential out of the event', async () => {
+    stubWrites();
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+
+    await baseHandler(buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO }));
+
+    const written = JSON.stringify([...intentEvents(), completionEvent()]);
+    expect(written).not.toContain('secret-abc-123');
+    // The access key id is recorded by its last characters only.
+    expect(written).not.toContain('AKIA1234567890');
+    expect(completionEvent().details.keyIdSuffix).toBe('7890');
+  });
+
+  it('leaves the intent dangling when the local write never lands', async () => {
+    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).rejects(new Error('DynamoDB unavailable'));
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+
+    await expect(
+      baseHandler(buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO })),
+    ).rejects.toThrow('DynamoDB unavailable');
+
+    // A live SigV4 key now exists with no local row. The intent is the only
+    // record that it was ever asked for, which is why it is written first.
+    expect(intentEvents()).toHaveLength(1);
+    expect(intentEvents()[0].phase).toBe('intent');
   });
 
   it('returns 409 and recovers DynamoDB record on partial failure', async () => {
@@ -422,7 +517,7 @@ describe('create-access-key baseHandler', () => {
       accessKeyId: 'AKIA1234567890',
       createdAt: '2026-03-10T00:00:00Z',
     });
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
 
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
     const result = await baseHandler(event);
@@ -433,9 +528,7 @@ describe('create-access-key baseHandler', () => {
       message: 'An access key with this name already exists',
     });
     // Verify DynamoDB record was recovered
-    const putCalls = ddbMock.commandCalls(PutItemCommand);
-    expect(putCalls).toHaveLength(1);
-    const item = putCalls[0].args[0].input.Item!;
+    const item = keyRow();
     expect(item).toMatchObject({
       pk: { S: 'ORG#org-1' },
       sk: { S: 'ACCESSKEY#aurora-key-1' },
@@ -449,6 +542,15 @@ describe('create-access-key baseHandler', () => {
       policyVersion: { S: 'pre-member-scope' },
       recovered: { BOOL: true },
     });
+
+    // The completion the earlier attempt never wrote, flagged the same way.
+    expect(completionEvent()).toMatchObject({
+      type: 'key.created',
+      phase: 'completion',
+      subject: 'key:aurora-key-1',
+      details: { keyKind: 's3', keyName: 'My Key', recovered: true },
+    });
+    expect(completionEvent().correlationId).toBe(intentEvents()[0].correlationId);
   });
 
   it('recovers DynamoDB record when same keyName exists only in a different region', async () => {
@@ -471,7 +573,7 @@ describe('create-access-key baseHandler', () => {
       accessKeyId: 'AKIA1234567890',
       createdAt: '2026-03-10T00:00:00Z',
     });
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
 
     const event = buildEvent({
       body: validBody({ keyName: 'My Key', region: 'eu-west-1' }),
@@ -481,9 +583,7 @@ describe('create-access-key baseHandler', () => {
 
     expect(result.statusCode).toBe(409);
     expect(mockFindAccessKeyByName).toHaveBeenCalled();
-    const putCalls = ddbMock.commandCalls(PutItemCommand);
-    expect(putCalls).toHaveLength(1);
-    const item = putCalls[0].args[0].input.Item!;
+    const item = keyRow();
     expect(item).toMatchObject({
       pk: { S: 'ORG#org-1' },
       sk: { S: 'ACCESSKEY#aurora-key-1' },
@@ -512,7 +612,7 @@ describe('create-access-key baseHandler', () => {
       accessKeyId: 'AKIA1234567890',
       createdAt: '2026-03-10T00:00:00Z',
     });
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
 
     const event = buildEvent({
       body: validBody({ keyName: 'My Key', region: 'us-east-1' }),
@@ -521,15 +621,13 @@ describe('create-access-key baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(409);
-    const putCalls = ddbMock.commandCalls(PutItemCommand);
-    expect(putCalls).toHaveLength(1);
-    const item = putCalls[0].args[0].input.Item!;
+    const item = keyRow();
     expect(item.region.S).toBe('us-east-1');
   });
 
   describe('region', () => {
     beforeEach(() => {
-      ddbMock.on(PutItemCommand).resolves({});
+      stubWrites();
       mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
     });
 
@@ -566,7 +664,7 @@ describe('create-access-key baseHandler', () => {
 
       expect(result.statusCode).toBe(201);
       expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('us-east-1');
-      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      const item = keyRow();
       expect(item.region.S).toBe('us-east-1');
     });
 
@@ -590,7 +688,7 @@ describe('create-access-key baseHandler', () => {
 
   describe('bucket management permissions', () => {
     beforeEach(() => {
-      ddbMock.on(PutItemCommand).resolves({});
+      stubWrites();
       mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
     });
 
@@ -620,7 +718,7 @@ describe('create-access-key baseHandler', () => {
       const event = buildEvent({ body: bucketBody('us-east-1'), userInfo: USER_INFO });
       await baseHandler(event);
 
-      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      const item = keyRow();
       expect(item.permissions.L).toEqual([
         { S: 'read' },
         { S: 'CreateBucket' },
@@ -666,7 +764,7 @@ describe('create-access-key baseHandler', () => {
     beforeEach(() => {
       vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
       vi.spyOn(console, 'error').mockImplementation(() => {});
-      ddbMock.on(PutItemCommand).resolves({});
+      stubWrites();
       mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
     });
 

@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
-  ConditionalCheckFailedException,
   DynamoDBClient,
   GetItemCommand,
-  UpdateItemCommand,
+  TransactionCanceledException,
+  TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
-import { OrgRole } from '@filone/shared';
+import { unmarshall } from '@aws-sdk/util-dynamodb';
+import { AUDIT_RETENTION_DAYS, OrgRole } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.js';
 
 // ---------------------------------------------------------------------------
@@ -85,10 +86,19 @@ function callerHolds(role: OrgRole) {
   stubMembershipRead(ddbMock, { orgId: MOCK_ORG_ID, userId: MOCK_USER_ID, role });
 }
 
-function updateInput() {
-  const calls = ddbMock.commandCalls(UpdateItemCommand);
+/** The rename and its audit event travel as one transaction. */
+function transactItems() {
+  const calls = ddbMock.commandCalls(TransactWriteItemsCommand);
   expect(calls).toHaveLength(1);
-  return calls[0].args[0].input;
+  return calls[0].args[0].input.TransactItems ?? [];
+}
+
+function updateInput() {
+  return transactItems()[0].Update!;
+}
+
+function auditedEvent() {
+  return unmarshall(transactItems()[1].Put!.Item!);
 }
 
 /** Answer the profile-row read the rename makes to capture the previous name. */
@@ -132,7 +142,7 @@ describe('PATCH /api/org handler', () => {
         },
       });
 
-    ddbMock.on(UpdateItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
     orgProfileNamed('Old Corp');
     callerHolds(OrgRole.Owner);
   });
@@ -153,20 +163,34 @@ describe('PATCH /api/org handler', () => {
     });
   });
 
-  it('reads the previous name, which the audit event will need, and stamps the event', async () => {
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-
+  it('records the rename beside the write, with both names', async () => {
     await handler(renameEvent({ name: 'New Corp' }), buildContext());
 
-    expect(log).toHaveBeenCalledWith(
-      expect.stringContaining('org.renamed'),
-      expect.objectContaining({
-        orgId: MOCK_ORG_ID,
-        actorUserId: MOCK_USER_ID,
-        previousName: 'Old Corp',
-        name: 'New Corp',
-      }),
-    );
+    const items = transactItems();
+    expect(items).toHaveLength(2);
+    expect(items[1].Put).toMatchObject({
+      TableName: 'AuditTable',
+      // Append-only: an event id already on the table cancels the whole
+      // transaction rather than rewriting history.
+      ConditionExpression: 'attribute_not_exists(pk)',
+    });
+    expect(auditedEvent()).toMatchObject({
+      pk: `ORG#${MOCK_ORG_ID}`,
+      type: 'org.renamed',
+      orgId: MOCK_ORG_ID,
+      subject: `org:${MOCK_ORG_ID}`,
+      actor: { kind: 'user', id: MOCK_USER_ID, email: MOCK_EMAIL },
+      details: { previousName: 'Old Corp', name: 'New Corp' },
+    });
+  });
+
+  it('stamps the event to expire 90 days out', async () => {
+    await handler(renameEvent({ name: 'New Corp' }), buildContext());
+
+    const event = auditedEvent();
+    const expected =
+      Math.floor(Date.parse(event.createdAt) / 1000) + AUDIT_RETENTION_DAYS * 24 * 60 * 60;
+    expect(event.ttl).toBe(expected);
   });
 
   it('reads the previous name rather than asking the write for it', async () => {
@@ -174,23 +198,36 @@ describe('PATCH /api/org handler', () => {
     // created before naming shipped has no `name` on its profile row — the
     // audit event would record a rename with no predecessor. The read is also
     // what lets a TransactWriteItems wrap the write with the audit record.
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     orgProfileNamed(undefined);
 
     const result = await handler(renameEvent({ name: 'New Corp' }), buildContext());
 
     expect(result).toMatchObject({ statusCode: 200 });
-    expect(updateInput().ReturnValues).toBeUndefined();
-    expect(log).toHaveBeenCalledWith(
-      expect.stringContaining('org.renamed'),
-      expect.objectContaining({ previousName: undefined, name: 'New Corp' }),
-    );
+    expect(updateInput()).toMatchObject({
+      ExpressionAttributeNames: { '#name': 'name' },
+      ConditionExpression: 'attribute_exists(pk)',
+    });
+    expect(auditedEvent().details).toStrictEqual({ name: 'New Corp' });
+  });
+
+  it('leaves the org unrenamed when the event cannot be written', async () => {
+    // The ADR accepts this: an AuditTable outage blocks the control-plane
+    // write rather than letting a rename land unrecorded.
+    ddbMock.on(TransactWriteItemsCommand).rejects(new Error('AuditTable unavailable'));
+
+    const result = await handler(renameEvent({ name: 'New Corp' }), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 500 });
   });
 
   it('returns 404 when the profile row the rename is conditional on is gone', async () => {
-    ddbMock
-      .on(UpdateItemCommand)
-      .rejects(new ConditionalCheckFailedException({ message: 'conditional', $metadata: {} }));
+    ddbMock.on(TransactWriteItemsCommand).rejects(
+      new TransactionCanceledException({
+        message: 'cancelled',
+        $metadata: {},
+        CancellationReasons: [{ Code: 'ConditionalCheckFailed' }],
+      }),
+    );
 
     const result = await handler(renameEvent({ name: 'New Corp' }), buildContext());
 
@@ -221,7 +258,7 @@ describe('PATCH /api/org handler', () => {
     const result = await handler(renameEvent({ name }), buildContext());
 
     expect(result).toMatchObject({ statusCode: 400 });
-    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
   });
 
   it('answers a rejected name with the rule the form has to state', async () => {

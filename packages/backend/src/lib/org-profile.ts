@@ -116,7 +116,9 @@ export function orgNotDeletingCheck(orgId: string): TransactWriteItem {
 
 // Positional: reason 0 is the guard, so a caller's own failed condition reports
 // at its own index and is rethrown rather than mislabelled as a deletion.
-function isGuardRejection(err: unknown): boolean {
+// Exported with {@link orgNotDeletingCheck} for callers that assemble their own
+// transaction and need to map the same rejection.
+export function isGuardRejection(err: unknown): boolean {
   return (
     err instanceof TransactionCanceledException &&
     err.CancellationReasons?.[0]?.Code === 'ConditionalCheckFailed'
