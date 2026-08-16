@@ -48,23 +48,30 @@ vi.mock('../middleware/auth.js', () => ({
   authMiddleware: () => ({ before: () => undefined }),
 }));
 
+import { ApiErrorCode, OrgRole } from '@filone/shared';
 import { baseHandler, handler } from './delete-access-key.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { buildEvent, buildContext, membershipFor } from '../test/lambda-test-utilities.js';
 import { describeRoleEnforcement } from '../test/role-enforcement.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 const KEY_ID = 'key-1';
 
-function eventWithKey(keyId: string | undefined): AuthenticatedEvent {
-  const event = buildEvent({ userInfo: USER_INFO, method: 'DELETE' });
+function eventWithKey(keyId: string | undefined, role?: OrgRole): AuthenticatedEvent {
+  const event = buildEvent({
+    userInfo: {
+      ...USER_INFO,
+      ...(role ? { membership: membershipFor(USER_INFO.orgId, USER_INFO.userId, role) } : {}),
+    },
+    method: 'DELETE',
+  });
   // pathParameters isn't directly supported by buildEvent — attach it here.
   return Object.assign(event, {
     pathParameters: keyId ? { keyId } : undefined,
   }) as unknown as AuthenticatedEvent;
 }
 
-function accessKeyItem(region?: string) {
+function accessKeyItem(region?: string, createdBy?: string) {
   const item: Record<string, { S: string }> = {
     pk: { S: 'ORG#org-1' },
     sk: { S: `ACCESSKEY#${KEY_ID}` },
@@ -74,6 +81,7 @@ function accessKeyItem(region?: string) {
     status: { S: 'active' },
   };
   if (region) item.region = { S: region };
+  if (createdBy) item.createdBy = { S: createdBy };
   return item;
 }
 
@@ -164,8 +172,75 @@ describe('delete-access-key baseHandler', () => {
   });
 });
 
+describe('whose key a caller may revoke', () => {
+  // `keys.manage_own` gets the caller through the chain; which key they are
+  // holding is a question only the handler can answer, because it has to read
+  // the row first.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ddbMock.reset();
+    ddbMock.on(DeleteItemCommand).resolves({});
+    auroraIsTenantReady.mockReturnValue('aurora-t-1');
+    auroraDeleteAccessKey.mockResolvedValue(undefined);
+  });
+
+  it('lets a Member revoke a key they created', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: accessKeyItem('eu-west-1', USER_INFO.userId) });
+
+    const result = (await baseHandler(eventWithKey(KEY_ID, OrgRole.Member))) as {
+      statusCode: number;
+    };
+
+    expect(result.statusCode).toBe(204);
+  });
+
+  it("refuses a Member someone else's key, before the provider is touched", async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: accessKeyItem('eu-west-1', 'user-2') });
+
+    const result = (await baseHandler(eventWithKey(KEY_ID, OrgRole.Member))) as {
+      statusCode: number;
+      body: string;
+    };
+
+    expect(result.statusCode).toBe(403);
+    expect(JSON.parse(result.body).code).toBe(ApiErrorCode.FORBIDDEN_ROLE);
+    // The provider-side deletion is the irreversible half.
+    expect(auroraDeleteAccessKey).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
+  });
+
+  it('refuses a Member an unattributed key, which nobody can claim', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: accessKeyItem('eu-west-1') });
+
+    const result = (await baseHandler(eventWithKey(KEY_ID, OrgRole.Member))) as {
+      statusCode: number;
+    };
+
+    expect(result.statusCode).toBe(403);
+    expect(auroraDeleteAccessKey).not.toHaveBeenCalled();
+  });
+
+  it.each([OrgRole.Owner, OrgRole.Admin])('lets %s revoke any key in the org', async (role) => {
+    ddbMock.on(GetItemCommand).resolves({ Item: accessKeyItem('eu-west-1', 'user-2') });
+
+    const result = (await baseHandler(eventWithKey(KEY_ID, role))) as { statusCode: number };
+
+    expect(result.statusCode).toBe(204);
+  });
+
+  it('lets keys.manage_all revoke an unattributed key', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: accessKeyItem('eu-west-1') });
+
+    const result = (await baseHandler(eventWithKey(KEY_ID, OrgRole.Admin))) as {
+      statusCode: number;
+    };
+
+    expect(result.statusCode).toBe(204);
+  });
+});
+
 describeRoleEnforcement({
-  permission: 'keys.manage_all',
+  permission: 'keys.manage_own',
   invoke: (membership) =>
     handler(buildEvent({ userInfo: { ...USER_INFO, membership } }), buildContext()),
 });

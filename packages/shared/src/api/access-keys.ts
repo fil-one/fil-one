@@ -224,6 +224,12 @@ export interface AccessKey {
   buckets?: string[];
   region?: S3Region;
   expiresAt?: string | null;
+  /**
+   * The FilOne user who minted the key, so the console can tell the caller's
+   * own keys from the org's. Absent on keys minted before attribution existed —
+   * those are only ever listed to a caller holding `keys.manage_all`.
+   */
+  createdBy?: string;
 }
 
 export interface ListAccessKeysResponse {

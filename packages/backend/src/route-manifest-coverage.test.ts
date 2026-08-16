@@ -2,8 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { APIGatewayProxyResultV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import {
+  ACCESS_KEY_PERMISSION_REQUIREMENT,
   ApiErrorCode,
   CSRF_COOKIE_NAME,
+  GRANULAR_PERMISSION_MAP,
+  GRANULAR_PERMISSION_REQUIREMENT,
   OrgRole,
   PresignOpSchema,
   ROUTE_MANIFEST,
@@ -539,6 +542,106 @@ describe('what the in-handler routes enforce', () => {
  * cases drive the cookie path — no `Authorization` header — so the requirement
  * the manifest declares is the one the response reflects.
  */
+/**
+ * The cap a route applies on top of its declared permission.
+ *
+ * `capsInHandler` marks a route that clears its manifest permission in the
+ * chain and then narrows what the request may ask for. On create-access-key the
+ * narrowing is the one that matters most: a SigV4 key leaves the console and
+ * acts over S3, where no role check runs, so a key carrying more than its
+ * creator would make the whole matrix cosmetic.
+ *
+ * The cases are derived from the same requirement tables the handler reads, so
+ * a permission added to a table arrives here with its mapping rather than
+ * without a case. Each asks for exactly one key permission and expects a
+ * refusal precisely when the creator's role does not hold what that permission
+ * requires.
+ */
+describe('the cap the key route applies on top of keys.create', () => {
+  quietDenialOutput();
+  withActiveSubscription();
+
+  const capped = ROUTE_MANIFEST.filter((route) => route.capsInHandler).map(
+    (route) => route.handler,
+  );
+
+  it('is declared on the key route and nowhere else', () => {
+    expect(capped).toStrictEqual(['create-access-key']);
+  });
+
+  /**
+   * A mint request asking for one permission, built the way the schema insists.
+   *
+   * A granular only parses alongside the object permission it hangs off, so the
+   * parent comes from the same map the schema checks against. The parent is
+   * always one the role holds where the granular is not, which keeps each case
+   * about the permission it names. `us-east-1` because bucket management does
+   * not parse in `eu-west-1` at all, and a body refused at the schema would
+   * answer 400 and say nothing about the cap.
+   */
+  const parentOf = (granular: string) =>
+    Object.entries(GRANULAR_PERMISSION_MAP).find(([, granulars]) =>
+      (granulars as string[]).includes(granular),
+    )?.[0];
+
+  const mintRequest = (keyPermission: string, granular: boolean): RouteRequest => ({
+    body: JSON.stringify({
+      keyName: 'a key',
+      permissions: granular ? [parentOf(keyPermission)] : [keyPermission],
+      ...(granular && { granularPermissions: [keyPermission] }),
+      region: 'us-east-1',
+    }),
+  });
+
+  const cases = Object.entries(OrgRole)
+    .filter(([, role]) => roleHasPermission(role, 'keys.create'))
+    .flatMap(([, role]) => [
+      ...Object.entries(ACCESS_KEY_PERMISSION_REQUIREMENT).map(([keyPermission, requires]) => ({
+        role,
+        keyPermission,
+        requires,
+        granular: false,
+      })),
+      ...Object.entries(GRANULAR_PERMISSION_REQUIREMENT).map(([keyPermission, requires]) => ({
+        role,
+        keyPermission,
+        requires,
+        granular: true,
+      })),
+    ]);
+
+  it('has a role that is refused something and a role that is refused nothing', () => {
+    // Both halves of the claim have to be exercised, or a handler that refused
+    // everything and a handler that refused nothing would both pass below.
+    const refused = cases.filter(({ role, requires }) => !roleHasPermission(role, requires));
+    expect(refused.length).toBeGreaterThan(0);
+    expect(refused.length).toBeLessThan(cases.length);
+  });
+
+  it.each(cases)(
+    '$role asking for $keyPermission, which needs $requires',
+    async ({ role, keyPermission, requires, granular }) => {
+      const result = await invokeRoute(routeFor('create-access-key'), {
+        membership: membershipFor(ORG_ID, USER_ID, role),
+        request: mintRequest(keyPermission, granular),
+      });
+
+      if (roleHasPermission(role, requires)) {
+        // Past the cap, into work this file's mocks do not stand up. Only that
+        // the cap let it through is pinned.
+        expect(errorCode(result)).not.toBe(ApiErrorCode.FORBIDDEN_ROLE);
+        return;
+      }
+
+      expect(result.statusCode).toBe(403);
+      expect(errorCode(result)).toBe(ApiErrorCode.FORBIDDEN_ROLE);
+      // Named, because "your role does not permit this key" against a form of
+      // checkboxes does not say which one to clear.
+      expect(result.body).toContain(keyPermission);
+    },
+  );
+});
+
 describe('the cookie caller on a bearer route', () => {
   quietDenialOutput();
 

@@ -39,9 +39,27 @@ process.env.FILONE_STAGE = 'test';
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { baseHandler } from './create-access-key.js';
+// The chain tests below exercise the REAL authorization gates; auth, csrf, and
+// the subscription guard are stubbed to pass through so the role check is what
+// the assertion is about.
+vi.mock('../middleware/auth.js', () => ({
+  // Every gate downstream of the auth middleware returns its denials through
+  // this helper, so the partial mock has to carry it.
+  withRefreshedCookies: (_request: unknown, response: unknown) => response,
+  authMiddleware: () => ({ before: () => undefined }),
+}));
+vi.mock('../middleware/csrf.js', () => ({
+  csrfMiddleware: () => ({ before: () => undefined }),
+}));
+vi.mock('../middleware/subscription-guard.js', () => ({
+  AccessLevel: { Read: 'read', Write: 'write' },
+  subscriptionGuardMiddleware: () => ({ before: () => undefined }),
+}));
+
+import { baseHandler, handler } from './create-access-key.js';
 import { AccessKeyAlreadyExistsError } from '../lib/errors.js';
-import { buildEvent, membershipFor, NO_MEMBERSHIP } from '../test/lambda-test-utilities.js';
+import { buildEvent, buildContext, membershipFor } from '../test/lambda-test-utilities.js';
+import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -652,14 +670,6 @@ describe('create-access-key baseHandler', () => {
       mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
     });
 
-    it('refuses ReadOnly outright — they hold no keys.create', async () => {
-      const result = await baseHandler(keyRequest(OrgRole.ReadOnly, { permissions: ['read'] }));
-
-      expect(result.statusCode).toBe(403);
-      expect(JSON.parse(result.body!).code).toBe(ApiErrorCode.FORBIDDEN_ROLE);
-      expect(mockIssueAccessKey).not.toHaveBeenCalled();
-    });
-
     it('lets a Member mint the four object permissions', async () => {
       const result = await baseHandler(
         keyRequest(OrgRole.Member, { permissions: ['read', 'list', 'write', 'delete'] }),
@@ -668,30 +678,66 @@ describe('create-access-key baseHandler', () => {
       expect(result.statusCode).toBe(201);
     });
 
-    it('refuses a Member the bucket-management permissions, naming them', async () => {
+    it('lets a Member mint the bucket capabilities a Member already holds', async () => {
+      // Creating a bucket is `buckets.create`, which a Member holds, and
+      // reading a bucket's configuration is `buckets.read`. Refusing these
+      // would 403 a Member who submitted the form untouched.
+      const result = await baseHandler(
+        keyRequest(OrgRole.Member, {
+          permissions: ['read', 'CreateBucket', 'GetBucketVersioning'],
+        }),
+      );
+
+      expect(result.statusCode).toBe(201);
+    });
+
+    it('refuses a Member bucket deletion, naming it', async () => {
       const result = await baseHandler(
         keyRequest(OrgRole.Member, { permissions: ['read', 'DeleteBucket', 'CreateBucket'] }),
       );
 
       expect(result.statusCode).toBe(403);
       expect(JSON.parse(result.body!)).toStrictEqual({
-        message:
-          'A key cannot carry more than you do. Your role does not permit: DeleteBucket, CreateBucket.',
+        message: 'A key cannot carry more than you do. Your role does not permit: DeleteBucket.',
         code: ApiErrorCode.FORBIDDEN_ROLE,
       });
       expect(mockIssueAccessKey).not.toHaveBeenCalled();
     });
 
-    it('refuses a Member the data-protection granulars', async () => {
+    it('lets a Member mint the granulars that only narrow what they hold', async () => {
       const result = await baseHandler(
         keyRequest(OrgRole.Member, {
-          permissions: ['write'],
-          granularPermissions: ['PutObjectRetention'],
+          permissions: ['read', 'delete'],
+          granularPermissions: ['GetObjectRetention', 'DeleteObjectVersion'],
         }),
       );
 
-      expect(result.statusCode).toBe(403);
-      expect(JSON.parse(result.body!).message).toContain('PutObjectRetention');
+      expect(result.statusCode).toBe(201);
+    });
+
+    it('refuses everyone below Owner the mutating retention granulars', async () => {
+      for (const role of [OrgRole.Admin, OrgRole.Member]) {
+        const result = await baseHandler(
+          keyRequest(role, {
+            permissions: ['write'],
+            granularPermissions: ['PutObjectRetention'],
+          }),
+        );
+
+        expect(result.statusCode).toBe(403);
+        expect(JSON.parse(result.body!).message).toContain('PutObjectRetention');
+      }
+    });
+
+    it('lets an Owner mint them, holding privileged.grant', async () => {
+      const result = await baseHandler(
+        keyRequest(OrgRole.Owner, {
+          permissions: ['write'],
+          granularPermissions: ['PutObjectRetention', 'PutObjectLegalHold'],
+        }),
+      );
+
+      expect(result.statusCode).toBe(201);
     });
 
     it('lets an Admin mint the bucket-management permissions', async () => {
@@ -700,19 +746,6 @@ describe('create-access-key baseHandler', () => {
       );
 
       expect(result.statusCode).toBe(201);
-    });
-
-    it('refuses a caller with no membership row', async () => {
-      const event = buildEvent({
-        body: validBody({ keyName: 'My Key' }),
-        userInfo: { ...USER_INFO, membership: NO_MEMBERSHIP },
-      });
-
-      const result = await baseHandler(event);
-
-      expect(result.statusCode).toBe(403);
-      expect(JSON.parse(result.body!).code).toBe(ApiErrorCode.NOT_A_MEMBER);
-      expect(mockIssueAccessKey).not.toHaveBeenCalled();
     });
 
     it('checks before minting anything at the provider', async () => {
@@ -724,4 +757,18 @@ describe('create-access-key baseHandler', () => {
       expect(mockIssueAccessKey).not.toHaveBeenCalled();
     });
   });
+});
+
+// `keys.create` is the entry gate and lives in the chain, so a ReadOnly member
+// and a caller with no membership row are refused before the body is read.
+describeRoleEnforcement({
+  permission: 'keys.create',
+  invoke: (membership) =>
+    handler(
+      buildEvent({
+        body: validBody({ keyName: 'My Key' }),
+        userInfo: { ...USER_INFO, membership },
+      }),
+      buildContext(),
+    ),
 });

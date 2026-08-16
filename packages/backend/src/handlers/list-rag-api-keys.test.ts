@@ -21,8 +21,9 @@ vi.mock('../middleware/subscription-guard.js', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
+import { OrgRole } from '@filone/shared';
 import { baseHandler, handler } from './list-rag-api-keys.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { buildEvent, buildContext, membershipFor } from '../test/lambda-test-utilities.js';
 import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1', emailVerified: true };
@@ -40,6 +41,13 @@ function keyItem(overrides: Record<string, unknown> = {}) {
     createdAt: '2026-07-01T00:00:00Z',
     ...overrides,
   });
+}
+
+/** A row from before `createdBy` was written — the attribute is simply absent. */
+function unattributedKeyItem() {
+  const item = keyItem({ sk: 'RAGKEY#key-legacy', keyName: 'legacy' });
+  delete item.createdBy;
+  return item;
 }
 
 describe('list-rag-api-keys baseHandler', () => {
@@ -86,6 +94,8 @@ describe('list-rag-api-keys baseHandler', () => {
       keyPrefix: 'sk_rag_AbC12',
       bucketScope: 'all',
       createdAt: '2026-07-01T00:00:00Z',
+      // Shipped so the console can gate the per-row revoke button.
+      createdBy: 'user-1',
       creatorEmail: 'dev@example.com',
       lastUsedAt: '2026-07-05T00:00:00Z',
     });
@@ -104,8 +114,40 @@ describe('list-rag-api-keys baseHandler', () => {
   });
 });
 
+describe('who sees which RAG keys', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ddbMock.reset();
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        keyItem({ sk: 'RAGKEY#key-own', keyName: 'mine', createdBy: 'user-1' }),
+        keyItem({ sk: 'RAGKEY#key-other', keyName: 'theirs', createdBy: 'user-2' }),
+        // Minted before attribution shipped: nobody can claim it.
+        unattributedKeyItem(),
+      ],
+    });
+  });
+
+  async function keyNamesFor(role: OrgRole) {
+    const result = await baseHandler(
+      buildEvent({
+        userInfo: { ...USER_INFO, membership: membershipFor('org-1', 'user-1', role) },
+      }),
+    );
+    return (JSON.parse(result.body ?? '{}').keys as { keyName: string }[]).map((k) => k.keyName);
+  }
+
+  it.each([OrgRole.Owner, OrgRole.Admin])('shows %s every key in the org', async (role) => {
+    expect((await keyNamesFor(role)).sort()).toStrictEqual(['legacy', 'mine', 'theirs']);
+  });
+
+  it('shows a Member only the keys they created', async () => {
+    expect(await keyNamesFor(OrgRole.Member)).toStrictEqual(['mine']);
+  });
+});
+
 describeRoleEnforcement({
-  permission: 'keys.manage_all',
+  permission: 'keys.manage_own',
   invoke: (membership) =>
     handler(buildEvent({ userInfo: { ...USER_INFO, membership } }), buildContext()),
 });

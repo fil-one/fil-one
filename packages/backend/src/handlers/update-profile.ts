@@ -34,9 +34,11 @@ function isDisposableDomain(domain: string): boolean {
 /**
  * PATCH /api/me/profile — the caller's own name and email, and nothing else.
  *
- * A `self` route in the manifest: membership in the active org is the whole
- * requirement, and no role gates it. Renaming the organization moved to
- * `PATCH /api/org`, which is `org.rename`.
+ * A `self` route in the manifest: an authenticated session is the whole
+ * requirement. No role gates it, and neither does membership — a user whose
+ * membership row is missing is exactly the user who needs to reach Settings,
+ * and their name and email are theirs whatever any org says. Renaming the
+ * organization moved to `PATCH /api/org`, which is `org.rename`.
  */
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { sub } = getUserInfo(event);
@@ -156,10 +158,5 @@ export const handler = middy(baseHandler)
   // email_verified to false and re-trigger verification, so this cannot be
   // used to bypass the gate.
   .use(authMiddleware({ requireVerifiedEmail: false }))
-  // No membership gate. What is left here after the org rename moved to
-  // PATCH /api/org is a person's own name and email, held in Auth0 and on their
-  // own identity row, and none of it is org-scoped. Gating it on membership
-  // would lock out the one caller who most needs it: the user whose missing
-  // membership row is the thing that has to be repaired.
   .use(csrfMiddleware())
   .use(errorHandlerMiddleware());

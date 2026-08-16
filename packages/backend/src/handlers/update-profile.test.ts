@@ -44,7 +44,12 @@ process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
 import { handler } from './update-profile.js';
-import { buildEvent, buildContext, stubMembershipRead } from '../test/lambda-test-utilities.js';
+import {
+  buildEvent,
+  buildContext,
+  stubAbsentMembershipRead,
+  stubMembershipRead,
+} from '../test/lambda-test-utilities.js';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
@@ -115,6 +120,19 @@ describe('PATCH /api/me/profile handler', () => {
       });
 
     ddbMock.on(UpdateItemCommand).resolves({});
+  });
+
+  it('serves a caller with no membership row', async () => {
+    // The whole point of the `self` category. A user whose membership row is
+    // missing — a failed conversion, a removal mid-session — is exactly the
+    // user who needs Settings, and their own name is theirs whatever any org
+    // says. An org gate here would lock them out of the page that fixes it.
+    stubAbsentMembershipRead(ddbMock, { orgId: MOCK_ORG_ID, userId: MOCK_USER_ID });
+
+    const result = await handler(profileEvent({ name: 'New Name' }), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 200 });
+    expect(mockUpdateAuth0User).toHaveBeenCalledWith(MOCK_SUB, { name: 'New Name' });
   });
 
   it('will not rename the org: that field left this endpoint', async () => {
