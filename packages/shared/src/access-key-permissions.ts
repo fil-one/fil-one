@@ -1,8 +1,8 @@
-import {
-  ACCESS_KEY_PERMISSIONS,
-  GRANULAR_PERMISSIONS,
-  type AccessKeyPermission,
-  type GranularPermission,
+import { GRANULAR_PERMISSION_MAP } from './api/access-keys.js';
+import type {
+  AccessKeyPermission,
+  GranularPermission,
+  ObjectPermission,
 } from './api/access-keys.js';
 import { permissionsForRole } from './permissions.js';
 import type { Permission } from './permissions.js';
@@ -16,40 +16,59 @@ import type { Permission } from './permissions.js';
  * cosmetic — without it a Member denied `buckets.delete` in the console mints
  * a key and does it over S3 instead.
  *
- * The two vocabularies do not line up one for one, and the mapping resolves
- * that conservatively: every bucket-level and data-protection permission maps
- * to `buckets.delete`, the most privileged bucket capability, because the
- * console's four permissions cannot express "may configure a bucket" or "may
- * set retention" and a key must never carry more than its creator. What that
- * means in practice is the ADR's line: a key a Member mints carries at most
- * read, list, write, and delete on objects. Finer grants are what M2's
- * privileged-operation flow is for.
+ * Each key permission maps to the console permission that grants the same
+ * capability: creating a bucket is `buckets.create`, deleting one is
+ * `buckets.delete`, and reading a bucket's versioning or object-lock settings
+ * is `buckets.read`. Mapping a capability to something stricter than its
+ * console equivalent is not conservatism — it refuses a caller the thing they
+ * demonstrably hold, and a Member who creates buckets every day would be
+ * unable to mint a key that does it.
  */
 export const ACCESS_KEY_PERMISSION_REQUIREMENT: Record<AccessKeyPermission, Permission> = {
   read: 'objects.read',
   list: 'objects.read',
   write: 'objects.write',
   delete: 'objects.delete',
-  CreateBucket: 'buckets.delete',
+  CreateBucket: 'buckets.create',
   DeleteBucket: 'buckets.delete',
-  GetBucketVersioning: 'buckets.delete',
-  GetBucketObjectLockConfiguration: 'buckets.delete',
+  GetBucketVersioning: 'buckets.read',
+  GetBucketObjectLockConfiguration: 'buckets.read',
 };
 
 /**
- * The same question for the data-protection granulars. Reading a retention
- * setting and writing one are both bucket-level authority here: they are
- * redeemed at the vendor, where their use cannot be audit-logged.
+ * The data-protection granulars that need more than their parent.
+ *
+ * Writing retention or a legal hold is the one genuinely privileged thing on
+ * this form: it is redeemed at the vendor, where its use cannot be audit-logged,
+ * and it can make an object undeletable for years. Presign refuses the same two
+ * operations for the same reason — no `putObjectRetention` op exists there — so
+ * a key is the only way to reach them and the key needs `privileged.grant`,
+ * which only an Owner holds. M2's privileged-operation flow (FIL-1019) replaces
+ * this with a grant per operation.
  */
-export const GRANULAR_PERMISSION_REQUIREMENT: Record<GranularPermission, Permission> = {
-  GetObjectVersion: 'buckets.delete',
-  GetObjectRetention: 'buckets.delete',
-  GetObjectLegalHold: 'buckets.delete',
-  PutObjectRetention: 'buckets.delete',
-  PutObjectLegalHold: 'buckets.delete',
-  ListBucketVersions: 'buckets.delete',
-  DeleteObjectVersion: 'buckets.delete',
+const GRANULAR_ELEVATIONS: Partial<Record<GranularPermission, Permission>> = {
+  PutObjectRetention: 'privileged.grant',
+  PutObjectLegalHold: 'privileged.grant',
 };
+
+/**
+ * The same question for the data-protection granulars, derived rather than
+ * written out: a granular is a narrowing of the object permission it hangs off,
+ * so reading an object version needs what reading an object needs. Deriving it
+ * from {@link GRANULAR_PERMISSION_MAP} means a granular added to that map
+ * cannot arrive here with a requirement nobody chose. The exceptions are
+ * {@link GRANULAR_ELEVATIONS}.
+ */
+export const GRANULAR_PERMISSION_REQUIREMENT: Record<GranularPermission, Permission> =
+  Object.fromEntries(
+    Object.entries(GRANULAR_PERMISSION_MAP).flatMap(([parent, granulars]) =>
+      granulars.map((granular) => [
+        granular,
+        GRANULAR_ELEVATIONS[granular] ??
+          ACCESS_KEY_PERMISSION_REQUIREMENT[parent as ObjectPermission],
+      ]),
+    ),
+  ) as Record<GranularPermission, Permission>;
 
 /** One requested key permission and the console permission it needs. */
 export interface ExcessKeyPermission {
@@ -83,26 +102,31 @@ export function excessKeyPermissions(
   const requested: ExcessKeyPermission[] = [
     ...request.permissions.map((keyPermission) => ({
       keyPermission,
-      requires: requirementFor(keyPermission, ACCESS_KEY_PERMISSION_REQUIREMENT, [
-        ...ACCESS_KEY_PERMISSIONS,
-      ]),
+      requires: requirementFor(keyPermission, ACCESS_KEY_PERMISSION_REQUIREMENT),
     })),
     ...(request.granularPermissions ?? []).map((keyPermission) => ({
       keyPermission,
-      requires: requirementFor(keyPermission, GRANULAR_PERMISSION_REQUIREMENT, [
-        ...GRANULAR_PERMISSIONS,
-      ]),
+      requires: requirementFor(keyPermission, GRANULAR_PERMISSION_REQUIREMENT),
     })),
   ];
 
   return requested.filter(({ requires }) => requires === undefined || !held.has(requires));
 }
 
-/** The console permission a key permission needs, if it is one we know. */
+/**
+ * The console permission a key permission needs, if it is one we know.
+ *
+ * The table's own keys are the membership test, so there is no second list to
+ * keep in step with it. The own-property check keeps an inherited key such as
+ * `'constructor'` from resolving to something that is not a permission —
+ * `Object.hasOwn` semantics, spelled the ES2020 way because the console
+ * compiles this file at that target.
+ */
 function requirementFor(
   keyPermission: string,
   table: Record<string, Permission>,
-  known: readonly string[],
 ): Permission | undefined {
-  return known.includes(keyPermission) ? table[keyPermission] : undefined;
+  return Object.prototype.hasOwnProperty.call(table, keyPermission)
+    ? table[keyPermission]
+    : undefined;
 }

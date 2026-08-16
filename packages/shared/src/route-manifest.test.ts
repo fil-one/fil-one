@@ -7,12 +7,9 @@ const entries = ROUTE_MANIFEST;
 
 describe('ROUTE_MANIFEST', () => {
   it('lists every registered route once', () => {
-    // 41 routes are registered via addRoute in sst.config.ts — the org-rename
-    // endpoint and the two account-deletion routes joined the original 38. The
-    // backend's manifest coverage test walks src/handlers/ and is the real
-    // completeness check; this pins the count so a route added to the config
-    // without a manifest entry is visible here too.
-    expect(entries).toHaveLength(41);
+    // Completeness is the backend's manifest coverage test, which walks
+    // src/handlers/. What this adds is uniqueness: two entries for one method
+    // and path would let a route be declared twice with different requirements.
     const keys = entries.map((route) => `${route.method} ${route.path}`);
     expect(new Set(keys).size).toBe(keys.length);
   });
@@ -72,17 +69,24 @@ describe('ROUTE_MANIFEST', () => {
   });
 
   it('checks the routes whose requirement depends on the request in their handlers', () => {
-    // presign serves seven operations through one route;
+    // presign serves seven operations through one route, and
     // set-bucket-rag-enablement creates or discards an index depending on the
-    // flag; create-access-key caps the new key at the creator's own authority.
+    // flag. Neither has a permission the chain could name.
     const inHandler = entries
       .filter((route) => route.requires === 'in-handler')
       .map((route) => route.handler);
-    expect(inHandler.sort()).toStrictEqual([
-      'create-access-key',
-      'presign',
-      'set-bucket-rag-enablement',
-    ]);
+    expect(inHandler.sort()).toStrictEqual(['presign', 'set-bucket-rag-enablement']);
+  });
+
+  it('names a declared permission alongside every in-handler cap', () => {
+    // A cap narrows a requirement; it does not replace one. create-access-key
+    // gates on `keys.create` in the chain and caps the new key at the creator's
+    // own authority in the handler, so the manifest states both.
+    const capped = entries.filter((route) => route.capsInHandler);
+    expect(capped.map((route) => route.handler)).toStrictEqual(['create-access-key']);
+    for (const route of capped) {
+      expect(new Set<string>(PERMISSIONS).has(route.requires as string)).toBe(true);
+    }
   });
 
   it('keeps the self-service marker on the caller-only routes', () => {

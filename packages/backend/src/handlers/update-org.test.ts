@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
-import { ApiErrorCode, OrgRole } from '@filone/shared';
+import {
+  ConditionalCheckFailedException,
+  DynamoDBClient,
+  GetItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
+import { OrgRole } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.js';
 
 // ---------------------------------------------------------------------------
@@ -34,8 +39,10 @@ import {
   buildEvent,
   buildContext,
   NO_MEMBERSHIP,
+  stubAbsentMembershipRead,
   stubMembershipRead,
 } from '../test/lambda-test-utilities.js';
+import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -84,6 +91,16 @@ function updateInput() {
   return calls[0].args[0].input;
 }
 
+/** Answer the profile-row read the rename makes to capture the previous name. */
+function orgProfileNamed(name?: string) {
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+    })
+    .resolves(name === undefined ? {} : { Item: { name: { S: name } } });
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -115,7 +132,8 @@ describe('PATCH /api/org handler', () => {
         },
       });
 
-    ddbMock.on(UpdateItemCommand).resolves({ Attributes: { name: { S: 'Old Corp' } } });
+    ddbMock.on(UpdateItemCommand).resolves({});
+    orgProfileNamed('Old Corp');
     callerHolds(OrgRole.Owner);
   });
 
@@ -135,14 +153,13 @@ describe('PATCH /api/org handler', () => {
     });
   });
 
-  it('reads back the previous name, which the audit event will need', async () => {
+  it('reads the previous name, which the audit event will need, and stamps the event', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     await handler(renameEvent({ name: 'New Corp' }), buildContext());
 
-    expect(updateInput()).toMatchObject({ ReturnValues: 'UPDATED_OLD' });
     expect(log).toHaveBeenCalledWith(
-      expect.stringContaining('renamed'),
+      expect.stringContaining('org.renamed'),
       expect.objectContaining({
         orgId: MOCK_ORG_ID,
         actorUserId: MOCK_USER_ID,
@@ -150,6 +167,34 @@ describe('PATCH /api/org handler', () => {
         name: 'New Corp',
       }),
     );
+  });
+
+  it('reads the previous name rather than asking the write for it', async () => {
+    // `UPDATED_OLD` returns nothing when the attribute was absent, and an org
+    // created before naming shipped has no `name` on its profile row — the
+    // audit event would record a rename with no predecessor. The read is also
+    // what lets a TransactWriteItems wrap the write with the audit record.
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    orgProfileNamed(undefined);
+
+    const result = await handler(renameEvent({ name: 'New Corp' }), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 200 });
+    expect(updateInput().ReturnValues).toBeUndefined();
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining('org.renamed'),
+      expect.objectContaining({ previousName: undefined, name: 'New Corp' }),
+    );
+  });
+
+  it('returns 404 when the profile row the rename is conditional on is gone', async () => {
+    ddbMock
+      .on(UpdateItemCommand)
+      .rejects(new ConditionalCheckFailedException({ message: 'conditional', $metadata: {} }));
+
+    const result = await handler(renameEvent({ name: 'New Corp' }), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 404 });
   });
 
   it('escapes the stored name', async () => {
@@ -168,26 +213,6 @@ describe('PATCH /api/org handler', () => {
     expect(result).toMatchObject({ statusCode: 200 });
   });
 
-  it.each([OrgRole.Member, OrgRole.ReadOnly])('refuses %s', async (role) => {
-    callerHolds(role);
-
-    const result = await handler(renameEvent({ name: 'New Corp' }), buildContext());
-
-    expect(result).toMatchObject({ statusCode: 403 });
-    expect(JSON.parse((result as { body: string }).body).code).toBe(ApiErrorCode.FORBIDDEN_ROLE);
-    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-  });
-
-  it('refuses a caller with no membership row', async () => {
-    ddbMock.on(GetItemCommand, { TableName: 'OrgTable' }).resolves({});
-
-    const result = await handler(renameEvent({ name: 'New Corp' }), buildContext());
-
-    expect(result).toMatchObject({ statusCode: 403 });
-    expect(JSON.parse((result as { body: string }).body).code).toBe(ApiErrorCode.NOT_A_MEMBER);
-    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-  });
-
   it.each([
     ['too short', 'A'],
     ['special characters', 'Acme @Corp!'],
@@ -197,6 +222,16 @@ describe('PATCH /api/org handler', () => {
 
     expect(result).toMatchObject({ statusCode: 400 });
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+  });
+
+  it('answers a rejected name with the rule the form has to state', async () => {
+    // The console shows this string under the field, so a generic "invalid
+    // request" would leave the user guessing which characters are allowed.
+    const result = await handler(renameEvent({ name: 'Acme @Corp!' }), buildContext());
+
+    expect(JSON.parse((result as { body: string }).body).message).toStrictEqual(
+      expect.stringContaining('letters, numbers, spaces, hyphens, and periods'),
+    );
   });
 
   it('returns 400 for a body with no name', async () => {
@@ -209,5 +244,21 @@ describe('PATCH /api/org handler', () => {
     const result = await handler(renameEvent('not-json{'), buildContext());
 
     expect(result).toMatchObject({ statusCode: 400 });
+  });
+
+  describeRoleEnforcement({
+    permission: 'org.rename',
+    orgId: MOCK_ORG_ID,
+    userId: MOCK_USER_ID,
+    invoke: (membership) => {
+      // The real chain runs, so the role comes from the OrgTable row rather
+      // than from the event.
+      if (membership === NO_MEMBERSHIP) {
+        stubAbsentMembershipRead(ddbMock, { orgId: MOCK_ORG_ID, userId: MOCK_USER_ID });
+      } else {
+        callerHolds(membership.role);
+      }
+      return handler(renameEvent({ name: 'New Corp' }), buildContext());
+    },
   });
 });

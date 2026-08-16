@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
+import { OrgRole } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -25,7 +26,7 @@ vi.mock('../middleware/auth.js', () => ({
 }));
 
 import { baseHandler, handler } from './list-access-keys.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { buildEvent, buildContext, membershipFor } from '../test/lambda-test-utilities.js';
 import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
 // ---------------------------------------------------------------------------
@@ -46,6 +47,7 @@ function ddbItem(overrides: {
   buckets?: string[];
   expiresAt?: string;
   region?: string;
+  createdBy?: string;
 }) {
   const item: Record<string, AttributeValue> = {
     pk: { S: `ORG#${USER_INFO.orgId}` },
@@ -55,6 +57,7 @@ function ddbItem(overrides: {
     createdAt: { S: overrides.createdAt },
     status: { S: overrides.status ?? 'active' },
   };
+  if (overrides.createdBy) item.createdBy = { S: overrides.createdBy };
   if (overrides.permissions) item.permissions = { L: overrides.permissions.map((p) => ({ S: p })) };
   if (overrides.granularPermissions)
     item.granularPermissions = { L: overrides.granularPermissions.map((g) => ({ S: g })) };
@@ -512,8 +515,73 @@ describe('list-access-keys baseHandler', () => {
   });
 });
 
+describe('who sees which keys', () => {
+  // `keys.manage_own` is what a Member holds. Before the narrowing below it
+  // named a filter nobody applied, and the route handed every member the org's
+  // whole key inventory.
+  const OWN = ddbItem({
+    id: 'key-own',
+    keyName: 'Mine',
+    accessKeyId: 'AKIAOWN',
+    createdAt: '2026-01-01T00:00:00Z',
+    createdBy: USER_INFO.userId,
+  });
+  const SOMEONE_ELSES = ddbItem({
+    id: 'key-other',
+    keyName: 'Theirs',
+    accessKeyId: 'AKIAOTHER',
+    createdAt: '2026-01-02T00:00:00Z',
+    createdBy: 'user-2',
+  });
+  // Minted before attribution shipped: it names no creator, so nobody can claim
+  // it as their own.
+  const UNATTRIBUTED = ddbItem({
+    id: 'key-legacy',
+    keyName: 'Legacy',
+    accessKeyId: 'AKIALEGACY',
+    createdAt: '2026-01-03T00:00:00Z',
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ddbMock.reset();
+    ddbMock.on(QueryCommand).resolves({ Items: [OWN, SOMEONE_ELSES, UNATTRIBUTED] });
+  });
+
+  async function keyNamesFor(role: OrgRole) {
+    const event = buildEvent({
+      userInfo: {
+        ...USER_INFO,
+        membership: membershipFor(USER_INFO.orgId, USER_INFO.userId, role),
+      },
+    });
+    const result = await baseHandler(event);
+    return (JSON.parse(result.body!).keys as { keyName: string }[]).map((key) => key.keyName);
+  }
+
+  it.each([OrgRole.Owner, OrgRole.Admin])('shows %s every key in the org', async (role) => {
+    expect(await keyNamesFor(role)).toStrictEqual(['Mine', 'Theirs', 'Legacy']);
+  });
+
+  it('shows a Member only the keys they created', async () => {
+    expect(await keyNamesFor(OrgRole.Member)).toStrictEqual(['Mine']);
+  });
+
+  it('ships the creator so the console can gate the per-row revoke button', async () => {
+    const event = buildEvent({ userInfo: USER_INFO });
+    const keys = JSON.parse((await baseHandler(event)).body!).keys as { createdBy?: string }[];
+
+    expect(keys.map((key) => key.createdBy)).toStrictEqual([
+      USER_INFO.userId,
+      'user-2',
+      // An unattributed row carries no creator rather than a made-up one.
+      undefined,
+    ]);
+  });
+});
+
 describeRoleEnforcement({
-  permission: 'keys.manage_all',
+  permission: 'keys.manage_own',
   invoke: (membership) =>
     handler(buildEvent({ userInfo: { ...USER_INFO, membership } }), buildContext()),
 });

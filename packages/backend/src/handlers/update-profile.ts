@@ -17,7 +17,6 @@ import {
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo, requestTokenRefresh } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { requireMembershipMiddleware } from '../middleware/authorize.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
@@ -35,9 +34,11 @@ function isDisposableDomain(domain: string): boolean {
 /**
  * PATCH /api/me/profile — the caller's own name and email, and nothing else.
  *
- * A `self` route in the manifest: membership in the active org is the whole
- * requirement, and no role gates it. Renaming the organization moved to
- * `PATCH /api/org`, which is `org.rename`.
+ * A `self` route in the manifest: an authenticated session is the whole
+ * requirement. No role gates it, and neither does membership — a user whose
+ * membership row is missing is exactly the user who needs to reach Settings,
+ * and their name and email are theirs whatever any org says. Renaming the
+ * organization moved to `PATCH /api/org`, which is `org.rename`.
  */
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { sub } = getUserInfo(event);
@@ -157,9 +158,5 @@ export const handler = middy(baseHandler)
   // email_verified to false and re-trigger verification, so this cannot be
   // used to bypass the gate.
   .use(authMiddleware({ requireVerifiedEmail: false }))
-  // Nothing here needs a role, but it does need a caller who is in the org:
-  // these fields belong to a membership, and a request without one is refused
-  // rather than written.
-  .use(requireMembershipMiddleware())
   .use(csrfMiddleware())
   .use(errorHandlerMiddleware());

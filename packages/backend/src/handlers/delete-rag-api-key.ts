@@ -6,6 +6,7 @@ import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import { keyScope, notYourKeyResponse, withinScope } from '../lib/key-scope.js';
 import { RagApiKeyKeys } from '../lib/rag-api-keys.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -29,9 +30,11 @@ function notFoundResponse(): APIGatewayProxyResultV2 {
 /**
  * Delete a RAG API key. Ownership proof is structural: the lookup runs under
  * the caller's own `ORG#{orgId}` partition, so a keyId belonging to another
- * org can never resolve. Both rows (ORG record + hash LOOKUP row) are removed
- * in one transaction — bearer auth reads the LOOKUP row with a consistent
- * read, so revocation takes effect immediately.
+ * org can never resolve. Within the org, a caller holding only
+ * `keys.manage_own` reaches the keys they created and no others. Both rows (ORG
+ * record + hash LOOKUP row) are removed in one transaction — bearer auth reads
+ * the LOOKUP row with a consistent read, so revocation takes effect
+ * immediately.
  */
 export async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const keyId = event.pathParameters?.keyId;
@@ -52,6 +55,10 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   );
   const tokenHash = Item?.tokenHash?.S;
   if (!tokenHash) return notFoundResponse();
+
+  // Revoking is `keys.manage_own` unless the caller holds `keys.manage_all`, so
+  // a Member revokes the keys they minted and no others.
+  if (!withinScope(keyScope(event), Item?.createdBy?.S)) return notYourKeyResponse();
 
   try {
     await dynamo.send(
@@ -95,7 +102,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
-  .use(authorize('keys.manage_all'))
+  .use(authorize('keys.manage_own'))
   .use(csrfMiddleware())
   .use(subscriptionGuardMiddleware(AccessLevel.Write))
   .use(ragAccessMiddleware())

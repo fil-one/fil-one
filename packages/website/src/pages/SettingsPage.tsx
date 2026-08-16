@@ -182,10 +182,44 @@ function applyProfileUpdate(result: {
   };
 }
 
+/** What one Save press changed, whether or not the whole press succeeded. */
+interface SavedFields {
+  name?: string;
+  email?: string;
+  orgName?: string;
+}
+
 /**
- * What one Save press sends. The org name goes to `PATCH /api/org` and the
- * personal fields to `PATCH /api/me/profile`: two endpoints because they are
- * two permissions, and only the fields that changed are sent at all.
+ * A save where one call succeeded and the other did not.
+ *
+ * The two halves go to two endpoints and either can fail on its own — most
+ * often the rename, which a Member is not allowed to make. Carrying what did
+ * land keeps the page honest: the message names the half that failed, and the
+ * half that succeeded still reaches the cache instead of being silently
+ * discarded and reappearing on the next refetch.
+ */
+class PartialSaveError extends Error {
+  constructor(
+    message: string,
+    readonly saved: SavedFields,
+  ) {
+    super(message);
+    this.name = 'PartialSaveError';
+  }
+}
+
+function messageFor(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
+}
+
+/**
+ * What one Save press sends. The personal fields go to `PATCH /api/me/profile`
+ * and the org name to `PATCH /api/org`: two endpoints because they are two
+ * permissions, and only the fields that changed are sent at all.
+ *
+ * Personal fields first. They are the caller's own and every role may change
+ * them, while the rename is the call a Member's role refuses — running it
+ * second means the likely failure cannot strand the likely success.
  */
 async function saveProfileAndOrg({
   profile,
@@ -193,10 +227,26 @@ async function saveProfileAndOrg({
 }: {
   profile: UpdateProfileRequest | undefined;
   orgName: string | undefined;
-}): Promise<{ name?: string; email?: string; orgName?: string }> {
-  const renamed = orgName === undefined ? undefined : await updateOrg({ name: orgName });
-  const updated = profile === undefined ? {} : await updateProfile(profile);
-  return { ...updated, ...(renamed ? { orgName: renamed.name } : {}) };
+}): Promise<SavedFields> {
+  const saved: SavedFields = {};
+
+  if (profile !== undefined) {
+    try {
+      Object.assign(saved, await updateProfile(profile));
+    } catch (err) {
+      throw new PartialSaveError(messageFor(err, 'Failed to update your profile'), saved);
+    }
+  }
+
+  if (orgName !== undefined) {
+    try {
+      saved.orgName = (await updateOrg({ name: orgName })).name;
+    } catch (err) {
+      throw new PartialSaveError(messageFor(err, 'Failed to rename the organization'), saved);
+    }
+  }
+
+  return saved;
 }
 
 function useProfileForm(me: MeResponse) {
@@ -221,21 +271,29 @@ function useProfileForm(me: MeResponse) {
 
   const nameChanged = !social && name !== (me.name ?? '');
   const emailChanged = !social && email !== (me.email ?? '');
-  const orgNameChanged = orgName !== (me.orgName ?? '');
+  // Against the trimmed value, because trimmed is what gets sent: otherwise a
+  // trailing space alone counts as a change and the save renames the org to the
+  // name it already has.
+  const orgNameChanged = orgName.trim() !== (me.orgName ?? '');
   const hasChanges = nameChanged || emailChanged || orgNameChanged;
+
+  /** Reflect what landed, in the form and in the cache the rest of the app reads. */
+  function applySaved(saved: SavedFields) {
+    if (saved.name !== undefined) setName(saved.name);
+    if (saved.email !== undefined) setEmail(saved.email);
+    if (saved.orgName !== undefined) setOrgName(saved.orgName);
+
+    const update = applyProfileUpdate(saved);
+    queryClient.setQueryData<MeResponse>(queryKeys.me, update);
+    queryClient.setQueryData<MeResponse>(queryKeys.meWithMfa, update);
+  }
 
   const mutation = useMutation({
     mutationFn: saveProfileAndOrg,
-    onSuccess: (result) => {
-      if (result.name !== undefined) setName(result.name);
-      if (result.email !== undefined) setEmail(result.email);
-      if (result.orgName !== undefined) setOrgName(result.orgName);
+    onSuccess: (saved) => {
+      applySaved(saved);
 
-      const update = applyProfileUpdate(result);
-      queryClient.setQueryData<MeResponse>(queryKeys.me, update);
-      queryClient.setQueryData<MeResponse>(queryKeys.meWithMfa, update);
-
-      if (result.email !== undefined) {
+      if (saved.email !== undefined) {
         // The cache update above means the verify-email page renders the
         // unverified state immediately, without a /me round-trip.
         void navigate({ to: '/verify-email' });
@@ -244,7 +302,11 @@ function useProfileForm(me: MeResponse) {
       }
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : 'Failed to update profile');
+      // A half that succeeded is applied even though the press as a whole
+      // failed; discarding it would show the old value until the next refetch
+      // and invite the user to save it again.
+      if (err instanceof PartialSaveError) applySaved(err.saved);
+      toast.error(messageFor(err, 'Failed to update profile'));
     },
   });
 
@@ -263,15 +325,19 @@ function useProfileForm(me: MeResponse) {
       profile = validated.data;
     }
 
+    let nextOrgName: string | undefined;
     if (orgNameChanged) {
       const validated = OrgNameSchema.safeParse(orgName);
       if (!validated.success) {
         toast.error(validated.error.issues[0].message);
         return;
       }
+      // The schema's own trimmed output, so the value stored is the value the
+      // form was checked against.
+      nextOrgName = validated.data;
     }
 
-    mutation.mutate({ profile, orgName: orgNameChanged ? orgName : undefined });
+    mutation.mutate({ profile, orgName: nextOrgName });
   }
 
   return {
