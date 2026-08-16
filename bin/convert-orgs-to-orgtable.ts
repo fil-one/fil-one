@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-// Usage: ./bin/convert-orgs-to-orgtable.ts --stage <name> [--execute] [--verify] [--force-unlock]
+// Usage: ./bin/convert-orgs-to-orgtable.ts --stage <name> [--execute] [--verify]
+//        [--accept-anomalies <orgId,orgId,…>] [--force-unlock]
 //
 // Moves organization membership out of UserInfoTable and into OrgTable, and
 // converts the legacy `admin` role to `owner` on the way (IAM M1, FIL-1013).
@@ -37,6 +38,16 @@
 // --verify re-derives the classification and prints PASS/FAIL per check — the
 // gate the enforcement PR merges on. It writes nothing.
 //
+// An anomaly fails --verify. Its org has no OrgTable membership and enforcement
+// reads no other table, so merging enforcement while one stands locks that
+// account out. Once an org has been looked at, name it to record the decision:
+//
+//   ./bin/convert-orgs-to-orgtable.ts --stage production --verify \
+//     --accept-anomalies ORG#8f3c…,ORG#1a2b…
+//
+// The report echoes every acceptance, so the PASS an operator pastes onto the
+// enforcement PR says which orgs were signed off and why each was an anomaly.
+//
 // An --execute run holds a lock row in OrgTable so the conversion and the
 // revert can never run at once. --force-unlock drops a lock a crashed run left
 // behind.
@@ -56,8 +67,12 @@ import { ensureSstShell } from './lib/stage.ts';
 const cli = parseCli({
   script: './bin/convert-orgs-to-orgtable.ts',
   flags: ['--verify', '--force-unlock'],
+  options: ['--accept-anomalies'],
   help: [
     '--verify        Re-check both tables and print PASS/FAIL. Writes nothing.',
+    '--accept-anomalies <orgId,orgId,…>',
+    '                With --verify: the anomaly orgs an operator has dispositioned.',
+    '                Anomalies not named here fail verification.',
     '--force-unlock  Drop the run lock a crashed --execute run left behind.',
   ],
 });
@@ -84,7 +99,7 @@ import {
   UserInfoKeys,
 } from './lib/org-conversion.ts';
 import type { ConvertPlan, OrgPlan, OrgState, ScanCounts } from './lib/org-conversion.ts';
-import { formatVerifyReport, verifyConversion } from './lib/org-verify.ts';
+import { formatVerifyReport, parseAcceptedAnomalies, verifyConversion } from './lib/org-verify.ts';
 
 /** Pause between orgs that write, so a few thousand transactions stay polite to a shared table. */
 const WRITE_DELAY_MS = 50;
@@ -99,6 +114,15 @@ const dynamo = new DynamoDBClient({ region: awsRegion });
 
 const verify = cli.flag('--verify');
 const execute = cli.execute && !verify;
+const acceptedAnomalies = parseAcceptedAnomalies(cli.option('--accept-anomalies'));
+
+// A disposition is a statement about what --verify may pass, and nothing else
+// reads it. Accepting it on a run that cannot act on it would let an operator
+// believe anomalies had been signed off when no check ever saw the list.
+if (acceptedAnomalies.size > 0 && !verify) {
+  console.error('--accept-anomalies applies to --verify only. Nothing was read or written.');
+  process.exit(1);
+}
 
 if (cli.flag('--force-unlock')) {
   await forceUnlock(dynamo, orgTable);
@@ -361,7 +385,7 @@ const plans: OrgPlan[] = states
   .sort((a, b) => a.orgId.localeCompare(b.orgId));
 
 if (verify) {
-  const checks = verifyConversion(states, plans, scan);
+  const checks = verifyConversion(states, plans, scan, acceptedAnomalies);
   console.log(formatVerifyReport(checks));
   process.exit(checks.some((check) => !check.pass) ? 1 : 0);
 }
@@ -475,7 +499,8 @@ if (execute) {
   );
   console.log('');
   console.log('Now run --verify against the same stage and record its result — the enforcement');
-  console.log('PR merges on a PASS. See docs/OrgConversionRunbook.md.');
+  console.log('PR merges on a PASS, and any anomaly left standing has to be named on');
+  console.log('--accept-anomalies to get one. See docs/OrgConversionRunbook.md.');
   if (outcomes.transactionConflict > 0 || outcomes.legacyDeleteConflict > 0) process.exitCode = 1;
 } else {
   console.log('Dry run only — nothing was written.');

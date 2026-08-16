@@ -33,7 +33,7 @@ import type {
   OrgState,
   ScanCounts,
 } from './org-conversion.ts';
-import { formatVerifyReport, verifyConversion } from './org-verify.ts';
+import { formatVerifyReport, parseAcceptedAnomalies, verifyConversion } from './org-verify.ts';
 
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
 const USER_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
@@ -740,7 +740,11 @@ describe('verifyConversion', () => {
     hasMeta: true,
   });
 
-  function verify(states: OrgState[], overrides: Partial<ScanCounts> = {}) {
+  function verify(
+    states: OrgState[],
+    overrides: Partial<ScanCounts> = {},
+    accepted: string | undefined = undefined,
+  ) {
     const plans = states.map((one) => classifyOrg(one, knownUsers));
     const scan: ScanCounts = {
       userInfoRows: 0,
@@ -753,8 +757,16 @@ describe('verifyConversion', () => {
       orgTableMetaRows: states.filter((one) => one.hasMeta).length,
       ...overrides,
     };
-    return verifyConversion(states, plans, scan);
+    return verifyConversion(states, plans, scan, parseAcceptedAnomalies(accepted));
   }
+
+  const unexpectedRole = (orgId: string): OrgState => ({
+    orgId,
+    profile: { createdBy: USER_ID, createdAt: CREATED_AT },
+    legacyMembers: [{ userId: USER_ID, role: 'member' }],
+    orgTableMemberUserIds: [],
+    hasMeta: false,
+  });
 
   it('passes a fully converted stage', () => {
     const checks = verify([converted('org-a'), converted('org-b')]);
@@ -763,20 +775,49 @@ describe('verifyConversion', () => {
     expect(formatVerifyReport(checks)).toContain('VERIFY: PASS');
   });
 
-  it('passes when the only legacy rows left are on anomalies, and enumerates them', () => {
-    const anomaly: OrgState = {
-      orgId: 'org-z',
-      profile: { createdBy: USER_ID, createdAt: CREATED_AT },
-      legacyMembers: [{ userId: USER_ID, role: 'member' }],
-      orgTableMemberUserIds: [],
-      hasMeta: false,
-    };
+  it('fails an undispositioned anomaly, and enumerates the legacy row it kept', () => {
+    const checks = verify([converted('org-a'), unexpectedRole('org-z')]);
+    const report = formatVerifyReport(checks);
 
-    const checks = verify([converted('org-a'), anomaly]);
+    expect(report).toContain('VERIFY: FAIL');
+    expect(report).toContain('FAIL  Every anomaly has been dispositioned');
+    expect(report).toContain('ORG#org-z [unexpected-role]');
+    expect(report).toContain('ORG#org-z MEMBER#' + USER_ID + ' — unexpected-role');
+  });
+
+  it('passes once every anomaly is named, and echoes what was accepted', () => {
+    const checks = verify(
+      [converted('org-a'), unexpectedRole('org-z')],
+      {},
+      `${OrgKeys.orgPk('org-z')}`,
+    );
     const report = formatVerifyReport(checks);
 
     expect(report).toContain('VERIFY: PASS');
-    expect(report).toContain('ORG#org-z MEMBER#' + USER_ID + ' — unexpected-role');
+    expect(report).toContain('accepted by --accept-anomalies (1):');
+    expect(report).toContain('ORG#org-z [unexpected-role]');
+  });
+
+  it('accepts bare org ids as well as the ORG# form the report prints', () => {
+    const checks = verify([unexpectedRole('org-z')], {}, 'org-z');
+
+    expect(checks.every((check) => check.pass)).toBe(true);
+  });
+
+  it('still fails the anomalies nobody named', () => {
+    const checks = verify([unexpectedRole('org-y'), unexpectedRole('org-z')], {}, 'org-z');
+    const report = formatVerifyReport(checks);
+
+    expect(report).toContain('VERIFY: FAIL');
+    expect(report).toContain('1 accepted, 1 undispositioned');
+    expect(report).toContain('ORG#org-y [unexpected-role]');
+  });
+
+  it('names an acceptance that no longer matches an anomaly', () => {
+    const checks = verify([converted('org-a')], {}, 'org-a');
+
+    expect(checks.every((check) => check.pass)).toBe(true);
+    expect(formatVerifyReport(checks)).toContain('ORG#org-a — no longer an anomaly');
   });
 
   it('fails when an org is still convertible', () => {
@@ -831,8 +872,16 @@ describe('verifyConversion', () => {
       hasMeta: true,
     };
 
-    const checks = verify([removed]);
+    // A removed membership is still an anomaly, so it needs the same explicit
+    // disposition as any other; what this asserts is that the META check itself
+    // is satisfied by the classification.
+    const checks = verify([removed], {}, 'org-v');
 
     expect(formatVerifyReport(checks)).toContain('VERIFY: PASS');
+    expect(
+      checks.find(
+        (check) => check.name === 'Every META without a membership is a removed membership',
+      )?.pass,
+    ).toBe(true);
   });
 });

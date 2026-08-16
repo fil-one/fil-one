@@ -118,6 +118,28 @@ or deleting rows by hand, not making the script convert it. An org left as an
 anomaly still holds its `UserInfoTable` `MEMBER#` row afterwards, by design —
 deleting it would destroy the only record of what the org held.
 
+That row is also why an anomaly fails `--verify`. Enforcement reads `OrgTable`
+and nothing else, so an anomaly org's users have no membership the moment it
+deploys, whatever `UserInfoTable` still holds. An anomaly that has been looked
+at is recorded by naming its org on the verify run:
+
+```sh
+./bin/convert-orgs-to-orgtable.ts --stage production --verify \
+  --accept-anomalies ORG#8f3c…,ORG#1a2b…
+```
+
+Each id is a separate decision about one account, so the list is enumerated by
+hand — there is no "accept all". Both the `ORG#…` form the report prints and
+the bare org id are accepted. Every acceptance is echoed under the check, with
+the reason the org was an anomaly, so the PASS recorded on the enforcement PR
+says which accounts were signed off and by which classification. An id that no
+longer matches an anomaly is echoed as such rather than silently dropped.
+
+The cheapest disposition is often to make the anomaly stop being one: repairing
+the org by hand (writing the `OrgTable` membership the conversion declined to
+invent) removes it from the list, and the next `--verify` passes without the
+flag.
+
 ## Execute
 
 ```sh
@@ -164,7 +186,8 @@ run; it is never counted as a conflict for manual review.
 ## Verify
 
 ```sh
-./bin/convert-orgs-to-orgtable.ts --stage production --verify 2>&1 | tee convert-verify.log
+./bin/convert-orgs-to-orgtable.ts --stage production --verify \
+  --accept-anomalies ORG#8f3c…,ORG#1a2b… 2>&1 | tee convert-verify.log
 ```
 
 `--verify` re-reads both tables, re-derives the same classification the
@@ -178,7 +201,7 @@ PASS  No org is still repairable
         0 orgs would be repaired from PROFILE.createdBy
 PASS  No converted org still holds its legacy row
         0 converted orgs have a legacy MEMBER# row left to delete
-PASS  Every remaining legacy MEMBER# row belongs to an undispositioned anomaly
+PASS  Every remaining legacy MEMBER# row belongs to an anomaly
         2 legacy MEMBER# rows remain, on 2 orgs; 0 of those orgs are not anomalies
           ORG#8f3c… MEMBER#a1b2… — unexpected-role
           ORG#1a2b… MEMBER#c4d5… — unknown-user
@@ -188,15 +211,28 @@ PASS  Every org with a membership has its META counter
         812 META rows for 810 memberships; 0 memberships have none
 PASS  Every META without a membership is a removed membership
         2 orgs hold META with no membership; 0 are not classified as membership-removed
-PASS  Anomalies are the only orgs left undone
-        2 anomalies of 812 orgs; 810 converted
+PASS  Every anomaly has been dispositioned
+        2 anomalies of 812 orgs; 810 converted; 2 accepted, 0 undispositioned
+        accepted by --accept-anomalies (2):
+          ORG#8f3c… [unexpected-role] MEMBER#a1b2… carries role="member", expected "admin"
+          ORG#1a2b… [unknown-user] MEMBER#c4d5… has no USER#c4d5…/PROFILE row
 
 VERIFY: PASS
 ```
 
-**The gate is `VERIFY: PASS`, not a legacy-row count of zero.** Anomaly classes
-keep their legacy rows on purpose; what has to be true is that every row still
-standing belongs to an org somebody has to look at, which is the fourth check.
+**The gate for the enforcement PR is `VERIFY: PASS` with zero unaccepted
+anomalies**, not a legacy-row count of zero. Anomaly classes keep their legacy
+rows on purpose, and the run above passes because both anomalies were named on
+`--accept-anomalies`. Without that flag the same stage reports:
+
+```
+FAIL  Every anomaly has been dispositioned
+        2 anomalies of 812 orgs; 810 converted; 0 accepted, 2 undispositioned
+          ORG#8f3c… [unexpected-role] MEMBER#a1b2… carries role="member", expected "admin"
+          ORG#1a2b… [unknown-user] MEMBER#c4d5… has no USER#c4d5…/PROFILE row
+
+VERIFY: FAIL (1 checks)
+```
 
 Spot-check one org from `convert.log` if you want the raw rows:
 
@@ -219,10 +255,18 @@ and `META` with `ownerCount: 1`.
 
 ## Post-run
 
-Record the `--verify` output — stage, date, and the report — on the enforcement
-PR. That PR removes the absent-row Owner fallback, and a PASS is what says the
-fallback has nothing left to catch. Do the same for staging before production,
-so both stages are converted before enforcement merges.
+Record the `--verify` output — stage, date, the report, and the
+`--accept-anomalies` list it was run with — on the enforcement PR. That PR
+removes the absent-row Owner fallback, and a PASS is what says the fallback has
+nothing left to catch. Do the same for staging before production, so both
+stages are converted before enforcement merges.
+
+**Enforcement merges as two PRs together.** #600 puts `authorize()` and the
+membership gate in front of every route and removes the fallback; #601 adds the
+in-handler permission checks that four of those routes need to distinguish a
+Member from an Admin. #600 alone leaves those four routes gated on membership
+but not on role, so deploy the pair — merge #601 immediately behind #600, or
+merge #600 only once #601 is approved and ready to follow.
 
 ## Revert
 
