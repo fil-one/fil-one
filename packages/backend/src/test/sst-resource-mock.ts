@@ -21,6 +21,7 @@ export function sstResourceMock(resources: Record<string, unknown> = {}): {
     Resource: {
       UserInfoTable: { name: 'UserInfoTable' },
       OrgTable: { name: 'OrgTable' },
+      AuditTable: { name: 'AuditTable' },
       Auth0ClientId: { value: 'test-client-id' },
       Auth0ClientSecret: { value: 'test-client-secret' },
       Auth0MgmtClientId: { value: 'test-mgmt-client-id' },
