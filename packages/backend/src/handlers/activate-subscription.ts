@@ -1,5 +1,3 @@
-import { GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
@@ -11,9 +9,9 @@ import {
   mapStripeStatus,
 } from '@filone/shared';
 import type { ActivateSubscriptionResponse } from '@filone/shared';
-import { Resource } from 'sst';
-import { getDynamoClient } from '../lib/ddb-client.js';
 import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.js';
+import { readSubscription } from '../lib/subscription-store.js';
+import type { SubscriptionRecord } from '../lib/dynamo-records.js';
 import { saveBillingRecord, unlockAllProvisionedRegions } from '../lib/billing-activation.js';
 import { isOrgDeleting } from '../lib/org-profile.js';
 import { accountDeletedResponse, ResponseBuilder } from '../lib/response-builder.js';
@@ -23,8 +21,6 @@ import { authMiddleware } from '../middleware/auth.js';
 import { authorize } from '../middleware/authorize.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-
-const dynamo = getDynamoClient();
 
 type PaymentMethodResolution = string | APIGatewayProxyResultV2;
 
@@ -55,9 +51,10 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   // in the teardown snapshot, so nothing would cancel it.
   if (await isOrgDeleting(orgId, { consistent: true })) return accountDeletedResponse();
 
-  // 2. Get customer record from billing table
-  const record = await getCustomerBillingRecord(userId);
-  const stripeCustomerId = record?.stripeCustomerId as string | undefined;
+  // 2. Get the org's billing record — the caller's own is only the fallback,
+  // so activating billing acts on the org's Stripe customer, not a second one.
+  const record = (await readSubscription(orgId, userId))?.record;
+  const stripeCustomerId = record?.stripeCustomerId;
 
   if (!record) {
     return new ResponseBuilder()
@@ -134,7 +131,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   }
 
   // 6. Persist billing record and unlock the tenant on every orchestrator
-  await saveBillingRecord(userId, subscription, paymentMethodId, mappedStatus);
+  await saveBillingRecord({ orgId, userId }, subscription, paymentMethodId, mappedStatus);
   await unlockAllProvisionedRegions(orgId);
 
   const response: ActivateSubscriptionResponse = {
@@ -150,25 +147,9 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   return new ResponseBuilder().status(200).body(response).build();
 }
 
-async function getCustomerBillingRecord(
-  userId: string,
-): Promise<Record<string, unknown> | undefined> {
-  const result = await dynamo.send(
-    new GetItemCommand({
-      TableName: Resource.BillingTable.name,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
-    }),
-  );
-
-  return result.Item ? unmarshall(result.Item) : undefined;
-}
-
 interface CreateOrUpdateSubscriptionParams {
   stripe: ReturnType<typeof getStripeClient>;
-  record: Record<string, unknown>;
+  record: SubscriptionRecord;
   paymentMethodId: string;
   secrets: ReturnType<typeof getBillingSecrets>;
   userId: string;
@@ -192,7 +173,7 @@ async function createOrUpdateSubscription({
   const discounts = promotionCodeId ? [{ promotion_code: promotionCodeId }] : undefined;
 
   if (record.subscriptionId && !isCanceled) {
-    const subscriptionId = record.subscriptionId as string;
+    const { subscriptionId } = record;
     // Step 1: Attach payment method
     await stripe.subscriptions.update(subscriptionId, {
       default_payment_method: paymentMethodId,
@@ -218,7 +199,7 @@ async function createOrUpdateSubscription({
   }
   const orgId = record.orgId as string | undefined;
   return stripe.subscriptions.create({
-    customer: record.stripeCustomerId as string,
+    customer: record.stripeCustomerId!,
     items: [{ price: secrets.STRIPE_PRICE_ID }],
     default_payment_method: paymentMethodId,
     ...(discounts ? { discounts } : {}),
@@ -227,9 +208,8 @@ async function createOrUpdateSubscription({
   });
 }
 
-function resolveSavedPaymentMethod(record: Record<string, unknown>): PaymentMethodResolution {
-  const subscriptionStatus = record.subscriptionStatus as SubscriptionStatus | undefined;
-  const paymentMethodId = record.paymentMethodId as string | undefined;
+function resolveSavedPaymentMethod(record: SubscriptionRecord): PaymentMethodResolution {
+  const { subscriptionStatus, paymentMethodId } = record;
 
   const isCanceled =
     subscriptionStatus === SubscriptionStatus.GracePeriod ||

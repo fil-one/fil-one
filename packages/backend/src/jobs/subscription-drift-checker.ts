@@ -7,11 +7,13 @@ import { reportMetric } from '../lib/metrics.js';
 import { getOrgProfile, isOrgDeletedOrDeleting, type OrgProfileItem } from '../lib/org-profile.js';
 import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.js';
 import type { ServiceOrchestrator } from '../lib/service-orchestrator.js';
+import { preferOrgRows, scannedSubscription } from '../lib/subscription-store.js';
 
 const dynamo = getDynamoClient();
 
 interface ActiveCandidate {
-  userId: string;
+  pk: string;
+  userId?: string;
   orgId: string;
 }
 
@@ -76,8 +78,9 @@ export async function handler(): Promise<void> {
 }
 
 // Multiple SUBSCRIPTION records can exist per orgId (e.g. user re-subscribed
-// after cancellation). We probe each orchestrator once per org so drift counts
-// are not inflated; the first userId encountered becomes the log representative.
+// after cancellation, or the org's row and its legacy twin during the re-key).
+// We probe each orchestrator once per org so drift counts are not inflated; the
+// first userId encountered becomes the log representative.
 function dedupeByOrgId(candidates: ActiveCandidate[]): ActiveCandidate[] {
   const seen = new Map<string, ActiveCandidate>();
   for (const candidate of candidates) {
@@ -111,20 +114,20 @@ async function scanActiveSubscriptions(billingTableName: string): Promise<Active
 
     for (const item of result.Items ?? []) {
       const record = unmarshall(item);
-      if (typeof record.pk !== 'string' || !record.orgId) {
+      const candidate = scannedSubscription(record);
+      if (!candidate) {
         console.warn('[subscription-drift-checker] missing orgId', { pk: record.pk });
         continue;
       }
-      out.push({
-        userId: record.pk.replace('CUSTOMER#', ''),
-        orgId: record.orgId,
-      });
+      out.push(candidate);
     }
 
     cursor = result.LastEvaluatedKey;
   } while (cursor);
 
-  return out;
+  // The org row wins over its legacy twin, so the pair a dual-write leaves
+  // behind is one candidate rather than two.
+  return preferOrgRows(out);
 }
 
 // Probes a single org against a single orchestrator. An active subscription is

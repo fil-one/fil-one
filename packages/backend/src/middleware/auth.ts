@@ -26,7 +26,6 @@ import { createNewUserAndOrg } from '../lib/account-creation.js';
 import { resolveMembership } from '../lib/org-membership.js';
 import type { OrgMembership } from '../lib/org-membership.js';
 import { deriveOrgName } from '../lib/suggest-org-name.js';
-import { ensureTrialEntitlement } from '../lib/trial-entitlement.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -368,14 +367,6 @@ async function resolveUserAndOrg(
         { userId },
       );
     }
-    // Lazy backfill: claim the entitlement and create the trial on the first
-    // verified login (covers signup-while-unverified and post-email-change).
-    // Best-effort: a transient failure here must not block authentication —
-    // the flag stays unset so the next login (or the subscription guard)
-    // retries. Only swallow it on this login-side path.
-    if (result.Item.emailEntitlementClaimed?.BOOL !== true) {
-      await ensureTrialEntitlementBestEffort({ sub, userId, orgId, email, emailVerified });
-    }
     return { userId, orgId, email };
   }
 
@@ -396,32 +387,17 @@ async function resolveUserAndOrg(
 
   // Tenant setup is deferred until the user creates their first bucket or access
   // key — see docs/architectural-decisions/2026-05-13-synchronous-tenant-setup-on-first-resource.md.
-  // The trial is claimed+created here (verified emails only) so billing is ready
-  // before any metered operation; ensureTrialEntitlement is idempotent. Best-effort:
-  // a transient failure must not block login — the subscription guard retries later.
-  await ensureTrialEntitlementBestEffort({ sub, userId, orgId, email, emailVerified });
+  //
+  // The trial is NOT claimed here. Login is the wrong place for it once a user
+  // can belong to more than one org: the subscription guard is the only claim
+  // point (ADR §4/§5), it runs on the first gated request in the caller's own
+  // org, and it is the only code that can tell that org from somebody else's.
+  // Claiming on the login path would spend an invitee's entitlement the moment
+  // they signed in, which is the thing the guard's conditions exist to prevent.
+  // For an organic signup the claim now happens one request later, on the
+  // dashboard's first API call, with the same Stripe latency.
 
   return { userId, orgId, email, membership };
-}
-
-/**
- * Login-side wrapper around {@link ensureTrialEntitlement}: claiming the trial is
- * a non-critical backfill, so a transient failure (DynamoDB/Stripe) is logged and
- * swallowed rather than failing authentication. The subscription guard calls
- * ensureTrialEntitlement directly and lets transient errors surface as a 5xx.
- */
-async function ensureTrialEntitlementBestEffort(
-  params: Parameters<typeof ensureTrialEntitlement>[0],
-): Promise<void> {
-  try {
-    await ensureTrialEntitlement(params);
-  } catch (err) {
-    console.error('[auth] Trial entitlement backfill failed (continuing login)', {
-      error: err,
-      userId: params.userId,
-      orgId: params.orgId,
-    });
-  }
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  ConditionalCheckFailedException,
+  DynamoDBClient,
+  GetItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { PlanId, SubscriptionStatus } from '@filone/shared';
 
@@ -47,14 +52,43 @@ import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 
+/** The two keys the subscription row lives on while it moves to the org. */
+const ORG_KEY = { pk: { S: `ORG#${USER_INFO.orgId}` }, sk: { S: 'SUBSCRIPTION' } };
+const LEGACY_KEY = { pk: { S: `CUSTOMER#${USER_INFO.userId}` }, sk: { S: 'SUBSCRIPTION' } };
+
+/** The org's row — the one a read prefers, so the one an unqualified stub answers with. */
 function subscriptionItem(overrides: Record<string, unknown> = {}) {
   return {
     Item: marshall({
-      pk: `CUSTOMER#${USER_INFO.userId}`,
+      pk: ORG_KEY.pk.S,
       sk: 'SUBSCRIPTION',
       ...overrides,
     }),
   };
+}
+
+/** The same row on the key an account keeps until the backfill copies it. */
+function legacySubscriptionItem(overrides: Record<string, unknown> = {}) {
+  return {
+    Item: marshall({
+      pk: LEGACY_KEY.pk.S,
+      sk: 'SUBSCRIPTION',
+      ...overrides,
+    }),
+  };
+}
+
+/** What the org row's existence condition throws before the backfill creates it. */
+function conditionalCheckFailed() {
+  return new ConditionalCheckFailedException({
+    message: 'The conditional request failed',
+    $metadata: {},
+  });
+}
+
+/** The partition keys the updates landed on, in the order the store wrote them. */
+function updatedKeys() {
+  return ddbMock.commandCalls(UpdateItemCommand).map((call) => call.args[0].input.Key?.pk?.S);
 }
 
 const METER_ID = 'mtr_61UONtrahRgx1CRqB41AQEKri8lBk7M8';
@@ -472,10 +506,10 @@ describe('get-billing baseHandler', () => {
       },
     });
 
-    // The lazy trial→grace transition must still persist, now from the single
-    // surviving implementation in evaluateStatusTransitions.
-    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(updateCalls).toHaveLength(1);
+    // The lazy trial→grace transition persists on both keys, org row first: a
+    // read prefers the org row, so leaving it on the expired trial would report
+    // a trial the account no longer holds.
+    expect(updatedKeys()).toStrictEqual([ORG_KEY.pk.S, LEGACY_KEY.pk.S]);
   });
 
   it('returns active subscription with payment method from Stripe', async () => {
@@ -586,8 +620,37 @@ describe('get-billing baseHandler', () => {
       },
     });
 
-    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(updateCalls).toHaveLength(1);
+    expect(updatedKeys()).toStrictEqual([ORG_KEY.pk.S, LEGACY_KEY.pk.S]);
+  });
+
+  it('persists the grace_period transition on the legacy row when the org row does not exist yet', async () => {
+    // Every account the backfill has not reached: the org row's existence
+    // condition fails, and the legacy row must still record the transition.
+    const expiredTrialEndsAt = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+    ddbMock.on(GetItemCommand, { Key: ORG_KEY }).resolves({});
+    ddbMock.on(GetItemCommand, { Key: LEGACY_KEY }).resolves(
+      legacySubscriptionItem({
+        subscriptionStatus: SubscriptionStatus.Trialing,
+        trialEndsAt: expiredTrialEndsAt,
+      }),
+    );
+    ddbMock.on(UpdateItemCommand, { Key: ORG_KEY }).rejects(conditionalCheckFailed());
+    ddbMock.on(UpdateItemCommand, { Key: LEGACY_KEY }).resolves({});
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(String(result.body));
+    expect(body).toStrictEqual({
+      subscription: {
+        planId: PlanId.PayAsYouGo,
+        status: SubscriptionStatus.GracePeriod,
+        trialEndsAt: expiredTrialEndsAt,
+        gracePeriodEndsAt: expect.any(String),
+      },
+    });
+
+    expect(updatedKeys()).toStrictEqual([ORG_KEY.pk.S, LEGACY_KEY.pk.S]);
   });
 
   it('reports expired grace_period as canceled but does NOT persist the transition', async () => {
@@ -882,21 +945,78 @@ describe('get-billing baseHandler', () => {
     });
   });
 
-  it('queries DynamoDB with correct key', async () => {
+  it("queries DynamoDB with the org key first and the caller's legacy key second", async () => {
     ddbMock.on(GetItemCommand).resolves({});
 
     const event = buildEvent({ userInfo: USER_INFO });
     await baseHandler(event);
 
     const calls = ddbMock.commandCalls(GetItemCommand);
-    expect(calls).toHaveLength(1);
-    const input = calls.at(0)?.args.at(0)?.input;
-    expect(input).toStrictEqual({
+    expect(calls).toHaveLength(2);
+    expect(calls.at(0)?.args.at(0)?.input).toStrictEqual({
       TableName: 'BillingTable',
-      Key: {
-        pk: { S: 'CUSTOMER#user-1' },
-        sk: { S: 'SUBSCRIPTION' },
-      },
+      Key: ORG_KEY,
+    });
+    expect(calls.at(1)?.args.at(0)?.input).toStrictEqual({
+      TableName: 'BillingTable',
+      Key: LEGACY_KEY,
+    });
+  });
+
+  it("reports the org row rather than the caller's own legacy row", async () => {
+    // Billing belongs to the org, so a legacy row the caller happens to own
+    // cannot answer in the org row's place — and once the org row is found
+    // there is no second read to make.
+    ddbMock
+      .on(GetItemCommand, { Key: ORG_KEY })
+      .resolves(subscriptionItem({ subscriptionStatus: SubscriptionStatus.Active }));
+    ddbMock
+      .on(GetItemCommand, { Key: LEGACY_KEY })
+      .resolves(legacySubscriptionItem({ subscriptionStatus: SubscriptionStatus.Canceled }));
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(String(result.body));
+    expect(body.subscription).toStrictEqual({
+      planId: PlanId.PayAsYouGo,
+      status: SubscriptionStatus.Active,
+    });
+    expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(1);
+  });
+
+  it('reports the org subscription to a member who holds no billing row of their own', async () => {
+    // What riding the org's subscription means: a second member has no
+    // CUSTOMER# row anywhere, and still sees the plan the org pays for.
+    const member = { userId: 'user-2', orgId: USER_INFO.orgId };
+    ddbMock
+      .on(GetItemCommand, { Key: ORG_KEY })
+      .resolves(subscriptionItem({ subscriptionStatus: SubscriptionStatus.Active }));
+    ddbMock.on(GetItemCommand, { Key: { pk: { S: `CUSTOMER#${member.userId}` } } }).resolves({});
+
+    const result = await baseHandler(buildEvent({ userInfo: member }));
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(String(result.body));
+    expect(body.subscription).toStrictEqual({
+      planId: PlanId.PayAsYouGo,
+      status: SubscriptionStatus.Active,
+    });
+  });
+
+  it('falls back to the legacy row when the backfill has not created the org row', async () => {
+    ddbMock.on(GetItemCommand, { Key: ORG_KEY }).resolves({});
+    ddbMock
+      .on(GetItemCommand, { Key: LEGACY_KEY })
+      .resolves(legacySubscriptionItem({ subscriptionStatus: SubscriptionStatus.Active }));
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(String(result.body));
+    expect(body.subscription).toStrictEqual({
+      planId: PlanId.PayAsYouGo,
+      status: SubscriptionStatus.Active,
     });
   });
 });

@@ -6,6 +6,12 @@ export enum ApiErrorCode {
   SUBSCRIPTION_CANCELED = 'SUBSCRIPTION_CANCELED',
   /** Subscription is in an inactive or incomplete state — all access is blocked. */
   SUBSCRIPTION_INACTIVE = 'SUBSCRIPTION_INACTIVE',
+  /**
+   * The active organization has no subscription, and the caller is not the
+   * person who can create one. Distinct from SUBSCRIPTION_INACTIVE, which tells
+   * the account holder to fix their own payment method.
+   */
+  ORG_BILLING_INACTIVE = 'ORG_BILLING_INACTIVE',
   /** Promo code is invalid, expired, or inactive. */
   INVALID_PROMOTION_CODE = 'INVALID_PROMOTION_CODE',
   /** Trial accounts cannot generate presigned URLs — upgrade required. */

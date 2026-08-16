@@ -1,41 +1,24 @@
-import { GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ListInvoicesResponse, Invoice } from '@filone/shared';
-import { Resource } from 'sst';
-import { getDynamoClient } from '../lib/ddb-client.js';
 import { getStripeClient } from '../lib/stripe-client.js';
+import { readSubscription } from '../lib/subscription-store.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { authorize } from '../middleware/authorize.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import type { SubscriptionRecord } from '../lib/dynamo-records.js';
-
-const dynamo = getDynamoClient();
 
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const { userId } = getUserInfo(event);
-  const billingTableName = Resource.BillingTable.name;
+  const { userId, orgId } = getUserInfo(event);
 
-  const billingResult = await dynamo.send(
-    new GetItemCommand({
-      TableName: billingTableName,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
-    }),
-  );
-
-  const billingRecord = billingResult.Item
-    ? (unmarshall(billingResult.Item) as SubscriptionRecord)
-    : null;
+  // Invoices belong to the org's Stripe customer, so an Admin reading them
+  // reads the org's, not a record of their own that may not exist.
+  const billingRecord = (await readSubscription(orgId, userId))?.record;
 
   if (!billingRecord?.stripeCustomerId) {
     const response: ListInvoicesResponse = { invoices: [] };

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
+  ConditionalCheckFailedException,
   DynamoDBClient,
   DeleteItemCommand,
   GetItemCommand,
@@ -176,6 +177,38 @@ function setupPaymentMethodsRetrieve() {
 const MOCK_ORG_ID = 'test-org-uuid';
 const MOCK_AURORA_TENANT_ID = 'aurora-tenant-123';
 
+// The two keys one subscription lives on while the row moves to its org. Every
+// write lands on the org key first: a read prefers that row, so it must never
+// be the stale half.
+const ORG_KEY = { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'SUBSCRIPTION' } };
+const LEGACY_KEY = { pk: { S: `CUSTOMER#${MOCK_USER_ID}` }, sk: { S: 'SUBSCRIPTION' } };
+
+function updateInputs() {
+  return ddbMock.commandCalls(UpdateItemCommand).map((c) => c.args[0].input);
+}
+
+function updatedKeys() {
+  return updateInputs().map((input) => input.Key);
+}
+
+/** The writes that landed on one key, for a test that cares about one row. */
+function updateInputsFor(key: typeof ORG_KEY) {
+  return updateInputs().filter((input) => input.Key?.pk?.S === key.pk.S);
+}
+
+/** DynamoDB's answer to `attribute_exists(pk)` on an account the backfill has not reached. */
+function noOrgRow() {
+  return new ConditionalCheckFailedException({ message: 'no org row', $metadata: {} });
+}
+
+function setupCustomerRetrieveWithOrg() {
+  mockCustomersRetrieve.mockResolvedValue({
+    id: MOCK_CUSTOMER_ID,
+    deleted: false,
+    metadata: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID },
+  });
+}
+
 // Per-region failure as reported by syncTenantStatusInProvisionedRegions,
 // which never throws.
 function regionSyncFailure(cause: Error) {
@@ -189,6 +222,8 @@ function regionSyncFailure(cause: Error) {
   ];
 }
 
+// The org resolved the second way: nothing in the Stripe metadata says which
+// org this is, so the billing row answers.
 function setupAuroraTenantResolution() {
   ddbMock
     .on(GetItemCommand, {
@@ -842,6 +877,23 @@ describe('stripe-webhook handler', () => {
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
+    it('grants the grace period on the legacy row when the org twin does not exist yet', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieveWithOrg();
+      ddbMock.on(UpdateItemCommand, { Key: ORG_KEY }).rejects(noOrgRow());
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      // The backfill has not copied this account, so there is no org row to
+      // update — the run carries on rather than failing the webhook.
+      const legacyWrites = updateInputsFor(LEGACY_KEY);
+      expect(legacyWrites).toHaveLength(1);
+      expect(legacyWrites[0].ExpressionAttributeValues![':status']).toEqual({
+        S: SubscriptionStatus.GracePeriod,
+      });
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
     describe('when the customer is already deleted', () => {
       // The fallback for a customer.deleted event that was never delivered.
       it('starts the deletion instead of granting a grace period', async () => {
@@ -932,8 +984,8 @@ describe('stripe-webhook handler', () => {
 
       const result = await handler(buildWebhookEvent('{}'));
 
-      // DynamoDB subscription update should still have happened
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+      // DynamoDB subscription update should still have happened, on both keys
+      expect(updatedKeys()).toEqual([ORG_KEY, LEGACY_KEY]);
       // Webhook should still return 200
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -1148,7 +1200,7 @@ describe('stripe-webhook handler', () => {
 
       const result = await handler(buildWebhookEvent('{}'));
 
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+      expect(updatedKeys()).toEqual([ORG_KEY, LEGACY_KEY]);
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
   });
@@ -1641,28 +1693,20 @@ describe('stripe-webhook handler', () => {
   // whatever the metadata carries.
   // -----------------------------------------------------------------------
   describe('orgId backfill', () => {
-    function setupCustomerRetrieveWithOrg() {
-      mockCustomersRetrieve.mockResolvedValue({
-        id: MOCK_CUSTOMER_ID,
-        deleted: false,
-        metadata: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID },
-      });
-    }
-
-    function billingUpdateInput() {
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-      return updateCalls[0].args[0].input;
-    }
-
+    // A known org is written to both keys: the org twin is the row the lifecycle
+    // jobs will read once the backfill has run.
     function expectOrgIdBackfilled() {
-      const input = billingUpdateInput();
-      expect(input.UpdateExpression).toContain('orgId = if_not_exists(orgId, :orgId)');
-      expect(input.ExpressionAttributeValues![':orgId']).toEqual({ S: MOCK_ORG_ID });
+      expect(updatedKeys()).toEqual([ORG_KEY, LEGACY_KEY]);
+      for (const input of updateInputs()) {
+        expect(input.UpdateExpression).toContain('orgId = if_not_exists(orgId, :orgId)');
+        expect(input.ExpressionAttributeValues![':orgId']).toEqual({ S: MOCK_ORG_ID });
+      }
     }
 
+    // No org id in hand names no org key, so the legacy row is the whole write.
     function expectNoOrgIdClause() {
-      const input = billingUpdateInput();
+      expect(updatedKeys()).toEqual([LEGACY_KEY]);
+      const input = updateInputs()[0];
       expect(input.UpdateExpression).not.toContain('orgId');
       expect(input.ExpressionAttributeValues![':orgId']).toBeUndefined();
     }

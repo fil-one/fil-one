@@ -2,6 +2,7 @@ import { ScanCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getOrgProfile } from '../lib/org-profile.js';
+import { preferOrgRows, scannedSubscription } from '../lib/subscription-store.js';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { Resource } from 'sst';
 import type { UsageReportingWorkerPayload } from './usage-reporting-worker.js';
@@ -10,8 +11,9 @@ const dynamo = getDynamoClient();
 const lambda = new LambdaClient({});
 
 interface SubscriptionRecord {
+  pk: string;
   orgId: string;
-  /** From the record pk (CUSTOMER#<userId>); lets the worker close out the record when self-healing. */
+  /** From the row, or from a legacy pk; lets the worker close out the record when self-healing. */
   userId?: string;
   subscriptionId: string;
   stripeCustomerId: string;
@@ -105,8 +107,9 @@ async function scanActiveSubscriptionRecords(
 
     for (const item of result.Items ?? []) {
       const record = unmarshall(item);
+      const owner = scannedSubscription(record);
 
-      if (!record.orgId) {
+      if (!owner) {
         console.warn('[usage-orchestrator] Missing orgId, skipping', { pk: record.pk });
         continue;
       }
@@ -126,8 +129,7 @@ async function scanActiveSubscriptionRecords(
       }
 
       records.push({
-        orgId: record.orgId,
-        userId: extractUserIdFromBillingRecordPK(record.pk),
+        ...owner,
         subscriptionId: record.subscriptionId,
         stripeCustomerId: record.stripeCustomerId,
         currentPeriodStart: record.currentPeriodStart,
@@ -138,18 +140,9 @@ async function scanActiveSubscriptionRecords(
     lastEvaluatedKey = result.LastEvaluatedKey;
   } while (lastEvaluatedKey);
 
-  return records;
-}
-
-/** userId from a billing record pk (CUSTOMER#<userId>); undefined for unexpected shapes. */
-function extractUserIdFromBillingRecordPK(pk: unknown): string | undefined {
-  const userId =
-    typeof pk === 'string' && pk.startsWith('CUSTOMER#') ? pk.slice('CUSTOMER#'.length) : '';
-  if (!userId) {
-    console.warn('[usage-orchestrator] Unexpected billing record pk shape', { pk });
-    return undefined;
-  }
-  return userId;
+  // The org row wins over its legacy twin, so the pair a dual-write leaves
+  // behind never reaches the per-org dedupe below as a conflict it would log.
+  return preferOrgRows(records);
 }
 
 /** Best-effort org name for Stripe metadata sync; `undefined` if the org has no profile/name. */

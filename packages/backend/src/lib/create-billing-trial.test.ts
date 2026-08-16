@@ -80,7 +80,7 @@ describe('createBillingTrial', () => {
     // Verify Stripe customer creation
     expect(mockCustomersCreate).toHaveBeenCalledWith(
       { email: 'test@example.com', metadata: { userId: 'user-1', orgId: 'org-1' } },
-      { idempotencyKey: 'billing-trial-user-1' },
+      { idempotencyKey: 'billing-trial-org-org-1' },
     );
 
     // Verify Stripe subscription creation
@@ -91,19 +91,26 @@ describe('createBillingTrial', () => {
         trial_settings: { end_behavior: { missing_payment_method: 'cancel' } },
         metadata: { userId: 'user-1', orgId: 'org-1' },
       }),
-      { idempotencyKey: 'billing-trial-sub-user-1' },
+      { idempotencyKey: 'billing-trial-sub-org-org-1' },
     );
 
-    // Verify DynamoDB write
+    // Verify DynamoDB write — both keys, org first, and the org row is created
+    // whole rather than conditioned on already existing: this is the writer
+    // that brings it into being.
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls).toHaveLength(2);
+    expect(updateCalls.map((call) => call.args[0].input.Key)).toEqual([
+      { pk: { S: 'ORG#org-1' }, sk: { S: 'SUBSCRIPTION' } },
+      { pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } },
+    ]);
+    expect(updateCalls[0].args[0].input.ConditionExpression).toBeUndefined();
 
     const input = updateCalls[0].args[0].input;
     expect(input.TableName).toBe('BillingTable');
-    expect(input.Key).toEqual({ pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } });
 
     const values = input.ExpressionAttributeValues!;
     expect(values[':orgId']).toEqual({ S: 'org-1' });
+    expect(values[':userId']).toEqual({ S: 'user-1' });
     expect(values[':customerId']).toEqual({ S: 'cus_test_123' });
     expect(values[':subscriptionId']).toEqual({ S: 'sub_test_123' });
     expect(values[':status']).toEqual({ S: SubscriptionStatus.Trialing });
@@ -122,12 +129,14 @@ describe('createBillingTrial', () => {
     await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
 
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls).toHaveLength(2);
 
-    const input = updateCalls[0].args[0].input;
-    expect(input.ConditionExpression).toBeUndefined();
-    expect(input.UpdateExpression).toContain('stripeCustomerId = :customerId');
-    expect(input.ExpressionAttributeValues![':customerId']).toEqual({ S: 'cus_test_123' });
+    for (const call of updateCalls) {
+      const input = call.args[0].input;
+      expect(input.ConditionExpression).toBeUndefined();
+      expect(input.UpdateExpression).toContain('stripeCustomerId = :customerId');
+      expect(input.ExpressionAttributeValues![':customerId']).toEqual({ S: 'cus_test_123' });
+    }
   });
 
   it('does not overwrite a subscription status written by a webhook', async () => {
@@ -161,13 +170,13 @@ describe('createBillingTrial', () => {
 
     expect(mockCustomersCreate).toHaveBeenCalledWith(
       { email: undefined, metadata: { userId: 'user-1', orgId: 'org-1' } },
-      { idempotencyKey: 'billing-trial-user-1' },
+      { idempotencyKey: 'billing-trial-org-org-1' },
     );
   });
 
-  it('returns early without touching Stripe when a billing record already exists', async () => {
+  it('returns early without touching Stripe when the org already has a record', async () => {
     ddbMock.on(GetItemCommand).resolves({
-      Item: { pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } },
+      Item: { pk: { S: 'ORG#org-1' }, sk: { S: 'SUBSCRIPTION' } },
     });
 
     await createBillingTrial({ userId: 'user-1', orgId: 'org-1', email: 'test@example.com' });
@@ -178,13 +187,43 @@ describe('createBillingTrial', () => {
     expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
 
+    // The org key answers first, so the legacy key is never read.
     const getCalls = ddbMock.commandCalls(GetItemCommand);
     expect(getCalls).toHaveLength(1);
     expect(getCalls[0].args[0].input).toMatchObject({
       TableName: 'BillingTable',
-      Key: { pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } },
+      Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'SUBSCRIPTION' } },
       ConsistentRead: true,
     });
+  });
+
+  it('returns early on the caller’s legacy record when the org key has not moved yet', async () => {
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'SUBSCRIPTION' } } })
+      .resolves({})
+      .on(GetItemCommand, { Key: { pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } } })
+      .resolves({ Item: { pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } } });
+
+    await createBillingTrial({ userId: 'user-1', orgId: 'org-1', email: 'test@example.com' });
+
+    expect(mockCustomersCreate).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(2);
+  });
+
+  it('keys Stripe idempotency to the org, so one person’s two orgs get two subscriptions', async () => {
+    // A key naming only the user would hand the second org the first org's
+    // customer and subscription — one Stripe meter billing two orgs' usage.
+    await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
+    await createBillingTrial({ userId: 'user-1', orgId: 'org-2' });
+
+    expect(mockCustomersCreate.mock.calls.map((call) => call[1].idempotencyKey)).toEqual([
+      'billing-trial-org-org-1',
+      'billing-trial-org-org-2',
+    ]);
+    expect(mockSubscriptionsCreate.mock.calls.map((call) => call[1].idempotencyKey)).toEqual([
+      'billing-trial-sub-org-org-1',
+      'billing-trial-sub-org-org-2',
+    ]);
   });
 
   it('propagates Stripe customer creation errors', async () => {
