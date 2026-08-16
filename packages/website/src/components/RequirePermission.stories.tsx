@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole } from '@filone/shared';
 
@@ -7,13 +8,19 @@ import { Button } from './Button';
 import { seedPermissions } from '../lib/test-permissions.js';
 
 /**
- * Each story gets its own QueryClient seeded with the role it is about — the
- * preview's shared client would otherwise carry one story's role into the next.
+ * Each story gets its own QueryClient seeded with the role it is about.
+ *
+ * Built in `useState` rather than in the decorator body: a client constructed on
+ * every render throws away the seeded cache each time React re-renders, and the
+ * component under test flips back to its pending state mid-story.
  */
 function withRole(role: OrgRole) {
   return function Decorator(Story: () => React.ReactElement) {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    seedPermissions(client, role);
+    const [client] = useState(() => {
+      const created = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      seedPermissions(created, role);
+      return created;
+    });
     return (
       <QueryClientProvider client={client}>
         <Story />

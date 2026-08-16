@@ -192,6 +192,12 @@ export type AccessKeysTableProps = {
   showPermissions?: boolean;
   showRegion?: boolean;
   onDelete?: (id: string) => Promise<void>;
+  /**
+   * Which rows carry the action. Omitted, every row does — the caller has
+   * already decided by passing `onDelete` at all. A Member holds
+   * `keys.manage_own`, so the answer is per key rather than per table.
+   */
+  canDelete?: (key: AccessKey) => boolean;
   onCreateOpen?: () => void;
   emptyTitle?: string;
   emptyDescription?: string;
@@ -203,10 +209,16 @@ export function AccessKeysTable({
   showPermissions = false,
   showRegion = false,
   onDelete,
+  canDelete,
   onCreateOpen,
   emptyTitle = 'No API keys yet',
   emptyDescription = 'Generate credentials to connect your applications via S3-compatible API',
 }: AccessKeysTableProps) {
+  // The header follows the cells: a column whose every row is empty is a column
+  // of whitespace with a screen-reader label attached to nothing.
+  const rowHasAction = (key: AccessKey) => Boolean(onDelete) && (canDelete?.(key) ?? true);
+  const showActions = keys.some(rowHasAction);
+
   if (keys.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center rounded-xl border border-zinc-200 bg-white px-6 py-16 text-center">
@@ -232,7 +244,7 @@ export function AccessKeysTable({
           {showPermissions && <Table.Head className="hidden md:table-cell">Permissions</Table.Head>}
           <Table.Head className="hidden sm:table-cell">Status</Table.Head>
           <Table.Head className="hidden md:table-cell">Last Used</Table.Head>
-          {onDelete && (
+          {showActions && (
             <Table.Head>
               <span className="sr-only">Actions</span>
             </Table.Head>
@@ -308,9 +320,11 @@ export function AccessKeysTable({
             </Table.Cell>
 
             {/* Actions */}
-            {onDelete && (
+            {showActions && (
               <Table.Cell className="text-right">
-                <ActionMenu onDelete={() => void onDelete(key.id)} />
+                {rowHasAction(key) && onDelete && (
+                  <ActionMenu onDelete={() => void onDelete(key.id)} />
+                )}
               </Table.Cell>
             )}
           </Table.Row>

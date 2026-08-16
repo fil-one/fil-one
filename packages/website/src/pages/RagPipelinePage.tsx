@@ -20,6 +20,7 @@ import {
 } from '../lib/rag-bucket-api.js';
 import { listRagApiKeys } from '../lib/rag-api-keys-api.js';
 import { queryKeys } from '../lib/query-client.js';
+import { useKeyActionScope } from '../lib/use-key-scope.js';
 import { useRagAccess } from '../lib/use-rag-access.js';
 import { BucketsTab, type RagBucket } from './RagPipelineBucketsTab.js';
 import { RagApiKeysTab } from './RagPipelineKeysTab.js';
@@ -63,6 +64,7 @@ function statValue({
 
 function RagPipelineView({
   buckets,
+  showApiKeyCount,
   apiKeyCount,
   apiKeysPending,
   apiKeysError,
@@ -73,6 +75,8 @@ function RagPipelineView({
   onConfirmToggle,
 }: {
   buckets: RagBucket[];
+  /** Whether the caller may list keys at all — the counter is theirs or absent. */
+  showApiKeyCount: boolean;
   /** Org's RAG API key count; undefined until the request resolves. */
   apiKeyCount: number | undefined;
   apiKeysPending: boolean;
@@ -112,15 +116,21 @@ function RagPipelineView({
       }),
       sub: 'total size of indexed files',
     },
-    {
-      label: 'API keys',
-      value: statValue({
-        pending: apiKeysPending,
-        failed: apiKeysError,
-        value: (apiKeyCount ?? 0).toLocaleString(),
-      }),
-      sub: 'for the Query API',
-    },
+    // Absent rather than "Unavailable" for a role that cannot list keys: the
+    // count is not a fact being withheld, it is not their counter.
+    ...(showApiKeyCount
+      ? [
+          {
+            label: 'API keys',
+            value: statValue({
+              pending: apiKeysPending,
+              failed: apiKeysError,
+              value: (apiKeyCount ?? 0).toLocaleString(),
+            }),
+            sub: 'for the Query API',
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -137,7 +147,7 @@ function RagPipelineView({
             and figures use tabular-nums so digits line up as they change. */}
         <div
           data-testid="rag-pipeline-stats"
-          className="grid grid-cols-3 divide-x divide-zinc-200 rounded-xl border border-zinc-200 bg-white"
+          className={`grid ${showApiKeyCount ? 'grid-cols-3' : 'grid-cols-2'} divide-x divide-zinc-200 rounded-xl border border-zinc-200 bg-white`}
         >
           {stats.map((s) => (
             <div key={s.label} data-testid="rag-pipeline-stat" className="px-5 py-4">
@@ -239,7 +249,10 @@ export function RagPipelinePage() {
   const bucketList: Bucket[] = bucketsData?.buckets ?? [];
 
   // Same query key as the API Keys tab, so the count and the table stay in
-  // sync (creates/deletes invalidate ['rag-api-keys']).
+  // sync (creates/deletes invalidate ['rag-api-keys']) and the two surfaces
+  // share one request. Both are gated the same way: without `keys.manage_own`
+  // the list is refused, and a counter is not worth a 403.
+  const { mayList: mayListKeys } = useKeyActionScope();
   const {
     data: apiKeysData,
     isPending: apiKeysPending,
@@ -247,7 +260,7 @@ export function RagPipelinePage() {
   } = useQuery({
     queryKey: queryKeys.ragApiKeys,
     queryFn: () => listRagApiKeys(),
-    enabled: ragAccess,
+    enabled: ragAccess && mayListKeys,
   });
 
   const enablementQueries = useQueries({
@@ -316,6 +329,7 @@ export function RagPipelinePage() {
   return (
     <RagPipelineView
       buckets={buckets}
+      showApiKeyCount={mayListKeys}
       apiKeyCount={apiKeysData?.keys.length}
       apiKeysPending={apiKeysPending}
       apiKeysError={apiKeysError}

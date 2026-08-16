@@ -24,10 +24,16 @@ interface RequirePermissionProps {
 /**
  * Render children only for a caller whose role carries `permission`.
  *
- * Fail-closed at every step: pending renders `pending` (nothing by default),
- * a failed `/me` renders the fallback, and only an explicit yes renders the
- * children. The server enforces regardless — this hides what the API would
- * refuse, so that a member is not offered a button that returns a 403.
+ * Fail-closed at every step: pending renders `pending` (nothing by default) and
+ * only an explicit yes renders the children. The server enforces regardless —
+ * this hides what the API would refuse, so that a member is not offered a
+ * button that returns a 403.
+ *
+ * A failed `/me` renders nothing at all, not the fallback. The fallback says why
+ * a surface is missing, and "Billing is managed by your organization's owners"
+ * is a claim about the caller's role — false, and unhelpfully so, when the truth
+ * is that the request failed. An Owner whose network dropped should not be told
+ * they are not an Owner.
  */
 export function RequirePermission({
   permission,
@@ -35,8 +41,9 @@ export function RequirePermission({
   fallback = null,
   pending = null,
 }: RequirePermissionProps) {
-  const { has, isPending } = usePermissions();
+  const { has, isPending, isError } = usePermissions();
 
   if (isPending) return <>{pending}</>;
+  if (isError) return null;
   return has(permission) ? <>{children}</> : <>{fallback}</>;
 }

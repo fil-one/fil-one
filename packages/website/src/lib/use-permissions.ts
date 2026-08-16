@@ -19,6 +19,17 @@ import { ME_STALE_TIME, queryKeys } from './query-client.js';
 export function usePermissions(): {
   /** Whether the caller holds a permission. False until `/me` says otherwise. */
   has: (permission: Permission) => boolean;
+  /**
+   * The caller's own user id, for the rules that are about ownership rather
+   * than authority — revoking a key you created, say. Undefined until `/me`
+   * answers, which fails those rules closed like everything else here.
+   *
+   * It rides along with the permissions instead of getting its own `useQuery`
+   * so that `/me` keeps exactly one set of query options: an observer
+   * registered without this hook's staleTime would make every window focus
+   * refetch `/me` for everybody.
+   */
+  userId: string | undefined;
   /** True while the answer is not yet known — render nothing rather than guess. */
   isPending: boolean;
   /** True when `/me` could not be read, which also grants nothing. */
@@ -40,6 +51,7 @@ export function usePermissions(): {
 
   return {
     has: (permission: Permission) => permissions?.includes(permission) ?? false,
+    userId: me?.userId,
     isPending,
     isError,
     // `role` is absent exactly when the caller has no membership row, which the

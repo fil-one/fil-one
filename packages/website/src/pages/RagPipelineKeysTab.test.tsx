@@ -30,12 +30,23 @@ vi.mock('../lib/rag-api-keys-api.js', () => ({
 
 const TOKEN = 'sk_rag_0123456789abcdefghijklmnopqrstuvwxyzABCDEF';
 
+// `seedPermissions` writes userId 'user-1', so this key is the caller's own —
+// which is what a Member's `keys.manage_own` reaches.
 const KEY: RagApiKey = {
   id: 'key-1',
   keyName: 'ci key',
   keyPrefix: 'sk_rag_AbC12',
   bucketScope: 'all',
   createdAt: '2026-07-01T00:00:00Z',
+  createdBy: 'user-1',
+};
+
+/** A key somebody else minted: visible to `keys.manage_all`, not revocable below it. */
+const OTHERS_KEY: RagApiKey = {
+  ...KEY,
+  id: 'key-2',
+  keyName: 'someone elses key',
+  createdBy: 'user-2',
 };
 
 function bucket(over: Partial<RagBucket> = {}): RagBucket {
@@ -214,5 +225,41 @@ describe('RagApiKeysTab — permissions', () => {
 
     await screen.findByText('No API keys yet');
     expect(screen.queryByRole('button', { name: 'Create API key' })).not.toBeInTheDocument();
+  });
+
+  it('does not request the list for a role without keys.manage_own', async () => {
+    // ReadOnly's request would 403. The empty state is the honest render, and
+    // the invitation to create one goes with the button it has lost.
+    renderTab([bucket()], OrgRole.ReadOnly);
+
+    await screen.findByTestId('rag-api-keys-empty');
+    expect(mockList).not.toHaveBeenCalled();
+    expect(screen.getByText('Keys for the Query API appear here.')).toBeInTheDocument();
+  });
+
+  it('lets a Member revoke their own key and not a colleague’s', async () => {
+    mockList.mockResolvedValue({ keys: [KEY, OTHERS_KEY] });
+
+    renderTab([bucket()], OrgRole.Member);
+
+    expect(
+      await screen.findByRole('button', { name: 'Delete API key ci key' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Delete API key someone elses key' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('gives an Admin the action on every key', async () => {
+    mockList.mockResolvedValue({ keys: [KEY, OTHERS_KEY] });
+
+    renderTab([bucket()], OrgRole.Admin);
+
+    expect(
+      await screen.findByRole('button', { name: 'Delete API key ci key' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Delete API key someone elses key' }),
+    ).toBeInTheDocument();
   });
 });

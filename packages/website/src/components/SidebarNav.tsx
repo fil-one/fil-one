@@ -43,6 +43,8 @@ type NavItem = {
   icon: React.ElementType;
   label: string;
   testId: string;
+  /** What the destination needs. Omitted, every member sees the entry. */
+  permission?: Permission;
 };
 
 type NavGroup = {
@@ -60,7 +62,15 @@ const navGroups: NavGroup[] = [
     label: 'Storage',
     items: [
       { path: '/buckets', icon: DatabaseIcon, label: 'Buckets', testId: 'nav-buckets' },
-      { path: '/api-keys', icon: KeyIcon, label: 'API Keys', testId: 'nav-api-keys' },
+      {
+        path: '/api-keys',
+        icon: KeyIcon,
+        label: 'API Keys',
+        testId: 'nav-api-keys',
+        // ReadOnly holds no `keys.*`, so the list request is refused and the
+        // page has nothing but the connection reference to offer.
+        permission: 'keys.manage_own',
+      },
     ],
   },
   {
@@ -92,6 +102,7 @@ type NavLinksProps = {
 };
 
 function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps) {
+  const { has } = usePermissions();
   return (
     <div className="flex flex-col p-2">
       {navGroups.map((group, gi) => (
@@ -102,36 +113,41 @@ function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps
             </p>
           )}
           <div className="flex flex-col gap-0.5">
-            {group.items.map(({ path, icon: Icon, label, testId }) => {
-              const isActive = Boolean(matchRoute({ to: path, fuzzy: path === '/buckets' }));
-              const link = (
-                <Link
-                  key={path}
-                  to={path}
-                  data-testid={showTestIds ? testId : undefined}
-                  aria-label={label}
-                  onClick={onClose}
-                  className={[
-                    'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
-                    collapsed ? 'justify-center' : '',
-                    isActive ? 'bg-brand-50 text-brand-700' : 'text-zinc-600 hover:bg-zinc-100',
-                  ]
-                    .filter(Boolean)
-                    .join(' ')}
-                >
-                  <Icon size={18} className={`flex-shrink-0 ${isActive ? '' : 'text-zinc-400'}`} />
-                  {!collapsed && <span className="flex-1">{label}</span>}
-                </Link>
-              );
-              if (collapsed) {
-                return (
-                  <Tooltip key={path} content={label} side="right">
-                    {link}
-                  </Tooltip>
+            {group.items
+              .filter((item) => !item.permission || has(item.permission))
+              .map(({ path, icon: Icon, label, testId }) => {
+                const isActive = Boolean(matchRoute({ to: path, fuzzy: path === '/buckets' }));
+                const link = (
+                  <Link
+                    key={path}
+                    to={path}
+                    data-testid={showTestIds ? testId : undefined}
+                    aria-label={label}
+                    onClick={onClose}
+                    className={[
+                      'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
+                      collapsed ? 'justify-center' : '',
+                      isActive ? 'bg-brand-50 text-brand-700' : 'text-zinc-600 hover:bg-zinc-100',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                  >
+                    <Icon
+                      size={18}
+                      className={`flex-shrink-0 ${isActive ? '' : 'text-zinc-400'}`}
+                    />
+                    {!collapsed && <span className="flex-1">{label}</span>}
+                  </Link>
                 );
-              }
-              return <div key={path}>{link}</div>;
-            })}
+                if (collapsed) {
+                  return (
+                    <Tooltip key={path} content={label} side="right">
+                      {link}
+                    </Tooltip>
+                  );
+                }
+                return <div key={path}>{link}</div>;
+              })}
           </div>
         </div>
       ))}
@@ -140,7 +156,7 @@ function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps
 }
 
 // Billing carries a permission; Settings is every member's own account.
-const utilityNavItems: (NavItem & { permission?: Permission })[] = [
+const utilityNavItems: NavItem[] = [
   {
     path: '/billing',
     icon: CreditCardIcon,
@@ -292,6 +308,7 @@ export function SidebarNav({
     storagePct,
     egressUsed,
     egressPct,
+    limitsKnown,
   } = useSidebarData();
 
   useEffect(() => {
@@ -435,6 +452,7 @@ export function SidebarNav({
           storagePct={storagePct}
           egressUsed={egressUsed}
           egressPct={egressPct}
+          limitsKnown={limitsKnown}
           graceDays={graceDays}
           graceEndsLabel={graceEndsLabel}
           isPastDue={isPastDue}

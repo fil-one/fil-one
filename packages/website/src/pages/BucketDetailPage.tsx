@@ -27,6 +27,8 @@ import type {
 import { apiRequest } from '../lib/api.js';
 import { formatDateTime } from '../lib/time.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
+import { useHasPermission } from '../lib/use-permissions.js';
+import { useKeyActionScope } from '../lib/use-key-scope.js';
 import { queryKeys } from '../lib/query-client.js';
 import { batchPresign } from '../lib/use-presign.js';
 import {
@@ -123,24 +125,8 @@ export type BucketDetailPageProps = {
   region: S3Region;
 };
 
-export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPageProps) {
-  const s3Endpoint = getS3Endpoint(region, FILONE_STAGE);
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const currentPrefix = prefix ?? '';
-
-  const setCurrentPrefix = useCallback(
-    (newPrefix: string) => {
-      void navigate({
-        to: '/buckets/$bucketName',
-        params: { bucketName },
-        search: { region, ...(newPrefix ? { prefix: newPrefix } : {}) },
-        replace: true,
-      });
-    },
-    [navigate, bucketName, region],
-  );
-
+/** Everything the page reads, in one place so the component is only render. */
+function useBucketData(bucketName: string, region: S3Region, mayListKeys: boolean) {
   // Bucket metadata
   const {
     data: bucketData,
@@ -169,7 +155,6 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     enabled: bucketData !== undefined,
     queryFn: () => fetchObjectListing(region, bucketName, bucket),
   });
-  const versions = objectsData?.versions ?? [];
 
   // Bucket analytics (object count + storage)
   const { data: analyticsData } = useQuery({
@@ -184,15 +169,76 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
 
   // Access keys scoped to this bucket. Access keys are region-scoped, so the
   // region is part of the filter: a key from another region — even one scoped to
-  // all buckets — cannot operate on this bucket.
-  const { data: accessKeysData, isPending: accessKeysLoading } = useQuery({
+  // all buckets — cannot operate on this bucket. The server narrows the list to
+  // the caller's own keys unless they hold `keys.manage_all`; without
+  // `keys.manage_own` it refuses the request, so it is not made.
+  const {
+    data: accessKeysData,
+    isPending: accessKeysPending,
+    isError: accessKeysIsError,
+    error: accessKeysError,
+  } = useQuery({
     queryKey: queryKeys.bucketAccessKeys(bucketName, region),
+    enabled: mayListKeys,
     queryFn: () => {
       const params = new URLSearchParams({ bucket: bucketName, region });
       return apiRequest<ListAccessKeysResponse>(`/access-keys?${params.toString()}`);
     },
   });
-  const accessKeys = accessKeysData?.keys ?? [];
+
+  return {
+    bucket,
+    bucketIsError,
+    bucketError,
+    versions: objectsData?.versions ?? [],
+    objectsLoading,
+    objectsIsError,
+    objectsError,
+    analyticsData,
+    accessKeys: accessKeysData?.keys ?? [],
+    // A disabled query stays pending forever, which would spin the tab's
+    // spinner for a role that is never going to get an answer.
+    accessKeysLoading: mayListKeys && accessKeysPending,
+    accessKeysIsError,
+    accessKeysError,
+  };
+}
+
+export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPageProps) {
+  const s3Endpoint = getS3Endpoint(region, FILONE_STAGE);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const currentPrefix = prefix ?? '';
+  const mayUpload = useHasPermission('objects.write');
+  const mayDelete = useHasPermission('objects.delete');
+  const { mayList: mayListKeys } = useKeyActionScope();
+
+  const setCurrentPrefix = useCallback(
+    (newPrefix: string) => {
+      void navigate({
+        to: '/buckets/$bucketName',
+        params: { bucketName },
+        search: { region, ...(newPrefix ? { prefix: newPrefix } : {}) },
+        replace: true,
+      });
+    },
+    [navigate, bucketName, region],
+  );
+
+  const {
+    bucket,
+    bucketIsError,
+    bucketError,
+    versions,
+    objectsLoading,
+    objectsIsError,
+    objectsError,
+    analyticsData,
+    accessKeys,
+    accessKeysLoading,
+    accessKeysIsError,
+    accessKeysError,
+  } = useBucketData(bucketName, region, mayListKeys);
 
   const [addKeyOpen, setAddKeyOpen] = useState(false);
 
@@ -265,7 +311,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
             upload CTA then, so two identical primary actions never compete. Once
             objects exist the empty state is gone and this is the only one. The
             cloud glyph leads the label, echoing that empty state's icon. */}
-        {versions.length > 0 && (
+        {versions.length > 0 && mayUpload && (
           <Button
             id="upload-object-button"
             variant="primary"
@@ -328,7 +374,8 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               onPrefixChange={setCurrentPrefix}
               onDownload={objectActions.downloadObject}
               downloading={objectActions.downloading}
-              onDelete={objectActions.deleteObject}
+              canUpload={mayUpload}
+              onDelete={mayDelete ? objectActions.deleteObject : undefined}
             />
           </TabPanel>
 
@@ -339,6 +386,10 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               region={region}
               accessKeys={accessKeys}
               accessKeysLoading={accessKeysLoading}
+              accessKeysError={accessKeysIsError}
+              {...(accessKeysError?.message
+                ? { accessKeysErrorMessage: accessKeysError.message }
+                : {})}
               onCreateOpen={() => setAddKeyOpen(true)}
             />
           </TabPanel>

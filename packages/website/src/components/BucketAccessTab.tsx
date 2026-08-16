@@ -7,13 +7,75 @@ import type { AccessKey, ListAccessKeysResponse, S3Region } from '@filone/shared
 import { apiRequest } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
 import { useHasPermission } from '../lib/use-permissions.js';
+import { useKeyActionScope } from '../lib/use-key-scope.js';
 import { RequirePermission } from './RequirePermission';
 import { useToast } from './Toast';
 import { AccessEndpointsCard } from './AccessEndpointsCard';
 import { AccessKeysTable } from './AccessKeysTable';
+import { Alert } from './Alert';
 import { Button } from './Button';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Spinner } from './Spinner';
+
+/**
+ * The keys list in each of its three states.
+ *
+ * Loading, failed, and loaded are kept apart because two of them used to render
+ * the same thing: a failed request came out as "No access keys yet", which is a
+ * claim about the bucket rather than about the request.
+ */
+function KeysSection({
+  accessKeys,
+  loading,
+  failed,
+  errorMessage,
+  mayCreate,
+  mayRevoke,
+  onCreateOpen,
+  onRequestDelete,
+}: {
+  accessKeys: AccessKey[];
+  loading: boolean;
+  failed: boolean;
+  errorMessage: string | undefined;
+  mayCreate: boolean;
+  mayRevoke: (key: AccessKey) => boolean;
+  onCreateOpen: () => void;
+  onRequestDelete: (id: string) => void;
+}) {
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Spinner ariaLabel="Loading access keys" size={24} />
+      </div>
+    );
+  }
+
+  if (failed) {
+    return (
+      <Alert
+        variant="red"
+        description={errorMessage ?? 'Failed to load access keys for this bucket'}
+      />
+    );
+  }
+
+  return (
+    <AccessKeysTable
+      keys={accessKeys}
+      showPermissions
+      onDelete={async (id) => onRequestDelete(id)}
+      canDelete={mayRevoke}
+      onCreateOpen={mayCreate ? onCreateOpen : undefined}
+      emptyTitle="No access keys yet"
+      emptyDescription={
+        mayCreate
+          ? 'Create an access key to connect via the S3 API'
+          : 'Keys with access to this bucket appear here'
+      }
+    />
+  );
+}
 
 export type BucketAccessTabProps = {
   bucketName: string;
@@ -21,6 +83,10 @@ export type BucketAccessTabProps = {
   region: S3Region;
   accessKeys: AccessKey[];
   accessKeysLoading: boolean;
+  /** True when the keys request failed — distinct from an empty bucket. */
+  accessKeysError?: boolean;
+  /** What went wrong, when the parent has a message worth showing. */
+  accessKeysErrorMessage?: string;
   onCreateOpen: () => void;
 };
 
@@ -30,13 +96,15 @@ export function BucketAccessTab({
   region,
   accessKeys,
   accessKeysLoading,
+  accessKeysError = false,
+  accessKeysErrorMessage,
   onCreateOpen,
 }: BucketAccessTabProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
   const mayCreate = useHasPermission('keys.create');
-  const mayRevoke = useHasPermission('keys.manage_all');
+  const { mayRevoke } = useKeyActionScope();
 
   const deleteKeyMutation = useMutation({
     mutationFn: (id: string) => apiRequest(`/access-keys/${id}`, { method: 'DELETE' }),
@@ -78,20 +146,16 @@ export function BucketAccessTab({
         </RequirePermission>
       </div>
 
-      {accessKeysLoading ? (
-        <div className="flex items-center justify-center py-8">
-          <Spinner ariaLabel="Loading access keys" size={24} />
-        </div>
-      ) : (
-        <AccessKeysTable
-          keys={accessKeys}
-          showPermissions
-          onDelete={mayRevoke ? async (id) => setConfirmDeleteKey(id) : undefined}
-          onCreateOpen={mayCreate ? onCreateOpen : undefined}
-          emptyTitle="No access keys yet"
-          emptyDescription="Create an access key to connect via the S3 API"
-        />
-      )}
+      <KeysSection
+        accessKeys={accessKeys}
+        loading={accessKeysLoading}
+        failed={accessKeysError}
+        errorMessage={accessKeysErrorMessage}
+        mayCreate={mayCreate}
+        mayRevoke={mayRevoke}
+        onCreateOpen={onCreateOpen}
+        onRequestDelete={setConfirmDeleteKey}
+      />
 
       {/* Access endpoints section */}
       <div className="mt-8">

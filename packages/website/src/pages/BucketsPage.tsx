@@ -22,6 +22,7 @@ import { apiRequest } from '../lib/api.js';
 import { formatDate } from '../lib/time.js';
 import { queryKeys } from '../lib/query-client.js';
 import { RequirePermission } from '../components/RequirePermission';
+import { useHasPermission } from '../lib/use-permissions.js';
 
 // Linked from the "bucket is not empty" toast, next to the thing it explains —
 // the docs page covers emptying a bucket with the S3 CLI.
@@ -40,6 +41,7 @@ export function BucketsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [confirmDeleteBucket, setConfirmDeleteBucket] = useState<string | null>(null);
+  const mayCreate = useHasPermission('buckets.create');
 
   const { data, isPending, isError, error } = useQuery({
     queryKey: queryKeys.buckets,
@@ -123,14 +125,20 @@ export function BucketsPage() {
         </RequirePermission>
       }
     >
-      {/* Content: empty state or table */}
+      {/* Content: empty state or table. The invitation goes with the button —
+          "Create your first bucket" over an empty card is a dead end for a role
+          that cannot. */}
       {buckets.length === 0 ? (
         <EmptyStateCard
           icon={DatabaseIcon}
           title="No buckets yet"
-          description="Create your first bucket to start storing objects"
+          description={
+            mayCreate
+              ? 'Create your first bucket to start storing objects'
+              : 'Buckets in this organization appear here'
+          }
         >
-          <RequirePermission permission="buckets.create">
+          {mayCreate && (
             <Button
               id="buckets-empty-create-button"
               variant="primary"
@@ -139,7 +147,7 @@ export function BucketsPage() {
             >
               Create bucket
             </Button>
-          </RequirePermission>
+          )}
         </EmptyStateCard>
       ) : (
         <Table>
