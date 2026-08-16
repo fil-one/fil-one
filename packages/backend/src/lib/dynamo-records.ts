@@ -108,10 +108,26 @@ export interface StripePriceDetails {
   } | null;
 }
 
-/** BillingTable — pk: CUSTOMER#{userId}, sk: SUBSCRIPTION */
+/**
+ * BillingTable — pk: `ORG#{orgId}`, sk: SUBSCRIPTION, with `CUSTOMER#{userId}`
+ * as the legacy key until the re-key completes (ADR §5). Read and written
+ * through `lib/subscription-store.ts`, never keyed inline.
+ */
 export interface SubscriptionRecord {
   pk: string;
   sk: string;
+  /**
+   * The org the subscription belongs to. Written since the webhook started
+   * backfilling it, declared here now that it is the partition key; still
+   * optional for the pre-backfill rows the lifecycle jobs skip.
+   */
+  orgId?: string;
+  /**
+   * The member who owns the Stripe customer. In the legacy key this is the pk;
+   * on an org row it is an attribute, so the self-healing paths that close out
+   * a deleted Stripe customer keep working after the re-key.
+   */
+  userId?: string;
   stripeCustomerId?: string;
   subscriptionStatus?: SubscriptionStatus;
   subscriptionId?: string;

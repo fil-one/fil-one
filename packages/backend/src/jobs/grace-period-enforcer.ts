@@ -1,4 +1,4 @@
-import { ScanCommand, UpdateItemCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
+import { ScanCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
@@ -8,6 +8,11 @@ import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
 } from '../lib/region-helpers.js';
+import {
+  preferOrgRows,
+  scannedSubscription,
+  updateSubscriptionByUser,
+} from '../lib/subscription-store.js';
 
 const dynamo = getDynamoClient();
 
@@ -15,7 +20,7 @@ type Action = 'cancel' | 'write_lock';
 
 interface Candidate {
   pk: string;
-  userId: string;
+  userId?: string;
   orgId: string;
   subscriptionStatus: string;
   action: Action;
@@ -111,19 +116,14 @@ async function scanGracePeriodCandidates(
 
     for (const item of result.Items ?? []) {
       const record = unmarshall(item);
+      const owner = scannedSubscription(record);
 
-      if (!record.orgId) {
+      if (!owner) {
         console.warn('[grace-period-enforcer] Missing orgId, skipping', { pk: record.pk });
         continue;
       }
 
-      const userId = (record.pk as string).replace('CUSTOMER#', '');
-      const base = {
-        pk: record.pk,
-        userId,
-        orgId: record.orgId,
-        subscriptionStatus: record.subscriptionStatus,
-      };
+      const base = { ...owner, subscriptionStatus: record.subscriptionStatus as string };
 
       const gracePeriodEndsAt = record.gracePeriodEndsAt as string | undefined;
       if (gracePeriodEndsAt && new Date(gracePeriodEndsAt).getTime() < nowMs) {
@@ -138,7 +138,36 @@ async function scanGracePeriodCandidates(
     lastEvaluatedKey = result.LastEvaluatedKey;
   } while (lastEvaluatedKey);
 
-  return candidates;
+  return dedupeByOrgId(preferOrgRows(candidates));
+}
+
+/**
+ * One candidate per org.
+ *
+ * This job had no dedupe, because until now one org could only be reached
+ * through one row. Dual-writing means most orgs are two rows for the length of
+ * the transition, and re-subscription history left some orgs with two legacy
+ * rows before that — either way, processing both disables the same tenant twice
+ * and counts one org as two. `preferOrgRows` has already dropped the twins, so
+ * what reaches here is the second case, and it is logged loudly rather than
+ * dropped quietly: two live subscriptions for one org is the collision the
+ * backfill halts on and a human resolves.
+ */
+function dedupeByOrgId(candidates: readonly Candidate[]): Candidate[] {
+  const byOrg = new Map<string, Candidate>();
+  for (const candidate of candidates) {
+    const first = byOrg.get(candidate.orgId);
+    if (!first) {
+      byOrg.set(candidate.orgId, candidate);
+      continue;
+    }
+    console.warn('[grace-period-enforcer] Second subscription row for one org, skipped', {
+      orgId: candidate.orgId,
+      processing: first.pk,
+      skipped: candidate.pk,
+    });
+  }
+  return [...byOrg.values()];
 }
 
 // Grace period expired — disable the tenant on every orchestrator it exists on
@@ -156,18 +185,16 @@ async function cancelSubscriptionAndDisableTenant(
   assertRegionSyncSucceeded(
     await syncTenantStatusInProvisionedRegions(candidate.orgId, 'disabled'),
   );
-  // Transition DynamoDB status to canceled
-  await dynamo.send(
-    new UpdateItemCommand({
-      TableName: billingTableName,
-      Key: { pk: { S: candidate.pk }, sk: { S: 'SUBSCRIPTION' } },
-      UpdateExpression: 'SET subscriptionStatus = :status, updatedAt = :now',
-      ExpressionAttributeValues: {
-        ':status': { S: SubscriptionStatus.Canceled },
-        ':now': { S: now.toISOString() },
-      },
-    }),
-  );
+  // Transition DynamoDB status to canceled, on both keys — a cancel that
+  // reached only the row this scan happened to pick would leave the twin in
+  // grace_period, and the next run would see the org again.
+  await updateSubscriptionByUser(candidate, {
+    UpdateExpression: 'SET subscriptionStatus = :status, updatedAt = :now',
+    ExpressionAttributeValues: {
+      ':status': { S: SubscriptionStatus.Canceled },
+      ':now': { S: now.toISOString() },
+    },
+  });
 
   console.log('[grace-period-enforcer] Canceled + disabled', {
     userId: candidate.userId,

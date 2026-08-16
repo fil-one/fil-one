@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, ScanCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  ConditionalCheckFailedException,
+  DynamoDBClient,
+  ScanCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 
@@ -48,6 +53,12 @@ import {
 const MOCK_USER_ID = 'user-123';
 const MOCK_ORG_ID = 'org-456';
 
+// The two keys one subscription lives on while the row moves to its org. Every
+// write lands on the org key first: a read prefers that row, so it must never
+// be the stale half.
+const ORG_KEY = { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'SUBSCRIPTION' } };
+const LEGACY_KEY = { pk: { S: `CUSTOMER#${MOCK_USER_ID}` }, sk: { S: 'SUBSCRIPTION' } };
+
 const tenantFor = (orchestratorId: string, orgId = MOCK_ORG_ID) =>
   fakeTenantFor(orchestratorId, orgId);
 
@@ -68,13 +79,17 @@ function buildBillingItem(overrides: Record<string, unknown>) {
   });
 }
 
-function canceledUpdate() {
+function canceledUpdates() {
   return ddbMock
     .commandCalls(UpdateItemCommand)
-    .find(
-      (c) =>
-        c.args[0].input.ExpressionAttributeValues?.[':status']?.S === SubscriptionStatus.Canceled,
+    .map((c) => c.args[0].input)
+    .filter(
+      (input) => input.ExpressionAttributeValues?.[':status']?.S === SubscriptionStatus.Canceled,
     );
+}
+
+function canceledUpdate() {
+  return canceledUpdates()[0];
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +159,62 @@ describe('grace-period-enforcer', () => {
     await handler();
 
     expect(canceledUpdate()).toBeDefined();
+  });
+
+  it('cancels both keys, org row first', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        buildBillingItem({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: pastDate(1),
+        }),
+      ],
+    });
+
+    await handler();
+
+    // A cancel that reached only the row this scan picked would leave the twin
+    // in grace_period, and the next run would see the org again.
+    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+    expect(updateCalls).toHaveLength(2);
+    const cancel = {
+      TableName: 'BillingTable',
+      UpdateExpression: 'SET subscriptionStatus = :status, updatedAt = :now',
+      ExpressionAttributeValues: {
+        ':status': { S: SubscriptionStatus.Canceled },
+        ':now': { S: expect.any(String) },
+      },
+    };
+    expect(updateCalls[0].args[0].input).toStrictEqual({
+      ...cancel,
+      Key: ORG_KEY,
+      ConditionExpression: 'attribute_exists(pk)',
+    });
+    expect(updateCalls[1].args[0].input).toStrictEqual({ ...cancel, Key: LEGACY_KEY });
+  });
+
+  it('cancels the legacy row when the org twin does not exist yet', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        buildBillingItem({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: pastDate(1),
+        }),
+      ],
+    });
+    ddbMock
+      .on(UpdateItemCommand, { Key: ORG_KEY })
+      .rejects(new ConditionalCheckFailedException({ message: 'no org row', $metadata: {} }));
+
+    await handler();
+
+    // The org write is attempted and its conditional failure swallowed: an
+    // account the backfill has not copied has only the legacy row to cancel,
+    // and the record still leaves grace_period.
+    expect(canceledUpdates().map((input) => input.Key)).toEqual([ORG_KEY, LEGACY_KEY]);
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 
   it('disables the tenant in every provisioned region when grace expired', async () => {
@@ -497,7 +568,7 @@ describe('grace-period-enforcer', () => {
       // Disable called only on the first run.
       expect(aurora.updateTenantStatus).toHaveBeenCalledTimes(1);
       expect(aurora.updateTenantStatus).toHaveBeenCalledWith(tenantFor('aurora'), 'disabled');
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+      expect(canceledUpdates().map((input) => input.Key)).toEqual([ORG_KEY, LEGACY_KEY]);
     });
 
     it('non-expired grace period — second run skips write_lock once already write-locked', async () => {

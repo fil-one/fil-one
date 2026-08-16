@@ -266,6 +266,32 @@ describe('subscription-drift-checker', () => {
     });
   });
 
+  it('names the org row, not its legacy twin, when both are in the scan', async () => {
+    // Dual-writing puts most orgs in the scan twice, and the org row is the one
+    // every read prefers — so it is the one whose drift is reported.
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        activeBillingItem(),
+        marshall({
+          pk: `ORG#${ORG_ID}`,
+          sk: 'SUBSCRIPTION',
+          orgId: ORG_ID,
+          userId: USER_ID,
+          subscriptionStatus: SubscriptionStatus.Active,
+        }),
+      ],
+    });
+    aurora.getTenantStatus.mockResolvedValue({ kind: 'ok', status: 'disabled' });
+
+    await handler();
+
+    expect(aurora.getTenantStatus).toHaveBeenCalledTimes(1);
+    // The user id comes off the row's own attribute, so the log still names a
+    // user rather than an org id parsed out of a partition key.
+    expect(outOfSyncLogs(logSpy)[0][1]).toMatchObject({ orgId: ORG_ID, userId: USER_ID });
+    expect(emissionFor('aurora')).toMatchObject({ SubscriptionsTotal: 1 });
+  });
+
   it('handles paginated scan results', async () => {
     const orgIdPage2 = 'org-page2';
     ddbMock
