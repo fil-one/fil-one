@@ -2,11 +2,20 @@ import { useQuery } from '@tanstack/react-query';
 import { SubscriptionStatus, getUsageLimits } from '@filone/shared';
 import { getBilling, getMe, getUsage } from '../lib/api.js';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
+import { useHasPermission } from '../lib/use-permissions.js';
 import { daysUntil, formatDateTime } from '../lib/time.js';
 
 export function useSidebarData() {
   const { data: me } = useQuery({ queryKey: queryKeys.me, queryFn: () => getMe() });
-  const { data: billing } = useQuery({ queryKey: queryKeys.billing, queryFn: getBilling });
+  // Every banner below the nav is a billing fact, and `billing.view` is what
+  // says whether the console may know them. Without it the request is not made,
+  // and the banners are absent rather than guessed at.
+  const mayReadBilling = useHasPermission('billing.view');
+  const { data: billing } = useQuery({
+    queryKey: queryKeys.billing,
+    queryFn: getBilling,
+    enabled: mayReadBilling,
+  });
   const { data: usage } = useQuery({
     queryKey: queryKeys.usage,
     queryFn: getUsage,
@@ -31,15 +40,23 @@ export function useSidebarData() {
   const graceEndsLabel = billing?.subscription.gracePeriodEndsAt
     ? `Expires ${formatDateTime(billing.subscription.gracePeriodEndsAt)}`
     : undefined;
+  // `getUsageLimits(false)` is the free-tier allowance, which is the right
+  // answer for a trial and a lie for anyone whose plan the console cannot read:
+  // a Member on pay-as-you-go would have seen a meter filling toward 1 TB.
+  // Without billing there is no limit to measure against, so the meters show
+  // usage and drop the denominator.
   const limits = getUsageLimits(!!isActivePaid);
   const storageUsed = usage?.storage.usedBytes ?? 0;
+  const egressUsed = usage?.egress.usedBytes ?? 0;
+  const limitsKnown = mayReadBilling && billing !== undefined;
   const storagePct =
-    limits.storageLimitBytes > 0
+    limitsKnown && limits.storageLimitBytes > 0
       ? Math.min(100, (storageUsed / limits.storageLimitBytes) * 100)
       : 0;
-  const egressUsed = usage?.egress.usedBytes ?? 0;
   const egressPct =
-    limits.egressLimitBytes > 0 ? Math.min(100, (egressUsed / limits.egressLimitBytes) * 100) : 0;
+    limitsKnown && limits.egressLimitBytes > 0
+      ? Math.min(100, (egressUsed / limits.egressLimitBytes) * 100)
+      : 0;
 
   return {
     me,
@@ -56,5 +73,7 @@ export function useSidebarData() {
     storagePct,
     egressUsed,
     egressPct,
+    /** Whether a meter has a denominator to show. False hides the limit. */
+    limitsKnown,
   };
 }

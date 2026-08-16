@@ -76,16 +76,21 @@ describe('RequirePermission', () => {
     expect(screen.getByText('Checking…')).toBeInTheDocument();
   });
 
-  it('falls back when /me cannot be read', async () => {
+  it('renders nothing at all when /me cannot be read', async () => {
+    // Not the fallback: the fallback explains a role ("Ask an admin"), and a
+    // failed request is not evidence about anybody's role. An Owner whose
+    // network dropped must not be told to ask an admin.
     mockGetMe.mockRejectedValue(new Error('network'));
 
-    renderGate(
+    const { container } = renderGate(
       <RequirePermission permission="buckets.delete" fallback={<span>Ask an admin</span>}>
         Delete
       </RequirePermission>,
     );
 
-    await waitFor(() => expect(screen.getByText('Ask an admin')).toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText('Checking…')).not.toBeInTheDocument());
+    expect(screen.queryByText('Ask an admin')).not.toBeInTheDocument();
     expect(screen.queryByText('Delete')).not.toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
   });
 });

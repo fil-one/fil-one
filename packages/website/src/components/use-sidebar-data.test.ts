@@ -11,6 +11,7 @@ const queryData: { me?: unknown; billing?: unknown; usage?: unknown } = {};
 vi.mock('../lib/query-client.js', () => ({
   queryKeys: { me: ['me'], billing: ['billing'], usage: ['usage'] },
   USAGE_STALE_TIME: 5 * 60_000,
+  ME_STALE_TIME: 10 * 60_000,
 }));
 
 vi.mock('@tanstack/react-query', () => ({
@@ -49,6 +50,16 @@ function setQueries(data: { me?: unknown; billing?: unknown; usage?: unknown }) 
   queryData.billing = data.billing;
   queryData.usage = data.usage;
 }
+
+/**
+ * A caller who may read billing, and a plan for them to read. Usage meters need
+ * both: `billing.view` is what makes the request, and the answer is what says
+ * which limits apply.
+ */
+const billingReader = {
+  me: { permissions: ['billing.view'] },
+  billing: { subscription: { status: 'trialing' } },
+};
 
 describe('useSidebarData', () => {
   beforeEach(() => {
@@ -150,20 +161,38 @@ describe('useSidebarData', () => {
 
     it('computes percentages against the limits', () => {
       setQueries({
+        ...billingReader,
         usage: { storage: { usedBytes: 250 }, egress: { usedBytes: 500 } },
       });
       const { result } = renderHook(() => useSidebarData());
+      expect(result.current.limitsKnown).toBe(true);
       expect(result.current.storagePct).toBe(25);
       expect(result.current.egressPct).toBe(50);
     });
 
     it('clamps percentages at 100 when usage exceeds the limit', () => {
       setQueries({
+        ...billingReader,
         usage: { storage: { usedBytes: 5000 }, egress: { usedBytes: 9999 } },
       });
       const { result } = renderHook(() => useSidebarData());
       expect(result.current.storagePct).toBe(100);
       expect(result.current.egressPct).toBe(100);
+    });
+
+    it('shows usage without a limit when billing is unreadable', () => {
+      // A Member on pay-as-you-go was shown a meter filling toward the free
+      // tier's 1 TB — a limit that is not theirs, derived from a plan the
+      // console never read.
+      setQueries({
+        me: { permissions: ['buckets.read'] },
+        usage: { storage: { usedBytes: 250 }, egress: { usedBytes: 500 } },
+      });
+      const { result } = renderHook(() => useSidebarData());
+      expect(result.current.limitsKnown).toBe(false);
+      expect(result.current.storageUsed).toBe(250);
+      expect(result.current.storagePct).toBe(0);
+      expect(result.current.egressPct).toBe(0);
     });
 
     it('avoids divide-by-zero, returning 0% when limits are 0', () => {

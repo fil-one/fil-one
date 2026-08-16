@@ -24,10 +24,24 @@ import { useCopyToClipboard } from '../lib/use-copy-to-clipboard.js';
 import { LIST_GC_TIME, LIST_STALE_TIME, queryKeys } from '../lib/query-client.js';
 import { RequirePermission } from '../components/RequirePermission';
 import { useHasPermission } from '../lib/use-permissions.js';
+import { useKeyActionScope } from '../lib/use-key-scope.js';
 
 // ---------------------------------------------------------------------------
 // Tab 1: Access Keys
 // ---------------------------------------------------------------------------
+
+// Mirrors AccessKeysTable at its widest (showRegion + showBuckets +
+// showPermissions), matching each column's breakpoint so the loading
+// placeholder hides the same columns as the real table.
+const SKELETON_COLUMNS: SkeletonColumn[] = [
+  { label: 'Name' },
+  { label: 'Region', className: 'hidden md:table-cell' },
+  { label: 'Buckets', className: 'hidden lg:table-cell' },
+  { label: 'Permissions', className: 'hidden md:table-cell' },
+  { label: 'Status', className: 'hidden sm:table-cell' },
+  { label: 'Last Used', className: 'hidden md:table-cell' },
+  {},
+];
 
 type AccessKeysTabProps = {
   keys: AccessKey[];
@@ -35,9 +49,11 @@ type AccessKeysTabProps = {
   onCreateOpen?: () => void;
   /** Absent for a role that cannot revoke them — the table drops the column. */
   onDelete?: (id: string) => Promise<void>;
+  /** Whether a row's Revoke belongs to this caller. */
+  canRevoke?: (key: AccessKey) => boolean;
 };
 
-function AccessKeysTab({ keys, onCreateOpen, onDelete }: AccessKeysTabProps) {
+function AccessKeysTab({ keys, onCreateOpen, onDelete, canRevoke }: AccessKeysTabProps) {
   return (
     <>
       <div className="mt-4 mb-4">
@@ -52,6 +68,7 @@ function AccessKeysTab({ keys, onCreateOpen, onDelete }: AccessKeysTabProps) {
         showBuckets
         showPermissions
         onDelete={onDelete}
+        canDelete={canRevoke}
         onCreateOpen={onCreateOpen}
       />
       {keys.length === 0 && (
@@ -62,6 +79,65 @@ function AccessKeysTab({ keys, onCreateOpen, onDelete }: AccessKeysTabProps) {
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * The keys tab in each of its four states.
+ *
+ * All four live inside the tab rather than replacing the page, so the static
+ * Connection details tab beside it survives a failed or refused keys request.
+ */
+function AccessKeysPanel({
+  keys,
+  mayList,
+  isPending,
+  isError,
+  errorMessage,
+  onCreateOpen,
+  onDelete,
+  canRevoke,
+}: AccessKeysTabProps & {
+  mayList: boolean;
+  isPending: boolean;
+  isError: boolean;
+  errorMessage?: string;
+}) {
+  if (!mayList) {
+    return (
+      <div
+        data-testid="api-keys-no-access"
+        className="mt-4 rounded-lg border border-zinc-200 bg-white p-6 text-sm text-zinc-600"
+      >
+        Access keys are managed by members who can create them. Your role can browse buckets and
+        objects; the connection details are in the next tab.
+      </div>
+    );
+  }
+
+  if (isPending) {
+    return (
+      <div className="mt-4">
+        <TableSkeleton columns={SKELETON_COLUMNS} rows={4} aria-label="Loading access keys" />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        {errorMessage ?? 'Failed to load access keys'}
+      </div>
+    );
+  }
+
+  return (
+    <AccessKeysTab
+      keys={keys}
+      onCreateOpen={onCreateOpen}
+      onDelete={onDelete}
+      canRevoke={canRevoke}
+    />
   );
 }
 
@@ -375,19 +451,6 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 // Page
 // ---------------------------------------------------------------------------
 
-// Mirrors AccessKeysTable at its widest (showRegion + showBuckets +
-// showPermissions), matching each column's breakpoint so the loading
-// placeholder hides the same columns as the real table.
-const SKELETON_COLUMNS: SkeletonColumn[] = [
-  { label: 'Name' },
-  { label: 'Region', className: 'hidden md:table-cell' },
-  { label: 'Buckets', className: 'hidden lg:table-cell' },
-  { label: 'Permissions', className: 'hidden md:table-cell' },
-  { label: 'Status', className: 'hidden sm:table-cell' },
-  { label: 'Last Used', className: 'hidden md:table-cell' },
-  {},
-];
-
 /** Minting keys is `keys.create`, which ReadOnly does not hold. */
 function CreateKeyAction({ onCreate }: { onCreate: () => void }) {
   return (
@@ -410,9 +473,10 @@ export function ApiKeysPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const mayCreate = useHasPermission('keys.create');
-  // Listing and revoking are `keys.manage_all` until a creator predicate
-  // exists — see the route manifest's note on the key routes.
-  const mayRevoke = useHasPermission('keys.manage_all');
+  // Listing is `keys.manage_own` and the server narrows the response to the
+  // caller's own keys; `keys.manage_all` lifts that narrowing server-side and
+  // asks nothing extra of this request. Revoking is per row.
+  const { mayList, mayRevoke } = useKeyActionScope();
 
   const openCreateKey = () => void navigate({ to: '/api-keys/create' });
 
@@ -421,6 +485,7 @@ export function ApiKeysPage() {
     queryFn: () => apiRequest<ListAccessKeysResponse>('/access-keys'),
     staleTime: LIST_STALE_TIME,
     gcTime: LIST_GC_TIME,
+    enabled: mayList,
   });
   const keys = data?.keys ?? [];
 
@@ -454,19 +519,10 @@ export function ApiKeysPage() {
     }
   }
 
-  if (isError) {
-    return (
-      <PageLayout
-        title="API Keys"
-        description="Manage credentials and connect via S3-compatible API"
-      >
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {error?.message ?? 'Failed to load access keys'}
-        </div>
-      </PageLayout>
-    );
-  }
-
+  // The whole page used to be replaced by a spinner or an error card. Both
+  // states now live in the keys panel: the Connection details tab is static
+  // documentation that works whatever the keys request did, and the action slot
+  // is the caller's way out of an empty list.
   return (
     <PageLayout
       title="API Keys"
@@ -484,21 +540,16 @@ export function ApiKeysPage() {
 
         <TabPanels>
           <TabPanel>
-            {isPending ? (
-              <div className="mt-4">
-                <TableSkeleton
-                  columns={SKELETON_COLUMNS}
-                  rows={4}
-                  aria-label="Loading access keys"
-                />
-              </div>
-            ) : (
-              <AccessKeysTab
-                keys={keys}
-                onCreateOpen={mayCreate ? openCreateKey : undefined}
-                onDelete={mayRevoke ? handleDelete : undefined}
-              />
-            )}
+            <AccessKeysPanel
+              keys={keys}
+              mayList={mayList}
+              isPending={isPending}
+              isError={isError}
+              errorMessage={error?.message}
+              onCreateOpen={mayCreate ? openCreateKey : undefined}
+              onDelete={handleDelete}
+              canRevoke={mayRevoke}
+            />
           </TabPanel>
           <TabPanel>
             <ConnectionDetailsTab />

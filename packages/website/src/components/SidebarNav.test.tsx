@@ -33,6 +33,9 @@ vi.mock('./use-sidebar-data.js', () => ({
     storagePct: 10,
     egressUsed: 1,
     egressPct: 10,
+    // The trial meters need a denominator, which only a caller who can read
+    // billing has.
+    limitsKnown: true,
   }),
 }));
 
@@ -117,6 +120,27 @@ describe('SidebarNav — the Billing entry', () => {
     expect(container.querySelectorAll('[data-testid="nav-billing"]')).toHaveLength(0);
     // Settings is every member's own account and stays.
     expect(container.querySelectorAll('[data-testid="nav-settings"]')).toHaveLength(1);
+  });
+});
+
+describe('SidebarNav — the API Keys entry', () => {
+  it.each([OrgRole.Owner, OrgRole.Admin, OrgRole.Member])(
+    'renders for %s, who holds keys.manage_own',
+    (role) => {
+      const { container } = renderBothSidebars(role);
+
+      expect(container.querySelectorAll('[data-testid="nav-api-keys"]')).toHaveLength(1);
+    },
+  );
+
+  it('is absent for ReadOnly', () => {
+    // ReadOnly holds no `keys.*`: the list request is refused, and the page has
+    // nothing but the connection reference left.
+    const { container } = renderBothSidebars(OrgRole.ReadOnly);
+
+    expect(container.querySelectorAll('[data-testid="nav-api-keys"]')).toHaveLength(0);
+    // Buckets carries no permission — every role browses.
+    expect(container.querySelectorAll('[data-testid="nav-buckets"]')).toHaveLength(1);
   });
 });
 

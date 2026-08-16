@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { OrgRole } from '@filone/shared';
+import { OrgRole, ROLE_PERMISSIONS } from '@filone/shared';
 import { seedPermissions } from '../lib/test-permissions.js';
 import { PlanId, SubscriptionStatus } from '@filone/shared';
 import type { BillingInfo } from '@filone/shared';
@@ -24,11 +24,16 @@ vi.mock('../components/Toast', () => ({
 const mockGetBilling = vi.fn();
 const mockGetUsage = vi.fn();
 const mockGetInvoices = vi.fn();
+const mockGetMe = vi.fn();
 vi.mock('../lib/api.js', () => ({
   apiRequest: vi.fn(),
   getBilling: (...args: unknown[]) => mockGetBilling(...args),
   getUsage: (...args: unknown[]) => mockGetUsage(...args),
   getInvoices: (...args: unknown[]) => mockGetInvoices(...args),
+  // `usePermissions` reads `/me`, and every gate on this page goes through it.
+  // The mock was missing it, so any refetch of the seeded cache called
+  // `undefined` and errored the query — which used to render the denial copy.
+  getMe: (...args: unknown[]) => mockGetMe(...args),
   activateSubscription: vi.fn(),
 }));
 
@@ -71,6 +76,16 @@ function renderPage(role = OrgRole.Owner) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   // The page is gated on `billing.view` and its controls on `billing.manage`.
   seedPermissions(client, role);
+  mockGetMe.mockResolvedValue({
+    orgId: 'org-1',
+    orgName: 'Acme',
+    emailVerified: true,
+    mfaEnrollments: [],
+    ragAccess: true,
+    userId: 'user-1',
+    role,
+    permissions: ROLE_PERMISSIONS[role],
+  });
   return render(
     <QueryClientProvider client={client}>
       <BillingPage />

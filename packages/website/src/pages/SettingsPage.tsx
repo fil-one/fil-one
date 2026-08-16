@@ -393,26 +393,8 @@ function ProfileSection({ me }: { me: MeResponse }) {
               )}
             </FormField>
           </div>
-          {/* The company name is the organization's, not the caller's: it goes
-              to PATCH /api/org behind `org.rename`. A member who cannot rename
-              it still sees it, read-only, because it names the org they are
-              working in. */}
           <div className="flex flex-1 flex-col">
-            <FormField label="Company name" htmlFor="profile-org-name">
-              <RequirePermission
-                permission="org.rename"
-                fallback={
-                  <Input id="profile-org-name" value={form.orgName} onChange={() => {}} disabled />
-                }
-              >
-                <Input
-                  id="profile-org-name"
-                  value={form.orgName}
-                  onChange={form.setOrgName}
-                  placeholder="Your company"
-                />
-              </RequirePermission>
-            </FormField>
+            <CompanyNameField value={form.orgName} onChange={form.setOrgName} />
           </div>
         </div>
 
@@ -616,6 +598,26 @@ function DangerSection({ me }: { me: MeResponse }) {
         }}
       />
     </Card>
+  );
+}
+
+/**
+ * The organization's name, not the caller's.
+ *
+ * It goes to `PATCH /api/org` behind `org.rename`, so most members see it
+ * read-only — visible because it names the org they are working in, disabled
+ * because the server would refuse the change. Read-only is also what shows
+ * while `/me` is in flight: it never offers an edit that then vanishes.
+ */
+function CompanyNameField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const readOnly = <Input id="profile-org-name" value={value} onChange={() => {}} disabled />;
+
+  return (
+    <FormField label="Company name" htmlFor="profile-org-name">
+      <RequirePermission permission="org.rename" fallback={readOnly} pending={readOnly}>
+        <Input id="profile-org-name" value={value} onChange={onChange} placeholder="Your company" />
+      </RequirePermission>
+    </FormField>
   );
 }
 

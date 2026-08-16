@@ -1,11 +1,26 @@
 import type { Preview } from '@storybook/react-vite';
+import { useMemo } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { OrgRole } from '@filone/shared';
 import '../src/styles.css';
 import { ToastProvider } from '../src/components/Toast';
+import { seedPermissions } from '../src/lib/test-permissions.js';
 
-const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: false } },
-});
+/**
+ * Every story renders as an Owner unless it says otherwise.
+ *
+ * Permission-gated surfaces are hidden until `/me` answers, and in Storybook it
+ * never does — so a gated control simply was not in its own story. A client per
+ * story, seeded before first render, gives each story the role it is about:
+ * `parameters: { role: OrgRole.Member }` on a story or its meta.
+ */
+function usePreviewClient(role: OrgRole) {
+  return useMemo(() => {
+    const created = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seedPermissions(created, role);
+    return created;
+  }, [role]);
+}
 
 const preview: Preview = {
   decorators: [
@@ -13,6 +28,8 @@ const preview: Preview = {
       // Full-page stories paint their own ground; the padded white frame would
       // misrepresent them as floating on a white page.
       const fullBleed = Boolean(context.parameters.fullBleed);
+      const role = (context.parameters.role as OrgRole | undefined) ?? OrgRole.Owner;
+      const queryClient = usePreviewClient(role);
       return (
         <QueryClientProvider client={queryClient}>
           <ToastProvider>

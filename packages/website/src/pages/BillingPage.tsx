@@ -30,6 +30,7 @@ import { ContactSalesDialog } from '../components/billing/ContactSalesDialog.js'
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { Overline } from '../components/Overline';
 import { RequirePermission } from '../components/RequirePermission';
+import { useHasPermission } from '../lib/use-permissions.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -92,6 +93,11 @@ export function BillingPage() {
 function BillingDetails() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  // Hoisted rather than wrapped per control: half of these buttons sit under
+  // prompt copy that only makes sense with them ("Ready to unlock unlimited
+  // storage?"), and gating the button alone left an Admin reading an invitation
+  // with nothing to accept.
+  const mayManage = useHasPermission('billing.manage');
 
   const {
     data: billing,
@@ -304,16 +310,31 @@ function BillingDetails() {
       headingId="billing-heading"
       description="Manage your plan, usage, and payment methods"
     >
-      {/* Past due warning banner */}
+      {/* Past due warning banner. An Admin sees the state and who to ask; only
+          `billing.manage` gets the inline action. */}
       {isPastDue && (
         <div className="mb-4 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
           <WarningIcon size={20} className="text-amber-600 flex-shrink-0" weight="fill" />
           <span className="text-sm text-amber-800">
-            Your last payment failed. Please{' '}
-            <button type="button" onClick={handleUpdatePayment} className="font-semibold underline">
-              update your payment method
-            </button>{' '}
-            to avoid losing access.{graceDays !== null ? ` ${daysRemainingLabel(graceDays)}.` : ''}
+            {mayManage ? (
+              <>
+                Your last payment failed. Please{' '}
+                <button
+                  type="button"
+                  onClick={handleUpdatePayment}
+                  className="font-semibold underline"
+                >
+                  update your payment method
+                </button>{' '}
+                to avoid losing access.
+              </>
+            ) : (
+              <>
+                Your last payment failed. An organization owner needs to update the payment method
+                to avoid losing access.
+              </>
+            )}
+            {graceDays !== null ? ` ${daysRemainingLabel(graceDays)}.` : ''}
           </span>
         </div>
       )}
@@ -323,11 +344,21 @@ function BillingDetails() {
         <div className="mb-4 flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
           <WarningIcon size={20} className="text-red-600 flex-shrink-0" weight="fill" />
           <span className="text-sm text-red-800">
-            Your account has been canceled.{' '}
-            <button type="button" onClick={handleUpgradeClick} className="font-semibold underline">
-              Reactivate
-            </button>{' '}
-            to regain access.
+            {mayManage ? (
+              <>
+                Your account has been canceled.{' '}
+                <button
+                  type="button"
+                  onClick={handleUpgradeClick}
+                  className="font-semibold underline"
+                >
+                  Reactivate
+                </button>{' '}
+                to regain access.
+              </>
+            ) : (
+              'Your account has been canceled. An organization owner can reactivate it.'
+            )}
           </span>
         </div>
       )}
@@ -407,30 +438,30 @@ function BillingDetails() {
               </div>
             </div>
 
-            {/* Trial CTA banner */}
-            {isTrialing && (
+            {/* Trial CTA banner — the invitation and its button stand or fall
+                together. */}
+            {isTrialing && mayManage && (
               <div className="rounded-lg bg-zinc-50 border border-zinc-200/50 p-[13px] flex items-center justify-between">
                 <p className="text-[13px] font-medium text-zinc-900">
                   Ready to unlock unlimited storage?
                 </p>
-                <RequirePermission permission="billing.manage">
-                  <Button
-                    id="billing-upgrade-button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleUpgradeClick}
-                  >
-                    Upgrade
-                  </Button>
-                </RequirePermission>
+                <Button
+                  id="billing-upgrade-button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleUpgradeClick}
+                >
+                  Upgrade
+                </Button>
               </div>
             )}
 
-            {/* Manage plan — active subscribers */}
+            {/* Manage plan — active subscribers. "Billed monthly" is a fact
+                worth stating on its own, so only the button is gated. */}
             {(isActive || isPastDue) && (
               <div className="flex items-center justify-between border-t border-zinc-100 pt-3">
                 <span className="text-[12px] text-zinc-500">Billed monthly</span>
-                <RequirePermission permission="billing.manage">
+                {mayManage && (
                   <Button
                     id="billing-manage-plan-button"
                     variant="ghost"
@@ -439,12 +470,12 @@ function BillingDetails() {
                   >
                     Manage plan
                   </Button>
-                </RequirePermission>
+                )}
               </div>
             )}
 
             {/* Grace period / Canceled reactivation CTA */}
-            {(isGracePeriod || isCanceled) && (
+            {(isGracePeriod || isCanceled) && mayManage && (
               <div
                 className={`rounded-lg p-[13px] flex items-center justify-between ${
                   isCanceled
@@ -461,18 +492,16 @@ function BillingDetails() {
                       ? 'Upgrade to keep your data and unlock unlimited storage'
                       : 'Reactivate your subscription to restore full access'}
                 </p>
-                <RequirePermission permission="billing.manage">
-                  <Button
-                    id="billing-reactivate-button"
-                    variant={isCanceled ? 'destructive' : 'warning'}
-                    size="sm"
-                    icon={ArrowRightIcon}
-                    iconPosition="right"
-                    onClick={handleUpgradeClick}
-                  >
-                    {isTrialExpiredGrace ? 'Upgrade' : 'Reactivate'}
-                  </Button>
-                </RequirePermission>
+                <Button
+                  id="billing-reactivate-button"
+                  variant={isCanceled ? 'destructive' : 'warning'}
+                  size="sm"
+                  icon={ArrowRightIcon}
+                  iconPosition="right"
+                  onClick={handleUpgradeClick}
+                >
+                  {isTrialExpiredGrace ? 'Upgrade' : 'Reactivate'}
+                </Button>
               </div>
             )}
           </div>
@@ -572,7 +601,7 @@ function BillingDetails() {
                     {String(billing.paymentMethod.expYear).slice(-2)}
                   </p>
                 </div>
-                <RequirePermission permission="billing.manage">
+                {mayManage && (
                   <Button
                     id="billing-update-payment-button"
                     variant="ghost"
@@ -581,13 +610,13 @@ function BillingDetails() {
                   >
                     Update
                   </Button>
-                </RequirePermission>
+                )}
               </div>
             ) : (
               <div className="flex items-center gap-3 rounded-lg border border-dashed border-zinc-200 bg-zinc-50/30 p-[13px] w-full">
                 <IconBox icon={CreditCardIcon} color="grey" size="sm" />
                 <span className="flex-1 text-[13px] text-zinc-500">No payment method added</span>
-                <RequirePermission permission="billing.manage">
+                {mayManage && (
                   <Button
                     id="billing-add-payment-button"
                     variant="ghost"
@@ -597,7 +626,7 @@ function BillingDetails() {
                   >
                     Add
                   </Button>
-                </RequirePermission>
+                )}
               </div>
             )}
           </div>
@@ -712,18 +741,16 @@ function BillingDetails() {
                   inactive, canReactivateWithSavedCard stays false, so the flow
                   goes through a fresh SetupIntent rather than a saved-card
                   reactivation the backend would reject. */}
-              {(isTrialing || isGracePeriod || isCanceled || isInactive) && (
-                <RequirePermission permission="billing.manage">
-                  <Button
-                    id="billing-plan-cta-button"
-                    variant="primary"
-                    icon={LightningIcon}
-                    onClick={handleUpgradeClick}
-                    className="w-full justify-center"
-                  >
-                    {isTrialing ? 'Upgrade now' : isInactive ? 'Choose a plan' : 'Reactivate'}
-                  </Button>
-                </RequirePermission>
+              {(isTrialing || isGracePeriod || isCanceled || isInactive) && mayManage && (
+                <Button
+                  id="billing-plan-cta-button"
+                  variant="primary"
+                  icon={LightningIcon}
+                  onClick={handleUpgradeClick}
+                  className="w-full justify-center"
+                >
+                  {isTrialing ? 'Upgrade now' : isInactive ? 'Choose a plan' : 'Reactivate'}
+                </Button>
               )}
             </div>
           </div>
