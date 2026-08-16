@@ -12,7 +12,7 @@ import { accountDeletedResponse, ResponseBuilder } from '../lib/response-builder
 import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.js';
 import { findRagKeyByToken, ragKeyAllowsBucket, touchRagKeyLastUsed } from '../lib/rag-api-keys.js';
 import { resolveMembership } from '../lib/org-membership.js';
-import { authMiddleware, withRefreshedCookies } from './auth.js';
+import { authMiddleware, membershipUnavailableResponse, withRefreshedCookies } from './auth.js';
 import type { AuthInternal, AuthMiddlewareOptions } from './auth.js';
 import { requireMembership, requirePermission } from './authorize.js';
 
@@ -109,8 +109,20 @@ async function bearerAuth(
   delete event.headers.authorization;
 
   // Read consistently, exactly as the cookie path does: a key minted moments
-  // after its creator joined must not query as a non-member.
-  const membership = await resolveMembership(record.orgId, record.createdBy);
+  // after its creator joined must not query as a non-member. A failed read is
+  // the same retryable 503 the cookie path answers with — treating an OrgTable
+  // outage as an absent row would revoke every live key for the duration.
+  let membership;
+  try {
+    membership = await resolveMembership(record.orgId, record.createdBy);
+  } catch (err) {
+    console.error('[rag-query-auth] OrgTable membership read failed — cannot authorize the key', {
+      orgId: record.orgId,
+      userId: record.createdBy,
+      error: err,
+    });
+    return membershipUnavailableResponse();
+  }
 
   const userInfo: UserInfo = {
     sub: `ragkey|${record.keyId}`,
@@ -120,6 +132,11 @@ async function bearerAuth(
     // creatorEmail was captured via getVerifiedEmail at creation time.
     emailVerified: true,
     name: record.keyName,
+    // The one thing downstream must know about this session: it came from a
+    // key. The subscription guard reads it and provisions no trial, and a
+    // membership denial counts as a revoked key creator rather than as an
+    // account the conversion missed.
+    apiKeySession: true,
     ...(membership ? { membership } : {}),
   };
   (

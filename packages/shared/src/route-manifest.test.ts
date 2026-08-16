@@ -7,10 +7,9 @@ const entries = ROUTE_MANIFEST;
 
 describe('ROUTE_MANIFEST', () => {
   it('lists every registered route once', () => {
-    // 38 routes are registered via addRoute in sst.config.ts. The enforcement
-    // PR adds the backend completeness test that walks src/handlers/; this pins
-    // the count so a route added to the config without a manifest entry is
-    // visible here too.
+    // 38 routes are registered via addRoute in sst.config.ts. The backend's
+    // completeness test walks src/handlers/; this pins the count so a route
+    // added to the config without a manifest entry is visible here too.
     expect(entries).toHaveLength(38);
     const keys = entries.map((route) => `${route.method} ${route.path}`);
     expect(new Set(keys).size).toBe(keys.length);
@@ -87,10 +86,10 @@ describe('ROUTE_MANIFEST', () => {
   });
 
   it('keeps the self-service marker on the caller-only routes', () => {
-    // 'self' waives the role gate, so it must never reach a route that touches
-    // org state: every route carrying it is /api/me itself or lives under
-    // /api/me/ or /api/mfa/. Matching the bare prefix would let /api/members
-    // through.
+    // 'self' waives the org gate entirely, so it must never reach a route that
+    // touches org state: every route carrying it is /api/me itself or lives
+    // under /api/me/ or /api/mfa/. Matching the bare prefix would let
+    // /api/members through.
     const isSelfServicePath = (path: string) =>
       path === '/api/me' || path.startsWith('/api/me/') || path.startsWith('/api/mfa/');
     const offOrg = entries

@@ -2,11 +2,10 @@ import type { Permission } from './permissions.js';
 
 /**
  * Every API route, its authentication category, and what it requires of the
- * caller. Declared rather than implied so route coverage becomes
- * machine-checkable: the enforcement PR adds a backend test that walks
- * `packages/backend/src/handlers/` and fails on any handler missing from this
- * manifest, which makes "we forgot to gate the new route" a red build instead
- * of an open door.
+ * caller. Declared rather than implied so route coverage is machine-checkable:
+ * a backend test walks `packages/backend/src/handlers/` and fails on any
+ * handler missing from this manifest, which makes "we forgot to gate the new
+ * route" a red build instead of an open door.
  *
  * The manifest is the source of truth for what `authorize()` installs; it does
  * not itself enforce anything.
@@ -20,10 +19,10 @@ export type RouteCategory =
   | 'webhook'
   /** RAG bearer token resolved by `ragQueryAuthMiddleware`, which bypasses
    * `authMiddleware` entirely on that branch and builds the caller from the key
-   * record; the enforcement PR adds the creator-membership resolution on this
-   * path, so that a revoked creator loses the key's authority. The same route
-   * still accepts a cookie session when no `Authorization` header is present,
-   * and that caller is gated on {@link RouteManifestEntry.cookieRequires}. */
+   * record. That path resolves the key creator's membership itself, so a
+   * revoked creator loses the key's authority. The same route still accepts a
+   * cookie session when no `Authorization` header is present, and that caller
+   * is gated on {@link RouteManifestEntry.cookieRequires}. */
   | 'bearer';
 
 /**
@@ -31,10 +30,11 @@ export type RouteCategory =
  *
  * A {@link Permission} is checked against the caller's role before the handler
  * runs. `'self'` marks routes that only touch the caller's own account —
- * profile, preferences, MFA — where membership in the active org is the whole
- * requirement and no role gate applies. `'in-handler'` marks routes whose
- * requirement depends on the request body, checked against this same registry
- * inside the handler.
+ * profile, preferences, MFA — and carries no org gate at all: an authenticated
+ * session is the whole requirement, because gating your own password on a role
+ * would lock a ReadOnly member out of their own account. `'in-handler'` marks
+ * routes whose permission depends on the request body; the chain gates them on
+ * membership and the handler checks the permission against this same registry.
  */
 export type RouteRequirement = Permission | 'self' | 'in-handler';
 
@@ -138,9 +138,8 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
   // Listing and revoking are `keys.manage_all`, because no handler can yet tell
   // whose key it is holding: keys gain `createdBy` in this milestone, and until
   // a creator predicate exists, `keys.manage_own` would name a narrowing nobody
-  // performs and hand a Member the whole org's key inventory. The enforcement PR
-  // relaxes list and delete to `keys.manage_own` in the same change that adds
-  // the predicate.
+  // performs and hand a Member the whole org's key inventory. Relaxing list and
+  // delete to `keys.manage_own` belongs to the change that adds that predicate.
   {
     method: 'GET',
     path: '/api/access-keys',
@@ -309,10 +308,9 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     requires: 'buckets.read',
   },
   // A synthesized feed of bucket, object, and key events — not the audit log.
-  // The route requirement is only half the gate. The enforcement PR also
-  // filters the feed itself, dropping key-lifecycle entries for a caller
-  // holding no `keys.*` permission; today the feed hands a ReadOnly member the
-  // org's key inventory.
+  // The route requirement is only half the gate: a feed carrying key-lifecycle
+  // events has to drop them for a caller holding no `keys.*` permission, or it
+  // hands a ReadOnly member the org's key inventory.
   {
     method: 'GET',
     path: '/api/activity',

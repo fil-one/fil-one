@@ -3,7 +3,7 @@ import type { APIGatewayProxyResultV2, APIGatewayProxyStructuredResultV2 } from 
 import { ApiErrorCode, OrgRole, roleHasPermission } from '@filone/shared';
 import type { Permission } from '@filone/shared';
 import type { OrgMembership } from '../lib/org-membership.js';
-import { membershipFor } from './lambda-test-utilities.js';
+import { membershipFor, NO_MEMBERSHIP } from './lambda-test-utilities.js';
 
 const ORG_ID = 'org-1';
 const USER_ID = 'user-1';
@@ -31,8 +31,13 @@ export function describeRoleEnforcement({
   userId = USER_ID,
 }: {
   permission: Permission;
-  /** Run the route's full chain for a caller with this membership. */
-  invoke: (membership: OrgMembership | undefined) => Promise<APIGatewayProxyResultV2>;
+  /**
+   * Run the route's full chain for a caller with this membership. The
+   * absent-row case is spelled {@link NO_MEMBERSHIP} rather than `undefined`,
+   * so forwarding it through a conditional spread cannot quietly turn the
+   * denial case into a caller who has the fixture's default role.
+   */
+  invoke: (membership: OrgMembership | typeof NO_MEMBERSHIP) => Promise<APIGatewayProxyResultV2>;
   orgId?: string;
   userId?: string;
 }): void {
@@ -40,7 +45,7 @@ export function describeRoleEnforcement({
 
   // Every route here answers with a ResponseBuilder, so the union's string arm
   // never occurs; middy's declared return type carries it anyway.
-  const denial = async (membership: OrgMembership | undefined) =>
+  const denial = async (membership: OrgMembership | typeof NO_MEMBERSHIP) =>
     (await invoke(membership)) as APIGatewayProxyStructuredResultV2;
 
   describe(`role enforcement (${permission})`, () => {
@@ -65,7 +70,7 @@ export function describeRoleEnforcement({
     }
 
     it('refuses a caller with no membership row', async () => {
-      const result = await denial(undefined);
+      const result = await denial(NO_MEMBERSHIP);
 
       expect(result.statusCode).toBe(403);
       expect(JSON.parse(result.body ?? '{}').code).toBe(ApiErrorCode.NOT_A_MEMBER);

@@ -85,9 +85,14 @@ process.env.FILONE_STAGE = 'test';
 
 import { baseHandler, handler } from './query-bucket.js';
 import { hashRagKeyToken, RagApiKeyKeys } from '../lib/rag-api-keys.js';
-import { buildEvent, buildContext, stubMembershipRead } from '../test/lambda-test-utilities.js';
+import {
+  buildEvent,
+  buildContext,
+  NO_MEMBERSHIP,
+  stubMembershipRead,
+} from '../test/lambda-test-utilities.js';
 import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.js';
-import { OrgRole, S3Region } from '@filone/shared';
+import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 
 // ---------------------------------------------------------------------------
@@ -576,6 +581,32 @@ describe('query-bucket handler (RAG access gate)', () => {
 
     expect(result.statusCode).toBe(200);
     expect(mockEmbed).toHaveBeenCalled();
+  });
+
+  it('refuses a cookie caller with no membership row before any RAG work', async () => {
+    // The route's other branch: no Authorization header means an ordinary
+    // console user, gated on the manifest's cookieRequires. This is also what
+    // exercises the cookie denial's use of withRefreshedCookies, which the auth
+    // mock above has to provide.
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const event = buildEvent({
+      userInfo: {
+        userId: 'user-1',
+        orgId: 'org-1',
+        email: 'dev@fil.org',
+        emailVerified: true,
+        membership: NO_MEMBERSHIP,
+      },
+      body: JSON.stringify({ query: 'hello' }),
+    });
+    event.pathParameters = { name: 'my-bucket' };
+
+    const result = await handler(event, buildContext());
+
+    expect(result.statusCode).toBe(403);
+    expect(JSON.parse(result.body!).code).toBe(ApiErrorCode.NOT_A_MEMBER);
+    expect(mockEmbed).not.toHaveBeenCalled();
   });
 });
 
