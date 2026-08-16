@@ -23,11 +23,22 @@ import {
   changePassword,
   getMe,
   getPreferences,
+  updateOrg,
   updatePreferences,
   updateProfile,
 } from '../lib/api.js';
-import { getProvider, isSocialConnection, UpdateProfileSchema } from '@filone/shared';
-import type { ConnectionProvider, MeResponse, PreferencesResponse } from '@filone/shared';
+import {
+  getProvider,
+  isSocialConnection,
+  OrgNameSchema,
+  UpdateProfileSchema,
+} from '@filone/shared';
+import type {
+  ConnectionProvider,
+  MeResponse,
+  PreferencesResponse,
+  UpdateProfileRequest,
+} from '@filone/shared';
 import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
@@ -171,6 +182,23 @@ function applyProfileUpdate(result: {
   };
 }
 
+/**
+ * What one Save press sends. The org name goes to `PATCH /api/org` and the
+ * personal fields to `PATCH /api/me/profile`: two endpoints because they are
+ * two permissions, and only the fields that changed are sent at all.
+ */
+async function saveProfileAndOrg({
+  profile,
+  orgName,
+}: {
+  profile: UpdateProfileRequest | undefined;
+  orgName: string | undefined;
+}): Promise<{ name?: string; email?: string; orgName?: string }> {
+  const renamed = orgName === undefined ? undefined : await updateOrg({ name: orgName });
+  const updated = profile === undefined ? {} : await updateProfile(profile);
+  return { ...updated, ...(renamed ? { orgName: renamed.name } : {}) };
+}
+
 function useProfileForm(me: MeResponse) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -197,7 +225,7 @@ function useProfileForm(me: MeResponse) {
   const hasChanges = nameChanged || emailChanged || orgNameChanged;
 
   const mutation = useMutation({
-    mutationFn: updateProfile,
+    mutationFn: saveProfileAndOrg,
     onSuccess: (result) => {
       if (result.name !== undefined) setName(result.name);
       if (result.email !== undefined) setEmail(result.email);
@@ -221,18 +249,29 @@ function useProfileForm(me: MeResponse) {
   });
 
   function save() {
-    const payload: Record<string, string> = {};
-    if (nameChanged) payload.name = name;
-    if (emailChanged) payload.email = email;
-    if (orgNameChanged) payload.orgName = orgName;
+    let profile: UpdateProfileRequest | undefined;
+    if (nameChanged || emailChanged) {
+      const payload: Record<string, string> = {};
+      if (nameChanged) payload.name = name;
+      if (emailChanged) payload.email = email;
 
-    const validated = UpdateProfileSchema.safeParse(payload);
-    if (!validated.success) {
-      toast.error(validated.error.issues[0].message);
-      return;
+      const validated = UpdateProfileSchema.safeParse(payload);
+      if (!validated.success) {
+        toast.error(validated.error.issues[0].message);
+        return;
+      }
+      profile = validated.data;
     }
 
-    mutation.mutate(validated.data);
+    if (orgNameChanged) {
+      const validated = OrgNameSchema.safeParse(orgName);
+      if (!validated.success) {
+        toast.error(validated.error.issues[0].message);
+        return;
+      }
+    }
+
+    mutation.mutate({ profile, orgName: orgNameChanged ? orgName : undefined });
   }
 
   return {

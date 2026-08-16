@@ -234,6 +234,17 @@ const MANIFEST = [
     ragAllowlisted: true,
   },
 
+  // ── Organization ─────────────────────────────────────────────────
+  // Rename only. Ownership transfer and deletion carry their own permissions
+  // and get their own routes when they ship.
+  {
+    method: 'PATCH',
+    path: '/api/org',
+    handler: 'update-org',
+    category: 'authenticated',
+    requires: 'org.rename',
+  },
+
   // ── Auth ─────────────────────────────────────────────────────────
   { method: 'GET', path: '/login', handler: 'auth-login', category: 'public' },
   { method: 'GET', path: '/api/auth/callback', handler: 'auth-callback', category: 'public' },
@@ -247,14 +258,15 @@ const MANIFEST = [
     category: 'authenticated',
     requires: 'self',
   },
-  // Self-service profile fields, except that the same body can rename the org —
-  // that field needs `org.rename`, which the handler checks when it is present.
+  // Self-service profile fields, and only those: renaming the org left this
+  // body for PATCH /api/org, because a route mixing a field every member may
+  // change with one most may not has no single requirement to declare.
   {
     method: 'PATCH',
     path: '/api/me/profile',
     handler: 'update-profile',
     category: 'authenticated',
-    requires: 'in-handler',
+    requires: 'self',
   },
   {
     method: 'POST',

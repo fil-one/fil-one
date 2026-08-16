@@ -4,6 +4,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { RecentActivity, RecentActivityResponse } from '@filone/shared';
+import { permissionsForRole } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import type { ServiceOrchestrator } from '../lib/service-orchestrator.js';
@@ -70,11 +71,17 @@ export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const handlerStart = performance.now();
-  const { orgId } = getUserInfo(event);
+  const { orgId, membership } = getUserInfo(event);
   const limit = Math.min(
     Math.max(parseInt(event.queryStringParameters?.limit ?? '10', 10) || 10, 1),
     50,
   );
+  // The route requirement (`buckets.read`) is only half the gate: this feed
+  // carries key-lifecycle entries, and a caller who may not touch keys should
+  // not be handed the org's key inventory by the dashboard. The rows are not
+  // fetched rather than fetched and filtered — a read nobody may see is a read
+  // worth not making.
+  const showsKeys = mayReadKeys(membership?.role ?? '');
   // The dashboard aggregates activity across every region the org is provisioned
   // in, so resolve the ready tenant on each available orchestrator.
   const { result: regions, durationMs: resolveRegionsMs } = await timed('resolveRegions', () =>
@@ -86,7 +93,9 @@ export async function baseHandler(
     { result: keyActivities, durationMs: keyActivitiesMs },
   ] = await Promise.all([
     timed('fetchBucketActivities', () => fetchBucketActivities(orgId, regions)),
-    timed('fetchAccessKeyActivities', () => fetchAccessKeyActivities(orgId)),
+    timed('fetchAccessKeyActivities', () =>
+      showsKeys ? fetchAccessKeyActivities(orgId) : Promise.resolve<RecentActivity[]>([]),
+    ),
   ]);
 
   // TODO: Re-add object activities once we have an event system with Aurora.
@@ -120,6 +129,15 @@ export async function baseHandler(
   });
 
   return new ResponseBuilder().status(200).body(response).build();
+}
+
+/**
+ * Whether a role sees key activity at all. Any `keys.` permission does: a
+ * Member holds `keys.create` and `keys.manage_own` and has keys of their own in
+ * this feed, while ReadOnly holds none and gets bucket activity only.
+ */
+function mayReadKeys(role: string): boolean {
+  return permissionsForRole(role).some((permission) => permission.startsWith('keys.'));
 }
 
 async function fetchBucketActivities(

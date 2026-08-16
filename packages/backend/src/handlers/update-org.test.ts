@@ -1,0 +1,213 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockClient } from 'aws-sdk-client-mock';
+import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { ApiErrorCode, OrgRole } from '@filone/shared';
+import { sstResourceMock } from '../test/sst-resource-mock.js';
+
+// ---------------------------------------------------------------------------
+// Mocks
+// ---------------------------------------------------------------------------
+
+vi.mock('sst', () => sstResourceMock());
+
+vi.mock('../lib/auth-secrets.js', () => ({
+  getAuthSecrets: () => ({
+    AUTH0_CLIENT_ID: 'test-client-id',
+    AUTH0_CLIENT_SECRET: 'test-client-secret',
+  }),
+}));
+
+const mockJwtVerify = vi.fn();
+vi.mock('jose', () => ({
+  jwtVerify: (token: unknown, jwks: unknown, opts: unknown) => mockJwtVerify(token, jwks, opts),
+  decodeJwt: vi.fn(),
+  createRemoteJWKSet: vi.fn((_url: unknown) => 'mock-jwks'),
+}));
+
+const ddbMock = mockClient(DynamoDBClient);
+
+process.env.AUTH0_DOMAIN = 'test.auth0.com';
+process.env.AUTH0_AUDIENCE = 'https://api.test.com';
+
+import { handler } from './update-org.js';
+import {
+  buildEvent,
+  buildContext,
+  NO_MEMBERSHIP,
+  stubMembershipRead,
+} from '../test/lambda-test-utilities.js';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const MOCK_SUB = 'auth0|abc123';
+const MOCK_ORG_ID = 'org-1';
+const MOCK_USER_ID = 'user-1';
+const MOCK_EMAIL = 'user@example.com';
+const MOCK_CSRF_TOKEN = 'csrf-token-value';
+
+/**
+ * The real chain, cookies and all: this route's point is that `authorize` sees
+ * the role the membership row carries, so the row has to be read rather than
+ * handed over in the event.
+ */
+function renameEvent(body: unknown) {
+  const event = buildEvent({
+    cookies: [
+      `hs_access_token=valid-token`,
+      `hs_id_token=id-token`,
+      `hs_csrf_token=${MOCK_CSRF_TOKEN}`,
+    ],
+    userInfo: {
+      userId: MOCK_USER_ID,
+      orgId: MOCK_ORG_ID,
+      email: MOCK_EMAIL,
+      // Nothing stamped here: the real auth middleware runs and reads the row.
+      membership: NO_MEMBERSHIP,
+    },
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+    method: 'PATCH',
+    rawPath: '/api/org',
+  });
+  event.headers['x-csrf-token'] = MOCK_CSRF_TOKEN;
+  return event;
+}
+
+function callerHolds(role: OrgRole) {
+  stubMembershipRead(ddbMock, { orgId: MOCK_ORG_ID, userId: MOCK_USER_ID, role });
+}
+
+function updateInput() {
+  const calls = ddbMock.commandCalls(UpdateItemCommand);
+  expect(calls).toHaveLength(1);
+  return calls[0].args[0].input;
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('PATCH /api/org handler', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ddbMock.reset();
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    mockJwtVerify.mockResolvedValue({
+      payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: true },
+    });
+
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+      })
+      .resolves({
+        Item: {
+          pk: { S: `SUB#${MOCK_SUB}` },
+          sk: { S: 'IDENTITY' },
+          userId: { S: MOCK_USER_ID },
+          orgId: { S: MOCK_ORG_ID },
+          emailEntitlementClaimed: { BOOL: true },
+        },
+      });
+
+    ddbMock.on(UpdateItemCommand).resolves({ Attributes: { name: { S: 'Old Corp' } } });
+    callerHolds(OrgRole.Owner);
+  });
+
+  it('renames the org', async () => {
+    const result = await handler(renameEvent({ name: 'New Corp' }), buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 200,
+      body: JSON.stringify({ name: 'New Corp' }),
+    });
+    expect(updateInput()).toMatchObject({
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+      ExpressionAttributeValues: { ':name': { S: 'New Corp' } },
+      // Never conjure an org: a rename that finds no profile row fails.
+      ConditionExpression: 'attribute_exists(pk)',
+    });
+  });
+
+  it('reads back the previous name, which the audit event will need', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await handler(renameEvent({ name: 'New Corp' }), buildContext());
+
+    expect(updateInput()).toMatchObject({ ReturnValues: 'UPDATED_OLD' });
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining('renamed'),
+      expect.objectContaining({
+        orgId: MOCK_ORG_ID,
+        actorUserId: MOCK_USER_ID,
+        previousName: 'Old Corp',
+        name: 'New Corp',
+      }),
+    );
+  });
+
+  it('escapes the stored name', async () => {
+    await handler(renameEvent({ name: 'Acme-Corp Inc.' }), buildContext());
+
+    expect(updateInput()).toMatchObject({
+      ExpressionAttributeValues: { ':name': { S: 'Acme-Corp Inc.' } },
+    });
+  });
+
+  it('lets an Admin rename the org', async () => {
+    callerHolds(OrgRole.Admin);
+
+    const result = await handler(renameEvent({ name: 'New Corp' }), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 200 });
+  });
+
+  it.each([OrgRole.Member, OrgRole.ReadOnly])('refuses %s', async (role) => {
+    callerHolds(role);
+
+    const result = await handler(renameEvent({ name: 'New Corp' }), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 403 });
+    expect(JSON.parse((result as { body: string }).body).code).toBe(ApiErrorCode.FORBIDDEN_ROLE);
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+  });
+
+  it('refuses a caller with no membership row', async () => {
+    ddbMock.on(GetItemCommand, { TableName: 'OrgTable' }).resolves({});
+
+    const result = await handler(renameEvent({ name: 'New Corp' }), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 403 });
+    expect(JSON.parse((result as { body: string }).body).code).toBe(ApiErrorCode.NOT_A_MEMBER);
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+  });
+
+  it.each([
+    ['too short', 'A'],
+    ['special characters', 'Acme @Corp!'],
+    ['empty', ''],
+  ])('returns 400 for a name that is %s', async (_label, name) => {
+    const result = await handler(renameEvent({ name }), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 400 });
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+  });
+
+  it('returns 400 for a body with no name', async () => {
+    const result = await handler(renameEvent({}), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 400 });
+  });
+
+  it('returns 400 for invalid JSON', async () => {
+    const result = await handler(renameEvent('not-json{'), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 400 });
+  });
+});

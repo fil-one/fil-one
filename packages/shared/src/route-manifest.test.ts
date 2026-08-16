@@ -66,10 +66,9 @@ describe('ROUTE_MANIFEST', () => {
   });
 
   it('checks the routes whose requirement depends on the request in their handlers', () => {
-    // presign serves seven operations through one route; update-profile can
-    // rename the org; set-bucket-rag-enablement creates or discards an index
-    // depending on the flag; create-access-key caps the new key at the
-    // creator's own authority.
+    // presign serves seven operations through one route;
+    // set-bucket-rag-enablement creates or discards an index depending on the
+    // flag; create-access-key caps the new key at the creator's own authority.
     const inHandler = entries
       .filter((route) => route.requires === 'in-handler')
       .map((route) => route.handler);
@@ -77,7 +76,6 @@ describe('ROUTE_MANIFEST', () => {
       'create-access-key',
       'presign',
       'set-bucket-rag-enablement',
-      'update-profile',
     ]);
   });
 

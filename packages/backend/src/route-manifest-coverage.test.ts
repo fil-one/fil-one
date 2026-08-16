@@ -5,6 +5,7 @@ import {
   ApiErrorCode,
   CSRF_COOKIE_NAME,
   OrgRole,
+  PresignOpSchema,
   ROUTE_MANIFEST,
   roleHasPermission,
   SubscriptionStatus,
@@ -67,6 +68,11 @@ const CSRF_TOKEN = 'csrf-token-value';
  * it fills it.
  */
 const verifiedAmr: string[] = [];
+/**
+ * A foundation address, which the RAG feature flag admits without a lookup, and
+ * the caller every case that is not about that flag arrives as.
+ */
+const CALLER_EMAIL = 'caller@fil.org';
 
 // The `sst` mock answers the resource reads a handler module makes while it is
 // being imported, and the auth one stands in for the middleware that would have
@@ -118,6 +124,27 @@ const readKey = (input: DynamoRead | undefined) =>
  */
 const stubbedRows = new Map<string, Record<string, unknown>>();
 
+/**
+ * Give the enclosing suite a billing record the subscription guard admits.
+ *
+ * The in-handler routes need it: their permission check is the handler's own
+ * work and runs after the guard, so reaching it means getting past billing
+ * first. The RAG gate sits after the guard on every chain carrying it and needs
+ * the same.
+ */
+function withActiveSubscription(): void {
+  beforeEach(() => {
+    stubbedRows.set(
+      rowKey('BillingTable', `CUSTOMER#${USER_ID}`, 'SUBSCRIPTION'),
+      marshall({ subscriptionStatus: SubscriptionStatus.Active }),
+    );
+  });
+
+  afterEach(() => {
+    stubbedRows.clear();
+  });
+}
+
 // Neither the network nor the BillingTable is available, and that is the point.
 // Most gates below refuse their caller before the subscription guard reads
 // billing, so the 403s are also the proof of the ordering: a chain that
@@ -146,6 +173,13 @@ type LambdaModule = {
   handler: (event: unknown, context: unknown) => Promise<APIGatewayProxyResultV2>;
 };
 
+/** The parts of a request an in-handler route reads to decide its permission. */
+type RouteRequest = {
+  body?: string;
+  queryStringParameters?: Record<string, string>;
+  pathParameters?: Record<string, string>;
+};
+
 /**
  * Run one route's real chain, driven with the method the manifest declares so a
  * POST route is exercised as a POST. The request carries a matching CSRF token
@@ -159,16 +193,27 @@ async function invokeRoute(
   route: RouteManifestEntry,
   {
     membership,
-    email,
+    email = CALLER_EMAIL,
     csrf = true,
-  }: { membership: OrgMembership | typeof NO_MEMBERSHIP; email?: string; csrf?: boolean },
+    request = {},
+  }: {
+    membership: OrgMembership | typeof NO_MEMBERSHIP;
+    email?: string;
+    csrf?: boolean;
+    request?: RouteRequest;
+  },
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const module = (await import(`./handlers/${route.handler}.ts`)) as LambdaModule;
+  const { pathParameters, ...eventProps } = request;
   const event = buildEvent({
+    ...eventProps,
     method: route.method,
-    userInfo: { userId: USER_ID, orgId: ORG_ID, membership, ...(email ? { email } : {}) },
+    userInfo: { userId: USER_ID, orgId: ORG_ID, membership, email },
     ...(csrf ? { cookies: [`${CSRF_COOKIE_NAME}=${CSRF_TOKEN}`] } : {}),
   });
+  // Assigned rather than passed: the shared builder takes no path parameters,
+  // and the handler tests set them on the built event the same way.
+  if (pathParameters) event.pathParameters = pathParameters;
   if (csrf) event.headers['x-csrf-token'] = CSRF_TOKEN;
   // Every route here answers with a ResponseBuilder, so the union's string arm
   // never occurs; middy's declared return type carries it anyway.
@@ -177,6 +222,13 @@ async function invokeRoute(
 
 /** The caller every case that is not about roles arrives as. */
 const owner = () => membershipFor(ORG_ID, USER_ID, OrgRole.Owner);
+
+/** The manifest entry one handler serves, since the probes below name the route. */
+function routeFor(handler: string): RouteManifestEntry {
+  const route = ROUTE_MANIFEST.find((entry) => entry.handler === handler);
+  if (!route) throw new Error(`no manifest entry for handler ${handler}`);
+  return route;
+}
 
 /** A manifest entry paired with its handler name, for `it.each` titles. */
 const named = (routes: readonly RouteManifestEntry[]) =>
@@ -289,6 +341,9 @@ describe('enforcement derived from the manifest', () => {
  * denial would be invisible to NotAMemberDenialCount — the metric whose whole
  * job is to say whether the conversion missed a cohort.
  */
+/** The routes the manifest marks in-handler, by handler name. */
+const inHandler = byRequirement('in-handler').map((route) => route.handler);
+
 describe('routes whose permission depends on the body', () => {
   quietDenialOutput();
 
@@ -301,6 +356,180 @@ describe('routes whose permission depends on the body', () => {
       expect(errorCode(result)).toBe(ApiErrorCode.NOT_A_MEMBER);
     },
   );
+});
+
+const BUCKET = 'test-bucket';
+const OBJECT_KEY = 'folder/object.txt';
+
+/**
+ * The permission each presign operation needs, mirroring the mapping the route
+ * manifest documents and the handler applies. One route serves all seven, so
+ * the permission is a property of the operation rather than of the route, and
+ * the only way to read it off the outside is to ask for each operation in turn.
+ *
+ * Each entry carries a body its schema accepts, because a request refused at
+ * the parse step would answer 400 and prove nothing about the gate.
+ */
+const PRESIGN_OPERATIONS: { op: Record<string, unknown>; permission: Permission }[] = [
+  { op: { op: 'getObject', bucket: BUCKET, key: OBJECT_KEY }, permission: 'objects.read' },
+  { op: { op: 'headObject', bucket: BUCKET, key: OBJECT_KEY }, permission: 'objects.read' },
+  { op: { op: 'listObjects', bucket: BUCKET }, permission: 'objects.read' },
+  { op: { op: 'listObjectVersions', bucket: BUCKET }, permission: 'objects.read' },
+  {
+    op: { op: 'getObjectRetention', bucket: BUCKET, key: OBJECT_KEY },
+    permission: 'objects.read',
+  },
+  {
+    op: {
+      op: 'putObject',
+      bucket: BUCKET,
+      key: OBJECT_KEY,
+      contentType: 'text/plain',
+      fileName: 'object.txt',
+    },
+    permission: 'objects.write',
+  },
+  { op: { op: 'deleteObject', bucket: BUCKET, key: OBJECT_KEY }, permission: 'objects.delete' },
+];
+
+/** A presign request asking for one operation, in the region the route requires. */
+const presignRequest = (op: Record<string, unknown>): RouteRequest => ({
+  body: JSON.stringify([op]),
+  queryStringParameters: { region: 'eu-west-1' },
+});
+
+/**
+ * Every in-handler route, with a request and the permission that request asks
+ * for. A route whose requirement depends on the body cannot declare a fixed
+ * permission in the manifest, so what it enforces is only visible by sending a
+ * body and reading the answer.
+ */
+const IN_HANDLER_PROBES: { handler: string; asks: string; permission: Permission; request: RouteRequest }[] =
+  [
+    ...PRESIGN_OPERATIONS.map(({ op, permission }) => ({
+      handler: 'presign',
+      asks: String(op.op),
+      permission,
+      request: presignRequest(op),
+    })),
+    {
+      handler: 'set-bucket-rag-enablement',
+      asks: 'indexing on',
+      permission: 'buckets.create',
+      request: { body: JSON.stringify({ enabled: true }), pathParameters: { name: BUCKET } },
+    },
+    {
+      handler: 'set-bucket-rag-enablement',
+      asks: 'indexing off',
+      permission: 'buckets.delete',
+      request: { body: JSON.stringify({ enabled: false }), pathParameters: { name: BUCKET } },
+    },
+    {
+      handler: 'create-access-key',
+      asks: 'a new key',
+      permission: 'keys.create',
+      request: {
+        body: JSON.stringify({
+          keyName: 'a key',
+          permissions: ['read'],
+          region: 'eu-west-1',
+        }),
+      },
+    },
+  ];
+
+/**
+ * What each in-handler route enforces, read off its answers.
+ *
+ * The manifest marks these routes in-handler and stops there, so the mapping
+ * from request to permission lives in the handler and nowhere a test can read
+ * it. These cases send the request and check the denial, which is the mapping
+ * observed rather than described.
+ *
+ * A permission every role holds refuses nobody and contributes no cases —
+ * true of the five presign read operations. The contrast cases below carry the
+ * claim those cannot: the same caller, the same route, a different body, a
+ * different answer.
+ */
+describe('what the in-handler routes enforce', () => {
+  quietDenialOutput();
+  withActiveSubscription();
+
+  it('probes every route the manifest marks in-handler', () => {
+    // A route added to the manifest as in-handler with no probe here would
+    // otherwise be checked for membership alone, which is the gap this suite
+    // exists to close.
+    const probed = new Set(IN_HANDLER_PROBES.map((probe) => probe.handler));
+    expect(inHandler.filter((handler) => !probed.has(handler))).toStrictEqual([]);
+  });
+
+  it('probes every operation the presign schema accepts', () => {
+    const covered = PRESIGN_OPERATIONS.map(({ op }) => op.op).sort();
+    const accepted = PresignOpSchema.options.map((option) => option.shape.op.value).sort();
+    expect(covered).toStrictEqual(accepted);
+  });
+
+  for (const { handler, asks, permission, request } of IN_HANDLER_PROBES) {
+    const refused = rolesRefused(permission);
+    if (refused.length === 0) continue;
+
+    describe(`${handler} asking for ${asks} (${permission})`, () => {
+      it.each(refused)('refuses %s', async (role) => {
+        const result = await invokeRoute(routeFor(handler), {
+          membership: membershipFor(ORG_ID, USER_ID, role),
+          request,
+        });
+
+        expect(result.statusCode).toBe(403);
+        expect(errorCode(result)).toBe(ApiErrorCode.FORBIDDEN_ROLE);
+      });
+    });
+  }
+
+  /**
+   * The two contrasts that prove the branch rather than the gate. A route
+   * reading its body and then checking one fixed permission would pass every
+   * case above; it fails these.
+   */
+  it('lets a ReadOnly caller presign a read but not a write', async () => {
+    const readOnly = membershipFor(ORG_ID, USER_ID, OrgRole.ReadOnly);
+    const read = await invokeRoute(routeFor('presign'), {
+      membership: readOnly,
+      request: presignRequest({ op: 'getObject', bucket: BUCKET, key: OBJECT_KEY }),
+    });
+    const write = await invokeRoute(routeFor('presign'), {
+      membership: readOnly,
+      request: presignRequest({
+        op: 'putObject',
+        bucket: BUCKET,
+        key: OBJECT_KEY,
+        contentType: 'text/plain',
+        fileName: 'object.txt',
+      }),
+    });
+
+    // The read is not served here — it runs on past the gate into the billing
+    // read this file makes unreachable — but it is not refused on the role.
+    expect(errorCode(read)).not.toBe(ApiErrorCode.FORBIDDEN_ROLE);
+    expect(write.statusCode).toBe(403);
+    expect(errorCode(write)).toBe(ApiErrorCode.FORBIDDEN_ROLE);
+  });
+
+  it('lets a Member turn bucket indexing on but not off', async () => {
+    const member = membershipFor(ORG_ID, USER_ID, OrgRole.Member);
+    const on = await invokeRoute(routeFor('set-bucket-rag-enablement'), {
+      membership: member,
+      request: { body: JSON.stringify({ enabled: true }), pathParameters: { name: BUCKET } },
+    });
+    const off = await invokeRoute(routeFor('set-bucket-rag-enablement'), {
+      membership: member,
+      request: { body: JSON.stringify({ enabled: false }), pathParameters: { name: BUCKET } },
+    });
+
+    expect(errorCode(on)).not.toBe(ApiErrorCode.FORBIDDEN_ROLE);
+    expect(off.statusCode).toBe(403);
+    expect(errorCode(off)).toBe(ApiErrorCode.FORBIDDEN_ROLE);
+  });
 });
 
 /**
@@ -397,19 +626,9 @@ describe('the RAG allowlist gates the routes the manifest marks', () => {
       !route.ragAllowlisted && (route.category === 'authenticated' || route.category === 'bearer'),
   );
 
-  // The RAG gate runs after the subscription guard on every chain that carries
-  // it, so the request only reaches the gate once the guard has a record to
-  // pass on. An active subscription is the plainest one there is.
-  beforeEach(() => {
-    stubbedRows.set(
-      rowKey('BillingTable', `CUSTOMER#${USER_ID}`, 'SUBSCRIPTION'),
-      marshall({ subscriptionStatus: SubscriptionStatus.Active }),
-    );
-  });
-
-  afterEach(() => {
-    stubbedRows.clear();
-  });
+  // The gate runs after the subscription guard on every chain that carries it,
+  // so the request only reaches it once the guard has a record to pass on.
+  withActiveSubscription();
 
   /** The allowlist row an operator writes to onboard one customer. */
   function allowlist(email: string): void {
