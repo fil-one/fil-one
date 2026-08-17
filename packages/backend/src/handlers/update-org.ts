@@ -5,7 +5,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { UpdateOrgSchema } from '@filone/shared';
 import type { AuditActor, ErrorResponse, UpdateOrgResponse } from '@filone/shared';
 import { Resource } from 'sst';
-import { AuditSubjects, auditEvent, commitAudited } from '../lib/audit.js';
+import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { parseJsonBody } from '../lib/parse-json-body.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
@@ -50,52 +50,49 @@ export async function baseHandler(
   if ('error' in parsed) return parsed.error;
   const { name } = parsed.data;
 
+  const profileKey = orgProfileKey(orgId);
+  const previousName = await readOrgName(profileKey);
+
+  // Submitting the form unchanged is what the Settings page does on every save,
+  // and there is nothing to record: an event saying an org was renamed from
+  // "Acme" to "Acme" is noise in the log a customer reads.
+  if (previousName === name) {
+    return new ResponseBuilder().status(200).body<UpdateOrgResponse>({ name }).build();
+  }
+
   try {
     await renameOrg({
+      key: profileKey,
       orgId,
       name,
-      actor: { kind: 'user', id: userId, ...(email ? { email } : {}) },
+      previousName,
+      actor: userActor({ userId, email }),
     });
   } catch (err) {
-    // The row the rename is conditional on is gone: the org was deleted between
-    // the session being minted and this request, which is a 404 rather than a
-    // 500. The condition now fails inside a transaction, so it arrives as a
-    // cancellation rather than as a bare conditional-check failure.
-    if (err instanceof TransactionCanceledException) {
-      return new ResponseBuilder()
-        .status(404)
-        .body<ErrorResponse>({ message: 'Organization not found' })
-        .build();
-    }
+    if (err instanceof TransactionCanceledException)
+      return await renameConflictResponse(profileKey);
     throw err;
   }
 
   return new ResponseBuilder().status(200).body<UpdateOrgResponse>({ name }).build();
 }
 
-/**
- * Write the new name and the event that records it, in one transaction.
- *
- * The read comes first because the previous name is what the event needs and
- * only a read can supply it: `UPDATED_OLD` returns nothing when the attribute
- * was absent, and every org created before naming shipped has no `name` on its
- * profile row, so the event would record a rename with no predecessor. The
- * write stays conditional on the row, so a rename can never conjure an org.
- *
- * The pair being a transaction is the point: a rename that reached the profile
- * row without reaching the log would be a change to the org nobody can see.
- */
-async function renameOrg({
-  orgId,
-  name,
-  actor,
-}: {
-  orgId: string;
-  name: string;
-  actor: AuditActor;
-}): Promise<void> {
-  const key = { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } };
+type OrgProfileKey = Record<'pk' | 'sk', { S: string }>;
 
+function orgProfileKey(orgId: string): OrgProfileKey {
+  return { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } };
+}
+
+/**
+ * The org's current name, or undefined when the row carries none.
+ *
+ * A read rather than `UPDATED_OLD`, because the event needs the previous name
+ * and an update returns nothing for an attribute that was absent: every org
+ * created before naming shipped has no `name` on its profile row, so the event
+ * would record a rename with no predecessor. Consistent, because the value is
+ * what the write then conditions on.
+ */
+async function readOrgName(key: OrgProfileKey): Promise<string | undefined> {
   const { Item } = await getDynamoClient().send(
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
@@ -105,8 +102,61 @@ async function renameOrg({
       ConsistentRead: true,
     }),
   );
-  const previousName = Item?.name?.S;
+  return Item?.name?.S;
+}
 
+/**
+ * Which of the two things the failed condition means.
+ *
+ * The condition covers both the row existing and its name still being the one
+ * the event is about, so a cancellation is either an org deleted between the
+ * session and this request or a rename that landed while this one was in
+ * flight. One read tells them apart, and it only runs on this path.
+ */
+async function renameConflictResponse(
+  key: OrgProfileKey,
+): Promise<APIGatewayProxyStructuredResultV2> {
+  const { Item } = await getDynamoClient().send(
+    new GetItemCommand({ TableName: Resource.UserInfoTable.name, Key: key }),
+  );
+
+  if (!Item) {
+    return new ResponseBuilder()
+      .status(404)
+      .body<ErrorResponse>({ message: 'Organization not found' })
+      .build();
+  }
+
+  return new ResponseBuilder()
+    .status(409)
+    .body<ErrorResponse>({ message: 'The organization was renamed by someone else — try again' })
+    .build();
+}
+
+/**
+ * Write the new name and the event that records it, in one transaction.
+ *
+ * The write is conditional on the name the event names, not merely on the row
+ * existing, so the transition the log records is the transition that happened.
+ * Without it two concurrent renames both report their own predecessor and the
+ * log claims a change that never took place.
+ *
+ * The pair being a transaction is the point: a rename that reached the profile
+ * row without reaching the log would be a change to the org nobody can see.
+ */
+async function renameOrg({
+  key,
+  orgId,
+  name,
+  previousName,
+  actor,
+}: {
+  key: OrgProfileKey;
+  orgId: string;
+  name: string;
+  previousName?: string;
+  actor: AuditActor;
+}): Promise<void> {
   await commitAudited({
     items: [
       {
@@ -114,9 +164,17 @@ async function renameOrg({
           TableName: Resource.UserInfoTable.name,
           Key: key,
           UpdateExpression: 'SET #name = :name',
-          ConditionExpression: 'attribute_exists(pk)',
+          // An org created before naming shipped has no name to match, so the
+          // two cases condition on absence and on the value respectively.
+          ConditionExpression:
+            previousName === undefined
+              ? 'attribute_exists(pk) AND attribute_not_exists(#name)'
+              : 'attribute_exists(pk) AND #name = :previousName',
           ExpressionAttributeNames: { '#name': 'name' },
-          ExpressionAttributeValues: { ':name': { S: name } },
+          ExpressionAttributeValues: {
+            ':name': { S: name },
+            ...(previousName === undefined ? {} : { ':previousName': { S: previousName } }),
+          },
         },
       },
     ],

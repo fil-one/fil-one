@@ -8,6 +8,7 @@ import {
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 
 import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.js';
 
 vi.mock('sst', () => sstResourceMock());
 
@@ -109,25 +110,30 @@ describe('create-rag-api-key baseHandler', () => {
 
     const body = JSON.parse(result.body ?? '{}');
     const items = sentTransactItems();
-    const event = unmarshall(items[2].Put!.Item!);
+    const auditItem = auditItemIn(items);
+    const event = unmarshall(auditItem);
 
-    expect(items[2].Put!.TableName).toBe('AuditTable');
-    expect(items[2].Put!.ConditionExpression).toBe('attribute_not_exists(pk)');
+    expect(
+      items.find((item) => item.Put?.TableName === 'AuditTable')!.Put!.ConditionExpression,
+    ).toBe('attribute_not_exists(pk)');
     expect(event).toMatchObject({
       pk: 'ORG#org-1',
       type: 'key.created',
       orgId: 'org-1',
       subject: `key:${body.id}`,
       actor: { kind: 'user', id: 'user-1', email: 'dev@example.com' },
-      details: { keyKind: 'rag', keyName: 'ci key' },
+      // The display prefix, which is what the console lists a RAG key by, so an
+      // operator reading the event can find the key it names.
+      details: { keyKind: 'rag', keyName: 'ci key', keyIdSuffix: body.keyPrefix },
     });
     // Minted here rather than at a vendor, so the whole mutation is one
     // transaction and there is no intent to correlate.
     expect(event.phase).toBeUndefined();
-    // Neither the token nor its display prefix — which is the token's own
-    // leading characters — reaches the log.
+    // The token itself never reaches the log — twelve of its fifty characters
+    // are the console's label, not the credential.
     expect(JSON.stringify(event)).not.toContain(body.token);
-    expect(JSON.stringify(event)).not.toContain(body.keyPrefix);
+    expect(event.details.keyIdSuffix).toHaveLength(12);
+    expectNoSecrets(auditItem);
   });
 
   it('persists (region, name) bucket scope pairs for specific keys', async () => {

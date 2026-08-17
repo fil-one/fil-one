@@ -2,10 +2,10 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { CreateRagApiKeySchema } from '@filone/shared';
+import { CreateRagApiKeySchema, auditKeyIdSuffix } from '@filone/shared';
 import type { CreateRagApiKeyResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
-import { AuditSubjects, auditEvent, commitAudited } from '../lib/audit.js';
+import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.js';
 import { OrgDeletingError, isGuardRejection, orgNotDeletingCheck } from '../lib/org-profile.js';
 import {
   RagApiKeyKeys,
@@ -112,12 +112,13 @@ export async function baseHandler(
       ],
       event: auditEvent({
         type: 'key.created',
-        actor: { kind: 'user', id: userId, ...(creatorEmail ? { email: creatorEmail } : {}) },
+        actor: userActor({ userId, email: creatorEmail }),
         orgId,
         subject: AuditSubjects.key(keyId),
-        // The display prefix is deliberately absent: it is the leading characters
-        // of the token itself, and the guard would refuse it anyway.
-        details: { keyKind: 'rag', keyName },
+        // The display prefix, which is what the console lists a RAG key by, so an
+        // operator reading the event can find the key it names. Twelve characters
+        // of a fifty-character token: the prefix plus five, not the credential.
+        details: { keyKind: 'rag', keyName, keyIdSuffix: auditKeyIdSuffix('rag', keyPrefix) },
       }),
     });
   } catch (err) {

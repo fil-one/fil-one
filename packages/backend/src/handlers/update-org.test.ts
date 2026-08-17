@@ -9,6 +9,7 @@ import {
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { AUDIT_RETENTION_DAYS, OrgRole } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -92,11 +93,20 @@ function transactItems() {
 }
 
 function updateInput() {
-  return transactItems()[0].Update!;
+  return transactItems().find((item) => item.Update)!.Update!;
 }
 
 function auditedEvent() {
-  return unmarshall(transactItems()[1].Put!.Item!);
+  return unmarshall(auditItemIn(transactItems()));
+}
+
+/** The cancellation DynamoDB sends when the rename's own condition fails. */
+function cancelledOnTheUpdate() {
+  return new TransactionCanceledException({
+    message: 'cancelled',
+    $metadata: {},
+    CancellationReasons: [{ Code: 'ConditionalCheckFailed' }, { Code: 'None' }],
+  });
 }
 
 /** Answer the profile-row read the rename makes to capture the previous name. */
@@ -160,10 +170,27 @@ describe('PATCH /api/org handler', () => {
     expect(updateInput()).toMatchObject({
       TableName: 'UserInfoTable',
       Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-      ExpressionAttributeValues: { ':name': { S: 'New Corp' } },
-      // Never conjure an org: a rename that finds no profile row fails.
-      ConditionExpression: 'attribute_exists(pk)',
+      ExpressionAttributeValues: { ':name': { S: 'New Corp' }, ':previousName': { S: 'Old Corp' } },
+      // Never conjure an org, and never record a transition that did not
+      // happen: the write is conditional on the name the event names.
+      ConditionExpression: 'attribute_exists(pk) AND #name = :previousName',
     });
+  });
+
+  it('writes nothing when the submitted name is the one the org already has', async () => {
+    // The Settings page submits the form whether or not the field changed, and
+    // an event saying an org was renamed from "Old Corp" to "Old Corp" is noise
+    // in a log a customer reads.
+    const result = await handler(renameEvent({ name: 'Old Corp' }), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 200, body: JSON.stringify({ name: 'Old Corp' }) });
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+  });
+
+  it('carries no credential into the log', async () => {
+    await handler(renameEvent({ name: 'New Corp' }), buildContext());
+
+    expectNoSecrets(auditItemIn(transactItems()));
   });
 
   it('records the rename beside the write, with both names', async () => {
@@ -171,7 +198,7 @@ describe('PATCH /api/org handler', () => {
 
     const items = transactItems();
     expect(items).toHaveLength(2);
-    expect(items[1].Put).toMatchObject({
+    expect(items.find((item) => item.Put?.TableName === 'AuditTable')!.Put).toMatchObject({
       TableName: 'AuditTable',
       // Append-only: an event id already on the table cancels the whole
       // transaction rather than rewriting history.
@@ -208,8 +235,10 @@ describe('PATCH /api/org handler', () => {
     expect(result).toMatchObject({ statusCode: 200 });
     expect(updateInput()).toMatchObject({
       ExpressionAttributeNames: { '#name': 'name' },
-      ConditionExpression: 'attribute_exists(pk)',
+      // Nothing to match, so the condition says the attribute is still absent.
+      ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(#name)',
     });
+    expect(updateInput().ExpressionAttributeValues).not.toHaveProperty(':previousName');
     expect(auditedEvent().details).toStrictEqual({ name: 'New Corp' });
   });
 
@@ -224,17 +253,32 @@ describe('PATCH /api/org handler', () => {
   });
 
   it('returns 404 when the profile row the rename is conditional on is gone', async () => {
-    ddbMock.on(TransactWriteItemsCommand).rejects(
-      new TransactionCanceledException({
-        message: 'cancelled',
-        $metadata: {},
-        CancellationReasons: [{ Code: 'ConditionalCheckFailed' }],
-      }),
-    );
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledOnTheUpdate());
+    orgProfileNamed(undefined);
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+      })
+      .resolves({});
 
     const result = await handler(renameEvent({ name: 'New Corp' }), buildContext());
 
     expect(result).toMatchObject({ statusCode: 404 });
+  });
+
+  it('returns 409 when someone else renamed the org first', async () => {
+    // The condition covers the previous name as well as the row, so the same
+    // cancellation means two different things — and telling a caller the org
+    // does not exist when it was simply renamed under them is a lie.
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledOnTheUpdate());
+
+    const result = await handler(renameEvent({ name: 'New Corp' }), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 409 });
+    expect(JSON.parse((result as { body: string }).body).message).toStrictEqual(
+      expect.stringContaining('renamed by someone else'),
+    );
   });
 
   it('escapes the stored name', async () => {

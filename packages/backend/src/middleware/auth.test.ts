@@ -10,6 +10,7 @@ import { mockClient } from 'aws-sdk-client-mock';
 import {
   DynamoDBClient,
   GetItemCommand,
+  TransactionCanceledException,
   TransactWriteItemsCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
@@ -19,6 +20,7 @@ import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { sstResourceMock } from '../test/sst-resource-mock.js';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
 import { expectErrorResponse } from '../test/assert-helpers.js';
+import { auditItemIn, hasAuditItem } from '../test/audit-assertions.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -875,9 +877,10 @@ describe('authMiddleware', () => {
               sk: { S: expect.any(String) },
               eventId: { S: expect.any(String) },
               type: { S: 'org.created' },
-              actor: {
-                M: { kind: { S: 'user' }, id: { S: MOCK_USER_ID }, email: { S: MOCK_EMAIL } },
-              },
+              // No email: this ID token carries no `email_verified` claim, and
+              // an unverified address must never be the name the audit viewer
+              // shows as the member's identity.
+              actor: { M: { kind: { S: 'user' }, id: { S: MOCK_USER_ID } } },
               orgId: { S: MOCK_ORG_ID },
               subject: { S: `org:${MOCK_ORG_ID}` },
               details: { M: { orgName: { S: 'Alice Org' }, source: { S: 'signup' } } },
@@ -898,6 +901,70 @@ describe('authMiddleware', () => {
         email: MOCK_EMAIL,
         emailVerified: false,
       });
+    });
+
+    it('names the actor by their email once the claim says it is verified', async () => {
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+        payload: { email: MOCK_EMAIL, email_verified: true, name: 'Alice Johnson' },
+      });
+
+      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+      ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      const request = buildMiddyRequest(
+        buildEvent({
+          cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+          rawPath: '/api/me',
+        }),
+      );
+
+      await before(request);
+
+      const items = ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems;
+      expect(auditItemIn(items).actor).toStrictEqual({
+        M: { kind: { S: 'user' }, id: { S: MOCK_USER_ID }, email: { S: MOCK_EMAIL } },
+      });
+    });
+
+    it('creates the account anyway when the audit item is the half the table refused', async () => {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, name: 'Alice Johnson' } });
+
+      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+      ddbMock
+        .on(TransactWriteItemsCommand)
+        .rejectsOnce(
+          new TransactionCanceledException({
+            message: 'cancelled',
+            $metadata: {},
+            CancellationReasons: [
+              ...Array.from({ length: 6 }, () => ({ Code: 'None' })),
+              { Code: 'TransactionConflict' },
+            ],
+          }),
+        )
+        .resolves({});
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+        rawPath: '/api/me',
+      });
+
+      // This runs inside the auth middleware: a cancelled signup would answer
+      // every new customer's first login with a 401 and send them round the
+      // auth loop. An unrecorded org is recoverable; an account nobody can
+      // create is not.
+      const result = await before(buildMiddyRequest(event));
+
+      expect(result).toBeUndefined();
+      expect(getUserInfoFromEvent(event)).toMatchObject({ userId: MOCK_USER_ID });
+      const calls = ddbMock.commandCalls(TransactWriteItemsCommand);
+      expect(calls).toHaveLength(2);
+      expect(hasAuditItem(calls[1].args[0].input.TransactItems)).toBe(false);
+      expect(calls[1].args[0].input.TransactItems).toHaveLength(6);
     });
 
     it('does not block login when the trial entitlement backfill fails transiently', async () => {
