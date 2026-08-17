@@ -1118,6 +1118,17 @@ export default $config({
         extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
       },
 
+      // ── Invitations ────────────────────────────────────────────────
+      // The only route that sends mail. `SendGridApiKey` exists on staging and
+      // production alone, so on every other stage the mailer logs the accept URL
+      // instead — which is what the e2e suite drives. `WEBSITE_URL` is the accept
+      // link's origin, taken from configuration rather than from the request, since
+      // the link goes to somebody else's inbox.
+      'create-invitation': {
+        extraEnv: { WEBSITE_URL: siteUrl },
+        ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
+      },
+
       // ── Usage and dashboard ────────────────────────────────────────
       'get-usage': {
         extraEnv: orchestratorEnv,
