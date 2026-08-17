@@ -1,6 +1,7 @@
 import { API_URL } from '../env.js';
-import { ApiErrorCode, CSRF_COOKIE_NAME } from '@filone/shared';
+import { ApiErrorCode, CSRF_COOKIE_NAME, ORG_ID_HEADER } from '@filone/shared';
 import type { StepUpRequiredResponse } from '@filone/shared';
+import { getActiveOrgId, reconcileActiveOrg } from './active-org.js';
 import { redirectToStepUp } from './step-up.js';
 import type { PreferencesResponse, UpdatePreferencesRequest } from '@filone/shared';
 
@@ -158,6 +159,12 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
     const token = getCsrfToken();
     if (token) headers.set('X-CSRF-Token', token);
   }
+  // Every call names the org it is about. Without the header the server serves
+  // the caller's own org, which is right on a first visit and wrong for anyone
+  // who has switched — so the header goes on here, in the one funnel, rather
+  // than at each call site.
+  const activeOrgId = getActiveOrgId();
+  if (activeOrgId) headers.set(ORG_ID_HEADER, activeOrgId);
 
   const response = await fetch(`${API_URL}/api${path}`, {
     ...options,
@@ -248,12 +255,27 @@ import type {
   UpdateProfileResponse,
 } from '@filone/shared';
 
-export function getMe(options?: { forceRefresh?: boolean; include?: 'mfa' }): Promise<MeResponse> {
+/**
+ * The caller, their role, and the org the server resolved the request in.
+ *
+ * `/me` is the one response that echoes the active org, and this is where that
+ * echo is checked: a mismatch against the tab's stash means every other request
+ * is landing in an org the user did not choose, so the stash is cleared and the
+ * tab reloads. The response is still returned — the reload is already in flight,
+ * and a caller left holding a rejected promise would render an error page over
+ * a page that is about to disappear.
+ */
+export async function getMe(options?: {
+  forceRefresh?: boolean;
+  include?: 'mfa';
+}): Promise<MeResponse> {
   const params = new URLSearchParams();
   if (options?.forceRefresh) params.set('forceRefresh', '1');
   if (options?.include) params.set('include', options.include);
   const qs = params.toString();
-  return apiRequest<MeResponse>(`/me${qs ? `?${qs}` : ''}`);
+  const me = await apiRequest<MeResponse>(`/me${qs ? `?${qs}` : ''}`);
+  reconcileActiveOrg(me.orgId);
+  return me;
 }
 
 export function updateProfile(data: UpdateProfileRequest): Promise<UpdateProfileResponse> {

@@ -22,6 +22,7 @@ import { logout } from '../lib/api.js';
 import { usePermissions } from '../lib/use-permissions.js';
 import { useSidebarData } from './use-sidebar-data.js';
 
+import { OrgSwitcher } from './OrgSwitcher.js';
 import { StatusBanners } from './SidebarStatusBanners.js';
 import { StatusIndicator } from './StatusIndicator.js';
 import { Tooltip } from './Tooltip.js';
@@ -408,6 +409,11 @@ export function SidebarNav({
                 ref={userMenuRef}
                 className="absolute left-2 top-14 z-50 w-52 rounded-lg border border-zinc-200 bg-white p-1 shadow-lg"
               >
+                <OrgSwitcher
+                  memberships={me?.memberships}
+                  activeOrgId={me?.orgId}
+                  testId={showTestIds ? 'org-switcher' : undefined}
+                />
                 <button
                   type="button"
                   id="user-menu-logout-button"

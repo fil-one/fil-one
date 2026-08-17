@@ -5,6 +5,7 @@ import { SubscriptionStatus } from '@filone/shared';
 import { SidebarNav } from './SidebarNav';
 import { Banner } from './Banner';
 import { UserAvatar } from './UserAvatar';
+import { OrgSwitcher } from './OrgSwitcher';
 import { getUsage, getBilling, getMe, logout } from '../lib/api';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { useHasPermission } from '../lib/use-permissions.js';
@@ -60,6 +61,11 @@ function MobileUserMenu() {
             {me?.orgName && <p className="truncate text-xs text-zinc-500">{me.orgName}</p>}
           </div>
           <div className="my-1 border-t border-zinc-100" />
+          <OrgSwitcher
+            memberships={me?.memberships}
+            activeOrgId={me?.orgId}
+            testId="mobile-org-switcher"
+          />
           <button
             type="button"
             role="menuitem"
