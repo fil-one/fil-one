@@ -387,12 +387,18 @@ describe('GET /api/me handler', () => {
       expect(resolvedOrgId(result)).toBe(MOCK_ORG_ID);
     });
 
-    it('refuses a header that is not an organization id', async () => {
+    it('echoes the caller’s own org when the header is not an organization id', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
       profileResolves();
 
       const result = await handler(eventNaming('not-a-uuid'), buildContext());
 
-      expect(result).toMatchObject({ statusCode: 400 });
+      // The 400 every other route answers would leave the console holding a
+      // stash it cannot read and no endpoint willing to tell it so. Answering
+      // under the caller's own org echoes an org id the stash disagrees with,
+      // which is what clears it.
+      expect(result).toMatchObject({ statusCode: 200 });
+      expect(resolvedOrgId(result)).toBe(MOCK_ORG_ID);
     });
   });
 

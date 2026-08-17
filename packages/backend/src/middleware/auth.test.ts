@@ -1164,8 +1164,8 @@ describe('authMiddleware', () => {
       mockFetch.mockResolvedValue({ ok: false, status: 401, text: async () => '' });
 
       // Use call-order mocking: first GetItem is the IDENTITY lookup, second the
-      // ORG PROFILE lookup. Everything after — the membership read the
-      // middleware now makes — falls to the empty default.
+      // membership read. Everything after — the org profile the
+      // identity-provider rule reads — falls to the empty default.
       ddbMock
         .on(GetItemCommand)
         .resolvesOnce({ Item: { userId: { S: existingUserId }, orgId: { S: existingOrgId } } })
@@ -1745,10 +1745,15 @@ describe('authMiddleware', () => {
     const OTHER_ORG = 'aaaaaaaa-0000-0000-0000-000000000002';
     const USER_ID = 'aaaaaaaa-0000-0000-0000-00000000000a';
 
-    function signInAs(orgId: string) {
-      mockJwtVerify
-        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: true } });
+    /**
+     * `idTokenClaims` lands in the ID token's verified payload, so a test naming
+     * `org_id` there drives the real claim through `extractIdTokenClaims` into
+     * the identity-provider rule — renaming the claim breaks the test.
+     */
+    function signInAs(orgId: string, idTokenClaims: Record<string, unknown> = {}) {
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+        payload: { email: MOCK_EMAIL, email_verified: true, ...idTokenClaims },
+      });
       ddbMock
         .on(GetItemCommand, { Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } } })
         .resolves({ Item: { userId: { S: USER_ID }, orgId: { S: orgId } } });
@@ -1857,6 +1862,134 @@ describe('authMiddleware', () => {
 
       expect(getUserInfoFromEvent(event).orgId).toBe(OTHER_ORG);
       expect(getUserInfoFromEvent(event).membership?.role).toBe(OrgRole.Admin);
+    });
+
+    it('serves /me from the caller’s own org when the header is not an org id', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      signInAs(PERSONAL_ORG);
+      stubMemberOf(PERSONAL_ORG, OrgRole.Owner);
+      const { event, request } = requestNaming('not-a-uuid');
+
+      const result = await authMiddleware({ orgHeaderFallback: true }).before(request);
+
+      // The 400 every other route answers would leave the console holding an
+      // unreadable stash and no endpoint willing to say so.
+      expect(result).toBeUndefined();
+      expect(getUserInfoFromEvent(event).orgId).toBe(PERSONAL_ORG);
+      warnSpy.mockRestore();
+    });
+
+    describe('the identity-provider rule', () => {
+      function stubRestrictedProfile(orgId: string, auth0OrgId: string) {
+        ddbMock
+          .on(GetItemCommand, {
+            TableName: 'UserInfoTable',
+            Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+          })
+          .resolves({ Item: { name: { S: 'Acme' }, auth0OrgId: { S: auth0OrgId } } });
+      }
+
+      function requestWithNoHeader() {
+        const event = buildEvent({
+          cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+        });
+        return { event, request: buildMiddyRequest(event) };
+      }
+
+      function profileReadsOf(orgId: string) {
+        return ddbMock
+          .commandCalls(GetItemCommand)
+          .map((call) => call.args[0].input)
+          .filter(
+            (input) => input.TableName === 'UserInfoTable' && input.Key?.pk?.S === `ORG#${orgId}`,
+          );
+      }
+
+      it('refuses a session that did not authenticate at the org, header or not', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        signInAs(PERSONAL_ORG);
+        stubMemberOf(PERSONAL_ORG, OrgRole.Owner);
+        stubRestrictedProfile(PERSONAL_ORG, 'org_auth0_acme');
+        const { event, request } = requestWithNoHeader();
+
+        const result = (await authMiddleware().before(
+          request,
+        )) as APIGatewayProxyStructuredResultV2;
+
+        // Sending no header would otherwise skip the one rule that keeps a
+        // plain Universal Login session out of an org that demands its own
+        // provider — including the caller's own.
+        expect(result.statusCode).toBe(403);
+        expect(JSON.parse(result.body!).message).toContain('identity provider');
+        expect(getUserInfoFromEvent(event).orgId).toBe(PERSONAL_ORG);
+        warnSpy.mockRestore();
+      });
+
+      it('admits the session whose ID token carries the org’s org_id claim', async () => {
+        signInAs(PERSONAL_ORG, { org_id: 'org_auth0_acme' });
+        stubMemberOf(PERSONAL_ORG, OrgRole.Owner);
+        stubRestrictedProfile(PERSONAL_ORG, 'org_auth0_acme');
+        const { event, request } = requestWithNoHeader();
+
+        expect(await authMiddleware().before(request)).toBeUndefined();
+        expect(getUserInfoFromEvent(event).membership?.role).toBe(OrgRole.Owner);
+      });
+
+      it('reads no profile for a caller who is not a member of the org they named', async () => {
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        signInAs(PERSONAL_ORG);
+        stubMemberOf(PERSONAL_ORG, OrgRole.Owner);
+        stubRestrictedProfile(OTHER_ORG, 'org_auth0_acme');
+        const { event, request } = requestNaming(OTHER_ORG);
+
+        expect(await authMiddleware().before(request)).toBeUndefined();
+
+        // Whether an org authenticates through its own provider is not
+        // something a non-member gets to learn by naming its id: they meet the
+        // same NOT_A_MEMBER 403 either way.
+        expect(profileReadsOf(OTHER_ORG)).toHaveLength(0);
+        const denied = authorize('buckets.read').before(
+          buildMiddyRequest(event),
+        ) as APIGatewayProxyStructuredResultV2;
+        expectErrorResponse(denied, 403, {
+          message: 'You are not a member of this organization.',
+          code: ApiErrorCode.NOT_A_MEMBER,
+        });
+        errorSpy.mockRestore();
+      });
+
+      it('serves /me from the caller’s own org when the named one refuses the session', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        signInAs(PERSONAL_ORG);
+        stubMemberOf(PERSONAL_ORG, OrgRole.Owner);
+        stubMemberOf(OTHER_ORG, OrgRole.Admin);
+        stubRestrictedProfile(OTHER_ORG, 'org_auth0_acme');
+        const { event, request } = requestNaming(OTHER_ORG);
+
+        const result = await authMiddleware({ orgHeaderFallback: true }).before(request);
+
+        expect(result).toBeUndefined();
+        expect(getUserInfoFromEvent(event).orgId).toBe(PERSONAL_ORG);
+        expect(getUserInfoFromEvent(event).membership?.role).toBe(OrgRole.Owner);
+        warnSpy.mockRestore();
+      });
+
+      it('refuses /me too when the caller’s own org refuses the session', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        signInAs(PERSONAL_ORG);
+        stubMemberOf(PERSONAL_ORG, OrgRole.Owner);
+        stubRestrictedProfile(PERSONAL_ORG, 'org_auth0_acme');
+        const { request } = requestWithNoHeader();
+
+        const result = (await authMiddleware({
+          orgHeaderFallback: true,
+        }).before(request)) as APIGatewayProxyStructuredResultV2;
+
+        // There is nowhere left to fall back to, and the way in is to
+        // authenticate through the org's own provider.
+        expect(result.statusCode).toBe(403);
+        warnSpy.mockRestore();
+      });
     });
   });
 

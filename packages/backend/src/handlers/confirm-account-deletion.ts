@@ -44,7 +44,7 @@ export async function baseHandler(
 
   const { orgId, userId } = getUserInfo(event);
 
-  const orgProfile = await getOrgProfile(orgId, { consistent: true });
+  const orgProfile = await getOrgProfile(orgId, { consistentRead: true });
   if (orgProfile?.name?.S !== parsed.data.orgName) {
     return badRequest('The organization name does not match.');
   }

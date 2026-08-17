@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import {
   ArrowLeftIcon,
@@ -380,6 +380,18 @@ export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) 
     },
   });
 
+  // An upload in flight dies with the page, and every way out of this page is a
+  // navigation: closing the tab, logging out, switching organizations. One
+  // guard here covers all of them, and it is the only place that knows an
+  // upload is running.
+  const isUploading = upload.uploadStep === 'uploading';
+  useEffect(() => {
+    if (!isUploading) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [isUploading]);
+
   const goToBucket = () =>
     void navigate({ to: '/buckets/$bucketName', params: { bucketName }, search: { region } });
 
@@ -410,7 +422,6 @@ export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) 
   };
 
   const listItems = groupEntries(upload.files);
-  const isUploading = upload.uploadStep === 'uploading';
   const removeFile = isUploading ? undefined : upload.removeFile;
   const removeFolderFiles = isUploading ? undefined : upload.removeFolderFiles;
 

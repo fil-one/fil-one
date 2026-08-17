@@ -64,6 +64,7 @@ function MobileUserMenu() {
           <OrgSwitcher
             memberships={me?.memberships}
             activeOrgId={me?.orgId}
+            inMenu
             testId="mobile-org-switcher"
           />
           <button

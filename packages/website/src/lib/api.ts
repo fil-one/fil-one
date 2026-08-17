@@ -1,7 +1,13 @@
 import { API_URL } from '../env.js';
 import { ApiErrorCode, CSRF_COOKIE_NAME, ORG_ID_HEADER } from '@filone/shared';
 import type { StepUpRequiredResponse } from '@filone/shared';
-import { getActiveOrgId, reconcileActiveOrg } from './active-org.js';
+import {
+  clearActiveOrgAfterRefusal,
+  clearActiveOrgId,
+  getActiveOrgId,
+  isSwitchingOrg,
+  reconcileActiveOrg,
+} from './active-org.js';
 import { redirectToStepUp } from './step-up.js';
 import type { PreferencesResponse, UpdatePreferencesRequest } from '@filone/shared';
 
@@ -62,7 +68,16 @@ export function redirectToLogin(): void {
   window.location.href = `${API_URL}/login`;
 }
 
+/**
+ * Log out, and drop the org this tab was operating in.
+ *
+ * `sessionStorage` belongs to the tab, not the session, and logging out is a
+ * same-tab navigation — so without this the next person to sign in on a shared
+ * machine starts inside the previous user's org whenever they are also a member
+ * of it.
+ */
 export function logout(): void {
+  clearActiveOrgId();
   window.location.href = `${API_URL}/logout`;
 }
 
@@ -150,6 +165,12 @@ function forbidden(body: { message?: string; code?: string }): Error {
  */
 // eslint-disable-next-line complexity/complexity
 export async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  // The tab is on its way to another org. Held rather than rejected, for the
+  // reason `getMe` returns instead of throwing on a mismatch: the page is
+  // disappearing, and an error rendered over it would be the last thing the user
+  // sees of the org they just left.
+  if (isSwitchingOrg()) return new Promise<T>(() => {});
+
   const method = options.method?.toUpperCase() ?? 'GET';
   const headers = new Headers(options.headers);
   if (!headers.has('Content-Type')) {
@@ -264,6 +285,11 @@ import type {
  * tab reloads. The response is still returned — the reload is already in flight,
  * and a caller left holding a rejected promise would render an error page over
  * a page that is about to disappear.
+ *
+ * A refusal carries no echo, and the server degrades `/me` rather than refusing
+ * it for anything the header could be at fault for. What is left is `/me`
+ * failing on its own account, and a stash held through it is worth dropping
+ * once: the alternative is a tab that keeps naming an org nobody will answer for.
  */
 export async function getMe(options?: {
   forceRefresh?: boolean;
@@ -273,7 +299,13 @@ export async function getMe(options?: {
   if (options?.forceRefresh) params.set('forceRefresh', '1');
   if (options?.include) params.set('include', options.include);
   const qs = params.toString();
-  const me = await apiRequest<MeResponse>(`/me${qs ? `?${qs}` : ''}`);
+  let me: MeResponse;
+  try {
+    me = await apiRequest<MeResponse>(`/me${qs ? `?${qs}` : ''}`);
+  } catch (err) {
+    clearActiveOrgAfterRefusal();
+    throw err;
+  }
   reconcileActiveOrg(me.orgId);
   return me;
 }
