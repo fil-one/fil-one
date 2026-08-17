@@ -90,6 +90,9 @@ aws iam list-roles --query 'length(Roles)' --output text
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `convert-orgs-to-orgtable.ts`  | Move org membership into OrgTable, `admin` → `owner` (runbook: [docs/OrgConversionRunbook.md](../docs/OrgConversionRunbook.md))                                        |
 | `revert-org-conversion.ts`     | Undo `convert-orgs-to-orgtable.ts`                                                                                                                                     |
+| `backfill-billing-to-org.ts`   | Copy each BillingTable subscription row to its org key, and `--verify` the result (runbook: [docs/BillingRekeyRunbook.md](../docs/BillingRekeyRunbook.md))             |
+| `revert-billing-backfill.ts`   | Undo `backfill-billing-to-org.ts` — deletes only the org rows it wrote                                                                                                 |
+| `extend-trial.ts`              | Reset a non-production test account back to a fresh `trialing` state, across Stripe, BillingTable, Aurora, and FTH                                                     |
 | `tail-logs.sh`                 | Tail CloudWatch logs for a Lambda function                                                                                                                             |
 | `tail-tenant-setup-logs.sh`    | Tail logs for the Aurora tenant setup Lambda                                                                                                                           |
 | `reset-db.ts`                  | Reset the Aurora database for a stage                                                                                                                                  |
@@ -102,8 +105,12 @@ aws iam list-roles --query 'length(Roles)' --output text
 
 ### Shared helpers (`bin/lib/`)
 
-| Module      | What it holds                                                                              |
-| ----------- | ------------------------------------------------------------------------------------------ |
-| `args.ts`   | `--stage` (required, no default), `--execute`/`--dry-run`, usage and help                  |
-| `stage.ts`  | Table names from `sst state export`, the resolved-name stage assertion, the region mapping |
-| `dynamo.ts` | Paging a Scan to the end, decoding rows, and retrying a cancelled transaction              |
+| Module              | What it holds                                                                              |
+| ------------------- | ------------------------------------------------------------------------------------------ |
+| `args.ts`           | `--stage` (required, no default), `--execute`/`--dry-run`, usage and help                  |
+| `stage.ts`          | Table names from `sst state export`, the resolved-name stage assertion, the region mapping |
+| `dynamo.ts`         | Paging a Scan to the end, decoding rows, and retrying a cancelled transaction              |
+| `run-lock.ts`       | The single lock row that keeps a migration and its revert off the same table at once       |
+| `billing-rekey.ts`  | What to do with each subscription row, and the exact items that carry it out               |
+| `billing-verify.ts` | The checks behind `backfill-billing-to-org.ts --verify` — the flip PR's merge gate         |
+| `org-conversion.ts` | The same, for the org membership conversion                                                |

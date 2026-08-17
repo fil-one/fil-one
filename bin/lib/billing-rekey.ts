@@ -56,7 +56,26 @@ export function parseOrgPk(pk: string): string | undefined {
 
 function parsePrefixed(value: string, prefix: string): string | undefined {
   const rest = value.startsWith(prefix) ? value.slice(prefix.length) : undefined;
-  return rest && !rest.includes('#') ? rest : undefined;
+  return isKeyable(rest) ? rest : undefined;
+}
+
+/**
+ * Whether an id can be half of a key.
+ *
+ * `#` separates a key's parts, so an id containing one produces a partition key
+ * that parses back as something else — `ORG#a#b` reads as an org named `a#b` to
+ * a `startsWith` test and as nothing at all to these parsers. Ids here are
+ * UUIDs and Auth0 subs; neither contains a `#`, so a value that does is not the
+ * thing it claims to be and is refused rather than half-accepted.
+ *
+ * The backend's `SubscriptionKeys.isOrgPk` is a bare `startsWith` and does
+ * accept those shapes. That is deliberate on its side — a scan filter that
+ * errs towards seeing a row is safer than one that skips it — but it means the
+ * two disagree about `ORG#a#b`, so this script names such a row as an anomaly
+ * rather than assuming nobody else can see it.
+ */
+export function isKeyable(id: string | undefined): id is string {
+  return id !== undefined && id.length > 0 && !id.includes('#');
 }
 
 /**
@@ -106,7 +125,7 @@ export interface OrgBillingState {
 }
 
 /** Why a row is left for a human. */
-export type BillingAnomalyReason = 'collision' | 'no-org-id' | 'foreign-org-row';
+export type BillingAnomalyReason = 'collision' | 'no-org-id' | 'foreign-org-row' | 'app-row-behind';
 
 export interface CopyPlan {
   kind: 'copy';
@@ -115,7 +134,7 @@ export interface CopyPlan {
   source: SubscriptionRow;
   /** A first copy, or a re-copy of a source that changed after the last one. */
   reason: 'first-copy' | 'delta';
-  /** What the org row's `rekeySourceUpdatedAt` says today, for the delta log line. */
+  /** What the org row's `updatedAt` says today: the delta log line, and the write's own condition. */
   copiedUpdatedAt?: string;
   /** The source's `updatedAt` now. */
   sourceUpdatedAt?: string;
@@ -128,6 +147,11 @@ export interface AlreadyCopiedPlan {
   orgId: string;
   /** `backfill` when this run's predecessor wrote it, `application` when a signup did. */
   origin: 'backfill' | 'application';
+}
+
+/** Whether a row is newer than another, with an absent timestamp counting as oldest. */
+function isNewerThan(a: string | undefined, b: string | undefined): boolean {
+  return (a ?? '') > (b ?? '');
 }
 
 export interface BillingAnomalyPlan {
@@ -148,8 +172,21 @@ export type BillingPlan = CopyPlan | AlreadyCopiedPlan | BillingAnomalyPlan;
  * run resumable: a re-run re-reads the table and re-derives the same decision
  * for every org it already finished, so an interrupted run needs no checkpoint.
  *
+ * THE SIGNAL IS WHICH ROW IS NEWER, not whether the source has moved since the
+ * copy. Every ordinary dual-write moves the legacy row's `updatedAt` while the
+ * copy's frozen `rekeySourceUpdatedAt` stays where it was, so the second reading
+ * re-flags every account the run already finished: `--verify` could never
+ * converge on a live stage, and each re-run put another delta Put over rows
+ * nothing was wrong with.
+ *
+ * An org row that is newer than the legacy row is not a problem to fix. Every
+ * reader prefers the org row while both exist, and the flip deletes the legacy
+ * one — so the org half being ahead never serves anybody stale data, and it is a
+ * reported count rather than a failure.
+ *
  * `resolved` carries the operator's collision decisions — one winning userId per
- * org — and is consulted only for orgs that have one.
+ * org — and is consulted only for orgs whose decision is not already recorded on
+ * the org row.
  */
 export function classifyOrgBilling(
   state: OrgBillingState,
@@ -157,42 +194,47 @@ export function classifyOrgBilling(
 ): BillingPlan {
   const { orgId, orgRow, legacyRows } = state;
 
-  // A row the application wrote for this org is already the truth: the
-  // dual-write put it there alongside its legacy twin. Copying over it would
-  // replace live state with whatever the scan happened to read.
-  if (orgRow && !orgRow.rekeyedFrom) {
-    return { kind: 'already-copied', orgId, origin: 'application' };
-  }
-
   if (legacyRows.length === 0) {
-    // An org row from a previous run whose source is gone. Nothing to copy, and
-    // deleting it is the revert's job, not this one's.
-    return { kind: 'already-copied', orgId, origin: 'backfill' };
-  }
-
-  const source = chooseSource(state, resolved);
-  if (!source) return collisionAnomaly(state);
-
-  // An org row copied from a different legacy row means two rows claim this org
-  // and one already won. Silently re-pointing it would flip which subscription
-  // the org rides on the strength of scan order.
-  if (orgRow?.rekeyedFrom && orgRow.rekeyedFrom !== source.pk) {
+    // Either an org row from a previous run whose source is gone, or one the
+    // application wrote and never had a legacy twin scanned for. Nothing to
+    // copy; deleting an orphaned copy is the revert's job, not this one's.
     return {
-      kind: 'anomaly',
+      kind: 'already-copied',
       orgId,
-      reason: 'foreign-org-row',
-      detail: `the org row was copied from ${orgRow.rekeyedFrom}, but ${source.pk} is the row this run would copy`,
-      rows: [orgRow.rekeyedFrom, source.pk],
+      origin: orgRow?.rekeyedFrom ? 'backfill' : 'application',
     };
   }
 
+  const source = chooseSource(state, resolved);
+  if (!source) return unresolvedSourceAnomaly(state);
+
   if (!orgRow) return copyPlan(state, source, 'first-copy');
 
-  // The source moved after it was copied. This is the one way the two rows
-  // diverge under dual-write: a Stripe object carrying no `metadata.orgId`
-  // updates the legacy row alone, because the writer has no org to key with.
-  if (orgRow.rekeySourceUpdatedAt !== source.updatedAt) {
-    return copyPlan(state, source, 'delta', orgRow.rekeySourceUpdatedAt);
+  // A row the application wrote is never overwritten: it is live billing state
+  // with no provenance, so a copy over it could not be reverted and might not
+  // even describe the same subscription. It is still compared, because two
+  // subscriptions claiming one org and a legacy row holding newer state are both
+  // things the operator has to know before the flip drops the legacy key.
+  if (!orgRow.rekeyedFrom) {
+    if (!isNewerThan(source.updatedAt, orgRow.updatedAt)) {
+      return { kind: 'already-copied', orgId, origin: 'application' };
+    }
+    return {
+      kind: 'anomaly',
+      orgId,
+      reason: 'app-row-behind',
+      detail:
+        `the application's org row (updatedAt=${orgRow.updatedAt ?? '(none)'}) is older than ` +
+        `${source.pk} (updatedAt=${source.updatedAt ?? '(none)'}), and the flip deletes the legacy row. ` +
+        'Reconcile the two by hand, or delete the org row and let the next run copy it',
+      rows: [source.pk],
+    };
+  }
+
+  // The org row records which legacy row won, so the source is settled. What is
+  // left is which half is newer.
+  if (isNewerThan(source.updatedAt, orgRow.updatedAt)) {
+    return copyPlan(state, source, 'delta', orgRow.updatedAt);
   }
 
   return { kind: 'already-copied', orgId, origin: 'backfill' };
@@ -228,26 +270,39 @@ function copyPlan(
 /**
  * Which legacy row this org's subscription comes from.
  *
- * One row is the answer. Several that agree on the subscription are
+ * A DECISION ALREADY RECORDED IS READ BACK, never re-derived — that is the first
+ * thing this asks, before the count of rows. `rekeyedFrom` on the org row is the
+ * winner a previous run copied, which for a collision is the row an operator
+ * checked in Stripe and named. Re-deriving it would re-halt a resolved collision
+ * on every subsequent run, and would need the same `--resolve-collisions`
+ * argument passed forever.
+ *
+ * Otherwise: one row is the answer. Several that agree on the subscription are
  * re-subscription residue describing the same Stripe subscription, so the newest
  * `updatedAt` wins and the rest are recorded as superseded. Several that
- * disagree are a real collision: the ADR's rule is that the row whose
- * `subscriptionId` is live in Stripe wins, and this script cannot ask Stripe —
- * so it halts and an operator names the winner on `--resolve-collisions` after
- * checking. Returns undefined when that decision has not been made.
+ * disagree — including any claimant that names no subscription at all, which
+ * agrees with nothing — are a real collision: the ADR's rule is that the row
+ * whose `subscriptionId` is live in Stripe wins, and this script cannot ask
+ * Stripe, so it halts and an operator names the winner on `--resolve-collisions`
+ * after checking. Returns undefined when that decision has not been made.
  */
 function chooseSource(
   state: OrgBillingState,
   resolved: ReadonlyMap<string, string>,
 ): SubscriptionRow | undefined {
-  const { legacyRows, orgId } = state;
+  const { legacyRows, orgId, orgRow } = state;
+
+  const recorded = orgRow?.rekeyedFrom;
+  if (recorded) return legacyRows.find((row) => row.pk === recorded);
+
   if (legacyRows.length === 1) return legacyRows[0];
 
   const chosen = resolved.get(orgId);
   if (chosen) return legacyRows.find((row) => parseLegacyPk(row.pk) === chosen);
 
-  const subscriptionIds = new Set(legacyRows.map((row) => row.subscriptionId ?? ''));
-  if (subscriptionIds.size > 1) return undefined;
+  const subscriptionIds = legacyRows.map((row) => row.subscriptionId ?? '');
+  if (subscriptionIds.some((id) => id === '')) return undefined;
+  if (new Set(subscriptionIds).size > 1) return undefined;
 
   return [...legacyRows].sort(byUpdatedAtDescending)[0];
 }
@@ -255,6 +310,29 @@ function chooseSource(
 /** Newest first; a row with no `updatedAt` sorts last, being the least likely to be current. */
 function byUpdatedAtDescending(a: SubscriptionRow, b: SubscriptionRow): number {
   return (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '');
+}
+
+/**
+ * No source could be chosen. Which anomaly that is depends on whether a decision
+ * was recorded and has since gone missing, or was never made at all.
+ */
+function unresolvedSourceAnomaly(state: OrgBillingState): BillingAnomalyPlan {
+  const recorded = state.orgRow?.rekeyedFrom;
+  if (recorded) {
+    const survivors = state.legacyRows.map((row) => row.pk);
+    return {
+      kind: 'anomaly',
+      orgId: state.orgId,
+      reason: 'foreign-org-row',
+      detail:
+        `the org row was copied from ${recorded}, which is no longer in the table, ` +
+        `while ${survivors.join(', ')} still claim this org. Confirm in Stripe which subscription is ` +
+        `live: if it is the surviving row, delete the org row and re-run so it is copied afresh; ` +
+        `if the recorded winner was deleted in error, the org row already holds its state and nothing is needed`,
+      rows: [recorded, ...survivors],
+    };
+  }
+  return collisionAnomaly(state);
 }
 
 function collisionAnomaly(state: OrgBillingState): BillingAnomalyPlan {
@@ -315,9 +393,13 @@ export function buildCopyItem(
  * revisit it. Failing instead leaves the org for the next run, which re-reads
  * and copies the newer row.
  *
- * A first copy also asserts the org row's absence, and a delta asserts it still
- * belongs to this source — so two runs racing produce one loser rather than two
- * winners, and neither can overwrite a row the application wrote.
+ * A first copy asserts the org row's absence. A delta asserts BOTH halves are
+ * still what the classification read: the row is still a copy of this source,
+ * and its `updatedAt` is still the one that lost the comparison. Without the
+ * second half, a webhook write landing on the org row inside the window is
+ * silently replaced by a copy that was already older than it — a Put replaces
+ * the whole item, so the newer state is not merged, it is gone. Asserting it
+ * makes that a race the run reports and the next one re-reads.
  */
 export function buildCopyTransactItems(
   plan: CopyPlan,
@@ -343,11 +425,7 @@ export function buildCopyTransactItems(
         Item: item,
         ...(plan.reason === 'first-copy'
           ? { ConditionExpression: 'attribute_not_exists(pk)' }
-          : {
-              ConditionExpression: '#rekeyedFrom = :source',
-              ExpressionAttributeNames: { '#rekeyedFrom': REKEY_ATTRIBUTES.from },
-              ExpressionAttributeValues: { ':source': { S: plan.source.pk } },
-            }),
+          : orgRowUnchanged(plan)),
       },
     },
     {
@@ -360,6 +438,30 @@ export function buildCopyTransactItems(
   ];
 }
 
+/** The delta's condition on the row it is replacing: same source, same `updatedAt`. */
+function orgRowUnchanged(plan: CopyPlan): {
+  ConditionExpression: string;
+  ExpressionAttributeNames: Record<string, string>;
+  ExpressionAttributeValues: Record<string, AttributeValue>;
+} {
+  const names = { '#rekeyedFrom': REKEY_ATTRIBUTES.from, '#updatedAt': 'updatedAt' };
+  if (plan.copiedUpdatedAt === undefined) {
+    return {
+      ConditionExpression: '#rekeyedFrom = :source AND attribute_not_exists(#updatedAt)',
+      ExpressionAttributeNames: names,
+      ExpressionAttributeValues: { ':source': { S: plan.source.pk } },
+    };
+  }
+  return {
+    ConditionExpression: '#rekeyedFrom = :source AND #updatedAt = :orgUpdatedAt',
+    ExpressionAttributeNames: names,
+    ExpressionAttributeValues: {
+      ':source': { S: plan.source.pk },
+      ':orgUpdatedAt': { S: plan.copiedUpdatedAt },
+    },
+  };
+}
+
 /**
  * Remove one copied org row.
  *
@@ -367,6 +469,13 @@ export function buildCopyTransactItems(
  * row the application wrote since — or a copy of a different legacy row — is
  * left alone. The legacy row is untouched by both directions: the backfill never
  * deleted it, which is what makes the revert a delete and not a restore.
+ *
+ * And conditional on that legacy row still existing. The revert's whole claim is
+ * that every read falls back to the `CUSTOMER#` row, so the accounts it reverts
+ * keep working — after the dated cleanup step there is no such row, and running
+ * this then would delete the only subscription an account has while printing
+ * that nothing was lost. Asserting the fallback makes the claim true: the revert
+ * declines per org rather than emptying the table.
  */
 export function buildRevertItem(
   orgId: string,
@@ -381,6 +490,13 @@ export function buildRevertItem(
         ConditionExpression: 'attribute_exists(pk) AND #rekeyedFrom = :source',
         ExpressionAttributeNames: { '#rekeyedFrom': REKEY_ATTRIBUTES.from },
         ExpressionAttributeValues: { ':source': { S: rekeyedFrom } },
+      },
+    },
+    {
+      ConditionCheck: {
+        TableName: tableName,
+        Key: { pk: { S: rekeyedFrom }, sk: { S: BillingKeys.subscriptionSk() } },
+        ConditionExpression: 'attribute_exists(pk)',
       },
     },
   ];
@@ -460,12 +576,9 @@ export function formatBillingPlanReport(
     `Orgs scanned: ${counts.orgs}`,
     ...alignedCounts([
       ['  Copy (CUSTOMER# row -> ORG# row)', counts.firstCopies],
-      ['  Re-copy (the source changed since the last copy)', counts.deltas],
-      ['  Already copied by an earlier run (skipped)', counts.alreadyCopiedByBackfill],
-      [
-        '  Already keyed to the org by the application (skipped)',
-        counts.alreadyCopiedByApplication,
-      ],
+      ['  Re-copy (the legacy row is newer than the org row)', counts.deltas],
+      ['  In sync, or the org row is ahead (skipped)', counts.alreadyCopiedByBackfill],
+      ['  Keyed to the org by the application (skipped)', counts.alreadyCopiedByApplication],
       ['  Superseded legacy rows left in place', counts.supersededRows],
       ['  Anomalies (manual disposition)', counts.anomalies],
     ]),
@@ -535,13 +648,83 @@ export function parseResolvedCollisions(value: string | undefined): Map<string, 
         `--resolve-collisions entries are <orgId>=<userId>; could not read "${trimmed}"`,
       );
     }
-    resolved.set(
-      stripPrefix(org.trim(), BillingKeys.orgPkPrefix()),
-      stripPrefix(user.trim(), BillingKeys.legacyPkPrefix()),
-    );
+    const orgId = stripPrefix(org.trim(), BillingKeys.orgPkPrefix());
+    const userId = stripPrefix(user.trim(), BillingKeys.legacyPkPrefix());
+
+    // One decision per org. Two entries for one org is an operator who edited a
+    // list and left the old line in, and taking the last silently would copy a
+    // subscription they had already decided against.
+    const existing = resolved.get(orgId);
+    if (existing && existing !== userId) {
+      throw new Error(
+        `--resolve-collisions names ${BillingKeys.orgPk(orgId)} twice, as ` +
+          `${BillingKeys.legacyPk(existing)} and ${BillingKeys.legacyPk(userId)}. ` +
+          'Each org gets one winner.',
+      );
+    }
+    resolved.set(orgId, userId);
   }
 
   return resolved;
+}
+
+/**
+ * Every resolution checked against the rows actually scanned.
+ *
+ * An entry naming a row that is not there is a typo or a stale list, and it is
+ * silent in the worst way: the org stays unresolved, the run halts on the same
+ * collision, and the operator reads the halt as the resolution not having been
+ * applied at all. Returns the problems as sentences, empty when the list is good.
+ */
+export function validateResolvedCollisions(
+  resolved: ReadonlyMap<string, string>,
+  states: readonly OrgBillingState[],
+): string[] {
+  const byOrg = new Map(states.map((state) => [state.orgId, state]));
+  const problems: string[] = [];
+
+  for (const [orgId, userId] of resolved) {
+    const state = byOrg.get(orgId);
+    if (!state) {
+      problems.push(
+        `${BillingKeys.orgPk(orgId)}=${BillingKeys.legacyPk(userId)} — no scanned row names that org`,
+      );
+      continue;
+    }
+    if (!state.legacyRows.some((row) => parseLegacyPk(row.pk) === userId)) {
+      const claimants = state.legacyRows.map((row) => row.pk).join(', ') || '(none)';
+      problems.push(
+        `${BillingKeys.orgPk(orgId)}=${BillingKeys.legacyPk(userId)} — that row does not claim this org; ` +
+          `its claimants are ${claimants}`,
+      );
+    }
+  }
+
+  return problems;
+}
+
+/** The resolutions this run applied, for the report an operator keeps. */
+export function formatAppliedResolutions(
+  resolved: ReadonlyMap<string, string>,
+  plans: readonly BillingPlan[],
+): string[] {
+  if (resolved.size === 0) return [];
+
+  const planByOrg = new Map(plans.map((plan) => [plan.orgId, plan]));
+  return [
+    `Collision resolutions applied (${resolved.size}):`,
+    ...[...resolved].map(([orgId, userId]) => {
+      const plan = planByOrg.get(orgId);
+      const outcome =
+        plan?.kind === 'copy'
+          ? `${plan.reason === 'first-copy' ? 'copy' : 're-copy'} from ${plan.source.pk}`
+          : plan?.kind === 'already-copied'
+            ? `already keyed to the org (${plan.origin})`
+            : `still an anomaly (${plan?.reason ?? 'org not scanned'})`;
+      return `  ${BillingKeys.orgPk(orgId)} = ${BillingKeys.legacyPk(userId)} — ${outcome}`;
+    }),
+    '',
+  ];
 }
 
 function stripPrefix(value: string, prefix: string): string {

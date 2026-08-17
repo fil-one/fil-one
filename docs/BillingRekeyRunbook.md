@@ -28,8 +28,24 @@ only the org key, and the `CUSTOMER#` rows go in a dated cleanup step afterwards
 Why the copy is conditional: Stripe webhooks mutate these rows continuously, so a
 twin copied today is stale tomorrow. The condition is what makes a copy
 meaningful — a run that loses it leaves that org for the next run, which re-reads
-it. And a source that changes _after_ its copy lands is re-copied, because the
-copy stores the source's `updatedAt` and a mismatch on a later run is a delta.
+it. A re-copy asserts both halves are still what the run read: the org row is
+still a copy of this source, and its `updatedAt` is still the one that lost the
+comparison. A `Put` replaces the whole item, so a webhook write landing inside
+that window would be erased rather than merged.
+
+Which orgs get re-copied is decided by **which row is newer**, the legacy row's
+`updatedAt` against the org row's. `rekeySourceUpdatedAt` records what the copy
+was made from and is part of the audit trail, not the signal: it stays frozen
+while every ordinary dual-write moves the source, so comparing the two would
+re-flag every account the run already finished and `--verify` would never pass on
+a live stage.
+
+An org row that is **ahead** of its legacy row is not a problem to fix. Every
+reader prefers the org row while both exist and the flip deletes the legacy one,
+so the org half being newer never serves stale data. It is counted and skipped.
+The reverse — a legacy row ahead of an org row the application wrote — is
+reported as an anomaly, because the flip is about to delete the only row holding
+that state, and reconciling it is a decision for a person.
 
 ## Preconditions
 
@@ -177,19 +193,25 @@ tally. Each per-org line carries the outcome that actually happened: `COPIED`,
 `RE-COPIED`, `SKIPPED`, `RACED`, `RETRY`, or `FAILED`.
 
 ```
-Copied (first time):                         775
-Re-copied (the source had changed):          0
-Skipped (already copied, or copied since):   33
+Copied (first time):                         740
+Re-copied (the legacy row was newer):        33
+Skipped (no longer needed a copy):           0
 Raced (the rows moved; next run retries):    2
+Already in sync at scan time (not planned):  91
 Anomalies (untouched):                       0
 Legacy CUSTOMER# rows deleted:               0 (by design)
 
-Planned copies (775) = Copied + Re-copied + Skipped-since + Raced (777 written, 33 skipped).
+Planned copies 775 = 773 written + 0 skipped-since + 2 raced.
 ```
 
 Every org is re-read consistently and re-classified immediately before its write,
 so the log line names the source `updatedAt` the write actually carried rather
 than what the scan saw minutes earlier.
+
+The closing line is an identity: every org the plan contained ends in exactly one
+of written, skipped-since, or raced. Orgs already in sync when the table was
+scanned were never planned, so they are reported separately rather than folded
+into the skipped count.
 
 `RACED` counts orgs whose transaction was cancelled by a condition — a Stripe
 webhook moved the legacy row, or another writer created the org row first. Nothing
@@ -258,16 +280,27 @@ VERIFY: FAIL (1 checks)
 ### Dispositioning a row with no orgId
 
 Each one is an account whose billing row predates the `orgId` attribute, or a
-Stripe customer created outside the app. Per row:
+Stripe customer created outside the app.
 
-1. Read the row's `stripeCustomerId` and look the customer up in Stripe. Its
-   `metadata.orgId` usually names the org, in which case write the attribute by
-   hand and the next dry run copies the row normally — the cheapest disposition is
-   to make it stop being one.
-2. If the customer is gone from Stripe, or its metadata names no org, the row is
-   residue: no live subscription is behind it and no tenant reads it. Record that
-   and name it on `--accept-orgless`.
-3. Never guess an org. A row copied to the wrong `ORG#` partition gives that org
+**"Its metadata names no org" does not mean "nothing is behind it."** The
+subscription guard serves these rows today through the userId-keyed `CUSTOMER#`
+fallback, so a row with no `orgId` can be a paying account that is working right
+now. The flip is what takes it away. So every disposition starts with the same
+question the collision procedure asks: **does this customer have a live
+subscription in the Stripe dashboard?**
+
+Per row:
+
+1. Read the row's `stripeCustomerId` and open the customer in Stripe.
+2. If it has a **live subscription**, this is a manual fix, never an acceptance.
+   Its `metadata.orgId` usually names the org: write the attribute onto the row by
+   hand and the next dry run copies it normally. If the metadata names no org,
+   find the org the customer belongs to and stamp it — the cheapest disposition is
+   to make the row stop being one.
+3. Only if the customer is **gone from Stripe, or has no live subscription**, is
+   the row residue: nothing is being billed and no tenant reads it. Record what
+   you saw and name it on `--accept-orgless`.
+4. Never guess an org. A row copied to the wrong `ORG#` partition gives that org
    somebody else's subscription.
 
 Spot-check one org from `billing-backfill.log` if you want the raw rows:
@@ -331,8 +364,10 @@ Preconditions, all of them:
    all scan this table, and a clean run of each on org rows alone is the evidence
    that nothing still reads a `CUSTOMER#` row.
 3. No rise in `SUBSCRIPTION_INACTIVE` denials attributable to the flip.
-4. The `--verify` log from the flip gate is still on hand: after the deletes, it
-   is the only record of what the legacy rows held.
+4. The `--verify` log from the flip gate is still on hand, and the cleanup log
+   below records each row **in full** before deleting it: between them they are
+   the only record of what the legacy rows held, because there is no PITR or
+   backup on this table.
 
 Then delete, stage by stage, keeping the output:
 
@@ -346,12 +381,12 @@ pnpm exec sst shell --stage production -- node --input-type=module -e '
     const page = await ddb.send(new ScanCommand({
       TableName: Resource.BillingTable.name,
       FilterExpression: "sk = :sk AND begins_with(pk, :legacy)",
-      ProjectionExpression: "pk",
       ExpressionAttributeValues: { ":sk": { S: "SUBSCRIPTION" }, ":legacy": { S: "CUSTOMER#" } },
       ExclusiveStartKey: key,
     }));
     for (const item of page.Items ?? []) {
-      console.log("DELETE", item.pk.S);
+      // The whole row, not just its key: this log is the record.
+      console.log("DELETE", JSON.stringify(item));
       await ddb.send(new DeleteItemCommand({
         TableName: Resource.BillingTable.name,
         Key: { pk: item.pk, sk: { S: "SUBSCRIPTION" } },
