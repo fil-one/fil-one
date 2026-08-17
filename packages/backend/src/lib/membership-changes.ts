@@ -1,0 +1,297 @@
+import { TransactionCanceledException } from '@aws-sdk/client-dynamodb';
+import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
+import { Resource } from 'sst';
+import { OrgRole, canManageTargetRole } from '@filone/shared';
+import type { OrgMembershipSource } from '@filone/shared';
+import { OrgKeys } from './org-membership.js';
+
+/**
+ * The writes that change who is in an organization and what they may do.
+ *
+ * Every one of them is a transaction item rather than a call, because none of
+ * these changes is ever a single write: the canonical `MEMBER#` row and its
+ * `MEMBERSHIP#` inverse item must agree about a role, the owner set has a counter
+ * that has to move with it, and an audit event rides along
+ * (`commitAudited`, `lib/audit.ts`). Handlers assemble the items, name the ones
+ * whose conditions they care about, and hand the lot to one transaction.
+ *
+ * Three invariants live here rather than in the handlers:
+ *
+ * - **Canonical and inverse move together.** Both are written on create, delete,
+ *   and every role change, so `MeResponse.memberships` can never show a role the
+ *   member no longer holds.
+ * - **The last Owner cannot leave.** `ownerCount` on `ORG#{orgId}/META` carries
+ *   the delta, and the guard is that same update's condition — DynamoDB permits
+ *   one operation per item per transaction, so the check and the decrement have
+ *   to be the same operation.
+ * - **An invitation does not outlive its issuer's authority.** The accept
+ *   transaction carries a `ConditionCheck` on the inviter's membership row,
+ *   expressed in the roles the registry says may invite the role in question.
+ */
+
+/** What a membership row records about how the member arrived. */
+export interface MembershipOrigin {
+  joinedAt: string;
+  source: OrgMembershipSource;
+  /** The member who issued the invitation, when `source` is `invitation`. */
+  invitedBy?: string;
+}
+
+/**
+ * A new membership: the canonical row and its inverse item.
+ *
+ * The canonical row is create-only, which is how an accept that races another
+ * accept of the same invitation loses cleanly instead of overwriting a role
+ * somebody already holds. The inverse item is not: it carries no authority, and
+ * a stale one left behind by an interrupted write should be corrected rather than
+ * be the reason a member cannot join.
+ */
+export function membershipRows({
+  orgId,
+  userId,
+  role,
+  origin,
+}: {
+  orgId: string;
+  userId: string;
+  role: OrgRole;
+  origin: MembershipOrigin;
+}): TransactWriteItem[] {
+  const tableName = Resource.OrgTable.name;
+
+  return [
+    {
+      Put: {
+        TableName: tableName,
+        Item: {
+          pk: { S: OrgKeys.orgPk(orgId) },
+          sk: { S: OrgKeys.memberSk(userId) },
+          role: { S: role },
+          joinedAt: { S: origin.joinedAt },
+          source: { S: origin.source },
+          ...(origin.invitedBy ? { invitedBy: { S: origin.invitedBy } } : {}),
+        },
+        ConditionExpression: 'attribute_not_exists(pk)',
+      },
+    },
+    {
+      Put: {
+        TableName: tableName,
+        Item: {
+          pk: { S: OrgKeys.userPk(userId) },
+          sk: { S: OrgKeys.membershipSk(orgId) },
+          role: { S: role },
+          joinedAt: { S: origin.joinedAt },
+        },
+      },
+    },
+  ];
+}
+
+/**
+ * A role change, on both rows.
+ *
+ * The canonical row's update is conditional on the role the caller read, so two
+ * concurrent conflicting changes cannot double-apply: the loser cancels and its
+ * handler says so. The inverse item's update is not conditional on a role — it is
+ * a denormalized copy, and an update that also repairs a copy that had drifted is
+ * the outcome we want.
+ */
+export function roleChangeItems({
+  orgId,
+  userId,
+  fromRole,
+  toRole,
+}: {
+  orgId: string;
+  userId: string;
+  fromRole: OrgRole;
+  toRole: OrgRole;
+}): TransactWriteItem[] {
+  const tableName = Resource.OrgTable.name;
+
+  return [
+    {
+      Update: {
+        TableName: tableName,
+        Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: OrgKeys.memberSk(userId) } },
+        UpdateExpression: 'SET #role = :role',
+        ConditionExpression: 'attribute_exists(pk) AND #role = :fromRole',
+        ExpressionAttributeNames: { '#role': 'role' },
+        ExpressionAttributeValues: { ':role': { S: toRole }, ':fromRole': { S: fromRole } },
+      },
+    },
+    {
+      Update: {
+        TableName: tableName,
+        Key: { pk: { S: OrgKeys.userPk(userId) }, sk: { S: OrgKeys.membershipSk(orgId) } },
+        UpdateExpression: 'SET #role = :role',
+        ExpressionAttributeNames: { '#role': 'role' },
+        ExpressionAttributeValues: { ':role': { S: toRole } },
+      },
+    },
+  ];
+}
+
+/**
+ * Removal, on both rows.
+ *
+ * The canonical delete is conditional on the row existing so a removal of
+ * somebody already gone is a clean 404 rather than a silent success; the inverse
+ * delete is unconditional, because a member whose inverse item is missing must
+ * still be removable.
+ */
+export function membershipDeleteItems({
+  orgId,
+  userId,
+}: {
+  orgId: string;
+  userId: string;
+}): TransactWriteItem[] {
+  const tableName = Resource.OrgTable.name;
+
+  return [
+    {
+      Delete: {
+        TableName: tableName,
+        Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: OrgKeys.memberSk(userId) } },
+        ConditionExpression: 'attribute_exists(pk)',
+      },
+    },
+    {
+      Delete: {
+        TableName: tableName,
+        Key: { pk: { S: OrgKeys.userPk(userId) }, sk: { S: OrgKeys.membershipSk(orgId) } },
+      },
+    },
+  ];
+}
+
+/** How the owner set moved: gained one, lost one, or swapped one for another. */
+export type OwnerCountDelta = 'increment' | 'decrement' | 'unchanged';
+
+/**
+ * The one update every owner-set transaction carries.
+ *
+ * `decrement` is where the last-Owner invariant is enforced, and it is enforced
+ * as this update's own condition (`ownerCount > :one`) because DynamoDB allows a
+ * single operation per item per transaction — a separate `ConditionCheck` on the
+ * same META row would make the transaction invalid rather than safer.
+ *
+ * `unchanged` still writes: ownership transfer promotes and demotes in one
+ * transaction, and touching the counter with a net-zero update is what makes the
+ * META row part of that transaction, so a concurrent promotion cannot interleave
+ * with it.
+ *
+ * Every branch conditions on the counter existing. An org whose META row is
+ * missing is a conversion gap, and inventing a counter for it would quietly set
+ * the invariant to whatever this one transaction happened to know.
+ */
+export function ownerCountItem(orgId: string, delta: OwnerCountDelta): TransactWriteItem {
+  const key = { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: OrgKeys.orgMetaSk() } };
+  const base = { TableName: Resource.OrgTable.name, Key: key };
+
+  if (delta === 'increment') {
+    return {
+      Update: {
+        ...base,
+        UpdateExpression: 'SET ownerCount = ownerCount + :one',
+        ConditionExpression: 'attribute_exists(ownerCount)',
+        ExpressionAttributeValues: { ':one': { N: '1' } },
+      },
+    };
+  }
+
+  if (delta === 'decrement') {
+    return {
+      Update: {
+        ...base,
+        UpdateExpression: 'SET ownerCount = ownerCount - :one',
+        // The whole last-Owner guard, in one place: an org at one Owner cancels
+        // the transaction that would take it to zero.
+        ConditionExpression: 'ownerCount > :one',
+        ExpressionAttributeValues: { ':one': { N: '1' } },
+      },
+    };
+  }
+
+  return {
+    Update: {
+      ...base,
+      UpdateExpression: 'SET ownerCount = ownerCount + :zero',
+      ConditionExpression: 'attribute_exists(ownerCount)',
+      ExpressionAttributeValues: { ':zero': { N: '0' } },
+    },
+  };
+}
+
+/** How the owner set moves when a member goes from one role to another. */
+export function ownerCountDeltaFor(fromRole: OrgRole, toRole: OrgRole): OwnerCountDelta {
+  if (fromRole === toRole) return 'unchanged';
+  if (toRole === OrgRole.Owner) return 'increment';
+  if (fromRole === OrgRole.Owner) return 'decrement';
+  return 'unchanged';
+}
+
+/**
+ * Assert, inside the transaction, that the inviter still holds a role that may
+ * invite the role being accepted.
+ *
+ * An invitation must not outlive its issuer's authority: an Admin demoted after
+ * inviting cannot mint members through invitations still in flight. Demotion and
+ * removal also revoke that member's pending invitations, so this is the backstop
+ * for the window between the two — and for an invitation whose issuer was
+ * demoted by a path that never saw it.
+ *
+ * The admissible roles come from the registry rather than from a rank
+ * comparison, so the matrix stays the single answer to "who may invite an
+ * Owner": `canManageTargetRole` is asked of each role, and the condition is the
+ * resulting set.
+ */
+export function inviterAuthorityCheck({
+  orgId,
+  invitedBy,
+  invitedRole,
+}: {
+  orgId: string;
+  invitedBy: string;
+  invitedRole: OrgRole;
+}): TransactWriteItem {
+  const admissible = Object.values(OrgRole).filter((role) =>
+    canManageTargetRole(role, invitedRole),
+  );
+  const values = Object.fromEntries(
+    admissible.map((role, index) => [`:role${index}`, { S: role }]),
+  );
+
+  return {
+    ConditionCheck: {
+      TableName: Resource.OrgTable.name,
+      Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: OrgKeys.memberSk(invitedBy) } },
+      ConditionExpression: `attribute_exists(pk) AND #role IN (${Object.keys(values).join(', ')})`,
+      ExpressionAttributeNames: { '#role': 'role' },
+      ExpressionAttributeValues: values,
+    },
+  };
+}
+
+/**
+ * Which of a transaction's items failed their conditions, by the caller's own
+ * names for them.
+ *
+ * DynamoDB reports cancellation reasons positionally, and a handler that indexed
+ * into that array would answer 404 for the wrong reason the moment somebody
+ * inserted an item ahead of the one it meant. Naming the items keeps the mapping
+ * honest: the caller passes the same labels in the same order as the items, and
+ * asks which names cancelled.
+ *
+ * Returns an empty list for anything that is not a cancellation, so a caller can
+ * ask without first narrowing the error.
+ */
+export function cancelledLabels(err: unknown, labels: readonly string[]): string[] {
+  if (!(err instanceof TransactionCanceledException)) return [];
+
+  return (err.CancellationReasons ?? []).flatMap((reason, index) =>
+    reason.Code && reason.Code !== 'None' ? [labels[index] ?? `item${index}`] : [],
+  );
+}
