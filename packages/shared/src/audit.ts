@@ -1,4 +1,5 @@
-import type { OrgRole } from './api/org.js';
+import type { OrgMembershipSource, OrgRole } from './api/org.js';
+import { RAG_KEY_DISPLAY_PREFIX_LENGTH } from './api/rag-api-keys.js';
 
 /**
  * The audit event envelope: what the control plane appends and what the M2
@@ -43,7 +44,7 @@ export const AUDIT_EVENT_TYPES = [
   'member.removed',
   'ownership.transferred',
   'key.created',
-  'key.revoked',
+  'key.deleted',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -51,6 +52,19 @@ export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
 export function isAuditEventType(value: string): value is AuditEventType {
   return (AUDIT_EVENT_TYPES as readonly string[]).includes(value);
 }
+
+/**
+ * The event types written as an `intent` before an external side effect and a
+ * `completion` after it. Every other type is single-phase, and the envelope
+ * types below make stamping a phase on one a compile error.
+ *
+ * Only the key flows: a credential is minted or revoked at the storage vendor
+ * before any local write, so the local write cannot be the thing that
+ * authorizes it. `key.created` also appears single-phase — a RAG key is minted
+ * here rather than at a vendor, so its whole mutation is one transaction.
+ */
+export const TWO_PHASE_AUDIT_EVENT_TYPES = ['key.created', 'key.deleted'] as const;
+export type TwoPhaseAuditEventType = (typeof TWO_PHASE_AUDIT_EVENT_TYPES)[number];
 
 /**
  * What kind of thing acted.
@@ -74,6 +88,7 @@ export interface AuditActor {
   /**
    * The actor's verified email when there is one, so the viewer can name a
    * member who has since been removed and whose profile no longer resolves.
+   * Verified only — an unverified claim names whoever typed it.
    */
   email?: string;
 }
@@ -81,23 +96,61 @@ export interface AuditActor {
 /**
  * Which half of a two-phase event this is.
  *
- * Only mutations with an external side effect carry it. A key is minted at the
- * storage vendor before any local write, so the local write cannot be the thing
- * that authorizes it: the flow records an `intent` before the vendor call and a
- * `completion` after it, sharing a `correlationId`. A crash between the two
- * leaves a visible dangling intent instead of an invisible credential.
- *
- * Absent means a single-phase event — a pure-DynamoDB mutation, where the
- * mutation and its record land in one transaction and a phase would be noise.
+ * The flow records an `intent` before the vendor call and a `completion` after
+ * it, sharing a `correlationId`. A crash between the two leaves a visible
+ * dangling intent instead of an invisible credential.
  */
 export const AUDIT_EVENT_PHASES = ['intent', 'completion'] as const;
 export type AuditEventPhase = (typeof AUDIT_EVENT_PHASES)[number];
 
-/** How a member came to be in the org, as recorded on membership events. */
-export type AuditMembershipSource = 'signup' | 'conversion' | 'invitation';
+/**
+ * How a two-phase flow ended, recorded on the `completion`.
+ *
+ * Every return path closes its correlation, including the ones that changed
+ * nothing: a duplicate-name conflict and a vendor failure are `failed`, a
+ * request that found nothing to do is `noop`. Without them a dangling intent
+ * means either "the process died mid-flight" or "the request was rejected",
+ * and an operator cannot tell which.
+ */
+export const AUDIT_OUTCOMES = ['succeeded', 'failed', 'noop'] as const;
+export type AuditOutcome = (typeof AUDIT_OUTCOMES)[number];
+
+/**
+ * What an event is about, as `kind:id`.
+ *
+ * A template-literal union rather than a string, so a raw invitation token or a
+ * bare access key id in the subject is a compile error rather than a value in
+ * the log. Built by `AuditSubjects` in the backend, which is where the ids come
+ * from.
+ */
+export type AuditSubject =
+  | `org:${string}`
+  | `user:${string}`
+  | `invite:${string}`
+  | `key:${string}`;
 
 /** Which credential a key event is about: an S3 access key or a RAG API key. */
 export type AuditKeyKind = 's3' | 'rag';
+
+/**
+ * A value an event payload may hold.
+ *
+ * Restricted to what `@aws-sdk/util-dynamodb` marshalls into a plain
+ * attribute — object, array, string, number, boolean, null. A Set, Map, Date,
+ * Buffer, or class instance either crashes the marshaller with no field name
+ * attached or lands as a shape the viewer cannot read back, so the write path
+ * rejects it by field path instead.
+ */
+export type AuditDetailValue =
+  | string
+  | number
+  | boolean
+  | null
+  | AuditDetailValue[]
+  | { [field: string]: AuditDetailValue | undefined };
+
+/** A payload, as the guard and the marshaller both see it. */
+export type AuditDetailRecord = { [field: string]: AuditDetailValue | undefined };
 
 /**
  * The payload each event type carries, keyed by type.
@@ -112,7 +165,7 @@ export type AuditKeyKind = 's3' | 'rag';
  * constructor will not accept a payload that does not match.
  */
 export interface AuditEventDetails {
-  'org.created': { orgName: string; source: AuditMembershipSource };
+  'org.created': { orgName: string; source?: OrgMembershipSource };
   'org.renamed': { name: string; previousName?: string };
   'member.invited': { inviteId: string; email: string; role: OrgRole };
   'invite.revoked': { inviteId: string; email: string };
@@ -124,7 +177,7 @@ export interface AuditEventDetails {
     keyKind: AuditKeyKind;
     keyName: string;
     region?: string;
-    /** Last characters of the minted access key id — see {@link auditKeyIdSuffix}. */
+    /** The characters of the key the console shows — see {@link auditKeyIdSuffix}. */
     keyIdSuffix?: string;
     /**
      * The key already existed at the vendor and this write recovered the local
@@ -133,21 +186,31 @@ export interface AuditEventDetails {
      */
     recovered?: boolean;
   };
-  'key.revoked': { keyKind: AuditKeyKind; keyName?: string; region?: string };
+  'key.deleted': {
+    keyKind: AuditKeyKind;
+    keyName?: string;
+    region?: string;
+    /** The characters of the key the console shows — see {@link auditKeyIdSuffix}. */
+    keyIdSuffix?: string;
+  };
 }
 
 /**
- * One stored event.
- *
- * Generic over its type so the payload narrows with it: reading
- * `event.details.previousName` off an `org.renamed` type-checks, and reading it
- * off a `key.created` does not.
+ * Every registered payload holds only what the table can store. A compile error
+ * here means a new event type carries a Date, a Set, or a nested class
+ * instance, which the runtime guard would reject at the write.
  */
-export interface AuditEventRecord<T extends AuditEventType = AuditEventType> {
+type RecordablePayloads<T extends { [K in keyof T]: AuditDetailRecord }> = T;
+export type AuditEventDetailsAreRecordable = RecordablePayloads<AuditEventDetails>;
+
+/** The envelope fields every event carries, whatever its type. */
+interface AuditEventEnvelope<T extends AuditEventType> {
   /**
-   * Unique per event and part of the sort key, so two events stamped in the
-   * same millisecond cannot overwrite each other. A consumer deduplicates
-   * replays on it.
+   * Unique per event and the second half of the sort key, so two events stamped
+   * in the same millisecond are two rows rather than one overwriting the other.
+   * A fresh random id per call, so it identifies the event and not the request:
+   * two attempts at the same mutation write two events, which is what a reader
+   * of a retried flow needs to see.
    */
   eventId: string;
   type: T;
@@ -158,19 +221,65 @@ export interface AuditEventRecord<T extends AuditEventType = AuditEventType> {
    * the action targeted. Built by `AuditSubjects` in the backend so the
    * vocabulary stays closed.
    */
-  subject: string;
+  subject: AuditSubject;
   details: AuditEventDetails[T];
   /** ISO-8601, and the first half of the sort key. */
   createdAt: string;
   /** Epoch seconds, {@link AUDIT_RETENTION_DAYS} after `createdAt`. */
   ttl: number;
-  phase?: AuditEventPhase;
-  /** Shared by an `intent` and its `completion`. */
-  correlationId?: string;
 }
+
+/**
+ * A single-phase event: the mutation and its record land in one transaction, so
+ * a phase would be noise. `phase` and `correlationId` are typed as absent
+ * rather than optional, which is what makes stamping one on `org.renamed` a
+ * compile error.
+ */
+export interface AuditSinglePhase {
+  phase?: undefined;
+  correlationId?: undefined;
+  outcome?: undefined;
+}
+
+/** The half written before the vendor call. It has no outcome yet. */
+export interface AuditIntentPhase {
+  phase: 'intent';
+  /** Shared by an `intent` and its `completion`. */
+  correlationId: string;
+  outcome?: undefined;
+}
+
+/** The half written after it, which is where the outcome is known. */
+export interface AuditCompletionPhase {
+  phase: 'completion';
+  correlationId: string;
+  outcome: AuditOutcome;
+}
+
+/**
+ * The phase fields a given event type may carry: either half for a two-phase
+ * type, absence only for everything else. Absence leads the union so a caller
+ * writing a single-phase event needs no narrowing of its own.
+ */
+export type AuditPhaseFields<T extends AuditEventType> =
+  | AuditSinglePhase
+  | (T extends TwoPhaseAuditEventType ? AuditIntentPhase | AuditCompletionPhase : never);
+
+/**
+ * One stored event.
+ *
+ * Generic over its type so the payload narrows with it: reading
+ * `event.details.previousName` off an `org.renamed` type-checks, and reading it
+ * off a `key.created` does not.
+ */
+export type AuditEventRecord<T extends AuditEventType = AuditEventType> = AuditEventEnvelope<T> &
+  AuditPhaseFields<T>;
 
 /** Any stored event, narrowable by `type`. */
 export type AuditEvent = { [T in AuditEventType]: AuditEventRecord<T> }[AuditEventType];
+
+/** An event of a type that can carry a phase — what `appendAuditEvent` accepts. */
+export type TwoPhaseAuditEvent = Extract<AuditEvent, { type: TwoPhaseAuditEventType }>;
 
 /**
  * How long an event survives: the IAM PRD's 90-day audit retention, carried
@@ -185,18 +294,26 @@ export type AuditEvent = { [T in AuditEventType]: AuditEventRecord<T> }[AuditEve
 export const AUDIT_RETENTION_DAYS = 90;
 
 /**
- * Characters of an access key id an event may record.
- *
- * The console renders access key ids in full and RAG keys by a 12-character
- * display prefix, so there is no one house convention to inherit; a short
- * suffix is enough to match an event against the row the console shows without
- * the event itself carrying an identifier anybody could use.
+ * Characters of an S3 access key id an event may record. The console renders
+ * those ids in full, so a short suffix is enough to match an event against the
+ * row an operator is looking at.
  */
 export const AUDIT_KEY_ID_SUFFIX_LENGTH = 4;
 
-/** The trailing characters of an access key id, for `key.created` details. */
-export function auditKeyIdSuffix(accessKeyId: string): string {
-  return accessKeyId.slice(-AUDIT_KEY_ID_SUFFIX_LENGTH);
+/**
+ * The characters of a key an event records, by kind.
+ *
+ * Whichever fragment the console already shows, because the point of the field
+ * is that an operator reading an event can find the key it names. A RAG key is
+ * listed by its leading display prefix (`sk_rag_AbC12`), an S3 access key by
+ * its id in full — so a RAG event carries the prefix and an S3 event the
+ * trailing four. Four trailing characters of a RAG token would correlate with
+ * nothing on screen.
+ */
+export function auditKeyIdSuffix(keyKind: AuditKeyKind, keyId: string): string {
+  return keyKind === 'rag'
+    ? keyId.slice(0, RAG_KEY_DISPLAY_PREFIX_LENGTH)
+    : keyId.slice(-AUDIT_KEY_ID_SUFFIX_LENGTH);
 }
 
 /**
@@ -204,9 +321,9 @@ export function auditKeyIdSuffix(accessKeyId: string): string {
  *
  * Stated as classes rather than field names because a guard that only knows
  * field names fails the moment a secret is nested one level deeper or pasted
- * into a free-text value. The field patterns below are how the write path
- * enforces the easy half; this list is the standard the whole write path is
- * held to, and what a reviewer checks a new event type against.
+ * into a free-text value. The patterns below are how the write path enforces
+ * the easy half; this list is the standard the whole write path is held to, and
+ * what a reviewer checks a new event type against.
  */
 export const PROHIBITED_AUDIT_CONTENT = [
   'secret access keys and the full access key id they pair with',
@@ -223,6 +340,11 @@ export const PROHIBITED_AUDIT_CONTENT = [
 /**
  * Field names an event may not carry, at any nesting depth.
  *
+ * A denied name is a developer error, not customer data: nothing a user types
+ * decides what a payload field is called, so the write path throws and the
+ * event type never ships. Values are handled the other way round — see
+ * {@link looksLikeCredential}.
+ *
  * Necessary and explicitly not sufficient — see {@link PROHIBITED_AUDIT_CONTENT}
  * for what the write path actually has to guarantee.
  */
@@ -236,9 +358,62 @@ export const PROHIBITED_AUDIT_FIELD_PATTERNS: readonly RegExp[] = Object.freeze(
   /bearer/i,
   /authorization/i,
   /private[_-]?key/i,
+  /access[_-]?key/i,
+  /api[_-]?key/i,
+  /key[_-]?hash/i,
+  /signature/i,
+  /session/i,
+  /csrf/i,
   /recovery[_-]?code/i,
   /presigned/i,
   /signed[_-]?url/i,
   /card[_-]?number/i,
   /account[_-]?number/i,
 ]);
+
+/** What a redacted value reads as in the log. */
+export const AUDIT_REDACTED = '[REDACTED]';
+
+/**
+ * Length at which a run of base64-ish characters stops being plausible as a
+ * name and starts being plausible as a key.
+ */
+export const AUDIT_SECRET_BLOB_MIN_LENGTH = 40;
+
+const SECRET_BLOB_PATTERN = new RegExp(`[A-Za-z0-9+/=_-]{${AUDIT_SECRET_BLOB_MIN_LENGTH},}`, 'g');
+
+/**
+ * Value shapes that read as a credential wherever they appear.
+ *
+ * A full RAG bearer token (the prefix plus enough of its random tail to be the
+ * token rather than the 12-character display prefix the console shows), an AWS
+ * access key id, a SHA-256 digest — which for a RAG key IS the lookup key — and
+ * a URL carrying a token or a signature.
+ */
+export const CREDENTIAL_VALUE_PATTERNS: readonly RegExp[] = Object.freeze([
+  /sk_rag_[A-Za-z0-9_-]{20,}/,
+  /AKIA[0-9A-Z]{16}/,
+  /(^|[^0-9a-f])[0-9a-f]{64}([^0-9a-f]|$)/,
+  /[?&](?:[a-z_-]*token|x-amz-signature|x-amz-credential|sig|signature)=/i,
+]);
+
+/**
+ * Whether a value looks like a credential and must therefore be redacted
+ * rather than stored.
+ *
+ * Redacted, not refused: a value can be something a customer typed. Key names
+ * accept the same characters a token starts with, so a member may legitimately
+ * name a key `sk_rag_ci`, and a throw there would make that customer's own key
+ * unauditable — in the two-phase flow it would throw after the vendor already
+ * minted the credential. So a suspicious value loses its content and the event
+ * still lands.
+ */
+export function looksLikeCredential(value: string): boolean {
+  if (CREDENTIAL_VALUE_PATTERNS.some((pattern) => pattern.test(value))) return true;
+  // A long, mixed-case, digit-bearing run: what random bytes look like in
+  // base64 and what no name looks like.
+  for (const run of value.match(SECRET_BLOB_PATTERN) ?? []) {
+    if (/[a-z]/.test(run) && /[A-Z]/.test(run) && /[0-9]/.test(run)) return true;
+  }
+  return false;
+}
