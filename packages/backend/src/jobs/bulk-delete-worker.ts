@@ -2,16 +2,22 @@
 // listing page at a time.
 //
 // A bucket can hold far more objects than one Lambda invocation can delete, so
-// the worker follows the RAG indexer's pattern: work until the time budget runs
-// low, persist the listing cursor, then re-invoke itself to continue. The job
-// row in DynamoDB is the single source of progress for the polling UI.
+// the worker works until the time budget runs low, persists the listing cursor,
+// then queues itself a continuation message. The job row in DynamoDB is the
+// single source of progress for the polling UI.
+//
+// Delivery is via SQS (see lib/bulk-delete-queue.ts), which decides how failure
+// behaves here. A retryable error is left to escape: the message returns to the
+// queue and the next delivery resumes from the last checkpoint. Only a
+// non-retryable error, or the last delivery before the dead-letter queue, marks
+// the job failed. Swallowing every error into a failed status, as this worker
+// used to, turns a transient throttle into a permanently dead job.
 //
 // Individual object failures (object-lock retention being the common one) are
 // recorded and stepped over rather than aborting the run, so one locked object
 // cannot strand the rest of the bucket.
 
-import type { Context } from 'aws-lambda';
-import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
+import type { Context, SQSEvent, SQSRecord } from 'aws-lambda';
 
 import { isTerminalBulkDeleteStatus } from '@filone/shared';
 
@@ -22,6 +28,11 @@ import {
   getBulkDeleteJob,
   putBulkDeleteJob,
 } from '../lib/bulk-delete-jobs.js';
+import {
+  MAX_BULK_DELETE_DELIVERY_ATTEMPTS,
+  enqueueBulkDeleteJob,
+  type BulkDeleteWorkerPayload,
+} from '../lib/bulk-delete-queue.js';
 import type { BulkDeleteJobRecord } from '../lib/dynamo-records.js';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { getOrgProfile } from '../lib/org-profile.js';
@@ -31,7 +42,7 @@ import { deleteTargets, enumerateDeletionPage } from '../lib/s3-bulk-delete.js';
 const LOG = '[bulk-delete-worker]';
 
 /**
- * Headroom reserved for the checkpoint write and the self re-invoke. The worker
+ * Headroom reserved for the checkpoint write and the queued hand-off. The worker
  * stops starting new pages once less than this remains.
  */
 const DEADLINE_BUFFER_MS = 30_000;
@@ -39,19 +50,46 @@ const DEADLINE_BUFFER_MS = 30_000;
 /** Objects requested per listing page. Matches the S3 per-page maximum. */
 const PAGE_SIZE = 1000;
 
-export interface BulkDeleteWorkerPayload {
-  orgId: string;
-  jobId: string;
-}
-
 export type RemainingTimeFn = () => number;
 
-const lambda = new LambdaClient({});
+/**
+ * An error no amount of redelivery will clear, such as a region the org is not
+ * provisioned in. Fails the job on the spot instead of burning every delivery
+ * attempt on a retry that cannot succeed.
+ */
+export class NonRetryableBulkDeleteError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NonRetryableBulkDeleteError';
+  }
+}
 
-export async function handler(
+export async function handler(event: SQSEvent, context: Context): Promise<void> {
+  // One message per invocation (batch size 1), so an error escaping this
+  // handler returns exactly the failed job to the queue and never re-runs a
+  // sibling that already succeeded.
+  for (const record of event.Records) {
+    await processRecord(record, () => context.getRemainingTimeInMillis());
+  }
+}
+
+async function processRecord(record: SQSRecord, getRemainingTimeInMillis: RemainingTimeFn) {
+  const payload = JSON.parse(record.body) as BulkDeleteWorkerPayload;
+  const deliveryAttempt = Number(record.attributes?.ApproximateReceiveCount ?? '1');
+  await processJob(payload, deliveryAttempt, getRemainingTimeInMillis);
+}
+
+/**
+ * Run one delivery of a job.
+ *
+ * `deliveryAttempt` is the message's receive count: on the last one the queue
+ * has no redelivery left, so the outcome is recorded as a failed job for the
+ * user before the message redrives to the dead-letter queue for an operator.
+ */
+export async function processJob(
   event: BulkDeleteWorkerPayload,
-  context: Context,
-  getRemainingTimeInMillis: RemainingTimeFn = () => context.getRemainingTimeInMillis(),
+  deliveryAttempt: number,
+  getRemainingTimeInMillis: RemainingTimeFn,
 ): Promise<void> {
   const { orgId, jobId } = event;
   const deadlineEpochMs = computeDeadline(getRemainingTimeInMillis);
@@ -83,14 +121,32 @@ export async function handler(
       return;
     }
 
-    // Out of time with pages left: the cursor is already persisted, so continue
-    // in a fresh invocation.
-    await putBulkDeleteJob(outcome.job);
-    await reinvoke({ orgId, jobId });
+    // Out of time with pages left: checkpoint, then queue the continuation.
+    // Persisting the advanced resume count *before* enqueueing matters, because
+    // it is the message's deduplication id. A crash between the two is safe:
+    // this delivery is redelivered and picks the next count. Enqueueing first
+    // would let a redelivery reuse a spent id, and SQS would drop the hand-off.
+    const resumeCount = (outcome.job.resumeCount ?? 0) + 1;
+    await putBulkDeleteJob({ ...outcome.job, resumeCount });
+    await enqueueBulkDeleteJob({ orgId, jobId }, resumeCount);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Bulk delete failed';
-    console.error(`${LOG} Job failed`, { jobId, error: err });
+    const retryable = !(err instanceof NonRetryableBulkDeleteError);
+
+    if (retryable && deliveryAttempt < MAX_BULK_DELETE_DELIVERY_ATTEMPTS) {
+      // Leave the job non-terminal and let the error out: the message goes back
+      // on the queue and the next delivery resumes from the last checkpoint.
+      console.warn(`${LOG} Delivery failed, will retry`, { jobId, deliveryAttempt, error: err });
+      throw err;
+    }
+
+    console.error(`${LOG} Job failed`, { jobId, deliveryAttempt, retryable, error: err });
     await putBulkDeleteJob(failJob(latestJob, message));
+
+    // Retries are spent rather than the error being terminal, so let it out
+    // once more: the user has a failed job to look at, and the message lands in
+    // the dead-letter queue where an operator can still see it.
+    if (retryable) throw err;
   }
 }
 
@@ -146,26 +202,10 @@ async function resolveClientContext(job: BulkDeleteJobRecord) {
   const orchestrator = getOrchestratorForRegion(job.region);
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(job.orgId));
   if (!tenantId) {
-    throw new Error(`Tenant is not provisioned in region ${job.region}`);
+    // Provisioning will not appear by itself between deliveries.
+    throw new NonRetryableBulkDeleteError(`Tenant is not provisioned in region ${job.region}`);
   }
   return orchestrator.getS3ClientContext(tenantId);
-}
-
-async function reinvoke(payload: BulkDeleteWorkerPayload): Promise<void> {
-  // The worker cannot link to itself at creation, so `Resource.BulkDeleteWorker`
-  // is not injected here; its own function name arrives via env instead (see
-  // sst.config.ts). Mirrors RAG_INDEXER_WORKER_FUNCTION_NAME / USAGE_WORKER_*.
-  const functionName = process.env.BULK_DELETE_WORKER_FUNCTION_NAME;
-  if (!functionName) {
-    throw new Error('BULK_DELETE_WORKER_FUNCTION_NAME is not set');
-  }
-  await lambda.send(
-    new InvokeCommand({
-      FunctionName: functionName,
-      InvocationType: 'Event',
-      Payload: Buffer.from(JSON.stringify(payload)),
-    }),
-  );
 }
 
 function computeDeadline(getRemainingTimeInMillis: RemainingTimeFn): number {

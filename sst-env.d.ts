@@ -58,13 +58,17 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Dynamo"
     }
+    "BulkDeleteDlq": {
+      "type": "sst.aws.Queue"
+      "url": string
+    }
+    "BulkDeleteQueue": {
+      "type": "sst.aws.Queue"
+      "url": string
+    }
     "BulkDeleteTable": {
       "name": string
       "type": "sst.aws.Dynamo"
-    }
-    "BulkDeleteWorker": {
-      "name": string
-      "type": "sst.aws.Function"
     }
     "ChangePassword": {
       "name": string

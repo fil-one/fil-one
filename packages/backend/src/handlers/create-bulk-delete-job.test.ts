@@ -8,19 +8,11 @@ vi.mock('sst', () => ({
   Resource: {
     UserInfoTable: { name: 'UserInfoTable' },
     BulkDeleteTable: { name: 'BulkDeleteTable' },
-    BulkDeleteWorker: { name: 'BulkDeleteWorker' },
+    BulkDeleteQueue: { url: 'https://sqs.example.com/bulk-delete.fifo' },
   },
 }));
 
-const { sendMock } = vi.hoisted(() => ({ sendMock: vi.fn() }));
-vi.mock('@aws-sdk/client-lambda', () => ({
-  LambdaClient: class {
-    send = sendMock;
-  },
-  InvokeCommand: class {
-    constructor(public input: unknown) {}
-  },
-}));
+vi.mock('../lib/bulk-delete-queue.js', () => ({ enqueueBulkDeleteJob: vi.fn() }));
 
 const mockIsTenantReady = vi.fn<() => string | undefined>(() => 'tenant-1');
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
@@ -30,16 +22,23 @@ vi.mock('../lib/org-profile.js', () => ({ getOrgProfile: vi.fn(async () => ({}))
 
 vi.mock('../lib/bulk-delete-jobs.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/bulk-delete-jobs.js')>();
-  return { ...actual, createBulkDeleteJob: vi.fn() };
+  return { ...actual, createBulkDeleteJob: vi.fn(), putBulkDeleteJob: vi.fn() };
 });
 
 process.env.FILONE_STAGE = 'test';
 
-import { BulkDeleteJobExistsError, createBulkDeleteJob } from '../lib/bulk-delete-jobs.js';
+import {
+  BulkDeleteJobExistsError,
+  createBulkDeleteJob,
+  putBulkDeleteJob,
+} from '../lib/bulk-delete-jobs.js';
+import { enqueueBulkDeleteJob } from '../lib/bulk-delete-queue.js';
 import { baseHandler } from './create-bulk-delete-job.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
 const mockCreate = vi.mocked(createBulkDeleteJob);
+const mockPutJob = vi.mocked(putBulkDeleteJob);
+const mockEnqueue = vi.mocked(enqueueBulkDeleteJob);
 
 const idempotencyKey = '3f1a6b2c-8d4e-4f0a-9b3c-1d2e3f4a5b6c';
 
@@ -86,12 +85,21 @@ beforeEach(() => {
 });
 
 describe('create-bulk-delete-job', () => {
-  it('creates a job and hands it to the worker', async () => {
+  it('creates a job and queues it for the worker', async () => {
     const result = await baseHandler(event({ idempotencyKey }));
 
     expect(result.statusCode).toBe(202);
     expect(JSON.parse(result.body!).job.jobId).toBe(idempotencyKey);
-    expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(mockEnqueue).toHaveBeenCalledWith({ orgId: 'org-1', jobId: idempotencyKey }, 0);
+  });
+
+  it('fails the job when it cannot be queued', async () => {
+    mockEnqueue.mockRejectedValueOnce(new Error('sqs unavailable'));
+
+    // The row is already written, so leaving it pending would give the UI a job
+    // to poll that nothing is ever going to pick up.
+    await expect(baseHandler(event({ idempotencyKey }))).rejects.toThrow('sqs unavailable');
+    expect(mockPutJob.mock.calls[0][0].status).toBe(BulkDeleteJobStatus.Failed);
   });
 
   it('passes the idempotency key through so the job id can be derived from it', async () => {
@@ -121,7 +129,7 @@ describe('create-bulk-delete-job', () => {
 
     expect(result.statusCode).toBe(200);
     expect(JSON.parse(result.body!).job.deletedCount).toBe(40);
-    expect(sendMock).not.toHaveBeenCalled();
+    expect(mockEnqueue).not.toHaveBeenCalled();
   });
 
   it('rejects a request with no idempotency key', async () => {

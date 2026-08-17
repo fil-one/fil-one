@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Context } from 'aws-lambda';
 
 import { BulkDeleteJobStatus, BulkDeleteScope, S3Region } from '@filone/shared';
 
@@ -8,6 +7,7 @@ import type { BulkDeleteJobRecord } from '../lib/dynamo-records.js';
 vi.mock('sst', () => ({
   Resource: {
     BulkDeleteTable: { name: 'BulkDeleteTable' },
+    BulkDeleteQueue: { url: 'https://sqs.example.com/bulk-delete.fifo' },
   },
 }));
 
@@ -39,27 +39,21 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
   })),
 }));
 
-// Hoisted so the mock factory (itself hoisted above the module body) can close
-// over it.
-const { sendMock } = vi.hoisted(() => ({ sendMock: vi.fn() }));
-
-vi.mock('@aws-sdk/client-lambda', () => ({
-  LambdaClient: class {
-    send = sendMock;
-  },
-  InvokeCommand: class {
-    constructor(public input: unknown) {}
-  },
-}));
+vi.mock('../lib/bulk-delete-queue.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/bulk-delete-queue.js')>();
+  return { ...actual, enqueueBulkDeleteJob: vi.fn() };
+});
 
 import { getBulkDeleteJob, putBulkDeleteJob } from '../lib/bulk-delete-jobs.js';
+import { enqueueBulkDeleteJob } from '../lib/bulk-delete-queue.js';
 import { deleteTargets, enumerateDeletionPage } from '../lib/s3-bulk-delete.js';
-import { handler } from './bulk-delete-worker.js';
+import { processJob } from './bulk-delete-worker.js';
 
 const mockGetJob = vi.mocked(getBulkDeleteJob);
 const mockPutJob = vi.mocked(putBulkDeleteJob);
 const mockEnumerate = vi.mocked(enumerateDeletionPage);
 const mockDelete = vi.mocked(deleteTargets);
+const mockEnqueue = vi.mocked(enqueueBulkDeleteJob);
 
 function job(overrides: Partial<BulkDeleteJobRecord> = {}): BulkDeleteJobRecord {
   return {
@@ -82,8 +76,12 @@ function job(overrides: Partial<BulkDeleteJobRecord> = {}): BulkDeleteJobRecord 
   };
 }
 
-const context = {} as Context;
 const payload = { orgId: 'org-1', jobId: 'job-1' };
+
+/** First delivery of the message: the queue still has redeliveries left. */
+const FIRST_DELIVERY = 1;
+/** Receive count at which SQS redrives to the dead-letter queue next. */
+const LAST_DELIVERY = 3;
 
 /** Plenty of budget: the worker drains every page in one invocation. */
 const generousBudget = () => 900_000;
@@ -96,29 +94,28 @@ function lastSavedJob(): BulkDeleteJobRecord {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  process.env.BULK_DELETE_WORKER_FUNCTION_NAME = 'filone-test-BulkDeleteWorker';
   mockDelete.mockResolvedValue({ deleted: 0, failures: [] });
 });
 
 describe('bulk-delete worker', () => {
   it('does nothing when the job is missing', async () => {
     mockGetJob.mockResolvedValue(undefined);
-    await handler(payload, context, generousBudget);
+    await processJob(payload, FIRST_DELIVERY, generousBudget);
     expect(mockPutJob).not.toHaveBeenCalled();
   });
 
   it('skips a job that already finished', async () => {
     mockGetJob.mockResolvedValue(job({ status: BulkDeleteJobStatus.Completed }));
-    await handler(payload, context, generousBudget);
+    await processJob(payload, FIRST_DELIVERY, generousBudget);
     expect(mockEnumerate).not.toHaveBeenCalled();
     expect(mockPutJob).not.toHaveBeenCalled();
   });
 
   it('skips a job already in the completed-with-errors terminal state', async () => {
-    // finalizeJob clears the cursor for this status too, so a duplicate Event
-    // re-invocation must not restart the listing walk from the beginning.
+    // finalizeJob clears the cursor for this status too, so a duplicate
+    // delivery must not restart the listing walk from the beginning.
     mockGetJob.mockResolvedValue(job({ status: BulkDeleteJobStatus.CompletedWithErrors }));
-    await handler(payload, context, generousBudget);
+    await processJob(payload, FIRST_DELIVERY, generousBudget);
     expect(mockEnumerate).not.toHaveBeenCalled();
     expect(mockPutJob).not.toHaveBeenCalled();
   });
@@ -133,34 +130,34 @@ describe('bulk-delete worker', () => {
       .mockResolvedValueOnce({ targets: [{ key: 'b.txt' }] });
     mockDelete.mockResolvedValue({ deleted: 1, failures: [] });
 
-    await handler(payload, context, generousBudget);
+    await processJob(payload, FIRST_DELIVERY, generousBudget);
 
     expect(mockEnumerate).toHaveBeenCalledTimes(2);
     const saved = lastSavedJob();
     expect(saved.status).toBe(BulkDeleteJobStatus.Completed);
     expect(saved.deletedCount).toBe(2);
-    expect(sendMock).not.toHaveBeenCalled();
+    expect(mockEnqueue).not.toHaveBeenCalled();
   });
 
   it('resumes from the persisted cursor', async () => {
     mockGetJob.mockResolvedValue(job({ cursor: { keyMarker: 'resume-here' } }));
     mockEnumerate.mockResolvedValue({ targets: [] });
 
-    await handler(payload, context, generousBudget);
+    await processJob(payload, FIRST_DELIVERY, generousBudget);
 
     expect(mockEnumerate.mock.calls[0][0].cursor).toEqual({ keyMarker: 'resume-here' });
   });
 
-  it('checkpoints and re-invokes itself when the time budget runs out', async () => {
+  it('checkpoints and queues a continuation when the time budget runs out', async () => {
     mockGetJob.mockResolvedValue(job());
     mockEnumerate.mockResolvedValue({
       targets: [{ key: 'a.txt' }],
       nextCursor: { keyMarker: 'a.txt' },
     });
     // No usable budget: take one page, checkpoint, hand off.
-    await handler(payload, context, () => 0);
+    await processJob(payload, FIRST_DELIVERY, () => 0);
 
-    expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(mockEnqueue).toHaveBeenCalledTimes(1);
     const saved = lastSavedJob();
     expect(saved.status).toBe(BulkDeleteJobStatus.Running);
     expect(saved.cursor).toEqual({ keyMarker: 'a.txt' });
@@ -174,18 +171,50 @@ describe('bulk-delete worker', () => {
       failures: [{ key: 'locked.txt', code: 'AccessDenied', message: 'under retention' }],
     });
 
-    await handler(payload, context, generousBudget);
+    await processJob(payload, FIRST_DELIVERY, generousBudget);
 
     const saved = lastSavedJob();
     expect(saved.status).toBe(BulkDeleteJobStatus.CompletedWithErrors);
     expect(saved.failedCount).toBe(1);
   });
 
-  it('records a failure status when the run throws', async () => {
+  it('advances the resume count before handing off, and uses it as the message id', async () => {
+    mockGetJob.mockResolvedValue(job({ resumeCount: 2 }));
+    mockEnumerate.mockResolvedValue({
+      targets: [{ key: 'a.txt' }],
+      nextCursor: { keyMarker: 'a.txt' },
+    });
+
+    await processJob(payload, FIRST_DELIVERY, () => 0);
+
+    // Persisted first: a crash before the send must not let a redelivery reuse
+    // a deduplication id SQS has already seen.
+    expect(lastSavedJob().resumeCount).toBe(3);
+    expect(mockEnqueue).toHaveBeenCalledWith(payload, 3);
+    expect(mockPutJob.mock.invocationCallOrder[mockPutJob.mock.calls.length - 1]).toBeLessThan(
+      mockEnqueue.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('rethrows without failing the job when deliveries remain', async () => {
     mockGetJob.mockResolvedValue(job());
     mockEnumerate.mockRejectedValue(new Error('listing blew up'));
 
-    await handler(payload, context, generousBudget);
+    // The error escaping is what returns the message to the queue. Recording a
+    // failed job here instead would turn a transient fault into a dead job.
+    await expect(processJob(payload, FIRST_DELIVERY, generousBudget)).rejects.toThrow(
+      'listing blew up',
+    );
+    expect(mockPutJob).not.toHaveBeenCalled();
+  });
+
+  it('records the failure on the last delivery, then rethrows for the dead-letter queue', async () => {
+    mockGetJob.mockResolvedValue(job());
+    mockEnumerate.mockRejectedValue(new Error('listing blew up'));
+
+    await expect(processJob(payload, LAST_DELIVERY, generousBudget)).rejects.toThrow(
+      'listing blew up',
+    );
 
     const saved = lastSavedJob();
     expect(saved.status).toBe(BulkDeleteJobStatus.Failed);
@@ -199,7 +228,7 @@ describe('bulk-delete worker', () => {
       .mockRejectedValueOnce(new Error('listing blew up on page 2'));
     mockDelete.mockResolvedValueOnce({ deleted: 1, failures: [] });
 
-    await handler(payload, context, generousBudget);
+    await expect(processJob(payload, LAST_DELIVERY, generousBudget)).rejects.toThrow();
 
     const saved = lastSavedJob();
     expect(saved.status).toBe(BulkDeleteJobStatus.Failed);
@@ -208,29 +237,19 @@ describe('bulk-delete worker', () => {
     expect(saved.deletedCount).toBe(1);
   });
 
-  it('fails the job when its own function name is not configured', async () => {
-    delete process.env.BULK_DELETE_WORKER_FUNCTION_NAME;
-    mockGetJob.mockResolvedValue(job());
-    mockEnumerate.mockResolvedValue({
-      targets: [{ key: 'a.txt' }],
-      nextCursor: { keyMarker: 'a.txt' },
-    });
-
-    await handler(payload, context, () => 0);
-
-    expect(sendMock).not.toHaveBeenCalled();
-    expect(lastSavedJob().status).toBe(BulkDeleteJobStatus.Failed);
-  });
-
-  it('fails the job when the tenant is not provisioned in the region', async () => {
+  it('fails a non-retryable error on the first delivery without redelivering', async () => {
     const registry = await import('../lib/service-orchestrator-registry.js');
     vi.mocked(registry.getOrchestratorForRegion).mockReturnValueOnce({
       isTenantReady: () => undefined,
     } as never);
     mockGetJob.mockResolvedValue(job());
 
-    await handler(payload, context, generousBudget);
+    // Provisioning will not appear between deliveries, so spending the retries
+    // on it would only delay the failure the user is waiting to see.
+    await expect(processJob(payload, FIRST_DELIVERY, generousBudget)).resolves.toBeUndefined();
 
-    expect(lastSavedJob().status).toBe(BulkDeleteJobStatus.Failed);
+    const saved = lastSavedJob();
+    expect(saved.status).toBe(BulkDeleteJobStatus.Failed);
+    expect(saved.error).toContain('not provisioned');
   });
 });

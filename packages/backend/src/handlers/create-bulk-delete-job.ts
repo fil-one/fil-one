@@ -4,9 +4,7 @@
 
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
-import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { Resource } from 'sst';
 
 import {
   CreateBulkDeleteJobSchema,
@@ -19,8 +17,11 @@ import {
 import {
   BulkDeleteJobExistsError,
   createBulkDeleteJob,
+  failJob,
+  putBulkDeleteJob,
   toApiJob,
 } from '../lib/bulk-delete-jobs.js';
+import { enqueueBulkDeleteJob } from '../lib/bulk-delete-queue.js';
 import { getOrgProfile } from '../lib/org-profile.js';
 import {
   ResponseBuilder,
@@ -34,8 +35,6 @@ import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
-
-const lambda = new LambdaClient({});
 
 export async function baseHandler(
   event: AuthenticatedEvent,
@@ -92,13 +91,16 @@ export async function baseHandler(
       scope,
     });
 
-    await lambda.send(
-      new InvokeCommand({
-        FunctionName: Resource.BulkDeleteWorker.name,
-        InvocationType: 'Event',
-        Payload: Buffer.from(JSON.stringify({ orgId, jobId: job.jobId })),
-      }),
-    );
+    try {
+      // Sequence 0 is the job's first message; the worker's hand-offs take it
+      // from there. See enqueueBulkDeleteJob.
+      await enqueueBulkDeleteJob({ orgId, jobId: job.jobId }, 0);
+    } catch (err) {
+      // The row exists but nothing will ever pick it up, so record that rather
+      // than leaving a job the UI polls forever.
+      await putBulkDeleteJob(failJob(job, 'Could not queue the deletion job'));
+      throw err;
+    }
 
     return new ResponseBuilder()
       .status(202)

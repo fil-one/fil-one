@@ -559,7 +559,7 @@ export default $config({
       handler: string;
       extraEnv?: Record<string, $util.Input<string>>;
       permissions?: sst.aws.FunctionPermissionArgs[];
-      extraLink?: ((typeof allResources)[number] | sst.aws.Function)[];
+      extraLink?: ((typeof allResources)[number] | sst.aws.Function | sst.aws.Queue)[];
       provisionedConcurrency?: number;
       memory?: sst.aws.FunctionArgs['memory'];
       timeout?: sst.aws.FunctionArgs['timeout'];
@@ -681,46 +681,48 @@ export default $config({
     // re-invokes itself; it needs the full Lambda timeout and permission to
     // call itself. DeleteBucket requires an empty bucket, so this is the step
     // that makes deleting a non-trivial bucket possible at all.
+    // Messages that fail every delivery land here rather than disappearing, so
+    // a stalled deletion is visible instead of being inferred from a job row
+    // that stopped moving.
+    const bulkDeleteDlq = new sst.aws.Queue('BulkDeleteDlq');
+
+    // FIFO so the message group (the job id) admits one in-flight message per
+    // job: a redelivery can never run alongside the invocation it is replacing
+    // and corrupt the shared cursor. Content-based deduplication stays off
+    // because a job's continuation messages are byte-identical; the worker
+    // supplies its own ids. See packages/backend/src/lib/bulk-delete-queue.ts.
+    const bulkDeleteQueue = new sst.aws.Queue('BulkDeleteQueue', {
+      fifo: true,
+      // Must outlast the worker's own timeout, or SQS would redeliver a message
+      // to a second worker while the first is still deleting.
+      visibilityTimeout: '16 minutes',
+      // Matches MAX_BULK_DELETE_DELIVERY_ATTEMPTS in bulk-delete-queue.ts: the
+      // worker uses that number to tell a retry from the final attempt.
+      dlq: { queue: bulkDeleteDlq.arn, retry: 3 },
+    });
+
     const bulkDeleteWorker = createFn('BulkDeleteWorker', {
       handler: 'packages/backend/src/jobs/bulk-delete-worker.handler',
-      link: [bulkDeleteTable, userInfoTable, ...managementApiTokens],
-      // The worker resumes a long job by invoking itself, but a function cannot
-      // link to itself at creation, so its own name is injected as a
-      // deterministic string rather than through `Resource`. Kept in sync with
-      // the physical name in createFn (`filone-${stage}-${fnName}`).
-      environment: {
-        ...orchestratorEnv,
-        BULK_DELETE_WORKER_FUNCTION_NAME: $interpolate`filone-${$app.stage}-BulkDeleteWorker`,
-      },
+      // Linking the queue covers both directions: consuming its messages and
+      // enqueueing the continuation for a job too large for one invocation.
+      link: [bulkDeleteTable, userInfoTable, bulkDeleteQueue, ...managementApiTokens],
+      environment: orchestratorEnv,
       timeout: '900 seconds',
       memory: '512 MB',
       permissions: s3DataPlanePermissions,
     });
-    // The worker continues a long job by invoking itself, so its execution role
-    // needs InvokeFunction on its own ARN. Attached after creation because the
-    // ARN is not knowable inside the function's own definition.
-    new aws.iam.RolePolicy('BulkDeleteWorkerSelfInvoke', {
-      role: bulkDeleteWorker.nodes.role.name,
-      policy: bulkDeleteWorker.arn.apply((arn) =>
-        JSON.stringify({
-          Version: '2012-10-17',
-          Statement: [{ Effect: 'Allow', Action: 'lambda:InvokeFunction', Resource: arn }],
-        }),
-      ),
-    });
+    // Subscribed by ARN so the worker keeps the logging and defaults createFn
+    // applies. One message at a time: a job owns the whole invocation's time
+    // budget, and a partial batch failure would replay siblings needlessly.
+    bulkDeleteQueue.subscribe(bulkDeleteWorker.arn, { batch: { size: 1 } });
 
     addRoute({
       method: 'POST',
       routePath: '/api/buckets/{name}/bulk-delete',
       handler: 'create-bulk-delete-job',
       extraEnv: { ...fthEnv, ...forgeEnv },
-      extraLink: [bulkDeleteWorker],
-      permissions: [
-        {
-          actions: ['lambda:InvokeFunction'],
-          resources: [bulkDeleteWorker.arn],
-        },
-      ],
+      // Linking the queue grants the send; the handler only enqueues the job.
+      extraLink: [bulkDeleteQueue],
     });
     addRoute({
       method: 'GET',

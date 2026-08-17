@@ -280,6 +280,11 @@ export interface BulkDeleteJobRecord {
   failures: BulkDeleteFailure[];
   /** Listing resume point; absent once the walk is exhausted. */
   cursor?: BulkDeleteCursorRecord;
+  /**
+   * Hand-offs made so far. Doubles as the deduplication id of the job's next
+   * queue message, so it must be persisted before that message is sent.
+   */
+  resumeCount?: number;
   startedAt: string; // ISO-8601
   updatedAt: string; // ISO-8601
   completedAt?: string; // ISO-8601
