@@ -84,7 +84,7 @@ const SOLO_MEMBERSHIPS = [{ orgId: ORG_ID, role: OrgRole.Owner, joinedAt: '' }];
 /** The denial a caller gets in an org whose billing is somebody else's to set up. */
 const ORG_BILLING_DENIAL = {
   message:
-    'This organization does not have billing set up. An Owner of the organization can add a payment method.',
+    'This organization does not have billing set up. Adding a payment method for it requires the Owner role.',
   code: ApiErrorCode.ORG_BILLING_INACTIVE,
 };
 
@@ -97,6 +97,8 @@ describe('subscriptionGuardMiddleware', () => {
     ddbMock.reset();
     vi.restoreAllMocks();
     mockListMemberships.mockResolvedValue(SOLO_MEMBERSHIPS);
+    // The read asks both keys at once; absent unless a test says otherwise.
+    ddbMock.on(GetItemCommand).resolves({});
   });
 
   it('allows when no billing record exists and the user is entitled to a trial', async () => {
@@ -161,12 +163,13 @@ describe('subscriptionGuardMiddleware', () => {
     );
 
     expect(result).toBeUndefined();
+    // Both keys are asked at once and the org row is the answer; the fallback
+    // costs a parallel read rather than a second round trip on the hot path.
     const reads = ddbMock.commandCalls(GetItemCommand);
-    expect(reads).toHaveLength(1);
-    expect(reads[0].args[0].input.Key).toStrictEqual({
-      pk: { S: `ORG#${ORG_ID}` },
-      sk: { S: 'SUBSCRIPTION' },
-    });
+    expect(reads.map((read) => read.args[0].input.Key)).toStrictEqual([
+      { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'SUBSCRIPTION' } },
+      { pk: { S: 'CUSTOMER#a-member-with-no-row' }, sk: { S: 'SUBSCRIPTION' } },
+    ]);
   });
 
   it('allows when subscription status is active', async () => {
@@ -226,9 +229,9 @@ describe('subscriptionGuardMiddleware', () => {
     // Read access during grace period → allowed
     expect(result).toBeUndefined();
 
-    // The transition lands on both keys. The org row carries the existence
-    // condition — it is only updated where the backfill has already created it,
-    // so a partial twin can never shadow the complete legacy row.
+    // The transition lands on both keys, each guarded on its row already
+    // existing — this is an update, so a key with no row is a key the backfill
+    // has not reached, never a row to create.
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
     expect(updateCalls).toHaveLength(2);
     const transition = {
@@ -249,6 +252,7 @@ describe('subscriptionGuardMiddleware', () => {
     expect(updateCalls[1].args[0].input).toStrictEqual({
       ...transition,
       Key: { pk: { S: `CUSTOMER#${USER_ID}` }, sk: { S: 'SUBSCRIPTION' } },
+      ConditionExpression: 'attribute_exists(pk)',
     });
   });
 
@@ -323,15 +327,17 @@ describe('subscriptionGuardMiddleware', () => {
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
-  it('blocks when billing record exists but has no subscriptionStatus (fail closed)', async () => {
-    // A customer-mapping-only record (e.g. written by create-setup-intent) has
-    // no status and must NOT grant access — entitlement comes only from
-    // ensureTrialEntitlement.
+  it('blocks a record that holds a subscription but no status yet (fail closed)', async () => {
+    // A record whose status has not arrived by webhook yet grants nothing —
+    // entitlement comes only from ensureTrialEntitlement. (A record with no
+    // subscription at all is a different case: the trial claim is still open on
+    // it, and the block would forfeit it. See the claim tests below.)
     ddbMock.on(GetItemCommand).resolves(
       billingItem({
         pk: `CUSTOMER#${USER_ID}`,
         sk: 'SUBSCRIPTION',
         stripeCustomerId: 'cus_123',
+        subscriptionId: 'sub_123',
       }),
     );
 

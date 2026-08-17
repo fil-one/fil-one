@@ -333,7 +333,7 @@ describe('subscription-drift-checker', () => {
 
     expect(aurora.getTenantStatus).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledWith(
-      '[subscription-drift-checker] missing orgId',
+      '[subscription-drift-checker] Missing orgId, skipping',
       expect.objectContaining({ pk: `CUSTOMER#${USER_ID}` }),
     );
     expect(emissionFor('aurora')).toMatchObject({ SubscriptionsTotal: 0 });

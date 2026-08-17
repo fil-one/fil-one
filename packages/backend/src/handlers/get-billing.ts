@@ -12,6 +12,7 @@ import {
   type SubscriptionOwner,
 } from '../lib/subscription-store.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
+import { claimTrialIfEligible, isTrialClaimable } from '../lib/trial-claim.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -22,17 +23,30 @@ import type { StripePriceDetails, SubscriptionRecord } from '../lib/dynamo-recor
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const { userId, orgId } = getUserInfo(event);
+  const userInfo = getUserInfo(event);
+  const { userId, orgId } = userInfo;
   const owner: SubscriptionOwner = { orgId, userId };
 
   // 1. Get the org's billing record — every member sees the org's plan and
   // status, which is what riding the org's subscription means.
-  const billingRecord = (await readSubscription(orgId, userId))?.record ?? null;
+  let billingRecord = (await readSubscription(orgId, userId))?.record ?? null;
 
-  // 2. No record, or a record without a status (e.g. the customer mapping
-  // written by create-setup-intent) → not entitled. This read model must report
-  // the same truth as the subscription guard, never synthesize a trial;
-  // entitlement is granted only by ensureTrialEntitlement.
+  // 2. This is the dashboard's first call and no subscription guard sits in
+  // front of it, so it is where an organic signup's trial gets claimed. Without
+  // this the account would read as inactive until the user happened to touch a
+  // gated route. Same eligibility test as the guard's, one implementation, and
+  // it writes only when the claim is genuinely open.
+  if (isTrialClaimable(billingRecord ?? undefined)) {
+    if ((await claimTrialIfEligible(userInfo)) === 'claimed') {
+      billingRecord =
+        (await readSubscription(orgId, userId, { consistentRead: true }))?.record ?? null;
+    }
+  }
+
+  // 3. No record, or a record without a status (e.g. the customer mapping
+  // written by create-setup-intent, for a caller who cannot claim a trial) →
+  // not entitled. This read model reports the same truth as the subscription
+  // guard; entitlement itself is granted only by ensureTrialEntitlement.
   const storedStatus = billingRecord?.subscriptionStatus;
   if (!billingRecord || !storedStatus) {
     return inactiveResponse(billingRecord);

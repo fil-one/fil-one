@@ -4,6 +4,8 @@ import {
   DynamoDBClient,
   GetItemCommand,
   PutItemCommand,
+  ScanCommand,
+  TransactWriteItemsCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
@@ -21,6 +23,7 @@ const ddbMock = mockClient(DynamoDBClient);
 import {
   preferOrgRows,
   readSubscription,
+  scanSubscriptions,
   scannedSubscription,
   SubscriptionKeys,
   updateSubscription,
@@ -48,6 +51,14 @@ function conditionFailed(): Error {
   });
 }
 
+/** The same refusal, reported one level down in a transaction's cancellation reasons. */
+function transactionConditionFailed(): Error {
+  return Object.assign(new Error('Transaction cancelled'), {
+    name: 'TransactionCanceledException',
+    CancellationReasons: [{ Code: 'ConditionalCheckFailed' }, { Code: 'None' }],
+  });
+}
+
 const SET_STATUS = {
   UpdateExpression: 'SET subscriptionStatus = :status',
   ExpressionAttributeValues: { ':status': { S: 'active' } },
@@ -60,16 +71,43 @@ const SET_STATUS = {
 describe('readSubscription', () => {
   beforeEach(() => ddbMock.reset());
 
-  it('answers from the org key and never reads the legacy one', async () => {
+  it('answers from the org key, and asks both at once rather than in turn', async () => {
     ddbMock
       .on(GetItemCommand, { Key: ORG_KEY })
-      .resolves(row({ pk: `ORG#${ORG_ID}`, sk: 'SUBSCRIPTION', orgId: ORG_ID }));
+      .resolves(row({ pk: `ORG#${ORG_ID}`, sk: 'SUBSCRIPTION', orgId: ORG_ID }))
+      .on(GetItemCommand, { Key: LEGACY_KEY })
+      .resolves(row({ pk: `CUSTOMER#${USER_ID}`, sk: 'SUBSCRIPTION', orgId: ORG_ID }));
 
     const stored = await readSubscription(ORG_ID, USER_ID);
 
+    // The org row still wins; the fallback costs a parallel read rather than a
+    // second round trip, which every gated handler was paying per request.
     expect(stored?.key).toBe('org');
     expect(stored?.record.orgId).toBe(ORG_ID);
-    expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(1);
+    expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(2);
+  });
+
+  it('refuses a legacy row that names a different org', async () => {
+    // Otherwise a member reachable from two orgs spends the wrong org's
+    // subscription the moment invitations make that possible.
+    ddbMock
+      .on(GetItemCommand, { Key: ORG_KEY })
+      .resolves({})
+      .on(GetItemCommand, { Key: LEGACY_KEY })
+      .resolves(row({ pk: `CUSTOMER#${USER_ID}`, sk: 'SUBSCRIPTION', orgId: 'org-somebody-else' }));
+
+    expect(await readSubscription(ORG_ID, USER_ID)).toBeUndefined();
+  });
+
+  it('serves a legacy row that names no org at all', async () => {
+    // Rows predating the attribute are this caller's own by construction.
+    ddbMock
+      .on(GetItemCommand, { Key: ORG_KEY })
+      .resolves({})
+      .on(GetItemCommand, { Key: LEGACY_KEY })
+      .resolves(row({ pk: `CUSTOMER#${USER_ID}`, sk: 'SUBSCRIPTION' }));
+
+    expect((await readSubscription(ORG_ID, USER_ID))?.key).toBe('legacy');
   });
 
   it('falls back to the caller’s legacy row for an account the backfill has not reached', async () => {
@@ -124,8 +162,10 @@ describe('updateSubscription', () => {
       TableName: 'BillingTable',
       Key: LEGACY_KEY,
       ...SET_STATUS,
+      ConditionExpression: 'attribute_exists(pk)',
     });
     expect(result.orgRowWritten).toBe(true);
+    expect(result.legacyRowWritten).toBe(true);
   });
 
   it('leaves the legacy write alone when there is no org twin yet', async () => {
@@ -176,10 +216,57 @@ describe('updateSubscription', () => {
     );
 
     const calls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(calls[0].args[0].input.ConditionExpression).toBe(
-      'attribute_exists(pk) AND (attribute_exists(stripeCustomerId))',
+    for (const call of calls) {
+      expect(call.args[0].input.ConditionExpression).toBe(
+        'attribute_exists(pk) AND (attribute_exists(stripeCustomerId))',
+      );
+    }
+  });
+
+  it('raises a caller condition the org row refused instead of swallowing it', async () => {
+    // Only "no org twin yet" is silent. A condition the record failed is a fact
+    // about the record, and assuming the legacy row will fail the same way is
+    // how the two rows diverge unnoticed.
+    ddbMock.on(UpdateItemCommand).rejects(conditionFailed());
+
+    await expect(
+      updateSubscription(
+        { orgId: ORG_ID, userId: USER_ID },
+        { ...SET_STATUS, ConditionExpression: 'attribute_exists(stripeCustomerId)' },
+      ),
+    ).rejects.toThrow('The conditional request failed');
+    expect(ddbMock.commandCalls(UpdateItemCommand, { Key: LEGACY_KEY })).toHaveLength(0);
+  });
+
+  it('reports a missing row per key for a caller that tolerates one', async () => {
+    ddbMock
+      .on(UpdateItemCommand, { Key: ORG_KEY })
+      .rejects(conditionFailed())
+      .on(UpdateItemCommand, { Key: LEGACY_KEY })
+      .rejects(conditionFailed());
+
+    const result = await updateSubscription(
+      { orgId: ORG_ID, userId: USER_ID },
+      { ...SET_STATUS, tolerateMissingRow: true },
     );
-    expect(calls[1].args[0].input.ConditionExpression).toBe('attribute_exists(stripeCustomerId)');
+
+    expect(result).toStrictEqual({
+      previous: undefined,
+      orgRowWritten: false,
+      legacyRowWritten: false,
+    });
+  });
+
+  it('still raises a missing legacy row for a caller that does not', async () => {
+    ddbMock
+      .on(UpdateItemCommand, { Key: ORG_KEY })
+      .resolves({})
+      .on(UpdateItemCommand, { Key: LEGACY_KEY })
+      .rejects(conditionFailed());
+
+    await expect(
+      updateSubscription({ orgId: ORG_ID, userId: USER_ID }, SET_STATUS),
+    ).rejects.toThrow('The conditional request failed');
   });
 
   it('returns the prior attributes of the row a read would have preferred', async () => {
@@ -209,7 +296,10 @@ describe('updateSubscriptionByUser', () => {
     const calls = ddbMock.commandCalls(UpdateItemCommand);
     expect(calls).toHaveLength(1);
     expect(calls[0].args[0].input.Key).toStrictEqual(LEGACY_KEY);
+    // One key is fewer writes, not weaker rules: still no upsert.
+    expect(calls[0].args[0].input.ConditionExpression).toBe('attribute_exists(pk)');
     expect(result.orgRowWritten).toBe(false);
+    expect(result.legacyRowWritten).toBe(true);
   });
 
   it('writes only the org key for a row that names no user', async () => {
@@ -232,7 +322,54 @@ describe('updateSubscriptionByUser', () => {
 describe('writeSubscription', () => {
   beforeEach(() => ddbMock.reset());
 
+  const RECORD = {
+    sk: { S: 'SUBSCRIPTION' },
+    orgId: { S: ORG_ID },
+    userId: { S: USER_ID },
+    stripeCustomerId: { S: 'cus_1' },
+  };
+
   it('creates both rows, each stamped with the org and the user', async () => {
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+    ddbMock.on(PutItemCommand).resolves({});
+
+    await writeSubscription(
+      { orgId: ORG_ID, userId: USER_ID },
+      {
+        item: { stripeCustomerId: { S: 'cus_1' } },
+        ConditionExpression: 'attribute_not_exists(pk)',
+      },
+    );
+
+    // The org row goes in a transaction with a check on the legacy key: the
+    // caller's "no record" read can be true of one key and false of the other,
+    // and a status-less org row would then shadow a complete legacy one.
+    const [transact] = ddbMock.commandCalls(TransactWriteItemsCommand);
+    expect(transact.args[0].input.TransactItems).toEqual([
+      {
+        Put: {
+          TableName: 'BillingTable',
+          Item: { ...RECORD, pk: { S: `ORG#${ORG_ID}` } },
+          ConditionExpression: 'attribute_not_exists(pk)',
+        },
+      },
+      {
+        ConditionCheck: {
+          TableName: 'BillingTable',
+          Key: LEGACY_KEY,
+          ConditionExpression: 'attribute_not_exists(pk)',
+        },
+      },
+    ]);
+
+    const items = ddbMock.commandCalls(PutItemCommand).map((call) => call.args[0].input.Item);
+    expect(items).toEqual([{ ...RECORD, pk: { S: `CUSTOMER#${USER_ID}` } }]);
+  });
+
+  it('leaves the org key alone when the legacy row is already there', async () => {
+    // The account the backfill has not copied. Its legacy row is complete and
+    // the org key stays empty until the backfill copies it whole.
+    ddbMock.on(TransactWriteItemsCommand).rejects(transactionConditionFailed());
     ddbMock.on(PutItemCommand).resolves({});
 
     await writeSubscription(
@@ -244,49 +381,13 @@ describe('writeSubscription', () => {
     );
 
     const items = ddbMock.commandCalls(PutItemCommand).map((call) => call.args[0].input.Item);
-    expect(items).toEqual([
-      {
-        pk: { S: `ORG#${ORG_ID}` },
-        sk: { S: 'SUBSCRIPTION' },
-        orgId: { S: ORG_ID },
-        userId: { S: USER_ID },
-        stripeCustomerId: { S: 'cus_1' },
-      },
-      {
-        pk: { S: `CUSTOMER#${USER_ID}` },
-        sk: { S: 'SUBSCRIPTION' },
-        orgId: { S: ORG_ID },
-        userId: { S: USER_ID },
-        stripeCustomerId: { S: 'cus_1' },
-      },
-    ]);
-  });
-
-  it('still creates the legacy row when the org row is already there', async () => {
-    ddbMock
-      .on(PutItemCommand, { Item: { pk: { S: `ORG#${ORG_ID}` } } })
-      .rejects(conditionFailed())
-      .on(PutItemCommand, { Item: { pk: { S: `CUSTOMER#${USER_ID}` } } })
-      .resolves({});
-
-    await writeSubscription(
-      { orgId: ORG_ID, userId: USER_ID },
-      {
-        item: { stripeCustomerId: { S: 'cus_1' } },
-        ConditionExpression: 'attribute_not_exists(pk)',
-      },
-    );
-
-    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(2);
+    expect(items).toEqual([{ ...RECORD, pk: { S: `CUSTOMER#${USER_ID}` } }]);
   });
 
   it('lets the legacy row’s condition failure reach the caller', async () => {
     // Today's behavior: the caller decides what an existing record means.
-    ddbMock
-      .on(PutItemCommand, { Item: { pk: { S: `ORG#${ORG_ID}` } } })
-      .resolves({})
-      .on(PutItemCommand, { Item: { pk: { S: `CUSTOMER#${USER_ID}` } } })
-      .rejects(conditionFailed());
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+    ddbMock.on(PutItemCommand).rejects(conditionFailed());
 
     await expect(
       writeSubscription(
@@ -343,6 +444,107 @@ describe('what the scanning jobs read off a row', () => {
     ];
 
     expect(preferOrgRows(rows)).toEqual(rows);
+  });
+});
+
+describe('scanSubscriptions', () => {
+  beforeEach(() => ddbMock.reset());
+
+  const scanned = (fields: Parameters<typeof marshall>[0]) => marshall(fields);
+
+  it('pages the scan and keeps one row per org, the org key winning', async () => {
+    ddbMock
+      .on(ScanCommand)
+      .resolvesOnce({
+        Items: [scanned({ pk: 'CUSTOMER#a', orgId: 'org-a', userId: 'a' })],
+        LastEvaluatedKey: { pk: { S: 'CUSTOMER#a' } },
+      })
+      .resolvesOnce({
+        Items: [
+          scanned({ pk: 'ORG#org-a', orgId: 'org-a', userId: 'a' }),
+          scanned({ pk: 'CUSTOMER#b', orgId: 'org-b', userId: 'b' }),
+        ],
+      });
+
+    const rows = await scanSubscriptions({
+      job: 'test',
+      filterExpression: 'sk = :sk',
+      expressionAttributeValues: { ':sk': { S: 'SUBSCRIPTION' } },
+      select: (_record, owner) => owner,
+    });
+
+    expect(rows.map((row) => row.pk)).toEqual(['ORG#org-a', 'CUSTOMER#b']);
+  });
+
+  it('names both sides of a collision the org key cannot settle', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        scanned({ pk: 'CUSTOMER#a', orgId: 'org-a', userId: 'a', subscriptionId: 'sub_1' }),
+        scanned({ pk: 'CUSTOMER#b', orgId: 'org-a', userId: 'b', subscriptionId: 'sub_2' }),
+      ],
+    });
+
+    const rows = await scanSubscriptions<{ pk: string; orgId: string; subscriptionId: string }>({
+      job: 'test',
+      filterExpression: 'sk = :sk',
+      expressionAttributeValues: { ':sk': { S: 'SUBSCRIPTION' } },
+      select: (record, owner) => ({ ...owner, subscriptionId: record.subscriptionId as string }),
+      describe: (row) => ({ subscriptionId: row.subscriptionId }),
+    });
+
+    // Two live subscriptions for one org is the collision the backfill halts on;
+    // the job acts once and says which row it left behind, and on what.
+    expect(rows).toHaveLength(1);
+    expect(warn).toHaveBeenCalledWith(
+      '[test] Second subscription row for one org, skipped',
+      expect.objectContaining({
+        orgId: 'org-a',
+        processing: 'CUSTOMER#a',
+        skipped: 'CUSTOMER#b',
+        processingDetail: { subscriptionId: 'sub_1' },
+        skippedDetail: { subscriptionId: 'sub_2' },
+      }),
+    );
+    warn.mockRestore();
+  });
+
+  it('lets the job say which of two rows it would rather act on', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        scanned({ pk: 'CUSTOMER#a', orgId: 'org-a', userId: 'a', rank: 1 }),
+        scanned({ pk: 'CUSTOMER#b', orgId: 'org-a', userId: 'b', rank: 2 }),
+      ],
+    });
+
+    const rows = await scanSubscriptions<{ pk: string; orgId: string; rank: number }>({
+      job: 'test',
+      filterExpression: 'sk = :sk',
+      expressionAttributeValues: { ':sk': { S: 'SUBSCRIPTION' } },
+      select: (record, owner) => ({ ...owner, rank: Number(record.rank) }),
+      prefer: (held, next) => (next.rank > held.rank ? next : held),
+    });
+
+    expect(rows.map((row) => row.pk)).toEqual(['CUSTOMER#b']);
+  });
+
+  it('warns about an org row that names no user', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    ddbMock.on(ScanCommand).resolves({ Items: [scanned({ pk: 'ORG#org-a', orgId: 'org-a' })] });
+
+    await scanSubscriptions({
+      job: 'test',
+      filterExpression: 'sk = :sk',
+      expressionAttributeValues: { ':sk': { S: 'SUBSCRIPTION' } },
+      select: (_record, owner) => owner,
+    });
+
+    // The close-out paths need it, and after the flip there is no pk left to
+    // recover it from.
+    expect(warn).toHaveBeenCalledWith('[test] Subscription row with no userId', {
+      pk: 'ORG#org-a',
+    });
+    warn.mockRestore();
   });
 });
 

@@ -144,7 +144,10 @@ describe('createBillingTrial', () => {
     // if_not_exists keeps the fresher webhook value.
     await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
 
-    const input = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
+    // On the legacy row, which is the only key a webhook can have written
+    // first — the webhook's own writes never create the org twin.
+    const input = ddbMock.commandCalls(UpdateItemCommand)[1].args[0].input;
+    expect(input.Key).toEqual({ pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } });
     expect(input.UpdateExpression).toContain(
       'subscriptionStatus = if_not_exists(subscriptionStatus, :status)',
     );
@@ -174,9 +177,13 @@ describe('createBillingTrial', () => {
     );
   });
 
-  it('returns early without touching Stripe when the org already has a record', async () => {
+  it('returns early without touching Stripe when the org already has a subscription', async () => {
     ddbMock.on(GetItemCommand).resolves({
-      Item: { pk: { S: 'ORG#org-1' }, sk: { S: 'SUBSCRIPTION' } },
+      Item: {
+        pk: { S: 'ORG#org-1' },
+        sk: { S: 'SUBSCRIPTION' },
+        subscriptionStatus: { S: SubscriptionStatus.Trialing },
+      },
     });
 
     await createBillingTrial({ userId: 'user-1', orgId: 'org-1', email: 'test@example.com' });
@@ -187,9 +194,7 @@ describe('createBillingTrial', () => {
     expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
 
-    // The org key answers first, so the legacy key is never read.
     const getCalls = ddbMock.commandCalls(GetItemCommand);
-    expect(getCalls).toHaveLength(1);
     expect(getCalls[0].args[0].input).toMatchObject({
       TableName: 'BillingTable',
       Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'SUBSCRIPTION' } },
@@ -197,17 +202,50 @@ describe('createBillingTrial', () => {
     });
   });
 
-  it('returns early on the caller’s legacy record when the org key has not moved yet', async () => {
+  it('returns early on the caller’s legacy subscription when the org key has not moved yet', async () => {
     ddbMock
       .on(GetItemCommand, { Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'SUBSCRIPTION' } } })
       .resolves({})
       .on(GetItemCommand, { Key: { pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } } })
-      .resolves({ Item: { pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } } });
+      .resolves({
+        Item: {
+          pk: { S: 'CUSTOMER#user-1' },
+          sk: { S: 'SUBSCRIPTION' },
+          subscriptionId: { S: 'sub_existing' },
+        },
+      });
 
     await createBillingTrial({ userId: 'user-1', orgId: 'org-1', email: 'test@example.com' });
 
     expect(mockCustomersCreate).not.toHaveBeenCalled();
     expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(2);
+  });
+
+  it('grants the trial onto the customer mapping an abandoned payment modal left', async () => {
+    // create-setup-intent writes a row with a Stripe customer and nothing else
+    // when somebody opens the payment form and closes it. Treating that as a
+    // subscription would forfeit the trial permanently for the one user who
+    // looked at the pricing page first.
+    ddbMock.on(GetItemCommand).resolves({
+      Item: {
+        pk: { S: 'ORG#org-1' },
+        sk: { S: 'SUBSCRIPTION' },
+        stripeCustomerId: { S: 'cus_from_setup_intent' },
+      },
+    });
+
+    await createBillingTrial({ userId: 'user-1', orgId: 'org-1', email: 'test@example.com' });
+
+    // And it reuses that customer rather than creating a second one for the
+    // same org — two customers is two Stripe meters billing the same usage.
+    expect(mockCustomersCreate).not.toHaveBeenCalled();
+    expect(mockSubscriptionsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ customer: 'cus_from_setup_intent' }),
+      expect.anything(),
+    );
+    const values =
+      ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input.ExpressionAttributeValues!;
+    expect(values[':customerId']).toEqual({ S: 'cus_from_setup_intent' });
   });
 
   it('keys Stripe idempotency to the org, so one person’s two orgs get two subscriptions', async () => {

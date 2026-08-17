@@ -1,20 +1,10 @@
-import { ScanCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
-import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
-import { Resource } from 'sst';
-import { getDynamoClient } from '../lib/ddb-client.js';
 import { isOrgDeletedOrDeleting } from '../lib/org-profile.js';
 import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
 } from '../lib/region-helpers.js';
-import {
-  preferOrgRows,
-  scannedSubscription,
-  updateSubscriptionByUser,
-} from '../lib/subscription-store.js';
-
-const dynamo = getDynamoClient();
+import { scanSubscriptions, updateSubscriptionByUser } from '../lib/subscription-store.js';
 
 type Action = 'cancel' | 'write_lock';
 
@@ -29,14 +19,13 @@ interface Candidate {
 type CandidateOutcome = 'canceled' | 'write_locked' | 'skipped';
 
 export async function handler(): Promise<void> {
-  const billingTableName = Resource.BillingTable.name;
   const now = new Date();
 
   console.log('[grace-period-enforcer] Starting enforcement run', {
     timestamp: now.toISOString(),
   });
 
-  const candidates = await scanGracePeriodCandidates(billingTableName, now.getTime());
+  const candidates = await scanGracePeriodCandidates(now.getTime());
 
   console.log('[grace-period-enforcer] Found candidates', { count: candidates.length });
 
@@ -55,7 +44,7 @@ export async function handler(): Promise<void> {
         continue;
       }
 
-      const outcome = await processCandidate(candidate, billingTableName, now);
+      const outcome = await processCandidate(candidate, now);
       if (outcome === 'canceled') canceled++;
       else if (outcome === 'write_locked') writeLocked++;
       else skipped++;
@@ -79,95 +68,48 @@ export async function handler(): Promise<void> {
   });
 }
 
-async function processCandidate(
-  candidate: Candidate,
-  billingTableName: string,
-  now: Date,
-): Promise<CandidateOutcome> {
+async function processCandidate(candidate: Candidate, now: Date): Promise<CandidateOutcome> {
   if (candidate.action === 'cancel') {
-    await cancelSubscriptionAndDisableTenant(candidate, billingTableName, now);
+    await cancelSubscriptionAndDisableTenant(candidate, now);
     return 'canceled';
   }
 
   return ensureTenantWriteLocked(candidate);
 }
 
-// Scan for grace_period records
-async function scanGracePeriodCandidates(
-  billingTableName: string,
-  nowMs: number,
-): Promise<Candidate[]> {
-  const candidates: Candidate[] = [];
-  let lastEvaluatedKey: Record<string, AttributeValue> | undefined;
-
-  do {
-    const result = await dynamo.send(
-      new ScanCommand({
-        TableName: billingTableName,
-        FilterExpression:
-          'sk = :sk AND subscriptionStatus = :gracePeriod AND attribute_not_exists(deletedAt)',
-        ExpressionAttributeValues: {
-          ':sk': { S: 'SUBSCRIPTION' },
-          ':gracePeriod': { S: SubscriptionStatus.GracePeriod },
-        },
-        ...(lastEvaluatedKey ? { ExclusiveStartKey: lastEvaluatedKey } : {}),
-      }),
-    );
-
-    for (const item of result.Items ?? []) {
-      const record = unmarshall(item);
-      const owner = scannedSubscription(record);
-
-      if (!owner) {
-        console.warn('[grace-period-enforcer] Missing orgId, skipping', { pk: record.pk });
-        continue;
-      }
-
-      const base = { ...owner, subscriptionStatus: record.subscriptionStatus as string };
-
-      const gracePeriodEndsAt = record.gracePeriodEndsAt as string | undefined;
-      if (gracePeriodEndsAt && new Date(gracePeriodEndsAt).getTime() < nowMs) {
-        // Grace period expired → cancel + DISABLE
-        candidates.push({ ...base, action: 'cancel' });
-      } else {
-        // Grace period still active → ensure WRITE_LOCKED
-        candidates.push({ ...base, action: 'write_lock' });
-      }
-    }
-
-    lastEvaluatedKey = result.LastEvaluatedKey;
-  } while (lastEvaluatedKey);
-
-  return dedupeByOrgId(preferOrgRows(candidates));
-}
-
 /**
- * One candidate per org.
+ * Scan for grace_period records, one candidate per org.
  *
- * This job had no dedupe, because until now one org could only be reached
- * through one row. Dual-writing means most orgs are two rows for the length of
- * the transition, and re-subscription history left some orgs with two legacy
- * rows before that — either way, processing both disables the same tenant twice
- * and counts one org as two. `preferOrgRows` has already dropped the twins, so
- * what reaches here is the second case, and it is logged loudly rather than
- * dropped quietly: two live subscriptions for one org is the collision the
- * backfill halts on and a human resolves.
+ * When one org survives with two rows, the expired one wins. Both actions are
+ * reachable from one org — a legacy row whose grace period has run out beside a
+ * twin that has not, say — and the two are not interchangeable: cancelling
+ * disables the tenant and closes the account out, write-locking leaves it
+ * running for another day. Picking by scan order would let DynamoDB decide
+ * whether a lapsed account keeps serving reads.
  */
-function dedupeByOrgId(candidates: readonly Candidate[]): Candidate[] {
-  const byOrg = new Map<string, Candidate>();
-  for (const candidate of candidates) {
-    const first = byOrg.get(candidate.orgId);
-    if (!first) {
-      byOrg.set(candidate.orgId, candidate);
-      continue;
-    }
-    console.warn('[grace-period-enforcer] Second subscription row for one org, skipped', {
-      orgId: candidate.orgId,
-      processing: first.pk,
-      skipped: candidate.pk,
-    });
-  }
-  return [...byOrg.values()];
+async function scanGracePeriodCandidates(nowMs: number): Promise<Candidate[]> {
+  return scanSubscriptions<Candidate>({
+    job: 'grace-period-enforcer',
+    filterExpression: 'sk = :sk AND subscriptionStatus = :gracePeriod',
+    expressionAttributeValues: {
+      ':sk': { S: 'SUBSCRIPTION' },
+      ':gracePeriod': { S: SubscriptionStatus.GracePeriod },
+    },
+    select: (record, owner) => {
+      const gracePeriodEndsAt = record.gracePeriodEndsAt as string | undefined;
+      return {
+        ...owner,
+        subscriptionStatus: record.subscriptionStatus as string,
+        // Grace period expired → cancel + DISABLE. Still active → ensure WRITE_LOCKED.
+        action:
+          gracePeriodEndsAt && new Date(gracePeriodEndsAt).getTime() < nowMs
+            ? 'cancel'
+            : 'write_lock',
+      };
+    },
+    prefer: (held, next) => (held.action === 'cancel' || next.action !== 'cancel' ? held : next),
+    describe: (row) => ({ action: row.action }),
+  });
 }
 
 // Grace period expired — disable the tenant on every orchestrator it exists on
@@ -177,11 +119,7 @@ function dedupeByOrgId(candidates: readonly Candidate[]): Candidate[] {
 // in grace_period so the next run retries only the out-of-sync regions. An org
 // with no provisioned regions still transitions out of grace (empty outcomes,
 // cancel proceeds).
-async function cancelSubscriptionAndDisableTenant(
-  candidate: Candidate,
-  billingTableName: string,
-  now: Date,
-): Promise<void> {
+async function cancelSubscriptionAndDisableTenant(candidate: Candidate, now: Date): Promise<void> {
   assertRegionSyncSucceeded(
     await syncTenantStatusInProvisionedRegions(candidate.orgId, 'disabled'),
   );

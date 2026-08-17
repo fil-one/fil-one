@@ -1,15 +1,9 @@
-import { ScanCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
-import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
-import { Resource } from 'sst';
-import { getDynamoClient } from '../lib/ddb-client.js';
 import { reportMetric } from '../lib/metrics.js';
 import { getOrgProfile, isOrgDeletedOrDeleting, type OrgProfileItem } from '../lib/org-profile.js';
 import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.js';
 import type { ServiceOrchestrator } from '../lib/service-orchestrator.js';
-import { preferOrgRows, scannedSubscription } from '../lib/subscription-store.js';
-
-const dynamo = getDynamoClient();
+import { scanSubscriptions } from '../lib/subscription-store.js';
 
 interface ActiveCandidate {
   pk: string;
@@ -29,8 +23,7 @@ export async function handler(): Promise<void> {
   console.log('[subscription-drift-checker] start');
 
   const orchestrators = getAvailableOrchestrators();
-  const candidates = await scanActiveSubscriptions(Resource.BillingTable.name);
-  const uniqueCandidates = dedupeByOrgId(candidates);
+  const uniqueCandidates = await scanActiveSubscriptions();
 
   // Counters are tracked per orchestrator and emitted with an `orchestrator`
   // CloudWatch dimension, so Aurora vs FTH drift is separable. Every active-sub
@@ -77,57 +70,25 @@ export async function handler(): Promise<void> {
   console.log('[subscription-drift-checker] complete', Object.fromEntries(stats));
 }
 
-// Multiple SUBSCRIPTION records can exist per orgId (e.g. user re-subscribed
-// after cancellation, or the org's row and its legacy twin during the re-key).
-// We probe each orchestrator once per org so drift counts are not inflated; the
-// first userId encountered becomes the log representative.
-function dedupeByOrgId(candidates: ActiveCandidate[]): ActiveCandidate[] {
-  const seen = new Map<string, ActiveCandidate>();
-  for (const candidate of candidates) {
-    if (seen.has(candidate.orgId)) continue;
-    seen.set(candidate.orgId, candidate);
-  }
-  return [...seen.values()];
-}
-
+// One candidate per org, so drift counts are not inflated by the twin a
+// dual-write leaves behind or by a re-subscription duplicate; the first userId
+// encountered becomes the log representative.
+//
 // Scan filters are applied after consuming RCUs for the full table; at scale
 // a GSI on subscriptionStatus would be cheaper (and shareable with the other
 // SUBSCRIPTION-status scanners — grace-period-enforcer, usage-reporting-orchestrator).
 // Deferred to a follow-up tech-debt ticket.
-async function scanActiveSubscriptions(billingTableName: string): Promise<ActiveCandidate[]> {
-  const out: ActiveCandidate[] = [];
-  let cursor: Record<string, AttributeValue> | undefined;
-
-  do {
-    const result = await dynamo.send(
-      new ScanCommand({
-        TableName: billingTableName,
-        FilterExpression:
-          'sk = :sk AND subscriptionStatus = :active AND attribute_not_exists(deletedAt)',
-        ExpressionAttributeValues: {
-          ':sk': { S: 'SUBSCRIPTION' },
-          ':active': { S: SubscriptionStatus.Active },
-        },
-        ...(cursor ? { ExclusiveStartKey: cursor } : {}),
-      }),
-    );
-
-    for (const item of result.Items ?? []) {
-      const record = unmarshall(item);
-      const candidate = scannedSubscription(record);
-      if (!candidate) {
-        console.warn('[subscription-drift-checker] missing orgId', { pk: record.pk });
-        continue;
-      }
-      out.push(candidate);
-    }
-
-    cursor = result.LastEvaluatedKey;
-  } while (cursor);
-
-  // The org row wins over its legacy twin, so the pair a dual-write leaves
-  // behind is one candidate rather than two.
-  return preferOrgRows(out);
+async function scanActiveSubscriptions(): Promise<ActiveCandidate[]> {
+  return scanSubscriptions<ActiveCandidate>({
+    job: 'subscription-drift-checker',
+    filterExpression:
+      'sk = :sk AND subscriptionStatus = :active AND attribute_not_exists(deletedAt)',
+    expressionAttributeValues: {
+      ':sk': { S: 'SUBSCRIPTION' },
+      ':active': { S: SubscriptionStatus.Active },
+    },
+    select: (_record, owner) => owner,
+  });
 }
 
 // Probes a single org against a single orchestrator. An active subscription is

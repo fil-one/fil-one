@@ -29,12 +29,19 @@ export async function createBillingTrial({
   orgId,
   email,
 }: CreateBillingTrialParams): Promise<void> {
-  // Check whether this org already has a billing record.
+  // Whether this org already has a subscription — not merely a row. A row with
+  // neither a status nor a subscription id is the customer mapping
+  // `create-setup-intent` writes when somebody opens the payment modal and
+  // closes it, and returning here would forfeit the trial for good over an
+  // abandoned card form. The trial is written onto that row instead, and its
+  // Stripe customer is reused rather than a second one created for the same org
+  // (two customers for one org is two meters billing the same usage).
   const existing = await readSubscription(orgId, userId, {
     consistentRead: true,
-    projectionExpression: 'pk',
+    projectionExpression: 'subscriptionStatus, subscriptionId, stripeCustomerId',
   });
-  if (existing) return;
+  if (existing?.record.subscriptionStatus || existing?.record.subscriptionId) return;
+  const existingCustomerId = existing?.record.stripeCustomerId;
 
   // Checked here rather than at the write below, which is deliberately
   // unconditional (see step 3) and would therefore recreate a purged billing
@@ -51,19 +58,25 @@ export async function createBillingTrial({
   const secrets = getBillingSecrets();
   const idempotency = trialIdempotencyKeys(orgId);
 
-  // 1. Create Stripe customer
-  const stripeCustomer = await stripe.customers.create(
-    {
-      email: email ?? undefined,
-      metadata: { userId, orgId },
-    },
-    { idempotencyKey: idempotency.customer },
-  );
+  // 1. The org's Stripe customer: the one already on the record, or a new one.
+  // Reusing it also covers the narrow deploy-window case where an earlier
+  // user-keyed idempotency key created a customer this org-keyed one cannot see.
+  const stripeCustomerId =
+    existingCustomerId ??
+    (
+      await stripe.customers.create(
+        {
+          email: email ?? undefined,
+          metadata: { userId, orgId },
+        },
+        { idempotencyKey: idempotency.customer },
+      )
+    ).id;
 
   // 2. Create Stripe trial subscription
   const subscription = await stripe.subscriptions.create(
     {
-      customer: stripeCustomer.id,
+      customer: stripeCustomerId,
       items: [{ price: secrets.STRIPE_PRICE_ID }],
       trial_end: trialEndsAtUnix,
       trial_settings: { end_behavior: { missing_payment_method: 'cancel' } },
@@ -80,9 +93,12 @@ export async function createBillingTrial({
   // stripeCustomerId would never be stored — the user could not activate. The
   // update fills the mapping in either arrival order; subscriptionStatus uses
   // if_not_exists so a status a webhook already wrote is never clobbered by
-  // this stale-at-write-time `trialing`.
+  // this stale-at-write-time `trialing`. That guarantee is per row, and only the
+  // legacy row is one a webhook can have written first: the webhook's own writes
+  // never create the org twin, so on the org key `if_not_exists` is reading an
+  // attribute that is not there yet and this `trialing` always wins.
   //
-  // This is the writer that brings an org row into existence (`createsOrgRow`),
+  // This is the writer that brings the record into existence (`createsOrgRow`),
   // so it writes the whole record — the org and user attributes included, which
   // is what every lifecycle job reads once the pk stops naming a user.
   await updateSubscription(
@@ -98,7 +114,7 @@ export async function createBillingTrial({
       ExpressionAttributeValues: {
         ':orgId': { S: orgId },
         ':userId': { S: userId },
-        ':customerId': { S: stripeCustomer.id },
+        ':customerId': { S: stripeCustomerId },
         ':subscriptionId': { S: subscription.id },
         ':status': { S: SubscriptionStatus.Trialing },
         ':trialStartedAt': { S: now.toISOString() },

@@ -5,6 +5,7 @@ import {
   DynamoDBClient,
   GetItemCommand,
   PutItemCommand,
+  TransactWriteItemsCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 
@@ -61,9 +62,19 @@ function subscriptionItem(key: typeof ORG_KEY, attributes: Record<string, { S: s
   return { Item: { ...key, ...attributes } };
 }
 
-/** The partition keys the puts landed on, in the order the store wrote them. */
+/**
+ * The partition keys the record was written to, in order. The org key goes in a
+ * transaction (with a check that the legacy row is not already there), the
+ * legacy key in a plain put.
+ */
 function putKeys() {
-  return ddbMock.commandCalls(PutItemCommand).map((call) => call.args[0].input.Item?.pk?.S);
+  const transacted = ddbMock
+    .commandCalls(TransactWriteItemsCommand)
+    .map((call) => call.args[0].input.TransactItems?.[0]?.Put?.Item?.pk?.S);
+  return [
+    ...transacted,
+    ...ddbMock.commandCalls(PutItemCommand).map((call) => call.args[0].input.Item?.pk?.S),
+  ];
 }
 
 /** The partition keys the updates landed on, in the order the store wrote them. */
@@ -81,6 +92,7 @@ describe('create-setup-intent baseHandler', () => {
 
   it('persists only the Stripe customer mapping and never grants a trial (first-time)', async () => {
     ddbMock.on(GetItemCommand).resolves({}); // no existing billing record
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
     ddbMock.on(PutItemCommand).resolves({});
 
     const result = await baseHandler(setupIntentEvent());
@@ -91,12 +103,13 @@ describe('create-setup-intent baseHandler', () => {
 
     // Both keys are born together, so the org row is whole from its first
     // write instead of a partial twin shadowing a complete legacy row.
-    const putCalls = ddbMock.commandCalls(PutItemCommand);
-    expect(putCalls).toHaveLength(2);
     expect(putKeys()).toStrictEqual([ORG_KEY.pk.S, LEGACY_KEY.pk.S]);
 
-    for (const call of putCalls) {
-      const input = call.args[0].input;
+    const writes = [
+      ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems![0].Put!,
+      ...ddbMock.commandCalls(PutItemCommand).map((call) => call.args[0].input),
+    ];
+    for (const input of writes) {
       // Race guard: never clobber a record created by the entitlement path.
       expect(input.ConditionExpression).toBe('attribute_not_exists(pk)');
 
@@ -176,12 +189,12 @@ describe('create-setup-intent baseHandler', () => {
     // conditional PutItem fails. We must not fail the request — keep going and
     // return the SetupIntent.
     ddbMock.on(GetItemCommand).resolves({}); // first-time branch
-    ddbMock.on(PutItemCommand).rejects(
-      new ConditionalCheckFailedException({
-        message: 'The conditional request failed',
-        $metadata: {},
-      }),
-    );
+    const refused = new ConditionalCheckFailedException({
+      message: 'The conditional request failed',
+      $metadata: {},
+    });
+    ddbMock.on(TransactWriteItemsCommand).rejects(refused);
+    ddbMock.on(PutItemCommand).rejects(refused);
 
     const result = await baseHandler(setupIntentEvent());
 
@@ -192,9 +205,26 @@ describe('create-setup-intent baseHandler', () => {
     expect(putKeys()).toStrictEqual([ORG_KEY.pk.S, LEGACY_KEY.pk.S]);
   });
 
+  it('leaves the org key alone when the legacy row is already there', async () => {
+    // The org PUT is transactional with a check on the legacy key. A "no
+    // record" read can be stale, and a status-less org row dropped in front of
+    // a complete legacy row would lock the account out of its own migration.
+    ddbMock.on(GetItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+    ddbMock.on(PutItemCommand).resolves({});
+
+    await baseHandler(setupIntentEvent());
+
+    const check =
+      ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems![1]
+        .ConditionCheck!;
+    expect(check.Key).toStrictEqual(LEGACY_KEY);
+    expect(check.ConditionExpression).toBe('attribute_not_exists(pk)');
+  });
+
   it('rethrows non-conditional DynamoDB errors', async () => {
     ddbMock.on(GetItemCommand).resolves({});
-    ddbMock.on(PutItemCommand).rejects(new Error('Service unavailable'));
+    ddbMock.on(TransactWriteItemsCommand).rejects(new Error('Service unavailable'));
 
     await expect(baseHandler(setupIntentEvent())).rejects.toThrow('Service unavailable');
     expect(mockSetupIntentsCreate).not.toHaveBeenCalled();
