@@ -30,6 +30,7 @@ export {
 } from './constants.js';
 export type { UsageLimits } from './constants.js';
 export { formatBytes, formatBytesShort } from './formatBytes.js';
+export { SPA_REWRITE_FUNCTION_CODE } from './spa-rewrite.js';
 export type {
   MeResponse,
   MfaEnrollment,
