@@ -15,6 +15,7 @@ function buildRequest(claims?: Partial<IdTokenClaims>) {
       name: null,
       picture: null,
       amr: [],
+      auth0OrgId: null,
       ...claims,
     } satisfies IdTokenClaims;
   }

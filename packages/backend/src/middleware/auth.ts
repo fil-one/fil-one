@@ -8,7 +8,7 @@ import type {
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
 import { Resource } from 'sst';
-import type { UserInfo } from '../lib/user-context.js';
+import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.js';
 import { ApiErrorCode } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
 import {
@@ -26,6 +26,7 @@ import { createNewUserAndOrg, stampVerifiedEmail } from '../lib/account-creation
 import { resolveMembership } from '../lib/org-membership.js';
 import type { OrgMembership } from '../lib/org-membership.js';
 import { deriveOrgName } from '../lib/suggest-org-name.js';
+import { resolveActiveOrg } from './org-context.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -196,6 +197,14 @@ export interface IdTokenClaims {
   picture: string | null;
   /** OIDC Authentication Methods References — empty when not asserted/verified. */
   amr: string[];
+  /**
+   * The Auth0 organization this session authenticated into (`org_id`), null for
+   * a session that named none — which is every session in M1, since nothing
+   * sends the `organization` parameter yet. It is read now because the rule that
+   * consumes it is about what a session may reach: an org carrying an
+   * `auth0OrgId` is enterable only from a session authenticated at that org.
+   */
+  auth0OrgId: string | null;
 }
 
 const EMPTY_ID_CLAIMS: IdTokenClaims = {
@@ -204,6 +213,7 @@ const EMPTY_ID_CLAIMS: IdTokenClaims = {
   name: null,
   picture: null,
   amr: [],
+  auth0OrgId: null,
 };
 
 /**
@@ -233,6 +243,7 @@ async function extractIdTokenClaims({
       name: (payload.name as string) ?? null,
       picture: (payload.picture as string) ?? null,
       amr: Array.isArray(rawAmr) ? rawAmr.filter((v): v is string => typeof v === 'string') : [],
+      auth0OrgId: typeof payload.org_id === 'string' ? payload.org_id : null,
     };
   } catch (err) {
     console.warn(
@@ -297,9 +308,17 @@ async function attachIdentity({
  * and an empty permission set so the console can say so.
  *
  * Returns a response when the read fails, and undefined when it succeeds.
+ *
+ * `fallbackOrgId` is `/api/me`'s escape hatch, and only its. When the header
+ * named an org the caller turns out not to be a member of, the active org falls
+ * back to their own and the response echoes the org that was actually resolved.
+ * Every other route answers a stale stashed org with the ordinary 403, which
+ * sends the console to `/me`; if `/me` answered that 403 too, the one surface
+ * that can clear the stash would be the one surface the stash locks out.
  */
 async function attachMembership(
   event: APIGatewayProxyEventV2,
+  fallbackOrgId?: string,
 ): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
   const userInfo = (
     event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }
@@ -308,6 +327,15 @@ async function attachMembership(
 
   try {
     userInfo.membership = await resolveMembership(userInfo.orgId, userInfo.userId);
+    if (userInfo.membership || fallbackOrgId === undefined) return undefined;
+
+    console.warn('[auth] The org header named an org the caller is not in — using their own', {
+      requestedOrgId: userInfo.orgId,
+      orgId: fallbackOrgId,
+      userId: userInfo.userId,
+    });
+    userInfo.orgId = fallbackOrgId;
+    userInfo.membership = await resolveMembership(fallbackOrgId, userInfo.userId);
     return undefined;
   } catch (err) {
     console.error('[auth] OrgTable membership read failed — cannot resolve the role', {
@@ -469,6 +497,15 @@ export interface AuthMiddlewareOptions {
    * `get-me`, `resend-verification`) should set this to false.
    */
   requireVerifiedEmail?: boolean;
+  /**
+   * Serve the caller from their own org when the request's `X-Org-Id` names one
+   * they are not a member of, instead of letting the absent row become a 403.
+   *
+   * `GET /api/me` alone sets this. The console keeps the active org per tab, so
+   * a membership revoked or an org deleted since the stash was written must not
+   * be able to refuse the request whose answer is what clears the stash.
+   */
+  orgHeaderFallback?: boolean;
 }
 
 /**
@@ -512,25 +549,30 @@ export function withRefreshedCookies(
 
 /**
  * What runs after a token proves the caller's identity, on both the
- * access-token and the refresh branch: the verified-email gate, then the
- * membership read. Identical on both so a failure cannot depend on which
- * branch authenticated the request.
+ * access-token and the refresh branch: the verified-email gate, then the active
+ * org, then the membership read in that org. Identical on both so a failure
+ * cannot depend on which branch authenticated the request.
  */
 async function completeAuthentication(
   request: AuthMiddlewareRequest,
-  requireVerifiedEmail: boolean,
+  { requireVerifiedEmail = true, orgHeaderFallback = false }: AuthMiddlewareOptions,
 ): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
   const gated = verifiedEmailGate(requireVerifiedEmail, request);
   if (gated) return withRefreshedCookies(request, gated);
 
-  const membershipFailure = await attachMembership(request.event);
+  const claims = request.internal.idTokenClaims ?? EMPTY_ID_CLAIMS;
+  const activeOrg = await resolveActiveOrg(request.event as AuthenticatedEvent, claims.auth0OrgId);
+  if (activeOrg.response) return withRefreshedCookies(request, activeOrg.response);
+
+  const membershipFailure = await attachMembership(
+    request.event,
+    orgHeaderFallback ? activeOrg.personalOrgId : undefined,
+  );
   return membershipFailure ? withRefreshedCookies(request, membershipFailure) : undefined;
 }
 
 // eslint-disable-next-line max-lines-per-function
 export function authMiddleware(options: AuthMiddlewareOptions = {}) {
-  const { requireVerifiedEmail = true } = options;
-
   // Mapped once here rather than at each attachIdentity call site, so no token
   // path can turn a deleted account into a 401 and invite a retry.
   const before = async (
@@ -585,7 +627,7 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
         accessToken,
         failureLabel: '[auth] Access token verification failed',
       });
-      if (ok) return completeAuthentication(request, requireVerifiedEmail);
+      if (ok) return completeAuthentication(request, options);
     }
 
     // Step 2: Attempt token refresh (always runs when forceRefresh=1)
@@ -611,7 +653,7 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
           name: refreshedClaims.name,
           picture: refreshedClaims.picture,
         });
-        return completeAuthentication(request, requireVerifiedEmail);
+        return completeAuthentication(request, options);
       }
       if (forceRefresh) {
         console.error(
@@ -633,7 +675,7 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
         accessToken,
         failureLabel: '[auth] Fallback access token validation failed',
       });
-      if (ok) return completeAuthentication(request, requireVerifiedEmail);
+      if (ok) return completeAuthentication(request, options);
     }
 
     console.warn('[auth] Returning 401 — no valid tokens');

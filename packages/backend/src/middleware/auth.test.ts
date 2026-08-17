@@ -89,6 +89,7 @@ process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
 // Import after all mocks are set up
 import { authMiddleware } from './auth.js';
+import { authorize } from './authorize.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1736,6 +1737,126 @@ describe('authMiddleware', () => {
       const items = ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems;
       expect(items?.[0].Put?.Item?.profileName).toBeUndefined();
       expect(items?.[1].Put?.Item?.name).toBeUndefined();
+    });
+  });
+
+  describe('the active org header', () => {
+    const PERSONAL_ORG = 'aaaaaaaa-0000-0000-0000-000000000001';
+    const OTHER_ORG = 'aaaaaaaa-0000-0000-0000-000000000002';
+    const USER_ID = 'aaaaaaaa-0000-0000-0000-00000000000a';
+
+    function signInAs(orgId: string) {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: true } });
+      ddbMock
+        .on(GetItemCommand, { Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } } })
+        .resolves({ Item: { userId: { S: USER_ID }, orgId: { S: orgId } } });
+      // No `auth0OrgId` on either org — the M1 state, in which the rule admits
+      // every session.
+      for (const profiled of [PERSONAL_ORG, OTHER_ORG]) {
+        ddbMock
+          .on(GetItemCommand, {
+            TableName: 'UserInfoTable',
+            Key: { pk: { S: `ORG#${profiled}` }, sk: { S: 'PROFILE' } },
+          })
+          .resolves({ Item: { name: { S: 'Acme' } } });
+      }
+    }
+
+    function stubMemberOf(orgId: string, role: OrgRole) {
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'OrgTable',
+          Key: { pk: { S: `ORG#${orgId}` }, sk: { S: `MEMBER#${USER_ID}` } },
+        })
+        .resolves({ Item: { role: { S: role }, joinedAt: { S: '2026-01-01T00:00:00.000Z' } } });
+    }
+
+    function requestNaming(orgId: string) {
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+      });
+      event.headers['x-org-id'] = orgId;
+      return { event, request: buildMiddyRequest(event) };
+    }
+
+    it('resolves the role in the org the header names', async () => {
+      signInAs(PERSONAL_ORG);
+      stubMemberOf(PERSONAL_ORG, OrgRole.Owner);
+      stubMemberOf(OTHER_ORG, OrgRole.ReadOnly);
+      const { event, request } = requestNaming(OTHER_ORG);
+
+      const result = await authMiddleware().before(request);
+
+      expect(result).toBeUndefined();
+      // Both halves matter: the org every downstream key expression is built
+      // from, and the role that org's own row carries.
+      expect(getUserInfoFromEvent(event).orgId).toBe(OTHER_ORG);
+      expect(getUserInfoFromEvent(event).membership?.role).toBe(OrgRole.ReadOnly);
+    });
+
+    it('refuses a header that is not an organization id', async () => {
+      signInAs(PERSONAL_ORG);
+      stubMemberOf(PERSONAL_ORG, OrgRole.Owner);
+      const { event, request } = requestNaming(`ORG#${OTHER_ORG}`);
+
+      const result = (await authMiddleware().before(request)) as APIGatewayProxyStructuredResultV2;
+
+      expect(result.statusCode).toBe(400);
+      expect(getUserInfoFromEvent(event).orgId).toBe(PERSONAL_ORG);
+    });
+
+    it('leaves the membership absent when the caller is not in the named org', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      signInAs(PERSONAL_ORG);
+      stubMemberOf(PERSONAL_ORG, OrgRole.Owner);
+      // No row in the named org, and the default stub answers absence.
+      const { event, request } = requestNaming(OTHER_ORG);
+
+      expect(await authMiddleware().before(request)).toBeUndefined();
+      expect(getUserInfoFromEvent(event).membership).toBeUndefined();
+
+      // Which is the 403 every authenticated route already produces: the header
+      // adds no authority, so naming an org the caller has left is refused by
+      // the same gate that refuses a revoked membership in their own org.
+      const denied = authorize('buckets.read').before(
+        buildMiddyRequest(event),
+      ) as APIGatewayProxyStructuredResultV2;
+      expectErrorResponse(denied, 403, {
+        message: 'You are not a member of this organization.',
+        code: ApiErrorCode.NOT_A_MEMBER,
+      });
+      errorSpy.mockRestore();
+    });
+
+    it('serves /me from the caller’s own org when the named one has no row', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      signInAs(PERSONAL_ORG);
+      stubMemberOf(PERSONAL_ORG, OrgRole.Owner);
+      const { event, request } = requestNaming(OTHER_ORG);
+
+      const result = await authMiddleware({ orgHeaderFallback: true }).before(request);
+
+      expect(result).toBeUndefined();
+      // The response then echoes an org id that disagrees with the console's
+      // stash, which is what tells the console to clear it.
+      expect(getUserInfoFromEvent(event).orgId).toBe(PERSONAL_ORG);
+      expect(getUserInfoFromEvent(event).membership?.role).toBe(OrgRole.Owner);
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('does not fall back for a caller who is a member of the named org', async () => {
+      signInAs(PERSONAL_ORG);
+      stubMemberOf(PERSONAL_ORG, OrgRole.Owner);
+      stubMemberOf(OTHER_ORG, OrgRole.Admin);
+      const { event, request } = requestNaming(OTHER_ORG);
+
+      await authMiddleware({ orgHeaderFallback: true }).before(request);
+
+      expect(getUserInfoFromEvent(event).orgId).toBe(OTHER_ORG);
+      expect(getUserInfoFromEvent(event).membership?.role).toBe(OrgRole.Admin);
     });
   });
 

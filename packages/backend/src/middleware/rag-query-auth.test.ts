@@ -277,13 +277,39 @@ describe('ragQueryAuthMiddleware', () => {
     it('derives orgId only from the key record, ignoring request-supplied identity', async () => {
       stubKeyRecords();
       const event = bearerEvent({ authorization: `Bearer ${TOKEN}` });
-      // An attacker-controlled body/header can name any org — it must not matter.
-      event.headers['x-org-id'] = 'org-B';
+      // An attacker-controlled body can name any org — it must not matter.
       event.body = JSON.stringify({ orgId: 'org-B' });
 
       await runBefore(event);
 
       expect(getUserInfo(event)?.orgId).toBe(ORG_ID);
+    });
+
+    it('refuses a bearer request that names an org', async () => {
+      stubKeyRecords();
+      const event = bearerEvent({ authorization: `Bearer ${TOKEN}` });
+      event.headers['x-org-id'] = '11111111-2222-3333-4444-555555555555';
+
+      const { response } = await runBefore(event);
+
+      // The key's org is the org, so there is nothing for the header to select.
+      // Refused rather than ignored: a caller sending it either misunderstands
+      // the API or is testing whether it moves the org, and both are owed the
+      // same answer.
+      expect(response?.statusCode).toBe(400);
+      expect(getUserInfo(event)).toBeUndefined();
+    });
+
+    it('refuses it before the token is looked up', async () => {
+      stubKeyRecords();
+      const event = bearerEvent({ authorization: `Bearer ${TOKEN}` });
+      event.headers['X-ORG-ID'] = '11111111-2222-3333-4444-555555555555';
+
+      const { response } = await runBefore(event);
+
+      expect(response?.statusCode).toBe(400);
+      // Whatever case the header arrived in, and with no read to show for it.
+      expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(0);
     });
 
     it('strips the authorization header after successful auth', async () => {
