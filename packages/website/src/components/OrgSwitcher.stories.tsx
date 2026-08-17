@@ -62,3 +62,18 @@ export const UnnamedOrg: Story = {
     ],
   },
 };
+
+/**
+ * Inside the mobile user menu, where the panel is a `role="menu"` and the org
+ * rows are its radio items.
+ */
+export const InsideAMenu: Story = {
+  args: { inMenu: true },
+  decorators: [
+    (Story) => (
+      <div role="menu" className="w-52 rounded-lg border border-zinc-200 bg-white p-1 shadow-lg">
+        <Story />
+      </div>
+    ),
+  ],
+};

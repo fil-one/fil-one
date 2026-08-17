@@ -66,11 +66,6 @@ function unauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
 }
 
 /**
- * Out-of-scope buckets return the same 404 the handler returns for buckets the
- * org does not own, so a key holder cannot distinguish "exists but outside my
- * scope" from "does not exist" (no bucket-name enumeration oracle).
- */
-/**
  * A bearer request named an org. The key record already names one, and a request
  * carrying two answers has no unambiguous reading.
  */
@@ -83,6 +78,11 @@ function orgHeaderNotAcceptedResponse(): APIGatewayProxyStructuredResultV2 {
     .build();
 }
 
+/**
+ * Out-of-scope buckets return the same 404 the handler returns for buckets the
+ * org does not own, so a key holder cannot distinguish "exists but outside my
+ * scope" from "does not exist" (no bucket-name enumeration oracle).
+ */
 function bucketNotFoundResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(404)

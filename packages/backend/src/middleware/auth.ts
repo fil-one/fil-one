@@ -26,7 +26,7 @@ import { createNewUserAndOrg } from '../lib/account-creation.js';
 import { resolveMembership } from '../lib/org-membership.js';
 import type { OrgMembership } from '../lib/org-membership.js';
 import { deriveOrgName } from '../lib/suggest-org-name.js';
-import { resolveActiveOrg } from './org-context.js';
+import { enforceIdentityProvider, resolveActiveOrg } from './org-context.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -327,7 +327,9 @@ async function attachMembership(
 
   try {
     userInfo.membership = await resolveMembership(userInfo.orgId, userInfo.userId);
-    if (userInfo.membership || fallbackOrgId === undefined) return undefined;
+    if (userInfo.membership || fallbackOrgId === undefined || userInfo.orgId === fallbackOrgId) {
+      return undefined;
+    }
 
     console.warn('[auth] The org header named an org the caller is not in — using their own', {
       requestedOrgId: userInfo.orgId,
@@ -533,10 +535,53 @@ export function withRefreshedCookies(
 }
 
 /**
+ * The caller's standing in the org the request resolved to: their membership,
+ * then the org's identity-provider rule.
+ *
+ * The order is the security property. Membership decides whether the caller may
+ * be in this org at all, and only a member costs the org's profile a read — so
+ * naming an org id the caller is not in answers the same 403 whether or not that
+ * org authenticates through its own provider.
+ *
+ * `fallbackOrgId` is `/api/me`'s escape hatch and only its: when the org the
+ * header named refuses this session, the answer degrades to the caller's own org
+ * rather than refusing, because that answer is what tells the console its
+ * stashed org is stale. Enforcement then applies to the org fallen back to, so a
+ * session locked out of its own SSO org still gets the 403 — that is the rule
+ * working, and re-authenticating through the org's provider is the way in.
+ */
+async function resolveOrgStanding(
+  event: AuthenticatedEvent,
+  sessionAuth0OrgId: string | null,
+  fallbackOrgId: string | undefined,
+): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
+  const membershipFailure = await attachMembership(event, fallbackOrgId);
+  if (membershipFailure) return membershipFailure;
+
+  const { userInfo } = event.requestContext;
+  // No membership, no standing to rule on: `authorize` refuses the request, and
+  // reading the org's profile for a caller who is not in it would answer
+  // "does this org use SSO?" to anyone who names one.
+  if (!userInfo.membership) return undefined;
+
+  const refusal = await enforceIdentityProvider(userInfo.orgId, sessionAuth0OrgId);
+  if (!refusal || fallbackOrgId === undefined || userInfo.orgId === fallbackOrgId) return refusal;
+
+  console.warn('[auth] The org header named an org this session may not enter — using their own', {
+    requestedOrgId: userInfo.orgId,
+    orgId: fallbackOrgId,
+    userId: userInfo.userId,
+  });
+  userInfo.orgId = fallbackOrgId;
+  delete userInfo.membership;
+  return resolveOrgStanding(event, sessionAuth0OrgId, fallbackOrgId);
+}
+
+/**
  * What runs after a token proves the caller's identity, on both the
  * access-token and the refresh branch: the verified-email gate, then the active
- * org, then the membership read in that org. Identical on both so a failure
- * cannot depend on which branch authenticated the request.
+ * org, then the caller's standing in it. Identical on both so a failure cannot
+ * depend on which branch authenticated the request.
  */
 async function completeAuthentication(
   request: AuthMiddlewareRequest,
@@ -545,15 +590,26 @@ async function completeAuthentication(
   const gated = verifiedEmailGate(requireVerifiedEmail, request);
   if (gated) return withRefreshedCookies(request, gated);
 
+  const event = request.event as AuthenticatedEvent;
   const claims = request.internal.idTokenClaims ?? EMPTY_ID_CLAIMS;
-  const activeOrg = await resolveActiveOrg(request.event as AuthenticatedEvent, claims.auth0OrgId);
-  if (activeOrg.response) return withRefreshedCookies(request, activeOrg.response);
 
-  const membershipFailure = await attachMembership(
-    request.event,
+  const activeOrg = resolveActiveOrg(event);
+  if (activeOrg.response) {
+    // A header that is not an org id is a client error everywhere but `/me`,
+    // which answers under the caller's own org instead: its echo is what tells
+    // the console to drop the value that produced this.
+    if (!orgHeaderFallback) return withRefreshedCookies(request, activeOrg.response);
+    console.warn('[auth] Ignoring a malformed org header on /me — using the caller’s own org', {
+      orgId: event.requestContext.userInfo.orgId,
+    });
+  }
+
+  const refusal = await resolveOrgStanding(
+    event,
+    claims.auth0OrgId,
     orgHeaderFallback ? activeOrg.personalOrgId : undefined,
   );
-  return membershipFailure ? withRefreshedCookies(request, membershipFailure) : undefined;
+  return refusal ? withRefreshedCookies(request, refusal) : undefined;
 }
 
 // eslint-disable-next-line max-lines-per-function

@@ -1,6 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { AppShell, gracePeriodMessage } from './AppShell';
+
+/** What `/me` answers, per test. Undefined is the shell before it has replied. */
+const fixtures = vi.hoisted(() => ({ me: undefined as unknown }));
 
 vi.mock('./SidebarNav', () => ({
   SidebarNav: ({ onClose }: { onClose?: () => void }) => (
@@ -43,7 +46,9 @@ vi.mock('@filone/shared', () => ({
 }));
 
 vi.mock('@tanstack/react-query', () => ({
-  useQuery: vi.fn(() => ({ data: undefined })),
+  useQuery: vi.fn(({ queryKey }: { queryKey: readonly unknown[] }) =>
+    queryKey[0] === 'me' ? { data: fixtures.me } : { data: undefined },
+  ),
 }));
 
 function renderAppShell() {
@@ -286,5 +291,57 @@ describe('gracePeriodMessage', () => {
     expect(gracePeriodMessage(null)).toBe(
       "Your free trial has expired. Upgrade to keep access, or download your data before it's removed.",
     );
+
+describe('AppShell mobile user menu', () => {
+  const ORG_A = '11111111-1111-1111-1111-111111111111';
+  const ORG_B = '22222222-2222-2222-2222-222222222222';
+
+  beforeEach(() => {
+    // Only `/me` answers; usage and billing stay undefined, as they are for a
+    // caller who cannot read them.
+    fixtures.me = {
+      name: 'Ada',
+      orgId: ORG_A,
+      orgName: 'Acme',
+      memberships: [
+        { orgId: ORG_A, orgName: 'Acme', role: 'owner' },
+        { orgId: ORG_B, orgName: 'Globex', role: 'member' },
+      ],
+    };
+  });
+
+  afterEach(() => {
+    fixtures.me = undefined;
+  });
+
+  function openUserMenu() {
+    const rendered = render(<AppShell>page content</AppShell>);
+    fireEvent.click(screen.getByRole('button', { name: 'User menu for Ada' }));
+    return rendered;
+  }
+
+  it('mounts the org switcher with the active org checked', () => {
+    openUserMenu();
+
+    // Neither mount was exercised before, so a props regression here —
+    // `activeOrgId={me?.userId}` compiles — would leave every org unmarked and
+    // the suite green.
+    expect(screen.getByTestId('mobile-org-switcher')).toBeInTheDocument();
+    expect(screen.getByRole('menuitemradio', { name: 'Acme' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    expect(screen.getByRole('menuitemradio', { name: 'Globex' })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+  });
+
+  it('keeps the panel’s items menu items', () => {
+    openUserMenu();
+
+    // The panel is a `role="menu"`, and its logout sibling is a menuitem.
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Log out' })).toBeInTheDocument();
   });
 });

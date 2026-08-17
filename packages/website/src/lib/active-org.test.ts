@@ -6,19 +6,23 @@ import {
   reconcileActiveOrg,
   setActiveOrgId,
   switchToOrg,
+  takeReconcileNotice,
 } from './active-org.js';
 
 const ORG_A = '11111111-1111-1111-1111-111111111111';
 const ORG_B = '22222222-2222-2222-2222-222222222222';
 
 const reload = vi.fn();
+const assign = vi.fn();
 
 describe('the active org stash', () => {
   beforeEach(() => {
     sessionStorage.clear();
     reload.mockClear();
-    // Only `reload` is read on these paths, so the stub carries nothing else.
-    vi.stubGlobal('location', { reload });
+    assign.mockClear();
+    // Only `reload` and `assign` are read on these paths, so the stub carries
+    // nothing else.
+    vi.stubGlobal('location', { reload, assign });
   });
 
   afterEach(() => {
@@ -57,13 +61,15 @@ describe('the active org stash', () => {
   });
 
   describe('switching', () => {
-    it('stashes the choice and reloads the tab', () => {
+    it('stashes the choice and loads the console root', () => {
       switchToOrg(ORG_B);
 
       expect(getActiveOrgId()).toBe(ORG_B);
-      // No query key carries an org dimension, so a reload is the only
-      // invalidation that cannot leak one org's cache into the other's view.
-      expect(reload).toHaveBeenCalledTimes(1);
+      // No query key carries an org dimension, so a fresh load is the only
+      // invalidation that cannot leak one org's cache into the other's view —
+      // and the root, because every path segment is org-scoped.
+      expect(assign).toHaveBeenCalledWith('/');
+      expect(reload).not.toHaveBeenCalled();
     });
   });
 
@@ -86,6 +92,26 @@ describe('the active org stash', () => {
       expect(getActiveOrgId()).toBeNull();
       expect(reload).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalled();
+    });
+
+    it('leaves a notice for the load that follows', () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      setActiveOrgId(ORG_A);
+      reconcileActiveOrg(ORG_B);
+
+      // Otherwise a header a proxy keeps stripping turns every switcher click
+      // into a reload that lands back where it started, indistinguishable from
+      // a switch that worked.
+      expect(takeReconcileNotice()).toBe(true);
+      // Once: the flag is spent, not repeated on every later load.
+      expect(takeReconcileNotice()).toBe(false);
+    });
+
+    it('leaves no notice when nothing was reconciled', () => {
+      setActiveOrgId(ORG_A);
+      reconcileActiveOrg(ORG_A);
+
+      expect(takeReconcileNotice()).toBe(false);
     });
 
     it('cannot loop, because the reload sends no header', () => {
@@ -111,5 +137,49 @@ describe('the active org stash', () => {
       expect(getActiveOrgId()).toBe(ORG_A);
       expect(reload).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('recovering from a /me that refuses', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Fresh module: the once-per-load latch is module state, as a page load is. */
+  async function freshStash() {
+    return import('./active-org.js');
+  }
+
+  it('drops the stash so the next load asks for nothing', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const stash = await freshStash();
+    stash.setActiveOrgId(ORG_A);
+
+    expect(stash.clearActiveOrgAfterRefusal()).toBe(true);
+    expect(stash.getActiveOrgId()).toBeNull();
+  });
+
+  it('does it once per page load', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const stash = await freshStash();
+    stash.setActiveOrgId(ORG_A);
+    stash.clearActiveOrgAfterRefusal();
+    stash.setActiveOrgId(ORG_B);
+
+    // A `/me` failing for its own reasons must not turn into a tab that clears
+    // and retries without end.
+    expect(stash.clearActiveOrgAfterRefusal()).toBe(false);
+    expect(stash.getActiveOrgId()).toBe(ORG_B);
+  });
+
+  it('does nothing when the tab had no stash', async () => {
+    const stash = await freshStash();
+
+    expect(stash.clearActiveOrgAfterRefusal()).toBe(false);
   });
 });

@@ -154,3 +154,113 @@ describe('apiRequest — the active org header', () => {
     });
   });
 });
+
+/**
+ * Fresh module graph per test: the org-switch latch and the once-per-load stash
+ * clear are module state, because a page load is what resets them.
+ */
+async function freshApi() {
+  vi.resetModules();
+  return {
+    api: await import('./api.js'),
+    stash: await import('./active-org.js'),
+  };
+}
+
+describe('apiRequest — a switch in flight', () => {
+  const ORG_B = '22222222-2222-2222-2222-222222222222';
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    vi.stubGlobal('fetch', vi.fn());
+    vi.stubGlobal('location', { assign: vi.fn(), reload: vi.fn() });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('issues nothing once the tab is on its way to another org', async () => {
+    const { api, stash } = await freshApi();
+    stash.switchToOrg(ORG_B);
+
+    const held = api.apiRequest('/buckets');
+    const settled = await Promise.race([held.then(() => 'settled'), Promise.resolve('pending')]);
+
+    // The answer would be discarded by the navigation either way; held rather
+    // than rejected so no error renders over a page that is disappearing.
+    expect(settled).toBe('pending');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('getMe — when /me itself refuses', () => {
+  const ORG_A = '11111111-1111-1111-1111-111111111111';
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    vi.stubGlobal('fetch', vi.fn());
+    vi.stubGlobal('location', { assign: vi.fn(), reload: vi.fn() });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('drops the stash before surfacing the error', async () => {
+    const { api, stash } = await freshApi();
+    stash.setActiveOrgId(ORG_A);
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ message: 'nope' }), { status: 503 }),
+    );
+
+    await expect(api.getMe()).rejects.toThrow();
+
+    // `/me` is the only carrier of the echo that clears a stale stash, so a
+    // refusal from it would otherwise leave the tab naming the same org forever.
+    expect(stash.getActiveOrgId()).toBeNull();
+  });
+
+  it('leaves a good stash alone when the call succeeds', async () => {
+    const { api, stash } = await freshApi();
+    stash.setActiveOrgId(ORG_A);
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ orgId: ORG_A }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await api.getMe();
+
+    expect(stash.getActiveOrgId()).toBe(ORG_A);
+  });
+});
+
+describe('logout', () => {
+  const ORG_A = '11111111-1111-1111-1111-111111111111';
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    vi.stubGlobal('location', { href: '' });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('drops the org this tab was operating in', async () => {
+    const { api, stash } = await freshApi();
+    stash.setActiveOrgId(ORG_A);
+
+    api.logout();
+
+    // sessionStorage belongs to the tab, and logging out is a same-tab
+    // navigation: on a shared machine the next user would otherwise start
+    // inside the previous user's org.
+    expect(stash.getActiveOrgId()).toBeNull();
+  });
+});

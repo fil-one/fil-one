@@ -21,6 +21,12 @@ import type { AuthenticatedEvent } from '../lib/user-context.js';
  * authority of its own. It selects which org the caller's membership is read in,
  * and a caller with no row there is refused by `authorize` exactly as one whose
  * membership was revoked in their own org is.
+ *
+ * Two steps, in this order, sequenced by `completeAuthentication`:
+ * {@link resolveActiveOrg} picks the org from the header without reading
+ * anything, the membership read decides whether the caller may be in it, and
+ * {@link enforceIdentityProvider} then reads that org's profile. The order is
+ * the security property — see each function for the half it carries.
  */
 
 /** The value is not a UUID, so it never reaches a DynamoDB key expression. */
@@ -65,24 +71,37 @@ function orgProfileUnavailableResponse(): APIGatewayProxyStructuredResultV2 {
 }
 
 /**
- * Once an org carries an `auth0OrgId`, a request naming it in {@link
- * ORG_ID_HEADER} is refused unless the session's `org_id` claim matches. An
- * org's Auth0-side connection restrictions and authentication policy must not be
- * bypassable from a session authenticated elsewhere.
+ * Once an org carries an `auth0OrgId`, a session that did not authenticate at
+ * that Auth0 organization may not act in it. An org's Auth0-side connection
+ * restrictions and authentication policy must not be bypassable from a session
+ * authenticated elsewhere.
+ *
+ * Applied to the org the request resolved to, whether the header named it or the
+ * identity row did. Running it only on the header path would make the rule
+ * bypassable by omission: a session that never authenticated at the org could
+ * reach it by sending no header at all. The caller's own org is included on
+ * purpose — an SSO org can be somebody's own, and the refusal is enforcement,
+ * with re-authenticating through the org's provider as the way back in.
+ *
+ * Runs after the membership read, and only for a caller who has one. A caller
+ * probing org ids they are not in gets the same 403 either way, so this read
+ * cannot be used to ask which orgs have SSO configured.
  *
  * Nothing writes `auth0OrgId` in M1, so the attribute is read tolerantly and the
  * common answer is "no restriction" — the rule is here as code rather than prose
  * so adopting Auth0 Organizations is a write, not a new enforcement path.
  */
-async function enforceIdentityProvider(
+export async function enforceIdentityProvider(
   orgId: string,
   sessionAuth0OrgId: string | null,
 ): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
   let auth0OrgId: string | undefined;
   try {
-    auth0OrgId = (await getOrgProfile(orgId))?.auth0OrgId?.S;
+    // Consistent: `auth0OrgId` is not write-once, and a stale replica answering
+    // "no restriction" would admit the session this rule exists to refuse.
+    auth0OrgId = (await getOrgProfile(orgId, { consistentRead: true }))?.auth0OrgId?.S;
   } catch (err) {
-    console.error('[org-context] Org profile read failed — cannot honor the org header', {
+    console.error('[org-context] Org profile read failed — cannot decide who may enter the org', {
       orgId,
       error: err,
     });
@@ -101,7 +120,7 @@ async function enforceIdentityProvider(
 }
 
 export interface ActiveOrgResolution {
-  /** Set when the header cannot be honored; the chain short-circuits with it. */
+  /** Set when the header is not an organization id; the chain refuses with it. */
   response?: APIGatewayProxyStructuredResultV2;
   /**
    * The identity row's own org, set only when the header moved the active org
@@ -115,13 +134,13 @@ export interface ActiveOrgResolution {
  * Resolve the active org from the request header, replacing `userInfo.orgId`
  * when one is named.
  *
- * Runs after identity resolution and before the membership read, so the row that
- * gets read is the caller's row in the org the request is actually about.
+ * Reads nothing. Which org a request is about is decided from the header and the
+ * identity row alone, so the membership read that follows is the first thing
+ * this request spends, and it is spent on the org the request is actually about.
+ * Everything that consults a row — membership, then the identity-provider rule —
+ * runs after this returns.
  */
-export async function resolveActiveOrg(
-  event: AuthenticatedEvent,
-  sessionAuth0OrgId: string | null,
-): Promise<ActiveOrgResolution> {
+export function resolveActiveOrg(event: AuthenticatedEvent): ActiveOrgResolution {
   const header = getRequestHeader(event, ORG_ID_HEADER);
   if (header === undefined) return {};
 
@@ -129,14 +148,18 @@ export async function resolveActiveOrg(
   // a read: an org id is a UUID, and anything else is a client error.
   if (!isUuid(header)) return { response: malformedOrgHeaderResponse() };
 
-  const { userInfo } = event.requestContext;
-  const rejection = await enforceIdentityProvider(header, sessionAuth0OrgId);
-  if (rejection) return { response: rejection };
+  // `isUuid` accepts upper case because the spec calls it valid input, and every
+  // key here is compared byte for byte against ids this system minted in lower
+  // case. Left as sent, `ACME…` would validate and then match no membership row,
+  // answering "you are not a member" to a caller whose only mistake was the
+  // spelling of a header.
+  const requested = header.toLowerCase();
 
-  if (header === userInfo.orgId) return {};
+  const { userInfo } = event.requestContext;
+  if (requested === userInfo.orgId) return {};
 
   const personalOrgId = userInfo.orgId;
-  userInfo.orgId = header;
+  userInfo.orgId = requested;
   // The signup branch attaches the membership row it has just written, for the
   // org it created. The header names a different one, so that row is not this
   // request's membership and the read has to happen.

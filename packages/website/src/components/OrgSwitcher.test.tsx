@@ -13,14 +13,17 @@ const memberships: OrgMembershipSummary[] = [
   { orgId: ORG_B, orgName: 'Globex', role: OrgRole.Member },
 ];
 
+const assign = vi.fn();
 const reload = vi.fn();
 
 describe('OrgSwitcher', () => {
   beforeEach(() => {
     sessionStorage.clear();
+    assign.mockClear();
     reload.mockClear();
-    // Only `reload` is read on these paths, so the stub carries nothing else.
-    vi.stubGlobal('location', { reload });
+    // Only `assign` and `reload` are read on these paths, so the stub carries
+    // nothing else.
+    vi.stubGlobal('location', { assign, reload });
   });
 
   afterEach(() => {
@@ -49,20 +52,77 @@ describe('OrgSwitcher', () => {
     expect(screen.getByRole('button', { name: 'Globex' })).toBeInTheDocument();
   });
 
+  it('lists them by name', () => {
+    render(
+      <OrgSwitcher
+        memberships={[
+          { orgId: ORG_A, orgName: 'Zenith', role: OrgRole.Owner },
+          { orgId: ORG_B, orgName: 'Acme', role: OrgRole.Member },
+        ]}
+        activeOrgId={ORG_A}
+      />,
+    );
+
+    // The server returns them in key order, which is org id order — arbitrary
+    // to everyone but the database.
+    const names = screen.getAllByRole('button').map((b) => b.textContent);
+    expect(names).toEqual(['Acme', 'Zenith']);
+  });
+
+  it('scrolls rather than growing past its dropdown', () => {
+    render(<OrgSwitcher memberships={memberships} activeOrgId={ORG_A} testId="org-switcher" />);
+
+    // The backend answers up to 100 memberships and neither dropdown scrolls.
+    expect(screen.getByTestId('org-switcher').className).toContain('overflow-y-auto');
+  });
+
   it('marks the org the server resolved as current', () => {
     render(<OrgSwitcher memberships={memberships} activeOrgId={ORG_B} />);
 
-    expect(screen.getByRole('button', { name: 'Globex' })).toHaveAttribute('aria-current', 'true');
+    const current = screen.getByRole('button', { name: 'Globex' });
+    expect(current).toHaveAttribute('aria-current', 'true');
+    // Its inertness is designed, so it is announced rather than left for a
+    // click that does nothing to reveal.
+    expect(current).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByRole('button', { name: 'Acme' })).not.toHaveAttribute('aria-current');
   });
 
-  it('stashes the chosen org and reloads the tab', () => {
+  it('speaks menu inside a menu', () => {
+    render(<OrgSwitcher memberships={memberships} activeOrgId={ORG_B} inMenu />);
+
+    // The mobile panel is a `role="menu"` whose children have to be menu items;
+    // a plain button there is announced as one and disagrees with its siblings.
+    const current = screen.getByRole('menuitemradio', { name: 'Globex' });
+    expect(current).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('menuitemradio', { name: 'Acme' })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+  });
+
+  it('stashes the chosen org and loads the console root', () => {
     render(<OrgSwitcher memberships={memberships} activeOrgId={ORG_A} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Globex' }));
 
     expect(sessionStorage.getItem('filone:activeOrgId')).toBe(ORG_B);
-    expect(reload).toHaveBeenCalledTimes(1);
+    // Not the current URL: bucket names and key ids are org-scoped, so
+    // reloading in place would greet the user with a not-found page.
+    expect(assign).toHaveBeenCalledWith('/');
+  });
+
+  it('goes inert once a switch is under way', () => {
+    render(<OrgSwitcher memberships={memberships} activeOrgId={ORG_A} />);
+    const target = screen.getByRole('button', { name: 'Globex' });
+
+    fireEvent.click(target);
+    fireEvent.click(screen.getByRole('button', { name: 'Acme' }));
+
+    // The load takes as long as it takes, and a second click in that window
+    // would stash a third org while the second one's load is in flight.
+    expect(target).toHaveAttribute('aria-busy', 'true');
+    expect(assign).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem('filone:activeOrgId')).toBe(ORG_B);
   });
 
   it('does nothing when the current org is chosen', () => {
@@ -70,7 +130,7 @@ describe('OrgSwitcher', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Acme' }));
 
-    expect(reload).not.toHaveBeenCalled();
+    expect(assign).not.toHaveBeenCalled();
   });
 
   it('names an org whose profile would not read', () => {

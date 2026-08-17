@@ -274,7 +274,7 @@ describe('ragQueryAuthMiddleware', () => {
       });
     });
 
-    it('derives orgId only from the key record, ignoring request-supplied identity', async () => {
+    it('derives orgId only from the key record, ignoring an org named in the body', async () => {
       stubKeyRecords();
       const event = bearerEvent({ authorization: `Bearer ${TOKEN}` });
       // An attacker-controlled body can name any org — it must not matter.
