@@ -206,7 +206,7 @@ function DropzoneArea({ fileInputRef, folderInputRef, onDrop }: DropzoneAreaProp
           <p className="text-xs text-zinc-500">Any file type up to 5 GB</p>
         </div>
       </div>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap justify-center gap-2">
         <Button
           variant="ghost"
           size="sm"
