@@ -20,8 +20,8 @@ const dynamo = getDynamoClient();
 export interface UsageReportingWorkerPayload {
   orgId: string;
   /**
-   * Key of the org's billing record (CUSTOMER#<userId>). Optional only for
-   * payloads dispatched by a pre-upgrade orchestrator; without it the
+   * The member who owns the org's Stripe customer, read off the billing row.
+   * Absent for a row that carries no `userId` attribute; without it the
    * deleted-customer reconciliation is skipped until the next daily run.
    */
   userId?: string;

@@ -29,9 +29,10 @@ import { handler } from './usage-reporting-orchestrator.js';
 function subscriptionItem(orgId: string, extra: Record<string, unknown> = {}) {
   return marshall(
     {
-      pk: `CUSTOMER#user-for-${orgId}`,
+      pk: `ORG#${orgId}`,
       sk: 'SUBSCRIPTION',
       orgId,
+      userId: `user-for-${orgId}`,
       subscriptionId: `sub_${orgId}`,
       stripeCustomerId: `cus_${orgId}`,
       subscriptionStatus: 'active',
@@ -92,8 +93,8 @@ describe('usage-reporting-orchestrator', () => {
       Buffer.from(invokeCalls[0].args[0].input.Payload as Uint8Array).toString(),
     );
     expect(payload.orgId).toBe('org-1');
-    // userId comes from the record pk (CUSTOMER#<userId>) — the worker needs it
-    // to close out the billing record when self-healing a deleted customer.
+    // userId is stamped on the row — the worker needs it to close out the
+    // billing record when self-healing a deleted customer.
     expect(payload.userId).toBe('user-for-org-1');
     expect(payload.orgName).toBe('Org org-1');
     expect(payload.subscriptionId).toBe('sub_org-1');
@@ -119,7 +120,7 @@ describe('usage-reporting-orchestrator', () => {
       .on(ScanCommand)
       .resolvesOnce({
         Items: [subscriptionItem('org-1')],
-        LastEvaluatedKey: marshall({ pk: 'CUSTOMER#user-1', sk: 'SUBSCRIPTION' }),
+        LastEvaluatedKey: marshall({ pk: 'ORG#org-1', sk: 'SUBSCRIPTION' }),
       })
       .resolvesOnce({
         Items: [subscriptionItem('org-2')],
@@ -167,16 +168,17 @@ describe('usage-reporting-orchestrator', () => {
     expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(2);
   });
 
-  it('deduplicates by orgId — two records same org = one worker invocation', async () => {
+  it('meters one org once and drops the leftover legacy row that claims it', async () => {
+    // Metering both rows bills one org's usage to Stripe twice — and the
+    // leftover's `subscriptionId` is a superseded one, so the second meter would
+    // be against a subscription nothing else in the system can see.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     ddbMock.on(ScanCommand).resolves({
       Items: [
-        subscriptionItem('shared-org', {
-          pk: 'CUSTOMER#user-1',
-          subscriptionId: 'sub_1',
-          stripeCustomerId: 'cus_1',
-        }),
+        subscriptionItem('shared-org', { subscriptionId: 'sub_1', stripeCustomerId: 'cus_1' }),
         subscriptionItem('shared-org', {
           pk: 'CUSTOMER#user-2',
+          userId: 'user-2',
           subscriptionId: 'sub_2',
           stripeCustomerId: 'cus_2',
         }),
@@ -194,12 +196,20 @@ describe('usage-reporting-orchestrator', () => {
       ).toString(),
     );
     expect(payload.orgId).toBe('shared-org');
+    expect(payload.subscriptionId).toBe('sub_1');
     expect(payload.orgName).toBe('Org shared-org');
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[usage-orchestrator] Not an org row, skipping',
+      expect.objectContaining({ pk: 'CUSTOMER#user-2', orgId: 'shared-org' }),
+    );
+    warnSpy.mockRestore();
   });
 
-  it('omits userId when the record pk has an empty suffix (bare CUSTOMER#)', async () => {
+  it('omits userId when the row carries no userId attribute', async () => {
+    // The worker's deleted-customer close-out needs a member to attribute the
+    // write to; a row that names none is still metered, just without one.
     ddbMock.on(ScanCommand).resolves({
-      Items: [subscriptionItem('org-1', { pk: 'CUSTOMER#' })],
+      Items: [subscriptionItem('org-1', { userId: undefined })],
     });
     mockOrgNames(['org-1']);
     lambdaMock.on(InvokeCommand).resolves({});
@@ -214,13 +224,15 @@ describe('usage-reporting-orchestrator', () => {
     expect(payload.userId).toBeUndefined();
   });
 
-  it('reports an org once from its org row, ignoring the legacy twin beside it', async () => {
-    // Dual-writing puts most orgs in the scan twice for the length of the
-    // re-key. Reporting both would meter one org's usage to Stripe twice.
+  it('takes the user id off the org row, never off a leftover', async () => {
+    // A `CUSTOMER#` row the cleanup step missed can name a different member, and
+    // the worker closes out a deleted Stripe customer against whichever member
+    // the payload names.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     ddbMock.on(ScanCommand).resolves({
       Items: [
         subscriptionItem('org-1'),
-        subscriptionItem('org-1', { pk: 'ORG#org-1', userId: 'user-for-org-1' }),
+        subscriptionItem('org-1', { pk: 'CUSTOMER#user-stale', userId: 'user-stale' }),
       ],
     });
     mockOrgNames(['org-1']);
@@ -233,9 +245,12 @@ describe('usage-reporting-orchestrator', () => {
     const payload = JSON.parse(
       Buffer.from(invokeCalls[0].args[0].input.Payload as Uint8Array).toString(),
     );
-    // The org row carries the user id as an attribute, so the worker can still
-    // close out the record when it self-heals a deleted Stripe customer.
     expect(payload.userId).toBe('user-for-org-1');
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[usage-orchestrator] Not an org row, skipping',
+      expect.objectContaining({ pk: 'CUSTOMER#user-stale', orgId: 'org-1' }),
+    );
+    warnSpy.mockRestore();
   });
 
   it('invokes worker even when the org has no profile (orgName undefined)', async () => {

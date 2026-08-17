@@ -5,7 +5,6 @@ import {
   DynamoDBClient,
   GetItemCommand,
   PutItemCommand,
-  TransactWriteItemsCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 
@@ -45,7 +44,7 @@ import { describeRoleEnforcement } from '../test/role-enforcement.js';
 const USER_ID = 'user-1';
 const ORG_ID = 'org-1';
 
-/** The two keys the subscription row lives on while it moves to the org. */
+/** The subscription row's key, and the dead `CUSTOMER#` key the cleanup step deletes. */
 const ORG_KEY = { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'SUBSCRIPTION' } };
 const LEGACY_KEY = { pk: { S: `CUSTOMER#${USER_ID}` }, sk: { S: 'SUBSCRIPTION' } };
 
@@ -62,19 +61,9 @@ function subscriptionItem(key: typeof ORG_KEY, attributes: Record<string, { S: s
   return { Item: { ...key, ...attributes } };
 }
 
-/**
- * The partition keys the record was written to, in order. The org key goes in a
- * transaction (with a check that the legacy row is not already there), the
- * legacy key in a plain put.
- */
+/** The partition keys the record was written to, in order. */
 function putKeys() {
-  const transacted = ddbMock
-    .commandCalls(TransactWriteItemsCommand)
-    .map((call) => call.args[0].input.TransactItems?.[0]?.Put?.Item?.pk?.S);
-  return [
-    ...transacted,
-    ...ddbMock.commandCalls(PutItemCommand).map((call) => call.args[0].input.Item?.pk?.S),
-  ];
+  return ddbMock.commandCalls(PutItemCommand).map((call) => call.args[0].input.Item?.pk?.S);
 }
 
 /** The partition keys the updates landed on, in the order the store wrote them. */
@@ -92,7 +81,6 @@ describe('create-setup-intent baseHandler', () => {
 
   it('persists only the Stripe customer mapping and never grants a trial (first-time)', async () => {
     ddbMock.on(GetItemCommand).resolves({}); // no existing billing record
-    ddbMock.on(TransactWriteItemsCommand).resolves({});
     ddbMock.on(PutItemCommand).resolves({});
 
     const result = await baseHandler(setupIntentEvent());
@@ -101,28 +89,23 @@ describe('create-setup-intent baseHandler', () => {
     expect(mockCustomersCreate).toHaveBeenCalledOnce();
     expect(mockSetupIntentsCreate).toHaveBeenCalledOnce();
 
-    // Both keys are born together, so the org row is whole from its first
-    // write instead of a partial twin shadowing a complete legacy row.
-    expect(putKeys()).toStrictEqual([ORG_KEY.pk.S, LEGACY_KEY.pk.S]);
+    expect(putKeys()).toStrictEqual([ORG_KEY.pk.S]);
 
-    const writes = [
-      ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems![0].Put!,
-      ...ddbMock.commandCalls(PutItemCommand).map((call) => call.args[0].input),
-    ];
-    for (const input of writes) {
-      // Race guard: never clobber a record created by the entitlement path.
-      expect(input.ConditionExpression).toBe('attribute_not_exists(pk)');
+    const input = ddbMock.commandCalls(PutItemCommand)[0].args[0].input;
+    // Race guard: never clobber a record created by the entitlement path.
+    expect(input.ConditionExpression).toBe('attribute_not_exists(pk)');
 
-      const item = input.Item!;
-      expect(item.stripeCustomerId).toEqual({ S: 'cus_test_123' });
-      expect(item.orgId).toEqual({ S: ORG_ID });
-      expect(item.userId).toEqual({ S: USER_ID });
+    const item = input.Item!;
+    expect(item.stripeCustomerId).toEqual({ S: 'cus_test_123' });
+    // The row carries both ids, since the key names only the org and the paths
+    // that close out a deleted Stripe customer still need the member.
+    expect(item.orgId).toEqual({ S: ORG_ID });
+    expect(item.userId).toEqual({ S: USER_ID });
 
-      // The invariant: this endpoint must not write trial entitlement.
-      expect(item.subscriptionStatus).toBeUndefined();
-      expect(item.trialStartedAt).toBeUndefined();
-      expect(item.trialEndsAt).toBeUndefined();
-    }
+    // The invariant: this endpoint must not write trial entitlement.
+    expect(item.subscriptionStatus).toBeUndefined();
+    expect(item.trialStartedAt).toBeUndefined();
+    expect(item.trialEndsAt).toBeUndefined();
   });
 
   it('stamps userId and orgId on the Stripe customer (first-time)', async () => {
@@ -151,16 +134,15 @@ describe('create-setup-intent baseHandler', () => {
     });
   });
 
-  it('records the customer mapping on both keys when the record exists without one', async () => {
+  it('records the customer mapping on the org row when the record exists without one', async () => {
     ddbMock.on(GetItemCommand).resolves(subscriptionItem(ORG_KEY));
     ddbMock.on(UpdateItemCommand).resolves({});
 
     await baseHandler(setupIntentEvent());
 
-    expect(updatedKeys()).toStrictEqual([ORG_KEY.pk.S, LEGACY_KEY.pk.S]);
-    for (const call of ddbMock.commandCalls(UpdateItemCommand)) {
-      expect(call.args[0].input.ExpressionAttributeValues?.[':cid']).toEqual({ S: 'cus_test_123' });
-    }
+    expect(updatedKeys()).toStrictEqual([ORG_KEY.pk.S]);
+    const input = ddbMock.commandCalls(UpdateItemCommand).at(0)!.args[0].input;
+    expect(input.ExpressionAttributeValues?.[':cid']).toEqual({ S: 'cus_test_123' });
   });
 
   it("uses the org's Stripe customer rather than the one on the caller's legacy row", async () => {
@@ -182,6 +164,7 @@ describe('create-setup-intent baseHandler', () => {
     expect(mockCustomersCreate).not.toHaveBeenCalled();
     expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(1);
   });
 
   it('swallows ConditionalCheckFailedException when a record was created concurrently', async () => {
@@ -189,48 +172,26 @@ describe('create-setup-intent baseHandler', () => {
     // conditional PutItem fails. We must not fail the request — keep going and
     // return the SetupIntent.
     ddbMock.on(GetItemCommand).resolves({}); // first-time branch
-    const refused = new ConditionalCheckFailedException({
-      message: 'The conditional request failed',
-      $metadata: {},
-    });
-    ddbMock.on(TransactWriteItemsCommand).rejects(refused);
-    ddbMock.on(PutItemCommand).rejects(refused);
+    ddbMock.on(PutItemCommand).rejects(
+      new ConditionalCheckFailedException({
+        message: 'The conditional request failed',
+        $metadata: {},
+      }),
+    );
 
     const result = await baseHandler(setupIntentEvent());
 
     expect(result).toMatchObject({ statusCode: 200 });
     expect(mockSetupIntentsCreate).toHaveBeenCalledOnce();
-    // A row the backfill already copied to the org key is no reason to leave
-    // the legacy key unwritten, so both are still attempted.
-    expect(putKeys()).toStrictEqual([ORG_KEY.pk.S, LEGACY_KEY.pk.S]);
-  });
-
-  it('leaves the org key alone when the legacy row is already there', async () => {
-    // The org PUT is transactional with a check on the legacy key. A "no
-    // record" read can be stale, and a status-less org row dropped in front of
-    // a complete legacy row would lock the account out of its own migration.
-    ddbMock.on(GetItemCommand).resolves({});
-    ddbMock.on(TransactWriteItemsCommand).resolves({});
-    ddbMock.on(PutItemCommand).resolves({});
-
-    await baseHandler(setupIntentEvent());
-
-    const check =
-      ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems![1]
-        .ConditionCheck!;
-    expect(check.Key).toStrictEqual(LEGACY_KEY);
-    expect(check.ConditionExpression).toBe('attribute_not_exists(pk)');
+    expect(putKeys()).toStrictEqual([ORG_KEY.pk.S]);
   });
 
   it('rethrows non-conditional DynamoDB errors', async () => {
     ddbMock.on(GetItemCommand).resolves({});
-    ddbMock.on(TransactWriteItemsCommand).rejects(new Error('Service unavailable'));
+    ddbMock.on(PutItemCommand).rejects(new Error('Service unavailable'));
 
     await expect(baseHandler(setupIntentEvent())).rejects.toThrow('Service unavailable');
     expect(mockSetupIntentsCreate).not.toHaveBeenCalled();
-    // The run stops before the legacy row moves, so the retry finds both keys
-    // where it left them.
-    expect(putKeys()).toStrictEqual([ORG_KEY.pk.S]);
   });
 });
 

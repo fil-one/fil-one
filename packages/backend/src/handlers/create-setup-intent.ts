@@ -28,12 +28,11 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   // one, and an eventually-consistent miss on a record written seconds ago
   // (a trial claim, or a second click on the same button) creates a second
   // Stripe customer for the same org.
-  const existing = await readSubscription(orgId, userId, { consistentRead: true });
+  const record = await readSubscription(orgId, { consistentRead: true });
 
   let stripeCustomerId: string;
 
-  if (existing) {
-    const { record } = existing;
+  if (record) {
     if (record.stripeCustomerId) {
       stripeCustomerId = record.stripeCustomerId;
     } else {
@@ -69,9 +68,8 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     stripeCustomerId = customer.id;
 
     try {
-      // Both keys are born together here: the record does not exist yet, so the
-      // org row is whole from its first write rather than a partial twin that
-      // would shadow a complete legacy row.
+      // The org's record does not exist yet, so this is its first write and it
+      // carries the whole mapping — nothing reads a half-written one into being.
       await writeSubscription(
         { orgId, userId },
         {

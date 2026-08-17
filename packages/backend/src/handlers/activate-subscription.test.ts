@@ -1,11 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import {
-  ConditionalCheckFailedException,
-  DynamoDBClient,
-  GetItemCommand,
-  UpdateItemCommand,
-} from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { OrgRole, SubscriptionStatus } from '@filone/shared';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
@@ -104,11 +99,11 @@ import { handler } from './activate-subscription.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** The two keys the subscription row lives on while it moves to the org. */
+/** The subscription row's key, and the dead `CUSTOMER#` key the cleanup step deletes. */
 const ORG_KEY = { pk: { S: 'ORG#org-1' }, sk: { S: 'SUBSCRIPTION' } };
 const LEGACY_KEY = { pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } };
 
-/** The org's row — the one a read prefers, so the one an unqualified stub answers with. */
+/** The org's row — the only row a read can land on. */
 function buildBillingRecord(overrides?: Record<string, unknown>) {
   const base: Record<string, unknown> = {
     pk: ORG_KEY.pk.S,
@@ -261,30 +256,20 @@ describe('activate-subscription handler', () => {
     });
     expect(mockSetupIntentsList).toHaveBeenCalledWith({ customer: 'cus_org_1', limit: 1 });
     expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(1);
   });
 
-  it('activates on the legacy row when the backfill has not created the org row', async () => {
-    // Every account the backfill has not reached: the org row's existence
-    // condition fails, and activation still has to complete.
+  it('refuses to activate when the org has no billing row of its own', async () => {
+    // A `CUSTOMER#` row the cleanup step has not deleted yet cannot stand in
+    // for the org's: activating off it would charge a Stripe customer the org
+    // does not own.
     ddbMock
       .on(GetItemCommand, { Key: ORG_KEY })
       .resolves({})
       .on(GetItemCommand, { Key: LEGACY_KEY })
       .resolves({
-        Item: buildBillingRecord({ pk: LEGACY_KEY.pk.S, subscriptionId: 'sub_trial_123' }),
+        Item: buildBillingRecord({ pk: LEGACY_KEY.pk.S, subscriptionId: 'sub_legacy_9' }),
       });
-    ddbMock
-      .on(UpdateItemCommand, { Key: ORG_KEY })
-      .rejects(
-        new ConditionalCheckFailedException({
-          message: 'The conditional request failed',
-          $metadata: {},
-        }),
-      )
-      .on(UpdateItemCommand, { Key: LEGACY_KEY })
-      .resolves({});
-
-    mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
 
     const event = buildEvent({
       userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
@@ -294,9 +279,12 @@ describe('activate-subscription handler', () => {
     const result = await handler(event, {} as never);
     const body = JSON.parse((result as { body: string }).body);
 
-    expect(body.subscription.status).toBe(SubscriptionStatus.Active);
-    expect(updatedKeys()).toStrictEqual([ORG_KEY.pk.S, LEGACY_KEY.pk.S]);
-    expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith('org-1', 'active');
+    expect((result as { statusCode: number }).statusCode).toBe(400);
+    expect(body.message).toContain('No billing record found');
+    expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
+    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
   });
 
   it('unlocks every provisioned region on activation', async () => {
@@ -479,12 +467,12 @@ describe('activate-subscription handler', () => {
     });
     await handler(event, {} as never);
 
-    // The billing update only, landing on both keys with the org row first.
-    expect(updatedKeys()).toStrictEqual([ORG_KEY.pk.S, LEGACY_KEY.pk.S]);
+    // The billing update only, landing on the org row.
+    expect(updatedKeys()).toStrictEqual([ORG_KEY.pk.S]);
     // trial_end: 'now' makes Stripe return active, so trialEndsAt should be removed
-    for (const call of ddbMock.commandCalls(UpdateItemCommand)) {
-      expect(call.args[0].input.UpdateExpression as string).toContain('REMOVE trialEndsAt');
-    }
+    expect(
+      ddbMock.commandCalls(UpdateItemCommand).at(0)?.args[0].input.UpdateExpression as string,
+    ).toContain('REMOVE trialEndsAt');
   });
 
   it('removes trialEndsAt when subscription is active', async () => {
@@ -504,11 +492,11 @@ describe('activate-subscription handler', () => {
     });
     await handler(event, {} as never);
 
-    // The billing update only, landing on both keys with the org row first.
-    expect(updatedKeys()).toStrictEqual([ORG_KEY.pk.S, LEGACY_KEY.pk.S]);
-    for (const call of ddbMock.commandCalls(UpdateItemCommand)) {
-      expect(call.args[0].input.UpdateExpression as string).toContain('REMOVE trialEndsAt');
-    }
+    // The billing update only, landing on the org row.
+    expect(updatedKeys()).toStrictEqual([ORG_KEY.pk.S]);
+    expect(
+      ddbMock.commandCalls(UpdateItemCommand).at(0)?.args[0].input.UpdateExpression as string,
+    ).toContain('REMOVE trialEndsAt');
   });
 
   it('returns 402 when subscription status is incomplete after activation (3DS pending)', async () => {

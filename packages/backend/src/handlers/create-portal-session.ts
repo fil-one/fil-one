@@ -14,7 +14,7 @@ import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
-  const { userId, orgId } = getUserInfo(event);
+  const { orgId } = getUserInfo(event);
   // Follows the hostname the user is actually on, so a session started from a
   // demo alias returns there instead of jumping to the canonical host. Stripe
   // applies no allowlist of its own to `return_url`, so resolveOrigin's exact
@@ -22,14 +22,14 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   const websiteUrl = resolveOrigin(event);
   const stripe = getStripeClient();
 
-  // The org's record, with the caller's own as the fallback until the re-key completes.
-  const stored = await readSubscription(orgId, userId);
+  // The org's record. Every member reaches the same one.
+  const record = await readSubscription(orgId);
 
-  if (!stored) {
+  if (!record) {
     return new ResponseBuilder().status(400).body({ message: 'No billing record found.' }).build();
   }
 
-  const stripeCustomerId = stored.record.stripeCustomerId;
+  const { stripeCustomerId } = record;
 
   if (!stripeCustomerId) {
     return new ResponseBuilder().status(400).body({ message: 'No Stripe customer found.' }).build();

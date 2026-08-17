@@ -14,11 +14,11 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const { userId, orgId } = getUserInfo(event);
+  const { orgId } = getUserInfo(event);
 
   // Invoices belong to the org's Stripe customer, so an Admin reading them
   // reads the org's, not a record of their own that may not exist.
-  const billingRecord = (await readSubscription(orgId, userId))?.record;
+  const billingRecord = await readSubscription(orgId);
 
   if (!billingRecord?.stripeCustomerId) {
     const response: ListInvoicesResponse = { invoices: [] };

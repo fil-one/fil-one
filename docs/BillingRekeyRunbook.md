@@ -345,6 +345,15 @@ After the flip deploys, watch the guard's denial rate before starting the cleanu
 below. A rise in `SUBSCRIPTION_INACTIVE` means the backfill missed a cohort, and
 the legacy rows are still there to recover from.
 
+**Expect invariant-violation logs in the window between the flip and the
+cleanup.** All three scan-driven jobs assert one subscription row per org, and
+every org whose `CUSTOMER#` row is still standing trips that assertion on every
+run — `[<job>] INVARIANT VIOLATED: two subscription rows for one org`, naming the
+org row it kept and the legacy row it ignored. That is the expected reading of a
+half-cleaned table, not an incident: the org row always wins, so no job acts on
+the legacy one. Do not point an alarm at that string until the cleanup below has
+run; after it, the line means what it says.
+
 ## Delete the CUSTOMER# rows
 
 The last phase, and the only destructive one. It is a **dated step run by hand**,

@@ -94,15 +94,15 @@ describe('createBillingTrial', () => {
       { idempotencyKey: 'billing-trial-sub-org-org-1' },
     );
 
-    // Verify DynamoDB write — both keys, org first, and the org row is created
-    // whole rather than conditioned on already existing: this is the writer
-    // that brings it into being.
+    // Verify the DynamoDB write: the org's row, created whole rather than
+    // conditioned on already existing — this is the writer that brings it into
+    // being.
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(updateCalls).toHaveLength(2);
-    expect(updateCalls.map((call) => call.args[0].input.Key)).toEqual([
-      { pk: { S: 'ORG#org-1' }, sk: { S: 'SUBSCRIPTION' } },
-      { pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } },
-    ]);
+    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls[0].args[0].input.Key).toStrictEqual({
+      pk: { S: 'ORG#org-1' },
+      sk: { S: 'SUBSCRIPTION' },
+    });
     expect(updateCalls[0].args[0].input.ConditionExpression).toBeUndefined();
 
     const input = updateCalls[0].args[0].input;
@@ -129,14 +129,12 @@ describe('createBillingTrial', () => {
     await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
 
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(updateCalls).toHaveLength(2);
+    expect(updateCalls).toHaveLength(1);
 
-    for (const call of updateCalls) {
-      const input = call.args[0].input;
-      expect(input.ConditionExpression).toBeUndefined();
-      expect(input.UpdateExpression).toContain('stripeCustomerId = :customerId');
-      expect(input.ExpressionAttributeValues![':customerId']).toEqual({ S: 'cus_test_123' });
-    }
+    const input = updateCalls[0].args[0].input;
+    expect(input.ConditionExpression).toBeUndefined();
+    expect(input.UpdateExpression).toContain('stripeCustomerId = :customerId');
+    expect(input.ExpressionAttributeValues![':customerId']).toEqual({ S: 'cus_test_123' });
   });
 
   it('does not overwrite a subscription status written by a webhook', async () => {
@@ -144,10 +142,8 @@ describe('createBillingTrial', () => {
     // if_not_exists keeps the fresher webhook value.
     await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
 
-    // On the legacy row, which is the only key a webhook can have written
-    // first — the webhook's own writes never create the org twin.
-    const input = ddbMock.commandCalls(UpdateItemCommand)[1].args[0].input;
-    expect(input.Key).toEqual({ pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } });
+    const input = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
+    expect(input.Key).toEqual({ pk: { S: 'ORG#org-1' }, sk: { S: 'SUBSCRIPTION' } });
     expect(input.UpdateExpression).toContain(
       'subscriptionStatus = if_not_exists(subscriptionStatus, :status)',
     );
@@ -202,23 +198,21 @@ describe('createBillingTrial', () => {
     });
   });
 
-  it('returns early on the caller’s legacy subscription when the org key has not moved yet', async () => {
-    ddbMock
-      .on(GetItemCommand, { Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'SUBSCRIPTION' } } })
-      .resolves({})
-      .on(GetItemCommand, { Key: { pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } } })
-      .resolves({
-        Item: {
-          pk: { S: 'CUSTOMER#user-1' },
-          sk: { S: 'SUBSCRIPTION' },
-          subscriptionId: { S: 'sub_existing' },
-        },
-      });
+  it('creates a trial for an org whose member happens to hold no record of their own', async () => {
+    // The existence check asks about the org, so a second member joining an org
+    // that has no billing yet is not mistaken for an account that already has a
+    // trial — and the check reads exactly one key to decide.
+    ddbMock.on(GetItemCommand).resolves({});
 
     await createBillingTrial({ userId: 'user-1', orgId: 'org-1', email: 'test@example.com' });
 
-    expect(mockCustomersCreate).not.toHaveBeenCalled();
-    expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(2);
+    expect(mockCustomersCreate).toHaveBeenCalledOnce();
+    const getCalls = ddbMock.commandCalls(GetItemCommand);
+    expect(getCalls).toHaveLength(1);
+    expect(getCalls[0].args[0].input.Key).toStrictEqual({
+      pk: { S: 'ORG#org-1' },
+      sk: { S: 'SUBSCRIPTION' },
+    });
   });
 
   it('grants the trial onto the customer mapping an abandoned payment modal left', async () => {

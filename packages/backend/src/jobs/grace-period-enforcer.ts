@@ -77,16 +77,7 @@ async function processCandidate(candidate: Candidate, now: Date): Promise<Candid
   return ensureTenantWriteLocked(candidate);
 }
 
-/**
- * Scan for grace_period records, one candidate per org.
- *
- * When one org survives with two rows, the expired one wins. Both actions are
- * reachable from one org — a legacy row whose grace period has run out beside a
- * twin that has not, say — and the two are not interchangeable: cancelling
- * disables the tenant and closes the account out, write-locking leaves it
- * running for another day. Picking by scan order would let DynamoDB decide
- * whether a lapsed account keeps serving reads.
- */
+/** Scan for grace_period records, one candidate per org. */
 async function scanGracePeriodCandidates(nowMs: number): Promise<Candidate[]> {
   return scanSubscriptions<Candidate>({
     job: 'grace-period-enforcer',
@@ -107,8 +98,6 @@ async function scanGracePeriodCandidates(nowMs: number): Promise<Candidate[]> {
             : 'write_lock',
       };
     },
-    prefer: (held, next) => (held.action === 'cancel' || next.action !== 'cancel' ? held : next),
-    describe: (row) => ({ action: row.action }),
   });
 }
 

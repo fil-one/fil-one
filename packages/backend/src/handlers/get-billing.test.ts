@@ -1,11 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import {
-  ConditionalCheckFailedException,
-  DynamoDBClient,
-  GetItemCommand,
-  UpdateItemCommand,
-} from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { PlanId, SubscriptionStatus } from '@filone/shared';
 
@@ -61,22 +56,23 @@ import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 
-/** The two keys the subscription row lives on while it moves to the org. */
+/** The subscription row's key, and the dead `CUSTOMER#` key the cleanup step deletes. */
 const ORG_KEY = { pk: { S: `ORG#${USER_INFO.orgId}` }, sk: { S: 'SUBSCRIPTION' } };
 const LEGACY_KEY = { pk: { S: `CUSTOMER#${USER_INFO.userId}` }, sk: { S: 'SUBSCRIPTION' } };
 
-/** The org's row — the one a read prefers, so the one an unqualified stub answers with. */
+/** The org's row — the only row a read can land on. */
 function subscriptionItem(overrides: Record<string, unknown> = {}) {
   return {
     Item: marshall({
       pk: ORG_KEY.pk.S,
       sk: 'SUBSCRIPTION',
+      orgId: USER_INFO.orgId,
       ...overrides,
     }),
   };
 }
 
-/** The same row on the key an account keeps until the backfill copies it. */
+/** A row on the dead key, planted so a test can prove no read reaches it. */
 function legacySubscriptionItem(overrides: Record<string, unknown> = {}) {
   return {
     Item: marshall({
@@ -85,14 +81,6 @@ function legacySubscriptionItem(overrides: Record<string, unknown> = {}) {
       ...overrides,
     }),
   };
-}
-
-/** What the org row's existence condition throws before the backfill creates it. */
-function conditionalCheckFailed() {
-  return new ConditionalCheckFailedException({
-    message: 'The conditional request failed',
-    $metadata: {},
-  });
 }
 
 /** The partition keys the updates landed on, in the order the store wrote them. */
@@ -275,7 +263,7 @@ describe('get-billing baseHandler', () => {
   // 403s these accounts, and this endpoint must not report a trial for them.
   const statuslessRecordVariants: Record<string, Record<string, unknown>> = {
     'bare record': {},
-    'customer mapping only': { stripeCustomerId: 'cus_123', orgId: 'org-1' },
+    'customer mapping only': { stripeCustomerId: 'cus_123' },
     'customer mapping with cached price': {
       stripeCustomerId: 'cus_123',
       stripePrice: CACHED_GRANDFATHERED_PRICE,
@@ -516,10 +504,9 @@ describe('get-billing baseHandler', () => {
       },
     });
 
-    // The lazy trial→grace transition persists on both keys, org row first: a
-    // read prefers the org row, so leaving it on the expired trial would report
-    // a trial the account no longer holds.
-    expect(updatedKeys()).toStrictEqual([ORG_KEY.pk.S, LEGACY_KEY.pk.S]);
+    // The lazy trial→grace transition persists on the org row: leaving it on
+    // the expired trial would report a trial the account does not hold.
+    expect(updatedKeys()).toStrictEqual([ORG_KEY.pk.S]);
   });
 
   it('returns active subscription with payment method from Stripe', async () => {
@@ -630,37 +617,34 @@ describe('get-billing baseHandler', () => {
       },
     });
 
-    expect(updatedKeys()).toStrictEqual([ORG_KEY.pk.S, LEGACY_KEY.pk.S]);
+    expect(updatedKeys()).toStrictEqual([ORG_KEY.pk.S]);
   });
 
-  it('persists the grace_period transition on the legacy row when the org row does not exist yet', async () => {
-    // Every account the backfill has not reached: the org row's existence
-    // condition fails, and the legacy row must still record the transition.
+  it('persists the grace_period transition onto the row it just read', async () => {
+    // Guarded on the row existing: this is an update to a record the request
+    // read a moment ago, never a reason to create one.
     const expiredTrialEndsAt = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
-    ddbMock.on(GetItemCommand, { Key: ORG_KEY }).resolves({});
-    ddbMock.on(GetItemCommand, { Key: LEGACY_KEY }).resolves(
-      legacySubscriptionItem({
+    ddbMock.on(GetItemCommand).resolves(
+      subscriptionItem({
         subscriptionStatus: SubscriptionStatus.Trialing,
         trialEndsAt: expiredTrialEndsAt,
       }),
     );
-    ddbMock.on(UpdateItemCommand, { Key: ORG_KEY }).rejects(conditionalCheckFailed());
-    ddbMock.on(UpdateItemCommand, { Key: LEGACY_KEY }).resolves({});
+    ddbMock.on(UpdateItemCommand).resolves({});
 
-    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+    await baseHandler(buildEvent({ userInfo: USER_INFO }));
 
-    expect(result.statusCode).toBe(200);
-    const body = JSON.parse(String(result.body));
-    expect(body).toStrictEqual({
-      subscription: {
-        planId: PlanId.PayAsYouGo,
-        status: SubscriptionStatus.GracePeriod,
-        trialEndsAt: expiredTrialEndsAt,
-        gracePeriodEndsAt: expect.any(String),
-      },
+    const updates = ddbMock.commandCalls(UpdateItemCommand);
+    expect(updates).toHaveLength(1);
+    const input = updates.at(0)?.args.at(0)?.input;
+    expect(input?.Key).toStrictEqual(ORG_KEY);
+    expect(input?.ConditionExpression).toBe('attribute_exists(pk)');
+    expect(input?.UpdateExpression).toBe(
+      'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
+    );
+    expect(input?.ExpressionAttributeValues?.[':status']).toEqual({
+      S: SubscriptionStatus.GracePeriod,
     });
-
-    expect(updatedKeys()).toStrictEqual([ORG_KEY.pk.S, LEGACY_KEY.pk.S]);
   });
 
   it('reports expired grace_period as canceled but does NOT persist the transition', async () => {
@@ -1028,27 +1012,23 @@ describe('get-billing baseHandler', () => {
     });
   });
 
-  it("queries DynamoDB with the org key first and the caller's legacy key second", async () => {
+  it('queries DynamoDB once, on the org key', async () => {
     ddbMock.on(GetItemCommand).resolves({});
 
     const event = buildEvent({ userInfo: USER_INFO });
     await baseHandler(event);
 
     const calls = ddbMock.commandCalls(GetItemCommand);
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(1);
     expect(calls.at(0)?.args.at(0)?.input).toStrictEqual({
       TableName: 'BillingTable',
       Key: ORG_KEY,
-    });
-    expect(calls.at(1)?.args.at(0)?.input).toStrictEqual({
-      TableName: 'BillingTable',
-      Key: LEGACY_KEY,
     });
   });
 
   it("reports the org row rather than the caller's own legacy row", async () => {
     // Billing belongs to the org, so a legacy row the caller happens to own
-    // cannot answer in the org row's place.
+    // cannot answer in the org row's place: the single read never touches it.
     ddbMock
       .on(GetItemCommand, { Key: ORG_KEY })
       .resolves(subscriptionItem({ subscriptionStatus: SubscriptionStatus.Active }));
@@ -1073,7 +1053,6 @@ describe('get-billing baseHandler', () => {
     ddbMock
       .on(GetItemCommand, { Key: ORG_KEY })
       .resolves(subscriptionItem({ subscriptionStatus: SubscriptionStatus.Active }));
-    ddbMock.on(GetItemCommand, { Key: { pk: { S: `CUSTOMER#${member.userId}` } } }).resolves({});
 
     const result = await baseHandler(buildEvent({ userInfo: member }));
 
@@ -1085,7 +1064,9 @@ describe('get-billing baseHandler', () => {
     });
   });
 
-  it('falls back to the legacy row when the backfill has not created the org row', async () => {
+  it('reports inactive when the caller has only a legacy row', async () => {
+    // A `CUSTOMER#` row the cleanup step has not deleted yet is not
+    // entitlement: nothing reads it, so the org holds no subscription.
     ddbMock.on(GetItemCommand, { Key: ORG_KEY }).resolves({});
     ddbMock
       .on(GetItemCommand, { Key: LEGACY_KEY })
@@ -1096,9 +1077,10 @@ describe('get-billing baseHandler', () => {
     expect(result.statusCode).toBe(200);
     const body = JSON.parse(String(result.body));
     expect(body.subscription).toStrictEqual({
-      planId: PlanId.PayAsYouGo,
-      status: SubscriptionStatus.Active,
+      planId: PlanId.None,
+      status: SubscriptionStatus.Inactive,
     });
+    expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(1);
   });
 });
 

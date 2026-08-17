@@ -42,17 +42,16 @@ async function runSubscriptionGuard(
   const { userId, orgId } = userInfo;
 
   // Consistent read so a trial just written moments earlier is visible —
-  // otherwise a stale read could falsely block an entitled user. The org key is
-  // preferred and the caller's own `CUSTOMER#` row is the fallback, so a member
-  // rides the org's subscription rather than looking for one of their own.
-  const stored = await readSubscription(orgId, userId, { consistentRead: true });
+  // otherwise a stale read could falsely block an entitled user. The row is the
+  // org's, so a member rides the org's subscription rather than looking for one
+  // of their own.
+  const record = await readSubscription(orgId, { consistentRead: true });
 
   // No record, or the customer-mapping-only row an abandoned payment modal
   // leaves behind: both leave the trial claim open, and the claim upgrades the
   // row rather than replacing it.
-  if (isTrialClaimable(stored?.record)) return claimTrialOrDeny(userInfo);
+  if (!record || isTrialClaimable(record)) return claimTrialOrDeny(userInfo);
 
-  const record = stored!.record;
   let status: string | undefined = record.subscriptionStatus;
 
   // A record can exist without a status and without being claimable — it holds a
