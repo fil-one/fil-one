@@ -35,7 +35,8 @@ that window would be erased rather than merged.
 
 Which orgs get re-copied is decided by **which row is newer**, the legacy row's
 `updatedAt` against the org row's. `rekeySourceUpdatedAt` records what the copy
-was made from and is part of the audit trail, not the signal: it stays frozen
+was made from. It is part of the audit trail rather than the delta signal: it
+stays frozen
 while every ordinary dual-write moves the source, so comparing the two would
 re-flag every account the run already finished and `--verify` would never pass on
 a live stage.
@@ -345,14 +346,21 @@ After the flip deploys, watch the guard's denial rate before starting the cleanu
 below. A rise in `SUBSCRIPTION_INACTIVE` means the backfill missed a cohort, and
 the legacy rows are still there to recover from.
 
-**Expect invariant-violation logs in the window between the flip and the
-cleanup.** All three scan-driven jobs assert one subscription row per org, and
-every org whose `CUSTOMER#` row is still standing trips that assertion on every
-run — `[<job>] INVARIANT VIOLATED: two subscription rows for one org`, naming the
-org row it kept and the legacy row it ignored. That is the expected reading of a
-half-cleaned table, not an incident: the org row always wins, so no job acts on
-the legacy one. Do not point an alarm at that string until the cleanup below has
-run; after it, the line means what it says.
+**The jobs report two shapes here, and they mean different things.** All three
+scan-driven jobs keep one subscription row per org, and each says so at the
+severity the finding deserves:
+
+- `[<job>] Not an org row, skipping` and `[<job>] Leftover CUSTOMER# row beside
+its org row`, at **warning**. Every org whose legacy row is still standing
+  produces one on every run. This is the expected reading of a half-cleaned
+  table: the jobs act on org rows only, so a frozen legacy row can neither
+  disable a paying tenant nor meter usage to a superseded subscription.
+- `[<job>] INVARIANT VIOLATED: two subscription rows for one org`, at **error**,
+  naming both rows' `subscriptionId`s. Two rows of the same kind for one org —
+  the collision the backfill's resolution was supposed to have settled. This one
+  needs a person: check which subscription Stripe is billing.
+
+Point the alarm at the error line. The warnings go away with the cleanup below.
 
 ## Delete the CUSTOMER# rows
 
@@ -363,10 +371,12 @@ and quiet.
 Preconditions, all of them:
 
 1. The flip is deployed to the stage, and `--verify` passed before it merged.
-2. At least one full billing cycle of the lifecycle jobs has run since — the daily
-   grace-period enforcer, the drift checker, and the usage-reporting orchestrator
-   all scan this table, and a clean run of each on org rows alone is the evidence
-   that nothing still reads a `CUSTOMER#` row.
+2. A full run of all three lifecycle jobs — the daily grace-period enforcer, the
+   drift checker, and the usage-reporting orchestrator — with **zero same-kind
+   `INVARIANT VIOLATED` lines** across the three. Leftover `CUSTOMER#` warnings
+   are expected and do not block this step; an error line means two live
+   subscriptions claim one org, and deleting the legacy rows would destroy the
+   evidence of which is which.
 3. No rise in `SUBSCRIPTION_INACTIVE` denials attributable to the flip.
 4. The `--verify` log from the flip gate is still on hand, and the cleanup log
    below records each row **in full** before deleting it: between them they are
@@ -414,9 +424,20 @@ Reach for the revert when the backfill has to be undone **before the flip
 merges** — the `CUSTOMER#` fallback is still in every read path, so reverted
 accounts keep working.
 
+**Check the flip is not deployed to this stage before running either line.** The
+script requires `--only-safe-before-flip-merges`, and the flag's name is the
+reason: after the flip, the org row is the only row anyone reads, so deleting it
+takes the account's subscription with it and every gated route answers
+`SUBSCRIPTION_INACTIVE`. Reverting billing then means reverting that deploy in
+the same change. After the dated cleanup step the deletes also refuse per org,
+because each asserts the `CUSTOMER#` row it promises readers will fall back to
+still exists.
+
 ```sh
-./bin/revert-billing-backfill.ts --stage production 2>&1 | tee billing-revert-dry-run.log
-./bin/revert-billing-backfill.ts --stage production --execute 2>&1 | tee billing-revert.log
+./bin/revert-billing-backfill.ts --stage production --only-safe-before-flip-merges \
+  2>&1 | tee billing-revert-dry-run.log
+./bin/revert-billing-backfill.ts --stage production --only-safe-before-flip-merges --execute \
+  2>&1 | tee billing-revert.log
 ```
 
 The revert deletes only org rows carrying `rekeyedFrom`, and each delete is
@@ -440,4 +461,5 @@ Two asymmetries to know before running it:
 
 **After the flip merges, the revert is not enough on its own.** The org row is the
 only row anyone reads by then, so deleting it locks the account out — reverting
-billing means reverting that deploy in the same change.
+billing means reverting that deploy in the same change. The required flag is
+there so nobody discovers this after the fact.

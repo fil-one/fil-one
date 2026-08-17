@@ -71,7 +71,6 @@ const ddbMock = mockClient(DynamoDBClient);
 import { handler } from './stripe-webhook.js';
 import { WEBHOOK_STATUS_SYNC_RETRY } from '../lib/region-helpers.js';
 import { BILLING_IDENTITY_PROJECTION } from '../lib/subscription-store.js';
-import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -682,6 +681,28 @@ describe('stripe-webhook handler', () => {
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
+    it('swallows a missing billing row, with a metric so it is not silent', async () => {
+      // The event carries a card's last four and expiry. A 500 would buy three
+      // days of Stripe retries and alert noise to redeliver that; post-verify
+      // the state is near-impossible and the metric is how anyone learns of it.
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      setupStripeEvent('customer.updated', mockCustomerObject());
+      const noRow = new Error('The conditional request failed');
+      (noRow as { name: string }).name = 'ConditionalCheckFailedException';
+      ddbMock.on(UpdateItemCommand).rejects(noRow);
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0); // claim not released
+      expect(
+        reportMetricMock.mock.calls.some(
+          ([event]) => (event as { BillingRowMissing?: number }).BillingRowMissing === 1,
+        ),
+      ).toBe(true);
+      errorSpy.mockRestore();
+    });
+
     it('fetches payment method via paymentMethods.retrieve when default_payment_method is a string ID', async () => {
       setupStripeEvent(
         'customer.updated',
@@ -797,7 +818,7 @@ describe('stripe-webhook handler', () => {
       // Stripe retries out of order: a cancellation for the trial subscription
       // an upgrade replaced can arrive after the replacement is live.
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
-      setupCustomerRetrieveWithOrg();
+      setupCustomerRetrieve();
       setupStoredIdentity({ subscriptionId: 'sub_the_live_one' });
 
       const result = await handler(buildWebhookEvent('{}'));
@@ -810,7 +831,7 @@ describe('stripe-webhook handler', () => {
 
     it('grants the grace period when the event names the subscription on the row', async () => {
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
-      setupCustomerRetrieveWithOrg();
+      setupCustomerRetrieve();
       setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
 
       await handler(buildWebhookEvent('{}'));
@@ -828,7 +849,7 @@ describe('stripe-webhook handler', () => {
           parent: { subscription_details: { subscription: 'sub_the_old_one' } },
         }),
       );
-      setupCustomerRetrieveWithOrg();
+      setupCustomerRetrieve();
       setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
 
       await handler(buildWebhookEvent('{}'));
@@ -844,7 +865,7 @@ describe('stripe-webhook handler', () => {
           parent: { subscription_details: { subscription: MOCK_SUBSCRIPTION_ID } },
         }),
       );
-      setupCustomerRetrieveWithOrg();
+      setupCustomerRetrieve();
       setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
 
       await handler(buildWebhookEvent('{}'));
@@ -860,7 +881,7 @@ describe('stripe-webhook handler', () => {
       // under an id the row has never seen, and refusing it as superseded would
       // leave the account on the plan it just left.
       setupStripeEvent('customer.subscription.updated', mockSubscription());
-      setupCustomerRetrieveWithOrg();
+      setupCustomerRetrieve();
       setupStoredIdentity({ subscriptionId: 'sub_the_previous_one' });
 
       await handler(buildWebhookEvent('{}'));

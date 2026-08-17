@@ -108,15 +108,7 @@ export async function activateSubscription(role: Role, userId: string): Promise<
   await patchSubscription(role, userId, { subscriptionStatus: status, ...extra });
 }
 
-/**
- * Patch every key the row lives under.
- *
- * The application reads the org key and falls back to the user's, so patching
- * one of them leaves the run at the mercy of whether the backfill has reached
- * this test account: the suite would set up `past_due` on the legacy row and the
- * app would keep serving `active` off the org twin. Both are patched, and it is
- * an error for neither to exist.
- */
+/** Patch the org's row — the only key the application reads. */
 async function patchSubscription(
   role: Role,
   userId: string,
@@ -137,31 +129,31 @@ async function patchSubscription(
   });
 
   const orgId = await resolveOrgId(userId);
-  const keys = [...(orgId ? [`ORG#${orgId}`] : []), `CUSTOMER#${userId}`];
-
-  let patched = 0;
-  for (const pk of keys) {
-    try {
-      await getDynamoClient().send(
-        new UpdateItemCommand({
-          TableName: getBillingTableName(),
-          Key: { pk: { S: pk }, sk: { S: 'SUBSCRIPTION' } },
-          UpdateExpression: `SET ${sets.join(', ')}`,
-          ExpressionAttributeNames: names,
-          ExpressionAttributeValues: values,
-          ConditionExpression: 'attribute_exists(pk)',
-        }),
-      );
-      patched += 1;
-    } catch (err) {
-      if (!(err instanceof ConditionalCheckFailedException)) throw err;
-    }
+  if (!orgId) {
+    throw new Error(
+      `E2E test user ${userId} (role=${role}) belongs to no org, so their billing row cannot ` +
+        `be addressed. Check the user's OrgTable membership rows.`,
+    );
   }
 
-  if (patched === 0) {
-    throw new Error(
-      `E2E test user ${userId} (role=${role}, org=${orgId ?? 'unresolved'}) has no BillingTable ` +
-        `record on either key. Pre-seed it (orgId, stripeCustomerId, subscriptionId) before running E2E tests.`,
+  try {
+    await getDynamoClient().send(
+      new UpdateItemCommand({
+        TableName: getBillingTableName(),
+        Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'SUBSCRIPTION' } },
+        UpdateExpression: `SET ${sets.join(', ')}`,
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
+        ConditionExpression: 'attribute_exists(pk)',
+      }),
     );
+  } catch (err) {
+    if (err instanceof ConditionalCheckFailedException) {
+      throw new Error(
+        `E2E test user ${userId} (role=${role}, org=${orgId}) has no BillingTable record at ` +
+          `ORG#${orgId}. Pre-seed it (orgId, userId, stripeCustomerId, subscriptionId) before running E2E tests.`,
+      );
+    }
+    throw err;
   }
 }

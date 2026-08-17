@@ -101,6 +101,31 @@ describe('subscriptionGuardMiddleware', () => {
     ddbMock.on(GetItemCommand).resolves({});
   });
 
+  it('refuses to mint a trial while a pre-re-key CUSTOMER# row is still standing', async () => {
+    // That row means the backfill missed this account, so the org already has
+    // billing this deploy cannot see. Minting would give one account two Stripe
+    // customers, two subscriptions and two meters — not something a later run
+    // can undo.
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'SUBSCRIPTION' } } })
+      .resolves({})
+      .on(GetItemCommand, { Key: { pk: { S: `CUSTOMER#${USER_ID}` }, sk: { S: 'SUBSCRIPTION' } } })
+      .resolves({ Item: { pk: { S: `CUSTOMER#${USER_ID}` } } });
+
+    const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
+    const result = await before(buildMiddyRequest(soloOwner()));
+
+    expect(mockEnsureTrialEntitlement).not.toHaveBeenCalled();
+    // Denied loudly, not quietly served: the customer sees a retryable error and
+    // the on-call sees a metric.
+    expectErrorResponse(result, 503, {
+      message: 'Billing is temporarily unavailable for this account. Please try again shortly.',
+      code: ApiErrorCode.SUBSCRIPTION_INACTIVE,
+    });
+    errorSpy.mockRestore();
+  });
+
   it('allows when no billing record exists and the user is entitled to a trial', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: undefined });
     mockEnsureTrialEntitlement.mockResolvedValue(true);

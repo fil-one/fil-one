@@ -106,6 +106,26 @@ export async function readSubscription(
 /** The attributes a writer reads to check the row still names the objects its event is about. */
 export const BILLING_IDENTITY_PROJECTION = 'stripeCustomerId, subscriptionId';
 
+/**
+ * Whether a pre-re-key `CUSTOMER#` row is still standing for this user.
+ *
+ * Nothing reads those rows any more, so this asks one question only: has the
+ * backfill missed this account? The trial claim needs to know before it mints a
+ * second Stripe customer for an org that already has one. It disappears with the
+ * runbook's dated cleanup step, which is what makes the question meaningless.
+ */
+export async function legacyRowExists(userId: string): Promise<boolean> {
+  const { Item } = await dynamo.send(
+    new GetItemCommand({
+      TableName: Resource.BillingTable.name,
+      Key: { pk: { S: SubscriptionKeys.legacyPk(userId) }, sk: { S: SubscriptionKeys.sk() } },
+      ProjectionExpression: 'pk',
+      ConsistentRead: true,
+    }),
+  );
+  return Item !== undefined;
+}
+
 /** The attributes every row carries about who it belongs to. */
 export function ownerAttributes({
   orgId,
@@ -365,7 +385,12 @@ export function scannedSubscription(
     typeof record.subscriptionId === 'string' && record.subscriptionId
       ? record.subscriptionId
       : undefined;
-  return { pk, orgId, ...(userId ? { userId } : {}), ...(subscriptionId ? { subscriptionId } : {}) };
+  return {
+    pk,
+    orgId,
+    ...(userId ? { userId } : {}),
+    ...(subscriptionId ? { subscriptionId } : {}),
+  };
 }
 
 /**
@@ -468,6 +493,33 @@ export interface SubscriptionScanOptions<T extends ScannedSubscription> {
  * legacy row arriving ALONE for an org — the cohort the backfill missed — is
  * skipped rather than acted on, which is the safe half of that trade.
  */
+/** The owner of a row this job may act on, or undefined with the reason logged. */
+function scannableOwner(
+  record: Record<string, unknown>,
+  job: string,
+): ScannedSubscription | undefined {
+  const owner = scannedSubscription(record);
+  if (!owner) {
+    console.warn(`[${job}] Missing orgId, skipping`, { pk: record.pk });
+    return undefined;
+  }
+  if (!SubscriptionKeys.isOrgPk(owner.pk)) {
+    console.warn(`[${job}] Not an org row, skipping`, {
+      pk: owner.pk,
+      orgId: owner.orgId,
+      hint: 'a CUSTOMER# row the dated cleanup step has not removed yet',
+    });
+    return undefined;
+  }
+  if (!owner.userId) {
+    // Every writer stamps it and the backfill copied it, so a row without one
+    // predates both — and the close-out paths need it now that the key does not
+    // carry it.
+    console.warn(`[${job}] Subscription row with no userId`, { pk: owner.pk });
+  }
+  return owner;
+}
+
 export async function scanSubscriptions<T extends ScannedSubscription>({
   job,
   filterExpression,
@@ -489,25 +541,8 @@ export async function scanSubscriptions<T extends ScannedSubscription>({
 
     for (const item of result.Items ?? []) {
       const record = unmarshall(item);
-      const owner = scannedSubscription(record);
-      if (!owner) {
-        console.warn(`[${job}] Missing orgId, skipping`, { pk: record.pk });
-        continue;
-      }
-      if (!SubscriptionKeys.isOrgPk(owner.pk)) {
-        console.warn(`[${job}] Not an org row, skipping`, {
-          pk: owner.pk,
-          orgId: owner.orgId,
-          hint: 'a CUSTOMER# row the dated cleanup step has not removed yet',
-        });
-        continue;
-      }
-      if (!owner.userId) {
-        // Every writer stamps it and the backfill copied it, so a row without one
-        // predates both — and the close-out paths need it now that the key does
-        // not carry it.
-        console.warn(`[${job}] Subscription row with no userId`, { pk: owner.pk });
-      }
+      const owner = scannableOwner(record, job);
+      if (!owner) continue;
       const candidate = select(record, owner);
       if (candidate) selected.push(candidate);
     }

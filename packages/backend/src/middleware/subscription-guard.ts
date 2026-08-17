@@ -8,7 +8,12 @@ import type {
 import { ApiErrorCode, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { SubscriptionRecord } from '../lib/dynamo-records.js';
-import { readSubscription, updateSubscription } from '../lib/subscription-store.js';
+import { emitTrialClaimBlockedByLegacyRow } from '../lib/stripe-webhook-metrics.js';
+import {
+  legacyRowExists,
+  readSubscription,
+  updateSubscription,
+} from '../lib/subscription-store.js';
 import { claimTrialIfEligible, isTrialClaimable } from '../lib/trial-claim.js';
 import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -105,6 +110,24 @@ async function runSubscriptionGuard(
 async function claimTrialOrDeny(
   userInfo: UserInfo,
 ): Promise<APIGatewayProxyStructuredResultV2 | void> {
+  // The claim mints a Stripe customer and a subscription. If a pre-re-key
+  // `CUSTOMER#` row is still standing for this user, the backfill missed their
+  // account and this org already has billing that nothing here can see — minting
+  // would give one account two Stripe customers, two subscriptions, and two
+  // meters, which is not something a later run can undo. Refusing costs one
+  // point read on a path that was about to make two Stripe API calls.
+  //
+  // A dead check once the dated cleanup step has deleted those rows, and it goes
+  // with them.
+  if (await legacyRowExists(userInfo.userId)) {
+    emitTrialClaimBlockedByLegacyRow();
+    console.error(
+      '[subscription-guard] Refusing to mint a trial: a pre-re-key CUSTOMER# row still exists',
+      { userId: userInfo.userId, orgId: userInfo.orgId },
+    );
+    return buildBillingUnavailableResponse();
+  }
+
   const outcome = await claimTrialIfEligible(userInfo);
   if (outcome === 'claimed') return undefined;
   if (outcome === 'not-own-org') return buildOrgBillingInactiveResponse();
@@ -199,6 +222,23 @@ function buildOrgBillingInactiveResponse(): APIGatewayProxyStructuredResultV2 {
       message:
         'This organization does not have billing set up. Adding a payment method for it requires the Owner role.',
       code: ApiErrorCode.ORG_BILLING_INACTIVE,
+    })
+    .build();
+}
+
+/**
+ * The account has billing this deploy cannot address — a row the re-key left
+ * behind. Not `SUBSCRIPTION_INACTIVE`: that tells the customer to update their
+ * payment method, and there is nothing wrong with their payment method. A 503
+ * says the same thing to the customer and to the on-call: come back, somebody is
+ * looking at it.
+ */
+function buildBillingUnavailableResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(503)
+    .body({
+      message: 'Billing is temporarily unavailable for this account. Please try again shortly.',
+      code: ApiErrorCode.SUBSCRIPTION_INACTIVE,
     })
     .build();
 }

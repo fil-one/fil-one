@@ -2,7 +2,7 @@ import { convertToAttr } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { PlanId, SubscriptionStatus } from '@filone/shared';
+import { PlanId, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
 import type { BillingInfo, ErrorResponse } from '@filone/shared';
 import type Stripe from 'stripe';
 import { getStripeClient } from '../lib/stripe-client.js';
@@ -312,7 +312,7 @@ async function evaluateStatusTransitions(
     new Date(billingRecord.trialEndsAt).getTime() < Date.now()
   ) {
     const gracePeriodEndsAt = new Date(
-      new Date(billingRecord.trialEndsAt).getTime() + 7 * 24 * 60 * 60 * 1000,
+      new Date(billingRecord.trialEndsAt).getTime() + TRIAL_GRACE_DAYS * 24 * 60 * 60 * 1000,
     ).toISOString();
 
     await updateSubscription(owner, {

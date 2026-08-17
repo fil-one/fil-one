@@ -119,7 +119,10 @@ describe('updateSubscription', () => {
   it('lets a writer that puts a whole record create it', async () => {
     ddbMock.on(UpdateItemCommand).resolves({});
 
-    await updateSubscription({ orgId: ORG_ID, userId: USER_ID }, { ...SET_STATUS, createsRow: true });
+    await updateSubscription(
+      { orgId: ORG_ID, userId: USER_ID },
+      { ...SET_STATUS, createsRow: true },
+    );
 
     expect(
       ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input.ConditionExpression,
