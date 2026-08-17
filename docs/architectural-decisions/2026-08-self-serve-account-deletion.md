@@ -17,6 +17,8 @@ After the user submits the deletion confirmation code, one DynamoDB transaction 
 
 These writes share a transaction because a spent code must never exist without a `DELETION` record behind it. Codes are rate limited, so a user left in that state cannot simply retry.
 
+Confirmation is not the only trigger. An admin deleting the org's Stripe customer, the standing response to trial abuse, commits the same deletion: the `customer.deleted` webhook writes the `DELETION` record and raises the profile fence in one transaction, with no code to spend, and invokes the same worker. The handler resolves the org from the deleted customer's `orgId` metadata, which is written at customer creation, and falls back to the billing-row lookup for customers that predate the metadata. The record write is conditional on no record existing, which makes the teardown's own `customer.deleted` echo a no-op and makes the two triggers converge instead of compounding. The record names its trigger, so the erasure receipt distinguishes a user's request from an admin action.
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -98,9 +100,7 @@ This guard is work to do, not a property we already have. On `main` a row-exists
 
 The guard also makes webhook arrival order irrelevant, and the teardown itself causes that race. Cancelling the subscription and deleting the customer fire `customer.subscription.deleted`, the `invoice.*` events and `customer.deleted`, all delivered asynchronously and retried. The worker never waits for any of them. It writes `canceled` itself, and only after the cancellation at Stripe has succeeded, since the scrub is the last step and a failed cancel ends the pass before it. The row and Stripe therefore cannot disagree about the terminal state: a webhook arriving before the scrub is overwritten and one arriving after is refused. The terminal state does not depend on webhook delivery at all. The `customer.updated` handler matters most, being the only writer that can put payment-card details back onto a scrubbed row.
 
-`closeOutDeletedCustomer` stays a separate path rather than folding into the deletion worker, because the two triggers mean different things. The webhook responds to a customer deleted in Stripe, possibly by a person in the dashboard, and that is an entitlement event; routing it into account deletion would let a dashboard action destroy a user account irreversibly. Both paths converge on the same terminal state, and during teardown the worker's own `customers.del` fires this webhook, whose `closeOutDeletedCustomer` call hits the fence and no-ops.
-
-That fence sits at the function's entry rather than on its write, because it disables tenants before it reaches the billing row and a condition on its write would come too late. Its webhook callers already read that row to resolve the org, so the fence rides on the read they make anyway: project `deleted` alongside `orgId` and return early when the flag is set. The check belongs in the function rather than its callers, since four webhook paths reach it.
+`closeOutDeletedCustomer` does not survive this work. Its job, disabling tenants and cancelling the billing record when Stripe reports a customer gone, is a subset of the teardown, and its trigger is not an accident to contain: an admin deleting the org's Stripe customer is the standing response to trial abuse and means the account should go. The `customer.deleted` handler therefore starts the full deletion, as decision 1 describes, and the usage-reporting worker's deleted-customer audit routes through the same entry point. The conditional `DELETION` record write carries the coordination: on the teardown's own echo the record already exists, the write is refused, and the handler acknowledges with a `2xx`. This also retires the old retry contract, in which the handler answered `500` so that Stripe's webhook retries would re-drive a failed region sync. The record and the sweeper own retries now, and the webhook always acknowledges.
 
 **The background jobs skip the org.** Each scheduled job skips any org whose profile carries `deleting`, failing closed when the profile is missing, the opposite of the request paths' fail-open choice; `isOrgDeletedOrDeleting` exists as a separate predicate for exactly that split. This is what covers the window between confirm and scrub, where the billing row is still webhook-writable and carries neither `canceled` nor `deleted`, so the scan filters alone would admit it. A webhook flipping the row to `active` mid-teardown is therefore harmless: the scrub overwrites it, and no job acts on it in the meantime.
 
@@ -143,6 +143,8 @@ Cancellation is a separate step because `customers.del` cancels subscriptions si
 A single best-effort attempt is made to collect the payment. A declined card must not block the teardown, and it does not need to: an outstanding invoice does not block customer deletion and stays open for finance afterwards.
 
 Deleting the customer removes the payment methods attached to it on Stripe's side; Stripe's documentation states that deleting a customer removes all credit card details. Our own copies, the `paymentMethod*` attributes on the billing row, are scrubbed in decision 9, so no card data survives on either side. Invoices and charges are unaffected and keep referencing the customer id, so finance keeps the linkage either way.
+
+When the deletion was triggered by the customer's deletion in Stripe, the customer is already gone when the worker runs. Every step in this list treats a missing or already-deleted customer as success and moves on, the same contract decision 2 sets for Auth0's `404`. The final period goes unbilled in that flow, which is the intended outcome for the abuse case it serves.
 
 ### 8. Teardown order
 
