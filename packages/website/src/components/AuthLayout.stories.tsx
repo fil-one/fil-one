@@ -20,7 +20,7 @@ export const Default: Story = {
     <AuthLayout>
       <div className="flex w-full max-w-sm flex-col gap-6">
         <h2 className="text-2xl font-semibold text-zinc-950">Sign in</h2>
-        <Input onChange={() => {}} placeholder="Email address" />
+        <Input aria-label="Email address" onChange={() => {}} placeholder="Email address" />
         <Button variant="primary">Continue</Button>
       </div>
     </AuthLayout>

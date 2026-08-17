@@ -224,6 +224,7 @@ function AskSection({
       </p>
       <div className="flex gap-2">
         <Input
+          aria-label="Ask a question"
           placeholder={
             notYetIndexed ? 'Waiting for the first indexing pass…' : `Ask about ${bucket.name}…`
           }

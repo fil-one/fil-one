@@ -6,10 +6,19 @@ import { CheckIcon } from '@phosphor-icons/react/dist/ssr';
 import clsx from 'clsx';
 
 import { Icon } from './Icon';
+import { warnIfUnnamedControl } from './accessible-control.js';
 
-type CheckboxProps = Omit<HeadlessCheckboxProps, 'children' | 'className'>;
+/**
+ * Headless UI renders the checkbox as a `<span role="checkbox">`, which no
+ * `<label>` can target, so the name has to come from `aria-label`.
+ */
+type CheckboxProps = Omit<
+  HeadlessCheckboxProps,
+  'children' | 'className' | 'id' | 'aria-label' | 'aria-labelledby'
+> & { 'aria-label': string };
 
 export function Checkbox(props: CheckboxProps) {
+  warnIfUnnamedControl('Checkbox', props['aria-label']);
   return (
     <HeadlessCheckbox
       {...props}
