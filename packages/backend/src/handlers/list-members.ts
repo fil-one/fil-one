@@ -1,12 +1,10 @@
-import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { Resource } from 'sst';
 import type { ListMembersResponse, MemberSummary } from '@filone/shared';
-import { getDynamoClient } from '../lib/ddb-client.js';
 import { listMembers } from '../lib/org-membership.js';
 import type { OrgMembership } from '../lib/org-membership.js';
+import { readUserProfile } from '../lib/user-profile.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -53,6 +51,10 @@ export async function baseHandler(
 }
 
 async function summarize(member: OrgMembership): Promise<MemberSummary> {
+  // A profile that cannot be read costs that member their display fields rather
+  // than the whole roster: the row that says they are a member has already been
+  // read, and a page that renders everyone but one name beats one that renders
+  // nobody.
   const profile = await readUserProfile(member.userId);
 
   return {
@@ -64,35 +66,6 @@ async function summarize(member: OrgMembership): Promise<MemberSummary> {
     ...(profile?.email ? { email: profile.email } : {}),
     ...(profile?.name ? { name: profile.name } : {}),
   };
-}
-
-/**
- * The member's own profile row, or undefined when it cannot be read.
- *
- * A failed read costs that member their display fields rather than the whole
- * roster: the row that says they are a member has already been read, and a page
- * that renders everyone but one name beats a page that renders nobody.
- */
-async function readUserProfile(
-  userId: string,
-): Promise<{ email?: string; name?: string } | undefined> {
-  try {
-    const { Item } = await getDynamoClient().send(
-      new GetItemCommand({
-        TableName: Resource.UserInfoTable.name,
-        Key: { pk: { S: `USER#${userId}` }, sk: { S: 'PROFILE' } },
-        ProjectionExpression: 'email, #name',
-        ExpressionAttributeNames: { '#name': 'name' },
-      }),
-    );
-    return { email: Item?.email?.S, name: Item?.name?.S };
-  } catch (err) {
-    console.error('[list-members] Profile read failed — listing the member unnamed', {
-      userId,
-      error: err,
-    });
-    return undefined;
-  }
 }
 
 export const handler = middy(baseHandler)

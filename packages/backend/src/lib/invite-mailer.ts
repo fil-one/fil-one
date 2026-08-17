@@ -7,10 +7,11 @@ import { Stage } from '@filone/shared';
  * Two behaviours, chosen by stage, because the credential the send needs does
  * not exist everywhere: `SendGridApiKey` is created only on staging and
  * production (sst.config.ts). Every other stage — a developer's `sst dev`, an
- * ephemeral PR stack, the e2e suite — gets the no-op mailer, which writes the
- * accept URL to the log. That is not a degraded fallback; it is how a test or a
- * developer obtains the invitation link at all, since no mailbox on those
- * stages would ever receive it.
+ * ephemeral PR stack, the e2e suite — gets the no-op mailer, which records that
+ * an invitation went unannounced and identifies it by id. The accept URL is not
+ * in that line: it carries the token, and nothing in this repo logs a
+ * credential. Handing a developer a working link on a stage that sends no mail
+ * is a dev-tool question, not a logging one.
  *
  * Sending never throws. The caller has already committed the invitation row
  * before it reaches here, and the row is the invitation — the email is only its
@@ -38,6 +39,16 @@ export interface SendInvitationEmailParams {
    * recipient should see the address they gave out.
    */
   to: string;
+  /**
+   * The same address lowercased. Log-only: every line this module writes names
+   * the invitation by its ids and this address, so an operator reading a send
+   * failure can find the row without the mail body being in the log.
+   */
+  emailNorm: string;
+  /** Log-only, so a failure names the row it belongs to rather than an org name. */
+  orgId: string;
+  /** Log-only, and the id the audit event and the pending list both use. */
+  inviteId: string;
   orgName: string;
   inviterName?: string;
   inviterEmail?: string;
@@ -45,6 +56,35 @@ export interface SendInvitationEmailParams {
   /** ISO-8601, as stored on the invitation row. */
   expiresAt: string;
 }
+
+/**
+ * How long the send may take before it counts as failed.
+ *
+ * Five seconds, well inside the route's ten: the invitation row is already
+ * committed, so the only thing a longer wait buys is a request that times out
+ * with no answer instead of a 201 that honestly says the mail did not go.
+ */
+const SEND_TIMEOUT_MS = 5_000;
+
+/**
+ * A value safe to interpolate into the plain-text body.
+ *
+ * The HTML part escapes for markup; the text part has its own injection, and it
+ * is line-based: a display name carrying CR or LF opens a new line in a body
+ * whose lines a reader takes as ours ("Accept the invitation:" followed by
+ * somebody else's URL). Control characters go the same way — they render as
+ * nothing and hide what follows.
+ */
+function sanitizeTextValue(value: string): string {
+  return value.replace(CONTROL_CHARACTERS, ' ').trim();
+}
+
+/**
+ * Unicode's control category: C0 and C1, which is CR, LF, NUL, DEL and the rest.
+ * Named by category rather than by code-point range, so the intent reads and no
+ * control character has to be written into this file to say it.
+ */
+const CONTROL_CHARACTERS = /\p{Cc}+/gu;
 
 /**
  * How the invitation names the person who sent it. Both fields are optional
@@ -75,9 +115,10 @@ function buildSubject(orgName: string): string {
 }
 
 function buildTextBody(params: SendInvitationEmailParams): string {
-  const inviter = describeInviter(params.inviterName, params.inviterEmail);
+  const inviter = sanitizeTextValue(describeInviter(params.inviterName, params.inviterEmail));
+  const orgName = sanitizeTextValue(params.orgName);
   return [
-    `${inviter} invited you to join ${params.orgName} on Fil One.`,
+    `${inviter} invited you to join ${orgName} on Fil One.`,
     '',
     'Accept the invitation:',
     params.acceptUrl,
@@ -130,6 +171,9 @@ async function sendThroughSendGrid(
 
     const response = await fetch(SENDGRID_MAIL_SEND_URL, {
       method: 'POST',
+      // A hung send must not hold the route open: the row is committed, so a
+      // timeout is a failed send like any other and the caller says so.
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
       headers: {
         Authorization: `Bearer ${Resource.SendGridApiKey.value}`,
         'Content-Type': 'application/json',
@@ -152,19 +196,35 @@ async function sendThroughSendGrid(
       console.error('[invite-mailer] SendGrid rejected the invitation email', {
         status: response.status,
         body,
-        orgName: params.orgName,
+        ...invitationLogFields(params),
       });
       return false;
     }
 
     return true;
   } catch (err) {
+    // A timeout arrives here too, as an AbortError, and is the same outcome.
     console.error('[invite-mailer] SendGrid request failed', {
-      orgName: params.orgName,
+      ...invitationLogFields(params),
       error: err,
     });
     return false;
   }
+}
+
+/**
+ * How every line in this module names an invitation: by the ids that address the
+ * row and the address it went to. Never the accept URL, and so never the token —
+ * "logged by id, never by hash" is the convention the RAG key rows already hold
+ * to, and a token in a log is a token in a log aggregator.
+ */
+function invitationLogFields(params: SendInvitationEmailParams) {
+  return {
+    orgId: params.orgId,
+    inviteId: params.inviteId,
+    emailNorm: params.emailNorm,
+    orgName: params.orgName,
+  };
 }
 
 /**
@@ -179,14 +239,13 @@ export async function sendInvitationEmail(params: SendInvitationEmailParams): Pr
     return sendThroughSendGrid(params, stage === Stage.Production);
   }
 
-  // The log line is the delivery mechanism on this stage, so it carries the
-  // whole invitation: which address, which org, the URL that accepts it, and
-  // when it stops working.
-  console.log('[invite-mailer] Stage sends no email — invitation accept URL', {
+  // Which invitation was not sent, and to whom — never the accept URL. The
+  // token is in that URL, and a token in a log is a credential in whatever the
+  // logs are shipped to. A stage that needs a working link needs a dev tool that
+  // mints one on demand, not a log line every stage writes.
+  console.log('[invite-mailer] Stage sends no email — invitation left unannounced', {
     stage,
-    to: params.to,
-    orgName: params.orgName,
-    acceptUrl: params.acceptUrl,
+    ...invitationLogFields(params),
     expiresAt: params.expiresAt,
   });
   return false;

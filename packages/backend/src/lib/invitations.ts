@@ -1,5 +1,10 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { GetItemCommand, QueryCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
+import {
+  GetItemCommand,
+  QueryCommand,
+  TransactWriteItemsCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import type { AttributeValue, TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
@@ -34,6 +39,13 @@ import { OrgKeys } from './org-membership.js';
  * invitation was ever issued, and the row is what tells an operator why nobody
  * joined.
  *
+ * One address holds at most one live invitation. Inviting an address that
+ * already has one revokes it in the same transaction that writes the new one
+ * (`handlers/create-invitation.ts`), which is what makes re-inviting the whole
+ * recovery story: a send that failed, a link somebody lost, a role somebody
+ * mistyped are all fixed by inviting again, and none of them leaves a second
+ * usable token or occupies a second slot under the cap.
+ *
  * The record is transport-independent on purpose: nothing here mentions the
  * mailer. An SSO-era switch to Auth0-delivered invitations replaces the send and
  * the token and leaves this lifecycle — including the inviter re-check and the
@@ -63,6 +75,13 @@ export interface InvitationRecord {
    * `RagKeyRecord.tokenHash` is for.
    */
   tokenHash: string;
+  /**
+   * The send after the row landed did not reach SendGrid. Stamped best-effort
+   * after the fact rather than written with the row, because the row is the
+   * invitation and the send is a later, separate outcome — and it is what lets
+   * the pending list tell a dead row from one the recipient is ignoring.
+   */
+  lastSendFailed?: boolean;
 }
 
 /**
@@ -126,6 +145,7 @@ export function invitationSummary(record: InvitationRecord, now = new Date()): I
     expiresAt: record.expiresAt,
     status: record.status,
     expired: isInvitationExpired(record, now),
+    ...(record.lastSendFailed ? { lastSendFailed: true } : {}),
   };
 }
 
@@ -243,12 +263,30 @@ export async function resolveInvitationByToken(
 }
 
 /**
- * The most invitation rows one Query walk will collect. An org's pending
- * invitations are capped well below this; the rest of a partition is accepted
- * and revoked history, which the list filters out and the M2 export reads
- * properly. Truncating loudly beats paging an unbounded history on a request.
+ * The point at which an org's invitation partition stops being explicable.
+ *
+ * Not a page size and not a display limit: the walk below pages to exhaustion,
+ * because every consumer of this list is a correctness gate. The pending filter
+ * decides what an operator can revoke, the cap decides whether another
+ * invitation may be issued, and the demotion and removal sweeps decide which
+ * links stop working — all three read a subset in ascending-UUID order, which
+ * correlates with neither status nor age, so a silent truncation makes each of
+ * them quietly wrong.
+ *
+ * The bound that remains is a circuit breaker set far above any plausible org:
+ * a partition holding this many rows is a bug or an attack, and hitting it
+ * throws rather than returning a partial answer. Failing the request is the only
+ * safe reading — a gate computed from part of the list is worse than no answer.
  */
-const MAX_INVITATION_ROWS = 500;
+const INVITATION_ROW_LIMIT = 20_000;
+
+/** Thrown when an org's invitation partition exceeds {@link INVITATION_ROW_LIMIT}. */
+export class InvitationListTooLargeError extends Error {
+  constructor(readonly orgId: string) {
+    super(`Organization ${orgId} holds more than ${INVITATION_ROW_LIMIT} invitation rows`);
+    this.name = 'InvitationListTooLargeError';
+  }
+}
 
 /** Every invitation row in an org, whatever its status. */
 export async function listInvitations(orgId: string): Promise<InvitationRecord[]> {
@@ -276,12 +314,12 @@ export async function listInvitations(orgId: string): Promise<InvitationRecord[]
       if (record) invitations.push(record);
     }
 
-    if (invitations.length >= MAX_INVITATION_ROWS) {
-      console.error('[invitations] Invitation list truncated at the cap', {
+    if (invitations.length > INVITATION_ROW_LIMIT) {
+      console.error('[invitations] Invitation partition is beyond any plausible org', {
         orgId,
-        cap: MAX_INVITATION_ROWS,
+        limit: INVITATION_ROW_LIMIT,
       });
-      return invitations.slice(0, MAX_INVITATION_ROWS);
+      throw new InvitationListTooLargeError(orgId);
     }
 
     startKey = LastEvaluatedKey;
@@ -299,6 +337,35 @@ export async function listUsableInvitations(
 }
 
 /**
+ * Which of a set of invitations one member issued.
+ *
+ * A filter over a list the caller already holds, because the three sweeps that
+ * need it — demotion, removal, and re-inviting an address — all start from the
+ * same read of the org's usable invitations and would otherwise walk the
+ * partition once each.
+ */
+export function invitationsFrom(
+  invitations: InvitationRecord[],
+  invitedBy: string,
+): InvitationRecord[] {
+  return invitations.filter((record) => record.invitedBy === invitedBy);
+}
+
+/**
+ * Which of them were addressed to one email address, already normalized.
+ *
+ * `emailNorm` rather than the typed form, for the reason the row stores both:
+ * the address is matched, not displayed, and case is the only difference the
+ * comparison may ignore.
+ */
+export function invitationsTo(
+  invitations: InvitationRecord[],
+  emailNorm: string,
+): InvitationRecord[] {
+  return invitations.filter((record) => record.emailNorm === emailNorm);
+}
+
+/**
  * The pending invitations one member issued.
  *
  * Read when that member is demoted or removed, because an invitation must not
@@ -311,9 +378,37 @@ export async function pendingInvitationsFrom(
   invitedBy: string,
   now = new Date(),
 ): Promise<InvitationRecord[]> {
-  return (await listUsableInvitations(orgId, now)).filter(
-    (record) => record.invitedBy === invitedBy,
-  );
+  return invitationsFrom(await listUsableInvitations(orgId, now), invitedBy);
+}
+
+/**
+ * Every usable invitation a removal has to retire, from one read of the
+ * partition.
+ *
+ * Two families, and the second is the one that matters. Invitations the member
+ * ISSUED go because no role of theirs remains to justify them. Invitations
+ * addressed TO them go because their token still works: a removed member holding
+ * an old link redeems it and walks back in at the role that link carries, which
+ * for a stale Owner invitation means re-entering as Owner after being demoted
+ * and removed. Nothing else on the accept path refuses it — the invitee's email
+ * still matches, and the inviter is still an Admin or Owner.
+ *
+ * Deduplicated by id, because a member who invited themselves is in both.
+ */
+export async function pendingInvitationsForRemoval(
+  orgId: string,
+  { userId, emailNorm }: { userId: string; emailNorm?: string },
+  now = new Date(),
+): Promise<InvitationRecord[]> {
+  const usable = await listUsableInvitations(orgId, now);
+  const doomed = new Map<string, InvitationRecord>();
+
+  for (const record of invitationsFrom(usable, userId)) doomed.set(record.inviteId, record);
+  if (emailNorm) {
+    for (const record of invitationsTo(usable, emailNorm)) doomed.set(record.inviteId, record);
+  }
+
+  return [...doomed.values()];
 }
 
 /**
@@ -468,3 +563,39 @@ export async function revokeDeferred(invitations: InvitationRecord[]): Promise<v
 }
 
 const REVOCATIONS_PER_TRANSACTION = Math.floor(TRANSACT_WRITE_ITEM_LIMIT / ITEMS_PER_REVOCATION);
+
+/**
+ * Record that the invitation's email did not go out.
+ *
+ * After the fact and best-effort: the row is committed before the send, the
+ * response already reports `emailSent: false`, and failing the request over a
+ * flag would fail a request whose work landed. What the flag buys is the pending
+ * list — an operator looking at a row nobody accepted can tell "we never
+ * delivered this" from "they have not clicked it", and re-inviting the same
+ * address replaces the row either way.
+ *
+ * Conditioned on the row existing so a revoke that raced the send does not
+ * resurrect one attribute of a row somebody just retired.
+ */
+export async function markInvitationSendFailed(record: InvitationRecord): Promise<void> {
+  try {
+    await getDynamoClient().send(
+      new UpdateItemCommand({
+        TableName: Resource.OrgTable.name,
+        Key: {
+          pk: { S: OrgKeys.orgPk(record.orgId) },
+          sk: { S: OrgKeys.inviteSk(record.inviteId) },
+        },
+        UpdateExpression: 'SET lastSendFailed = :true',
+        ConditionExpression: 'attribute_exists(pk)',
+        ExpressionAttributeValues: { ':true': { BOOL: true } },
+      }),
+    );
+  } catch (err) {
+    console.error('[invitations] Could not stamp the failed send on the invitation', {
+      orgId: record.orgId,
+      inviteId: record.inviteId,
+      error: err,
+    });
+  }
+}

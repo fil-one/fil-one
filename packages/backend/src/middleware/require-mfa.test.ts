@@ -109,11 +109,55 @@ describe('requireMfaIfEnrolled', () => {
     mockGetMfaEnrollments.mockResolvedValue([]);
   });
 
-  it.each([['mfa'], ['phr']])('passes on amr %s without asking Auth0 anything', async (method) => {
-    const result = await requireMfaIfEnrolled().before(buildRequest({ amr: [method] }));
+  it.each([['mfa'], ['phr']])(
+    'passes a recent amr %s without asking Auth0 anything',
+    async (method) => {
+      const result = await requireMfaIfEnrolled().before(
+        buildRequest({ amr: [method], authTime: secondsAgo(10) }),
+      );
 
-    expect(result).toBeUndefined();
-    expect(mockGetMfaEnrollments).not.toHaveBeenCalled();
+      expect(result).toBeUndefined();
+      expect(mockGetMfaEnrollments).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([['mfa'], ['phr']])(
+    'refuses amr %s from a session that is no longer fresh',
+    async (method) => {
+      // `amr` says WHICH kind of authentication satisfies the gate; `auth_time`
+      // says WHEN it happened, and a step-up needs both. An MFA challenge answered
+      // this morning is a fact about the session, not proof about whoever is at
+      // the keyboard now — and the docstrings' five minutes has to be true.
+      const result = await requireMfaIfEnrolled().before(
+        buildRequest({ amr: [method], authTime: secondsAgo(STEP_UP_MAX_AGE_SECONDS + 60) }),
+      );
+
+      expect(result).toMatchObject({
+        statusCode: 401,
+        body: JSON.stringify({ error: 'step_up_required' }),
+      });
+    },
+  );
+
+  it('refuses an MFA session whose token asserts no auth_time', async () => {
+    // OIDC §12.2: a refresh-token grant must not stamp a new `auth_time`, and
+    // Auth0 strips `amr` from refreshed ID tokens as well. Nothing here pins
+    // Auth0's behaviour — this pins ours, which is to fail closed on a claim we
+    // did not get.
+    const result = await requireMfaIfEnrolled().before(buildRequest({ amr: ['mfa'] }));
+
+    expect(result).toMatchObject({ statusCode: 401 });
+  });
+
+  it('refuses a session claiming to have authenticated in the future', async () => {
+    // Clock skew, or a claim somebody chose. Unclamped, a far-future
+    // `auth_time` would make an arbitrarily old session pass the window.
+    const result = await requireMfaIfEnrolled().before(
+      buildRequest({ amr: ['mfa'], authTime: secondsAgo(-3600) }),
+    );
+
+    expect(result).toMatchObject({ statusCode: 401 });
+    expect(console.error).toHaveBeenCalled();
   });
 
   it('passes a fresh sign-in from a user with nothing enrolled', async () => {

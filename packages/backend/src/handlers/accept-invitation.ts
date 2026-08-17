@@ -80,20 +80,19 @@ export async function baseHandler(
   try {
     await commitAudited({
       items: [...items, ...retireInvitationItems(invitation, 'accepted')],
-      event: auditEvent({
-        type: 'invite.accepted',
-        actor: userActor({ userId, email: verifiedEmail }),
-        orgId: invitation.orgId,
-        subject: AuditSubjects.invite(invitation.inviteId),
-        details: {
-          inviteId: invitation.inviteId,
-          email: invitation.email,
-          role: invitation.role,
-        },
+      event: acceptedEvent({
+        invitation,
+        userId,
+        verifiedEmail,
+        alreadyMember: Boolean(existing),
       }),
     });
   } catch (err) {
-    return await acceptFailureResponse(err, [...labels, 'invitation', 'token'], invitation, userId);
+    return await acceptFailureResponse(err, [...labels, 'invitation', 'token'], {
+      invitation,
+      userId,
+      verifiedEmail,
+    });
   }
 
   return await acceptedResponse({
@@ -142,6 +141,38 @@ function joinLabels(invitation: InvitationRecord): string[] {
 }
 
 /**
+ * The event, with the one field that says whether anything was granted.
+ *
+ * `alreadyMember` is the `key.created.recovered` idiom: a reader of the log sees
+ * two shapes of success here — one that added a member and one that only spent
+ * an invitation — and without the marker they are the same record.
+ */
+function acceptedEvent({
+  invitation,
+  userId,
+  verifiedEmail,
+  alreadyMember,
+}: {
+  invitation: InvitationRecord;
+  userId: string;
+  verifiedEmail?: string;
+  alreadyMember: boolean;
+}) {
+  return auditEvent({
+    type: 'invite.accepted',
+    actor: userActor({ userId, email: verifiedEmail }),
+    orgId: invitation.orgId,
+    subject: AuditSubjects.invite(invitation.inviteId),
+    details: {
+      inviteId: invitation.inviteId,
+      email: invitation.email,
+      role: invitation.role,
+      ...(alreadyMember ? { alreadyMember: true } : {}),
+    },
+  });
+}
+
+/**
  * Which of the transaction's conditions failed, as an answer the caller can act
  * on.
  *
@@ -154,8 +185,7 @@ function joinLabels(invitation: InvitationRecord): string[] {
 async function acceptFailureResponse(
   err: unknown,
   labels: string[],
-  invitation: InvitationRecord,
-  userId: string,
+  { invitation, userId, verifiedEmail }: AcceptContext,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const failed = cancelledLabels(err, labels);
   if (failed.length === 0) throw err;
@@ -163,6 +193,10 @@ async function acceptFailureResponse(
   if (failed.includes('membership')) {
     const existing = await resolveMembership(invitation.orgId, userId);
     if (existing) {
+      // The whole transaction cancelled, so the invitation is still pending: the
+      // idempotent answer has to carry the retirement it promised, or a link the
+      // caller has already used stays live for a fortnight.
+      await retireAfterRace({ invitation, userId, verifiedEmail });
       return await acceptedResponse({ invitation, role: existing.role, alreadyMember: true });
     }
   }
@@ -182,6 +216,41 @@ async function acceptFailureResponse(
   // The invitation's own condition: revoked, or accepted by another request,
   // between resolving the token and writing.
   return notFoundResponse();
+}
+
+interface AcceptContext {
+  invitation: InvitationRecord;
+  userId: string;
+  verifiedEmail?: string;
+}
+
+/**
+ * Mark the invitation accepted after the join lost its race.
+ *
+ * Its own transaction, because the one it belonged to is gone. The status update
+ * is still conditional on `pending`, so a revoke that landed in the meantime
+ * wins and this cancels — which is the same outcome as never having tried, and
+ * why the failure is logged rather than raised: the caller IS a member of the
+ * org, which is what they asked for, and refusing them over the bookkeeping
+ * would answer failure for a request that succeeded.
+ */
+async function retireAfterRace({
+  invitation,
+  userId,
+  verifiedEmail,
+}: AcceptContext): Promise<void> {
+  try {
+    await commitAudited({
+      items: retireInvitationItems(invitation, 'accepted'),
+      event: acceptedEvent({ invitation, userId, verifiedEmail, alreadyMember: true }),
+    });
+  } catch (err) {
+    console.error('[accept-invitation] Membership landed but the invitation stayed pending', {
+      orgId: invitation.orgId,
+      inviteId: invitation.inviteId,
+      error: err,
+    });
+  }
 }
 
 async function acceptedResponse({

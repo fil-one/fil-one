@@ -401,7 +401,7 @@ describe('POST /api/invitations/accept handler', () => {
     expect(result).toMatchObject({ statusCode: 200 });
   });
 
-  it('refuses a session whose email is not verified', async () => {
+  it('refuses a session whose email is not verified, in the chain', async () => {
     mockJwtVerify.mockResolvedValue({
       payload: { sub: MOCK_SUB, email: EMAIL, email_verified: false },
     });
@@ -409,6 +409,22 @@ describe('POST /api/invitations/accept handler', () => {
     const result = await handler(acceptEvent(), buildContext());
 
     expect(result).toMatchObject({ statusCode: 403 });
+    // Which layer refused matters: this is the shared verification gate, not the
+    // handler's address comparison, and the console's remedy for the two is
+    // different — verify your address, versus sign in as somebody else.
+    expect(body(result).code).toBe(ApiErrorCode.EMAIL_NOT_VERIFIED);
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+  });
+
+  it('refuses a verified session that carries no address at all', async () => {
+    // `email_verified` with no `email` reaches the handler, so the handler's own
+    // branch is what refuses it — there is nothing to compare the invitation to.
+    mockJwtVerify.mockResolvedValue({ payload: { sub: MOCK_SUB, email_verified: true } });
+
+    const result = await handler(acceptEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 403 });
+    expect(body(result).code).toBe(ApiErrorCode.INVITE_EMAIL_MISMATCH);
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
   });
 
@@ -428,10 +444,38 @@ describe('POST /api/invitations/accept handler', () => {
     expect(items.some((item) => item.Put?.Item?.sk?.S === OrgKeys.memberSk(USER_ID))).toBe(false);
   });
 
+  it('keeps the role a member already holds even when the invitation offers more', async () => {
+    // The direction that matters: an Owner invitation redeemed by somebody who
+    // is already a Member must not promote them, and the counter must not move.
+    stubMembershipInInvitingOrg(OrgRole.Member);
+    stubInvitation({ role: OrgRole.Owner });
+
+    const result = await handler(acceptEvent(), buildContext());
+
+    expect(body(result)).toMatchObject({ alreadyMember: true, role: OrgRole.Member });
+    expect(transactItems().some((item) => item.Update?.Key?.sk?.S === 'META')).toBe(false);
+  });
+
+  it('says in the log when an accept granted nothing', async () => {
+    stubMembershipInInvitingOrg(OrgRole.Admin);
+
+    await handler(acceptEvent(), buildContext());
+
+    // Two shapes of success reach this event — one that added a member and one
+    // that only spent an invitation — and without the marker they read alike.
+    expect(auditedEvent().details).toMatchObject({ alreadyMember: true });
+  });
+
+  it('leaves the marker off an accept that did add the member', async () => {
+    await handler(acceptEvent(), buildContext());
+
+    expect(auditedEvent().details).not.toHaveProperty('alreadyMember');
+  });
+
   it('answers success when the membership appeared while the request was in flight', async () => {
     // Two clicks on the same link. The create-only condition loses, and the
     // loser must not be told their invitation failed.
-    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(0, 6));
+    ddbMock.on(TransactWriteItemsCommand).rejectsOnce(cancelledAt(0, 6)).resolves({});
     ddbMock
       .on(GetItemCommand, {
         TableName: 'OrgTable',
@@ -451,6 +495,68 @@ describe('POST /api/invitations/accept handler', () => {
 
     expect(result).toMatchObject({ statusCode: 200 });
     expect(body(result)).toMatchObject({ alreadyMember: true, role: OrgRole.Member });
+  });
+
+  it('still retires the invitation when the join lost that race', async () => {
+    // The whole transaction cancelled, so nothing marked the invitation — and a
+    // link the caller has already used would stay live for a fortnight.
+    ddbMock.on(TransactWriteItemsCommand).rejectsOnce(cancelledAt(0, 6)).resolves({});
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'OrgTable',
+        Key: { pk: { S: OrgKeys.orgPk(INVITING_ORG_ID) }, sk: { S: OrgKeys.memberSk(USER_ID) } },
+      })
+      .resolvesOnce({})
+      .resolves({
+        Item: {
+          pk: { S: OrgKeys.orgPk(INVITING_ORG_ID) },
+          sk: { S: OrgKeys.memberSk(USER_ID) },
+          role: { S: OrgRole.Member },
+          joinedAt: { S: CREATED_AT },
+        },
+      });
+
+    await handler(acceptEvent(), buildContext());
+
+    const calls = ddbMock.commandCalls(TransactWriteItemsCommand);
+    expect(calls).toHaveLength(2);
+    const retry = calls[1].args[0].input.TransactItems ?? [];
+    // The status update, the token delete, and the event — nothing else: the
+    // membership already exists.
+    expect(retry).toHaveLength(3);
+    expect(retry[0].Update).toMatchObject({
+      Key: { pk: { S: OrgKeys.orgPk(INVITING_ORG_ID) }, sk: { S: OrgKeys.inviteSk(INVITE_ID) } },
+      ConditionExpression: '#status = :pending',
+      ExpressionAttributeValues: { ':status': { S: 'accepted' }, ':pending': { S: 'pending' } },
+    });
+    expect(retry[1].Delete?.Key?.pk?.S).toBe(OrgKeys.inviteTokenPk(TOKEN_HASH));
+    expect(unmarshall(auditItemIn(retry)).details).toMatchObject({ alreadyMember: true });
+  });
+
+  it('answers the member success even when that retirement cannot land', async () => {
+    // A revoke that won the race cancels the second transaction too. The caller
+    // is a member of the org, which is what they asked for; the bookkeeping
+    // failure is logged rather than answered.
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(0, 6));
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'OrgTable',
+        Key: { pk: { S: OrgKeys.orgPk(INVITING_ORG_ID) }, sk: { S: OrgKeys.memberSk(USER_ID) } },
+      })
+      .resolvesOnce({})
+      .resolves({
+        Item: {
+          pk: { S: OrgKeys.orgPk(INVITING_ORG_ID) },
+          sk: { S: OrgKeys.memberSk(USER_ID) },
+          role: { S: OrgRole.Member },
+          joinedAt: { S: CREATED_AT },
+        },
+      });
+
+    const result = await handler(acceptEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 200 });
+    expect(console.error).toHaveBeenCalled();
   });
 
   it('refuses when the inviter no longer holds the authority they invited with', async () => {

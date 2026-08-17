@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
+import {
+  DynamoDBClient,
+  GetItemCommand,
+  QueryCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { OrgRole, INVITE_EXPIRY_DAYS } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.js';
 
@@ -13,13 +18,17 @@ import {
   hashInviteToken,
   invitationRows,
   invitationSummary,
+  invitationsFrom,
+  invitationsTo,
   inviteExpiresAt,
   isInvitationExpired,
   isInvitationUsable,
   listInvitations,
   listUsableInvitations,
+  markInvitationSendFailed,
   newInviteToken,
   normalizeInviteEmail,
+  pendingInvitationsForRemoval,
   pendingInvitationsFrom,
   readInvitation,
   resolveInvitationByToken,
@@ -162,6 +171,13 @@ describe('expiry', () => {
 
   it('keeps the token out of the wire shape', () => {
     expect(Object.keys(invitationSummary(record(), NOW))).not.toContain('tokenHash');
+  });
+
+  it('surfaces a failed send, and says nothing when the send worked', () => {
+    // The pending list is where somebody asks why nobody joined, and "we never
+    // delivered this" is a different answer from "they have not clicked it".
+    expect(invitationSummary(record({ lastSendFailed: true }), NOW).lastSendFailed).toBe(true);
+    expect(Object.keys(invitationSummary(record(), NOW))).not.toContain('lastSendFailed');
   });
 });
 
@@ -391,5 +407,127 @@ describe('listInvitations', () => {
 
     // The org id comes from the partition the Query ran in, not from the row.
     expect(found[0].orgId).toBe(ORG_ID);
+  });
+
+  it('pages to exhaustion rather than answering from a prefix', async () => {
+    // Every consumer of this list is a correctness gate — the cap, the pending
+    // view, the demotion and removal sweeps — and the rows arrive in
+    // ascending-UUID order, which correlates with neither status nor age. A
+    // stop at any page would make each of them quietly wrong.
+    stubQuery(
+      Array.from({ length: 6 }, (_unused, page) =>
+        Array.from({ length: 400 }, (_row, index) =>
+          storedItem(record({ inviteId: `invite-${page}-${index}` })),
+        ),
+      ),
+    );
+
+    const found = await listInvitations(ORG_ID);
+
+    expect(found).toHaveLength(2400);
+    expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(6);
+  });
+
+  it('throws rather than answer a gate from part of an implausible partition', async () => {
+    // The bound that remains is a circuit breaker, not a page size. Truncating
+    // would under-count the cap and under-revoke a sweep, silently; failing the
+    // request is the only reading that fails closed.
+    stubQuery(
+      Array.from({ length: 22 }, (_unused, page) =>
+        Array.from({ length: 1000 }, (_row, index) =>
+          storedItem(record({ inviteId: `invite-${page}-${index}` })),
+        ),
+      ),
+    );
+
+    await expect(listInvitations(ORG_ID)).rejects.toThrow(/invitation rows/);
+    expect(console.error).toHaveBeenCalled();
+  });
+});
+
+describe('the sweeps', () => {
+  const issued = record({ inviteId: 'issued-by-them', invitedBy: 'leaver' });
+  const addressed = record({ inviteId: 'addressed-to-them', emailNorm: 'leaver@example.com' });
+  const both = record({
+    inviteId: 'self-invited',
+    invitedBy: 'leaver',
+    emailNorm: 'leaver@example.com',
+  });
+  const unrelated = record({
+    inviteId: 'unrelated',
+    invitedBy: 'somebody-else',
+    emailNorm: 'other@example.com',
+  });
+
+  beforeEach(() => {
+    ddbMock.reset();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    ddbMock
+      .on(QueryCommand)
+      .resolves({ Items: [issued, addressed, both, unrelated].map(storedItem) });
+  });
+
+  it('separates what a member issued from what was sent to them', () => {
+    const all = [issued, addressed, both, unrelated];
+
+    expect(invitationsFrom(all, 'leaver').map((row) => row.inviteId)).toStrictEqual([
+      'issued-by-them',
+      'self-invited',
+    ]);
+    expect(invitationsTo(all, 'leaver@example.com').map((row) => row.inviteId)).toStrictEqual([
+      'addressed-to-them',
+      'self-invited',
+    ]);
+  });
+
+  it('retires both families on a removal, counting the overlap once', async () => {
+    const doomed = await pendingInvitationsForRemoval(
+      ORG_ID,
+      { userId: 'leaver', emailNorm: 'leaver@example.com' },
+      NOW,
+    );
+
+    expect(doomed.map((row) => row.inviteId)).toStrictEqual([
+      'issued-by-them',
+      'self-invited',
+      'addressed-to-them',
+    ]);
+    // One walk of the partition, not one per family.
+    expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(1);
+  });
+
+  it('narrows to what they issued when we hold no address for them', async () => {
+    const doomed = await pendingInvitationsForRemoval(ORG_ID, { userId: 'leaver' }, NOW);
+
+    expect(doomed.map((row) => row.inviteId)).toStrictEqual(['issued-by-them', 'self-invited']);
+  });
+});
+
+describe('markInvitationSendFailed', () => {
+  beforeEach(() => {
+    ddbMock.reset();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  it('stamps the row, conditioned on it still being there', async () => {
+    ddbMock.on(UpdateItemCommand).resolves({});
+
+    await markInvitationSendFailed(record());
+
+    expect(ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input).toMatchObject({
+      TableName: 'OrgTable',
+      Key: { pk: { S: OrgKeys.orgPk(ORG_ID) }, sk: { S: OrgKeys.inviteSk(INVITE_ID) } },
+      UpdateExpression: 'SET lastSendFailed = :true',
+      // A revoke that raced the send wins: the flag must not resurrect one
+      // attribute of a row somebody just retired.
+      ConditionExpression: 'attribute_exists(pk)',
+    });
+  });
+
+  it('never fails the request it belongs to', async () => {
+    ddbMock.on(UpdateItemCommand).rejects(new Error('throttled'));
+
+    await expect(markInvitationSendFailed(record())).resolves.toBeUndefined();
+    expect(console.error).toHaveBeenCalled();
   });
 });

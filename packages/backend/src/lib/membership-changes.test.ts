@@ -213,4 +213,27 @@ describe('cancelledLabels', () => {
 
     expect(cancelledLabels(err, ['membership'])).toStrictEqual(['item1']);
   });
+
+  it.each([
+    ['TransactionConflict'],
+    ['ThrottlingError'],
+    ['ProvisionedThroughputExceeded'],
+    ['ValidationError'],
+  ])('does not read %s as a condition that failed', (code) => {
+    // Every caller turns a named item into a statement about the world — this
+    // org has one Owner, this person is not a member, somebody accepted first —
+    // and those are true only of a guard that fired. A conflict means the
+    // opposite: the write did not happen, try again. So the list stays empty and
+    // the caller's throw stands, which becomes a retryable error rather than a
+    // verdict.
+    const err = cancelled([code, undefined]);
+
+    expect(cancelledLabels(err, ['ownerCount', 'membership'])).toStrictEqual([]);
+  });
+
+  it('names only the items whose conditions failed, beside a conflict', () => {
+    const err = cancelled(['TransactionConflict', 'ConditionalCheckFailed']);
+
+    expect(cancelledLabels(err, ['ownerCount', 'invitation'])).toStrictEqual(['invitation']);
+  });
 });

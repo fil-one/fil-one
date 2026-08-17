@@ -15,10 +15,15 @@ import {
   hashInviteToken,
   invitationRows,
   invitationSummary,
+  invitationsTo,
   inviteExpiresAt,
   listUsableInvitations,
+  markInvitationSendFailed,
   newInviteToken,
   normalizeInviteEmail,
+  planRevocations,
+  retireInvitationItems,
+  revokeDeferred,
 } from '../lib/invitations.js';
 import type { InvitationRecord } from '../lib/invitations.js';
 import { resolveOrgName } from '../lib/org-profile.js';
@@ -46,18 +51,26 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
  * - The **beta flag**, on creation only: an allowlist row for the caller or one
  *   for the org (`lib/orgs-beta.ts`). Accepting is never flagged — an invitee's
  *   experience must not depend on somebody else's allowlist status.
- * - The **cap** on pending invitations, which is the only rate limit the API
- *   has. Revoking or accepting frees a slot.
+ * - The **cap** on live invitations, which counts addresses rather than
+ *   attempts. Revoking or accepting frees a slot, and re-inviting an address
+ *   that already has one takes no new slot at all.
  *
- * Then one transaction writes the invitation, its token lookup, and the audit
- * event, and only after it lands is the email sent. That order is deliberate: the
- * row is the invitation, the email is its announcement, and a send that fails
- * leaves a usable invitation the response reports honestly rather than a
- * rolled-back one. Re-inviting is the retry.
+ * Then one transaction writes the invitation, its token lookup, any live
+ * invitation to the same address it replaces, and the audit event; only after it
+ * lands is the email sent. That order is deliberate: the row is the invitation,
+ * the email is its announcement, and a send that fails leaves a usable
+ * invitation the response reports honestly rather than a rolled-back one.
+ *
+ * Re-inviting is therefore the whole recovery story, and revoke-and-replace is
+ * what makes it one. A failed send, a lost link, a mistyped role: invite the
+ * address again and the old row is revoked and its token deleted in the same
+ * transaction that writes the new one. An address never accumulates live
+ * invitations, so it never accumulates working tokens.
  *
  * The token exists in the email and in this response's absence: it is generated
- * here, hashed into the row, put in the accept URL, and never logged, never
- * audited, and never returned.
+ * here, hashed into the row, put in the accept URL's FRAGMENT — which reaches
+ * neither servers, proxies, access logs, nor a front-end error reporter's URL
+ * capture — and never logged, never audited, and never returned.
  */
 export async function baseHandler(
   event: AuthenticatedEvent,
@@ -75,56 +88,90 @@ export async function baseHandler(
 
   if (!(await hasOrgsBetaAccess({ verifiedEmail: inviterEmail, orgId }))) return betaOnlyResponse();
 
-  const pending = await listUsableInvitations(orgId);
-  if (pending.length >= MAX_PENDING_INVITATIONS_PER_ORG) return capReachedResponse();
+  const emailNorm = normalizeInviteEmail(email);
+  const usable = await listUsableInvitations(orgId);
+  // Replaced rather than counted: this address already occupies whatever slot it
+  // is going to occupy, so re-inviting cannot be how an org reaches the cap.
+  const superseded = invitationsTo(usable, emailNorm);
+  if (usable.length - superseded.length >= MAX_PENDING_INVITATIONS_PER_ORG) {
+    return capReachedResponse();
+  }
 
   const token = newInviteToken();
-  const invitation = newInvitation({ orgId, email, role, invitedBy: userId, token });
+  const invitation = newInvitation({ orgId, email, emailNorm, role, invitedBy: userId, token });
+  // Two items for the new invitation; the rest of the transaction's room goes to
+  // the rows it supersedes. `later` is empty for any org the cap has ever
+  // bounded — one address holds one live invitation — and exists so that rows
+  // written before replacement existed cannot fail an invite.
+  const { now, later } = planRevocations(superseded, 2);
 
   try {
     await commitAudited({
-      items: invitationRows(invitation),
+      items: [
+        ...now.flatMap((replaced) => retireInvitationItems(replaced, 'revoked')),
+        ...invitationRows(invitation),
+      ],
       event: auditEvent({
         type: 'member.invited',
         actor: userActor({ userId, email: inviterEmail }),
         orgId,
         subject: AuditSubjects.invite(invitation.inviteId),
         // The address and the role, never the token or the URL that carries it.
-        details: { inviteId: invitation.inviteId, email, role },
+        details: {
+          inviteId: invitation.inviteId,
+          email,
+          role,
+          ...(superseded.length > 0 ? { replacedInvitations: superseded.length } : {}),
+        },
       }),
     });
   } catch (err) {
-    // Both rows are create-only and both keys are freshly minted, so a
-    // cancellation here is a collision that cannot happen twice: report it as a
-    // conflict and let the caller invite again with new keys.
+    // The new rows are create-only on freshly minted keys, so they cannot lose;
+    // a replaced row's condition can, when an accept or a revoke landed while
+    // this request was in flight. Either way the caller's remedy is the same
+    // one request: invite again against the state that now exists.
     if (err instanceof TransactionCanceledException) return collisionResponse();
     throw err;
   }
 
+  await revokeDeferred(later);
+
   const emailSent = await sendInvitationEmail({
     to: email,
+    emailNorm,
+    orgId,
+    inviteId: invitation.inviteId,
     orgName: await resolveOrgName(orgId),
     inviterName: name,
     inviterEmail,
     acceptUrl: acceptUrl(token),
     expiresAt: invitation.expiresAt,
   });
+  // Stamped on the row, not just returned: the console's pending list is where
+  // somebody later asks why nobody joined, and a row nobody was told about looks
+  // exactly like a row somebody is ignoring.
+  if (!emailSent) await markInvitationSendFailed(invitation);
 
   return new ResponseBuilder()
     .status(201)
-    .body<CreateInvitationResponse>({ invitation: invitationSummary(invitation), emailSent })
+    .body<CreateInvitationResponse>({
+      invitation: invitationSummary({ ...invitation, lastSendFailed: !emailSent }),
+      emailSent,
+    })
     .build();
 }
 
 function newInvitation({
   orgId,
   email,
+  emailNorm,
   role,
   invitedBy,
   token,
 }: {
   orgId: string;
   email: string;
+  emailNorm: string;
   role: OrgRole;
   invitedBy: string;
   token: string;
@@ -135,7 +182,7 @@ function newInvitation({
     orgId,
     inviteId: crypto.randomUUID(),
     email,
-    emailNorm: normalizeInviteEmail(email),
+    emailNorm,
     role,
     invitedBy,
     status: 'pending',
@@ -149,12 +196,19 @@ function newInvitation({
  * Where the invitation link points: the console's accept route, which stashes
  * the token and bounces through login before calling the accept endpoint.
  *
+ * The token rides the FRAGMENT, not the query. A fragment is never sent to a
+ * server, so it is absent from access logs, proxy logs, referrer headers, and
+ * the URL capture every front-end analytics and error reporter does by default;
+ * a query parameter is present in all of them. The console reads it from
+ * `location.hash`. Settled here rather than later because the first emailed link
+ * fixes the shape for as long as that mail sits in an inbox.
+ *
  * `WEBSITE_URL` rather than `resolveOrigin`, which honours a request header on
  * non-production stages. An origin an inviter can choose is an origin an
  * attacker can choose, and this URL goes to somebody else's inbox.
  */
 function acceptUrl(token: string): string {
-  return `${process.env.WEBSITE_URL}/invite/accept?token=${encodeURIComponent(token)}`;
+  return `${process.env.WEBSITE_URL}/invite/accept#token=${encodeURIComponent(token)}`;
 }
 
 function beyondCeilingResponse(role: OrgRole): APIGatewayProxyStructuredResultV2 {

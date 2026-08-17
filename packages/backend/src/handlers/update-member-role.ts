@@ -23,7 +23,7 @@ import {
   ownerCountItem,
   roleChangeItems,
 } from '../lib/membership-changes.js';
-import { resolveMembership } from '../lib/org-membership.js';
+import { readOwnerCount, resolveMembership } from '../lib/org-membership.js';
 import { parseJsonBody } from '../lib/parse-json-body.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -103,7 +103,7 @@ export async function baseHandler(
       }),
     });
   } catch (err) {
-    return changeFailureResponse(err, { delta, revocations: now.length });
+    return await changeFailureResponse(err, { orgId, delta, revocations: now.length });
   }
 
   await revokeDeferred(later);
@@ -152,17 +152,31 @@ function changeLabels({
   ];
 }
 
-function changeFailureResponse(
+async function changeFailureResponse(
   err: unknown,
-  context: { delta: ReturnType<typeof ownerCountDeltaFor>; revocations: number },
-): APIGatewayProxyStructuredResultV2 {
+  context: {
+    orgId: string;
+    delta: ReturnType<typeof ownerCountDeltaFor>;
+    revocations: number;
+  },
+): Promise<APIGatewayProxyStructuredResultV2> {
   const failed = cancelledLabels(err, changeLabels(context));
   if (failed.length === 0) throw err;
 
-  // The decrement's condition IS the last-Owner invariant: an org at one Owner
-  // cancels the transaction that would take it to zero.
-  if (failed.includes('ownerCount') && context.delta === 'decrement') return lastOwnerResponse();
-  if (failed.includes('ownerCount')) return ownerCountUnavailableResponse();
+  if (failed.includes('ownerCount')) {
+    // The decrement's condition IS the last-Owner invariant: an org at one Owner
+    // cancels the transaction that would take it to zero. It reads `ownerCount`
+    // though, so a missing counter cancels the same update for the opposite
+    // reason — the guard was never armed — and saying "you are the last Owner"
+    // about an org whose counter we cannot read would be a guess.
+    if (context.delta === 'decrement' && (await readOwnerCount(context.orgId)) !== undefined) {
+      return lastOwnerResponse();
+    }
+    console.error('[update-member-role] ownerCount missing — role change refused', {
+      orgId: context.orgId,
+    });
+    return ownerCountUnavailableResponse();
+  }
   if (failed.includes('invitation')) return invitationRaceResponse();
   return concurrentChangeResponse();
 }

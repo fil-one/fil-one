@@ -50,6 +50,7 @@ const ORG_ID = '11111111-2222-3333-4444-555555555555';
 const USER_ID = 'caller-user-id';
 const TARGET_ID = 'target-user-id';
 const EMAIL = 'owner@example.com';
+const TARGET_EMAIL = 'Departing.Person@Example.com';
 const MOCK_CSRF_TOKEN = 'csrf-token-value';
 
 function removeEvent(targetUserId: string | null = TARGET_ID) {
@@ -84,7 +85,32 @@ function targetHolds(role: OrgRole | undefined, userId = TARGET_ID) {
   stubMembershipRead(ddbMock, { orgId: ORG_ID, userId, role });
 }
 
-function stubTargetInvitations(count: number) {
+function invitationRow({
+  inviteId,
+  emailNorm,
+  invitedBy = TARGET_ID,
+  role = OrgRole.Member,
+}: {
+  inviteId: string;
+  emailNorm: string;
+  invitedBy?: string;
+  role?: OrgRole;
+}) {
+  return {
+    pk: { S: OrgKeys.orgPk(ORG_ID) },
+    sk: { S: OrgKeys.inviteSk(inviteId) },
+    email: { S: emailNorm },
+    emailNorm: { S: emailNorm },
+    role: { S: role },
+    invitedBy: { S: invitedBy },
+    status: { S: 'pending' },
+    createdAt: { S: '2026-08-14T00:00:00.000Z' },
+    expiresAt: { S: inviteExpiresAt(new Date().toISOString()) },
+    tokenHash: { S: inviteId.padEnd(64, '0').slice(0, 64) },
+  };
+}
+
+function stubInvitationRows(items: Record<string, { S: string }>[]) {
   ddbMock
     .on(QueryCommand, {
       TableName: 'OrgTable',
@@ -93,20 +119,49 @@ function stubTargetInvitations(count: number) {
         ':skPrefix': { S: 'INVITE#' },
       },
     })
-    .resolves({
-      Items: Array.from({ length: count }, (_unused, index) => ({
-        pk: { S: OrgKeys.orgPk(ORG_ID) },
-        sk: { S: OrgKeys.inviteSk(`invite-${index}`) },
-        email: { S: `person-${index}@example.com` },
-        emailNorm: { S: `person-${index}@example.com` },
-        role: { S: OrgRole.Member },
-        invitedBy: { S: TARGET_ID },
-        status: { S: 'pending' },
-        createdAt: { S: '2026-08-14T00:00:00.000Z' },
-        expiresAt: { S: inviteExpiresAt(new Date().toISOString()) },
-        tokenHash: { S: `${index}`.repeat(64).slice(0, 64) },
-      })),
-    });
+    .resolves({ Items: items });
+}
+
+/** `count` invitations the target issued to other people. */
+function stubTargetInvitations(count: number) {
+  stubInvitationRows(
+    Array.from({ length: count }, (_unused, index) =>
+      invitationRow({ inviteId: `invite-${index}`, emailNorm: `person-${index}@example.com` }),
+    ),
+  );
+}
+
+/**
+ * The org's META row, which the failure path reads to tell the last-Owner guard
+ * firing from there being no counter for it to fire on.
+ */
+function stubOwnerCount(ownerCount: number | undefined) {
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'OrgTable',
+      Key: { pk: { S: OrgKeys.orgPk(ORG_ID) }, sk: { S: 'META' } },
+    })
+    .resolves(
+      ownerCount === undefined
+        ? {}
+        : {
+            Item: {
+              pk: { S: OrgKeys.orgPk(ORG_ID) },
+              sk: { S: 'META' },
+              ownerCount: { N: String(ownerCount) },
+            },
+          },
+    );
+}
+
+/** The `USER#{userId}/PROFILE` row, which is where a member's address lives. */
+function stubTargetProfile(email: string | undefined, userId = TARGET_ID) {
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: `USER#${userId}` }, sk: { S: 'PROFILE' } },
+    })
+    .resolves(email ? { Item: { email: { S: email } } } : {});
 }
 
 function transactItems() {
@@ -157,6 +212,8 @@ describe('DELETE /api/org/members/{userId} handler', () => {
 
     ddbMock.on(TransactWriteItemsCommand).resolves({});
     stubTargetInvitations(0);
+    stubTargetProfile(TARGET_EMAIL);
+    stubOwnerCount(1);
     callerHolds(OrgRole.Owner);
     targetHolds(OrgRole.Member);
   });
@@ -253,12 +310,55 @@ describe('DELETE /api/org/members/{userId} handler', () => {
   it('stops the last Owner leaving by the same guard', async () => {
     callerHolds(OrgRole.Owner);
     targetHolds(OrgRole.Owner, USER_ID);
+    stubTargetProfile(TARGET_EMAIL, USER_ID);
     ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(2, 4));
 
     const result = await handler(removeEvent(USER_ID), buildContext());
 
     expect(result).toMatchObject({ statusCode: 409 });
     expect(body(result).code).toBe(ApiErrorCode.LAST_OWNER);
+  });
+
+  it('does not call an Owner the last one when there is no counter to read', async () => {
+    // The decrement conditions on `ownerCount`, so a missing META row cancels
+    // the same item for the opposite reason: the guard was never armed. Saying
+    // LAST_OWNER there would diagnose an org we cannot diagnose, and it
+    // self-heals within a day of the drift checker's next run.
+    targetHolds(OrgRole.Owner);
+    stubOwnerCount(undefined);
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(2, 4));
+
+    const result = await handler(removeEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 409 });
+    expect(body(result).code).toBeUndefined();
+    expect(body(result).message).toStrictEqual(expect.stringContaining('contact support'));
+    expect(console.error).toHaveBeenCalled();
+  });
+
+  it('reports a transient conflict as a failure rather than a verdict', async () => {
+    // TransactionConflict cancels an item exactly as a failed condition does.
+    // Read as the guard firing, a conflict on the counter would tell an Owner
+    // they are the last one and a conflict on the membership row would tell a
+    // member they do not exist.
+    targetHolds(OrgRole.Owner);
+    ddbMock.on(TransactWriteItemsCommand).rejects(
+      new TransactionCanceledException({
+        message: 'cancelled',
+        $metadata: {},
+        CancellationReasons: [
+          { Code: 'None' },
+          { Code: 'None' },
+          { Code: 'TransactionConflict' },
+          { Code: 'None' },
+        ],
+      }),
+    );
+
+    const result = await handler(removeEvent(), buildContext());
+
+    // A 500 the client retries, not a 409 that names an invariant.
+    expect(result).toMatchObject({ statusCode: 500 });
   });
 
   it('revokes every invitation the departing member issued', async () => {
@@ -273,6 +373,90 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     // Two status updates, two token deletes, plus the membership pair.
     expect(items.filter((item) => item.Delete)).toHaveLength(4);
     expect(unmarshall(auditItemIn(items)).details).toMatchObject({ revokedInvitations: 2 });
+  });
+
+  it('revokes the invitations addressed to the departing member', async () => {
+    // The token in such a link still works: their verified address still
+    // matches it and the inviter still holds the authority they invited with.
+    // Left alone, an Owner invitation issued before a demotion turns
+    // demote-then-remove into a re-entry as Owner.
+    stubInvitationRows([
+      invitationRow({
+        inviteId: 'to-them',
+        emailNorm: 'departing.person@example.com',
+        invitedBy: USER_ID,
+        role: OrgRole.Owner,
+      }),
+      invitationRow({
+        inviteId: 'to-somebody-else',
+        emailNorm: 'other@example.com',
+        invitedBy: USER_ID,
+      }),
+    ]);
+
+    await handler(removeEvent(), buildContext());
+
+    const items = transactItems();
+    const revoked = items.filter(
+      (item) => item.Update?.UpdateExpression === 'SET #status = :status',
+    );
+    expect(revoked).toHaveLength(1);
+    expect(revoked[0].Update?.Key?.sk?.S).toBe(OrgKeys.inviteSk('to-them'));
+    expect(JSON.stringify(items)).not.toContain('to-somebody-else');
+    expect(unmarshall(auditItemIn(items)).details).toMatchObject({ revokedInvitations: 1 });
+  });
+
+  it('counts an invitation they both issued and received once', async () => {
+    stubInvitationRows([
+      invitationRow({ inviteId: 'self-invited', emailNorm: 'departing.person@example.com' }),
+    ]);
+
+    await handler(removeEvent(), buildContext());
+
+    expect(unmarshall(auditItemIn(transactItems())).details).toMatchObject({
+      revokedInvitations: 1,
+    });
+  });
+
+  it('matches the departing member’s address regardless of case', async () => {
+    // The row stores the address as the inviter typed it and lowercased beside
+    // it; the profile stores it as Auth0 has it. Only case may differ.
+    stubTargetProfile('DEPARTING.PERSON@EXAMPLE.COM');
+    stubInvitationRows([
+      invitationRow({
+        inviteId: 'to-them',
+        emailNorm: 'departing.person@example.com',
+        invitedBy: USER_ID,
+      }),
+    ]);
+
+    await handler(removeEvent(), buildContext());
+
+    expect(unmarshall(auditItemIn(transactItems())).details).toMatchObject({
+      revokedInvitations: 1,
+    });
+  });
+
+  it('still removes the member when we hold no address for them, and says so', async () => {
+    stubTargetProfile(undefined);
+    stubInvitationRows([
+      invitationRow({ inviteId: 'issued', emailNorm: 'person-0@example.com' }),
+      invitationRow({
+        inviteId: 'to-them',
+        emailNorm: 'departing.person@example.com',
+        invitedBy: USER_ID,
+      }),
+    ]);
+
+    const result = await handler(removeEvent(), buildContext());
+
+    // The removal is the urgent act; the invitation to them stays live until it
+    // expires, which is a line an operator can act on rather than a silence.
+    expect(result).toMatchObject({ statusCode: 204 });
+    expect(unmarshall(auditItemIn(transactItems())).details).toMatchObject({
+      revokedInvitations: 1,
+    });
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).toContain('No address');
   });
 
   it('returns 404 for somebody who is not a member', async () => {

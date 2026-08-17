@@ -5,6 +5,7 @@ import {
   GetItemCommand,
   QueryCommand,
   TransactWriteItemsCommand,
+  UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { ApiErrorCode, MAX_PENDING_INVITATIONS_PER_ORG, OrgRole } from '@filone/shared';
@@ -31,6 +32,26 @@ vi.mock('jose', () => ({
   createRemoteJWKSet: vi.fn((_url: unknown) => 'mock-jwks'),
 }));
 
+/**
+ * The real mailer, watched.
+ *
+ * The no-op stage's behaviour is what these tests want — no fetch, a log line
+ * that names the invitation and not its token — but the token itself now leaves
+ * no trace outside the message, so the send's parameters are the only place a
+ * test can read the accept URL it built.
+ */
+const sentInvitations: { acceptUrl: string; orgId: string; inviteId: string }[] = [];
+vi.mock('../lib/invite-mailer.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/invite-mailer.js')>();
+  return {
+    ...actual,
+    sendInvitationEmail: async (params: Parameters<typeof actual.sendInvitationEmail>[0]) => {
+      sentInvitations.push(params);
+      return actual.sendInvitationEmail(params);
+    },
+  };
+});
+
 const ddbMock = mockClient(DynamoDBClient);
 
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
@@ -42,7 +63,7 @@ process.env.FILONE_STAGE = 'dev-test';
 
 import { handler } from './create-invitation.js';
 import { OrgKeys } from '../lib/org-membership.js';
-import { inviteExpiresAt } from '../lib/invitations.js';
+import { inviteExpiresAt, normalizeInviteEmail } from '../lib/invitations.js';
 import {
   buildEvent,
   buildContext,
@@ -100,8 +121,35 @@ function grantBeta(pk: string) {
     .resolves({ Item: { pk: { S: pk }, sk: { S: 'ORGS_BETA' } } });
 }
 
+function invitationRow({
+  inviteId,
+  emailNorm,
+  status = 'pending',
+  role = OrgRole.Member,
+  tokenHash = 'b'.repeat(64),
+}: {
+  inviteId: string;
+  emailNorm: string;
+  status?: string;
+  role?: OrgRole;
+  tokenHash?: string;
+}) {
+  return {
+    pk: { S: OrgKeys.orgPk(ORG_ID) },
+    sk: { S: OrgKeys.inviteSk(inviteId) },
+    email: { S: emailNorm },
+    emailNorm: { S: emailNorm },
+    role: { S: role },
+    invitedBy: { S: USER_ID },
+    status: { S: status },
+    createdAt: { S: '2026-08-14T00:00:00.000Z' },
+    expiresAt: { S: inviteExpiresAt(new Date().toISOString()) },
+    tokenHash: { S: tokenHash },
+  };
+}
+
 /** The org's existing invitation rows, which the cap is computed from. */
-function stubPendingInvitations(count: number, status = 'pending') {
+function stubInvitationRows(items: Record<string, { S: string }>[]) {
   ddbMock
     .on(QueryCommand, {
       TableName: 'OrgTable',
@@ -110,20 +158,20 @@ function stubPendingInvitations(count: number, status = 'pending') {
         ':skPrefix': { S: 'INVITE#' },
       },
     })
-    .resolves({
-      Items: Array.from({ length: count }, (_unused, index) => ({
-        pk: { S: OrgKeys.orgPk(ORG_ID) },
-        sk: { S: OrgKeys.inviteSk(`invite-${index}`) },
-        email: { S: `person-${index}@example.com` },
-        emailNorm: { S: `person-${index}@example.com` },
-        role: { S: OrgRole.Member },
-        invitedBy: { S: USER_ID },
-        status: { S: status },
-        createdAt: { S: '2026-08-14T00:00:00.000Z' },
-        expiresAt: { S: inviteExpiresAt(new Date().toISOString()) },
-        tokenHash: { S: 'b'.repeat(64) },
-      })),
-    });
+    .resolves({ Items: items });
+}
+
+/** `count` invitations to addresses nobody is inviting again. */
+function stubPendingInvitations(count: number, status = 'pending') {
+  stubInvitationRows(
+    Array.from({ length: count }, (_unused, index) =>
+      invitationRow({
+        inviteId: `invite-${index}`,
+        emailNorm: `person-${index}@example.com`,
+        status,
+      }),
+    ),
+  );
 }
 
 function transactItems() {
@@ -136,15 +184,17 @@ function body(result: unknown) {
   return JSON.parse((result as { body: string }).body);
 }
 
-/** The accept URL the no-op mailer logged, which is where the token lives. */
-function loggedAcceptUrl(): string {
-  const logged = vi.mocked(console.log).mock.calls.flat();
-  const entry = logged.find(
-    (value): value is { acceptUrl: string } =>
-      typeof value === 'object' && value !== null && 'acceptUrl' in value,
-  );
-  expect(entry, 'the dev-stage mailer logs the accept URL').toBeDefined();
-  return entry!.acceptUrl;
+/** The accept URL the send was handed, which is the only place the token exists. */
+function sentAcceptUrl(): string {
+  expect(sentInvitations, 'the handler sent exactly one invitation').toHaveLength(1);
+  return sentInvitations[0].acceptUrl;
+}
+
+/** The token out of that URL's fragment, where it now rides. */
+function sentToken(): string {
+  const fragment = new URL(sentAcceptUrl()).hash;
+  expect(fragment.startsWith('#token=')).toBe(true);
+  return decodeURIComponent(fragment.slice('#token='.length));
 }
 
 // ---------------------------------------------------------------------------
@@ -155,6 +205,7 @@ describe('POST /api/org/invitations handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
+    sentInvitations.length = 0;
     vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -186,6 +237,7 @@ describe('POST /api/org/invitations handler', () => {
       .resolves({ Item: { name: { S: 'Acme Corp' } } });
 
     ddbMock.on(TransactWriteItemsCommand).resolves({});
+    ddbMock.on(UpdateItemCommand).resolves({});
     stubPendingInvitations(0);
     grantBeta(`ALLOWLIST#${INVITER_EMAIL}`);
     callerHolds(OrgRole.Owner);
@@ -240,15 +292,27 @@ describe('POST /api/org/invitations handler', () => {
   it('stores the token’s digest and never the token itself', async () => {
     await handler(inviteEvent(), buildContext());
 
-    const token = new URL(loggedAcceptUrl()).searchParams.get('token')!;
+    const token = sentToken();
     expect(token).toMatch(/^[A-Za-z0-9_-]{40,}$/);
 
     const written = JSON.stringify(transactItems());
     expect(written).not.toContain(token);
-    expect(written).not.toContain(loggedAcceptUrl());
+    expect(written).not.toContain(sentAcceptUrl());
     // What the row does carry: a 64-character hex digest.
     const stored = transactItems().find((item) => item.Put?.Item?.tokenHash)!.Put!;
     expect(stored.Item!.tokenHash!.S).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('puts the token in the link’s fragment, where no server sees it', async () => {
+    // A fragment reaches neither our access logs nor a proxy's nor an analytics
+    // script's URL capture; a query parameter reaches all three. Settled before
+    // the first link is emailed, because that link outlives the decision.
+    await handler(inviteEvent(), buildContext());
+
+    const url = new URL(sentAcceptUrl());
+    expect(`${url.origin}${url.pathname}`).toBe('https://app.example.com/invite/accept');
+    expect(url.search).toBe('');
+    expect(url.hash).toContain('token=');
   });
 
   it('records the invitation in the audit log, with no secret in it', async () => {
@@ -354,6 +418,77 @@ describe('POST /api/org/invitations handler', () => {
     },
   );
 
+  it('revokes the live invitation to the same address in the same transaction', async () => {
+    // One address, one live invitation. Two working tokens for one person is
+    // both a security surface and the thing that makes "just invite them again"
+    // an unusable answer to a failed send.
+    stubInvitationRows([
+      invitationRow({
+        inviteId: 'earlier',
+        emailNorm: 'invitee@example.com',
+        role: OrgRole.ReadOnly,
+        tokenHash: 'c'.repeat(64),
+      }),
+    ]);
+
+    const result = await handler(inviteEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 201 });
+    const items = transactItems();
+    // The replaced pair, the new pair, the event.
+    expect(items).toHaveLength(5);
+    expect(items[0].Update).toMatchObject({
+      Key: { pk: { S: OrgKeys.orgPk(ORG_ID) }, sk: { S: OrgKeys.inviteSk('earlier') } },
+      ConditionExpression: '#status = :pending',
+      ExpressionAttributeValues: { ':status': { S: 'revoked' }, ':pending': { S: 'pending' } },
+    });
+    // Its token stops working the moment the new one starts.
+    expect(items[1].Delete).toMatchObject({
+      Key: { pk: { S: OrgKeys.inviteTokenPk('c'.repeat(64)) }, sk: { S: 'LOOKUP' } },
+    });
+    expect(unmarshall(auditItemIn(items)).details).toMatchObject({ replacedInvitations: 1 });
+  });
+
+  it('leaves invitations to other addresses alone', async () => {
+    stubInvitationRows([
+      invitationRow({ inviteId: 'someone-else', emailNorm: 'other@example.com' }),
+    ]);
+
+    await handler(inviteEvent(), buildContext());
+
+    const items = transactItems();
+    expect(items).toHaveLength(3);
+    expect(JSON.stringify(items)).not.toContain('someone-else');
+  });
+
+  it('matches the address it replaces regardless of case', async () => {
+    stubInvitationRows([
+      invitationRow({ inviteId: 'earlier', emailNorm: normalizeInviteEmail(INVITED_EMAIL) }),
+    ]);
+
+    await handler(
+      inviteEvent({ email: INVITED_EMAIL.toUpperCase(), role: OrgRole.Member }),
+      buildContext(),
+    );
+
+    expect(JSON.stringify(transactItems())).toContain('earlier');
+  });
+
+  it('replaces rather than counts, so re-inviting cannot reach the cap', async () => {
+    // A full org, where one of the live invitations is to the address being
+    // invited again: that address already holds its slot.
+    stubInvitationRows([
+      ...Array.from({ length: MAX_PENDING_INVITATIONS_PER_ORG - 1 }, (_unused, index) =>
+        invitationRow({ inviteId: `invite-${index}`, emailNorm: `person-${index}@example.com` }),
+      ),
+      invitationRow({ inviteId: 'theirs', emailNorm: 'invitee@example.com' }),
+    ]);
+
+    const result = await handler(inviteEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 201 });
+  });
+
   it('sends nothing on a stage with no SendGrid secret, and still creates the invitation', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
@@ -361,7 +496,22 @@ describe('POST /api/org/invitations handler', () => {
 
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(result).toMatchObject({ statusCode: 201 });
-    expect(loggedAcceptUrl()).toContain('https://app.example.com/invite/accept?token=');
+    expect(sentAcceptUrl()).toContain('https://app.example.com/invite/accept#token=');
+  });
+
+  it('marks the row when the invitation went unannounced', async () => {
+    // The dev stage sends nothing, which is the same outcome for the row as a
+    // SendGrid failure: the invitation is live and nobody has heard about it.
+    const result = await handler(inviteEvent(), buildContext());
+
+    expect(body(result).emailSent).toBe(false);
+    expect(body(result).invitation.lastSendFailed).toBe(true);
+    const stamp = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
+    expect(stamp).toMatchObject({
+      TableName: 'OrgTable',
+      UpdateExpression: 'SET lastSendFailed = :true',
+    });
+    expect(stamp.Key!.sk.S).toBe(OrgKeys.inviteSk(body(result).invitation.inviteId));
   });
 
   it.each([

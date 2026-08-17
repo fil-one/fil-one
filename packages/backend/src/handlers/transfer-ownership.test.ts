@@ -3,6 +3,7 @@ import { mockClient } from 'aws-sdk-client-mock';
 import {
   DynamoDBClient,
   GetItemCommand,
+  QueryCommand,
   TransactionCanceledException,
   TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
@@ -39,6 +40,7 @@ process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
 import { handler } from './transfer-ownership.js';
 import { OrgKeys } from '../lib/org-membership.js';
+import { inviteExpiresAt } from '../lib/invitations.js';
 import {
   buildEvent,
   buildContext,
@@ -55,10 +57,21 @@ const TARGET_ID = 'target-user-id';
 const EMAIL = 'owner@example.com';
 const MOCK_CSRF_TOKEN = 'csrf-token-value';
 
-/** A session that satisfied an MFA challenge, which is the cheapest way in. */
-function withMfa() {
+/**
+ * A session that satisfied an MFA challenge, recently. Both halves are required:
+ * `amr` says what kind of authentication happened and `auth_time` says when, and
+ * an MFA sign-in from this morning is a fact about the session rather than proof
+ * about whoever is at the keyboard now.
+ */
+function withMfa(secondsAgo = 30) {
   mockJwtVerify.mockResolvedValue({
-    payload: { sub: MOCK_SUB, email: EMAIL, email_verified: true, amr: ['pwd', 'mfa'] },
+    payload: {
+      sub: MOCK_SUB,
+      email: EMAIL,
+      email_verified: true,
+      amr: ['pwd', 'mfa'],
+      auth_time: Math.floor(Date.now() / 1000) - secondsAgo,
+    },
   });
 }
 
@@ -103,6 +116,42 @@ function targetHolds(role: OrgRole | undefined) {
   stubMembershipRead(ddbMock, { orgId: ORG_ID, userId: TARGET_ID, role });
 }
 
+/** The outgoing Owner's pending invitations, which the transfer sweeps. */
+function invitationRow({
+  inviteId,
+  role,
+  invitedBy = USER_ID,
+}: {
+  inviteId: string;
+  role: OrgRole;
+  invitedBy?: string;
+}) {
+  return {
+    pk: { S: OrgKeys.orgPk(ORG_ID) },
+    sk: { S: OrgKeys.inviteSk(inviteId) },
+    email: { S: `${inviteId}@example.com` },
+    emailNorm: { S: `${inviteId}@example.com` },
+    role: { S: role },
+    invitedBy: { S: invitedBy },
+    status: { S: 'pending' },
+    createdAt: { S: '2026-08-14T00:00:00.000Z' },
+    expiresAt: { S: inviteExpiresAt(new Date().toISOString()) },
+    tokenHash: { S: inviteId.padEnd(64, '0').slice(0, 64) },
+  };
+}
+
+function stubInvitationRows(items: Record<string, { S: string }>[]) {
+  ddbMock
+    .on(QueryCommand, {
+      TableName: 'OrgTable',
+      ExpressionAttributeValues: {
+        ':pk': { S: OrgKeys.orgPk(ORG_ID) },
+        ':skPrefix': { S: 'INVITE#' },
+      },
+    })
+    .resolves({ Items: items });
+}
+
 function transactItems() {
   const calls = ddbMock.commandCalls(TransactWriteItemsCommand);
   expect(calls).toHaveLength(1);
@@ -140,6 +189,7 @@ describe('POST /api/org/transfer handler', () => {
       });
 
     ddbMock.on(TransactWriteItemsCommand).resolves({});
+    stubInvitationRows([]);
     callerHolds(OrgRole.Owner);
     targetHolds(OrgRole.Admin);
   });
@@ -199,6 +249,39 @@ describe('POST /api/org/transfer handler', () => {
       details: { fromUserId: USER_ID, toUserId: TARGET_ID },
     });
     expectNoSecrets(auditItemIn(transactItems()));
+  });
+
+  it('revokes the outgoing Owner’s pending Owner invitations, in the same transaction', async () => {
+    // They leave as an Admin, and an Admin can neither issue an Owner
+    // invitation nor keep one outstanding. The accept path already refuses
+    // those links, so this is what stops dead links, occupied cap slots, and
+    // pending rows nobody can explain.
+    stubInvitationRows([
+      invitationRow({ inviteId: 'theirs-owner', role: OrgRole.Owner }),
+      invitationRow({ inviteId: 'theirs-admin', role: OrgRole.Admin }),
+      invitationRow({ inviteId: 'somebody-elses', role: OrgRole.Owner, invitedBy: TARGET_ID }),
+    ]);
+
+    await handler(transferEvent(), buildContext());
+
+    const items = transactItems();
+    const revoked = items.filter(
+      (item) => item.Update?.UpdateExpression === 'SET #status = :status',
+    );
+    expect(revoked).toHaveLength(1);
+    expect(revoked[0].Update?.Key?.sk?.S).toBe(OrgKeys.inviteSk('theirs-owner'));
+    // What an Admin could have issued stays: the demotion does not reach it.
+    expect(JSON.stringify(items)).not.toContain('theirs-admin');
+    expect(JSON.stringify(items)).not.toContain('somebody-elses');
+    expect(unmarshall(auditItemIn(items)).details).toMatchObject({ revokedInvitations: 1 });
+  });
+
+  it('says nothing about revocations when there were none', async () => {
+    await handler(transferEvent(), buildContext());
+
+    expect(unmarshall(auditItemIn(transactItems())).details).not.toHaveProperty(
+      'revokedInvitations',
+    );
   });
 
   it('returns 404 for somebody who is not a member', async () => {
@@ -263,6 +346,20 @@ describe('POST /api/org/transfer handler', () => {
 
     it('refuses a session that is neither strong nor fresh', async () => {
       withFreshLogin(3600);
+
+      const result = await handler(transferEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 401 });
+      expect(body(result)).toStrictEqual({ error: 'step_up_required' });
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+    });
+
+    it('refuses an MFA session that is no longer fresh', async () => {
+      // The gate is a step-up, not a session attribute: this is the only verb
+      // that takes the caller's own authority away, and an MFA challenge
+      // satisfied hours ago says nothing about who is at the keyboard now. The
+      // remedy is one redirect — `max_age=0` forces a fresh authentication.
+      withMfa(3600);
 
       const result = await handler(transferEvent(), buildContext());
 

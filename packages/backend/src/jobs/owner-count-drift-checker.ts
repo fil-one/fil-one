@@ -1,6 +1,7 @@
 import {
   ConditionalCheckFailedException,
   PutItemCommand,
+  QueryCommand,
   ScanCommand,
   UpdateItemCommand,
   type AttributeValue,
@@ -31,6 +32,16 @@ import { OrgKeys } from '../lib/org-membership.js';
  * counter to match, including down to zero. An org with no Owner is a real
  * incident (nobody can invite, promote, or manage billing), and inventing an
  * Owner to make the counter defensible would hide it.
+ *
+ * The Scan is a trigger, never the evidence. A Scan is not a snapshot: it reads
+ * each item at whatever moment it reaches it, so a transaction that promotes one
+ * member and demotes another can be half-observed, and an org whose rows straddle
+ * a page boundary can be counted across minutes. A repair written from that is a
+ * repair written from a count no instant ever held — and the direction that
+ * matters is upward, because an inflated counter defeats the `ownerCount > :one`
+ * guard and lets the last Owner be removed. So every repair recounts the org's
+ * own partition with a ConsistentRead Query first, and writes what THAT says,
+ * conditioned on the counter it read a moment earlier.
  */
 
 const dynamo = getDynamoClient();
@@ -123,24 +134,33 @@ async function scanOrgRows(orgTableName: string): Promise<Map<string, OrgTally>>
 }
 
 /**
- * Adds one scanned row to its org's tally, ignoring everything that is not a
- * membership or META row: the `USER#` inverse items carry a denormalized role
- * and would double every count, and the `INVITETOKEN#` partitions are not orgs
- * at all. An `ORG#` partition holding only invitation rows never becomes a
- * tally entry, so the missing-META repair below cannot mint a counter for a
- * partition that has no members.
+ * Adds one scanned row to its org's tally. An `ORG#` partition holding only
+ * invitation rows never becomes a tally entry, so the missing-META repair below
+ * cannot mint a counter for a partition that has no members.
  */
 function tallyRow(item: Record<string, AttributeValue>, tallies: Map<string, OrgTally>): void {
   const pk = item.pk?.S ?? '';
   if (!pk.startsWith(ORG_PK_PREFIX)) return;
 
+  const orgId = pk.slice(ORG_PK_PREFIX.length);
+  const tally = tallies.get(orgId) ?? { members: 0, owners: 0, hasMeta: false };
+  if (addRow(item, orgId, tally)) tallies.set(orgId, tally);
+}
+
+/**
+ * Adds one row to an org's tally, and says whether it was one this job counts.
+ *
+ * Shared by the Scan and the per-org recount so the two can never disagree about
+ * what an Owner row is. Everything that is not a membership or META row is
+ * ignored: the `USER#` inverse items carry a denormalized role and would double
+ * every count, the `INVITETOKEN#` partitions are not orgs, and an invitation row
+ * sits in the org's own partition carrying a role that is nobody's membership.
+ */
+function addRow(item: Record<string, AttributeValue>, orgId: string, tally: OrgTally): boolean {
   const sk = item.sk?.S ?? '';
   const isMeta = sk === OrgKeys.orgMetaSk();
   const isMember = sk.startsWith(OrgKeys.memberSkPrefix());
-  if (!isMeta && !isMember) return;
-
-  const orgId = pk.slice(ORG_PK_PREFIX.length);
-  const tally = tallies.get(orgId) ?? { members: 0, owners: 0, hasMeta: false };
+  if (!isMeta && !isMember) return false;
 
   if (isMeta) {
     tally.hasMeta = true;
@@ -150,7 +170,7 @@ function tallyRow(item: Record<string, AttributeValue>, tallies: Map<string, Org
     if (isOwnerRow(item.role, orgId, sk)) tally.owners += 1;
   }
 
-  tallies.set(orgId, tally);
+  return true;
 }
 
 /**
@@ -205,10 +225,60 @@ interface Repair {
   send: () => Promise<unknown>;
 }
 
-async function reconcileOrg(orgId: string, tally: OrgTally, stats: RunStats): Promise<void> {
+/**
+ * One org's rows, read consistently, in one Query of its partition.
+ *
+ * Everything the repair decides comes from here rather than from the Scan: a
+ * Query of one partition with `ConsistentRead` returns rows that were all
+ * current at the same moment, which is exactly what a count the guard depends on
+ * has to be. Paged, because a Query returns at most 1 MB.
+ */
+async function recountOrg(orgId: string): Promise<OrgTally> {
+  const tally: OrgTally = { members: 0, owners: 0, hasMeta: false };
+  let cursor: Record<string, AttributeValue> | undefined;
+
+  do {
+    const result = await dynamo.send(
+      new QueryCommand({
+        TableName: Resource.OrgTable.name,
+        KeyConditionExpression: 'pk = :pk',
+        ExpressionAttributeValues: { ':pk': { S: OrgKeys.orgPk(orgId) } },
+        ProjectionExpression: 'pk, sk, #role, ownerCount',
+        ExpressionAttributeNames: { '#role': 'role' },
+        ConsistentRead: true,
+        ...(cursor ? { ExclusiveStartKey: cursor } : {}),
+      }),
+    );
+
+    for (const item of result.Items ?? []) addRow(item, orgId, tally);
+
+    cursor = result.LastEvaluatedKey;
+  } while (cursor);
+
+  return tally;
+}
+
+async function reconcileOrg(orgId: string, scanned: OrgTally, stats: RunStats): Promise<void> {
+  // Nothing to look at: the Scan saw a counter that matched a non-zero owner
+  // set, which is the shape of an org that is fine. Everything else is
+  // re-examined properly before a word is said about it.
+  if (scanned.hasMeta && scanned.storedOwnerCount === scanned.owners && scanned.owners > 0) return;
+
+  let tally: OrgTally;
+  try {
+    tally = await recountOrg(orgId);
+  } catch (error) {
+    stats.repairFailed += 1;
+    console.error('[owner-count-drift-checker] recount failed — org left for the next run', {
+      orgId,
+      error,
+    });
+    return;
+  }
+
   const counted = tally.owners;
 
-  if (counted === 0) {
+  if (counted === 0 && tally.members > 0) {
     stats.noOwner += 1;
     console.error('[owner-count-drift-checker] org has no Owner', {
       orgId,
@@ -218,9 +288,12 @@ async function reconcileOrg(orgId: string, tally: OrgTally, stats: RunStats): Pr
   }
 
   if (!tally.hasMeta) {
-    // Only orgs with membership rows get here, so the counter the last-Owner
-    // guard reads is missing for an org that has members — the guard's
-    // condition cannot fail closed on a row that does not exist.
+    // A partition whose member rows have all gone gets no counter invented for
+    // it; an org that still has members and no META row has a last-Owner guard
+    // that cannot fail closed, because its condition reads a row that is not
+    // there.
+    if (tally.members === 0) return;
+
     console.error('[owner-count-drift-checker] org has membership rows and no META row', {
       orgId,
       members: tally.members,
@@ -234,6 +307,9 @@ async function reconcileOrg(orgId: string, tally: OrgTally, stats: RunStats): Pr
     return;
   }
 
+  // The Scan's disagreement did not survive the recount: the counter is current
+  // and the Scan's count was stale, which is the ordinary case for an org whose
+  // membership changed while the table was being read.
   if (tally.storedOwnerCount === counted) return;
 
   const stored = tally.storedOwnerCount;
@@ -262,6 +338,12 @@ async function applyRepair(repair: Repair, stats: RunStats): Promise<void> {
     await repair.send();
     stats.repaired += 1;
     console.log('[owner-count-drift-checker] counter repaired', { orgId, stored, counted });
+    // Its own data point rather than a number in the run summary: a repair means
+    // some write path left the counter wrong, and an alarm on "this happened at
+    // all" is the one an operator wants. The org id stays in the log line beside
+    // it — orgs are unbounded, and a per-org dimension would mint a custom
+    // metric for each.
+    emitRepair();
   } catch (error) {
     if (isConditionalCheckFailure(error)) {
       stats.skipped += 1;
@@ -317,6 +399,22 @@ function createMeta(orgId: string, counted: number): PutItemCommand {
       ownerCount: { N: String(counted) },
     },
     ConditionExpression: 'attribute_not_exists(pk)',
+  });
+}
+
+function emitRepair(): void {
+  reportMetric({
+    _aws: {
+      Timestamp: Date.now(),
+      CloudWatchMetrics: [
+        {
+          Namespace: 'FilOne',
+          Dimensions: [[]],
+          Metrics: [{ Name: 'OwnerCountRepaired', Unit: 'Count' }],
+        },
+      ],
+    },
+    OwnerCountRepaired: 1,
   });
 }
 
