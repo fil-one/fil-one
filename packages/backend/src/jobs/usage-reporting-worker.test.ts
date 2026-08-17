@@ -662,18 +662,21 @@ describe('usage-reporting-worker', () => {
       expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(0);
     });
 
-    it('defers the reconciliation when the payload has no userId (pre-upgrade orchestrator)', async () => {
+    it('reconciles a row that names no user, since the close-out is keyed by org', async () => {
+      // The user id appears in the close-out's logs and nowhere else. Skipping
+      // on a missing one left the tenant enabled for a customer Stripe had
+      // deleted, and promised a next run that would find the same absent
+      // attribute and skip again.
       mockGetTenantUsageMetrics.mockResolvedValue(oneTbUsage);
       mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
       mockGetCustomerExistence.mockResolvedValue('deleted');
 
       await handler({ ...basePayload, userId: undefined });
 
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(mockAuroraUpdateTenantStatus).not.toHaveBeenCalled();
+      expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith('aurora-tenant-123', 'disabled');
       const item = auditItem();
-      expect(item.orgSyncAction).toEqual({ S: 'error:reconcile-skipped-no-user-id' });
-      expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(1);
+      expect(item.orgSyncAction).toEqual({ S: 'reconciled:customer-deleted' });
+      expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(0);
     });
 
     // startDeletionFromStripe never throws, so a failure to commit cannot break the

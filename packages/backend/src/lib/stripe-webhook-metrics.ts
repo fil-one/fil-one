@@ -110,3 +110,53 @@ export function emitInvoiceFinalizationFailed(reason: string): void {
     InvoiceFinalizationFailed: 1,
   });
 }
+
+/**
+ * A billing write that found no row to write to.
+ *
+ * Post-re-key there is one row per org and the writers assert it exists, so this
+ * should be zero. A non-zero count means Stripe holds a customer the billing
+ * table does not, which is a reconciliation job for a person rather than
+ * something a retry can fix.
+ */
+export function emitBillingRowMissing(writer: string): void {
+  reportMetric({
+    _aws: {
+      Timestamp: Date.now(),
+      CloudWatchMetrics: [
+        {
+          Namespace: 'FilOne',
+          Dimensions: [['writer']],
+          Metrics: [{ Name: 'BillingRowMissing', Unit: 'Count' }],
+        },
+      ],
+    },
+    writer,
+    BillingRowMissing: 1,
+  });
+}
+
+/**
+ * A trial claim refused because a pre-re-key `CUSTOMER#` row is still standing
+ * for this user.
+ *
+ * Defense in depth for the flip-to-cleanup window: the backfill was verified,
+ * but a row it missed would otherwise mint a second Stripe customer and
+ * subscription for an account that already has one. Non-zero means the backfill
+ * missed a cohort and the cleanup step must not run.
+ */
+export function emitTrialClaimBlockedByLegacyRow(): void {
+  reportMetric({
+    _aws: {
+      Timestamp: Date.now(),
+      CloudWatchMetrics: [
+        {
+          Namespace: 'FilOne',
+          Dimensions: [[]],
+          Metrics: [{ Name: 'TrialClaimBlockedByLegacyRow', Unit: 'Count' }],
+        },
+      ],
+    },
+    TrialClaimBlockedByLegacyRow: 1,
+  });
+}

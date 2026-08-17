@@ -315,22 +315,13 @@ async function reconcileDeletedCustomer(params: {
     };
   }
 
-  if (!userId) {
-    console.warn(
-      '[usage-worker] Customer deleted but payload has no userId — reconciliation deferred to the next run',
-      { orgId, stripeCustomerId },
-    );
-    return {
-      orgSyncAction: 'error:reconcile-skipped-no-user-id',
-      lockAction: 'skipped:customer-missing',
-      outOfSync: true,
-    };
-  }
-
-  // Same entry point as the customer.deleted webhook: this is the audit that
-  // catches a customer deletion whose event was never delivered.
+  // No userId gate. The deletion is committed against the org, which the scan
+  // already names; the user id feeds the legacy fallback and the logs and
+  // nowhere else. Skipping on a missing one left the tenant enabled for a
+  // customer Stripe had deleted, and the log line promised a next run that
+  // would find the same absent attribute and skip again.
   await startDeletionFromStripe({
-    userId,
+    ...(userId ? { userId } : {}),
     customerId: stripeCustomerId,
     orgId,
     caller: 'usage-worker',

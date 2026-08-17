@@ -23,6 +23,7 @@ import { invoiceSubscriptionId, subscriptionSuperseded } from '../lib/billing-id
 import { getStripeClient, getWebhookSecret } from '../lib/stripe-client.js';
 import { updateSubscriptionByUser } from '../lib/subscription-store.js';
 import {
+  emitBillingRowMissing,
   emitDunningEscalation,
   emitInvoiceFinalizationFailed,
   emitInvoiceFinalized,
@@ -210,12 +211,13 @@ async function updatePaymentMethod(
   owner: { userId: string; orgId?: string },
   pm: Stripe.PaymentMethod,
 ): Promise<void> {
-  // No ConditionExpression of its own: the store already refuses to create a row
-  // on an update, and asking for `attribute_exists(pk)` here would make the org
-  // row's "no twin yet" indistinguishable from a real condition failure, so
-  // every un-backfilled account's card update would 500 instead of landing on
-  // the legacy row.
-  await updateSubscriptionByUser(owner, {
+  // A missing row is swallowed here rather than failing the webhook. The store
+  // refuses to create one, and every other writer treats that refusal as an
+  // error — but this one carries a card's last four digits and expiry, and a
+  // 500 buys three days of Stripe retries and alert noise to redeliver them.
+  // Post-verify the state is near-impossible; the metric is how anyone would
+  // learn it happened at all.
+  const { written } = await updateSubscriptionByUser(owner, {
     UpdateExpression:
       'SET paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now',
     ExpressionAttributeValues: {
@@ -226,8 +228,17 @@ async function updatePaymentMethod(
       ':expYear': { N: String(pm.card?.exp_year ?? 0) },
       ':now': { S: new Date().toISOString() },
     },
+    tolerateMissingRow: true,
     guardAgainstScrub: { caller: 'customer.updated' },
   });
+
+  if (!written) {
+    emitBillingRowMissing('customer.updated');
+    console.error('[stripe-webhook] No billing row to record the payment method on', {
+      userId: owner.userId,
+      orgId: owner.orgId,
+    });
+  }
 }
 
 async function handleCustomerDeleted(customer: Stripe.Customer): Promise<void> {

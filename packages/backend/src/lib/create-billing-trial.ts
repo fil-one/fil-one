@@ -85,18 +85,15 @@ export async function createBillingTrial({
     { idempotencyKey: idempotency.subscription },
   );
 
-  // 3. Write to DynamoDB, on both keys. Deliberately an unconditional update,
-  // NOT a conditional put: Stripe fires customer.subscription.created as soon
-  // as the subscription above exists, and if that webhook lands first it
-  // upserts a partial record (subscriptionId + status, no customer mapping). A
-  // put guarded by attribute_not_exists would then silently no-op and the
-  // stripeCustomerId would never be stored — the user could not activate. The
-  // update fills the mapping in either arrival order; subscriptionStatus uses
-  // if_not_exists so a status a webhook already wrote is never clobbered by
-  // this stale-at-write-time `trialing`. That guarantee is per row, and only the
-  // legacy row is one a webhook can have written first: the webhook's own writes
-  // never create the org twin, so on the org key `if_not_exists` is reading an
-  // attribute that is not there yet and this `trialing` always wins.
+  // 3. Write to DynamoDB. Deliberately an update rather than a conditional put:
+  // Stripe fires customer.subscription.created as soon as the subscription above
+  // exists, and if that webhook lands first it writes a partial record
+  // (subscriptionId + status, no customer mapping). A put guarded by
+  // attribute_not_exists would then silently no-op and the stripeCustomerId
+  // would never be stored — the user could not activate. The update fills the
+  // mapping in either arrival order; subscriptionStatus uses if_not_exists so a
+  // status a webhook already wrote is never clobbered by this
+  // stale-at-write-time `trialing`.
   //
   // This is the writer that brings the record into existence (`createsRow`), so
   // it writes the whole record — the org and user attributes included, which is
