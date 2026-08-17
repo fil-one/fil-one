@@ -3,7 +3,7 @@ import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import { OrgRole, isOrgRole } from '@filone/shared';
-import type { OrgMembershipSummary } from '@filone/shared';
+import type { OrgMembershipSource, OrgMembershipSummary } from '@filone/shared';
 import { getDynamoClient } from './ddb-client.js';
 import { resolveOrgName } from './org-profile.js';
 
@@ -73,8 +73,11 @@ export const OrgKeys = {
   auth0OrgSk: (): string => 'LOOKUP',
 } as const;
 
-/** How a member came to be in the org. SCIM provisioning extends this later. */
-export type OrgMembershipSource = 'signup' | 'conversion' | 'invitation';
+/**
+ * How a member came to be in the org, defined in shared because the audit
+ * envelope records the same value.
+ */
+export type { OrgMembershipSource };
 
 /**
  * OrgTable — pk: ORG#{orgId}, sk: MEMBER#{userId}. The authoritative membership

@@ -20,6 +20,15 @@ export function isOrgRole(value: unknown): value is OrgRole {
   return typeof value === 'string' && (Object.values(OrgRole) as string[]).includes(value);
 }
 
+/**
+ * How a member came to be in the org. SCIM provisioning extends this later.
+ *
+ * Declared here rather than beside the membership row because the audit
+ * envelope records it too, and two unions listing the same three values drift:
+ * the day SCIM adds a fourth, one of them would still be missing it.
+ */
+export type OrgMembershipSource = 'signup' | 'conversion' | 'invitation';
+
 export const ORG_NAME_MIN_LENGTH = 2;
 export const ORG_NAME_MAX_LENGTH = 100;
 export const ORG_NAME_PATTERN = /^[A-Za-z0-9 .-]+$/;

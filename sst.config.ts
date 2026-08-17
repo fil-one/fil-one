@@ -149,6 +149,10 @@ export default $config({
     // profile, or billing row that happened to share a partition. Written only
     // through lib/audit.ts, which appends an event in the same transaction as
     // the mutation it records.
+    // Handlers reach this table with the same allResources link every route
+    // uses, so they hold dynamodb:* on it. Narrowing the audit grant to
+    // PutItem/Query is follow-up work: it is the one table where a handler
+    // holding DeleteItem contradicts the append-only claim.
     const auditTable = new sst.aws.Dynamo('AuditTable', {
       fields: {
         pk: 'string',
@@ -156,6 +160,15 @@ export default $config({
       },
       primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
       ttl: 'ttl',
+      transform: {
+        table: {
+          // The two protections the record itself needs: a 90-day log with no
+          // backups loses the quarter to one bad deploy, and a table a stack
+          // operation can drop is a log an operator can make disappear.
+          pointInTimeRecovery: { enabled: true },
+          deletionProtectionEnabled: true,
+        },
+      },
     });
 
     // RAG indexer's own store: per-object chunk manifests
