@@ -26,7 +26,7 @@ import {
   deleteBucket,
 } from './s3-bucket-operations.js';
 import { createS3Client } from './s3-client.js';
-import { BucketAlreadyExistsError } from './errors.js';
+import { BucketAlreadyExistsError, BucketNotEmptyError } from './errors.js';
 import type { S3ClientContext } from './s3-client.js';
 
 // ---------------------------------------------------------------------------
@@ -134,12 +134,20 @@ describe('s3 bucket operations', () => {
       await expect(deleteBucket(s3, 'my-bucket')).resolves.toBeUndefined();
     });
 
-    // A non-empty bucket must NOT be swallowed — only NoSuchBucket is.
-    it('propagates a BucketNotEmpty error unchanged', async () => {
+    // A non-empty bucket must NOT be swallowed — only NoSuchBucket is. It becomes a
+    // domain error so the handler can return a machine-readable 409.
+    it('translates a BucketNotEmpty error into BucketNotEmptyError', async () => {
       const sdkErr = Object.assign(new Error('bucket not empty'), { name: 'BucketNotEmpty' });
       s3Mock.on(DeleteBucketCommand).rejects(sdkErr);
 
-      await expect(deleteBucket(s3, 'my-bucket')).rejects.toBe(sdkErr);
+      await expect(deleteBucket(s3, 'my-bucket')).rejects.toBeInstanceOf(BucketNotEmptyError);
+    });
+
+    it('attaches the original SDK error as the cause of BucketNotEmptyError', async () => {
+      const sdkErr = Object.assign(new Error('bucket not empty'), { name: 'BucketNotEmpty' });
+      s3Mock.on(DeleteBucketCommand).rejects(sdkErr);
+
+      await expect(deleteBucket(s3, 'my-bucket')).rejects.toMatchObject({ cause: sdkErr });
     });
 
     it('propagates unrelated SDK errors unchanged', async () => {

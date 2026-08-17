@@ -6,7 +6,9 @@ export type ToastVariant = 'success' | 'error' | 'info';
 
 export type ToastItem = {
   id: string;
-  message: string;
+  // ReactNode rather than string so a message can carry an inline link (e.g. the
+  // docs link on a "bucket is not empty" error).
+  message: React.ReactNode;
   variant: ToastVariant;
   duration: number;
 };
@@ -16,9 +18,9 @@ type ToastOptions = {
 };
 
 type ToastAPI = {
-  success: (message: string, options?: ToastOptions) => void;
-  error: (message: string, options?: ToastOptions) => void;
-  info: (message: string, options?: ToastOptions) => void;
+  success: (message: React.ReactNode, options?: ToastOptions) => void;
+  error: (message: React.ReactNode, options?: ToastOptions) => void;
+  info: (message: React.ReactNode, options?: ToastOptions) => void;
 };
 
 type ToastContextValue = {
@@ -73,13 +75,16 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  const addToast = useCallback((message: string, variant: ToastVariant, options?: ToastOptions) => {
-    counterRef.current += 1;
-    const id = `toast-${counterRef.current}`;
-    const duration = options?.duration ?? DEFAULT_DURATION;
+  const addToast = useCallback(
+    (message: React.ReactNode, variant: ToastVariant, options?: ToastOptions) => {
+      counterRef.current += 1;
+      const id = `toast-${counterRef.current}`;
+      const duration = options?.duration ?? DEFAULT_DURATION;
 
-    setToasts((prev) => [...prev, { id, message, variant, duration }]);
-  }, []);
+      setToasts((prev) => [...prev, { id, message, variant, duration }]);
+    },
+    [],
+  );
 
   const toast: ToastAPI = useMemo(
     () => ({

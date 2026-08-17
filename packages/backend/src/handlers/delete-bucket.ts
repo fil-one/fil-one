@@ -1,9 +1,10 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { S3_REGION } from '@filone/shared';
+import { ApiErrorCode, S3_REGION } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
+import { BucketNotEmptyError } from '../lib/errors.js';
 import { getOrgProfile } from '../lib/org-profile.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -35,7 +36,20 @@ export async function baseHandler(
       .build();
   }
 
-  await orchestrator.deleteBucket(tenantId, bucketName);
+  try {
+    await orchestrator.deleteBucket(tenantId, bucketName);
+  } catch (err) {
+    if (err instanceof BucketNotEmptyError) {
+      return new ResponseBuilder()
+        .status(409)
+        .body<ErrorResponse>({
+          message: `Bucket "${bucketName}" is not empty. Delete its objects and object versions before deleting the bucket.`,
+          code: ApiErrorCode.BUCKET_NOT_EMPTY,
+        })
+        .build();
+    }
+    throw err;
+  }
 
   return {
     statusCode: 204,

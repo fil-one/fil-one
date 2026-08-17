@@ -60,6 +60,7 @@ import {
   AccessKeyValidationError,
   BucketAlreadyExistsError,
   BucketConfigurationError,
+  BucketNotEmptyError,
   BucketNotFoundError,
 } from '../errors.js';
 import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
@@ -388,13 +389,15 @@ describe('deleteBucket', () => {
     await expect(orchestrator.deleteBucket(tenantId, 'my-bucket')).resolves.toBeUndefined();
   });
 
-  it('propagates a BucketNotEmpty error', async () => {
+  // Surfaced as a domain error so delete-bucket can answer with a machine-readable
+  // 409 (BUCKET_NOT_EMPTY) instead of the generic 500 from errorHandlerMiddleware.
+  it('surfaces a BucketNotEmpty error as BucketNotEmptyError', async () => {
     const err = new Error('bucket not empty');
     (err as Error & { name: string }).name = 'BucketNotEmpty';
     s3Mock.on(DeleteBucketCommand).rejects(err);
 
-    await expect(orchestrator.deleteBucket(tenantId, 'my-bucket')).rejects.toThrow(
-      /bucket not empty/,
+    await expect(orchestrator.deleteBucket(tenantId, 'my-bucket')).rejects.toBeInstanceOf(
+      BucketNotEmptyError,
     );
   });
 });

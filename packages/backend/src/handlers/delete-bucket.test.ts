@@ -31,6 +31,7 @@ vi.mock('../lib/org-profile.js', () => ({
 process.env.FILONE_STAGE = 'test';
 
 import { baseHandler } from './delete-bucket.js';
+import { BucketNotEmptyError } from '../lib/errors.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
@@ -74,8 +75,7 @@ describe('delete-bucket baseHandler', () => {
     event.pathParameters = { name: 'my-bucket' };
     const result = await baseHandler(event);
 
-    expect(result.statusCode).toBe(204);
-    expect(result.body).toBe('');
+    expect(result).toMatchObject({ statusCode: 204, body: '' });
     expect(mockOrchestratorDeleteBucket).toHaveBeenCalledWith('aurora-t-1', 'my-bucket');
   });
 
@@ -90,9 +90,23 @@ describe('delete-bucket baseHandler', () => {
     expect(mockOrchestratorDeleteBucket).toHaveBeenCalledWith('tenant-xyz', 'some-bucket');
   });
 
-  // Only NotImplementedError is translated to a response here; every other
-  // failure propagates to errorHandlerMiddleware (which renders the 5xx).
-  it('rethrows non-NotImplementedError failures from the orchestrator', async () => {
+  // A non-empty bucket is the one failure translated to a response here, so the
+  // console can tell the user to empty the bucket first.
+  it('returns 409 BUCKET_NOT_EMPTY when the bucket still holds objects', async () => {
+    mockOrchestratorDeleteBucket.mockRejectedValue(new BucketNotEmptyError('my-bucket'));
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    event.pathParameters = { name: 'my-bucket' };
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(409);
+    const body = JSON.parse(result.body!) as { message: string; code: string };
+    expect(body.code).toBe('BUCKET_NOT_EMPTY');
+    expect(body.message).toMatch(/not empty/);
+  });
+
+  // Every other failure propagates to errorHandlerMiddleware (which renders the 5xx).
+  it('rethrows other failures from the orchestrator', async () => {
     mockOrchestratorDeleteBucket.mockRejectedValue(new Error('S3 gateway unavailable'));
 
     const event = buildEvent({ userInfo: USER_INFO });

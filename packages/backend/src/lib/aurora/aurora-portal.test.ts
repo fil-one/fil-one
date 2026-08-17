@@ -46,7 +46,7 @@ import {
   _resetSsmCacheForTesting,
 } from './aurora-portal.js';
 import { instrumentClient } from './aurora-api-metrics.js';
-import { AccessKeyAlreadyExistsError } from '../errors.js';
+import { AccessKeyAlreadyExistsError, BucketNotEmptyError } from '../errors.js';
 import { ACCESS_KEY_PERMISSIONS } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
@@ -285,8 +285,10 @@ describe('deleteAuroraBucket', () => {
     ).resolves.toBeUndefined();
   });
 
-  // A non-empty bucket (409) is a real failure and must surface, not be swallowed.
-  it('throws on a 409 conflict (bucket still has objects/versions)', async () => {
+  // A non-empty bucket (409) is a real failure and must surface, not be swallowed. It
+  // becomes the same BucketNotEmptyError the S3-backed orchestrators raise, so
+  // delete-bucket answers with a machine-readable 409 whichever region is in play.
+  it('surfaces a 409 conflict (bucket still has objects/versions) as BucketNotEmptyError', async () => {
     setupSsmMock();
     mockDeleteBucket.mockResolvedValue({
       error: { message: "Can't delete a bucket with objects/versions present" },
@@ -295,7 +297,7 @@ describe('deleteAuroraBucket', () => {
 
     await expect(
       deleteAuroraBucket({ tenantId: 'tenant-1', bucketName: 'my-bucket' }),
-    ).rejects.toThrow('Failed to delete Aurora bucket "my-bucket" for tenant tenant-1');
+    ).rejects.toBeInstanceOf(BucketNotEmptyError);
   });
 
   it('throws on a non-404 API error', async () => {
