@@ -2,12 +2,14 @@
 //
 // The conversion and the revert move the same rows in opposite directions, and
 // a revert that lands between the conversion's OrgTable transaction and its
-// legacy-row delete leaves the org with neither membership. One row in OrgTable
-// makes that impossible: every `--execute` run of either script takes it first
-// and drops it on the way out.
+// legacy-row delete leaves the org with neither membership. One row makes that
+// impossible: every `--execute` run of either script takes it first and drops
+// it on the way out. The billing re-key and its own revert share a second lock
+// on the same terms.
 //
-// The key sits outside both scans' filters (`ORG#`, `USER#`), so the lock is
-// invisible to everything that reads membership.
+// Each lock's key sits outside the scans of the migration it guards — `ORG#`
+// and `USER#` for membership, `sk = SUBSCRIPTION` for billing — so a lock row
+// is invisible to everything that reads real data.
 
 import type { AttributeValue, DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
@@ -24,8 +26,16 @@ import { decodeRow, text } from './dynamo.ts';
 export const RUN_LOCK_PK = 'CONVERSION#LOCK';
 export const RUN_LOCK_SK = 'LOCK';
 
-const lockKey = (): Record<string, AttributeValue> => ({
-  pk: { S: RUN_LOCK_PK },
+/**
+ * The billing re-key's lock. Its own row rather than the conversion's: the two
+ * migrations write different tables and may legitimately be in flight in the
+ * same week, and one lock would make them queue behind each other for no
+ * reason. `sk` stays `LOCK`, which no `sk = SUBSCRIPTION` scan matches.
+ */
+export const BILLING_REKEY_LOCK_PK = 'BILLING_REKEY#LOCK';
+
+const lockKey = (pk: string): Record<string, AttributeValue> => ({
+  pk: { S: pk },
   sk: { S: RUN_LOCK_SK },
 });
 
@@ -53,16 +63,17 @@ export interface RunLock {
 export async function acquireRunLock(
   client: DynamoDBClient,
   tableName: string,
-  context: { script: string; stage: string },
+  context: { script: string; stage: string; lockPk?: string },
 ): Promise<RunLock> {
   const runId = randomUUID();
+  const pk = context.lockPk ?? RUN_LOCK_PK;
 
   try {
     await client.send(
       new PutItemCommand({
         TableName: tableName,
         Item: {
-          ...lockKey(),
+          ...lockKey(pk),
           runId: { S: runId },
           script: { S: context.script },
           stage: { S: context.stage },
@@ -75,7 +86,7 @@ export async function acquireRunLock(
     );
   } catch (err) {
     if (!(err instanceof ConditionalCheckFailedException)) throw err;
-    await reportHolder(client, tableName);
+    await reportHolder(client, tableName, pk);
     process.exit(1);
   }
 
@@ -85,7 +96,7 @@ export async function acquireRunLock(
         await client.send(
           new DeleteItemCommand({
             TableName: tableName,
-            Key: lockKey(),
+            Key: lockKey(pk),
             ConditionExpression: '#runId = :runId',
             ExpressionAttributeNames: { '#runId': 'runId' },
             ExpressionAttributeValues: { ':runId': { S: runId } },
@@ -100,29 +111,38 @@ export async function acquireRunLock(
 }
 
 /** Drop a lock a crashed run left behind. Prints what it removed, or that there was nothing. */
-export async function forceUnlock(client: DynamoDBClient, tableName: string): Promise<void> {
-  const holder = await readLock(client, tableName);
+export async function forceUnlock(
+  client: DynamoDBClient,
+  tableName: string,
+  lockPk: string = RUN_LOCK_PK,
+): Promise<void> {
+  const holder = await readLock(client, tableName, lockPk);
   if (!holder) {
     console.log('No run lock held.');
     return;
   }
 
-  await client.send(new DeleteItemCommand({ TableName: tableName, Key: lockKey() }));
+  await client.send(new DeleteItemCommand({ TableName: tableName, Key: lockKey(lockPk) }));
   console.log(`Released the run lock held by ${describeHolder(holder)}.`);
 }
 
 async function readLock(
   client: DynamoDBClient,
   tableName: string,
+  lockPk: string,
 ): Promise<Partial<LockRow> | undefined> {
   const { Item } = await client.send(
-    new GetItemCommand({ TableName: tableName, Key: lockKey(), ConsistentRead: true }),
+    new GetItemCommand({ TableName: tableName, Key: lockKey(lockPk), ConsistentRead: true }),
   );
   return Item ? decodeRow<LockRow>(Item) : undefined;
 }
 
-async function reportHolder(client: DynamoDBClient, tableName: string): Promise<void> {
-  const holder = await readLock(client, tableName);
+async function reportHolder(
+  client: DynamoDBClient,
+  tableName: string,
+  lockPk: string,
+): Promise<void> {
+  const holder = await readLock(client, tableName, lockPk);
   console.error(
     holder
       ? `Another run holds the lock: ${describeHolder(holder)}.`
