@@ -167,9 +167,29 @@ export type AuditDetailRecord = { [field: string]: AuditDetailValue | undefined 
 export interface AuditEventDetails {
   'org.created': { orgName: string; source?: OrgMembershipSource };
   'org.renamed': { name: string; previousName?: string };
-  'member.invited': { inviteId: string; email: string; role: OrgRole };
+  'member.invited': {
+    inviteId: string;
+    email: string;
+    role: OrgRole;
+    /**
+     * Live invitations to the same address this one replaced. Inviting an
+     * address that already has one revokes it in the same transaction, so the
+     * reader sees why a row they were looking at is suddenly revoked.
+     */
+    replacedInvitations?: number;
+  };
   'invite.revoked': { inviteId: string; email: string };
-  'invite.accepted': { inviteId: string; email: string; role: OrgRole };
+  'invite.accepted': {
+    inviteId: string;
+    email: string;
+    role: OrgRole;
+    /**
+     * The caller was already a member, so the accept marked the invitation and
+     * granted nothing — the same honesty `key.created.recovered` carries about
+     * which attempt did the work.
+     */
+    alreadyMember?: boolean;
+  };
   'member.role_changed': {
     role: OrgRole;
     previousRole: OrgRole;
@@ -183,7 +203,15 @@ export interface AuditEventDetails {
     revokedInvitations?: number;
   };
   'member.removed': { role: OrgRole; revokedInvitations?: number };
-  'ownership.transferred': { fromUserId: string; toUserId: string };
+  'ownership.transferred': {
+    fromUserId: string;
+    toUserId: string;
+    /**
+     * Owner invitations the outgoing Owner had outstanding, which the transfer
+     * revoked: an Admin cannot issue one, so they cannot keep one either.
+     */
+    revokedInvitations?: number;
+  };
   'key.created': {
     keyKind: AuditKeyKind;
     keyName: string;

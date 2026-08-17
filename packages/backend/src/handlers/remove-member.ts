@@ -5,7 +5,8 @@ import { ApiErrorCode, OrgRole, canManageTargetRole } from '@filone/shared';
 import type { ErrorResponse, OrgRole as Role } from '@filone/shared';
 import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.js';
 import {
-  pendingInvitationsFrom,
+  normalizeInviteEmail,
+  pendingInvitationsForRemoval,
   planRevocations,
   retireInvitationItems,
   revokeDeferred,
@@ -15,7 +16,8 @@ import {
   membershipDeleteItems,
   ownerCountItem,
 } from '../lib/membership-changes.js';
-import { resolveMembership } from '../lib/org-membership.js';
+import { readOwnerCount, resolveMembership } from '../lib/org-membership.js';
+import { readUserProfile } from '../lib/user-profile.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
@@ -41,7 +43,22 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
  * self-service carve-out) rather than a quiet exception here.
  *
  * One transaction: both membership rows, the `ownerCount` decrement when the
- * member was an Owner, every pending invitation they issued, and the event.
+ * member was an Owner, the invitations the removal retires, and the event.
+ *
+ * Two families of invitation go, and the second is the one that makes removal
+ * mean anything. The ones they ISSUED go because no role of theirs remains to
+ * justify them. The ones ADDRESSED TO them go because the token in such a link
+ * still works: a removed member who kept an old invitation redeems it and walks
+ * straight back in at the role that link carries — a stale Owner invitation
+ * turns demote-then-remove into a re-entry as Owner. Nothing else on the accept
+ * path refuses it, since their address still matches and the inviter still holds
+ * the authority they invited with.
+ *
+ * Finding those needs the member's address, which the membership row does not
+ * carry — it is in the `USER#{userId}/PROFILE` row, and that read is best-effort
+ * like every other profile read here. A removal whose profile read fails or
+ * whose row has learned no address still removes the member, sweeps what they
+ * issued, and logs that the addressed-to sweep could not run.
  *
  * Keys are untouched in M1. A departing member's access keys keep working until
  * somebody revokes them, which the console names in the confirmation dialog; the
@@ -65,9 +82,10 @@ export async function baseHandler(
   }
 
   const wasOwner = target.role === OrgRole.Owner;
-  // Every one of them: the member is leaving, so no role of theirs remains to
-  // justify an invitation still in flight.
-  const doomed = await pendingInvitationsFrom(orgId, targetUserId);
+  const doomed = await pendingInvitationsForRemoval(orgId, {
+    userId: targetUserId,
+    emailNorm: await removedMemberAddress(targetUserId),
+  });
   const { now, later } = planRevocations(doomed, wasOwner ? 3 : 2);
 
   try {
@@ -89,7 +107,7 @@ export async function baseHandler(
       }),
     });
   } catch (err) {
-    return removalFailureResponse(err, { wasOwner, revocations: now.length });
+    return await removalFailureResponse(err, { orgId, wasOwner, revocations: now.length });
   }
 
   await revokeDeferred(later);
@@ -97,10 +115,30 @@ export async function baseHandler(
   return { statusCode: 204, body: '' };
 }
 
-function removalFailureResponse(
+/**
+ * The removed member's address, lowercased, or undefined when we do not hold
+ * one.
+ *
+ * Undefined narrows the sweep to the invitations they issued, and says so: the
+ * invitation their old link belongs to stays live until it expires, and an
+ * operator reading this line is the only person who can revoke it by hand.
+ */
+async function removedMemberAddress(userId: string): Promise<string | undefined> {
+  const email = (await readUserProfile(userId))?.email;
+  if (!email) {
+    console.error(
+      '[remove-member] No address for the removed member — invitations to them stay live',
+      { userId },
+    );
+    return undefined;
+  }
+  return normalizeInviteEmail(email);
+}
+
+async function removalFailureResponse(
   err: unknown,
-  { wasOwner, revocations }: { wasOwner: boolean; revocations: number },
-): APIGatewayProxyStructuredResultV2 {
+  { orgId, wasOwner, revocations }: { orgId: string; wasOwner: boolean; revocations: number },
+): Promise<APIGatewayProxyStructuredResultV2> {
   const failed = cancelledLabels(err, [
     'membership',
     'inverse',
@@ -110,8 +148,15 @@ function removalFailureResponse(
   if (failed.length === 0) throw err;
 
   // The decrement's own condition, which is the whole last-Owner invariant:
-  // the org's only Owner cannot be removed, including by themselves.
-  if (failed.includes('ownerCount')) return lastOwnerResponse();
+  // the org's only Owner cannot be removed, including by themselves. Unless
+  // there is no counter to read, in which case the guard did not fire — it was
+  // never armed, and telling the caller they are the last Owner would be a
+  // diagnosis of an org we cannot diagnose.
+  if (failed.includes('ownerCount')) {
+    return (await readOwnerCount(orgId)) === undefined
+      ? ownerCountUnavailableResponse(orgId)
+      : lastOwnerResponse();
+  }
   if (failed.includes('invitation')) return invitationRaceResponse();
   // The membership delete is conditional on the row existing, so this is a
   // member somebody else removed first — the outcome the caller wanted.
@@ -149,6 +194,23 @@ function lastOwnerResponse(): APIGatewayProxyStructuredResultV2 {
       message:
         'This organization would be left without an owner. Transfer ownership or promote another member first.',
       code: ApiErrorCode.LAST_OWNER,
+    })
+    .build();
+}
+
+/**
+ * The org has membership rows and no counter, so the last-Owner invariant is
+ * unenforceable for it until somebody repairs the META row — which the drift
+ * checker does within a day. Loud, and the same answer the accept path gives for
+ * the same missing row, because "contact support" is true and "you are the last
+ * Owner" would not be.
+ */
+function ownerCountUnavailableResponse(orgId: string): APIGatewayProxyStructuredResultV2 {
+  console.error('[remove-member] ownerCount missing — removal of an Owner refused', { orgId });
+  return new ResponseBuilder()
+    .status(409)
+    .body<ErrorResponse>({
+      message: 'The organization’s owner count could not be updated. Please contact support.',
     })
     .build();
 }

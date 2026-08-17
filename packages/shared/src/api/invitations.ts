@@ -28,9 +28,14 @@ export const INVITE_EXPIRY_DAYS = 14;
 /**
  * The most invitations one org may have outstanding.
  *
- * The API has no rate limiting anywhere, so this cap is what stands between an
- * Admin's credentials and our SendGrid reputation. Small on purpose: a real team
- * invites people a handful at a time, and revoking or accepting frees a slot.
+ * What it bounds is how many addresses an org can have waiting at once, not how
+ * much mail it can send: revoking frees a slot immediately, and re-inviting an
+ * address that already has a live invitation replaces that one rather than
+ * taking a second slot. Volume over time is a per-org send throttle, which the
+ * API does not have — the ORGS_BETA allowlist is what stands in for it while
+ * every account that can invite is one we admitted by hand.
+ *
+ * Small on purpose: a real team invites people a handful at a time.
  */
 export const MAX_PENDING_INVITATIONS_PER_ORG = 25;
 
@@ -63,6 +68,13 @@ export interface InvitationSummary {
   status: InvitationStatus;
   /** `expiresAt` is in the past. A pending invitation nobody can accept. */
   expired: boolean;
+  /**
+   * The last attempt to email this invitation did not reach SendGrid, so the row
+   * is live and nobody has heard about it. Present only when that happened: the
+   * console shows it so an operator can tell a dead row from one somebody is
+   * simply ignoring, and re-inviting the same address replaces it.
+   */
+  lastSendFailed?: boolean;
 }
 
 /**

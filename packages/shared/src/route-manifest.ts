@@ -57,10 +57,12 @@ export interface RouteManifestEntry {
   /** Set on `authenticated` routes, absent on every other category. */
   requires?: RouteRequirement;
   /**
-   * Set on a route that carries a declared permission AND a second, body-
-   * dependent restriction the chain cannot express. `requires` still says what
-   * reaching the route costs; this says the handler narrows it further, so a
-   * reader of the manifest is not told the whole gate is in the chain.
+   * Set on a route that carries a declared permission AND a second restriction
+   * the chain cannot express, because it depends on something the chain has not
+   * read: the request body, or the role of the member or invitation the request
+   * names. `requires` still says what reaching the route costs; this says the
+   * handler narrows it further, so a reader of the manifest is not told the
+   * whole gate is in the chain.
    */
   capsInHandler?: boolean;
   /**
@@ -260,6 +262,7 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     handler: 'update-member-role',
     category: 'authenticated',
     requires: 'members.manage',
+    capsInHandler: true,
   },
   {
     method: 'DELETE',
@@ -267,9 +270,16 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     handler: 'remove-member',
     category: 'authenticated',
     requires: 'members.manage',
+    capsInHandler: true,
   },
 
   // ── Invitations ──────────────────────────────────────────────────
+  // The same split the members routes have: `members.manage` is what reaching
+  // these costs, and the ceiling on the ROLE — the one being invited, or the one
+  // a pending invitation carries — runs in the handler against the same
+  // registry. An Admin cannot invite an Owner, and cannot revoke an Owner
+  // invitation either. Listing carries no ceiling: it is one org's own pending
+  // invitations, and every caller who reaches it may already manage them.
   {
     method: 'GET',
     path: '/api/org/invitations',
@@ -283,6 +293,7 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     handler: 'create-invitation',
     category: 'authenticated',
     requires: 'members.manage',
+    capsInHandler: true,
   },
   {
     method: 'DELETE',
@@ -290,6 +301,7 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     handler: 'revoke-invitation',
     category: 'authenticated',
     requires: 'members.manage',
+    capsInHandler: true,
   },
   // Outside the org gate, and it has to be: the caller is not a member of the
   // inviting org yet, so a membership check here would refuse every invitation

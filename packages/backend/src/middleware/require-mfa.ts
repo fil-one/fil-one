@@ -101,18 +101,24 @@ export const STEP_UP_MAX_AGE_SECONDS = 300;
  * This variant asks the question the ADR settles on instead: has this caller
  * proved themselves again, just now?
  *
- * Three ways that is satisfied, in the order they are cheapest to check:
+ * Two questions, and BOTH have to pass. `amr` says what KIND of authentication
+ * satisfies the gate; `auth_time` says WHEN it happened. Freshness is the half
+ * that makes this a step-up rather than a session attribute — an MFA sign-in
+ * this morning is a fact about the session, not proof that the person at the
+ * keyboard now is the one who signed in. So a caller gets through when
+ * {@link STEP_UP_MAX_AGE_SECONDS} has not elapsed since `auth_time` AND either:
  *
  * 1. `amr` carries `mfa` or `phr` — an MFA challenge or a phishing-resistant
- *    factor was satisfied for this session.
- * 2. `auth_time` is within {@link STEP_UP_MAX_AGE_SECONDS} and the user has
- *    nothing enrolled at Guardian — the step-up they can do IS re-authenticating,
- *    which `max_age=0` forces. This is the SAML-and-SSO case the plain gate
- *    passes silently today: a federated session never carries `mfa`, and its
- *    remedy can never be an Auth0 enrollment.
- * 3. Nothing else. A stale session, and an enrolled user whose session predates
- *    their last challenge, both get the 401 that sends the console through
- *    `/login?acr_values=…&max_age=0`.
+ *    factor was satisfied, and recently.
+ * 2. The user has nothing enrolled at Guardian, so re-authenticating IS the
+ *    strongest step-up they can perform. This is the SAML-and-SSO case: a
+ *    federated session never carries `mfa`, and its remedy can never be an Auth0
+ *    enrollment.
+ *
+ * Everything else gets the 401 that sends the console through
+ * `/login?acr_values=…&max_age=0`, which forces a fresh authentication and
+ * stamps a new `auth_time` — so the denial always has a remedy, whichever half
+ * of the check refused.
  *
  * The enrollment read costs an Auth0 Management call and only runs in case 2. If
  * it fails, a caller who authenticated moments ago is let through and the failure
@@ -127,10 +133,13 @@ export function requireMfaIfEnrolled() {
     request: Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>,
   ): Promise<APIGatewayProxyStructuredResultV2 | void> => {
     const { amr, authTime } = getVerifiedIdTokenClaims(request);
-    if (amr.includes('mfa') || amr.includes('phr')) return;
 
-    const { sub } = (request.event as AuthenticatedEvent).requestContext.userInfo;
-    if (authenticatedRecently(authTime) && !(await hasMfaEnrolled(sub))) return;
+    if (authenticatedRecently(authTime)) {
+      if (amr.includes('mfa') || amr.includes('phr')) return;
+
+      const { sub } = (request.event as AuthenticatedEvent).requestContext.userInfo;
+      if (!(await hasMfaEnrolled(sub))) return;
+    }
 
     // Through withRefreshedCookies: a step-up prompt must not also cost the
     // caller the session this request just rotated.
@@ -140,9 +149,24 @@ export function requireMfaIfEnrolled() {
   return { before } satisfies MiddlewareObj<APIGatewayProxyEventV2, APIGatewayProxyResultV2>;
 }
 
+/**
+ * Whether the ID token's `auth_time` is inside the window, clamped at both ends.
+ *
+ * A negative age is a token claiming to have been authenticated in the future:
+ * a clock skew, or a claim somebody chose. Neither is a recent authentication,
+ * and admitting it would make an arbitrarily old session pass by naming a
+ * timestamp far enough ahead. It refuses, and says so, because clock skew
+ * between Auth0 and Lambda is worth knowing about.
+ */
 function authenticatedRecently(authTime: number | null): boolean {
   if (authTime === null) return false;
-  return Date.now() / 1000 - authTime <= STEP_UP_MAX_AGE_SECONDS;
+
+  const age = Date.now() / 1000 - authTime;
+  if (age < 0) {
+    console.error('[require-mfa] auth_time is in the future — refusing the step-up', { age });
+    return false;
+  }
+  return age <= STEP_UP_MAX_AGE_SECONDS;
 }
 
 async function hasMfaEnrolled(sub: string): Promise<boolean> {

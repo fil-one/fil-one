@@ -4,6 +4,7 @@ import {
   ConditionalCheckFailedException,
   DynamoDBClient,
   PutItemCommand,
+  QueryCommand,
   ScanCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
@@ -50,14 +51,36 @@ function putInputs() {
   return ddbMock.commandCalls(PutItemCommand).map((call) => call.args[0].input);
 }
 
-/** The run's single EMF envelope, off the stdout the metrics module writes to. */
-function emission(spy: ReturnType<typeof vi.spyOn>): Record<string, unknown> {
+function envelopes(spy: ReturnType<typeof vi.spyOn>): Record<string, unknown>[] {
   const calls = spy.mock.calls as unknown as unknown[][];
-  const envelopes = calls
+  return calls
     .map((call) => JSON.parse(String(call[0])) as Record<string, unknown>)
     .filter((parsed) => parsed._aws !== undefined);
-  expect(envelopes).toHaveLength(1);
-  return envelopes[0];
+}
+
+/** The run's summary envelope, off the stdout the metrics module writes to. */
+function emission(spy: ReturnType<typeof vi.spyOn>): Record<string, unknown> {
+  const summaries = envelopes(spy).filter((parsed) => parsed.OwnerCountDrift !== undefined);
+  expect(summaries).toHaveLength(1);
+  return summaries[0];
+}
+
+/** One data point per applied repair, which is what an alarm watches. */
+function repairsEmitted(spy: ReturnType<typeof vi.spyOn>): number {
+  return envelopes(spy).filter((parsed) => parsed.OwnerCountRepaired !== undefined).length;
+}
+
+/**
+ * The org's own partition, read consistently, which is what every repair is
+ * written from. The Scan only decides which orgs to look at.
+ */
+function stubPartition(orgId: string, items: Record<string, unknown>[]) {
+  ddbMock
+    .on(QueryCommand, {
+      TableName: 'OrgTable',
+      ExpressionAttributeValues: { ':pk': { S: `ORG#${orgId}` } },
+    })
+    .resolves({ Items: items as never });
 }
 
 function logsMatching(spy: ReturnType<typeof vi.spyOn>, message: string) {
@@ -97,6 +120,9 @@ describe('owner-count-drift-checker', () => {
 
     expect(updateInputs()).toHaveLength(0);
     expect(putInputs()).toHaveLength(0);
+    // An org the Scan finds in order costs nothing further: the per-org read is
+    // what a repair is written from, and there is no repair here.
+    expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(0);
     expect(emission(stdoutSpy)).toMatchObject({
       OwnerCountDrift: 0,
       OwnerCountRepairFailed: 0,
@@ -118,16 +144,26 @@ describe('owner-count-drift-checker', () => {
     });
   });
 
-  it('repairs a counter that is too high, conditioned on the stale value', async () => {
-    ddbMock.on(ScanCommand).resolves({
-      Items: [
-        metaRow(ORG_ID, 3),
-        memberRow(ORG_ID, 'user-1'),
-        memberRow(ORG_ID, 'user-2', OrgRole.Admin),
-      ],
-    });
+  it('repairs a counter that is too high, conditioned on the value it recounted', async () => {
+    const rows = [
+      metaRow(ORG_ID, 3),
+      memberRow(ORG_ID, 'user-1'),
+      memberRow(ORG_ID, 'user-2', OrgRole.Admin),
+    ];
+    ddbMock.on(ScanCommand).resolves({ Items: rows });
+    stubPartition(ORG_ID, rows);
 
     await handler();
+
+    // The repair is written from the org's own partition, read consistently —
+    // a Scan reads each item at whatever moment it reaches it, and a counter
+    // written from a count no instant ever held is what put us here.
+    expect(ddbMock.commandCalls(QueryCommand)[0].args[0].input).toMatchObject({
+      TableName: 'OrgTable',
+      KeyConditionExpression: 'pk = :pk',
+      ExpressionAttributeValues: { ':pk': { S: `ORG#${ORG_ID}` } },
+      ConsistentRead: true,
+    });
 
     expect(updateInputs()).toEqual([
       {
@@ -143,6 +179,7 @@ describe('owner-count-drift-checker', () => {
       stored: 3,
       counted: 1,
     });
+    expect(repairsEmitted(stdoutSpy)).toBe(1);
     expect(emission(stdoutSpy)).toMatchObject({
       OwnerCountDrift: 1,
       OwnerCountRepairFailed: 0,
@@ -151,9 +188,9 @@ describe('owner-count-drift-checker', () => {
   });
 
   it('repairs a counter that is too low', async () => {
-    ddbMock.on(ScanCommand).resolves({
-      Items: [metaRow(ORG_ID, 1), memberRow(ORG_ID, 'user-1'), memberRow(ORG_ID, 'user-2')],
-    });
+    const rows = [metaRow(ORG_ID, 1), memberRow(ORG_ID, 'user-1'), memberRow(ORG_ID, 'user-2')];
+    ddbMock.on(ScanCommand).resolves({ Items: rows });
+    stubPartition(ORG_ID, rows);
 
     await handler();
 
@@ -184,6 +221,12 @@ describe('owner-count-drift-checker', () => {
         ],
       });
 
+    stubPartition(ORG_ID, [
+      metaRow(ORG_ID, 1),
+      memberRow(ORG_ID, 'user-1'),
+      memberRow(ORG_ID, 'user-2'),
+    ]);
+
     await handler();
 
     expect(ddbMock.commandCalls(ScanCommand)).toHaveLength(2);
@@ -201,10 +244,59 @@ describe('owner-count-drift-checker', () => {
     expect(emission(stdoutSpy)).toMatchObject({ OwnerCountDrift: 1 });
   });
 
-  it('creates the META row for an org that has members and no counter', async () => {
+  it('writes nothing when the recount agrees with the counter the Scan doubted', async () => {
+    // The Scan straddled a transaction: it saw the demoted half and not the
+    // promoted one. The org is fine, and a repair written from that reading
+    // would set the counter to a number no instant ever held.
     ddbMock.on(ScanCommand).resolves({
-      Items: [memberRow(ORG_ID, 'user-1'), memberRow(ORG_ID, 'user-2', OrgRole.Member)],
+      Items: [metaRow(ORG_ID, 2), memberRow(ORG_ID, 'user-1')],
     });
+    stubPartition(ORG_ID, [
+      metaRow(ORG_ID, 2),
+      memberRow(ORG_ID, 'user-1'),
+      memberRow(ORG_ID, 'user-2'),
+    ]);
+
+    await handler();
+
+    expect(updateInputs()).toHaveLength(0);
+    expect(putInputs()).toHaveLength(0);
+    expect(emission(stdoutSpy)).toMatchObject({ OwnerCountDrift: 0, OrgsWithNoOwner: 0 });
+  });
+
+  it('never writes the Scan’s count upward over a counter that is right', async () => {
+    // The direction that matters: an inflated counter defeats `ownerCount > :one`
+    // and lets the last Owner be removed. The recount is what the write says.
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        metaRow(ORG_ID, 1),
+        memberRow(ORG_ID, 'user-1'),
+        memberRow(ORG_ID, 'user-2'),
+        memberRow(ORG_ID, 'user-3'),
+      ],
+    });
+    stubPartition(ORG_ID, [metaRow(ORG_ID, 1), memberRow(ORG_ID, 'user-1')]);
+
+    await handler();
+
+    expect(updateInputs()).toHaveLength(0);
+  });
+
+  it('leaves an org for the next run when its recount fails', async () => {
+    ddbMock.on(ScanCommand).resolves({ Items: [metaRow(ORG_ID, 3), memberRow(ORG_ID, 'user-1')] });
+    ddbMock.on(QueryCommand).rejects(new Error('ProvisionedThroughputExceededException'));
+
+    await handler();
+
+    expect(updateInputs()).toHaveLength(0);
+    expect(logsMatching(errorSpy, 'recount failed — org left for the next run')).toHaveLength(1);
+    expect(emission(stdoutSpy)).toMatchObject({ OwnerCountRepairFailed: 1 });
+  });
+
+  it('creates the META row for an org that has members and no counter', async () => {
+    const rows = [memberRow(ORG_ID, 'user-1'), memberRow(ORG_ID, 'user-2', OrgRole.Member)];
+    ddbMock.on(ScanCommand).resolves({ Items: rows });
+    stubPartition(ORG_ID, rows);
 
     await handler();
 
@@ -229,7 +321,9 @@ describe('owner-count-drift-checker', () => {
   });
 
   it('repairs a META row that carries no counter, conditioned on its absence', async () => {
-    ddbMock.on(ScanCommand).resolves({ Items: [metaRow(ORG_ID), memberRow(ORG_ID, 'user-1')] });
+    const rows = [metaRow(ORG_ID), memberRow(ORG_ID, 'user-1')];
+    ddbMock.on(ScanCommand).resolves({ Items: rows });
+    stubPartition(ORG_ID, rows);
 
     await handler();
 
@@ -247,9 +341,9 @@ describe('owner-count-drift-checker', () => {
   });
 
   it('reports an org with no Owner and still repairs the counter to zero', async () => {
-    ddbMock.on(ScanCommand).resolves({
-      Items: [metaRow(ORG_ID, 1), memberRow(ORG_ID, 'user-1', OrgRole.Admin)],
-    });
+    const rows = [metaRow(ORG_ID, 1), memberRow(ORG_ID, 'user-1', OrgRole.Admin)];
+    ddbMock.on(ScanCommand).resolves({ Items: rows });
+    stubPartition(ORG_ID, rows);
 
     await handler();
 
@@ -265,13 +359,13 @@ describe('owner-count-drift-checker', () => {
   });
 
   it('does not count an unrecognized role as an Owner', async () => {
-    ddbMock.on(ScanCommand).resolves({
-      Items: [
-        metaRow(ORG_ID, 2),
-        memberRow(ORG_ID, 'user-1'),
-        memberRow(ORG_ID, 'user-2', 'wizard'),
-      ],
-    });
+    const rows = [
+      metaRow(ORG_ID, 2),
+      memberRow(ORG_ID, 'user-1'),
+      memberRow(ORG_ID, 'user-2', 'wizard'),
+    ];
+    ddbMock.on(ScanCommand).resolves({ Items: rows });
+    stubPartition(ORG_ID, rows);
 
     await handler();
 
@@ -284,7 +378,9 @@ describe('owner-count-drift-checker', () => {
   });
 
   it('treats a repair that lost its condition as the counter having moved', async () => {
-    ddbMock.on(ScanCommand).resolves({ Items: [metaRow(ORG_ID, 3), memberRow(ORG_ID, 'user-1')] });
+    const rows = [metaRow(ORG_ID, 3), memberRow(ORG_ID, 'user-1')];
+    ddbMock.on(ScanCommand).resolves({ Items: rows });
+    stubPartition(ORG_ID, rows);
     ddbMock
       .on(UpdateItemCommand)
       .rejects(new ConditionalCheckFailedException({ message: 'moved', $metadata: {} }));
@@ -297,6 +393,7 @@ describe('owner-count-drift-checker', () => {
       counted: 1,
     });
     expect(logsMatching(errorSpy, 'repair failed')).toHaveLength(0);
+    expect(repairsEmitted(stdoutSpy)).toBe(0);
     expect(emission(stdoutSpy)).toMatchObject({ OwnerCountDrift: 1, OwnerCountRepairFailed: 0 });
   });
 
@@ -330,6 +427,8 @@ describe('owner-count-drift-checker', () => {
         memberRow(OTHER_ORG_ID, 'user-2'),
       ],
     });
+    stubPartition(ORG_ID, [metaRow(ORG_ID, 5), memberRow(ORG_ID, 'user-1')]);
+    stubPartition(OTHER_ORG_ID, [metaRow(OTHER_ORG_ID, 4), memberRow(OTHER_ORG_ID, 'user-2')]);
     ddbMock
       .on(UpdateItemCommand)
       .rejectsOnce(new Error('ProvisionedThroughputExceededException'))

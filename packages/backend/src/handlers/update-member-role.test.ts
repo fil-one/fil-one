@@ -111,6 +111,29 @@ function stubTargetInvitations(...roles: OrgRole[]) {
     });
 }
 
+/**
+ * The org's META row, which the failure path reads to tell the last-Owner guard
+ * firing from there being no counter for it to fire on.
+ */
+function stubOwnerCount(ownerCount: number | undefined) {
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'OrgTable',
+      Key: { pk: { S: OrgKeys.orgPk(ORG_ID) }, sk: { S: 'META' } },
+    })
+    .resolves(
+      ownerCount === undefined
+        ? {}
+        : {
+            Item: {
+              pk: { S: OrgKeys.orgPk(ORG_ID) },
+              sk: { S: 'META' },
+              ownerCount: { N: String(ownerCount) },
+            },
+          },
+    );
+}
+
 function transactItems() {
   const calls = ddbMock.commandCalls(TransactWriteItemsCommand);
   expect(calls).toHaveLength(1);
@@ -163,6 +186,7 @@ describe('PATCH /api/org/members/{userId} handler', () => {
 
     ddbMock.on(TransactWriteItemsCommand).resolves({});
     stubTargetInvitations();
+    stubOwnerCount(1);
     callerHolds(OrgRole.Owner);
     targetHolds(OrgRole.Member);
   });
@@ -238,6 +262,44 @@ describe('PATCH /api/org/members/{userId} handler', () => {
 
     expect(result).toMatchObject({ statusCode: 409 });
     expect(body(result).code).toBe(ApiErrorCode.LAST_OWNER);
+  });
+
+  it('does not call an Owner the last one when there is no counter to read', async () => {
+    // The decrement conditions on `ownerCount`, so a missing META row cancels
+    // the same item for the opposite reason: the guard was never armed. The
+    // remedy is support and the drift checker, not promoting somebody.
+    targetHolds(OrgRole.Owner);
+    stubOwnerCount(undefined);
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(2, 4));
+
+    const result = await handler(roleEvent(OrgRole.Admin), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 409 });
+    expect(body(result).code).toBeUndefined();
+    expect(body(result).message).toStrictEqual(expect.stringContaining('contact support'));
+    expect(console.error).toHaveBeenCalled();
+  });
+
+  it('reports a transient conflict as a failure rather than a verdict', async () => {
+    // A TransactionConflict cancels an item exactly as a failed condition does.
+    // Read as the guard firing, it would tell an Owner they are the last one.
+    targetHolds(OrgRole.Owner);
+    ddbMock.on(TransactWriteItemsCommand).rejects(
+      new TransactionCanceledException({
+        message: 'cancelled',
+        $metadata: {},
+        CancellationReasons: [
+          { Code: 'None' },
+          { Code: 'None' },
+          { Code: 'TransactionConflict' },
+          { Code: 'None' },
+        ],
+      }),
+    );
+
+    const result = await handler(roleEvent(OrgRole.Admin), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 500 });
   });
 
   it('refuses an Admin promoting anyone to Owner', async () => {

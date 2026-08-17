@@ -276,7 +276,7 @@ export function inviterAuthorityCheck({
 }
 
 /**
- * Which of a transaction's items failed their conditions, by the caller's own
+ * Which of a transaction's items failed their CONDITIONS, by the caller's own
  * names for them.
  *
  * DynamoDB reports cancellation reasons positionally, and a handler that indexed
@@ -285,13 +285,26 @@ export function inviterAuthorityCheck({
  * honest: the caller passes the same labels in the same order as the items, and
  * asks which names cancelled.
  *
- * Returns an empty list for anything that is not a cancellation, so a caller can
- * ask without first narrowing the error.
+ * Only `ConditionalCheckFailed` counts. Every caller here turns a named item
+ * into a statement about the world — "this org has one Owner", "this person is
+ * not a member", "somebody accepted first" — and those statements are true only
+ * of a guard that fired. A `TransactionConflict` or a throttle cancels the same
+ * item and means the opposite: the write did not happen, try again. Reported as
+ * a condition failure, a conflict on the META row would tell an Owner they are
+ * the last one and a conflict on a membership row would tell a member they do
+ * not exist.
+ *
+ * So anything else leaves the list empty and the caller's `throw err` stands,
+ * which is the honest answer for a transient failure: an error the client
+ * retries, not a verdict.
  */
 export function cancelledLabels(err: unknown, labels: readonly string[]): string[] {
   if (!(err instanceof TransactionCanceledException)) return [];
 
   return (err.CancellationReasons ?? []).flatMap((reason, index) =>
-    reason.Code && reason.Code !== 'None' ? [labels[index] ?? `item${index}`] : [],
+    reason.Code === CONDITION_FAILED ? [labels[index] ?? `item${index}`] : [],
   );
 }
+
+/** The one cancellation reason that means a condition we wrote was not met. */
+const CONDITION_FAILED = 'ConditionalCheckFailed';

@@ -134,11 +134,14 @@ describe('route manifest coverage', () => {
 
   it('applies the declared cap in the handler on the routes that carry one', () => {
     // A route can hold a fixed permission in the chain and still narrow it on
-    // the body — create-access-key gates on `keys.create` and then caps the new
-    // key at the creator's own authority. The cap is the shared registry's, so
-    // a route declaring one without calling it is a cap that does not run.
+    // something the chain has not read — create-access-key gates on
+    // `keys.create` and caps the new key at the creator's own authority; the
+    // member and invitation routes gate on `members.manage` and cap the reach
+    // at the caller's own role. Both caps come from the shared registry, so a
+    // route declaring one without calling it is a cap that does not run.
+    const capIdiom = /\b(excessKeyPermissions|canManageTargetRole|canChangeRole)\(/;
     const uncapped = ROUTE_MANIFEST.filter((route) => route.capsInHandler)
-      .filter((route) => !/\bexcessKeyPermissions\(/.test(handlerSource(route.handler)))
+      .filter((route) => !capIdiom.test(handlerSource(route.handler)))
       .map((route) => route.handler);
     expect(uncapped).toStrictEqual([]);
   });

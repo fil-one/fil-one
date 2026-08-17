@@ -1,9 +1,15 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { OrgRole, TransferOwnershipSchema } from '@filone/shared';
+import { OrgRole, TransferOwnershipSchema, canManageTargetRole } from '@filone/shared';
 import type { ErrorResponse, TransferOwnershipResponse } from '@filone/shared';
 import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.js';
+import {
+  pendingInvitationsFrom,
+  planRevocations,
+  retireInvitationItems,
+  revokeDeferred,
+} from '../lib/invitations.js';
 import { cancelledLabels, ownerCountItem, roleChangeItems } from '../lib/membership-changes.js';
 import { resolveMembership } from '../lib/org-membership.js';
 import { parseJsonBody } from '../lib/parse-json-body.js';
@@ -32,6 +38,10 @@ import { requireMfaIfEnrolled } from '../middleware/require-mfa.js';
  * transaction — a promotion landing concurrently then conflicts instead of
  * interleaving with a swap that assumed the count.
  *
+ * The outgoing Owner's pending Owner-invitations ride the same transaction, the
+ * way a demotion's do: they are invitations the role they now hold could not
+ * have issued.
+ *
  * Nothing about billing changes. The subscription is keyed to the org and the
  * Stripe customer is untouched; ownership is a role attribute, not a payer.
  */
@@ -54,6 +64,17 @@ export async function baseHandler(
   // `authorize('org.transfer')` is Owner-only, so this is the caller's role.
   const callerRole = membership!.role;
 
+  // The same sweep a demotion runs, for the same reason: the outgoing Owner
+  // becomes an Admin, and an Admin cannot issue an Owner invitation, so they
+  // cannot keep one outstanding either. The accept path's ConditionCheck already
+  // refuses those links, which makes this hygiene rather than a guard — no dead
+  // links in inboxes, no slots held under the cap, no pending rows on the page
+  // that nobody can explain.
+  const doomed = (await pendingInvitationsFrom(orgId, userId)).filter(
+    (invitation) => !canManageTargetRole(OrgRole.Admin, invitation.role),
+  );
+  const { now, later } = planRevocations(doomed, TRANSFER_ITEMS);
+
   try {
     await commitAudited({
       items: [
@@ -73,18 +94,25 @@ export async function baseHandler(
           toRole: OrgRole.Admin,
         }),
         ownerCountItem(orgId, 'unchanged'),
+        ...now.flatMap((invitation) => retireInvitationItems(invitation, 'revoked')),
       ],
       event: auditEvent({
         type: 'ownership.transferred',
         actor: userActor({ userId, email: actorEmail }),
         orgId,
         subject: AuditSubjects.org(orgId),
-        details: { fromUserId: userId, toUserId: targetUserId },
+        details: {
+          fromUserId: userId,
+          toUserId: targetUserId,
+          ...(doomed.length > 0 ? { revokedInvitations: doomed.length } : {}),
+        },
       }),
     });
   } catch (err) {
-    return transferFailureResponse(err);
+    return transferFailureResponse(err, now.length);
   }
+
+  await revokeDeferred(later);
 
   return new ResponseBuilder()
     .status(200)
@@ -92,13 +120,20 @@ export async function baseHandler(
     .build();
 }
 
-function transferFailureResponse(err: unknown): APIGatewayProxyStructuredResultV2 {
+/** Both role changes and the counter — what the sweep's revocations sit behind. */
+const TRANSFER_ITEMS = 5;
+
+function transferFailureResponse(
+  err: unknown,
+  revocations: number,
+): APIGatewayProxyStructuredResultV2 {
   const failed = cancelledLabels(err, [
     'promotion',
     'promotionInverse',
     'demotion',
     'demotionInverse',
     'ownerCount',
+    ...Array.from({ length: revocations * 2 }, () => 'invitation'),
   ]);
   if (failed.length === 0) throw err;
 

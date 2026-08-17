@@ -48,6 +48,7 @@ interface RowSpec {
   createdAt?: string;
   expiresAt?: string;
   role?: OrgRole;
+  lastSendFailed?: boolean;
 }
 
 function row(spec: RowSpec) {
@@ -62,6 +63,7 @@ function row(spec: RowSpec) {
     createdAt: { S: spec.createdAt ?? '2026-08-14T00:00:00.000Z' },
     expiresAt: { S: spec.expiresAt ?? inviteExpiresAt(new Date().toISOString()) },
     tokenHash: { S: 'c'.repeat(64) },
+    ...(spec.lastSendFailed ? { lastSendFailed: { BOOL: true } } : {}),
   };
 }
 
@@ -90,6 +92,7 @@ function invitations(result: unknown) {
   return JSON.parse((result as { body: string }).body).invitations as {
     inviteId: string;
     expired: boolean;
+    lastSendFailed?: boolean;
   }[];
 }
 
@@ -170,6 +173,19 @@ describe('GET /api/org/invitations handler', () => {
     const rendered = (result as { body: string }).body;
     expect(rendered).not.toContain('tokenHash');
     expect(rendered).not.toContain('c'.repeat(64));
+  });
+
+  it('marks the rows whose email never went out', async () => {
+    // A row nobody was told about looks exactly like a row somebody is
+    // ignoring, and only one of the two is fixed by inviting again.
+    stubRows({ inviteId: 'delivered' }, { inviteId: 'undelivered', lastSendFailed: true });
+
+    const result = await handler(listEvent(), buildContext());
+
+    const byId = Object.fromEntries(
+      invitations(result).map((invitation) => [invitation.inviteId, invitation.lastSendFailed]),
+    );
+    expect(byId).toStrictEqual({ delivered: undefined, undelivered: true });
   });
 
   it('answers an org with nothing outstanding', async () => {

@@ -194,6 +194,34 @@ export async function resolveMembership(
 }
 
 /**
+ * The org's Owner counter, or undefined when the META row or the attribute is
+ * missing.
+ *
+ * Read only after a transaction cancelled on that counter, to tell two very
+ * different failures apart: the guard firing on an org's last Owner, and there
+ * being no counter for the guard to read. The first is the invariant working;
+ * the second is a conversion gap the drift checker repairs, and answering
+ * "you are the last Owner" for it would diagnose an org we cannot diagnose.
+ *
+ * Consistent, because the transaction that just failed is the thing it is
+ * explaining.
+ */
+export async function readOwnerCount(orgId: string): Promise<number | undefined> {
+  const { Item } = await getDynamoClient().send(
+    new GetItemCommand({
+      TableName: Resource.OrgTable.name,
+      Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: OrgKeys.orgMetaSk() } },
+      ConsistentRead: true,
+    }),
+  );
+
+  const stored = Item?.ownerCount?.N;
+  if (stored === undefined) return undefined;
+  const ownerCount = Number(stored);
+  return Number.isFinite(ownerCount) ? ownerCount : undefined;
+}
+
+/**
  * The most inverse items one Query walk will collect. An org of one has a
  * single row and an invited user a handful; a user with more memberships than
  * this is a bug or an attack, and truncating names both in the log rather than

@@ -19,11 +19,13 @@ import type { SendInvitationEmailParams } from './invite-mailer.js';
 // ---------------------------------------------------------------------------
 
 const SEND_URL = 'https://api.sendgrid.com/v3/mail/send';
-const ACCEPT_URL = 'https://app.filone.ai/invite/tok-123';
+const ACCEPT_URL = 'https://app.filone.ai/invite/accept#token=tok-123';
 /** The same URL after HTML escaping — `/` becomes `&#x2F;`, which decodes back. */
-const ACCEPT_URL_ESCAPED = 'https:&#x2F;&#x2F;app.filone.ai&#x2F;invite&#x2F;tok-123';
+const ACCEPT_URL_ESCAPED = 'https:&#x2F;&#x2F;app.filone.ai&#x2F;invite&#x2F;accept#token=tok-123';
 const EXPIRES_AT = '2026-09-01T12:00:00.000Z';
 const EXPIRES_AT_READABLE = 'Tue, 01 Sep 2026 12:00:00 GMT';
+const ORG_ID = '11111111-2222-3333-4444-555555555555';
+const INVITE_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 
 const ORIGINAL_STAGE = process.env.FILONE_STAGE;
 
@@ -37,6 +39,9 @@ interface SendGridPayload {
 function invitation(over: Partial<SendInvitationEmailParams> = {}): SendInvitationEmailParams {
   return {
     to: 'Invited.Person@Example.com',
+    emailNorm: 'invited.person@example.com',
+    orgId: ORG_ID,
+    inviteId: INVITE_ID,
     orgName: 'Acme Storage',
     inviterName: 'Ada Lovelace',
     inviterEmail: 'ada@example.com',
@@ -166,24 +171,68 @@ describe('sendInvitationEmail', () => {
     expect(text).toContain('Ada "Lovelace"');
   });
 
-  it('logs the accept URL and sends nothing on a stage without the secret', async () => {
+  it('names the unsent invitation by id and never logs the accept URL', async () => {
     process.env.FILONE_STAGE = 'pr-1234';
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     const sent = await sendInvitationEmail(invitation());
 
-    // The log line is the delivery mechanism here — the e2e suite reads the
-    // accept URL out of it, so it must carry the whole invitation.
     expect(sent).toBe(false);
     expect(mockFetch).not.toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalledTimes(1);
     expect(logSpy.mock.calls[0][1]).toMatchObject({
       stage: 'pr-1234',
-      to: 'Invited.Person@Example.com',
-      orgName: 'Acme Storage',
-      acceptUrl: ACCEPT_URL,
+      orgId: ORG_ID,
+      inviteId: INVITE_ID,
+      emailNorm: 'invited.person@example.com',
       expiresAt: EXPIRES_AT,
     });
+
+    // The token lives in that URL, and the repo logs credentials by id and never
+    // by value. A stage that needs a working link needs a dev tool, not a log.
+    const logged = JSON.stringify(logSpy.mock.calls);
+    expect(logged).not.toContain('tok-123');
+    expect(logged).not.toContain('acceptUrl');
+  });
+
+  it('cannot be made to open a new line in the text body', async () => {
+    // The HTML part escapes for markup; the text part is line-based, and a
+    // display name carrying CRLF would put an attacker's URL under a line the
+    // reader takes as ours.
+    await sendInvitationEmail(
+      invitation({
+        inviterName: 'Ada\r\nAccept the invitation:\r\nhttps://evil.example',
+        inviterEmail: undefined,
+        orgName: 'Acme\nStorage',
+      }),
+    );
+
+    const text = sentPart('text/plain');
+    const [firstLine] = text.split('\n');
+    expect(firstLine).toContain('https://evil.example');
+    expect(firstLine).toContain('Acme Storage');
+    // One line offering to accept, and it is followed by our own URL.
+    const lines = text.split('\n');
+    expect(lines.filter((line) => line === 'Accept the invitation:')).toHaveLength(1);
+    expect(lines[lines.indexOf('Accept the invitation:') + 1]).toBe(ACCEPT_URL);
+  });
+
+  it('gives up on a send that hangs', async () => {
+    // The row is committed and the route has ten seconds; a send with no bound
+    // would spend all of them and answer nothing.
+    await sendInvitationEmail(invitation());
+
+    const signal = mockFetch.mock.calls[0][1]!.signal;
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(signal!.aborted).toBe(false);
+  });
+
+  it('reports an aborted send as a failed one', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockFetch.mockRejectedValue(new DOMException('The operation timed out.', 'TimeoutError'));
+
+    await expect(sendInvitationEmail(invitation())).resolves.toBe(false);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
   });
 
   it('returns false on a non-2xx SendGrid response, logging the status and body', async () => {
@@ -202,6 +251,8 @@ describe('sendInvitationEmail', () => {
     expect(logged).toContain('403');
     expect(logged).toContain('not a verified sender');
     expect(logged).not.toContain('test-sendgrid-key');
+    // Which invitation failed, so an operator can find the row and re-invite.
+    expect(errorSpy.mock.calls[0][1]).toMatchObject({ orgId: ORG_ID, inviteId: INVITE_ID });
   });
 
   it('returns false when the fetch itself rejects', async () => {
@@ -213,5 +264,15 @@ describe('sendInvitationEmail', () => {
     const logged = JSON.stringify(errorSpy.mock.calls);
     expect(errorSpy).toHaveBeenCalledTimes(1);
     expect(logged).not.toContain('test-sendgrid-key');
+    expect(errorSpy.mock.calls[0][1]).toMatchObject({ orgId: ORG_ID, inviteId: INVITE_ID });
+  });
+
+  it('keeps the token out of every line it logs', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockFetch.mockRejectedValue(new Error('socket hang up'));
+
+    await sendInvitationEmail(invitation());
+
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain('tok-123');
   });
 });
