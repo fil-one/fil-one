@@ -11,6 +11,7 @@ const ddbMock = mockClient(DynamoDBClient);
 import { stubMembershipList } from '../test/lambda-test-utilities.js';
 import {
   OrgKeys,
+  listMembers,
   listMemberships,
   resolveMembership,
   summarizeMemberships,
@@ -338,5 +339,82 @@ describe('summarizeMemberships', () => {
     ]);
     expect(consoleError).toHaveBeenCalled();
     consoleError.mockRestore();
+  });
+});
+
+describe('listMembers', () => {
+  beforeEach(() => {
+    ddbMock.reset();
+  });
+
+  function memberItem(userId: string, role: string, joinedAt = JOINED_AT) {
+    return {
+      pk: { S: OrgKeys.orgPk(ORG_ID) },
+      sk: { S: OrgKeys.memberSk(userId) },
+      role: { S: role },
+      joinedAt: { S: joinedAt },
+      source: { S: 'invitation' },
+    };
+  }
+
+  it('walks the org partition by the member prefix, consistently', async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [memberItem(USER_ID, OrgRole.Owner)] });
+
+    const members = await listMembers(ORG_ID);
+
+    expect(members).toStrictEqual([
+      {
+        orgId: ORG_ID,
+        userId: USER_ID,
+        role: OrgRole.Owner,
+        joinedAt: JOINED_AT,
+        source: 'invitation',
+      },
+    ]);
+    expect(ddbMock.commandCalls(QueryCommand)[0].args[0].input).toMatchObject({
+      TableName: 'OrgTable',
+      ExpressionAttributeValues: {
+        ':pk': { S: OrgKeys.orgPk(ORG_ID) },
+        ':skPrefix': { S: 'MEMBER#' },
+      },
+      ConsistentRead: true,
+    });
+  });
+
+  it('pages, because a Query returns at most 1 MB', async () => {
+    ddbMock
+      .on(QueryCommand)
+      .resolvesOnce({
+        Items: [memberItem('first-user', OrgRole.Owner)],
+        LastEvaluatedKey: { pk: { S: 'more' }, sk: { S: 'more' } },
+      })
+      .resolves({ Items: [memberItem('second-user', OrgRole.Member)] });
+
+    const members = await listMembers(ORG_ID);
+
+    expect(members.map((member) => member.userId)).toStrictEqual(['first-user', 'second-user']);
+  });
+
+  it('drops a row whose role nothing can authorize, and says so', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    ddbMock.on(QueryCommand).resolves({
+      Items: [memberItem(USER_ID, OrgRole.Owner), memberItem('broken-user', 'billing')],
+    });
+
+    const members = await listMembers(ORG_ID);
+
+    expect(members.map((member) => member.userId)).toStrictEqual([USER_ID]);
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it('derives the member id from the key rather than the row', async () => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [{ ...memberItem(USER_ID, OrgRole.Admin), userId: { S: 'a-lie' } }],
+    });
+
+    const [member] = await listMembers(ORG_ID);
+
+    expect(member.userId).toBe(USER_ID);
   });
 });
