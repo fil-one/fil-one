@@ -6,6 +6,7 @@ import {
   ApiErrorCode,
   CSRF_COOKIE_NAME,
   GRANULAR_PERMISSION_MAP,
+  INVITE_TOKEN_MIN_LENGTH,
   GRANULAR_PERMISSION_REQUIREMENT,
   OrgRole,
   PresignOpSchema,
@@ -275,7 +276,10 @@ const byRequirement = (requires: RouteManifestEntry['requires']) =>
  */
 const permissionGated: { route: RouteManifestEntry; permission: Permission }[] =
   ROUTE_MANIFEST.filter((route) => route.category === 'authenticated').flatMap((route) =>
-    route.requires === undefined || route.requires === 'self' || route.requires === 'in-handler'
+    route.requires === undefined ||
+    route.requires === 'self' ||
+    route.requires === 'in-handler' ||
+    route.requires === 'invite-token'
       ? []
       : [{ route, permission: route.requires }],
   );
@@ -649,6 +653,56 @@ describe('the cap the key route applies on top of keys.create', () => {
       // Named, because "your role does not permit this key" against a form of
       // checkboxes does not say which one to clear.
       expect(result.body).toContain(keyPermission);
+    },
+  );
+});
+
+/**
+ * The invitation route, which asks for a token where the others ask for a role.
+ *
+ * Accepting an invitation cannot require membership in the org it is about to
+ * create one in, so `invite-token` carries no org gate at all. What stands in
+ * its place is the token: an unknown one is refused, which is what says the
+ * route is not simply open. The rest of the check — that the session's verified
+ * address is the one the invitation went to — needs a real invitation row and
+ * belongs to accept-invitation's own tests, which cover the mismatch, the
+ * casing, and the unverified session.
+ */
+describe('the invitation route asks for a token instead of a role', () => {
+  quietDenialOutput();
+
+  const inviteRoutes = byRequirement('invite-token');
+  // A token the schema accepts and no invitation matches.
+  const unknownToken = JSON.stringify({ token: 'x'.repeat(INVITE_TOKEN_MIN_LENGTH) });
+
+  it('is declared on at least one route', () => {
+    expect(inviteRoutes.length).toBeGreaterThan(0);
+  });
+
+  it.each(named(inviteRoutes))(
+    '%s refuses no caller for want of a membership row',
+    async (_handler, route) => {
+      const result = await invokeRoute(route, {
+        membership: NO_MEMBERSHIP,
+        request: { body: unknownToken },
+      });
+
+      expect([ApiErrorCode.FORBIDDEN_ROLE, ApiErrorCode.NOT_A_MEMBER]).not.toContain(
+        errorCode(result),
+      );
+    },
+  );
+
+  it.each(named(inviteRoutes))(
+    '%s refuses a token no invitation matches',
+    async (_handler, route) => {
+      const result = await invokeRoute(route, {
+        membership: NO_MEMBERSHIP,
+        request: { body: unknownToken },
+      });
+
+      expect(result.statusCode).toBe(404);
+      expect(errorCode(result)).toBe(ApiErrorCode.INVITE_NOT_FOUND);
     },
   );
 });

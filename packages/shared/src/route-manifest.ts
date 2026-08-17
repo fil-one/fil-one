@@ -37,8 +37,15 @@ export type RouteCategory =
  * membership row is what went wrong. `'in-handler'` marks routes whose
  * permission depends on the request body; the chain gates them on membership
  * and the handler checks the permission against this same registry.
+ *
+ * `'invite-token'` marks the one route whose caller is, by definition, not yet a
+ * member of the org it acts on: accepting an invitation. Its authorization is
+ * the single-use token in the body plus a session whose verified email is the
+ * invited address, both checked in the handler; a membership gate in the chain
+ * would refuse every invitation there is. Deliberately not `'self'`, which is
+ * for routes that touch no org state at all — accepting creates a membership.
  */
-export type RouteRequirement = Permission | 'self' | 'in-handler';
+export type RouteRequirement = Permission | 'self' | 'in-handler' | 'invite-token';
 
 export interface RouteManifestEntry {
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -246,8 +253,8 @@ const MANIFEST = [
   },
 
   // ── Organization ─────────────────────────────────────────────────
-  // Rename only. Ownership transfer and deletion carry their own permissions
-  // and get their own routes when they ship.
+  // Rename and ownership transfer. Deletion carries its own permission and gets
+  // its own route when it ships.
   {
     method: 'PATCH',
     path: '/api/org',
@@ -255,6 +262,47 @@ const MANIFEST = [
     category: 'authenticated',
     requires: 'org.rename',
   },
+  // Owner-only, and the one org action behind a step-up: it is the only verb
+  // that can take the caller's own authority away, so a session somebody walked
+  // away from must not be enough to move the seat.
+  {
+    method: 'POST',
+    path: '/api/org/transfer',
+    handler: 'transfer-ownership',
+    category: 'authenticated',
+    requires: 'org.transfer',
+  },
+
+  // ── Members ──────────────────────────────────────────────────────
+  // Every role reads the roster: the matrix grants `members.read` to all four,
+  // and a member who cannot see who else is in the org cannot tell who to ask
+  // for anything.
+  {
+    method: 'GET',
+    path: '/api/org/members',
+    handler: 'list-members',
+    category: 'authenticated',
+    requires: 'members.read',
+  },
+  // `members.manage` is what reaching these routes costs; the ceiling on the
+  // TARGET runs in the handler against the same registry, because the target's
+  // role is a row the chain has not read. Touching an Owner — promoting to,
+  // demoting from, removing — needs `owners.manage` there.
+  {
+    method: 'PATCH',
+    path: '/api/org/members/{userId}',
+    handler: 'update-member-role',
+    category: 'authenticated',
+    requires: 'members.manage',
+  },
+  {
+    method: 'DELETE',
+    path: '/api/org/members/{userId}',
+    handler: 'remove-member',
+    category: 'authenticated',
+    requires: 'members.manage',
+  },
+
   // ── Invitations ──────────────────────────────────────────────────
   {
     method: 'GET',
@@ -277,17 +325,17 @@ const MANIFEST = [
     category: 'authenticated',
     requires: 'members.manage',
   },
-  // Accepting is `self`, and deliberately outside the org gate: the caller is
-  // not a member of the inviting org yet, so a membership check here would
-  // refuse every invitation there is. The token plus a session whose verified
-  // email matches the invitation is the whole authorization, and neither is
-  // something a role can grant.
+  // Outside the org gate, and it has to be: the caller is not a member of the
+  // inviting org yet, so a membership check here would refuse every invitation
+  // there is. The token plus a session whose verified email matches the
+  // invitation is the whole authorization, and neither is something a role can
+  // grant.
   {
     method: 'POST',
     path: '/api/invitations/accept',
     handler: 'accept-invitation',
     category: 'authenticated',
-    requires: 'self',
+    requires: 'invite-token',
   },
 
   // ── Auth ─────────────────────────────────────────────────────────
