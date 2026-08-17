@@ -971,6 +971,25 @@ export default $config({
 
     // ── Organization route ──────────────────────────────────────────
     addRoute({ method: 'PATCH', routePath: '/api/org', handler: 'update-org' });
+    // ── Invitations ─────────────────────────────────────────────────
+    addRoute({ method: 'GET', routePath: '/api/org/invitations', handler: 'list-invitations' });
+    // The only route that sends mail. `SendGridApiKey` exists on staging and
+    // production alone, so on every other stage the mailer logs the accept URL
+    // instead — which is what the e2e suite drives. `WEBSITE_URL` is the accept
+    // link's origin, taken from configuration rather than from the request, since
+    // the link goes to somebody else's inbox.
+    addRoute({
+      method: 'POST',
+      routePath: '/api/org/invitations',
+      handler: 'create-invitation',
+      extraEnv: { WEBSITE_URL: siteUrl },
+      ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
+    });
+    addRoute({
+      method: 'DELETE',
+      routePath: '/api/org/invitations/{inviteId}',
+      handler: 'revoke-invitation',
+    });
     addRoute({
       method: 'GET',
       routePath: '/api/me/preferences',

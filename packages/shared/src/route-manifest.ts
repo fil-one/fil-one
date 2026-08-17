@@ -221,7 +221,28 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     category: 'authenticated',
     requires: 'org.rename',
   },
-
+  // ── Invitations ──────────────────────────────────────────────────
+  {
+    method: 'GET',
+    path: '/api/org/invitations',
+    handler: 'list-invitations',
+    category: 'authenticated',
+    requires: 'members.manage',
+  },
+  {
+    method: 'POST',
+    path: '/api/org/invitations',
+    handler: 'create-invitation',
+    category: 'authenticated',
+    requires: 'members.manage',
+  },
+  {
+    method: 'DELETE',
+    path: '/api/org/invitations/{inviteId}',
+    handler: 'revoke-invitation',
+    category: 'authenticated',
+    requires: 'members.manage',
+  },
   // ── Auth ─────────────────────────────────────────────────────────
   { method: 'GET', path: '/login', handler: 'auth-login', category: 'public' },
   { method: 'GET', path: '/api/auth/callback', handler: 'auth-callback', category: 'public' },
