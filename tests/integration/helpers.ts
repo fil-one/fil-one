@@ -72,58 +72,86 @@ export async function pollUntil<T>(
 // DynamoDB helpers
 // =============================================================================
 
+/**
+ * The org a test user's subscription belongs to.
+ *
+ * Derived from the user id, which every suite already makes unique per run, so
+ * each test owns its own org row. The fixed `test-org` this replaced put every
+ * webhook suite on one org, and the jobs now keep one row per org — so under
+ * `fileParallelism` two suites' rows would collide and one of them would be
+ * dropped by whichever ran second.
+ */
+export function testOrgId(userId: string): string {
+  return `test-org-${userId}`;
+}
+
+/**
+ * Both keys the row lives under, org first — the order the application reads
+ * them in. A suite that seeds its own `orgId` names it here too, so the key and
+ * the attribute can never disagree.
+ */
+const subscriptionKeys = (userId: string, orgId: string = testOrgId(userId)) => [
+  { pk: { S: `ORG#${orgId}` }, sk: { S: 'SUBSCRIPTION' } },
+  { pk: { S: `CUSTOMER#${userId}` }, sk: { S: 'SUBSCRIPTION' } },
+];
+
+/**
+ * Seed the subscription on both keys, the way the application writes it.
+ *
+ * Seeding one key only would test the wrong thing in both directions: seed just
+ * the legacy row and a handler that correctly writes the org twin looks like it
+ * wrote nothing; seed just the org row and the fallback path is never exercised.
+ */
 export async function seedBillingRecord(
   userId: string,
   customerId: string,
   status: string,
   extra?: Record<string, { S: string }>,
 ): Promise<void> {
-  const item: Record<string, { S: string }> = {
-    pk: { S: `CUSTOMER#${userId}` },
+  const orgId = extra?.orgId?.S ?? testOrgId(userId);
+  const attributes: Record<string, { S: string }> = {
     sk: { S: 'SUBSCRIPTION' },
-    orgId: { S: 'test-org' },
+    userId: { S: userId },
     stripeCustomerId: { S: customerId },
     subscriptionStatus: { S: status },
     updatedAt: { S: new Date().toISOString() },
     ...extra,
+    orgId: { S: orgId },
   };
 
-  await getDynamoClient().send(
-    new PutItemCommand({
-      TableName: getBillingTableName(),
-      Item: item,
-    }),
-  );
-}
-
-export async function getBillingRecord(
-  userId: string,
-): Promise<Record<string, AttributeValue> | null> {
-  const result = await getDynamoClient().send(
-    new GetItemCommand({
-      TableName: getBillingTableName(),
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
-    }),
-  );
-  return result.Item ?? null;
-}
-
-export async function deleteBillingRecord(userId: string): Promise<void> {
-  try {
+  for (const key of subscriptionKeys(userId, orgId)) {
     await getDynamoClient().send(
-      new DeleteItemCommand({
+      new PutItemCommand({
         TableName: getBillingTableName(),
-        Key: {
-          pk: { S: `CUSTOMER#${userId}` },
-          sk: { S: 'SUBSCRIPTION' },
-        },
+        Item: { ...attributes, pk: key.pk },
       }),
     );
-  } catch (error) {
-    console.error('Failed to delete billing record:', error);
+  }
+}
+
+/** The row the application would read: the org key first, the legacy key second. */
+export async function getBillingRecord(
+  userId: string,
+  orgId?: string,
+): Promise<Record<string, AttributeValue> | null> {
+  for (const Key of subscriptionKeys(userId, orgId)) {
+    const result = await getDynamoClient().send(
+      new GetItemCommand({ TableName: getBillingTableName(), Key }),
+    );
+    if (result.Item) return result.Item;
+  }
+  return null;
+}
+
+export async function deleteBillingRecord(userId: string, orgId?: string): Promise<void> {
+  for (const Key of subscriptionKeys(userId, orgId)) {
+    try {
+      await getDynamoClient().send(
+        new DeleteItemCommand({ TableName: getBillingTableName(), Key }),
+      );
+    } catch (error) {
+      console.error('Failed to delete billing record:', error);
+    }
   }
 }
 
@@ -133,7 +161,7 @@ export async function deleteBillingRecord(userId: string): Promise<void> {
 
 export async function createTestCustomer(userId: string, testClock?: string): Promise<string> {
   const params: Stripe.CustomerCreateParams = {
-    metadata: { userId, orgId: 'test-org' },
+    metadata: { userId, orgId: testOrgId(userId) },
     description: `Webhook test customer (${userId})`,
   };
   if (testClock) {

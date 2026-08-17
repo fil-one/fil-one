@@ -161,6 +161,31 @@ describe('grace-period-enforcer', () => {
     expect(canceledUpdate()).toBeDefined();
   });
 
+  it('cancels the org when its two rows disagree about whether grace has run out', async () => {
+    // Two rows for one org survive re-subscription history, and the job acts on
+    // one of them. Cancelling disables the tenant and closes the account out;
+    // write-locking leaves it running another day. Which one happens must not
+    // depend on the order DynamoDB returned the scan pages in.
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        buildBillingItem({
+          pk: 'CUSTOMER#still-in-grace',
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: futureDate(3),
+        }),
+        buildBillingItem({
+          pk: 'CUSTOMER#grace-expired',
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: pastDate(1),
+        }),
+      ],
+    });
+
+    await handler();
+
+    expect(canceledUpdate()).toBeDefined();
+  });
+
   it('cancels both keys, org row first', async () => {
     ddbMock.on(ScanCommand).resolves({
       Items: [
@@ -185,12 +210,19 @@ describe('grace-period-enforcer', () => {
         ':now': { S: expect.any(String) },
       },
     };
+    // Both keys carry the existence guard: this job updates rows it just
+    // scanned, so a write that finds nothing there is a row that vanished
+    // underneath it, not a row to create.
     expect(updateCalls[0].args[0].input).toStrictEqual({
       ...cancel,
       Key: ORG_KEY,
       ConditionExpression: 'attribute_exists(pk)',
     });
-    expect(updateCalls[1].args[0].input).toStrictEqual({ ...cancel, Key: LEGACY_KEY });
+    expect(updateCalls[1].args[0].input).toStrictEqual({
+      ...cancel,
+      Key: LEGACY_KEY,
+      ConditionExpression: 'attribute_exists(pk)',
+    });
   });
 
   it('cancels the legacy row when the org twin does not exist yet', async () => {

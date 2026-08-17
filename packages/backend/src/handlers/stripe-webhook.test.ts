@@ -421,6 +421,7 @@ describe('stripe-webhook handler', () => {
           ':periodEnd': { S: new Date(1700000000 * 1000).toISOString() },
           ':now': { S: expect.any(String) },
         },
+        ConditionExpression: 'attribute_exists(pk)',
       });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -625,6 +626,7 @@ describe('stripe-webhook handler', () => {
           ':periodEnd': { S: new Date(1700000000 * 1000).toISOString() },
           ':now': { S: expect.any(String) },
         },
+        ConditionExpression: 'attribute_exists(pk)',
       });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -844,6 +846,7 @@ describe('stripe-webhook handler', () => {
           ':now': { S: expect.any(String) },
           ':grace': { S: expect.any(String) },
         },
+        ConditionExpression: 'attribute_exists(pk)',
       });
 
       const graceDate = new Date(input.ExpressionAttributeValues![':grace'].S!).getTime();
@@ -1126,6 +1129,7 @@ describe('stripe-webhook handler', () => {
           ':active': { S: SubscriptionStatus.Active },
           ':now': { S: expect.any(String) },
         },
+        ConditionExpression: 'attribute_exists(pk)',
         ReturnValues: 'ALL_OLD',
       });
       expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
@@ -1209,6 +1213,19 @@ describe('stripe-webhook handler', () => {
   // 8. invoice.payment_failed
   // -----------------------------------------------------------------------
   describe('invoice.payment_failed', () => {
+    it('dual-writes for a customer whose org only the billing row knows', async () => {
+      // Customers created before the metadata carried an `orgId` used to write
+      // one key here while every other writer wrote two, which left the backfill
+      // chasing a row the app kept changing under it.
+      setupStripeEvent('invoice.payment_failed', mockInvoice());
+      setupCustomerRetrieve();
+      setupAuroraTenantResolution();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(updatedKeys()).toEqual([ORG_KEY, LEGACY_KEY]);
+    });
+
     it('sets PastDue status with lastPaymentFailedAt (no grace period)', async () => {
       setupStripeEvent('invoice.payment_failed', mockInvoice());
       setupCustomerRetrieve();
@@ -1233,6 +1250,7 @@ describe('stripe-webhook handler', () => {
           ':failedAt': { S: expect.any(String) },
           ':now': { S: expect.any(String) },
         },
+        ConditionExpression: 'attribute_exists(pk)',
       });
 
       // Must NOT set gracePeriodEndsAt — Stripe Smart Retries handle the retry window

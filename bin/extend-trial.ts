@@ -45,6 +45,16 @@ import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/clie
 import Stripe from 'stripe';
 import { createClient, setTenantStatus } from '@filone/aurora-backoffice-client';
 
+// BillingTable keys — mirror of `SubscriptionKeys` in
+// packages/backend/src/lib/subscription-store.ts, for the reason
+// ./lib/org-conversion.ts records: bin scripts run under Node's type stripping,
+// which resolves neither the backend's `./x.js` specifiers nor its enums.
+const BillingKeys = {
+  orgPk: (id: string): string => `ORG#${id}`,
+  legacyPk: (id: string): string => `CUSTOMER#${id}`,
+  subscriptionSk: (): string => 'SUBSCRIPTION',
+} as const;
+
 const PROTECTED_STAGES = ['production'];
 
 const stage = readFileSync('.sst/stage', 'utf8').trim();
@@ -87,15 +97,24 @@ if (!auroraTenantId) {
   process.exit(1);
 }
 
-// 2. Read current subscription
-const subRes = await dynamo.send(
+// 2. Read the current subscription, the same way the application does: the org
+// key first, the user's legacy key as the fallback for an account the backfill
+// has not copied yet.
+const orgSubRes = await dynamo.send(
   new GetItemCommand({
     TableName: Resource.BillingTable.name,
-    Key: { pk: { S: `CUSTOMER#${userId}` }, sk: { S: 'SUBSCRIPTION' } },
+    Key: { pk: { S: BillingKeys.orgPk(orgId) }, sk: { S: BillingKeys.subscriptionSk() } },
   }),
 );
+const legacySubRes = await dynamo.send(
+  new GetItemCommand({
+    TableName: Resource.BillingTable.name,
+    Key: { pk: { S: BillingKeys.legacyPk(userId) }, sk: { S: BillingKeys.subscriptionSk() } },
+  }),
+);
+const subRes = orgSubRes.Item ? orgSubRes : legacySubRes;
 if (!subRes.Item) {
-  console.error(`No SUBSCRIPTION record for userId="${userId}" (orgId="${orgId}")`);
+  console.error(`No SUBSCRIPTION record for orgId="${orgId}" (userId="${userId}")`);
   process.exit(1);
 }
 const stripeCustomerId = subRes.Item.stripeCustomerId?.S;
@@ -142,23 +161,36 @@ if (currentSub.status === 'canceled') {
   });
 }
 
-// 5. Reset BillingTable in a single atomic write
-await dynamo.send(
-  new UpdateItemCommand({
-    TableName: Resource.BillingTable.name,
-    Key: { pk: { S: `CUSTOMER#${userId}` }, sk: { S: 'SUBSCRIPTION' } },
-    UpdateExpression:
-      'SET subscriptionStatus = :status, subscriptionId = :subId, trialStartedAt = :start, trialEndsAt = :end, updatedAt = :now ' +
-      'REMOVE gracePeriodEndsAt, canceledAt, lastPaymentFailedAt',
-    ExpressionAttributeValues: {
-      ':status': { S: 'trialing' },
-      ':subId': { S: activeSubscriptionId },
-      ':start': { S: now.toISOString() },
-      ':end': { S: trialEndsAt.toISOString() },
-      ':now': { S: now.toISOString() },
-    },
-  }),
-);
+// 5. Reset BillingTable on both keys. Resetting one of them would leave the
+// other holding the state this script exists to clear, and which one the
+// application reads depends on whether the backfill has reached this account —
+// so the org row would report a trial the guard never sees, or the reverse.
+// Each write is skipped when its row is not there.
+for (const pk of [BillingKeys.orgPk(orgId), BillingKeys.legacyPk(userId)]) {
+  try {
+    await dynamo.send(
+      new UpdateItemCommand({
+        TableName: Resource.BillingTable.name,
+        Key: { pk: { S: pk }, sk: { S: BillingKeys.subscriptionSk() } },
+        UpdateExpression:
+          'SET subscriptionStatus = :status, subscriptionId = :subId, trialStartedAt = :start, trialEndsAt = :end, updatedAt = :now ' +
+          'REMOVE gracePeriodEndsAt, canceledAt, lastPaymentFailedAt',
+        ExpressionAttributeValues: {
+          ':status': { S: 'trialing' },
+          ':subId': { S: activeSubscriptionId },
+          ':start': { S: now.toISOString() },
+          ':end': { S: trialEndsAt.toISOString() },
+          ':now': { S: now.toISOString() },
+        },
+        ConditionExpression: 'attribute_exists(pk)',
+      }),
+    );
+    console.log(`  reset ${pk}`);
+  } catch (err) {
+    if ((err as { name?: string }).name !== 'ConditionalCheckFailedException') throw err;
+    console.log(`  ${pk} — no row, skipped`);
+  }
+}
 
 // 6. Unlock Aurora tenant via backoffice API
 const { error: auroraError, response: auroraResponse } = await setTenantStatus({

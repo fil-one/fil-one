@@ -23,8 +23,12 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   const { userId, email, orgId } = getUserInfo(event);
   const stripe = getStripeClient();
 
-  // 1. Check whether the org already has a customer in the billing table
-  const existing = await readSubscription(orgId, userId);
+  // 1. Check whether the org already has a customer in the billing table.
+  // Consistently: this handler decides between updating a record and creating
+  // one, and an eventually-consistent miss on a record written seconds ago
+  // (a trial claim, or a second click on the same button) creates a second
+  // Stripe customer for the same org.
+  const existing = await readSubscription(orgId, userId, { consistentRead: true });
 
   let stripeCustomerId: string;
 

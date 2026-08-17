@@ -39,10 +39,17 @@ export async function resolveOrgIdFromSubscription(userId: string): Promise<stri
   return Item?.orgId?.S;
 }
 
-/** The org for a Stripe object: its own metadata first, the billing row second. */
+/**
+ * The org for a Stripe object: its own metadata first (each source in the
+ * order given), the billing row last.
+ */
 export async function resolveOrgId(
   userId: string,
-  metadata: Stripe.Metadata | null | undefined,
+  ...metadatas: Array<Stripe.Metadata | null | undefined>
 ): Promise<string | undefined> {
-  return orgIdFromStripeMetadata(metadata) ?? (await resolveOrgIdFromSubscription(userId));
+  for (const metadata of metadatas) {
+    const orgId = orgIdFromStripeMetadata(metadata);
+    if (orgId) return orgId;
+  }
+  return resolveOrgIdFromSubscription(userId);
 }

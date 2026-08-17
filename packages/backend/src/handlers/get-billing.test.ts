@@ -35,6 +35,15 @@ vi.mock('../lib/stripe-client.js', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
+// The trial claim itself is the subscription guard's, tested there. What this
+// endpoint owes is firing it on exactly the records that leave it open — no
+// guard sits in front of the route the dashboard calls first.
+const mockClaimTrialIfEligible = vi.fn();
+vi.mock('../lib/trial-claim.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/trial-claim.js')>()),
+  claimTrialIfEligible: (...args: unknown[]) => mockClaimTrialIfEligible(...args),
+}));
+
 import { baseHandler } from './get-billing.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
@@ -231,6 +240,7 @@ describe('get-billing baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
+    mockClaimTrialIfEligible.mockResolvedValue('not-own-org');
   });
 
   // The distinction the endpoint rests on: absent status ⇒ inactive; present
@@ -937,6 +947,79 @@ describe('get-billing baseHandler', () => {
     });
   });
 
+  describe('the trial claim, on the call the dashboard makes first', () => {
+    // The ADR promises an organic signup holds a trial by its first API call.
+    // No subscription guard runs on this route, so if the claim did not fire
+    // here the account would read inactive until the user happened to touch a
+    // gated one — and the console shows them a dead dashboard until then.
+
+    /** The claim wrote a trial; the re-read finds it. */
+    function trialArrivesOnClaim() {
+      mockClaimTrialIfEligible.mockImplementation(async () => {
+        ddbMock.on(GetItemCommand).resolves(
+          subscriptionItem({
+            subscriptionStatus: SubscriptionStatus.Trialing,
+            trialEndsAt: '2099-01-01T00:00:00.000Z',
+          }),
+        );
+        return 'claimed';
+      });
+    }
+
+    it('claims the trial for a fresh signup and reports it as trialing', async () => {
+      ddbMock.on(GetItemCommand).resolves({});
+      trialArrivesOnClaim();
+
+      const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+      expect(mockClaimTrialIfEligible).toHaveBeenCalledOnce();
+      const body = JSON.parse(String(result.body));
+      expect(body.subscription).toMatchObject({
+        planId: PlanId.FreeTrial,
+        status: SubscriptionStatus.Trialing,
+        trialEndsAt: '2099-01-01T00:00:00.000Z',
+      });
+    });
+
+    it('claims it onto the customer mapping an abandoned payment modal left behind', async () => {
+      // create-setup-intent writes a row with a Stripe customer and nothing
+      // else. Opening the payment form and closing it must not forfeit the
+      // trial for good.
+      ddbMock.on(GetItemCommand).resolves(subscriptionItem({ stripeCustomerId: 'cus_123' }));
+      trialArrivesOnClaim();
+
+      const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+      expect(mockClaimTrialIfEligible).toHaveBeenCalledOnce();
+      const body = JSON.parse(String(result.body));
+      expect(body.subscription).toMatchObject({ status: SubscriptionStatus.Trialing });
+    });
+
+    it('reports inactive, without writing, when the caller cannot claim', async () => {
+      ddbMock.on(GetItemCommand).resolves({});
+      mockClaimTrialIfEligible.mockResolvedValue('not-own-org');
+
+      const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+      const body = JSON.parse(String(result.body));
+      expect(body.subscription).toStrictEqual({
+        planId: PlanId.None,
+        status: SubscriptionStatus.Inactive,
+      });
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    });
+
+    it('leaves a record that already holds a subscription alone', async () => {
+      ddbMock
+        .on(GetItemCommand)
+        .resolves(subscriptionItem({ subscriptionStatus: SubscriptionStatus.Canceled }));
+
+      await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+      expect(mockClaimTrialIfEligible).not.toHaveBeenCalled();
+    });
+  });
+
   it("queries DynamoDB with the org key first and the caller's legacy key second", async () => {
     ddbMock.on(GetItemCommand).resolves({});
 
@@ -957,8 +1040,7 @@ describe('get-billing baseHandler', () => {
 
   it("reports the org row rather than the caller's own legacy row", async () => {
     // Billing belongs to the org, so a legacy row the caller happens to own
-    // cannot answer in the org row's place — and once the org row is found
-    // there is no second read to make.
+    // cannot answer in the org row's place.
     ddbMock
       .on(GetItemCommand, { Key: ORG_KEY })
       .resolves(subscriptionItem({ subscriptionStatus: SubscriptionStatus.Active }));
@@ -974,7 +1056,6 @@ describe('get-billing baseHandler', () => {
       planId: PlanId.PayAsYouGo,
       status: SubscriptionStatus.Active,
     });
-    expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(1);
   });
 
   it('reports the org subscription to a member who holds no billing row of their own', async () => {

@@ -93,7 +93,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
 
   // 4. Process event
   try {
-    await processStripeEvent(tableName, stripeEvent);
+    await processStripeEvent(stripeEvent);
   } catch (err) {
     console.error('[stripe-webhook] Error processing event:', err);
     // Release idempotency claim so Stripe retries can reprocess
@@ -108,27 +108,27 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
   return { statusCode: 200, body: JSON.stringify({ received: true }) };
 }
 
-async function processStripeEvent(tableName: string, stripeEvent: Stripe.Event): Promise<void> {
+async function processStripeEvent(stripeEvent: Stripe.Event): Promise<void> {
   switch (stripeEvent.type) {
     case 'customer.subscription.created':
     case 'customer.subscription.updated': {
       const subscription = stripeEvent.data.object as Stripe.Subscription;
-      await handleSubscriptionUpdate(tableName, subscription);
+      await handleSubscriptionUpdate(subscription);
       return;
     }
     case 'customer.subscription.deleted': {
       const subscription = stripeEvent.data.object as Stripe.Subscription;
-      await handleSubscriptionDeleted(tableName, subscription);
+      await handleSubscriptionDeleted(subscription);
       return;
     }
     case 'customer.updated': {
       const customer = stripeEvent.data.object as Stripe.Customer;
-      await handleCustomerUpdated(tableName, customer);
+      await handleCustomerUpdated(customer);
       return;
     }
     case 'customer.deleted': {
       const customer = stripeEvent.data.object as Stripe.Customer;
-      await handleCustomerDeleted(tableName, customer);
+      await handleCustomerDeleted(customer);
       return;
     }
     case 'customer.subscription.trial_will_end': {
@@ -138,12 +138,12 @@ async function processStripeEvent(tableName: string, stripeEvent: Stripe.Event):
     }
     case 'invoice.payment_succeeded': {
       const invoice = stripeEvent.data.object as Stripe.Invoice;
-      await handlePaymentSucceeded(tableName, invoice);
+      await handlePaymentSucceeded(invoice);
       return;
     }
     case 'invoice.payment_failed': {
       const invoice = stripeEvent.data.object as Stripe.Invoice;
-      await handlePaymentFailed(tableName, invoice);
+      await handlePaymentFailed(invoice);
       return;
     }
     case 'invoice.finalized': {
@@ -183,7 +183,7 @@ function orgIdBackfill(orgId: string | undefined): {
   };
 }
 
-async function handleCustomerUpdated(tableName: string, customer: Stripe.Customer): Promise<void> {
+async function handleCustomerUpdated(customer: Stripe.Customer): Promise<void> {
   const userId = customer.metadata?.userId;
   if (!userId) {
     throw new Error(`[stripe-webhook] No userId in metadata for customer: ${customer.id}`);
@@ -201,13 +201,19 @@ async function handleCustomerUpdated(tableName: string, customer: Stripe.Custome
   const stripe = getStripeClient();
   const pm =
     typeof defaultPm === 'string' ? await stripe.paymentMethods.retrieve(defaultPm) : defaultPm;
-  await updatePaymentMethod({ userId, orgId: customer.metadata?.orgId }, pm);
+  const orgId = (await resolveOrgId(userId, customer.metadata)) ?? undefined;
+  await updatePaymentMethod({ userId, orgId }, pm);
 }
 
 async function updatePaymentMethod(
   owner: { userId: string; orgId?: string },
   pm: Stripe.PaymentMethod,
 ): Promise<void> {
+  // No ConditionExpression of its own: the store already refuses to create a row
+  // on an update, and asking for `attribute_exists(pk)` here would make the org
+  // row's "no twin yet" indistinguishable from a real condition failure, so
+  // every un-backfilled account's card update would 500 instead of landing on
+  // the legacy row.
   await updateSubscriptionByUser(owner, {
     UpdateExpression:
       'SET paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now',
@@ -219,12 +225,11 @@ async function updatePaymentMethod(
       ':expYear': { N: String(pm.card?.exp_year ?? 0) },
       ':now': { S: new Date().toISOString() },
     },
-    ConditionExpression: 'attribute_exists(pk)',
     guardAgainstScrub: { caller: 'customer.updated' },
   });
 }
 
-async function handleCustomerDeleted(tableName: string, customer: Stripe.Customer): Promise<void> {
+async function handleCustomerDeleted(customer: Stripe.Customer): Promise<void> {
   // The customer.deleted payload carries the full pre-deletion Customer, including metadata.
   // We do NOT retrieve from Stripe — the customer no longer exists there.
   const userId = customer.metadata?.userId;
@@ -249,10 +254,7 @@ async function handleCustomerDeleted(tableName: string, customer: Stripe.Custome
   emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
 }
 
-async function handleSubscriptionUpdate(
-  tableName: string,
-  subscription: Stripe.Subscription,
-): Promise<void> {
+async function handleSubscriptionUpdate(subscription: Stripe.Subscription): Promise<void> {
   const customerId = getCustomerIdString(subscription.customer);
   const mappedStatus = mapStripeStatus(subscription.status);
 
@@ -289,27 +291,27 @@ async function handleSubscriptionUpdate(
       return;
     }
     await updateBillingRecord({
-      tableName,
       userId: metaUserId,
       subscription,
       mappedStatus,
-      orgId: subscription.metadata?.orgId || customer.metadata?.orgId,
+      orgId: await resolveOrgId(metaUserId, subscription.metadata, customer.metadata),
       email: customer.email,
     });
     return;
   }
 
+  // The customer is not fetched on this path, so the row is the fallback rather
+  // than the customer's metadata — one read against one Stripe API call, for the
+  // same answer.
   await updateBillingRecord({
-    tableName,
     userId,
     subscription,
     mappedStatus,
-    orgId: subscription.metadata?.orgId,
+    orgId: (await resolveOrgId(userId, subscription.metadata)) ?? undefined,
   });
 }
 
 interface UpdateBillingRecordParams {
-  tableName: string;
   userId: string;
   subscription: Stripe.Subscription;
   mappedStatus: SubscriptionStatus;
@@ -349,10 +351,7 @@ async function updateBillingRecord({
   await syncHubSpotStatusBestEffort({ userId, status: fromInternalStatus(mappedStatus), email });
 }
 
-async function handleSubscriptionDeleted(
-  tableName: string,
-  subscription: Stripe.Subscription,
-): Promise<void> {
+async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Promise<void> {
   const stripe = getStripeClient();
   const customerId = getCustomerIdString(subscription.customer);
   const customer = await stripe.customers.retrieve(customerId);
@@ -370,6 +369,8 @@ async function handleSubscriptionDeleted(
       );
       return;
     }
+    // A deleted customer carries no metadata, so the subscription's is the only
+    // one there is; startDeletionFromStripe's row fallback covers the rest.
     await startDeletionFromStripe({
       userId,
       customerId,
@@ -391,7 +392,7 @@ async function handleSubscriptionDeleted(
   // Resolved once: the same org id keys the twin write below and the tenant
   // write-lock after it, and resolving it twice would read the billing row a
   // second time for an answer already in hand.
-  const orgId = await resolveOrgId(userId, customer.metadata);
+  const orgId = await resolveOrgId(userId, subscription.metadata, customer.metadata);
   const backfill = orgIdBackfill(orgId);
   await updateSubscriptionByUser(
     { userId, orgId },
@@ -443,7 +444,7 @@ async function handleSubscriptionDeleted(
   });
 }
 
-async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice): Promise<void> {
+async function handlePaymentSucceeded(invoice: Stripe.Invoice): Promise<void> {
   if (!invoice.customer) return;
   const stripe = getStripeClient();
   const customerId = getCustomerIdString(invoice.customer);
@@ -510,7 +511,7 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   });
 }
 
-async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): Promise<void> {
+async function handlePaymentFailed(invoice: Stripe.Invoice): Promise<void> {
   if (!invoice.customer) return;
   const stripe = getStripeClient();
   const customerId = getCustomerIdString(invoice.customer);
@@ -524,7 +525,7 @@ async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): 
   // continue attempting payment. Grace period only begins when Stripe cancels
   // the subscription after all retries are exhausted.
   const now = new Date().toISOString();
-  const orgId = customer.metadata?.orgId;
+  const orgId = (await resolveOrgId(userId, customer.metadata)) ?? undefined;
   const backfill = orgIdBackfill(orgId);
   await updateSubscriptionByUser(
     { userId, orgId },
