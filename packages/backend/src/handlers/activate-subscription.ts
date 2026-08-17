@@ -51,9 +51,9 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   // in the teardown snapshot, so nothing would cancel it.
   if (await isOrgDeleting(orgId, { consistent: true })) return accountDeletedResponse();
 
-  // 2. Get the org's billing record — the caller's own is only the fallback,
-  // so activating billing acts on the org's Stripe customer, not a second one.
-  const record = (await readSubscription(orgId, userId))?.record;
+  // 2. Get the org's billing record, so activating billing acts on the org's
+  // Stripe customer rather than one belonging to whoever clicked.
+  const record = await readSubscription(orgId);
   const stripeCustomerId = record?.stripeCustomerId;
 
   if (!record) {

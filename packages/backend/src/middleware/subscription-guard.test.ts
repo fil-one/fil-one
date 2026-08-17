@@ -141,9 +141,9 @@ describe('subscriptionGuardMiddleware', () => {
     await expect(before(buildMiddyRequest(soloOwner()))).rejects.toThrow('DynamoDB unavailable');
   });
 
-  it('reads the org key first and never looks at the caller when it hits', async () => {
-    // The whole point of the re-key: a member with no `CUSTOMER#` row of their
-    // own rides the org's subscription.
+  it('serves a member from the org row with one read', async () => {
+    // The whole point of the re-key: a member who has never had a billing row of
+    // their own rides the org's subscription.
     ddbMock
       .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'SUBSCRIPTION' } } })
       .resolves(
@@ -163,20 +163,20 @@ describe('subscriptionGuardMiddleware', () => {
     );
 
     expect(result).toBeUndefined();
-    // Both keys are asked at once and the org row is the answer; the fallback
-    // costs a parallel read rather than a second round trip on the hot path.
+    // One read, on the org's key. Which member is asking does not change the
+    // answer, so there is no second key to try.
     const reads = ddbMock.commandCalls(GetItemCommand);
     expect(reads.map((read) => read.args[0].input.Key)).toStrictEqual([
       { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'SUBSCRIPTION' } },
-      { pk: { S: 'CUSTOMER#a-member-with-no-row' }, sk: { S: 'SUBSCRIPTION' } },
     ]);
   });
 
   it('allows when subscription status is active', async () => {
     ddbMock.on(GetItemCommand).resolves(
       billingItem({
-        pk: `CUSTOMER#${USER_ID}`,
+        pk: `ORG#${ORG_ID}`,
         sk: 'SUBSCRIPTION',
+        orgId: ORG_ID,
         subscriptionStatus: SubscriptionStatus.Active,
       }),
     );
@@ -193,8 +193,9 @@ describe('subscriptionGuardMiddleware', () => {
     const futureDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     ddbMock.on(GetItemCommand).resolves(
       billingItem({
-        pk: `CUSTOMER#${USER_ID}`,
+        pk: `ORG#${ORG_ID}`,
         sk: 'SUBSCRIPTION',
+        orgId: ORG_ID,
         subscriptionStatus: SubscriptionStatus.Trialing,
         trialEndsAt: futureDate,
       }),
@@ -213,8 +214,9 @@ describe('subscriptionGuardMiddleware', () => {
 
     ddbMock.on(GetItemCommand).resolves(
       billingItem({
-        pk: `CUSTOMER#${USER_ID}`,
+        pk: `ORG#${ORG_ID}`,
         sk: 'SUBSCRIPTION',
+        orgId: ORG_ID,
         subscriptionStatus: SubscriptionStatus.Trialing,
         trialEndsAt: pastDate,
       }),
@@ -229,13 +231,15 @@ describe('subscriptionGuardMiddleware', () => {
     // Read access during grace period → allowed
     expect(result).toBeUndefined();
 
-    // The transition lands on both keys, each guarded on its row already
-    // existing — this is an update, so a key with no row is a key the backfill
-    // has not reached, never a row to create.
+    // The transition lands on the org's row, which is the row every read of it
+    // will find, and asserts it is still there — this is an update to a record
+    // the request read a moment ago, never a reason to create one.
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(updateCalls).toHaveLength(2);
-    const transition = {
+    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls[0].args[0].input).toStrictEqual({
       TableName: 'BillingTable',
+      Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'SUBSCRIPTION' } },
+      ConditionExpression: 'attribute_exists(pk)',
       UpdateExpression:
         'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
       ExpressionAttributeValues: {
@@ -243,16 +247,6 @@ describe('subscriptionGuardMiddleware', () => {
         ':grace': { S: expect.any(String) },
         ':now': { S: expect.any(String) },
       },
-    };
-    expect(updateCalls[0].args[0].input).toStrictEqual({
-      ...transition,
-      Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'SUBSCRIPTION' } },
-      ConditionExpression: 'attribute_exists(pk)',
-    });
-    expect(updateCalls[1].args[0].input).toStrictEqual({
-      ...transition,
-      Key: { pk: { S: `CUSTOMER#${USER_ID}` }, sk: { S: 'SUBSCRIPTION' } },
-      ConditionExpression: 'attribute_exists(pk)',
     });
   });
 
@@ -260,8 +254,9 @@ describe('subscriptionGuardMiddleware', () => {
     const futureGrace = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     ddbMock.on(GetItemCommand).resolves(
       billingItem({
-        pk: `CUSTOMER#${USER_ID}`,
+        pk: `ORG#${ORG_ID}`,
         sk: 'SUBSCRIPTION',
+        orgId: ORG_ID,
         subscriptionStatus: SubscriptionStatus.GracePeriod,
         gracePeriodEndsAt: futureGrace,
       }),
@@ -283,8 +278,9 @@ describe('subscriptionGuardMiddleware', () => {
     const futureGrace = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     ddbMock.on(GetItemCommand).resolves(
       billingItem({
-        pk: `CUSTOMER#${USER_ID}`,
+        pk: `ORG#${ORG_ID}`,
         sk: 'SUBSCRIPTION',
+        orgId: ORG_ID,
         subscriptionStatus: SubscriptionStatus.GracePeriod,
         gracePeriodEndsAt: futureGrace,
       }),
@@ -302,8 +298,9 @@ describe('subscriptionGuardMiddleware', () => {
     const pastGrace = new Date(Date.now() - 1000).toISOString();
     ddbMock.on(GetItemCommand).resolves(
       billingItem({
-        pk: `CUSTOMER#${USER_ID}`,
+        pk: `ORG#${ORG_ID}`,
         sk: 'SUBSCRIPTION',
+        orgId: ORG_ID,
         subscriptionStatus: SubscriptionStatus.GracePeriod,
         gracePeriodEndsAt: pastGrace,
       }),
@@ -334,8 +331,9 @@ describe('subscriptionGuardMiddleware', () => {
     // it, and the block would forfeit it. See the claim tests below.)
     ddbMock.on(GetItemCommand).resolves(
       billingItem({
-        pk: `CUSTOMER#${USER_ID}`,
+        pk: `ORG#${ORG_ID}`,
         sk: 'SUBSCRIPTION',
+        orgId: ORG_ID,
         stripeCustomerId: 'cus_123',
         subscriptionId: 'sub_123',
       }),
@@ -359,8 +357,9 @@ describe('subscriptionGuardMiddleware', () => {
     // answer GET /api/billing reports for accounts without entitlement.
     ddbMock.on(GetItemCommand).resolves(
       billingItem({
-        pk: `CUSTOMER#${USER_ID}`,
+        pk: `ORG#${ORG_ID}`,
         sk: 'SUBSCRIPTION',
+        orgId: ORG_ID,
         subscriptionStatus: SubscriptionStatus.Inactive,
       }),
     );
@@ -382,8 +381,9 @@ describe('subscriptionGuardMiddleware', () => {
     async (unknownStatus) => {
       ddbMock.on(GetItemCommand).resolves(
         billingItem({
-          pk: `CUSTOMER#${USER_ID}`,
+          pk: `ORG#${ORG_ID}`,
           sk: 'SUBSCRIPTION',
+          orgId: ORG_ID,
           subscriptionStatus: unknownStatus,
         }),
       );
@@ -404,8 +404,9 @@ describe('subscriptionGuardMiddleware', () => {
   it('blocks read access for unknown statuses too (fail closed)', async () => {
     ddbMock.on(GetItemCommand).resolves(
       billingItem({
-        pk: `CUSTOMER#${USER_ID}`,
+        pk: `ORG#${ORG_ID}`,
         sk: 'SUBSCRIPTION',
+        orgId: ORG_ID,
         subscriptionStatus: 'incomplete',
       }),
     );
@@ -425,8 +426,9 @@ describe('subscriptionGuardMiddleware', () => {
   it('blocks access when status is directly canceled (not via grace expiry)', async () => {
     ddbMock.on(GetItemCommand).resolves(
       billingItem({
-        pk: `CUSTOMER#${USER_ID}`,
+        pk: `ORG#${ORG_ID}`,
         sk: 'SUBSCRIPTION',
+        orgId: ORG_ID,
         subscriptionStatus: SubscriptionStatus.Canceled,
       }),
     );
@@ -447,8 +449,9 @@ describe('subscriptionGuardMiddleware', () => {
     // this request refreshed would send them to the login page instead.
     ddbMock.on(GetItemCommand).resolves(
       billingItem({
-        pk: `CUSTOMER#${USER_ID}`,
+        pk: `ORG#${ORG_ID}`,
         sk: 'SUBSCRIPTION',
+        orgId: ORG_ID,
         subscriptionStatus: SubscriptionStatus.Canceled,
       }),
     );
@@ -601,8 +604,9 @@ describe('subscriptionGuardMiddleware', () => {
     it('is served normally when the org does have one', async () => {
       ddbMock.on(GetItemCommand).resolves(
         billingItem({
-          pk: `CUSTOMER#${USER_ID}`,
+          pk: `ORG#${ORG_ID}`,
           sk: 'SUBSCRIPTION',
+          orgId: ORG_ID,
           subscriptionStatus: SubscriptionStatus.Active,
         }),
       );

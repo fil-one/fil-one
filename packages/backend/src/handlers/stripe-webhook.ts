@@ -202,7 +202,7 @@ async function handleCustomerUpdated(customer: Stripe.Customer): Promise<void> {
   const stripe = getStripeClient();
   const pm =
     typeof defaultPm === 'string' ? await stripe.paymentMethods.retrieve(defaultPm) : defaultPm;
-  const orgId = await resolveOrgId(userId, customer.metadata);
+  const orgId = resolveOrgId(customer.metadata);
   await updatePaymentMethod({ userId, orgId }, pm);
 }
 
@@ -295,7 +295,7 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription): Prom
       userId: metaUserId,
       subscription,
       mappedStatus,
-      orgId: await resolveOrgId(metaUserId, subscription.metadata, customer.metadata),
+      orgId: resolveOrgId(subscription.metadata, customer.metadata),
       email: customer.email,
     });
     return;
@@ -308,7 +308,7 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription): Prom
     userId,
     subscription,
     mappedStatus,
-    orgId: await resolveOrgId(userId, subscription.metadata),
+    orgId: resolveOrgId(subscription.metadata),
   });
 }
 
@@ -390,10 +390,9 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
   const now = new Date();
   const gracePeriodEndsAt = new Date(now.getTime() + graceDays * 24 * 60 * 60 * 1000).toISOString();
 
-  // Resolved once: the same org id keys the twin write below and the tenant
-  // write-lock after it, and resolving it twice would read the billing row a
-  // second time for an answer already in hand.
-  const orgId = await resolveOrgId(userId, subscription.metadata, customer.metadata);
+  // Resolved once: the same org id keys the write below and the tenant
+  // write-lock after it.
+  const orgId = resolveOrgId(subscription.metadata, customer.metadata);
   if (
     await subscriptionSuperseded({
       source: 'customer.subscription.deleted',
@@ -466,7 +465,7 @@ async function handlePaymentSucceeded(invoice: Stripe.Invoice): Promise<void> {
   const userId = customer.metadata?.userId;
   if (!userId) return;
 
-  const orgId = await resolveOrgId(userId, customer.metadata);
+  const orgId = resolveOrgId(customer.metadata);
   const backfill = orgIdBackfill(orgId);
   const updateResult = await updateSubscriptionByUser(
     { userId, orgId },
@@ -482,8 +481,8 @@ async function handlePaymentSucceeded(invoice: Stripe.Invoice): Promise<void> {
     },
   );
 
-  // The prior status comes from the row the guard reads — the org twin once it
-  // exists — so a recovery is reported off the record that governs access.
+  // The prior status comes from the row the guard reads, so a recovery is
+  // reported off the record that governs access.
   const priorStatus = updateResult.previous?.subscriptionStatus?.S;
   if (
     priorStatus === SubscriptionStatus.PastDue ||
@@ -537,7 +536,7 @@ async function handlePaymentFailed(invoice: Stripe.Invoice): Promise<void> {
   // continue attempting payment. Grace period only begins when Stripe cancels
   // the subscription after all retries are exhausted.
   const now = new Date().toISOString();
-  const orgId = await resolveOrgId(userId, customer.metadata);
+  const orgId = resolveOrgId(customer.metadata);
   if (
     await subscriptionSuperseded({
       source: 'invoice.payment_failed',

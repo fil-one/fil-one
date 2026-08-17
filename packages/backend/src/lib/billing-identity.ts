@@ -7,7 +7,7 @@
 
 import type Stripe from 'stripe';
 import { emitSupersededBillingEvent } from './stripe-webhook-metrics.js';
-import { readStoredBillingIdentity } from './subscription-store.js';
+import { BILLING_IDENTITY_PROJECTION, readSubscription } from './subscription-store.js';
 
 /**
  * Whether the stored row has already moved on from the subscription this event
@@ -35,8 +35,12 @@ export async function subscriptionSuperseded({
   orgId: string | undefined;
   subscriptionId: string | undefined;
 }): Promise<boolean> {
-  if (!subscriptionId) return false;
-  const stored = await readStoredBillingIdentity({ orgId, userId });
+  // No org means no row: after the re-key the org id is the key, so there is
+  // nothing to compare the event against and nothing the write can reach either.
+  if (!subscriptionId || !orgId) return false;
+  const stored = await readSubscription(orgId, {
+    projectionExpression: BILLING_IDENTITY_PROJECTION,
+  });
   const storedId = stored?.subscriptionId;
   if (!storedId || storedId === subscriptionId) return false;
 
