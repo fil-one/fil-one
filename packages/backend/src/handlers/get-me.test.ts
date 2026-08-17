@@ -343,6 +343,59 @@ describe('GET /api/me handler', () => {
     });
   });
 
+  describe('the active org it echoes', () => {
+    const SECOND_ORG = '22222222-2222-2222-2222-222222222222';
+
+    function eventNaming(orgId: string) {
+      const event = authenticatedEvent();
+      event.headers['x-org-id'] = orgId;
+      return event;
+    }
+
+    function resolvedOrgId(result: unknown): string {
+      return (JSON.parse((result as { body: string }).body) as { orgId: string }).orgId;
+    }
+
+    it('echoes the org the header named', async () => {
+      profileResolves();
+      profileResolves(SECOND_ORG, 'Second Corp');
+      stubMembershipRead(ddbMock, {
+        orgId: SECOND_ORG,
+        userId: MOCK_USER_ID,
+        role: OrgRole.Admin,
+      });
+
+      const result = await handler(eventNaming(SECOND_ORG), buildContext());
+
+      // The console compares this against its own stash, so it has to name the
+      // org the request was actually served in.
+      expect(resolvedOrgId(result)).toBe(SECOND_ORG);
+    });
+
+    it('echoes the caller’s own org when the named one has no membership row', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      profileResolves();
+      profileResolves(SECOND_ORG, 'Second Corp');
+      stubAbsentMembershipRead(ddbMock, { orgId: SECOND_ORG, userId: MOCK_USER_ID });
+
+      const result = await handler(eventNaming(SECOND_ORG), buildContext());
+
+      // A stale stash — removed from the org, or the org is gone. This route
+      // answers instead of refusing, because the mismatch it reports is what
+      // makes the console clear the stash. Every other route 403s and sends the
+      // console here.
+      expect(resolvedOrgId(result)).toBe(MOCK_ORG_ID);
+    });
+
+    it('refuses a header that is not an organization id', async () => {
+      profileResolves();
+
+      const result = await handler(eventNaming('not-a-uuid'), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 400 });
+    });
+  });
+
   describe('role and memberships', () => {
     function parseBody(result: unknown) {
       return JSON.parse((result as { body: string }).body) as {

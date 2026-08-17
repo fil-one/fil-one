@@ -24,6 +24,7 @@ export {
   AUTH0_DOMAIN_BY_CONSOLE_ORIGIN,
   OAUTH_STATE_COOKIE,
   CSRF_COOKIE_NAME,
+  ORG_ID_HEADER,
   GB_BYTES,
   TB_BYTES,
   TRIAL_STORAGE_LIMIT,
@@ -36,6 +37,7 @@ export {
 } from './constants.js';
 export type { UsageLimits } from './constants.js';
 export { formatBytes, formatBytesShort } from './formatBytes.js';
+export { UUID_PATTERN, isUuid } from './uuid.js';
 export type {
   MeResponse,
   OrgMembershipSummary,
