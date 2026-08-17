@@ -1,11 +1,12 @@
-import { GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { GetItemCommand, TransactionCanceledException } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
+import { auditKeyIdSuffix } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
-import { AuditSubjects, auditEvent, commitAudited } from '../lib/audit.js';
+import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { keyScope, notYourKeyResponse, withinScope } from '../lib/key-scope.js';
 import { RagApiKeyKeys } from '../lib/rag-api-keys.js';
@@ -63,9 +64,15 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   if (!withinScope(keyScope(event), { createdBy: Item?.createdBy?.S })) return notYourKeyResponse();
 
   const keyName = Item?.keyName?.S;
+  const keyPrefix = Item?.keyPrefix?.S;
 
   try {
+    // Best-effort on the audit half: an AuditTable outage must never be the
+    // reason a leaked key stays live, so a cancellation on the event alone
+    // lands the two deletes without it and counts the dropped event. What
+    // reaches the catch is therefore a cancellation on the caller's own items.
     await commitAudited({
+      onAuditFailure: 'retry-without-audit',
       items: [
         {
           Delete: {
@@ -89,19 +96,23 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
         },
       ],
       event: auditEvent({
-        type: 'key.revoked',
-        actor: { kind: 'user', id: userId, ...(email ? { email } : {}) },
+        type: 'key.deleted',
+        actor: userActor({ userId, email }),
         orgId,
         subject: AuditSubjects.key(keyId),
-        details: { keyKind: 'rag', ...(keyName ? { keyName } : {}) },
+        details: {
+          keyKind: 'rag',
+          ...(keyName ? { keyName } : {}),
+          ...(keyPrefix ? { keyIdSuffix: auditKeyIdSuffix('rag', keyPrefix) } : {}),
+        },
       }),
     });
   } catch (err) {
     // A concurrent delete of the same key cancels the transaction — the key is
     // gone either way, so report it as not found rather than a server error.
-    if (err instanceof Error && err.name === 'TransactionCanceledException') {
-      return notFoundResponse();
-    }
+    // Only the deletes can get here: an audit-side cancellation never becomes a
+    // 404, which would report a key that is still live as revoked.
+    if (err instanceof TransactionCanceledException) return notFoundResponse();
     throw err;
   }
 

@@ -10,6 +10,7 @@ import {
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -59,7 +60,7 @@ vi.mock('../middleware/subscription-guard.js', () => ({
 }));
 
 import { baseHandler, handler } from './create-access-key.js';
-import { AccessKeyAlreadyExistsError } from '../lib/errors.js';
+import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.js';
 import { buildEvent, buildContext, membershipFor } from '../test/lambda-test-utilities.js';
 import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
@@ -105,23 +106,29 @@ function keyRowWrites() {
   return ddbMock.commandCalls(TransactWriteItemsCommand);
 }
 
-/** The key row itself, the first item of that transaction. */
+/** The key row itself, found by its table rather than by its position. */
 function keyRow() {
   const calls = keyRowWrites();
   expect(calls).toHaveLength(1);
-  return calls[0].args[0].input.TransactItems![0].Put!.Item!;
+  const items = calls[0].args[0].input.TransactItems ?? [];
+  return items.find((item) => item.Put?.TableName === 'UserInfoTable')!.Put!.Item!;
 }
 
 /** The completion event, which rides beside it. */
 function completionEvent() {
-  return unmarshall(keyRowWrites()[0].args[0].input.TransactItems![1].Put!.Item!);
+  return unmarshall(auditItemIn(keyRowWrites()[0].args[0].input.TransactItems));
 }
 
-/** The intent events, written before the vendor was called. */
-function intentEvents() {
+/** Every event written on its own, in order: the intent and any completion. */
+function standaloneEvents() {
   return ddbMock
     .commandCalls(PutItemCommand)
     .map((call) => unmarshall(call.args[0].input.Item ?? {}));
+}
+
+/** The intents, written before the vendor was called. */
+function intentEvents() {
+  return standaloneEvents().filter((event) => event.phase === 'intent');
 }
 
 describe('create-access-key baseHandler', () => {
@@ -471,13 +478,58 @@ describe('create-access-key baseHandler', () => {
       actor: { kind: 'user', id: 'user-1', email: 'alice@example.com' },
       details: { keyKind: 's3', keyName: 'My Key', region: 'eu-west-1' },
     });
+    // One subject for both halves, or the viewer cannot pair them: the mint has
+    // no key id to file under until the vendor returns one, so the completion
+    // names the key in `keyIdSuffix` instead.
     expect(completion).toMatchObject({
       type: 'key.created',
       phase: 'completion',
-      subject: 'key:aurora-key-1',
+      outcome: 'succeeded',
+      subject: 'org:org-1',
       details: { keyKind: 's3', keyName: 'My Key', keyIdSuffix: '7890' },
     });
     expect(completion.correlationId).toBe(intent.correlationId);
+  });
+
+  it('carries no credential into either half', async () => {
+    stubWrites();
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+
+    await baseHandler(buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO }));
+
+    for (const call of ddbMock.commandCalls(PutItemCommand)) {
+      expectNoSecrets(call.args[0].input.Item ?? {});
+    }
+    expectNoSecrets(auditItemIn(keyRowWrites()[0].args[0].input.TransactItems));
+  });
+
+  it('closes the correlation as failed when the vendor rejects the request', async () => {
+    stubWrites();
+    mockIssueAccessKey.mockRejectedValue(new AccessKeyValidationError('bad expiry'));
+
+    const result = await baseHandler(
+      buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO }),
+    );
+
+    // A dangling intent has to mean the process died mid-flight, so a request
+    // the vendor refused closes its own correlation.
+    expect(result.statusCode).toBe(400);
+    const [intent, completion] = standaloneEvents();
+    expect(completion).toMatchObject({ phase: 'completion', outcome: 'failed' });
+    expect(completion.correlationId).toBe(intent.correlationId);
+    expect(keyRowWrites()).toHaveLength(0);
+  });
+
+  it('never calls the vendor when the intent cannot be written', async () => {
+    ddbMock.on(PutItemCommand).rejects(new Error('AuditTable unavailable'));
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+
+    // Fail-closed: no credential may exist at the vendor without a record that
+    // somebody asked for it, and here the vendor has not been called yet.
+    await expect(
+      baseHandler(buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO })),
+    ).rejects.toThrow('AuditTable unavailable');
+    expect(mockIssueAccessKey).not.toHaveBeenCalled();
   });
 
   it('keeps the minted credential out of the event', async () => {
@@ -547,10 +599,41 @@ describe('create-access-key baseHandler', () => {
     expect(completionEvent()).toMatchObject({
       type: 'key.created',
       phase: 'completion',
-      subject: 'key:aurora-key-1',
-      details: { keyKind: 's3', keyName: 'My Key', recovered: true },
+      outcome: 'succeeded',
+      subject: 'org:org-1',
+      details: { keyKind: 's3', keyName: 'My Key', keyIdSuffix: '7890', recovered: true },
     });
     expect(completionEvent().correlationId).toBe(intentEvents()[0].correlationId);
+    // The vendor's own timestamp for the attempt that minted the key, not this
+    // retry's clock.
+    expect(keyRow().createdAt).toStrictEqual({ S: '2026-03-10T00:00:00Z' });
+  });
+
+  it('closes the correlation as failed on a plain duplicate name', async () => {
+    mockIssueAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        {
+          pk: { S: 'ORG#org-1' },
+          sk: { S: 'ACCESSKEY#aurora-key-1' },
+          keyName: { S: 'My Key' },
+          region: { S: 'eu-west-1' },
+        },
+      ],
+    });
+    stubWrites();
+
+    const result = await baseHandler(
+      buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO }),
+    );
+
+    // Nothing to recover and nothing written, but the intent still has to be
+    // closed or it reads as a mint whose process died.
+    expect(result.statusCode).toBe(409);
+    expect(keyRowWrites()).toHaveLength(0);
+    const [intent, completion] = standaloneEvents();
+    expect(completion).toMatchObject({ phase: 'completion', outcome: 'failed' });
+    expect(completion.correlationId).toBe(intent.correlationId);
   });
 
   it('recovers DynamoDB record when same keyName exists only in a different region', async () => {

@@ -3,11 +3,13 @@ import { mockClient } from 'aws-sdk-client-mock';
 import {
   DynamoDBClient,
   GetItemCommand,
+  TransactionCanceledException,
   TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 
 import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { auditItemIn, expectNoSecrets, hasAuditItem } from '../test/audit-assertions.js';
 
 vi.mock('sst', () => sstResourceMock());
 
@@ -103,18 +105,48 @@ describe('delete-rag-api-key baseHandler', () => {
 
     const items =
       ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems ?? [];
-    expect(items[2].Put!.TableName).toBe('AuditTable');
-    expect(items[2].Put!.ConditionExpression).toBe('attribute_not_exists(pk)');
-    expect(unmarshall(items[2].Put!.Item!)).toMatchObject({
+    const auditItem = auditItemIn(items);
+    expect(unmarshall(auditItem)).toMatchObject({
       pk: 'ORG#org-1',
-      type: 'key.revoked',
+      type: 'key.deleted',
       orgId: 'org-1',
       subject: 'key:key-1',
       actor: { kind: 'user', id: 'user-1' },
       details: { keyKind: 'rag', keyName: 'ci key' },
     });
     // The token hash is the credential's lookup key and never reaches the log.
-    expect(JSON.stringify(items[2])).not.toContain(TOKEN_HASH);
+    expect(JSON.stringify(auditItem)).not.toContain(TOKEN_HASH);
+    expectNoSecrets(auditItem);
+  });
+
+  it('deletes the key when the event item is the half the table refused', async () => {
+    ddbMock.on(GetItemCommand).resolves({
+      Item: marshall({ pk: 'ORG#org-1', sk: 'RAGKEY#key-1', tokenHash: TOKEN_HASH }),
+    });
+    ddbMock
+      .on(TransactWriteItemsCommand)
+      .rejectsOnce(
+        new TransactionCanceledException({
+          message: 'cancelled',
+          $metadata: {},
+          CancellationReasons: [
+            { Code: 'None' },
+            { Code: 'None' },
+            { Code: 'TransactionConflict' },
+          ],
+        }),
+      )
+      .resolves({});
+
+    // Revocation is best-effort on the audit half: a refused event must never
+    // become a 404 that reports a live key as revoked.
+    const result = await baseHandler(deleteEvent('key-1'));
+
+    expect(result).toMatchObject({ statusCode: 204 });
+    const calls = ddbMock.commandCalls(TransactWriteItemsCommand);
+    expect(calls).toHaveLength(2);
+    expect(hasAuditItem(calls[1].args[0].input.TransactItems)).toBe(false);
+    expect(calls[1].args[0].input.TransactItems).toHaveLength(2);
   });
 
   it('returns 404 for a keyId the org does not own (partition miss)', async () => {
@@ -130,9 +162,18 @@ describe('delete-rag-api-key baseHandler', () => {
     ddbMock.on(GetItemCommand).resolves({
       Item: marshall({ pk: 'ORG#org-1', sk: 'RAGKEY#key-1', tokenHash: TOKEN_HASH }),
     });
-    const cancel = new Error('cancelled');
-    cancel.name = 'TransactionCanceledException';
-    ddbMock.on(TransactWriteItemsCommand).rejects(cancel);
+    ddbMock.on(TransactWriteItemsCommand).rejects(
+      new TransactionCanceledException({
+        message: 'cancelled',
+        $metadata: {},
+        // The key's own row is the item that failed its condition.
+        CancellationReasons: [
+          { Code: 'ConditionalCheckFailed' },
+          { Code: 'None' },
+          { Code: 'None' },
+        ],
+      }),
+    );
 
     const result = await baseHandler(deleteEvent('key-1'));
 

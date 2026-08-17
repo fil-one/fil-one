@@ -12,19 +12,13 @@ import {
   isSupportedRegion,
 } from '@filone/shared';
 import type {
-  AuditActor,
   CreateAccessKeyRequest,
   CreateAccessKeyResponse,
   ErrorResponse,
 } from '@filone/shared';
 import { Resource } from 'sst';
-import {
-  AuditSubjects,
-  appendAuditEvent,
-  auditEvent,
-  commitAudited,
-  newCorrelationId,
-} from '../lib/audit.js';
+import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.js';
+import type { AuditCorrelation } from '../lib/audit.js';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.js';
 import type { IssuedAccessKey, ServiceOrchestrator } from '../lib/service-orchestrator.js';
@@ -37,7 +31,7 @@ import {
   tenantNotReadyResponse,
   unsupportedRegionResponse,
 } from '../lib/response-builder.js';
-import { keyAttribution } from '../lib/dynamo-records.js';
+import { AccessKeyKeys, keyAttribution } from '../lib/dynamo-records.js';
 import type { AccessKeyRecord } from '../lib/dynamo-records.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
@@ -65,11 +59,7 @@ export async function baseHandler(
   const { orgId, userId } = getUserInfo(event);
   const creatorEmail = getVerifiedEmail(event);
   const attribution = keyAttribution({ userId, creatorEmail });
-  const actor: AuditActor = {
-    kind: 'user',
-    id: userId,
-    ...(creatorEmail ? { email: creatorEmail } : {}),
-  };
+  const actor = userActor({ userId, email: creatorEmail });
 
   if (!isSupportedRegion(region, process.env.FILONE_STAGE!)) {
     return unsupportedRegionResponse(region);
@@ -83,8 +73,20 @@ export async function baseHandler(
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
 
-  const correlationId = newCorrelationId();
-  await recordMintIntent({ orgId, keyName, region, actor, correlationId });
+  // Fail-closed, and before the vendor: the credential is created at the storage
+  // vendor before anything local is written, so no SigV4 key may come into
+  // existence without a record that somebody asked for it. The intent cannot
+  // name the key — the id comes back from the vendor — which is what makes a
+  // dangling intent legible: a key was asked for by this name and no completion
+  // followed. Both halves are filed under the org for the same reason.
+  const mint = await twoPhaseAudit({
+    type: 'key.created',
+    mode: 'fail-closed',
+    actor,
+    orgId,
+    subject: AuditSubjects.org(orgId),
+    details: { keyKind: 's3', keyName, region },
+  });
 
   let accessKey: IssuedAccessKey;
   try {
@@ -104,8 +106,7 @@ export async function baseHandler(
         region,
         orchestrator,
         attribution,
-        actor,
-        correlationId,
+        mint,
       });
       return new ResponseBuilder()
         .status(409)
@@ -113,18 +114,24 @@ export async function baseHandler(
         .build();
     }
     if (err instanceof AccessKeyValidationError) {
+      // The vendor refused the request. Closing the correlation is what says so:
+      // an intent with no completion means the process died mid-flight.
+      await mint.complete({ outcome: 'failed' });
       return new ResponseBuilder()
         .status(400)
         .body<ErrorResponse>({ message: err.message })
         .build();
     }
+    // Left dangling on purpose: an unhandled vendor error is the case where
+    // nobody knows whether a credential exists, and that is what the operator
+    // needs to see.
     throw err;
   }
 
   await recordMintedKey({
     row: {
-      pk: `ORG#${orgId}`,
-      sk: `ACCESSKEY#${accessKey.id}`,
+      pk: AccessKeyKeys.orgPk(orgId),
+      sk: AccessKeyKeys.keySk(accessKey.id),
       keyName,
       accessKeyId: accessKey.accessKeyId,
       createdAt: accessKey.createdAt,
@@ -137,13 +144,8 @@ export async function baseHandler(
       ...(expiresAt ? { expiresAt } : {}),
       ...attribution,
     },
-    keyId: accessKey.id,
     accessKeyId: accessKey.accessKeyId,
-    keyName,
-    region,
-    orgId,
-    actor,
-    correlationId,
+    mint,
   });
 
   return new ResponseBuilder()
@@ -159,41 +161,6 @@ export async function baseHandler(
 }
 
 /**
- * Record that a key is about to be minted, before the vendor is called.
- *
- * The credential is created at the storage vendor before anything local is
- * written, and a fail-closed local write afterwards would leave a live SigV4
- * key with no record at all. So the intent goes down first. It cannot name the
- * key — the id comes back from the vendor — which is what makes a dangling
- * intent legible: a key was asked for by this name and no completion followed.
- */
-async function recordMintIntent({
-  orgId,
-  keyName,
-  region,
-  actor,
-  correlationId,
-}: {
-  orgId: string;
-  keyName: string;
-  region: S3Region;
-  actor: AuditActor;
-  correlationId: string;
-}): Promise<void> {
-  await appendAuditEvent(
-    auditEvent({
-      type: 'key.created',
-      phase: 'intent',
-      correlationId,
-      actor,
-      orgId,
-      subject: AuditSubjects.org(orgId),
-      details: { keyKind: 's3', keyName, region },
-    }),
-  );
-}
-
-/**
  * Write the key's row and the completion event as one transaction, so the
  * record of a live credential cannot be the half that fails.
  *
@@ -203,43 +170,23 @@ async function recordMintIntent({
  */
 async function recordMintedKey({
   row,
-  keyId,
   accessKeyId,
-  keyName,
-  region,
-  orgId,
-  actor,
-  correlationId,
+  mint,
   recovered,
 }: {
   row: Record<string, unknown>;
-  keyId: string;
   accessKeyId: string;
-  keyName: string;
-  region: S3Region;
-  orgId: string;
-  actor: AuditActor;
-  correlationId: string;
+  mint: AuditCorrelation<'key.created'>;
   recovered?: true;
 }): Promise<void> {
-  await commitAudited({
+  await mint.complete({
+    outcome: 'succeeded',
+    details: {
+      // The id the console shows, by its last characters only.
+      keyIdSuffix: auditKeyIdSuffix('s3', accessKeyId),
+      ...(recovered ? { recovered } : {}),
+    },
     items: [{ Put: { TableName: Resource.UserInfoTable.name, Item: marshall(row) } }],
-    event: auditEvent({
-      type: 'key.created',
-      phase: 'completion',
-      correlationId,
-      actor,
-      orgId,
-      subject: AuditSubjects.key(keyId),
-      details: {
-        keyKind: 's3',
-        keyName,
-        region,
-        // The id the console shows, by its last characters only.
-        keyIdSuffix: auditKeyIdSuffix(accessKeyId),
-        ...(recovered ? { recovered } : {}),
-      },
-    }),
   });
 }
 
@@ -281,9 +228,8 @@ interface RecoverDuplicateKeyParams {
   region: S3Region;
   orchestrator: ServiceOrchestrator;
   attribution: Pick<AccessKeyRecord, 'createdBy' | 'creatorEmail' | 'policyVersion'>;
-  actor: AuditActor;
-  /** The intent this attempt already wrote — the recovery completes that one. */
-  correlationId: string;
+  /** The intent this attempt already wrote — every exit here closes it. */
+  mint: AuditCorrelation<'key.created'>;
 }
 
 async function recoverDuplicateKey({
@@ -293,8 +239,7 @@ async function recoverDuplicateKey({
   region,
   orchestrator,
   attribution,
-  actor,
-  correlationId,
+  mint,
 }: RecoverDuplicateKeyParams): Promise<void> {
   // Check if we already have a DynamoDB record for this key
   const { Items: existingKeys } = await getDynamoClient().send(
@@ -302,8 +247,8 @@ async function recoverDuplicateKey({
       TableName: Resource.UserInfoTable.name,
       KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
       ExpressionAttributeValues: {
-        ':pk': { S: `ORG#${orgId}` },
-        ':skPrefix': { S: 'ACCESSKEY#' },
+        ':pk': { S: AccessKeyKeys.orgPk(orgId) },
+        ':skPrefix': { S: AccessKeyKeys.keySkPrefix() },
       },
     }),
   );
@@ -313,7 +258,10 @@ async function recoverDuplicateKey({
     return item.keyName?.S === keyName && itemRegion === region;
   });
   if (alreadyInDb) {
-    return; // Simple duplicate — nothing to recover
+    // A plain duplicate name: the vendor refused and there is nothing to
+    // recover, so the correlation closes as the rejection it was.
+    await mint.complete({ outcome: 'failed' });
+    return;
   }
 
   // Partial failure: key exists in Orchestrator's DB, but our DynamoDB record is missing.
@@ -326,6 +274,7 @@ async function recoverDuplicateKey({
     console.error(
       `Orchestrator returned conflict for key "${keyName}" but key not found in list for tenant ${tenantId}`,
     );
+    await mint.complete({ outcome: 'failed' });
     return;
   }
 
@@ -334,10 +283,12 @@ async function recoverDuplicateKey({
   // by a request whose own intent is still dangling.
   await recordMintedKey({
     row: {
-      pk: `ORG#${orgId}`,
-      sk: `ACCESSKEY#${recovered.id}`,
+      pk: AccessKeyKeys.orgPk(orgId),
+      sk: AccessKeyKeys.keySk(recovered.id),
       keyName,
       accessKeyId: recovered.accessKeyId,
+      // The vendor's own timestamp, from the attempt that actually minted the
+      // key — not this retry's clock, which would date the credential wrong.
       createdAt: recovered.createdAt,
       status: 'active',
       region,
@@ -348,13 +299,8 @@ async function recoverDuplicateKey({
       ...attribution,
       recovered: true,
     },
-    keyId: recovered.id,
     accessKeyId: recovered.accessKeyId,
-    keyName,
-    region,
-    orgId,
-    actor,
-    correlationId,
+    mint,
     recovered: true,
   });
 
