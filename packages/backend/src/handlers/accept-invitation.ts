@@ -1,0 +1,264 @@
+import middy from '@middy/core';
+import httpHeaderNormalizer from '@middy/http-header-normalizer';
+import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
+import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
+import { AcceptInvitationSchema, ApiErrorCode, OrgRole } from '@filone/shared';
+import type { AcceptInvitationResponse, ErrorResponse } from '@filone/shared';
+import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.js';
+import {
+  isInvitationUsable,
+  normalizeInviteEmail,
+  resolveInvitationByToken,
+  retireInvitationItems,
+} from '../lib/invitations.js';
+import type { InvitationRecord } from '../lib/invitations.js';
+import {
+  cancelledLabels,
+  inviterAuthorityCheck,
+  membershipRows,
+  ownerCountItem,
+} from '../lib/membership-changes.js';
+import { resolveMembership } from '../lib/org-membership.js';
+import { resolveOrgName } from '../lib/org-profile.js';
+import { parseJsonBody } from '../lib/parse-json-body.js';
+import { ResponseBuilder } from '../lib/response-builder.js';
+import type { AuthenticatedEvent } from '../lib/user-context.js';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
+import { authMiddleware } from '../middleware/auth.js';
+import { csrfMiddleware } from '../middleware/csrf.js';
+import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+
+/**
+ * POST /api/invitations/accept — join the organization an invitation names.
+ *
+ * The one org route with no org gate, and it has to be: the caller is not a
+ * member of the inviting org yet, so a membership check here would refuse every
+ * invitation there is. Authorization is the token plus a session whose VERIFIED
+ * email matches the invitation — the token alone must not admit whoever a
+ * forwarded email reaches.
+ *
+ * What the request never touches is as load-bearing as what it does. No
+ * entitlement row, no Stripe call, no billing read: an invitation must not
+ * create a trial, must not resurrect suppressed eligibility, and must not burn
+ * the invitee's own claim, which stays available for their personal org (ADR §4,
+ * §5). Those three are pinned by tests in the billing chain; the test here is
+ * simply that this path makes no such call.
+ *
+ * Everything else lands in one transaction:
+ *
+ * - the membership row and its inverse item,
+ * - the invitation marked accepted, conditional on it still being pending,
+ * - the token lookup deleted, which is what makes the token single-use,
+ * - `ownerCount + 1` when the invited role is Owner,
+ * - a `ConditionCheck` that the INVITER still holds a role admitting that
+ *   invitation, so an invitation cannot outlive its issuer's authority,
+ * - and the audit event.
+ */
+export async function baseHandler(
+  event: AuthenticatedEvent,
+): Promise<APIGatewayProxyStructuredResultV2> {
+  const { userId } = getUserInfo(event);
+  const verifiedEmail = getVerifiedEmail(event);
+
+  const parsed = parseJsonBody(event.body, AcceptInvitationSchema);
+  if ('error' in parsed) return parsed.error;
+
+  const invitation = await resolveInvitationByToken(parsed.data.token);
+  // Expired, revoked, already accepted, never existed: one answer. The caller
+  // holds a token and a session, so this is no probing oracle — it is the page
+  // saying the link is done and offering to ask for another.
+  if (!invitation || !isInvitationUsable(invitation)) return notFoundResponse();
+
+  if (!verifiedEmail || normalizeInviteEmail(verifiedEmail) !== invitation.emailNorm) {
+    return emailMismatchResponse();
+  }
+
+  const existing = await resolveMembership(invitation.orgId, userId);
+  const items = existing ? [] : joinItems(invitation, userId);
+  const labels = existing ? [] : joinLabels(invitation);
+
+  try {
+    await commitAudited({
+      items: [...items, ...retireInvitationItems(invitation, 'accepted')],
+      event: auditEvent({
+        type: 'invite.accepted',
+        actor: userActor({ userId, email: verifiedEmail }),
+        orgId: invitation.orgId,
+        subject: AuditSubjects.invite(invitation.inviteId),
+        details: {
+          inviteId: invitation.inviteId,
+          email: invitation.email,
+          role: invitation.role,
+        },
+      }),
+    });
+  } catch (err) {
+    return await acceptFailureResponse(err, [...labels, 'invitation', 'token'], invitation, userId);
+  }
+
+  return await acceptedResponse({
+    invitation,
+    role: existing?.role ?? invitation.role,
+    alreadyMember: Boolean(existing),
+  });
+}
+
+/**
+ * The rows joining an org costs, in the order their labels name them.
+ *
+ * The inviter check is a `ConditionCheck` rather than a read before the
+ * transaction, because a read cannot hold: an Admin demoted between the read and
+ * the write would still mint a member. Demotion and removal revoke that member's
+ * pending invitations, and this is the backstop for the window between them.
+ */
+function joinItems(invitation: InvitationRecord, userId: string): TransactWriteItem[] {
+  return [
+    ...membershipRows({
+      orgId: invitation.orgId,
+      userId,
+      role: invitation.role,
+      origin: {
+        joinedAt: new Date().toISOString(),
+        source: 'invitation',
+        invitedBy: invitation.invitedBy,
+      },
+    }),
+    inviterAuthorityCheck({
+      orgId: invitation.orgId,
+      invitedBy: invitation.invitedBy,
+      invitedRole: invitation.role,
+    }),
+    ...(invitation.role === OrgRole.Owner ? [ownerCountItem(invitation.orgId, 'increment')] : []),
+  ];
+}
+
+function joinLabels(invitation: InvitationRecord): string[] {
+  return [
+    'membership',
+    'inverse',
+    'inviter',
+    ...(invitation.role === OrgRole.Owner ? ['ownerCount'] : []),
+  ];
+}
+
+/**
+ * Which of the transaction's conditions failed, as an answer the caller can act
+ * on.
+ *
+ * The membership row's create-only condition is the interesting one: it fails
+ * when the caller became a member while this request was in flight — two clicks
+ * on the same link, or an admin adding them in parallel. That is the idempotent
+ * case arriving by another route, so it re-reads and answers success rather than
+ * telling somebody who is now a member that their invitation failed.
+ */
+async function acceptFailureResponse(
+  err: unknown,
+  labels: string[],
+  invitation: InvitationRecord,
+  userId: string,
+): Promise<APIGatewayProxyStructuredResultV2> {
+  const failed = cancelledLabels(err, labels);
+  if (failed.length === 0) throw err;
+
+  if (failed.includes('membership')) {
+    const existing = await resolveMembership(invitation.orgId, userId);
+    if (existing) {
+      return await acceptedResponse({ invitation, role: existing.role, alreadyMember: true });
+    }
+  }
+
+  if (failed.includes('inviter')) return inviterAuthorityResponse();
+
+  if (failed.includes('ownerCount')) {
+    // The increment conditions on the counter existing, so this means an org
+    // whose META row the conversion never wrote. Loud, because the last-Owner
+    // invariant is unenforceable for that org until somebody repairs it.
+    console.error('[accept-invitation] ownerCount missing — invitation to Owner refused', {
+      orgId: invitation.orgId,
+    });
+    return ownerCountUnavailableResponse();
+  }
+
+  // The invitation's own condition: revoked, or accepted by another request,
+  // between resolving the token and writing.
+  return notFoundResponse();
+}
+
+async function acceptedResponse({
+  invitation,
+  role,
+  alreadyMember,
+}: {
+  invitation: InvitationRecord;
+  role: OrgRole;
+  alreadyMember: boolean;
+}): Promise<APIGatewayProxyStructuredResultV2> {
+  return new ResponseBuilder()
+    .status(200)
+    .body<AcceptInvitationResponse>({
+      orgId: invitation.orgId,
+      // The console sets the active org from this response and reloads, so it
+      // needs the name it is switching to as well as the id.
+      orgName: await resolveOrgName(invitation.orgId),
+      // A member who was already in the org keeps the role they hold: the
+      // invitation is marked accepted, and accepting an invitation is not a way
+      // to give somebody a role change nobody authorized.
+      role,
+      alreadyMember,
+    })
+    .build();
+}
+
+function notFoundResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(404)
+    .body<ErrorResponse>({
+      message: 'That invitation is no longer valid. Ask for a new one.',
+      code: ApiErrorCode.INVITE_NOT_FOUND,
+    })
+    .build();
+}
+
+/**
+ * Its own code, unlike the four misses above. The caller holds a valid token and
+ * an authenticated session, so this is not a token-probing oracle — and under
+ * SSO it is the difference between a debuggable "you are signed in with the
+ * wrong account" and an opaque dead link.
+ */
+function emailMismatchResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(403)
+    .body<ErrorResponse>({
+      message:
+        'This invitation was sent to a different email address than the one you signed in with.',
+      code: ApiErrorCode.INVITE_EMAIL_MISMATCH,
+    })
+    .build();
+}
+
+function inviterAuthorityResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(403)
+    .body<ErrorResponse>({
+      message:
+        'The person who invited you no longer has permission to add members. Ask an administrator for a new invitation.',
+    })
+    .build();
+}
+
+function ownerCountUnavailableResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(409)
+    .body<ErrorResponse>({
+      message: 'That organization cannot accept an owner right now. Please contact support.',
+    })
+    .build();
+}
+
+export const handler = middy(baseHandler)
+  .use(httpHeaderNormalizer())
+  // The verified-email gate stays on: the whole check here is that the session's
+  // VERIFIED address is the one the invitation went to.
+  .use(authMiddleware())
+  .use(csrfMiddleware())
+  .use(errorHandlerMiddleware());
