@@ -8,7 +8,7 @@ export function Table({ className, containerStyle, ...props }: TableProps) {
   return (
     <div
       data-slot="table-container"
-      className="relative w-full overflow-x-auto rounded-lg border border-zinc-200 bg-white"
+      className="relative w-full overflow-x-auto rounded-xl border border-zinc-200 bg-white"
       style={containerStyle}
       tabIndex={0}
     >

@@ -29,10 +29,11 @@ export function Breadcrumb({ items, className }: BreadcrumbProps) {
               {item.href && !isLast ? (
                 <BaseLink
                   href={item.href}
-                  className={clsx(
-                    'text-zinc-600 transition-colors hover:text-brand-700',
-                    'hover:underline',
-                  )}
+                  // Linear-style: a crumb signals it's interactive by quietly
+                  // darkening into the neutral family, not by switching to an
+                  // accent colour and underline. The rest state is muted; hover
+                  // brings it up to the same near-black the current page uses.
+                  className="text-zinc-500 transition-colors hover:text-zinc-950"
                 >
                   {item.label}
                 </BaseLink>
