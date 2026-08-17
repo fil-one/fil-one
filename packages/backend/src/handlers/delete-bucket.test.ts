@@ -67,7 +67,7 @@ describe('delete-bucket baseHandler', () => {
     expect(mockOrchestratorDeleteBucket).not.toHaveBeenCalled();
   });
 
-  it('returns 204 with an empty body and calls orchestrator.deleteBucket on success', async () => {
+  it('calls orchestrator.deleteBucket and returns 204 with an empty body on success', async () => {
     mockOrchestratorDeleteBucket.mockResolvedValue(undefined);
 
     const event = buildEvent({ userInfo: USER_INFO });
