@@ -657,8 +657,16 @@ export default $config({
       method: 'DELETE',
       routePath: '/api/buckets/{name}',
       handler: 'delete-bucket',
-      extraEnv: { ...fthEnv, ...forgeEnv },
-      permissions: s3DataPlanePermissions,
+      // Same credentials as create-bucket, minus ssm:PutParameter — deleting never
+      // mints a key. Aurora deletes through the portal (tenant API key from SSM),
+      // FTH/Forge through the S3 data plane (console S3 key).
+      extraEnv: orchestratorEnv,
+      permissions: [
+        {
+          actions: ['ssm:GetParameter'],
+          resources: [auroraApiKeySsmArn, ...orchestratorS3KeySsmArns],
+        },
+      ],
     });
     addRoute({
       method: 'GET',
