@@ -5,7 +5,7 @@
 
 ## Context
 
-Self-service account deletion feature is unavailable today. Building it means removing state across multiple separate systems with unrelated failure modes: DynamoDB (`UserInfoTable`, `BillingTable`, `RagIndexerTable`), Stripe, regional storage orchestrators, Auth0, and the S3 Vector indexes.
+Self-service account deletion is unavailable today. Building it means removing state across multiple separate systems with unrelated failure modes: DynamoDB (`UserInfoTable`, `BillingTable`, `RagIndexerTable`), Stripe, regional storage orchestrators, Auth0, and the S3 Vector indexes.
 
 It's not possible to do an atomic cleanup across all these systems. Partially finished teardowns are therefore normal rather than exceptional. The design has to decide two things: where the point of no return sits, and what happens after each partial failure.
 
@@ -13,7 +13,7 @@ It's not possible to do an atomic cleanup across all these systems. Partially fi
 
 ### 1. Deletion starts at the confirmation
 
-After the user submits the deletion confirmation code a transactional write to the DynamoDB is invoked writing the `DELETION` record, and raises the write fences. The `202` status code is returned after the transaction is committed. From that moment on the account is unusable: all sessions are killed and new resource creation is refused.
+After the user submits the deletion confirmation code, one DynamoDB transaction spends the code, writes the `DELETION` record and raises the profile fence. The transaction is the same three items at any org size. The `202` is returned after the transaction commits. From that moment the account is unusable: every session request is refused with a `410` by the fence check in decision 5, and new resource creation is refused. The data plane is the exception: S3 access keys are not sessions, so uploads and downloads continue until the tenant-disable step in decision 7, seconds after the confirm in the normal case and bounded by the sweeper pickup when the invoke is lost.
 
 These writes share a transaction because a spent code must never exist without a `DELETION` record behind it. Codes are rate limited, so a user left in that state cannot simply retry.
 
@@ -27,7 +27,7 @@ sequenceDiagram
     participant Cron as Sweeper (15m)
 
     User->>API: confirm { code, orgName }
-    API->>DDB: TransactWriteItems — spend code, write record, raise fences
+    API->>DDB: TransactWriteItems — spend code, write record, raise fence
     Note over API,DDB: commitment boundary
     API-)W: invoke (Event)
     API-->>User: 202
@@ -38,7 +38,7 @@ sequenceDiagram
     end
 ```
 
-After the transaction is committed deletion worker is invoked. In the case of invocation failing the deletion will be picked up within up to 30 minutes by the cron worker and a new invocation will be issued. Confirm does not fail the request when the invocation fails, since the record is the source of truth rather than the invocation.
+After the transaction is committed the deletion worker is invoked. If the invocation fails, the sweeper picks the deletion up after at most about 45 minutes: the 30-minute staleness window plus up to one 15-minute sweep interval. Confirm does not fail the request when the invocation fails, since the record is the source of truth rather than the invocation.
 
 ### 2. Teardown is idempotent; error recovery means re-running the teardown job
 
@@ -49,11 +49,13 @@ This works because no teardown step is asynchronous on the vendor side. Every ex
 Two requirements follow from re-running, and both are easy to lose in a refactor:
 
 - The worker's first read of the `DELETION` record is strongly consistent. An eventually consistent read immediately after the confirm transaction can miss the record and burn a retry.
-- The worker updates `updatedAt` at the start of every pass, otherwise the cron re-drives a teardown that is progressing normally.
+- The worker updates `updatedAt` and increments `attempts` in one write at the start of every pass. The first keeps the cron from re-driving a teardown that is progressing normally; the second is the counter decision 10's blocked-deletion alert reads.
 
 ### 3. Records are scrubbed, not purged
 
 Deleting an account does not delete the rows that describe it. Every row that survives keeps its key, loses its personal data, and gains `deleted` and `deletedAt`. The rows that do not survive are destroyed outright. Which of the two applies is decided per record in decision 9.
+
+The scrub is the only writer of these flags. It is the worker's final step, and it sets `deleted` and `deletedAt` on every retained row in the same update that removes the row's personal data. Before that step runs, the org profile's `deleting`, raised at confirm, is the only deletion marker in the tables: `deleting` is the fence, `deleted` is the terminal marker.
 
 **Personal data** here means names, email addresses, phone numbers, postal addresses and payment-card details. **System identifiers are not considered personal data** — `orgId`, `userId`, `sub`, `stripeCustomerId`, `subscriptionId`, tenant ids and Stripe object ids are all retained, as are timestamps, counters, status enums and role assignments.
 
@@ -75,31 +77,38 @@ The safeguard sits ahead of the confirmation instead: a code emailed to the requ
 
 ### 5. Multiple deletion guards
 
-Due to our system having multiple write paths multiple deletion guards / fences had to be installed. These guards prevent new resource creation, resurection of the deleted records and request authentication.
+The system has many write paths, so two guards divide them between each other. The profile fence covers everything a session or a credential can reach; the billing fence covers the asynchronous writers that have neither.
 
-| Guard                                              | Written at                    | Stops                                                                           |
-| -------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------- |
-| `ORG#/PROFILE.deleting = true`                     | confirm, re-applied each pass | resource creation: access keys, RAG keys, buckets, tenant setup, RAG enablement |
-| `SUB#/IDENTITY.deleted = true`                     | confirm                       | every existing session, on its next request                                     |
-| `attribute_not_exists(deleted)` on billing updates | added by this work            | a Stripe webhook writing personal data back to a scrubbed billing row           |
+| Guard                                              | Written at                             | Stops                                                                                                                                                                                 |
+| -------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ORG#/PROFILE.deleting = true`                     | confirm, re-applied each pass          | every session on its next request; RAG bearer-key queries; resource creation: access keys, RAG keys, buckets, tenant setup, RAG enablement; every background job, which skips the org |
+| `attribute_not_exists(deleted)` on billing updates | scrub, when `deleted` lands on the row | a Stripe webhook writing personal data back to a scrubbed billing row                                                                                                                 |
 
-None of the three covers the other two. `deleting` cannot guard a write that creates its own row, as there is no row yet to carry the condition. The identity flag stops the user but not third-party callbacks made on their behalf. The billing fence covers the row both of the others miss.
+**The request paths read the profile fence.** The flag is read at two points on a request's timeline. `authMiddleware` reads it after resolving the identity row and answers `410` when it is set, which is what makes the confirm kill every member's session at once. Each creation writer then checks the same flag again immediately before its irreversible action, because a request that passed auth before the fence landed can stay in flight for up to API Gateway's 29 seconds, and the auth-time check does nothing for a request already past it. Where the writer's final action is a DynamoDB write, the check is a condition on that write and the refusal is atomic. Where the resource is minted upstream (a bucket, an access key, a Stripe subscription), the check sits just ahead of the mint and narrows the window the deferred-risk section bounds. The RAG bearer path reads the same flag at query time, because a standalone credential has no session for the middleware to refuse.
 
-The billing guard is one condition, not two. The DynamoDB semantics here run against intuition: `UpdateItem` evaluates a condition on a missing item as though its attributes are absent, so `attribute_not_exists(deleted)` is _true_ for a row that does not exist and will create one. The single clause is sufficient only because decision 3 retains the row — it is never missing, so the fence has nothing to fail open against. Under a purge design this condition alone would have been a bug.
+The auth-time check costs one extra sequential `GetItem` per authenticated request, sequential because the `orgId` only becomes known from the identity read the middleware already makes. The read is eventually consistent, which halves its cost, and the staleness it admits is milliseconds. A missing profile row fails open. Decision 3 retains the profile with `deleting` set permanently, so the refusal is permanent with no second flag for the terminal state. The check runs before the trial-entitlement backfill in the middleware, so a deleted org's login cannot trigger it.
 
-This guard is work to do, not a property we already have. On `main` a row-exists condition sits on two of roughly fourteen writers to `CUSTOMER#/SUBSCRIPTION`. This work routes all five webhook writers and the activation write through one guarded helper, so no unguarded writer can be added by omission. A refused write is a no-op rather than an error: the caller has nothing to fix, and a webhook handler that threw would be retried by Stripe for days over a row that will never accept the write.
+Fencing sessions on the org profile rather than on per-member identity rows keeps the confirm transaction at three items regardless of org size, and it refuses a member added while the deletion is in flight, for whom no identity row existed at confirm. The identity row still gains `deleted` at scrub, as decision 9 records: the flag preserves the known-user branch in auth and marks the terminal state on the row itself, and the middleware's check of it stays as defense in depth on a read it already makes.
 
-The guard also makes webhook arrival order irrelevant, and the teardown itself causes that race. Cancelling the subscription and deleting the customer fire `customer.subscription.deleted`, the `invoice.*` events and `customer.deleted`, all delivered asynchronously and retried. The worker never waits for any of them. It writes `canceled` itself, so a webhook arriving before the scrub is overwritten and one arriving after is refused. The terminal state does not depend on webhook delivery at all. The `customer.updated` handler matters most, being the only writer that can put payment-card details back onto a scrubbed row.
+The request-path billing writers need no fence of their own: the two lazy transitions in `get-billing`, `transitionExpiredTrial` and `create-setup-intent`. Each one runs only inside an authenticated request, and the profile fence answers `410` before any handler or the subscription guard executes. They are unreachable for a deleted account, so a row-level condition would add nothing.
 
-Not every writer takes the write guard. `closeOutDeletedCustomer` is fenced at its entry instead, because it disables tenants before it reaches the billing row and a condition on its write would come too late. Its webhook callers already read that row to resolve the org, so the fence rides on the read they make anyway: project `deleted` alongside `orgId` and return early when the flag is set. The check belongs in the function rather than its callers, since four webhook paths reach it.
+**The Stripe callbacks are fenced on the billing row.** The profile fence cannot stop Stripe, which holds no session and retries its callbacks for days, so the billing fence covers the one row those callbacks write. The guard is one condition, not two. The DynamoDB semantics here run against intuition: `UpdateItem` evaluates a condition on a missing item as though its attributes are absent, so `attribute_not_exists(deleted)` is _true_ for a row that does not exist and will create one. The single clause is sufficient only because decision 3 retains the row — it is never missing, so the fence has nothing to fail open against. Under a purge design this condition alone would have been a bug.
 
-The request-path writers need no billing fence at all: the two lazy transitions in `get-billing`, `transitionExpiredTrial` and `create-setup-intent`. Each one runs only inside an authenticated request, and `authMiddleware` rejects a flagged identity with a `410` before any handler or the subscription guard executes. They are unreachable for a deleted account, so a row-level condition would add nothing. Stripe has no session to lose, which is precisely why its callbacks need the fence and these do not — the identity flag stops the user, the billing fence stops Stripe.
+This guard is work to do, not a property we already have. On `main` a row-exists condition sits on two of roughly fourteen writers to `CUSTOMER#/SUBSCRIPTION`. This work routes all five webhook writers and the activation write through one guarded helper, so no unguarded writer can be added by omission. A refused write is a no-op rather than an error: the helper catches the `ConditionalCheckFailedException`, logs it and returns normally, so the handler answers Stripe with a `2xx`. A handler that threw instead would be retried by Stripe for days over a row that will never accept the write, and enough failures would disable the webhook endpoint.
 
-Setting `canceled` on the scrubbed row is load-bearing and must survive refactoring. The grace-period enforcer has no guard; a retained row escapes it only because that cron's scan filters on `subscriptionStatus = grace_period`. Dropping the status on the grounds that the row is flagged anyway re-arms the cron silently.
+The guard also makes webhook arrival order irrelevant, and the teardown itself causes that race. Cancelling the subscription and deleting the customer fire `customer.subscription.deleted`, the `invoice.*` events and `customer.deleted`, all delivered asynchronously and retried. The worker never waits for any of them. It writes `canceled` itself, and only after the cancellation at Stripe has succeeded, since the scrub is the last step and a failed cancel ends the pass before it. The row and Stripe therefore cannot disagree about the terminal state: a webhook arriving before the scrub is overwritten and one arriving after is refused. The terminal state does not depend on webhook delivery at all. The `customer.updated` handler matters most, being the only writer that can put payment-card details back onto a scrubbed row.
+
+`closeOutDeletedCustomer` stays a separate path rather than folding into the deletion worker, because the two triggers mean different things. The webhook responds to a customer deleted in Stripe, possibly by a person in the dashboard, and that is an entitlement event; routing it into account deletion would let a dashboard action destroy a user account irreversibly. Both paths converge on the same terminal state, and during teardown the worker's own `customers.del` fires this webhook, whose `closeOutDeletedCustomer` call hits the fence and no-ops.
+
+That fence sits at the function's entry rather than on its write, because it disables tenants before it reaches the billing row and a condition on its write would come too late. Its webhook callers already read that row to resolve the org, so the fence rides on the read they make anyway: project `deleted` alongside `orgId` and return early when the flag is set. The check belongs in the function rather than its callers, since four webhook paths reach it.
+
+**The background jobs skip the org.** Each scheduled job skips any org whose profile carries `deleting`, failing closed when the profile is missing, the opposite of the request paths' fail-open choice; `isOrgDeletedOrDeleting` exists as a separate predicate for exactly that split. This is what covers the window between confirm and scrub, where the billing row is still webhook-writable and carries neither `canceled` nor `deleted`, so the scan filters alone would admit it. A webhook flipping the row to `active` mid-teardown is therefore harmless: the scrub overwrites it, and no job acts on it in the meantime.
+
+Setting `canceled` on the scrubbed row keeps it inert to every reader, and this work also adds `attribute_not_exists(deleted)` to the filter expressions of the three lifecycle scans. The invariant is then enforced twice: the status keeps the row out of each scan's business logic, and the filter keeps it out even if a refactor changes how a scan treats statuses.
 
 ### 6. Verification code gets its own table
 
-Decision has been made to create a new `DeletionChallengeTable` rather that saving deletion challenge codes in `UserInfoTable` or `BillingTable`.
+The deletion challenge codes get a new `DeletionChallengeTable` rather than a place in `UserInfoTable` or `BillingTable`.
 
 There are two reasons for this:
 
@@ -114,42 +123,47 @@ The salt is a single deployment-wide secret, held as an `sst.Secret` alongside t
 
 At the time of writing this ADR Stripe redaction API is in public preview and therefore not part of any stable version SDK.
 
-To avoid using preview APIs we have opted for a simpler solution of deleting the stripe customer records.
+To avoid using preview APIs we have opted for the simpler solution of deleting the Stripe customer records.
 
 Stripe customer cleanup has the following steps:
 
+- Tenants are disabled in every provisioned region
 - Outstanding usage is reported
-- Default payment method is collected
-- Subscription is canceled
-- Single attempt is made to collect any outstanding payments using the default payment method
-- Customer is deleted
+- The default payment method is looked up
+- The subscription is canceled
+- A single attempt is made to collect the outstanding balance using that payment method
+- The customer is deleted
 
-Reporting usage first is what makes the final period billable. It is the same per-org call the 12-hourly cron makes, and repeating it is safe: the meter aggregates `last_during_period`, so a re-driven pass submits the same or a fresher absolute value rather than a delta. Two orderings are required. It must run before the cancel, because a meter event after cancellation lands on no invoice. It must also run before tenant teardown, because the reporting path resolves an org's regions from its profile and emits nothing when that list is empty.
+Disabling the tenants first stops consumption before the final report, so the meter is not moving underneath the figure the customer is billed for. A request already in flight when the disable lands can still add its last writes, and that residue goes unbilled; it is bounded by a request timeout measured in seconds. If tighter numbers are ever needed, the tenant disable can move ahead of the Auth0 step, so real teardown work provides the settling time instead of a timer.
+
+The report itself is the same per-org call the 12-hourly cron makes, and repeating it is safe: the meter aggregates `last_during_period`, so a re-driven pass submits the same or a fresher absolute value rather than a delta. It must run before the cancel, because a meter event after cancellation lands on no invoice. It still resolves the org's regions after the disable, because disabling is a status change that leaves the profile's region list intact; only tenant deletion, which comes later, empties that list.
 
 Cancellation is a separate step because `customers.del` cancels subscriptions silently and issues no invoice. The explicit cancel is what makes the outstanding usage billable at all.
 
-A single best effort attempt it made to collect the user payment. A declined card must not block the teardown, and it does not need to: an outstanding invoice does not block customer deletion and stays open for finance afterwards.
+A single best-effort attempt is made to collect the payment. A declined card must not block the teardown, and it does not need to: an outstanding invoice does not block customer deletion and stays open for finance afterwards.
 
-Deleting the customer deletes all of their payment information. Invoices and charges are unaffected and keep referencing the customer id, so finance keeps the linkage either way.
+Deleting the customer removes the payment methods attached to it on Stripe's side; Stripe's documentation states that deleting a customer removes all credit card details. Our own copies, the `paymentMethod*` attributes on the billing row, are scrubbed in decision 9, so no card data survives on either side. Invoices and charges are unaffected and keep referencing the customer id, so finance keeps the linkage either way.
 
 ### 8. Teardown order
 
-Steps run strictly sequentially as there is no hard constraint on the teardown duration. Teardown happends in the following order:
+Steps run strictly sequentially, as there is no hard constraint on the teardown duration. Teardown happens in the following order:
 
-- Deleting Auth0 user
-- Stripe records — it's worth noting that we will bill the customer once the guards are up
+- Auth0: for each member, the worker reads the email from the management API, deletes the `ALLOWLIST#` row that email keys, then deletes the Auth0 user
+- Stripe records, in the order decision 7 gives, billing the customer while the guards are up
 - Tenant deletion
 - Scrubbing org records: RAG keys, RAG state, billing record, ORG profile, ORG member profiles
 
-Auth0 goes first because it is the authentication root, and so the one fence no missed code path can route around. Nothing later depends on it. `sub` originates in the JWT and is written to DynamoDB at signup, no teardown step reads anything from Auth0, and decision 9 retains `sub` on two rows, so it stays available as the audit correlation key indefinitely. This costs one thing: deleting an already-deleted Auth0 user returns `404`, which the worker treats as success, so a pass that died before marking the record done looks identical to one that never started.
+Sessions are already refused at confirm by the profile fence, so no step is racing to lock the account and the order follows the data dependencies. Stripe cleanup precedes tenant deletion because the usage report must land on a live subscription and resolves the org's regions from the profile, as decision 7 orders.
 
-Scrubbing comes last because those rows hold the pointers to the tenants and the Stripe customer, so they go after everything they point at. Within that step the RAG key lookup rows go before the org partition, because a lookup row's key derives from the token hash stored on the key row.
+The Auth0 step goes first, and its three actions run in a fixed order: the email read and the allowlist delete precede the user delete, because the allowlist row is keyed by an email no retained row stores and Auth0 is the only place it can be read. A re-run that gets a `404` on the lookup skips the row for that member, which is safe because the in-step ordering guarantees the user is only gone once a previous pass finished the removal. Deleting an already-deleted Auth0 user likewise returns `404`, which the worker treats as success and moves past. `sub` originates in the JWT and is written to DynamoDB at signup, and decision 9 retains it on two rows, so it stays available as the audit correlation key after the Auth0 user is gone.
+
+The destroyed rows go after every step that needs them: the RAG key lookup row's key derives from the token hash stored on the key row, and the `RagIndexerTable` keys are what address the vector indexes. The scrubbed rows keep their identifiers either way, so their position is free; they go last so a failed pass leaves the most context for troubleshooting. The pass ends by setting the `DELETION` record's status to `DONE`, which is what removes it from the sweeper's scan.
 
 ### 9. Which records survive
 
 | Record                         | Outcome                                                                        |
 | ------------------------------ | ------------------------------------------------------------------------------ |
-| `SUB#/IDENTITY`                | Retained and flagged. Prevents re-signup by the same Auth0 subject             |
+| `SUB#/IDENTITY`                | Retained and flagged. Keeps a live JWT out of the new-user path                |
 | `USER#/PROFILE`                | Retained and flagged. Holds `sub`, the audit correlation key                   |
 | `ORG#/MEMBER#`                 | Retained and flagged. `role` and `joinedAt` are not personal data              |
 | `ORG#/PROFILE`                 | Retained, flagged, `name` removed. Keeps `deleting`, `createdBy`, tenant ids   |
@@ -159,51 +173,44 @@ Scrubbing comes last because those rows hold the pointers to the tenants and the
 | Access keys, RAG keys, lookups | Destroyed. Credentials                                                         |
 | `RagIndexerTable` rows         | Destroyed. Object keys and bucket names sit in the keys                        |
 | `WEBHOOK#/EVENT`               | Left alone. Expires on its own 30-day TTL                                      |
-| `EMAIL_NORM#`, `ALLOWLIST#`    | Not reachable. See below                                                       |
+| `ALLOWLIST#`                   | Destroyed. The worker resolves its email key from Auth0; see below             |
+| `EMAIL_NORM#`                  | Left alone. Anti-abuse record; see below                                       |
 
 On the billing row the scrub removes `paymentMethodId`, `paymentMethodLast4`, `paymentMethodBrand`, `paymentMethodExpMonth` and `paymentMethodExpYear`. `stripeCustomerId`, `subscriptionId` are system identifiers and stay, though the last of them then references an object Stripe deletes along with the customer.
 
-Flagging the identity row rather than emptying it is a correctness requirement, not a matter of taste. Auth middleware branches on the row carrying both `userId` and `orgId`. A row stripped of them falls through to the new-user path, which mints fresh ids and then cancels its own transaction against the still-present key — a `500` on every login attempt instead of a clean refusal. Retaining the identifiers keeps that branch intact, so the explicit `deleted` check answers with a `410`.
+Flagging the identity row rather than emptying it is a correctness requirement. Auth middleware branches on the row carrying both `userId` and `orgId`. A row stripped of them falls through to the new-user path, which mints fresh ids and then cancels its own transaction against the still-present key, producing a `500` on every login attempt instead of a clean refusal. Retaining the identifiers keeps that branch intact: the profile fence answers the `410`, and the row's own `deleted` flag marks the terminal state and backs the fence up on a read the middleware already makes. Destroying the row would be worse still. The Auth0 user is deleted, so the same subject can never authenticate again, but a deleted member's still-valid JWT would find no row, take the new-user path successfully, and mint a fresh user, org and trial. Retention is what turns that token into a refusal.
 
 Credentials are destroyed rather than retained, because a scrubbed credential row is still a credential row and retention buys nothing. The RAG key lookup row cannot be scrubbed at all: its delete path conditions on `orgId`, so stripping that attribute would block key deletion permanently. In `RagIndexerTable` the object keys and bucket names sit inside the primary keys, where attribute scrubbing is a structural no-op.
 
-`EMAIL_NORM#` and `ALLOWLIST#` are keyed by a plaintext email address, and **the teardown neither scrubs nor deletes them**. This is not an omission, and it is not work the worker could pick up later. No row stores a user's email, so neither key can be reconstructed from the deletion record or from any retained row. The trial-entitlement row therefore keeps its `userId`, and the RAG allowlist row keeps granting access — its mere presence is the grant, and it has no attributes to strip.
+`ALLOWLIST#` is keyed by a plaintext email address, and the worker deletes it by resolving that key while it still can: inside the Auth0 step, the email read and the allowlist delete come before the user delete, as decision 8 orders. The row needs no scrub, since its presence is the grant and deleting it revokes the grant. Rows for live users stay keyed by plaintext email, which keeps the access list readable.
 
-Rekeying `EMAIL_NORM#` to a salted hash, under the same single-secret constraint as decision 6, is what removes this personal data. `ALLOWLIST#` needs the same treatment. Both should ship as **their own PR with a migration**, not inside the deletion work. The migration repoints the primary key of a live anti-abuse record whose writer claims it with `attribute_not_exists(pk)`, so a partial run either grants a second free trial or locks a legitimate user out of their first.
+`EMAIL_NORM#` shares the key shape and cannot take the same treatment. No retained row stores a user's email, so once the Auth0 user is gone the key cannot be reconstructed, and the row must survive regardless: it is the anti-abuse record that prevents a second free trial. Rekeying it to a salted hash, under the same single-secret constraint as decision 6, is what removes this personal data, and it ships as **its own PR with a migration** rather than inside the deletion work. The migration repoints the primary key of a live record whose writer claims it with `attribute_not_exists(pk)`, so a partial run either grants a second free trial or locks a legitimate user out of their first.
 
 ### 10. Observability
 
-The teardown has no duration target, so the signal is not how long a deletion took but whether one has stopped making progress. Two EMF metrics in the `FilOne` namespace carry that, both emitted by the sweeper:
+The teardown has no duration target, so the signal is not how long a deletion took but whether one has stopped making progress. Three EMF metrics in the `FilOne` namespace carry that, all emitted by the sweeper:
 
-- `StuckAccountDeletionCount` — a dimensionless gauge of records past the staleness window, emitted on every run including when it is zero, so an alert on `> 0` auto-clears.
-- `BlockedAccountDeletion` — emitted per org once a record passes ten attempts, with a paired `console.error` for Loki triage.
+- `StuckAccountDeletionCount` — a gauge of records past the staleness window, emitted on every run including when it is zero, so an alert on `> 0` auto-clears.
+- `BlockedAccountDeletion` — emitted once a record passes ten attempts, with a paired structured `console.error` carrying `orgId`. The metric drives the alert and the log line identifies the org through a Loki JSON query, the same pattern the FTH errors and tenant-setup failures use, so the metric needs no dimension and stays inside the cardinality rule of the [drift-telemetry ADR](2026-04-subscription-drift-telemetry.md).
+- `OldestPendingDeletionAgeHours` — the age of the oldest record not yet `DONE`, emitted on every run. A Grafana alert at 168 hours encodes the seven-day completion promise in the customer documentation, and the threshold can move without touching code.
 
-Both reach Grafana Cloud with no infrastructure change, since `FilOne` is already in the metric stream's include filter. The deletion worker's failed asynchronous invocations land in a dead-letter queue whose depth arrives the same way, `AWS/SQS` being in that filter too.
+All three reach Grafana Cloud with no infrastructure change, since `FilOne` is already in the metric stream's include filter. The deletion worker's failed asynchronous invocations land in a dead-letter queue whose depth arrives the same way, `AWS/SQS` being in that filter too.
 
-`BlockedAccountDeletion` carries an `orgId` dimension, which is the per-entity cardinality the [drift-telemetry ADR](2026-04-subscription-drift-telemetry.md) rules out. It is admitted here because the ten-attempt threshold makes it rare by construction: a deletion that reaches it is already an incident. This is a deliberate exception to a stated rule, not an oversight.
-
-One gap remains. Nothing in this repository shows these metrics being alarmed on. There are no CloudWatch alarms and no SNS or paging integration anywhere in the codebase; alerting lives in Grafana Cloud and is configured by hand. `docs/SLOs.md`, named as the destination for panels and alerts by two existing metric ADRs, does not exist. So the metrics are real while the alert rules are unversioned and unreviewable. This predates the feature, but it is why a reader cannot confirm from the repository that a stalled deletion pages anyone.
+Alert rules and panels for these metrics live in Grafana Cloud, outside this repository. `docs/SLOs.md`, which two earlier metric ADRs name as the destination for panels and alerts, does not exist; revisiting that reference is out of scope here.
 
 ## Consequences
 
 ### Accepted costs
 
-| Cost                                                            | Reasoning                                                                                                                                                        |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Up to ~30 minutes before teardown starts, if the invoke is lost | Deletion need not be immediate. The fences already made the account inert.                                                                                       |
-| The sweeper runs a full-table `Scan`                            | Fine at current table size. Revisit when RCUs or scan duration show up in cost or latency; the fix is a sparse GSI on an attribute present only while `PENDING`. |
-| The confirm transaction caps at 97 members                      | See below.                                                                                                                                                       |
-| Possibly up to 12 hours of unbilled storage per deleted org     | Only if the usage-reporting path proves too entangled to call directly. Bounded, and better than blocking the feature on that refactor.                          |
-| Finalized invoices keep their `customer_email` snapshot         | They are immutable, and retained on the same legal-obligation basis as the rest of the financial record.                                                         |
-| Deleted orgs keep a row in every partition they occupied        | The rows carry no personal data and no entitlement. Retention is what makes the guards in decision 5 cheap and the re-runs in decision 2 possible.               |
-
-### The 97-member limit
-
-`TransactWriteItems` accepts 100 items. The confirm transaction spends the code, writes the `DELETION` record, raises the profile fence, and then flags one identity row per member — so `3 + N ≤ 100` caps an org at 97 members. Scrubbing rather than creating tombstones does not change this: either way it is one write per member.
-
-Past the limit the transaction is rejected as a whole. Nothing commits: no spent code, no `DELETION` record, no fence. The user gets a failed request against an account that has not been touched. It fails closed and leaves no partial state to recover from, which is the property that matters most here. `createNewUserAndOrg` is still the only writer of `MEMBER#` rows, so an org has one member today.
-
-What is missing is a warning before we first reach the limit. That lands in the alerting gap described in decision 10 rather than in this design.
+| Cost                                                                | Reasoning                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Up to ~45 minutes before teardown starts, if the invoke is lost     | The 30-minute staleness window plus up to one 15-minute sweep interval. Deletion need not be immediate; the fences already made the control plane inert.                                                                   |
+| The data plane stays live between confirm and tenant disable        | Access keys are not sessions, so no fence reaches them. The disable lands seconds after confirm in the normal case; the bound is the sweeper pickup when the invoke is lost.                                               |
+| The sweeper runs a full-table `Scan`                                | Fine at current table size. Revisit when RCUs or scan duration show up in cost or latency; the fix is a sparse GSI on an attribute present only while `PENDING`.                                                           |
+| Seconds of in-flight consumption after tenant disable go unbilled   | Bounded by a request timeout: sessions are dead at confirm and creation is fenced, so only requests already in flight when the disable lands can still write.                                                              |
+| Every authenticated request pays one extra sequential DynamoDB read | The session fence lives on the org profile, which keeps the confirm transaction at three items at any org size. A few milliseconds at the median; a per-container cache can absorb it if it ever shows in latency budgets. |
+| Finalized invoices keep their `customer_email` snapshot             | They are immutable, and retained on the same legal-obligation basis as the rest of the financial record.                                                                                                                   |
+| Deleted orgs keep a row in every partition they occupied            | The rows carry no personal data and no entitlement, and total under 10 KB per org. Retention is what makes the guards in decision 5 cheap and the re-runs in decision 2 possible.                                          |
 
 ### Deferred risk
 
@@ -217,18 +224,17 @@ Reconciliation against provider tenant lists is filed as its own ticket and rema
 
 ## Open questions
 
-None blocks the architecture. All three need a decision owner outside engineering.
+None blocks the architecture. The first two need a decision owner outside engineering; the third is a verification task.
 
-| Item                                                              | Owner   | What is needed                                                                                                                                                                                                                                                                                          |
-| ----------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| An uncollectable final invoice                                    | Finance | The teardown makes one best-effort charge attempt and leaves the invoice open when the card declines. Someone needs to confirm that is the intended outcome and own what happens to it afterwards, since the customer record is gone by then and the account cannot be dunned.                          |
-| HubSpot retains the contact, with email and marketing preferences | Product | Delete the contact as a worker step, or document the retention as a lawful basis. As a step it inherits the same idempotency contract, where 404 counts as success.                                                                                                                                     |
-| Duplicate Stripe customers                                        | —       | Largely answered by decision 3: retaining the billing row makes `createBillingTrial` a no-op, so the path that minted a second customer is closed. `create-setup-intent` can also create one, and is fenced. Worth confirming in practice that no duplicate customers exist for orgs already torn down. |
+| Item                                                              | Owner   | What is needed                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ----------------------------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| An uncollectable final invoice                                    | Finance | The teardown makes one best-effort charge attempt and leaves the invoice open when the card declines. Stripe retains the deleted customer as retrievable history and the finalized invoice keeps its `customer_email` snapshot, so manual collection remains possible; automated dunning does not, since the customer has no payment methods and accepts no further operations. Finance needs to confirm the outcome and own the open invoice. |
+| HubSpot retains the contact, with email and marketing preferences | Product | Delete the contact as a worker step, or document the retention as a lawful basis. As a step it inherits the same idempotency contract, where 404 counts as success.                                                                                                                                                                                                                                                                            |
 
 ## References
 
 - [Billing read model never synthesizes entitlement](2026-07-billing-read-model-never-synthesizes-entitlement.md) — why the `createBillingTrial` write cannot be conditional.
 - [Observability architecture](2026-03-observability-architecture.md) — the EMF and metric-stream pipeline decision 10 relies on.
-- [Subscription drift telemetry](2026-04-subscription-drift-telemetry.md) — the per-invocation metric pattern, and the cardinality rule decision 10 makes an exception to.
+- [Subscription drift telemetry](2026-04-subscription-drift-telemetry.md) — the per-invocation metric pattern, and the cardinality rule decision 10 stays within.
 - [Synchronous tenant setup on first resource](2026-05-synchronous-tenant-setup-on-first-resource.md) — the stuck-gauge precedent.
 - [Usage-based storage billing](2026-03-usage-based-storage-billing.md) — the meter aggregation that makes a repeated usage report safe.
