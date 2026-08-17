@@ -991,6 +991,11 @@ export default $config({
       handler: 'revoke-invitation',
     });
     addRoute({
+      method: 'POST',
+      routePath: '/api/invitations/accept',
+      handler: 'accept-invitation',
+    });
+    addRoute({
       method: 'GET',
       routePath: '/api/me/preferences',
       handler: 'get-preferences',

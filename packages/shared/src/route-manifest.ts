@@ -243,6 +243,19 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     category: 'authenticated',
     requires: 'members.manage',
   },
+  // Accepting is `self`, and deliberately outside the org gate: the caller is
+  // not a member of the inviting org yet, so a membership check here would
+  // refuse every invitation there is. The token plus a session whose verified
+  // email matches the invitation is the whole authorization, and neither is
+  // something a role can grant.
+  {
+    method: 'POST',
+    path: '/api/invitations/accept',
+    handler: 'accept-invitation',
+    category: 'authenticated',
+    requires: 'self',
+  },
+
   // ── Auth ─────────────────────────────────────────────────────────
   { method: 'GET', path: '/login', handler: 'auth-login', category: 'public' },
   { method: 'GET', path: '/api/auth/callback', handler: 'auth-callback', category: 'public' },
