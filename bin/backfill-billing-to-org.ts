@@ -107,10 +107,12 @@ import {
   BillingKeys,
   buildCopyTransactItems,
   classifyOrgBilling,
+  formatAppliedResolutions,
   formatBillingPlanReport,
   parseLegacyPk,
   parseOrgPk,
   parseResolvedCollisions,
+  validateResolvedCollisions,
 } from './lib/billing-rekey.ts';
 import type {
   BillingPlan,
@@ -119,7 +121,11 @@ import type {
   OrgBillingState,
   SubscriptionRow,
 } from './lib/billing-rekey.ts';
-import { formatBillingVerifyReport, verifyBillingRekey } from './lib/billing-verify.ts';
+import {
+  findUnkeyableOrgIds,
+  formatBillingVerifyReport,
+  verifyBillingRekey,
+} from './lib/billing-verify.ts';
 
 /** Pause between orgs that write, so a few thousand transactions stay polite to a shared table. */
 const WRITE_DELAY_MS = 50;
@@ -136,26 +142,6 @@ const execute = cli.execute && !verify;
 const resolved = parseResolvedCollisions(cli.option('--resolve-collisions'));
 const acceptedOrgless = parseAcceptedOrgless(cli.option('--accept-orgless'));
 
-// A disposition is a statement about what --verify may pass, and nothing else
-// reads it. Accepting it on a run that cannot act on it would let an operator
-// believe rows had been signed off when no check ever saw the list.
-if (acceptedOrgless.size > 0 && !verify) {
-  console.error('--accept-orgless applies to --verify only. Nothing was read or written.');
-  process.exit(1);
-}
-
-if (cli.flag('--force-unlock')) {
-  await forceUnlock(dynamo, billingTable, BILLING_REKEY_LOCK_PK);
-  process.exit(0);
-}
-
-const mode = verify ? 'VERIFY — ' : execute ? 'EXECUTE — ' : 'DRY-RUN — ';
-console.log(
-  `${mode}Copying subscription rows to their org key (stage="${cli.stage}", region=${awsRegion})`,
-);
-console.log(`  BillingTable: ${billingTable}`);
-console.log('');
-
 const scan: BillingScanCounts = {
   subscriptionRows: 0,
   legacyRows: 0,
@@ -168,6 +154,10 @@ const scan: BillingScanCounts = {
 const orgs = new Map<string, OrgBillingState>();
 /** Legacy rows with no `orgId` — there is no org to file them under. */
 const orglessRows: string[] = [];
+/** Keys that parse as neither shape. Named, because a counted row is a row nobody looks at. */
+const unparsedRows: string[] = [];
+/** Every row the scan read, for the checks that are about keys rather than orgs. */
+const allRows: SubscriptionRow[] = [];
 
 function orgState(orgId: string): OrgBillingState {
   const existing = orgs.get(orgId);
@@ -196,10 +186,14 @@ interface BillingRowAttributes {
  * never matched.
  */
 async function scanBillingTable(): Promise<void> {
+  // ConsistentRead: this scan is what `--verify` gates the flip on, and an
+  // eventually-consistent miss reads as "no legacy row for that org" — the exact
+  // shape of the failure the gate exists to catch.
   const items = scanAll(dynamo, {
     TableName: billingTable,
     FilterExpression: 'sk = :subscription',
     ExpressionAttributeValues: { ':subscription': { S: BillingKeys.subscriptionSk() } },
+    ConsistentRead: true,
   });
 
   for await (const item of items) {
@@ -223,6 +217,8 @@ function collectRow(item: Record<string, AttributeValue>): void {
       : {}),
   };
 
+  allRows.push(row);
+
   const orgIdFromKey = parseOrgPk(pk);
   if (orgIdFromKey) {
     scan.orgRows++;
@@ -233,6 +229,7 @@ function collectRow(item: Record<string, AttributeValue>): void {
 
   if (!parseLegacyPk(pk)) {
     scan.unparsedRows++;
+    unparsedRows.push(pk);
     return;
   }
 
@@ -345,125 +342,236 @@ function parseAcceptedOrgless(value: string | undefined): Set<string> {
   return new Set(entries);
 }
 
-await scanBillingTable();
+/**
+ * The run, in one function so every exit is a `return`.
+ *
+ * `process.exit` truncates whatever the process has buffered, and the runbook
+ * has every run piped through `tee` — so the last lines of the report, the ones
+ * naming what an operator has to act on, were the ones most likely to be lost.
+ * `process.exitCode` sets the same status and lets the process end on its own.
+ */
+async function main(): Promise<void> {
+  // A disposition is a statement about what --verify may pass, and nothing else
+  // reads it. Accepting it on a run that cannot act on it would let an operator
+  // believe rows had been signed off when no check ever saw the list.
+  if (acceptedOrgless.size > 0 && !verify) {
+    console.error('--accept-orgless applies to --verify only. Nothing was read or written.');
+    process.exitCode = 1;
+    return;
+  }
 
-const states = [...orgs.values()].sort((a, b) => a.orgId.localeCompare(b.orgId));
-const stateByOrg = new Map(states.map((state) => [state.orgId, state]));
-const plans: BillingPlan[] = states.map((state) => classifyOrgBilling(state, resolved));
+  if (cli.flag('--force-unlock')) {
+    await forceUnlock(dynamo, billingTable, BILLING_REKEY_LOCK_PK);
+    return;
+  }
 
-if (verify) {
+  const mode = verify ? 'VERIFY — ' : execute ? 'EXECUTE — ' : 'DRY-RUN — ';
+  console.log(
+    `${mode}Copying subscription rows to their org key (stage="${cli.stage}", region=${awsRegion})`,
+  );
+  console.log(`  BillingTable: ${billingTable}`);
+  console.log('');
+
+  // The lock is taken BEFORE the scan, not before the writes. A revert that
+  // starts while this run is scanning deletes rows the plan already contains,
+  // and the plan an operator then approves describes a table that no longer
+  // exists. Holding it across the read makes the plan and the writes agree.
+  const lock = execute
+    ? await acquireRunLock(dynamo, billingTable, {
+        script: 'backfill-billing-to-org.ts',
+        stage: cli.stage,
+        lockPk: BILLING_REKEY_LOCK_PK,
+      })
+    : undefined;
+
+  try {
+    await run();
+  } finally {
+    await lock?.release();
+  }
+}
+
+async function run(): Promise<void> {
+  await scanBillingTable();
+
+  const states = [...orgs.values()].sort((a, b) => a.orgId.localeCompare(b.orgId));
+
+  // A resolution naming a row nobody scanned is a typo or a stale list, and its
+  // failure mode is the confusing one: the org stays unresolved, the run halts
+  // on the same collision, and the halt reads as the argument not having been
+  // passed at all.
+  const badResolutions = validateResolvedCollisions(resolved, states);
+  if (badResolutions.length > 0) {
+    console.error('--resolve-collisions names rows this scan did not find:');
+    for (const problem of badResolutions) console.error(`  ${problem}`);
+    console.error('Nothing was written.');
+    process.exitCode = 1;
+    return;
+  }
+
+  const plans: BillingPlan[] = states.map((state) => classifyOrgBilling(state, resolved));
+
+  if (verify) {
+    reportVerification(states, plans);
+    return;
+  }
+
+  console.log(formatBillingPlanReport(scan, plans, orglessRows));
+  for (const line of formatAppliedResolutions(resolved, plans)) console.log(line);
+  console.log('');
+
+  if (halted(plans)) return;
+
+  const stateByOrg = new Map(states.map((state) => [state.orgId, state]));
+  printSummary(plans, await copyEachOrg(plans, stateByOrg));
+}
+
+/**
+ * The gate the flip PR merges on.
+ *
+ * It prints the plan as well as the checks: a PASS whose reader cannot see what
+ * was classified is a number to paste onto a PR, not evidence.
+ */
+function reportVerification(
+  states: readonly OrgBillingState[],
+  plans: readonly BillingPlan[],
+): void {
+  console.log(formatBillingPlanReport(scan, plans, orglessRows));
+  console.log('');
   const checks = verifyBillingRekey({
     states,
     plans,
     scan,
     orglessRows,
     acceptedOrgless,
+    unparsedRows,
+    unkeyableOrgIds: findUnkeyableOrgIds(allRows),
   });
   console.log(formatBillingVerifyReport(checks));
-  process.exit(checks.some((check) => !check.pass) ? 1 : 0);
+  if (checks.some((check) => !check.pass)) process.exitCode = 1;
 }
 
-console.log(formatBillingPlanReport(scan, plans, orglessRows));
-console.log('');
+/**
+ * Collisions stop the run in BOTH modes, before any write and before the per-org
+ * lines. The plan a dry run prints is the plan --execute plays back, and a plan
+ * that skips the orgs an operator has not decided about is not the plan.
+ */
+function halted(plans: readonly BillingPlan[]): boolean {
+  const unresolved = plans.filter((plan) => plan.kind === 'anomaly' && plan.reason === 'collision');
+  if (unresolved.length === 0) return false;
 
-// Collisions stop the run in BOTH modes, before any write and before the
-// per-org lines. The plan a dry run prints is the plan --execute plays back, and
-// a plan that skips the orgs an operator has not decided about is not the plan.
-const unresolvedCollisions = plans.filter(
-  (plan) => plan.kind === 'anomaly' && plan.reason === 'collision',
-);
-if (unresolvedCollisions.length > 0) {
   console.error(
-    `HALTED: ${unresolvedCollisions.length} orgs are claimed by legacy rows naming different subscriptions.`,
+    `HALTED: ${unresolved.length} orgs are claimed by legacy rows naming different subscriptions.`,
   );
   console.error(
     'Check each subscriptionId in the Stripe dashboard, then name the live row per org:',
   );
   console.error('  --resolve-collisions ORG#<orgId>=CUSTOMER#<userId>,…');
   console.error(`See ${RUNBOOK}. Nothing was written.`);
-  process.exit(1);
+  process.exitCode = 1;
+  return true;
 }
 
-const outcomes = {
-  copied: 0,
-  recopied: 0,
-  raced: 0,
-  alreadyCopied: 0,
-  anomalies: 0,
-};
+/**
+ * Every planned copy ends in exactly one of these, which is what makes the
+ * closing line an identity rather than a set of numbers that happen to sit near
+ * each other. Orgs that never needed a copy were never planned, so they are
+ * counted apart from the ones that stopped needing one mid-run.
+ */
+interface Outcomes {
+  copied: number;
+  recopied: number;
+  raced: number;
+  /** Planned, then found not to need a copy when re-read. */
+  skippedSince: number;
+  /** Never planned: in sync when the table was scanned. */
+  alreadyCopied: number;
+  anomalies: number;
+}
 
-// Held for the whole write phase: the revert deletes the rows this run creates,
-// and one landing mid-run would remove a copy this run is about to condition on.
-const lock = execute
-  ? await acquireRunLock(dynamo, billingTable, {
-      script: 'backfill-billing-to-org.ts',
-      stage: cli.stage,
-      lockPk: BILLING_REKEY_LOCK_PK,
-    })
-  : undefined;
+async function copyEachOrg(
+  plans: readonly BillingPlan[],
+  stateByOrg: ReadonlyMap<string, OrgBillingState>,
+): Promise<Outcomes> {
+  const outcomes: Outcomes = {
+    copied: 0,
+    recopied: 0,
+    raced: 0,
+    skippedSince: 0,
+    alreadyCopied: 0,
+    anomalies: 0,
+  };
 
-try {
   for (const plan of plans) {
     if (plan.kind === 'anomaly') {
       outcomes.anomalies++;
-      continue;
-    }
-
-    if (plan.kind === 'already-copied') {
+    } else if (plan.kind === 'already-copied') {
       outcomes.alreadyCopied++;
-      continue;
-    }
-
-    if (!execute) {
+    } else if (!execute) {
       console.log(
         `  [dry-run] ${plan.reason === 'first-copy' ? 'COPY' : 'RE-COPY'} ${describe(plan)}`,
       );
-      continue;
-    }
-
-    // The scan is minutes old by now and Stripe has been writing all along, so
-    // the org is re-read and re-classified before the write. An org that stopped
-    // needing one in the meantime is reported as such rather than copied from a
-    // stale read.
-    const fresh = classifyOrgBilling(await rereadOrg(stateByOrg.get(plan.orgId)!), resolved);
-    if (fresh.kind !== 'copy') {
-      outcomes.alreadyCopied++;
-      console.log(
-        `  SKIPPED ${BillingKeys.orgPk(plan.orgId)} — no longer needs a copy (${fresh.kind === 'anomaly' ? fresh.reason : fresh.origin})`,
-      );
+    } else {
+      await copyOneOrg(plan, stateByOrg, outcomes);
       await sleep(WRITE_DELAY_MS);
-      continue;
     }
-
-    const outcome = await applyCopy(fresh, new Date().toISOString());
-    if (outcome === 'copied') {
-      if (fresh.reason === 'first-copy') outcomes.copied++;
-      else outcomes.recopied++;
-      console.log(`  ${fresh.reason === 'first-copy' ? 'COPIED' : 'RE-COPIED'} ${describe(fresh)}`);
-    } else if (outcome === 'raced') {
-      outcomes.raced++;
-    }
-    await sleep(WRITE_DELAY_MS);
   }
-} finally {
-  await lock?.release();
+
+  return outcomes;
 }
 
-const planned = summarize();
+/**
+ * The scan is minutes old by now and Stripe has been writing all along, so the
+ * org is re-read and re-classified before the write. An org that stopped needing
+ * a copy in the meantime is reported as such rather than copied from a stale
+ * read.
+ */
+async function copyOneOrg(
+  plan: CopyPlan,
+  stateByOrg: ReadonlyMap<string, OrgBillingState>,
+  outcomes: Outcomes,
+): Promise<void> {
+  const fresh = classifyOrgBilling(await rereadOrg(stateByOrg.get(plan.orgId)!), resolved);
+  if (fresh.kind !== 'copy') {
+    outcomes.skippedSince++;
+    console.log(
+      `  SKIPPED ${BillingKeys.orgPk(plan.orgId)} — no longer needs a copy (${fresh.kind === 'anomaly' ? fresh.reason : fresh.origin})`,
+    );
+    return;
+  }
 
-console.log('');
-if (execute) {
+  const outcome = await applyCopy(fresh, new Date().toISOString());
+  if (outcome === 'raced') {
+    outcomes.raced++;
+    return;
+  }
+  if (fresh.reason === 'first-copy') outcomes.copied++;
+  else outcomes.recopied++;
+  console.log(`  ${fresh.reason === 'first-copy' ? 'COPIED' : 'RE-COPIED'} ${describe(fresh)}`);
+}
+
+function printSummary(plans: readonly BillingPlan[], outcomes: Outcomes): void {
+  const planned = plans.filter((plan) => plan.kind === 'copy').length;
+
+  console.log('');
+  if (!execute) {
+    console.log('Dry run only — nothing was written.');
+    console.log('Disposition every anomaly above, then re-run with --execute.');
+    console.log('Done.');
+    return;
+  }
+
+  const written = outcomes.copied + outcomes.recopied;
   console.log(`Copied (first time):                         ${outcomes.copied}`);
-  console.log(`Re-copied (the source had changed):          ${outcomes.recopied}`);
-  console.log(`Skipped (already copied, or copied since):   ${outcomes.alreadyCopied}`);
+  console.log(`Re-copied (the legacy row was newer):        ${outcomes.recopied}`);
+  console.log(`Skipped (no longer needed a copy):           ${outcomes.skippedSince}`);
   console.log(`Raced (the rows moved; next run retries):    ${outcomes.raced}`);
+  console.log(`Already in sync at scan time (not planned):  ${outcomes.alreadyCopied}`);
   console.log(`Anomalies (untouched):                       ${outcomes.anomalies}`);
   console.log(`Legacy CUSTOMER# rows deleted:               0 (by design)`);
   console.log('');
   console.log(
-    `Planned copies (${planned.writes}) = Copied + Re-copied + Skipped-since + Raced (${
-      outcomes.copied + outcomes.recopied + outcomes.raced
-    } written, ${outcomes.alreadyCopied} skipped).`,
+    `Planned copies ${planned} = ${written} written + ${outcomes.skippedSince} skipped-since + ${outcomes.raced} raced.`,
   );
   console.log('');
   console.log('Now run --verify against the same stage and record its result — the flip PR');
@@ -474,14 +582,7 @@ if (execute) {
     console.log('Rows raced. Re-run --execute until that count is zero, then verify.');
     process.exitCode = 1;
   }
-} else {
-  console.log('Dry run only — nothing was written.');
-  console.log('Disposition every anomaly above, then re-run with --execute.');
+  console.log('Done.');
 }
-console.log('Done.');
 
-function summarize(): { writes: number } {
-  let writes = 0;
-  for (const plan of plans) if (plan.kind === 'copy') writes++;
-  return { writes };
-}
+await main();

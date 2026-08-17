@@ -18,6 +18,7 @@ import {
   parseLegacyPk,
   parseOrgPk,
   parseResolvedCollisions,
+  validateResolvedCollisions,
   REKEY_ATTRIBUTES,
   summarizeBillingPlans,
 } from './billing-rekey.ts';
@@ -176,16 +177,43 @@ describe('classifyOrgBilling', () => {
     });
   });
 
-  it('skips an org whose copy still carries the source’s updatedAt', () => {
+  it('skips an org whose two rows agree', () => {
     const source = legacyRow();
     const plan = classifyOrgBilling(state({ legacyRows: [source], orgRow: copiedRow(source) }));
 
     expect(plan).toStrictEqual({ kind: 'already-copied', orgId: ORG_ID, origin: 'backfill' });
   });
 
-  it('re-copies when the source moved after it was copied', () => {
-    // The one way the pair diverges under dual-write: a Stripe object carrying
-    // no metadata.orgId updates the legacy row alone.
+  it('skips an org whose copy is AHEAD of its legacy row', () => {
+    // The dual-write's own doing: a write that reached the org row alone leaves
+    // the legacy row behind. Every reader prefers the org row and the flip
+    // deletes the legacy one, so nothing is served stale and there is nothing to
+    // copy. The frozen rekeySourceUpdatedAt would have called this a delta on
+    // every run forever, which is why --verify could not converge.
+    const copied = copiedRow(legacyRow(), { updatedAt: NEWER });
+
+    expect(classifyOrgBilling(state({ legacyRows: [legacyRow()], orgRow: copied }))).toStrictEqual({
+      kind: 'already-copied',
+      orgId: ORG_ID,
+      origin: 'backfill',
+    });
+  });
+
+  it('does not re-flag a copy just because its source was written again', () => {
+    // Every ordinary dual-write moves the source's updatedAt while the copy's
+    // rekeySourceUpdatedAt stays frozen. Both rows moved together here, so the
+    // pair is in sync and the run has nothing to do.
+    const copied = copiedRow(legacyRow(), { updatedAt: NEWER });
+    const rewritten = legacyRow({ updatedAt: NEWER });
+
+    expect(classifyOrgBilling(state({ legacyRows: [rewritten], orgRow: copied }))).toStrictEqual({
+      kind: 'already-copied',
+      orgId: ORG_ID,
+      origin: 'backfill',
+    });
+  });
+
+  it('re-copies when the legacy row is newer than the org row', () => {
     const copied = copiedRow(legacyRow());
     const moved = legacyRow({ updatedAt: NEWER });
 
@@ -205,6 +233,29 @@ describe('classifyOrgBilling', () => {
     );
 
     expect(plan).toStrictEqual({ kind: 'already-copied', orgId: ORG_ID, origin: 'application' });
+  });
+
+  it('reports an application row its legacy row has moved past', () => {
+    // The blanket exemption hid this: the flip deletes the legacy row, so state
+    // only the legacy row holds is state about to be lost. The app row is still
+    // never overwritten — a human reconciles it.
+    const behind = applicationRow();
+    behind.updatedAt = UPDATED_AT;
+    behind.attributes.updatedAt = { S: UPDATED_AT };
+
+    expect(
+      classifyOrgBilling(state({ legacyRows: [legacyRow({ updatedAt: NEWER })], orgRow: behind })),
+    ).toMatchObject({ kind: 'anomaly', reason: 'app-row-behind' });
+  });
+
+  it('surfaces a collision even when an application row exists', () => {
+    // Two subscriptions claiming one org is a fact about the account, not about
+    // which key its row happens to be on.
+    const rival = legacyRow({ pk: BillingKeys.legacyPk(OTHER_USER_ID), subscriptionId: 'sub_2' });
+
+    expect(
+      classifyOrgBilling(state({ legacyRows: [legacyRow(), rival], orgRow: applicationRow() })),
+    ).toMatchObject({ kind: 'anomaly', reason: 'collision' });
   });
 
   it('leaves an org row whose source is gone for the revert', () => {
@@ -263,15 +314,45 @@ describe('classifyOrgBilling', () => {
       });
     });
 
-    it('reports a foreign org row rather than re-pointing it', () => {
-      // Two rows claim the org and one already won. Flipping which subscription
-      // the org rides on the strength of scan order is not a decision a script
-      // gets to make.
+    it('reads the recorded winner back rather than re-deriving it', () => {
+      // rekeyedFrom IS the resolution: an operator checked Stripe and named this
+      // row. Re-deriving would halt on the same collision every run, and would
+      // need --resolve-collisions passed forever.
+      const rival = legacyRow({
+        pk: BillingKeys.legacyPk(OTHER_USER_ID),
+        subscriptionId: 'sub_2',
+        updatedAt: NEWER,
+      });
+      const copied = copiedRow(first);
+
+      expect(
+        classifyOrgBilling(state({ legacyRows: [first, rival], orgRow: copied })),
+      ).toStrictEqual({ kind: 'already-copied', orgId: ORG_ID, origin: 'backfill' });
+    });
+
+    it('names the anomaly when the recorded winner is gone and another claimant survives', () => {
+      // Not a dead end: the halt text carries what to check in Stripe and what
+      // to do either way.
       const copied = copiedRow(legacyRow({ pk: BillingKeys.legacyPk(OTHER_USER_ID) }));
 
-      expect(classifyOrgBilling(state({ legacyRows: [first], orgRow: copied }))).toMatchObject({
+      const plan = classifyOrgBilling(state({ legacyRows: [first], orgRow: copied }));
+      expect(plan).toMatchObject({ kind: 'anomaly', reason: 'foreign-org-row' });
+      expect((plan as { detail: string }).detail).toContain('no longer in the table');
+      expect((plan as { detail: string }).detail).toContain('delete the org row and re-run');
+    });
+
+    it('halts when a claimant names no subscription at all', () => {
+      // Two rows that agree on nothing are the same problem as two that
+      // disagree; collapsing their missing ids into one Set entry read as
+      // agreement.
+      const nameless = legacyRow({
+        pk: BillingKeys.legacyPk(OTHER_USER_ID),
+        subscriptionId: '',
+      });
+
+      expect(classifyOrgBilling(state({ legacyRows: [first, nameless] }))).toMatchObject({
         kind: 'anomaly',
-        reason: 'foreign-org-row',
+        reason: 'collision',
       });
     });
   });
@@ -347,7 +428,10 @@ describe('buildCopyTransactItems', () => {
     );
   });
 
-  it('conditions a re-copy on the org row still belonging to this source', () => {
+  it('conditions a re-copy on the org row still belonging to this source, unmoved', () => {
+    // A Put replaces the whole item, so a webhook write that lands on the org
+    // row inside the window is not merged by this copy, it is erased by it. The
+    // second half of the condition turns that into a race the run reports.
     const copied = copiedRow(legacyRow());
     const plan = classifyOrgBilling(
       state({ legacyRows: [legacyRow({ updatedAt: NEWER })], orgRow: copied }),
@@ -355,9 +439,15 @@ describe('buildCopyTransactItems', () => {
     const [put] = buildCopyTransactItems(plan, TABLE, NOW);
 
     expect(put.Put).toMatchObject({
-      ConditionExpression: '#rekeyedFrom = :source',
-      ExpressionAttributeNames: { '#rekeyedFrom': REKEY_ATTRIBUTES.from },
-      ExpressionAttributeValues: { ':source': { S: BillingKeys.legacyPk(USER_ID) } },
+      ConditionExpression: '#rekeyedFrom = :source AND #updatedAt = :orgUpdatedAt',
+      ExpressionAttributeNames: {
+        '#rekeyedFrom': REKEY_ATTRIBUTES.from,
+        '#updatedAt': 'updatedAt',
+      },
+      ExpressionAttributeValues: {
+        ':source': { S: BillingKeys.legacyPk(USER_ID) },
+        ':orgUpdatedAt': { S: UPDATED_AT },
+      },
     });
   });
 });
@@ -397,6 +487,16 @@ describe('parseResolvedCollisions', () => {
     expect(parseResolvedCollisions(undefined).size).toBe(0);
   });
 
+  it('refuses two entries for one org', () => {
+    // An operator who edited a list and left the old line in; taking the last
+    // would copy the subscription they had already decided against.
+    expect(() =>
+      parseResolvedCollisions(
+        `ORG#${ORG_ID}=CUSTOMER#${USER_ID},ORG#${ORG_ID}=CUSTOMER#${OTHER_USER_ID}`,
+      ),
+    ).toThrow('twice');
+  });
+
   it('refuses an entry that names only one side', () => {
     // A resolution is "this org's live row is this one". Half of that is a typo,
     // and treating it as a decision would copy a row nobody chose.
@@ -407,6 +507,36 @@ describe('parseResolvedCollisions', () => {
 // ---------------------------------------------------------------------------
 // Verification
 // ---------------------------------------------------------------------------
+
+describe('validateResolvedCollisions', () => {
+  it('accepts a resolution naming a row that claims the org', () => {
+    const rows = [legacyRow(), legacyRow({ pk: BillingKeys.legacyPk(OTHER_USER_ID) })];
+    const states = [state({ legacyRows: rows })];
+
+    expect(validateResolvedCollisions(new Map([[ORG_ID, USER_ID]]), states)).toEqual([]);
+  });
+
+  it('names a resolution for an org nothing scanned', () => {
+    // Its failure mode is the confusing one: the run halts on the same collision
+    // and the halt reads as the argument not having been passed.
+    const problems = validateResolvedCollisions(new Map([['other-org', USER_ID]]), [
+      state({ legacyRows: [legacyRow()] }),
+    ]);
+
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('no scanned row names that org');
+  });
+
+  it('names a resolution whose row does not claim the org', () => {
+    const problems = validateResolvedCollisions(new Map([[ORG_ID, OTHER_USER_ID]]), [
+      state({ legacyRows: [legacyRow()] }),
+    ]);
+
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('does not claim this org');
+    expect(problems[0]).toContain(BillingKeys.legacyPk(USER_ID));
+  });
+});
 
 describe('verifyBillingRekey', () => {
   function checksFor(
@@ -478,10 +608,66 @@ describe('verifyBillingRekey', () => {
     expect(named('Every org row’s orgId attribute matches its key').pass).toBe(false);
   });
 
+  it('reports an application row whose legacy row holds newer state', () => {
+    // The exemption used to cover this: the flip deletes the legacy row, so
+    // state only it holds is state about to be lost.
+    const behind = applicationRow();
+    behind.updatedAt = UPDATED_AT;
+    behind.attributes.updatedAt = { S: UPDATED_AT };
+    const { named } = checksFor([
+      state({ legacyRows: [legacyRow({ updatedAt: NEWER })], orgRow: behind }),
+    ]);
+
+    expect(named('No org is claimed by two subscriptions').pass).toBe(false);
+  });
+
   it('exempts an application-written row from the faithfulness check', () => {
     const { named } = checksFor([state({ legacyRows: [legacyRow()], orgRow: applicationRow() })]);
 
     expect(named('Every org twin says what its source says').pass).toBe(true);
+  });
+
+  it('fails, and names, a key this migration cannot parse', () => {
+    // A counted row is a row nobody looks at, and the flip deletes the legacy
+    // rows regardless of whether this script could read their keys.
+    const plans: BillingPlan[] = [];
+    const checks = verifyBillingRekey({
+      states: [],
+      plans,
+      scan: { ...EMPTY_SCAN, subscriptionRows: 2, unparsedRows: 1 },
+      orglessRows: [],
+      unparsedRows: ['SUBSCRIPTION#weird'],
+    });
+    const check = checks.find((c) => c.name.startsWith('Every SUBSCRIPTION row has a key'))!;
+
+    expect(check.pass).toBe(false);
+    expect(check.offenders[0]).toContain('SUBSCRIPTION#weird');
+  });
+
+  it('fails an orgId attribute that cannot form a key', () => {
+    // `ORG#a#b` parses back as something else, so the row would be filed under
+    // an org that does not exist.
+    const checks = verifyBillingRekey({
+      states: [],
+      plans: [],
+      scan: EMPTY_SCAN,
+      orglessRows: [],
+      unkeyableOrgIds: [`${BillingKeys.legacyPk(USER_ID)} carries orgId="a#b"`],
+    });
+    const check = checks.find((c) => c.name.startsWith('Every SUBSCRIPTION row has a key'))!;
+
+    expect(check.pass).toBe(false);
+  });
+
+  it('fails an org row carrying no orgId attribute at all', () => {
+    // Every lifecycle job reads the attribute, not the key, so a row without one
+    // is invisible to all of them.
+    const source = legacyRow();
+    const copied = copiedRow(source);
+    delete copied.orgId;
+    const { named } = checksFor([state({ legacyRows: [source], orgRow: copied })]);
+
+    expect(named('Every org row’s orgId attribute matches its key').pass).toBe(false);
   });
 
   it('fails a legacy row with no orgId until it is named', () => {

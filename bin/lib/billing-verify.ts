@@ -20,6 +20,7 @@
 import {
   BillingKeys,
   COMPARED_ATTRIBUTES,
+  isKeyable,
   summarizeBillingPlans,
   type BillingAnomalyPlan,
   type BillingPlan,
@@ -58,6 +59,10 @@ export interface BillingVerifyInput {
   orglessRows: readonly string[];
   /** The ones an operator has dispositioned by name. */
   acceptedOrgless?: ReadonlySet<string>;
+  /** Rows whose key parsed as neither shape, named. */
+  unparsedRows?: readonly string[];
+  /** Rows whose `orgId` attribute cannot be half of a key, named. */
+  unkeyableOrgIds?: readonly string[];
 }
 
 export function verifyBillingRekey({
@@ -66,6 +71,8 @@ export function verifyBillingRekey({
   scan,
   orglessRows,
   acceptedOrgless = new Set<string>(),
+  unparsedRows = [],
+  unkeyableOrgIds = [],
 }: BillingVerifyInput): BillingVerifyCheck[] {
   const counts = summarizeBillingPlans(plans);
   const pending = plans.filter((plan) => plan.kind === 'copy');
@@ -73,9 +80,10 @@ export function verifyBillingRekey({
 
   const missingTwin = states.filter((state) => state.legacyRows.length > 0 && !state.orgRow);
   const diverged = states.flatMap(describeDivergence);
+  // Missing counts as well as wrong: an org row with no `orgId` attribute is
+  // invisible to every lifecycle job, which reads the attribute and not the key.
   const mismatchedOrgId = states.filter(
-    (state) =>
-      state.orgRow && state.orgRow.orgId !== undefined && state.orgRow.orgId !== state.orgId,
+    (state) => state.orgRow && state.orgRow.orgId !== state.orgId,
   );
 
   const undispositionedOrgless = orglessRows.filter((pk) => !acceptedOrgless.has(pk));
@@ -107,11 +115,23 @@ export function verifyBillingRekey({
     {
       name: 'Every org row’s orgId attribute matches its key',
       pass: mismatchedOrgId.length === 0,
-      detail: `${scan.orgRows} org rows; ${mismatchedOrgId.length} carry an orgId that is not their own`,
+      detail: `${scan.orgRows} org rows; ${mismatchedOrgId.length} carry an orgId that is missing or not their own`,
       offenders: mismatchedOrgId.map(
         (state) =>
           `${BillingKeys.orgPk(state.orgId)} carries orgId=${state.orgRow?.orgId ?? '(none)'}`,
       ),
+    },
+    {
+      // A key this script's parsers reject is a row it can neither copy nor
+      // account for, and the flip deletes the legacy rows regardless. Counting
+      // it and moving on is how a row disappears in a migration.
+      name: 'Every SUBSCRIPTION row has a key this migration recognizes',
+      pass: unparsedRows.length === 0 && unkeyableOrgIds.length === 0,
+      detail: `${scan.subscriptionRows} rows matched; ${unparsedRows.length} keys parsed as neither CUSTOMER# nor ORG#, ${unkeyableOrgIds.length} carry an orgId that cannot form a key`,
+      offenders: [
+        ...unparsedRows.map((pk) => `${pk} — key parses as neither shape`),
+        ...unkeyableOrgIds,
+      ],
     },
     {
       name: 'No org is claimed by two subscriptions',
@@ -123,6 +143,19 @@ export function verifyBillingRekey({
     },
     orglessCheck(scan, undispositionedOrgless, acceptedRows, staleAcceptances),
   ];
+}
+
+/**
+ * The rows whose `orgId` attribute cannot be half of a key, named with their pk.
+ *
+ * A `#` in the attribute makes `ORG#{orgId}` parse back as something else, so
+ * the row would be filed under an org that does not exist and copied to a
+ * partition nobody reads.
+ */
+export function findUnkeyableOrgIds(rows: readonly SubscriptionRow[]): string[] {
+  return rows
+    .filter((row) => row.orgId !== undefined && !isKeyable(row.orgId))
+    .map((row) => `${row.pk} carries orgId=${JSON.stringify(row.orgId)}`);
 }
 
 /**

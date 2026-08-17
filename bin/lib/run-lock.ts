@@ -54,6 +54,12 @@ export interface RunLock {
   release(): Promise<void>;
 }
 
+/** What a `--force-unlock` has to name to be sure it is dropping the lock it just read. */
+export interface ForceUnlockOptions {
+  /** Only drop the lock if this run still holds it. */
+  runId?: string;
+}
+
 /**
  * Take the lock, or name the run that holds it and stop.
  *
@@ -104,13 +110,31 @@ export async function acquireRunLock(
         );
       } catch (err) {
         if (!(err instanceof ConditionalCheckFailedException)) throw err;
-        console.warn('  Run lock was taken over by another run — left in place.');
+        // Either somebody force-unlocked this run and another took the lock, or
+        // the row is simply gone. Both mean this run no longer holds it, and
+        // saying so is the difference between a clean exit and one that looks
+        // clean.
+        const holder = await readLock(client, tableName, pk);
+        console.warn(
+          holder
+            ? `  Run lock is no longer this run's — now held by ${describeHolder(holder)}; left in place.`
+            : '  Run lock was already released (force-unlocked while this run was working).',
+        );
       }
     },
   };
 }
 
-/** Drop a lock a crashed run left behind. Prints what it removed, or that there was nothing. */
+/**
+ * Drop a lock a crashed run left behind. Prints what it removed, or that there
+ * was nothing.
+ *
+ * The delete names the `runId` this call just read, so an operator who reads a
+ * stale lock, decides it is dead, and runs this a moment after the real holder
+ * finished and a third run took the lock, drops nothing — the condition fails
+ * and the new run keeps its lock. Without it, `--force-unlock` is a delete of
+ * whatever happens to be there when it lands.
+ */
 export async function forceUnlock(
   client: DynamoDBClient,
   tableName: string,
@@ -122,7 +146,26 @@ export async function forceUnlock(
     return;
   }
 
-  await client.send(new DeleteItemCommand({ TableName: tableName, Key: lockKey(lockPk) }));
+  const runId = text(holder.runId);
+  try {
+    await client.send(
+      new DeleteItemCommand({
+        TableName: tableName,
+        Key: lockKey(lockPk),
+        ...(runId
+          ? {
+              ConditionExpression: '#runId = :runId',
+              ExpressionAttributeNames: { '#runId': 'runId' },
+              ExpressionAttributeValues: { ':runId': { S: runId } },
+            }
+          : {}),
+      }),
+    );
+  } catch (err) {
+    if (!(err instanceof ConditionalCheckFailedException)) throw err;
+    console.log('The lock changed hands while this was reading it — nothing was released.');
+    return;
+  }
   console.log(`Released the run lock held by ${describeHolder(holder)}.`);
 }
 

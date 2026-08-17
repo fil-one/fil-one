@@ -180,11 +180,14 @@ try {
     );
 
     if (conditionFailed) {
-      // The row changed between the scan and the delete: re-copied from a
-      // different source, or replaced by the application. Either way it is no
-      // longer the row this run read, so it stays.
+      // Either the org row changed between the scan and the delete — re-copied
+      // from a different source, or replaced by the application — or its legacy
+      // row is gone, which means there is no fallback to revert to and deleting
+      // would take the account's subscription with it.
       outcomes.changed++;
-      console.log(`  CHANGED ${label} — no longer the row that was scanned; kept`);
+      console.log(
+        `  KEPT ${label} — the org row changed since the scan, or its CUSTOMER# row is gone`,
+      );
     } else {
       outcomes.deleted++;
       console.log(`  DELETED ${label}`);
@@ -198,7 +201,7 @@ try {
 console.log('');
 if (cli.execute) {
   console.log(`Deleted:                                     ${outcomes.deleted}`);
-  console.log(`Changed since the scan (kept):                ${outcomes.changed}`);
+  console.log(`Kept (changed since the scan, or no fallback):${outcomes.changed}`);
   console.log(`Application-written rows (kept):              ${applicationRows}`);
   console.log('');
   console.log('Every read still falls back to the CUSTOMER# row while the flip is unmerged,');
