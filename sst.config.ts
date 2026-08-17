@@ -165,8 +165,13 @@ export default $config({
           // The two protections the record itself needs: a 90-day log with no
           // backups loses the quarter to one bad deploy, and a table a stack
           // operation can drop is a log an operator can make disappear.
-          pointInTimeRecovery: { enabled: true },
-          deletionProtectionEnabled: true,
+          //
+          // Deletion protection only where the app already retains on removal.
+          // Every preview stage is torn down with `sst remove`, and a protected
+          // table refuses to go, leaving the teardown failing and the stage's
+          // resources live.
+          pointInTimeRecovery: { enabled: isProduction || isStaging },
+          deletionProtectionEnabled: isProduction,
         },
       },
     });
