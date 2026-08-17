@@ -1,5 +1,5 @@
-// Command-line parsing shared by the org-conversion scripts: the flags both of
-// them take and the usage block.
+// Command-line parsing shared by the migration scripts: the flags all of them
+// take and the usage block.
 //
 // `--stage` is required and has no default. A script that targets whichever
 // stage happens to be lying around writes to the wrong account exactly once.
@@ -14,6 +14,12 @@ export interface CliSpec {
   options?: readonly string[];
   /** One line per flag worth explaining, printed under the usage line. */
   help?: readonly string[];
+  /**
+   * The procedure this script belongs to, printed on every usage and failure.
+   * An operator who mistypes a flag is one who needs the runbook, and the one
+   * they need is their own migration's.
+   */
+  runbook?: string;
 }
 
 export interface Cli {
@@ -30,20 +36,22 @@ export interface Cli {
 /** Accepted by every script here, so a caller's muscle memory works on all of them. */
 const SHARED_FLAGS = ['--execute', '--dry-run'] as const;
 
-const RUNBOOK = 'docs/OrgConversionRunbook.md';
+/** Where a script points when it has nothing better to say. */
+const DEFAULT_RUNBOOK = 'docs/OrgConversionRunbook.md';
 
 export function parseCli(spec: CliSpec): Cli {
   const argv = process.argv.slice(2);
   const usageLine = usage(spec);
+  const runbook = spec.runbook ?? DEFAULT_RUNBOOK;
 
   if (argv.includes('--help') || argv.includes('-h')) {
-    printHelp(spec, usageLine);
+    printHelp(spec, usageLine, runbook);
     process.exit(0);
   }
 
   const known = new Set<string>([...SHARED_FLAGS, ...(spec.flags ?? [])]);
   const valued = new Set<string>(spec.options ?? []);
-  const { stage, passed, values } = read(argv, known, valued, usageLine);
+  const { stage, passed, values } = read(argv, known, valued, { usageLine, runbook });
 
   return {
     stage,
@@ -63,19 +71,25 @@ function usage(spec: CliSpec): string {
   return `Usage: ${spec.script} --stage <name> [--execute]${extras}`;
 }
 
-function printHelp(spec: CliSpec, usageLine: string): void {
+function printHelp(spec: CliSpec, usageLine: string, runbook: string): void {
   console.log(usageLine);
   console.log('  --stage <name>  Required. The stage to read and write, e.g. staging.');
   console.log('  --execute       Apply the plan. Dry run by default.');
   for (const line of spec.help ?? []) console.log(`  ${line}`);
-  console.log(`Runbook: ${RUNBOOK}`);
+  console.log(`Runbook: ${runbook}`);
+}
+
+/** What a parse failure prints alongside the message: how to call it, and where it is documented. */
+interface Guidance {
+  usageLine: string;
+  runbook: string;
 }
 
 function read(
   argv: readonly string[],
   known: ReadonlySet<string>,
   valued: ReadonlySet<string>,
-  usageLine: string,
+  guidance: Guidance,
 ): { stage: string; passed: Set<string>; values: Map<string, string> } {
   const passed = new Set<string>();
   const values = new Map<string, string>();
@@ -84,23 +98,23 @@ function read(
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg !== '--stage' && !valued.has(arg)) {
-      if (!known.has(arg)) fail(`Unrecognized argument: ${arg}`, usageLine);
+      if (!known.has(arg)) fail(`Unrecognized argument: ${arg}`, guidance);
       passed.add(arg);
       continue;
     }
     const value = argv[++i];
-    if (!value || value.startsWith('--')) fail(`Missing value for ${arg}.`, usageLine);
+    if (!value || value.startsWith('--')) fail(`Missing value for ${arg}.`, guidance);
     if (arg === '--stage') stage = value;
     else values.set(arg, value);
   }
 
-  if (!stage) fail('Missing required --stage.', usageLine);
+  if (!stage) fail('Missing required --stage.', guidance);
   return { stage, passed, values };
 }
 
-function fail(message: string, usageLine: string): never {
+function fail(message: string, { usageLine, runbook }: Guidance): never {
   console.error(message);
   console.error(usageLine);
-  console.error(`Runbook: ${RUNBOOK}`);
+  console.error(`Runbook: ${runbook}`);
   process.exit(1);
 }
