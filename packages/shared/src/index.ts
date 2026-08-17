@@ -68,6 +68,36 @@ export {
 export type { OrgMembershipSource, UpdateOrgRequest, UpdateOrgResponse } from './api/org.js';
 
 export {
+  INVITATION_STATUSES,
+  INVITE_EXPIRY_DAYS,
+  INVITE_TOKEN_MAX_LENGTH,
+  INVITE_TOKEN_MIN_LENGTH,
+  MAX_PENDING_INVITATIONS_PER_ORG,
+  AcceptInvitationSchema,
+  CreateInvitationSchema,
+  InvitedRoleSchema,
+} from './api/invitations.js';
+export type {
+  AcceptInvitationRequest,
+  AcceptInvitationResponse,
+  CreateInvitationRequest,
+  CreateInvitationResponse,
+  InvitationStatus,
+  InvitationSummary,
+  ListInvitationsResponse,
+} from './api/invitations.js';
+
+export { TransferOwnershipSchema, UpdateMemberRoleSchema } from './api/members.js';
+export type {
+  ListMembersResponse,
+  MemberSummary,
+  TransferOwnershipRequest,
+  TransferOwnershipResponse,
+  UpdateMemberRoleRequest,
+  UpdateMemberRoleResponse,
+} from './api/members.js';
+
+export {
   AUDIT_EVENT_TYPES,
   AUDIT_ACTOR_KINDS,
   AUDIT_EVENT_PHASES,

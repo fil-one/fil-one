@@ -170,8 +170,19 @@ export interface AuditEventDetails {
   'member.invited': { inviteId: string; email: string; role: OrgRole };
   'invite.revoked': { inviteId: string; email: string };
   'invite.accepted': { inviteId: string; email: string; role: OrgRole };
-  'member.role_changed': { role: OrgRole; previousRole: OrgRole };
-  'member.removed': { role: OrgRole };
+  'member.role_changed': {
+    role: OrgRole;
+    previousRole: OrgRole;
+    /**
+     * Pending invitations this change revoked, because an invitation must not
+     * outlive its issuer's authority. A count rather than a list of ids: the
+     * revocations rode the same transaction as the role change, so the reader
+     * needs to know they happened, and each revoked row still says for itself
+     * that it is revoked.
+     */
+    revokedInvitations?: number;
+  };
+  'member.removed': { role: OrgRole; revokedInvitations?: number };
   'ownership.transferred': { fromUserId: string; toUserId: string };
   'key.created': {
     keyKind: AuditKeyKind;
