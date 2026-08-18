@@ -125,6 +125,21 @@ export default $config({
         sk: 'string',
       },
       primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
+      transform: {
+        table: {
+          // Membership is the authorization record, and nothing else holds it:
+          // losing these rows locks every org out of itself and leaves no
+          // source to rebuild who belonged where. Backups on the stages that
+          // carry real accounts.
+          //
+          // Deletion protection only where the app already retains on removal.
+          // Every preview stage is torn down with `sst remove`, and a protected
+          // table refuses to go, leaving the teardown failing and the stage's
+          // resources live.
+          pointInTimeRecovery: { enabled: isProduction || isStaging },
+          deletionProtectionEnabled: isProduction,
+        },
+      },
     });
 
     // RAG indexer's own store: per-object chunk manifests
