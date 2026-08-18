@@ -145,6 +145,40 @@ async function getRow(
   return Item ? (unmarshall(Item) as SubscriptionRecord) : undefined;
 }
 
+/** The attributes a writer reads to check the row still names the objects its event is about. */
+export const BILLING_IDENTITY_PROJECTION = 'stripeCustomerId, subscriptionId';
+
+/** What the stored row names as its Stripe objects. */
+export interface StoredBillingIdentity {
+  stripeCustomerId?: string;
+  /** The Stripe subscription id, as `SubscriptionRecord` spells it. */
+  subscriptionId?: string;
+}
+
+/**
+ * The Stripe objects the stored row names, for a writer deciding whether the
+ * event in its hand still describes them.
+ *
+ * The org row when the org is known and the caller's legacy row otherwise —
+ * the same pair `updateSubscriptionByUser` writes, so the identity checked is
+ * the identity of the row about to change. Undefined means no row exists, which
+ * is not the same as a row that names nothing.
+ */
+export async function readStoredBillingIdentity({
+  orgId,
+  userId,
+}: {
+  orgId?: string | undefined;
+  userId: string;
+}): Promise<StoredBillingIdentity | undefined> {
+  const options: ReadOptions = { projectionExpression: BILLING_IDENTITY_PROJECTION };
+  const [orgRow, legacyRow] = await Promise.all([
+    orgId ? getRow(SubscriptionKeys.orgPk(orgId), options) : undefined,
+    getRow(SubscriptionKeys.legacyPk(userId), options),
+  ]);
+  return orgRow ?? legacyRow;
+}
+
 /** The attributes every row carries about who it belongs to, on both keys. */
 export function ownerAttributes({
   orgId,
@@ -345,29 +379,15 @@ export async function updateSubscriptionByUser(
   const pk = orgId ? SubscriptionKeys.orgPk(orgId) : userId && SubscriptionKeys.legacyPk(userId);
   if (!pk) throw new Error('A subscription update names neither an org nor a user');
 
-  const { ReturnValues, createsOrgRow, tolerateMissingRow, ...expression } = update;
+  const { tolerateMissingRow, createsOrgRow } = update;
   const ConditionExpression = withScrubFence(update);
   let result;
   try {
-    result = await dynamo.send(
-      new UpdateItemCommand({
-        TableName: Resource.BillingTable.name,
-        Key: { pk: { S: pk }, sk: { S: SubscriptionKeys.sk() } },
-        UpdateExpression: expression.UpdateExpression,
-        ...(expression.ExpressionAttributeValues
-          ? { ExpressionAttributeValues: expression.ExpressionAttributeValues }
-          : {}),
-        ...(expression.ExpressionAttributeNames
-          ? { ExpressionAttributeNames: expression.ExpressionAttributeNames }
-          : {}),
-        // The same condition policy as the two-key path. One key is fewer
-        // writes, not weaker rules: an unconditional upsert here would mint the
-        // partial row rule 1 exists to prevent, on whichever key the caller
-        // happened to name.
-        ...rowCondition(ConditionExpression, createsOrgRow),
-        ...(ReturnValues ? { ReturnValues } : {}),
-      }),
-    );
+    // The same condition policy as the two-key path. One key is fewer
+    // writes, not weaker rules: an unconditional upsert here would mint the
+    // partial row rule 1 exists to prevent, on whichever key the caller
+    // happened to name.
+    result = await dynamo.send(singleKeyUpdateCommand(pk, update, ConditionExpression));
   } catch (err) {
     const refusal = scrubRefusal(err, update, { orgId, userId });
     if (refusal) return refusal;
@@ -379,6 +399,27 @@ export async function updateSubscriptionByUser(
     orgRowWritten: Boolean(orgId) && written,
     legacyRowWritten: !orgId && written,
   };
+}
+
+/** The one-key write, with the caller's condition already fenced. */
+function singleKeyUpdateCommand(
+  pk: string,
+  { ReturnValues, createsOrgRow, ...expression }: SubscriptionUpdate,
+  ConditionExpression: string | undefined,
+): UpdateItemCommand {
+  return new UpdateItemCommand({
+    TableName: Resource.BillingTable.name,
+    Key: { pk: { S: pk }, sk: { S: SubscriptionKeys.sk() } },
+    UpdateExpression: expression.UpdateExpression,
+    ...(expression.ExpressionAttributeValues
+      ? { ExpressionAttributeValues: expression.ExpressionAttributeValues }
+      : {}),
+    ...(expression.ExpressionAttributeNames
+      ? { ExpressionAttributeNames: expression.ExpressionAttributeNames }
+      : {}),
+    ...rowCondition(ConditionExpression, createsOrgRow),
+    ...(ReturnValues ? { ReturnValues } : {}),
+  });
 }
 
 /**

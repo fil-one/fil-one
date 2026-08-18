@@ -10,7 +10,7 @@ import {
 } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { resolveOrgIdFromSubscription } from '../lib/billing-org-lookup.js';
+import { resolveOrgId } from '../lib/billing-org-lookup.js';
 import { startDeletionFromStripe } from '../lib/deletion-from-stripe.js';
 import {
   assertRegionSyncSucceeded,
@@ -19,6 +19,7 @@ import {
 } from '../lib/region-helpers.js';
 import { fromInternalStatus } from '../lib/hubspot-lifecycle-status.js';
 import { syncHubSpotStatusBestEffort } from '../lib/hubspot-status-sync.js';
+import { invoiceSubscriptionId, subscriptionSuperseded } from '../lib/billing-identity.js';
 import { getStripeClient, getWebhookSecret } from '../lib/stripe-client.js';
 import { updateSubscriptionByUser } from '../lib/subscription-store.js';
 import {
@@ -201,7 +202,7 @@ async function handleCustomerUpdated(customer: Stripe.Customer): Promise<void> {
   const stripe = getStripeClient();
   const pm =
     typeof defaultPm === 'string' ? await stripe.paymentMethods.retrieve(defaultPm) : defaultPm;
-  const orgId = (await resolveOrgId(userId, customer.metadata)) ?? undefined;
+  const orgId = await resolveOrgId(userId, customer.metadata);
   await updatePaymentMethod({ userId, orgId }, pm);
 }
 
@@ -307,7 +308,7 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription): Prom
     userId,
     subscription,
     mappedStatus,
-    orgId: (await resolveOrgId(userId, subscription.metadata)) ?? undefined,
+    orgId: await resolveOrgId(userId, subscription.metadata),
   });
 }
 
@@ -393,6 +394,17 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
   // write-lock after it, and resolving it twice would read the billing row a
   // second time for an answer already in hand.
   const orgId = await resolveOrgId(userId, subscription.metadata, customer.metadata);
+  if (
+    await subscriptionSuperseded({
+      source: 'customer.subscription.deleted',
+      userId,
+      orgId,
+      subscriptionId: subscription.id,
+    })
+  ) {
+    return;
+  }
+
   const backfill = orgIdBackfill(orgId);
   await updateSubscriptionByUser(
     { userId, orgId },
@@ -525,7 +537,18 @@ async function handlePaymentFailed(invoice: Stripe.Invoice): Promise<void> {
   // continue attempting payment. Grace period only begins when Stripe cancels
   // the subscription after all retries are exhausted.
   const now = new Date().toISOString();
-  const orgId = (await resolveOrgId(userId, customer.metadata)) ?? undefined;
+  const orgId = await resolveOrgId(userId, customer.metadata);
+  if (
+    await subscriptionSuperseded({
+      source: 'invoice.payment_failed',
+      userId,
+      orgId,
+      subscriptionId: invoiceSubscriptionId(invoice),
+    })
+  ) {
+    return;
+  }
+
   const backfill = orgIdBackfill(orgId);
   await updateSubscriptionByUser(
     { userId, orgId },
