@@ -63,7 +63,8 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { decodeRow, scanAll, text, transactWithRetry } from './lib/dynamo.ts';
 import { acquireRunLock, BILLING_REKEY_LOCK_PK, forceUnlock } from './lib/run-lock.ts';
 import { assertStageResources, awsRegionForStage } from './lib/stage.ts';
-import { BillingKeys, buildRevertItem, parseOrgPk, REKEY_ATTRIBUTES } from './lib/billing-rekey.ts';
+import { BillingKeys, buildRevertItem, parseOrgPk } from './lib/billing-rekey.ts';
+import { buildRevertScanInput } from './lib/billing-scan.ts';
 
 /** Pause between deletes, so a few thousand transactions stay polite to a shared table. */
 const WRITE_DELAY_MS = 50;
@@ -103,23 +104,15 @@ let orgRows = 0;
 let applicationRows = 0;
 
 /**
- * Every org row this backfill wrote.
+ * Every org row this backfill wrote, and — from the same pass — how many org
+ * rows the application wrote itself, because "how many am I leaving alone" is
+ * the number an operator wants before deleting anything.
  *
- * The filter names `rekeyedFrom` rather than testing it after the fact, so the
- * scan reads only what the revert can act on — and the count of application-
- * written rows comes from the same pass, because "how many org rows am I leaving
- * alone" is the number an operator wants before deleting anything.
+ * What the pass asks the table for, including the consistent read a revert
+ * cannot be complete without, is {@link buildRevertScanInput}.
  */
 async function scanCopiedRows(): Promise<void> {
-  const items = scanAll(dynamo, {
-    TableName: billingTable,
-    FilterExpression: 'sk = :subscription AND begins_with(pk, :orgPrefix)',
-    ProjectionExpression: `pk, ${REKEY_ATTRIBUTES.from}`,
-    ExpressionAttributeValues: {
-      ':subscription': { S: BillingKeys.subscriptionSk() },
-      ':orgPrefix': { S: BillingKeys.orgPkPrefix() },
-    },
-  });
+  const items = scanAll(dynamo, buildRevertScanInput(billingTable));
 
   for await (const item of items) {
     orgRows++;

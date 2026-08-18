@@ -30,6 +30,7 @@ import type {
   OrgBillingState,
   SubscriptionRow,
 } from './billing-rekey.ts';
+import { buildBackfillScanInput, buildRevertScanInput } from './billing-scan.ts';
 import { formatBillingVerifyReport, verifyBillingRekey } from './billing-verify.ts';
 
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
@@ -509,6 +510,37 @@ describe('buildRevertItem', () => {
         'attribute_exists(pk) AND (attribute_not_exists(#orgId) OR #orgId = :orgId)',
       ExpressionAttributeNames: { '#orgId': 'orgId' },
       ExpressionAttributeValues: { ':orgId': { S: ORG_ID } },
+    });
+  });
+});
+
+describe('the scans the two runs issue', () => {
+  it('reads the org subscription rows, and only what the revert decides from', () => {
+    expect(buildRevertScanInput(TABLE)).toStrictEqual({
+      TableName: TABLE,
+      FilterExpression: 'sk = :subscription AND begins_with(pk, :orgPrefix)',
+      ProjectionExpression: `pk, ${REKEY_ATTRIBUTES.from}`,
+      ExpressionAttributeValues: {
+        ':subscription': { S: 'SUBSCRIPTION' },
+        ':orgPrefix': { S: 'ORG#' },
+      },
+      ConsistentRead: true,
+    });
+  });
+
+  it('reverts from a consistent read, so no copy is missing from the inventory', () => {
+    // An eventually-consistent page can omit a copy a backfill committed shortly
+    // before this run took the lock. That row never reaches the plan, so it is
+    // never deleted, and the run still prints Done. over what it left behind.
+    expect(buildRevertScanInput(TABLE).ConsistentRead).toBe(true);
+  });
+
+  it('collects every subscription row for the backfill, consistently', () => {
+    expect(buildBackfillScanInput(TABLE)).toStrictEqual({
+      TableName: TABLE,
+      FilterExpression: 'sk = :subscription',
+      ExpressionAttributeValues: { ':subscription': { S: 'SUBSCRIPTION' } },
+      ConsistentRead: true,
     });
   });
 });
