@@ -10,6 +10,7 @@ import { OrgRole, isOrgRole } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { reportMetric } from '../lib/metrics.js';
+import { OWNER_SET_REV_ATTRIBUTE } from '../lib/membership-changes.js';
 import { OrgKeys } from '../lib/org-membership.js';
 
 /**
@@ -62,6 +63,12 @@ interface OrgTally {
   hasMeta: boolean;
   /** The counter as stored; undefined when the META row carried none. */
   storedOwnerCount?: number;
+  /**
+   * The owner-set revision on the META row the recount read. Undefined for a row
+   * written before the attribute existed, which is the same as "nothing has
+   * moved the owner set since".
+   */
+  ownerSetRev?: number;
 }
 
 interface RunStats {
@@ -165,6 +172,8 @@ function addRow(item: Record<string, AttributeValue>, orgId: string, tally: OrgT
   if (isMeta) {
     tally.hasMeta = true;
     tally.storedOwnerCount = readCounter(item.ownerCount, orgId);
+    const rev = Number(item[OWNER_SET_REV_ATTRIBUTE]?.N);
+    if (Number.isFinite(rev)) tally.ownerSetRev = rev;
   } else {
     tally.members += 1;
     if (isOwnerRow(item.role, orgId, sk)) tally.owners += 1;
@@ -243,7 +252,10 @@ async function recountOrg(orgId: string): Promise<OrgTally> {
         TableName: Resource.OrgTable.name,
         KeyConditionExpression: 'pk = :pk',
         ExpressionAttributeValues: { ':pk': { S: OrgKeys.orgPk(orgId) } },
-        ProjectionExpression: 'pk, sk, #role, ownerCount',
+        // The revision comes back with the counter here and not in the Scan:
+        // this is the reading the repair conditions on, and it is what says
+        // whether the owner set moved while these pages were being read.
+        ProjectionExpression: `pk, sk, #role, ownerCount, ${OWNER_SET_REV_ATTRIBUTE}`,
         ExpressionAttributeNames: { '#role': 'role' },
         ConsistentRead: true,
         ...(cursor ? { ExclusiveStartKey: cursor } : {}),
@@ -316,7 +328,12 @@ async function reconcileOrg(orgId: string, scanned: OrgTally, stats: RunStats): 
   stats.drifted += 1;
   console.log('[owner-count-drift-checker] counter diverged', { orgId, stored, counted });
   await applyRepair(
-    { orgId, counted, stored, send: () => dynamo.send(repairCounter(orgId, counted, stored)) },
+    {
+      orgId,
+      counted,
+      stored,
+      send: () => dynamo.send(repairCounter(orgId, counted, stored, tally.ownerSetRev)),
+    },
     stats,
   );
 }
@@ -369,20 +386,42 @@ function isConditionalCheckFailure(error: unknown): boolean {
   );
 }
 
+/**
+ * The repair, conditioned on nothing having moved the owner set since the
+ * recount read it.
+ *
+ * The counter alone is not enough. A transfer's META update is net zero, so
+ * `ownerCount = :stale` still holds while the recount's paged Query observed the
+ * transfer half applied — at zero Owners, or at two, which would inflate the
+ * counter and defeat the `ownerCount > :one` last-Owner guard. The revision moves
+ * on every owner-set write including that one, so conditioning on it makes any
+ * concurrent change skip the repair; the next run recounts and converges.
+ *
+ * A row with no revision yet is one no owner-set transaction has touched since
+ * the attribute shipped, so its absence is the condition.
+ */
 function repairCounter(
   orgId: string,
   counted: number,
   stored: number | undefined,
+  ownerSetRev: number | undefined,
 ): UpdateItemCommand {
+  const counterCondition =
+    stored === undefined ? 'attribute_not_exists(ownerCount)' : 'ownerCount = :stale';
+  const revCondition =
+    ownerSetRev === undefined
+      ? `attribute_not_exists(${OWNER_SET_REV_ATTRIBUTE})`
+      : `${OWNER_SET_REV_ATTRIBUTE} = :rev`;
+
   return new UpdateItemCommand({
     TableName: Resource.OrgTable.name,
     Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: OrgKeys.orgMetaSk() } },
     UpdateExpression: 'SET ownerCount = :counted',
-    ConditionExpression:
-      stored === undefined ? 'attribute_not_exists(ownerCount)' : 'ownerCount = :stale',
+    ConditionExpression: `${counterCondition} AND ${revCondition}`,
     ExpressionAttributeValues: {
       ':counted': { N: String(counted) },
       ...(stored === undefined ? {} : { ':stale': { N: String(stored) } }),
+      ...(ownerSetRev === undefined ? {} : { ':rev': { N: String(ownerSetRev) } }),
     },
   });
 }

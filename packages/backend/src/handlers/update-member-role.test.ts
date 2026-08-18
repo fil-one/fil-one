@@ -235,7 +235,7 @@ describe('PATCH /api/org/members/{userId} handler', () => {
 
     expect(result).toMatchObject({ statusCode: 200 });
     expect(counterItem()).toMatchObject({
-      UpdateExpression: 'SET ownerCount = ownerCount + :one',
+      UpdateExpression: 'SET ownerCount = ownerCount + :one ADD ownerSetRev :one',
       ConditionExpression: 'attribute_exists(ownerCount)',
     });
   });
@@ -247,7 +247,7 @@ describe('PATCH /api/org/members/{userId} handler', () => {
 
     expect(result).toMatchObject({ statusCode: 200 });
     expect(counterItem()).toMatchObject({
-      UpdateExpression: 'SET ownerCount = ownerCount - :one',
+      UpdateExpression: 'SET ownerCount = ownerCount - :one ADD ownerSetRev :one',
       // DynamoDB permits one operation per item per transaction, so the check
       // and the decrement have to be the same operation.
       ConditionExpression: 'ownerCount > :one',

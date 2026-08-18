@@ -347,7 +347,7 @@ describe('POST /api/invitations/accept handler', () => {
     const counter = transactItems().find((item) => item.Update?.Key?.sk?.S === 'META')!.Update!;
     expect(counter).toMatchObject({
       Key: { pk: { S: OrgKeys.orgPk(INVITING_ORG_ID) }, sk: { S: 'META' } },
-      UpdateExpression: 'SET ownerCount = ownerCount + :one',
+      UpdateExpression: 'SET ownerCount = ownerCount + :one ADD ownerSetRev :one',
       ConditionExpression: 'attribute_exists(ownerCount)',
     });
   });

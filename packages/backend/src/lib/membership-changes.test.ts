@@ -109,7 +109,7 @@ describe('ownerCountItem', () => {
     // check cannot be a separate ConditionCheck on the META row.
     expect(ownerCountItem(ORG_ID, 'decrement').Update).toMatchObject({
       Key: { pk: { S: OrgKeys.orgPk(ORG_ID) }, sk: { S: 'META' } },
-      UpdateExpression: 'SET ownerCount = ownerCount - :one',
+      UpdateExpression: 'SET ownerCount = ownerCount - :one ADD ownerSetRev :one',
       ConditionExpression: 'ownerCount > :one',
       ExpressionAttributeValues: { ':one': { N: '1' } },
     });
@@ -117,7 +117,7 @@ describe('ownerCountItem', () => {
 
   it('increments only when the counter exists', () => {
     expect(ownerCountItem(ORG_ID, 'increment').Update).toMatchObject({
-      UpdateExpression: 'SET ownerCount = ownerCount + :one',
+      UpdateExpression: 'SET ownerCount = ownerCount + :one ADD ownerSetRev :one',
       // An org with no META row is a conversion gap; inventing a counter would
       // silently set the invariant to whatever one transaction happened to know.
       ConditionExpression: 'attribute_exists(ownerCount)',
@@ -129,7 +129,7 @@ describe('ownerCountItem', () => {
     // META row is what puts it in that transaction, so a concurrent promotion
     // cannot interleave.
     expect(ownerCountItem(ORG_ID, 'unchanged').Update).toMatchObject({
-      UpdateExpression: 'SET ownerCount = ownerCount + :zero',
+      UpdateExpression: 'SET ownerCount = ownerCount + :zero ADD ownerSetRev :one',
       ConditionExpression: 'attribute_exists(ownerCount)',
       ExpressionAttributeValues: { ':zero': { N: '0' } },
     });
