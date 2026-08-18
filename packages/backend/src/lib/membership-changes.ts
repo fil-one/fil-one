@@ -171,6 +171,24 @@ export function membershipDeleteItems({
 export type OwnerCountDelta = 'increment' | 'decrement' | 'unchanged';
 
 /**
+ * Bumped by every owner-set transaction, including the transfer that leaves the
+ * count where it was.
+ *
+ * The drift checker's recount pages a Query, and DynamoDB gives no snapshot
+ * across pages: a transfer committing between two of them is observed half
+ * applied, as zero Owners or two. The counter alone cannot say so, because a
+ * transfer's delta is zero and `ownerCount = :stale` still holds — so the repair
+ * would write the transient count and, at two, defeat the last-Owner guard the
+ * counter exists for. A revision that moves on every owner-set write is what the
+ * recount holds its reading against.
+ *
+ * `ADD` rather than `SET ... + :one`, so a META row written before this
+ * attribute existed starts at one instead of failing the update.
+ */
+export const OWNER_SET_REV_ATTRIBUTE = 'ownerSetRev';
+const OWNER_SET_REV_CLAUSE = ` ADD ${OWNER_SET_REV_ATTRIBUTE} :one`;
+
+/**
  * The one update every owner-set transaction carries.
  *
  * `decrement` is where the last-Owner invariant is enforced, and it is enforced
@@ -195,7 +213,7 @@ export function ownerCountItem(orgId: string, delta: OwnerCountDelta): TransactW
     return {
       Update: {
         ...base,
-        UpdateExpression: 'SET ownerCount = ownerCount + :one',
+        UpdateExpression: `SET ownerCount = ownerCount + :one${OWNER_SET_REV_CLAUSE}`,
         ConditionExpression: 'attribute_exists(ownerCount)',
         ExpressionAttributeValues: { ':one': { N: '1' } },
       },
@@ -206,7 +224,7 @@ export function ownerCountItem(orgId: string, delta: OwnerCountDelta): TransactW
     return {
       Update: {
         ...base,
-        UpdateExpression: 'SET ownerCount = ownerCount - :one',
+        UpdateExpression: `SET ownerCount = ownerCount - :one${OWNER_SET_REV_CLAUSE}`,
         // The whole last-Owner guard, in one place: an org at one Owner cancels
         // the transaction that would take it to zero.
         ConditionExpression: 'ownerCount > :one',
@@ -218,9 +236,9 @@ export function ownerCountItem(orgId: string, delta: OwnerCountDelta): TransactW
   return {
     Update: {
       ...base,
-      UpdateExpression: 'SET ownerCount = ownerCount + :zero',
+      UpdateExpression: `SET ownerCount = ownerCount + :zero${OWNER_SET_REV_CLAUSE}`,
       ConditionExpression: 'attribute_exists(ownerCount)',
-      ExpressionAttributeValues: { ':zero': { N: '0' } },
+      ExpressionAttributeValues: { ':zero': { N: '0' }, ':one': { N: '1' } },
     },
   };
 }

@@ -232,7 +232,7 @@ describe('POST /api/org/transfer handler', () => {
     // and a demotion cannot each carry their own delta.
     expect(counters).toHaveLength(1);
     expect(counters[0].Update).toMatchObject({
-      UpdateExpression: 'SET ownerCount = ownerCount + :zero',
+      UpdateExpression: 'SET ownerCount = ownerCount + :zero ADD ownerSetRev :one',
       ConditionExpression: 'attribute_exists(ownerCount)',
       ExpressionAttributeValues: { ':zero': { N: '0' } },
     });

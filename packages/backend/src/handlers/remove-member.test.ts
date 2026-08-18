@@ -255,7 +255,7 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     expect(
       transactItems().find((item) => item.Update?.Key?.sk?.S === 'META')!.Update,
     ).toMatchObject({
-      UpdateExpression: 'SET ownerCount = ownerCount - :one',
+      UpdateExpression: 'SET ownerCount = ownerCount - :one ADD ownerSetRev :one',
       ConditionExpression: 'ownerCount > :one',
     });
   });

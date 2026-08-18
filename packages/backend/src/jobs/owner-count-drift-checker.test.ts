@@ -35,11 +35,12 @@ function memberRow(orgId: string, userId: string, role: string = OrgRole.Owner) 
   return marshall({ pk: `ORG#${orgId}`, sk: `MEMBER#${userId}`, role });
 }
 
-function metaRow(orgId: string, ownerCount?: number) {
+function metaRow(orgId: string, ownerCount?: number, ownerSetRev?: number) {
   return marshall({
     pk: `ORG#${orgId}`,
     sk: 'META',
     ...(ownerCount === undefined ? {} : { ownerCount }),
+    ...(ownerSetRev === undefined ? {} : { ownerSetRev }),
   });
 }
 
@@ -170,7 +171,7 @@ describe('owner-count-drift-checker', () => {
         TableName: 'OrgTable',
         Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'META' } },
         UpdateExpression: 'SET ownerCount = :counted',
-        ConditionExpression: 'ownerCount = :stale',
+        ConditionExpression: 'ownerCount = :stale AND attribute_not_exists(ownerSetRev)',
         ExpressionAttributeValues: { ':counted': { N: '1' }, ':stale': { N: '3' } },
       },
     ]);
@@ -199,7 +200,7 @@ describe('owner-count-drift-checker', () => {
         TableName: 'OrgTable',
         Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'META' } },
         UpdateExpression: 'SET ownerCount = :counted',
-        ConditionExpression: 'ownerCount = :stale',
+        ConditionExpression: 'ownerCount = :stale AND attribute_not_exists(ownerSetRev)',
         ExpressionAttributeValues: { ':counted': { N: '2' }, ':stale': { N: '1' } },
       },
     ]);
@@ -237,7 +238,7 @@ describe('owner-count-drift-checker', () => {
         TableName: 'OrgTable',
         Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'META' } },
         UpdateExpression: 'SET ownerCount = :counted',
-        ConditionExpression: 'ownerCount = :stale',
+        ConditionExpression: 'ownerCount = :stale AND attribute_not_exists(ownerSetRev)',
         ExpressionAttributeValues: { ':counted': { N: '2' }, ':stale': { N: '1' } },
       },
     ]);
@@ -332,7 +333,8 @@ describe('owner-count-drift-checker', () => {
         TableName: 'OrgTable',
         Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'META' } },
         UpdateExpression: 'SET ownerCount = :counted',
-        ConditionExpression: 'attribute_not_exists(ownerCount)',
+        ConditionExpression:
+          'attribute_not_exists(ownerCount) AND attribute_not_exists(ownerSetRev)',
         ExpressionAttributeValues: { ':counted': { N: '1' } },
       },
     ]);
@@ -375,6 +377,55 @@ describe('owner-count-drift-checker', () => {
     expect(updateInputs()[0]).toMatchObject({
       ExpressionAttributeValues: { ':counted': { N: '1' }, ':stale': { N: '2' } },
     });
+  });
+
+  it('conditions the repair on the owner-set revision it recounted', async () => {
+    const rows = [metaRow(ORG_ID, 3, 7), memberRow(ORG_ID, 'user-1')];
+    ddbMock.on(ScanCommand).resolves({ Items: rows });
+    stubPartition(ORG_ID, rows);
+
+    await handler();
+
+    expect(updateInputs()).toEqual([
+      {
+        TableName: 'OrgTable',
+        Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'META' } },
+        UpdateExpression: 'SET ownerCount = :counted',
+        ConditionExpression: 'ownerCount = :stale AND ownerSetRev = :rev',
+        ExpressionAttributeValues: {
+          ':counted': { N: '1' },
+          ':stale': { N: '3' },
+          ':rev': { N: '7' },
+        },
+      },
+    ]);
+  });
+
+  it('skips the repair when a transfer commits between the recount pages', async () => {
+    // A transfer's META update is net zero, so `ownerCount = :stale` still holds
+    // while the paged Query observed the transfer half applied — writing that
+    // reading would inflate the counter and defeat the last-Owner guard. The
+    // revision is what the counter cannot say, and DynamoDB refuses the write.
+    const rows = [metaRow(ORG_ID, 1, 7), memberRow(ORG_ID, 'user-1'), memberRow(ORG_ID, 'user-2')];
+    ddbMock.on(ScanCommand).resolves({ Items: rows });
+    stubPartition(ORG_ID, rows);
+    ddbMock
+      .on(UpdateItemCommand)
+      .rejects(
+        new ConditionalCheckFailedException({ message: 'the revision moved', $metadata: {} }),
+      );
+
+    await handler();
+
+    expect(updateInputs()[0]).toMatchObject({
+      ConditionExpression: 'ownerCount = :stale AND ownerSetRev = :rev',
+      ExpressionAttributeValues: { ':counted': { N: '2' }, ':rev': { N: '7' } },
+    });
+    // Not a failure: the counter is whatever the transfer left, and the next run
+    // recounts an org nothing is changing under it.
+    expect(logsMatching(logSpy, 'repair skipped, the counter moved')).toHaveLength(1);
+    expect(logsMatching(errorSpy, 'repair failed')).toHaveLength(0);
+    expect(repairsEmitted(stdoutSpy)).toBe(0);
   });
 
   it('treats a repair that lost its condition as the counter having moved', async () => {
