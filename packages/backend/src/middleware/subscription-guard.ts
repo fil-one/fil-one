@@ -8,12 +8,7 @@ import type {
 import { ApiErrorCode, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { SubscriptionRecord } from '../lib/dynamo-records.js';
-import { emitTrialClaimBlockedByLegacyRow } from '../lib/stripe-webhook-metrics.js';
-import {
-  legacyRowExists,
-  readSubscription,
-  updateSubscription,
-} from '../lib/subscription-store.js';
+import { readSubscription, updateSubscription } from '../lib/subscription-store.js';
 import { claimTrialIfEligible, isTrialClaimable } from '../lib/trial-claim.js';
 import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -110,26 +105,12 @@ async function runSubscriptionGuard(
 async function claimTrialOrDeny(
   userInfo: UserInfo,
 ): Promise<APIGatewayProxyStructuredResultV2 | void> {
-  // The claim mints a Stripe customer and a subscription. If a pre-re-key
-  // `CUSTOMER#` row is still standing for this user, the backfill missed their
-  // account and this org already has billing that nothing here can see — minting
-  // would give one account two Stripe customers, two subscriptions, and two
-  // meters, which is not something a later run can undo. Refusing costs one
-  // point read on a path that was about to make two Stripe API calls.
-  //
-  // A dead check once the dated cleanup step has deleted those rows, and it goes
-  // with them.
-  if (await legacyRowExists(userInfo.userId)) {
-    emitTrialClaimBlockedByLegacyRow();
-    console.error(
-      '[subscription-guard] Refusing to mint a trial: a pre-re-key CUSTOMER# row still exists',
-      { userId: userInfo.userId, orgId: userInfo.orgId },
-    );
-    return buildBillingUnavailableResponse();
-  }
-
   const outcome = await claimTrialIfEligible(userInfo);
   if (outcome === 'claimed') return undefined;
+  // The claim refused because a pre-re-key `CUSTOMER#` row is still standing:
+  // this org has billing the org key cannot see, so its state is unknown here
+  // rather than inactive.
+  if (outcome === 'legacy-row') return buildBillingUnavailableResponse();
   if (outcome === 'not-own-org') return buildOrgBillingInactiveResponse();
   return buildInactiveResponse();
 }

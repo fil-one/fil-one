@@ -2,10 +2,13 @@ import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import type { CreateSetupIntentResponse } from '@filone/shared';
+import { ApiErrorCode } from '@filone/shared';
+import type { CreateSetupIntentResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getStripeClient } from '../lib/stripe-client.js';
+import { emitTrialClaimBlockedByLegacyRow } from '../lib/stripe-webhook-metrics.js';
 import {
+  legacyRowExists,
   readSubscription,
   updateSubscription,
   writeSubscription,
@@ -57,6 +60,28 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
       );
     }
   } else {
+    // No org record — but that is only "first time" if the backfill has reached
+    // this account. A pre-re-key `CUSTOMER#` row still standing means it has
+    // not, and this org already has a Stripe customer nothing reading the org
+    // key can see. Minting here would give it a second one, and
+    // activate-subscription would then put a second live subscription beside
+    // the one still billing. Same refusal, metric and log as the trial claim's,
+    // and it dies with the runbook's dated cleanup like that one.
+    if (await legacyRowExists(userId)) {
+      emitTrialClaimBlockedByLegacyRow();
+      console.error(
+        '[create-setup-intent] Refusing to mint a Stripe customer: a pre-re-key CUSTOMER# row still exists',
+        { userId, orgId },
+      );
+      return new ResponseBuilder()
+        .status(503)
+        .body<ErrorResponse>({
+          message: 'Billing is temporarily unavailable for this account. Please try again shortly.',
+          code: ApiErrorCode.SUBSCRIPTION_INACTIVE,
+        })
+        .build();
+    }
+
     // First time — create the Stripe customer and persist only the customer
     // mapping. Trial entitlement is granted only by ensureTrialEntitlement.
     const customer = await stripe.customers.create({

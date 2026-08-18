@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
-import { PlanId, SubscriptionStatus } from '@filone/shared';
+import { ApiErrorCode, PlanId, SubscriptionStatus } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -998,6 +998,20 @@ describe('get-billing baseHandler', () => {
         planId: PlanId.None,
         status: SubscriptionStatus.Inactive,
       });
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    });
+
+    it('says billing is unreadable when a pre-re-key CUSTOMER# row is still standing', async () => {
+      // The backfill missed this account, so its billing lives on a key nothing
+      // here reads. "No plan" would invite the user to buy a second
+      // subscription beside the one still billing them.
+      ddbMock.on(GetItemCommand).resolves({});
+      mockClaimTrialIfEligible.mockResolvedValue('legacy-row');
+
+      const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+      expect(result.statusCode).toBe(503);
+      expect(JSON.parse(String(result.body)).code).toBe(ApiErrorCode.SUBSCRIPTION_INACTIVE);
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
 
