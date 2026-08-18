@@ -14,10 +14,12 @@ import {
   AUDIT_REDACTED,
   AUDIT_RETENTION_DAYS,
   PROHIBITED_AUDIT_FIELD_PATTERNS,
+  auditKeyIdSuffix,
   looksLikeCredential,
 } from '@filone/shared';
 import type {
   AuditActor,
+  AuditKeyKind,
   AuditDetailRecord,
   AuditDetailValue,
   AuditEvent,
@@ -93,7 +95,16 @@ export const AuditSubjects = {
   org: (orgId: string): AuditSubject => `org:${orgId}`,
   user: (userId: string): AuditSubject => `user:${userId}`,
   invite: (inviteId: string): AuditSubject => `invite:${inviteId}`,
-  key: (keyId: string): AuditSubject => `key:${keyId}`,
+  /**
+   * Kind-aware, because for an S3 access key the id IS the `AKIA…` access key
+   * id, and PROHIBITED_AUDIT_CONTENT forbids the log holding that in full — the
+   * details of the very same events carry only {@link auditKeyIdSuffix}. The
+   * subject records the same fragment the details do, so the two agree and a
+   * 90-day row never holds the full id. Correlating the two halves of a
+   * two-phase flow runs off `correlationId`, not the subject.
+   */
+  key: (keyKind: AuditKeyKind, keyId: string): AuditSubject =>
+    `key:${auditKeyIdSuffix(keyKind, keyId)}`,
 } as const;
 
 /**
@@ -445,20 +456,63 @@ export async function commitAudited({
     );
   } catch (err) {
     const auditFailure = auditOnlyCancellation(err, items.length);
-    if (!auditFailure) throw err;
-
-    if (onAuditFailure === 'fail') {
-      throw new AuditAppendError(auditFailure, { cause: err });
+    if (auditFailure) {
+      if (onAuditFailure === 'fail') throw new AuditAppendError(auditFailure, { cause: err });
+      await retryWithoutAudit({ items, event, reason: auditFailure });
+      return;
     }
 
-    reportAuditWriteFailure({ event, reason: auditFailure, action: 'retried without the event' });
-    await getDynamoClient().send(
-      new TransactWriteItemsCommand({
-        TransactItems: items,
-        ClientRequestToken: crypto.randomUUID(),
-      }),
-    );
+    // `retry-without-audit` exists so a mutation is not lost to the log, and a
+    // whole-transaction refusal from the audit table strands exactly what it
+    // protects: the vendor key is already deleted, the local row survives, and
+    // the caller gets a 500. So a refusal that cannot have applied is treated
+    // like the cancellation. Anything ambiguous still raises — a timeout or a
+    // 5xx may have landed the write, and re-sending under a fresh token would
+    // run the caller's items a second time.
+    const refused = onAuditFailure === 'retry-without-audit' ? refusedOutright(err) : undefined;
+    if (!refused) throw err;
+    await retryWithoutAudit({ items, event, reason: refused });
   }
+}
+
+/**
+ * Failures that refuse a whole transaction before any item is applied.
+ *
+ * A table DynamoDB does not have and a role that may not write it are both
+ * decided before the write, so nothing landed and the caller's items can go
+ * again on their own. Both are deploy-shaped — a missing table, a policy that
+ * never granted the audit write — which is why they reach this path at all.
+ */
+const REFUSED_OUTRIGHT_ERRORS = new Set(['ResourceNotFoundException', 'AccessDeniedException']);
+
+function refusedOutright(err: unknown): string | undefined {
+  const name = err instanceof Error ? err.name : '';
+  return REFUSED_OUTRIGHT_ERRORS.has(name) ? name : undefined;
+}
+
+/**
+ * Send the caller's items alone, under a token of their own.
+ *
+ * A fresh `ClientRequestToken`: the first attempt's token belongs to a
+ * transaction DynamoDB has already answered, and reusing it would have the
+ * retry deduplicated against that answer.
+ */
+async function retryWithoutAudit({
+  items,
+  event,
+  reason,
+}: {
+  items: TransactWriteItem[];
+  event: AuditEvent;
+  reason: string;
+}): Promise<void> {
+  reportAuditWriteFailure({ event, reason, action: 'retried without the event' });
+  await getDynamoClient().send(
+    new TransactWriteItemsCommand({
+      TransactItems: items,
+      ClientRequestToken: crypto.randomUUID(),
+    }),
+  );
 }
 
 /**
