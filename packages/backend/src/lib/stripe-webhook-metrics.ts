@@ -31,6 +31,37 @@ export function emitDunningEscalation(args: {
   });
 }
 
+/**
+ * A destructive billing write refused because the stored row names a different
+ * Stripe object than the event in hand.
+ *
+ * Worth a counter rather than a log line alone: a steady rate means events are
+ * arriving for subscriptions or customers the account has already replaced, and
+ * that is the shape of a delivery problem nobody would otherwise see.
+ */
+export function emitSupersededBillingEvent(args: {
+  /** The webhook event or job path that was about to write. */
+  source: string;
+  /** Which stored id disagreed with the event. */
+  field: 'subscription' | 'customer';
+}): void {
+  reportMetric({
+    _aws: {
+      Timestamp: Date.now(),
+      CloudWatchMetrics: [
+        {
+          Namespace: 'FilOne',
+          Dimensions: [['source', 'field']],
+          Metrics: [{ Name: 'SupersededBillingEvent', Unit: 'Count' }],
+        },
+      ],
+    },
+    source: args.source,
+    field: args.field,
+    SupersededBillingEvent: 1,
+  });
+}
+
 export function emitInvoicePaid(): void {
   reportMetric({
     _aws: {

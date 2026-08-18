@@ -200,7 +200,6 @@ async function createOrUpdateSubscription({
       userId,
     });
   }
-  const orgId = record.orgId as string | undefined;
   // The metadata is what every webhook writer resolves the org from. A
   // subscription created without it arrives at the webhook naming no org, and
   // that subscription's whole lifecycle — status changes, payment failures,
@@ -210,7 +209,7 @@ async function createOrUpdateSubscription({
     customer: record.stripeCustomerId!,
     items: [{ price: secrets.STRIPE_PRICE_ID }],
     default_payment_method: paymentMethodId,
-    metadata: { userId, ...(orgId ? { orgId } : {}) },
+    metadata: { userId, orgId },
     ...(discounts ? { discounts } : {}),
     expand: ['latest_invoice.payment_intent', 'default_payment_method'],
   });

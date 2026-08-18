@@ -71,6 +71,7 @@ const ddbMock = mockClient(DynamoDBClient);
 
 import { handler } from './stripe-webhook.js';
 import { WEBHOOK_STATUS_SYNC_RETRY } from '../lib/region-helpers.js';
+import { BILLING_IDENTITY_PROJECTION } from '../lib/subscription-store.js';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
@@ -131,6 +132,17 @@ function setupCustomerRetrieve(userId?: string) {
     deleted: false,
     metadata: { userId: userId ?? MOCK_USER_ID },
   });
+}
+
+/**
+ * What the stored billing row names, for the guards that compare it against the
+ * event in hand. Keyed on the projection so it does not answer the org-resolution
+ * read, which projects `orgId`.
+ */
+function setupStoredIdentity(identity: { subscriptionId?: string; stripeCustomerId?: string }) {
+  ddbMock
+    .on(GetItemCommand, { ProjectionExpression: BILLING_IDENTITY_PROJECTION })
+    .resolves({ Item: marshall(identity) });
 }
 
 function setupDeletedCustomerRetrieve() {
@@ -411,7 +423,6 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
-        ConditionExpression: 'attribute_not_exists(deletedAt)',
         UpdateExpression:
           'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now REMOVE gracePeriodEndsAt, canceledAt',
         ExpressionAttributeValues: {
@@ -421,7 +432,7 @@ describe('stripe-webhook handler', () => {
           ':periodEnd': { S: new Date(1700000000 * 1000).toISOString() },
           ':now': { S: expect.any(String) },
         },
-        ConditionExpression: 'attribute_exists(pk)',
+        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
       });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -616,7 +627,6 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
-        ConditionExpression: 'attribute_not_exists(deletedAt)',
         UpdateExpression:
           'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now REMOVE gracePeriodEndsAt, canceledAt',
         ExpressionAttributeValues: {
@@ -626,7 +636,7 @@ describe('stripe-webhook handler', () => {
           ':periodEnd': { S: new Date(1700000000 * 1000).toISOString() },
           ':now': { S: expect.any(String) },
         },
-        ConditionExpression: 'attribute_exists(pk)',
+        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
       });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -700,7 +710,6 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
-        ConditionExpression: 'attribute_not_exists(deletedAt)',
         UpdateExpression:
           'SET paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now',
         ExpressionAttributeValues: {
@@ -711,6 +720,7 @@ describe('stripe-webhook handler', () => {
           ':expYear': { N: String(MOCK_PM_EXP_YEAR) },
           ':now': { S: expect.any(String) },
         },
+        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
       });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -819,6 +829,92 @@ describe('stripe-webhook handler', () => {
   // -----------------------------------------------------------------------
   // 5. customer.subscription.deleted
   // -----------------------------------------------------------------------
+  describe('a subscription the account has already replaced', () => {
+    function supersededEmissions(): MetricEvent[] {
+      return reportMetricMock.mock.calls
+        .map(([event]) => event)
+        .filter((e) => (e as { SupersededBillingEvent?: unknown }).SupersededBillingEvent === 1);
+    }
+
+    it('does not put a paying tenant into grace on a late cancellation', async () => {
+      // Stripe retries out of order: a cancellation for the trial subscription
+      // an upgrade replaced can arrive after the replacement is live.
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieveWithOrg();
+      setupStoredIdentity({ subscriptionId: 'sub_the_live_one' });
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+      expect(supersededEmissions()).toHaveLength(1);
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('grants the grace period when the event names the subscription on the row', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieveWithOrg();
+      setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(updateInputs()[0].ExpressionAttributeValues![':status']).toEqual({
+        S: SubscriptionStatus.GracePeriod,
+      });
+      expect(supersededEmissions()).toHaveLength(0);
+    });
+
+    it('does not mark a live subscription past due on a late payment failure', async () => {
+      setupStripeEvent(
+        'invoice.payment_failed',
+        mockInvoice({
+          parent: { subscription_details: { subscription: 'sub_the_old_one' } },
+        }),
+      );
+      setupCustomerRetrieveWithOrg();
+      setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(supersededEmissions()).toHaveLength(1);
+    });
+
+    it('marks past due when the failing invoice names the subscription on the row', async () => {
+      setupStripeEvent(
+        'invoice.payment_failed',
+        mockInvoice({
+          parent: { subscription_details: { subscription: MOCK_SUBSCRIPTION_ID } },
+        }),
+      );
+      setupCustomerRetrieveWithOrg();
+      setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(updateInputs()[0].ExpressionAttributeValues![':status']).toEqual({
+        S: SubscriptionStatus.PastDue,
+      });
+      expect(supersededEmissions()).toHaveLength(0);
+    });
+
+    it('still applies an update arriving under a new subscription id', async () => {
+      // The upsert keeps last-writer-wins: an upgrade legitimately arrives
+      // under an id the row has never seen, and refusing it as superseded would
+      // leave the account on the plan it just left.
+      setupStripeEvent('customer.subscription.updated', mockSubscription());
+      setupCustomerRetrieveWithOrg();
+      setupStoredIdentity({ subscriptionId: 'sub_the_previous_one' });
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(updateInputs()[0].ExpressionAttributeValues![':subId']).toEqual({
+        S: MOCK_SUBSCRIPTION_ID,
+      });
+      expect(supersededEmissions()).toHaveLength(0);
+    });
+  });
+
   describe('customer.subscription.deleted', () => {
     it('sets GracePeriod status with 30-day grace window', async () => {
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
@@ -838,7 +934,6 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
-        ConditionExpression: 'attribute_not_exists(deletedAt)',
         UpdateExpression:
           'SET subscriptionStatus = :status, canceledAt = :now, gracePeriodEndsAt = :grace, updatedAt = :now',
         ExpressionAttributeValues: {
@@ -846,7 +941,7 @@ describe('stripe-webhook handler', () => {
           ':now': { S: expect.any(String) },
           ':grace': { S: expect.any(String) },
         },
-        ConditionExpression: 'attribute_exists(pk)',
+        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
       });
 
       const graceDate = new Date(input.ExpressionAttributeValues![':grace'].S!).getTime();
@@ -1122,14 +1217,13 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
-        ConditionExpression: 'attribute_not_exists(deletedAt)',
         UpdateExpression:
           'SET subscriptionStatus = :active, lastPaymentAt = :now, updatedAt = :now REMOVE gracePeriodEndsAt, lastPaymentFailedAt, canceledAt',
         ExpressionAttributeValues: {
           ':active': { S: SubscriptionStatus.Active },
           ':now': { S: expect.any(String) },
         },
-        ConditionExpression: 'attribute_exists(pk)',
+        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
         ReturnValues: 'ALL_OLD',
       });
       expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
@@ -1242,7 +1336,6 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
-        ConditionExpression: 'attribute_not_exists(deletedAt)',
         UpdateExpression:
           'SET subscriptionStatus = :status, lastPaymentFailedAt = :failedAt, updatedAt = :now',
         ExpressionAttributeValues: {
@@ -1250,7 +1343,7 @@ describe('stripe-webhook handler', () => {
           ':failedAt': { S: expect.any(String) },
           ':now': { S: expect.any(String) },
         },
-        ConditionExpression: 'attribute_exists(pk)',
+        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
       });
 
       // Must NOT set gracePeriodEndsAt — Stripe Smart Retries handle the retry window

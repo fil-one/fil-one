@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, PutItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  DynamoDBClient,
+  GetItemCommand,
+  PutItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
+import { marshall } from '@aws-sdk/util-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import type { UsageReportingWorkerPayload } from './usage-reporting-worker.js';
 
@@ -133,6 +139,11 @@ describe('usage-reporting-worker', () => {
     vi.clearAllMocks();
     ddbMock.on(PutItemCommand).resolves({});
     ddbMock.on(UpdateItemCommand).resolves({});
+    // The billing identity a close-out checks before it disables anything: the
+    // row names the same customer the payload does.
+    ddbMock
+      .on(GetItemCommand)
+      .resolves({ Item: marshall({ stripeCustomerId: basePayload.stripeCustomerId }) });
     mockGetCustomerExistence.mockResolvedValue('deleted');
     mockGetTenantUsageMetrics.mockResolvedValue({ storage: [], egress: [] });
     // Default: org provisioned in Aurora only (mirrors the previous Aurora-only basePayload).

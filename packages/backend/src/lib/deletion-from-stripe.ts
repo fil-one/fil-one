@@ -1,6 +1,8 @@
 import { invokeAccountDeletionWorker } from './account-deletion-invoke.js';
 import { resolveOrgIdFromSubscription } from './billing-org-lookup.js';
 import { commitStripeTriggeredDeletion } from './deletion-confirm-transaction.js';
+import { emitSupersededBillingEvent } from './stripe-webhook-metrics.js';
+import { readStoredBillingIdentity } from './subscription-store.js';
 
 const LOG = '[deletion-from-stripe]';
 
@@ -32,6 +34,25 @@ export async function startDeletionFromStripe(params: {
         customerId,
         caller,
       });
+      return;
+    }
+
+    // The org outlives its Stripe customers, and this event destroys the whole
+    // account: a customer.deleted for one the account replaced months ago must
+    // not tear down the service the replacement subscription is paying for.
+    // Only a present-and-different stored id refuses — a row that names no
+    // customer cannot answer the question, and the deletion proceeds as before.
+    const stored = await readStoredBillingIdentity({ orgId, userId });
+    const storedCustomerId = stored?.stripeCustomerId;
+    if (storedCustomerId && storedCustomerId !== customerId) {
+      console.warn(`${LOG} refusing the teardown for a superseded customer`, {
+        userId,
+        orgId,
+        customerId,
+        storedCustomerId,
+        caller,
+      });
+      emitSupersededBillingEvent({ source: caller, field: 'customer' });
       return;
     }
 

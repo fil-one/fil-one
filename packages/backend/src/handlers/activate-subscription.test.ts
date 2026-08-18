@@ -222,7 +222,7 @@ describe('activate-subscription baseHandler', () => {
       method: 'POST',
       rawPath: '/api/billing/activate',
     });
-    await handler(event, {} as never);
+    await baseHandler(event);
 
     expect(mockSubscriptionsUpdate).toHaveBeenNthCalledWith(1, 'sub_org_1', {
       default_payment_method: 'pm_test_789',
@@ -259,7 +259,7 @@ describe('activate-subscription baseHandler', () => {
       method: 'POST',
       rawPath: '/api/billing/activate',
     });
-    const result = await handler(event, {} as never);
+    const result = await baseHandler(event);
     const body = JSON.parse((result as { body: string }).body);
 
     expect(body.subscription.status).toBe(SubscriptionStatus.Active);
@@ -781,7 +781,6 @@ describe('activate-subscription baseHandler', () => {
         default_payment_method: 'pm_test_789',
         metadata: { userId: 'user-1', orgId: 'org-1' },
         discounts: [{ promotion_code: 'promo_xxx' }],
-        metadata: { userId: 'user-1', orgId: 'org-1' },
         expand: ['latest_invoice.payment_intent', 'default_payment_method'],
       });
     });
@@ -817,7 +816,6 @@ describe('activate-subscription baseHandler', () => {
         default_payment_method: 'pm_test_789',
         metadata: { userId: 'user-1', orgId: 'org-1' },
         discounts: [{ promotion_code: 'promo_xxx' }],
-        metadata: { userId: 'user-1', orgId: 'org-1' },
         expand: ['latest_invoice.payment_intent', 'default_payment_method'],
       });
       expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
@@ -927,7 +925,6 @@ describe('activate-subscription baseHandler', () => {
         default_payment_method: 'pm_saved_1',
         metadata: { userId: 'user-1', orgId: 'org-1' },
         discounts: [{ promotion_code: 'promo_xxx' }],
-        metadata: { userId: 'user-1', orgId: 'org-1' },
         expand: ['latest_invoice.payment_intent', 'default_payment_method'],
       });
     });
