@@ -16,7 +16,11 @@ Per org, one `OrgTable` transaction writes `ORG#{orgId}/MEMBER#{userId}`
 one — `ORG#{orgId}/META` with `ownerCount: 1`. The legacy `UserInfoTable`
 `ORG#{orgId}/MEMBER#{userId}` row is deleted after that transaction succeeds.
 Orgs from the earliest accounts have no membership row anywhere and are repaired
-from `ORG#{orgId}/PROFILE.createdBy`.
+from `ORG#{orgId}/PROFILE.createdBy`. `joinedAt` comes from the legacy row, or
+from `PROFILE.createdAt` when the legacy row carries none; where neither exists
+the conversion writes `1970-01-01T00:00:00.000Z` and the org's log line marks it
+`(none recorded)`. That epoch timestamp in a converted row means the join date
+was never recorded, not that anyone joined in 1970.
 
 Every item is written with `attribute_not_exists(pk)`, and the classification is
 derived from live data on each run. An interrupted run is resumed by running it
