@@ -20,6 +20,7 @@ import {
   LEGACY_ROLE,
   OrgKeys,
   parseMemberSk,
+  parseMembershipSk,
   parseOrgPk,
   parseUserPk,
   summarizePlans,
@@ -29,9 +30,11 @@ import {
 import type {
   ConvertedMembership,
   ConvertPlan,
+  MembershipScan,
   OrgPlan,
   OrgState,
   ScanCounts,
+  ScanResult,
 } from './org-conversion.ts';
 import { formatVerifyReport, parseAcceptedAnomalies, verifyConversion } from './org-verify.ts';
 
@@ -124,14 +127,17 @@ describe('key builders', () => {
     expect(parseOrgPk(OrgKeys.orgPk(ORG_ID))).toBe(ORG_ID);
     expect(parseUserPk(OrgKeys.userPk(USER_ID))).toBe(USER_ID);
     expect(parseMemberSk(OrgKeys.memberSk(USER_ID))).toBe(USER_ID);
+    expect(parseMembershipSk(OrgKeys.membershipSk(ORG_ID))).toBe(ORG_ID);
 
     expect(parseOrgPk(`USER#${USER_ID}`)).toBeUndefined();
     expect(parseUserPk(`ORG#${ORG_ID}`)).toBeUndefined();
     expect(parseMemberSk('MEMBERSHIP#x')).toBeUndefined();
+    expect(parseMembershipSk('MEMBER#x')).toBeUndefined();
     expect(parseOrgPk('ORG#')).toBeUndefined();
     // A key with a second `#` is not a plain id and must not be split into one.
     expect(parseOrgPk('ORG#a#b')).toBeUndefined();
     expect(parseMemberSk('MEMBER#a#b')).toBeUndefined();
+    expect(parseMembershipSk('MEMBERSHIP#a#b')).toBeUndefined();
   });
 });
 
@@ -740,13 +746,27 @@ describe('verifyConversion', () => {
     hasMeta: true,
   });
 
+  /** Both OrgTable items every converted membership has, as the scan collects them. */
+  function membershipScan(states: readonly OrgState[]): MembershipScan {
+    const pairs = states.flatMap((one) =>
+      one.orgTableMemberUserIds.map((userId) => ({
+        orgId: one.orgId,
+        userId,
+        role: CONVERTED_ROLE,
+      })),
+    );
+    return { members: [...pairs], inverse: [...pairs] };
+  }
+
   function verify(
     states: OrgState[],
     overrides: Partial<ScanCounts> = {},
     accepted: string | undefined = undefined,
+    membership: MembershipScan = membershipScan(states),
   ) {
     const plans = states.map((one) => classifyOrg(one, knownUsers));
-    const scan: ScanCounts = {
+    const scan: ScanResult = {
+      membership,
       userInfoRows: 0,
       orgProfiles: states.length,
       legacyMemberRows: states.reduce((total, one) => total + one.legacyMembers.length, 0),
@@ -847,10 +867,53 @@ describe('verifyConversion', () => {
     );
   });
 
-  it('fails when the inverse items do not match the membership rows', () => {
-    const checks = verify([converted('org-a')], { orgTableInverseRows: 0 });
+  it('names the membership whose inverse item is missing', () => {
+    const states = [converted('org-a')];
+    const checks = verify(states, { orgTableInverseRows: 0 }, undefined, {
+      ...membershipScan(states),
+      inverse: [],
+    });
+    const report = formatVerifyReport(checks);
 
-    expect(formatVerifyReport(checks)).toContain('FAIL  Membership rows and inverse items agree');
+    expect(report).toContain('FAIL  Membership rows and inverse items agree');
+    expect(report).toContain(`ORG#org-a MEMBER#${USER_ID} — no MEMBERSHIP# inverse item`);
+  });
+
+  it('fails a missing inverse item and an orphan that cancel each other out in the counts', () => {
+    const states = [converted('org-a'), converted('org-b')];
+    const derived = membershipScan(states);
+    const membership: MembershipScan = {
+      members: derived.members,
+      inverse: [
+        ...derived.inverse.filter((pair) => pair.orgId !== 'org-a'),
+        { orgId: 'org-gone', userId: USER_ID, role: CONVERTED_ROLE },
+      ],
+    };
+    // The premise: the two breakages leave the two totals equal, which is all
+    // the old cardinality check compared.
+    expect(membership.inverse.length).toBe(membership.members.length);
+
+    const report = formatVerifyReport(verify(states, {}, undefined, membership));
+
+    expect(report).toContain('FAIL  Membership rows and inverse items agree');
+    expect(report).toContain(`ORG#org-a MEMBER#${USER_ID} — no MEMBERSHIP# inverse item`);
+    expect(report).toContain(`ORG#org-gone MEMBER#${USER_ID} — inverse item with no MEMBER# row`);
+  });
+
+  it('fails a membership whose two items disagree on role', () => {
+    const states = [converted('org-a')];
+    const derived = membershipScan(states);
+    const report = formatVerifyReport(
+      verify(states, {}, undefined, {
+        members: derived.members,
+        inverse: derived.inverse.map((pair) => ({ ...pair, role: LEGACY_ROLE })),
+      }),
+    );
+
+    expect(report).toContain('FAIL  Membership rows and inverse items agree');
+    expect(report).toContain(
+      `ORG#org-a MEMBER#${USER_ID} — MEMBER# says ${CONVERTED_ROLE}, inverse item says ${LEGACY_ROLE}`,
+    );
   });
 
   it('fails when a membership has no META counter', () => {

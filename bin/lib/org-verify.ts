@@ -18,8 +18,15 @@
 // the same classification — no second query language, no table names typed by
 // hand.
 
-import { OrgKeys, summarizePlans } from './org-conversion.ts';
-import type { AnomalyPlan, OrgPlan, OrgState, PlanCounts, ScanCounts } from './org-conversion.ts';
+import { membershipPairKey, OrgKeys, summarizePlans } from './org-conversion.ts';
+import type {
+  AnomalyPlan,
+  MembershipPair,
+  OrgPlan,
+  OrgState,
+  PlanCounts,
+  ScanResult,
+} from './org-conversion.ts';
 
 /** How many rows a passing check enumerates before it summarizes the rest. */
 const LISTED_OFFENDERS = 50;
@@ -56,7 +63,7 @@ export function parseAcceptedAnomalies(value: string | undefined): Set<string> {
 export function verifyConversion(
   states: readonly OrgState[],
   plans: readonly OrgPlan[],
-  scan: ScanCounts,
+  scan: ScanResult,
   acceptedAnomalies: ReadonlySet<string> = new Set(),
 ): VerifyCheck[] {
   const counts = summarizePlans(plans);
@@ -115,12 +122,7 @@ export function verifyConversion(
         describeLegacyRow(state, planByOrg.get(state.orgId)),
       ),
     },
-    {
-      name: 'Membership rows and inverse items agree',
-      pass: scan.orgTableMemberRows === scan.orgTableInverseRows,
-      detail: `${scan.orgTableMemberRows} MEMBER# rows, ${scan.orgTableInverseRows} MEMBERSHIP# inverse items`,
-      offenders: [],
-    },
+    inverseCheck(scan),
     {
       name: 'Every org with a membership has its META counter',
       pass: memberWithoutMeta.length === 0,
@@ -135,6 +137,57 @@ export function verifyConversion(
     },
     anomalyCheck(plans, counts, acceptedAnomalies),
   ];
+}
+
+/**
+ * Every membership is two items, and this holds one against the other by pair,
+ * not by count: a membership row missing its inverse item and an orphan inverse
+ * item are two different breakages that add up to the same two numbers, so
+ * counting them cancels the pair out and reports the tables agree. Reading the
+ * `(orgId, userId)` out of both keys names each side of the mismatch, which is
+ * also what an operator needs to repair it.
+ *
+ * The roles are compared for the same reason. Enforcement reads the role off
+ * the canonical row (`resolveMembership`) and the org list reads it off the
+ * inverse item (`listMemberships`), both in
+ * packages/backend/src/lib/org-membership.ts, so a membership whose two halves
+ * disagree shows the user one role and applies another.
+ */
+function inverseCheck(scan: ScanResult): VerifyCheck {
+  const canonical = pairsByKey(scan.membership.members);
+  const inverse = pairsByKey(scan.membership.inverse);
+
+  const missingInverse = [...canonical.keys()].filter((key) => !inverse.has(key));
+  const orphanInverse = [...inverse.keys()].filter((key) => !canonical.has(key));
+  const roleMismatches = [...canonical.entries()].filter(([key, member]) => {
+    const twin = inverse.get(key);
+    return twin !== undefined && (twin.role ?? '') !== (member.role ?? '');
+  });
+
+  return {
+    name: 'Membership rows and inverse items agree',
+    pass: missingInverse.length + orphanInverse.length + roleMismatches.length === 0,
+    detail:
+      `${scan.orgTableMemberRows} MEMBER# rows, ${scan.orgTableInverseRows} MEMBERSHIP# inverse items; ` +
+      `${missingInverse.length} memberships have no inverse item, ${orphanInverse.length} inverse items have no membership, ` +
+      `${roleMismatches.length} disagree on role`,
+    offenders: [
+      ...missingInverse.map((key) => `${key} — no MEMBERSHIP# inverse item`),
+      ...orphanInverse.map((key) => `${key} — inverse item with no MEMBER# row`),
+      ...roleMismatches.map(
+        ([key, member]) =>
+          `${key} — MEMBER# says ${describeRole(member.role)}, inverse item says ${describeRole(inverse.get(key)?.role)}`,
+      ),
+    ],
+  };
+}
+
+function pairsByKey(pairs: readonly MembershipPair[]): Map<string, MembershipPair> {
+  return new Map(pairs.map((pair) => [membershipPairKey(pair), pair]));
+}
+
+function describeRole(role: string | undefined): string {
+  return role ?? '(no role)';
 }
 
 /**
