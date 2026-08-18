@@ -1018,7 +1018,9 @@ describe('authMiddleware', () => {
       mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } });
       mockFetch.mockResolvedValue({ ok: false, status: 401, text: async () => '' });
 
-      // Use call-order mocking: first GetItem is IDENTITY lookup, second is ORG PROFILE lookup
+      // Use call-order mocking: first GetItem is the IDENTITY lookup, second the
+      // ORG PROFILE lookup. Everything after — the membership read the
+      // middleware now makes — falls to the empty default.
       ddbMock
         .on(GetItemCommand)
         .resolvesOnce({ Item: { userId: { S: existingUserId }, orgId: { S: existingOrgId } } })
@@ -1026,7 +1028,8 @@ describe('authMiddleware', () => {
           Item: {
             auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
           },
-        });
+        })
+        .resolves({});
 
       const { before } = authMiddleware({ requireVerifiedEmail: false });
       const event = buildEvent({
