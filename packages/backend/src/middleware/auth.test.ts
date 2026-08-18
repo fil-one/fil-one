@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Request } from '@middy/core';
 import type {
   APIGatewayProxyEventV2,
@@ -12,7 +12,7 @@ import {
   GetItemCommand,
   TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
-import { ApiErrorCode, OrgRole } from '@filone/shared';
+import { ApiErrorCode, OrgRole, Stage } from '@filone/shared';
 import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../lib/org-setup-status.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
@@ -124,6 +124,16 @@ describe('authMiddleware', () => {
     // alias. Verification is rejected here on purpose — the assertion is about
     // which issuer and JWKS endpoint got used, which happens either way.
     describe('per-host Auth0 domain', () => {
+      // The per-host table holds production domains only, so resolveAuth0Domain
+      // consults it on the production stage alone.
+      beforeEach(() => {
+        process.env.FILONE_STAGE = Stage.Production;
+      });
+
+      afterEach(() => {
+        delete process.env.FILONE_STAGE;
+      });
+
       async function issuerUsedFor(host?: string): Promise<string> {
         mockJwtVerify.mockRejectedValue(new Error('token expired'));
         const event = buildEvent({ cookies: ['hs_access_token=some-token'] });
@@ -151,6 +161,14 @@ describe('authMiddleware', () => {
 
       it('falls back to the configured domain when no viewer host is present', async () => {
         expect(await issuerUsedFor()).toBe(`https://${process.env.AUTH0_DOMAIN}/`);
+      });
+
+      // x-forwarded-host is attacker-controlled on the public execute-api path,
+      // and the aliases only exist in production: a non-production deployment
+      // handed a production host must stay on its own tenant.
+      it('ignores a production host on a non-production stage', async () => {
+        process.env.FILONE_STAGE = Stage.Staging;
+        expect(await issuerUsedFor('app.fil.one')).toBe(`https://${process.env.AUTH0_DOMAIN}/`);
       });
     });
 

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
+import { PROD_CONSOLE_ALIAS_HOSTS, PROD_CONSOLE_HOST, Stage } from '@filone/shared';
 import { resolveAuth0Domain } from './auth0-domain.js';
 
 const CONFIGURED = 'dev-tenant.us.auth0.com';
@@ -11,10 +12,12 @@ function eventWith(headers: Record<string, string | undefined>): APIGatewayProxy
 describe('resolveAuth0Domain', () => {
   beforeEach(() => {
     process.env.AUTH0_DOMAIN = CONFIGURED;
+    process.env.FILONE_STAGE = Stage.Production;
   });
 
   afterEach(() => {
     delete process.env.AUTH0_DOMAIN;
+    delete process.env.FILONE_STAGE;
   });
 
   it('falls back to the configured domain when no viewer host is present', () => {
@@ -57,5 +60,27 @@ describe('resolveAuth0Domain', () => {
     ['an empty host', ''],
   ])('ignores %s', ([, host]) => {
     expect(resolveAuth0Domain(eventWith({ 'x-forwarded-host': host }))).toBe(CONFIGURED);
+  });
+
+  // Every domain in the table lives in the production Auth0 tenant, so a
+  // deployment that isn't production must stay on its own tenant even when handed
+  // a production host it has no business honouring.
+  describe('outside the production stage', () => {
+    it.for([
+      ['staging', Stage.Staging as string],
+      ['an ephemeral stage', 'srdjan'],
+    ])('ignores production hosts on %s', ([, stage]) => {
+      process.env.FILONE_STAGE = stage;
+      for (const host of [PROD_CONSOLE_HOST, ...PROD_CONSOLE_ALIAS_HOSTS]) {
+        expect(resolveAuth0Domain(eventWith({ 'x-forwarded-host': host }))).toBe(CONFIGURED);
+      }
+    });
+
+    it('ignores production hosts when the stage is unset', () => {
+      delete process.env.FILONE_STAGE;
+      expect(resolveAuth0Domain(eventWith({ 'x-forwarded-host': PROD_CONSOLE_HOST }))).toBe(
+        CONFIGURED,
+      );
+    });
   });
 });

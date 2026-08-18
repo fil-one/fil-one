@@ -173,8 +173,9 @@ export function logoutReturnTo(origin: string): string {
 
 /**
  * Auth0 domain to authenticate against, keyed by the console origin the request
- * arrived on. Production hosts only — non-production stages never match and fall
- * through to their configured domain.
+ * arrived on. Production hosts only: every domain here belongs to the production
+ * Auth0 tenant, so `resolveAuth0Domain` ignores the table outside the production
+ * stage and non-production deployments keep their configured domain.
  *
  * Aliases cannot use `auth.fil.one`: a second Auth0 custom domain requires an
  * Enterprise plan, and `auth.fil.one` sits on the same flagged TLD the aliases exist
