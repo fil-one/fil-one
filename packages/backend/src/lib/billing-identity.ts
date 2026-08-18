@@ -95,3 +95,15 @@ export function invoiceSubscriptionId(invoice: Stripe.Invoice): string | undefin
   if (!subscription) return undefined;
   return typeof subscription === 'string' ? subscription : subscription.id;
 }
+
+/**
+ * The subscription metadata an invoice carries, when it carries any.
+ *
+ * Stripe snapshots the subscription's metadata onto the invoice at
+ * finalization, so an invoice event can name the org that generated it without
+ * a round trip to fetch the subscription back. That makes it the more specific
+ * source for `resolveOrgId`, ahead of the customer's own metadata.
+ */
+export function invoiceSubscriptionMetadata(invoice: Stripe.Invoice): Stripe.Metadata | undefined {
+  return invoice.parent?.subscription_details?.metadata ?? undefined;
+}
