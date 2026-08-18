@@ -261,7 +261,7 @@ export default $config({
         securityHeadersConfig: {
           contentSecurityPolicy: {
             // i1.wp.com: WordPress Photon CDN — Auth0 proxies some avatar images through it
-            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io https://fil-one.instatus.com ${s3GatewayUrls}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
+            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io https://status.fil.one ${s3GatewayUrls}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
             override: true,
           },
           frameOptions: {
@@ -885,6 +885,13 @@ export default $config({
       handler: 'get-usage',
       extraEnv: orchestratorEnv,
       permissions: s3DataPlanePermissions,
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+    });
+    addRoute({
+      method: 'GET',
+      routePath: '/api/usage/trends',
+      handler: 'get-usage-trends',
+      extraEnv: orchestratorEnv,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
     });
     addRoute({

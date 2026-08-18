@@ -3,7 +3,7 @@ import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-import type { InstatusSummary } from '../lib/instatus';
+import { INSTATUS_PAGE_URL, type InstatusSummary } from '../lib/instatus';
 import { queryKeys } from '../lib/query-client';
 import { StatusIndicator } from './StatusIndicator';
 
@@ -12,7 +12,7 @@ function createSeededQueryClient(status: string) {
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
   const summary: InstatusSummary = {
-    page: { name: 'Fil One', url: 'https://fil-one.instatus.com', status },
+    page: { name: 'Fil One', url: INSTATUS_PAGE_URL, status },
   };
   client.setQueryData(queryKeys.instatusSummary, summary);
   return client;

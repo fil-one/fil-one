@@ -2,21 +2,21 @@ import { useState } from 'react';
 import { PlusIcon } from '@phosphor-icons/react/dist/ssr';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
-import type { AccessKey, ListAccessKeysResponse } from '@filone/shared';
+import type { AccessKey, ListAccessKeysResponse, S3Region } from '@filone/shared';
 
 import { apiRequest } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
 import { useToast } from './Toast';
+import { AccessEndpointsCard } from './AccessEndpointsCard';
 import { AccessKeysTable } from './AccessKeysTable';
 import { Button } from './Button';
 import { ConfirmDialog } from './ConfirmDialog';
-import { CopyableField } from './CopyableField';
 import { Spinner } from './Spinner';
 
 export type BucketAccessTabProps = {
   bucketName: string;
   s3Endpoint: string;
-  region: string;
+  region: S3Region;
   accessKeys: AccessKey[];
   accessKeysLoading: boolean;
   onCreateOpen: () => void;
@@ -38,7 +38,7 @@ export function BucketAccessTab({
     mutationFn: (id: string) => apiRequest(`/access-keys/${id}`, { method: 'DELETE' }),
     onSuccess: (_, id) => {
       queryClient.setQueryData<ListAccessKeysResponse>(
-        queryKeys.bucketAccessKeys(bucketName),
+        queryKeys.bucketAccessKeys(bucketName, region),
         (old) => (old ? { keys: old.keys.filter((k) => k.id !== id) } : old),
       );
       void queryClient.invalidateQueries({ queryKey: queryKeys.accessKeys });
@@ -89,14 +89,11 @@ export function BucketAccessTab({
 
       {/* Access endpoints section */}
       <div className="mt-8">
-        <h2 className="mb-3 text-[13px] font-medium text-zinc-900">Access endpoints</h2>
-        <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-col gap-3">
-            <CopyableField label="S3 Endpoint" value={s3Endpoint} />
-            <CopyableField label="S3 Path" value={`s3://${bucketName}`} />
-            <CopyableField label="Region" value={region} />
-          </div>
-        </div>
+        <AccessEndpointsCard
+          s3Endpoint={s3Endpoint}
+          s3Path={`s3://${bucketName}`}
+          region={region}
+        />
       </div>
 
       <ConfirmDialog

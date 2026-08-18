@@ -16,12 +16,12 @@
 //   ./bin/backfill-access-key-granular-permissions.ts
 //
 // Target staging (AWS account 654654381893):
-//   pnpx sst shell --stage staging -- node ./bin/backfill-access-key-granular-permissions.ts --dry-run
-//   pnpx sst shell --stage staging -- node ./bin/backfill-access-key-granular-permissions.ts
+//   pnpm exec sst shell --stage staging -- node ./bin/backfill-access-key-granular-permissions.ts --dry-run
+//   pnpm exec sst shell --stage staging -- node ./bin/backfill-access-key-granular-permissions.ts
 //
 // Target production (AWS account 811430801166):
-//   pnpx sst shell --stage production -- node ./bin/backfill-access-key-granular-permissions.ts --dry-run
-//   pnpx sst shell --stage production -- node ./bin/backfill-access-key-granular-permissions.ts
+//   pnpm exec sst shell --stage production -- node ./bin/backfill-access-key-granular-permissions.ts --dry-run
+//   pnpm exec sst shell --stage production -- node ./bin/backfill-access-key-granular-permissions.ts
 //
 // The `--` between `--stage <name>` and `node` keeps `sst shell` from parsing
 // `--dry-run` as one of its own flags. Confirm the stage printed at startup
@@ -33,8 +33,8 @@ import { readFileSync } from 'node:fs';
 // Re-exec under `sst shell` if SST resources aren't available
 if (!process.env.SST_RESOURCE_App) {
   execFileSync(
-    'pnpx',
-    ['sst', 'shell', '--', 'node', import.meta.filename, ...process.argv.slice(2)],
+    'pnpm',
+    ['exec', 'sst', 'shell', '--', 'node', import.meta.filename, ...process.argv.slice(2)],
     { stdio: 'inherit' },
   );
   process.exit(0);

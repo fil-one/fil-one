@@ -27,7 +27,7 @@ import type { RecentActivity } from '@filone/shared';
 
 import { getUsage, getBilling, getActivity } from '../lib/api.js';
 import { daysUntil, formatDateTime, timeAgo } from '../lib/time.js';
-import { queryKeys } from '../lib/query-client.js';
+import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -38,7 +38,7 @@ function planDisplayName(planId: PlanId): string {
     case PlanId.FreeTrial:
       return 'Free trial';
     case PlanId.PayAsYouGo:
-      return 'Pay As You Go';
+      return 'Pay as you go';
     case PlanId.None:
       return 'No plan';
     default:
@@ -105,6 +105,7 @@ export function DashboardPage() {
   const { data: usage, isPending: usagePending } = useQuery({
     queryKey: queryKeys.usage,
     queryFn: getUsage,
+    staleTime: USAGE_STALE_TIME,
   });
 
   const { data: billing, isPending: billingPending } = useQuery({
@@ -296,7 +297,10 @@ export function DashboardPage() {
               {planDisplayName(billing.subscription.planId)}
             </span>
             {isTrialing && (
-              <p className="mt-0.5 text-[11px] text-zinc-500">1 TB storage &amp; egress included</p>
+              <p className="mt-0.5 text-[11px] text-zinc-500">
+                {formatBytes(limits.storageLimitBytes)} storage ·{' '}
+                {formatBytes(limits.egressLimitBytes)} egress included
+              </p>
             )}
             {isInactive && (
               <p className="mt-0.5 text-[11px] text-zinc-500">

@@ -9,6 +9,7 @@ import {
   BUCKET_INFO_PERMISSION_LABELS,
   BUCKET_PERMISSION_LABELS,
   GRANULAR_PERMISSION_LABELS,
+  getRegionLabel,
   isBucketInfoPermission,
   isBucketPermission,
   isObjectPermission,
@@ -17,6 +18,7 @@ import {
 import { Badge } from './Badge';
 import { Button } from './Button';
 import { CopyButton } from './CopyButton';
+import { IconButton } from './IconButton';
 import { Table } from './Table/Table';
 import { formatDate } from '../lib/time.js';
 
@@ -150,15 +152,13 @@ function ActionMenu({ onDelete }: { onDelete: () => void }) {
 
   return (
     <div className="relative inline-block">
-      <button
+      <IconButton
         ref={buttonRef}
-        type="button"
+        icon={DotsThreeIcon}
         aria-label="Key actions"
+        size="md"
         onClick={handleOpen}
-        className="rounded p-1.5 text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
-      >
-        <DotsThreeIcon weight="bold" width={18} height={18} aria-hidden="true" />
-      </button>
+      />
       {open && (
         <div
           ref={menuRef}
@@ -190,6 +190,7 @@ export type AccessKeysTableProps = {
   keys: AccessKey[];
   showBuckets?: boolean;
   showPermissions?: boolean;
+  showRegion?: boolean;
   onDelete?: (id: string) => Promise<void>;
   onCreateOpen?: () => void;
   emptyTitle?: string;
@@ -200,6 +201,7 @@ export function AccessKeysTable({
   keys,
   showBuckets = false,
   showPermissions = false,
+  showRegion = false,
   onDelete,
   onCreateOpen,
   emptyTitle = 'No API keys yet',
@@ -207,7 +209,7 @@ export function AccessKeysTable({
 }: AccessKeysTableProps) {
   if (keys.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white px-6 py-16 text-center">
+      <div className="flex flex-col items-center justify-center rounded-xl border border-zinc-200 bg-white px-6 py-16 text-center">
         <IconBox icon={KeyIcon} size="md" color="blue" className="mb-4" />
         <p className="mb-1 text-sm font-medium text-zinc-900">{emptyTitle}</p>
         <p className="mb-4 max-w-xs text-sm text-zinc-500">{emptyDescription}</p>
@@ -225,6 +227,7 @@ export function AccessKeysTable({
       <Table.Header>
         <Table.Row>
           <Table.Head>Name</Table.Head>
+          {showRegion && <Table.Head className="hidden md:table-cell">Region</Table.Head>}
           {showBuckets && <Table.Head className="hidden lg:table-cell">Buckets</Table.Head>}
           {showPermissions && <Table.Head className="hidden md:table-cell">Permissions</Table.Head>}
           <Table.Head className="hidden sm:table-cell">Status</Table.Head>
@@ -251,6 +254,19 @@ export function AccessKeysTable({
                 <StatusBadge status={key.status} />
               </div>
             </Table.Cell>
+
+            {/* Region — access keys are region-scoped */}
+            {showRegion && (
+              <Table.Cell className="hidden md:table-cell">
+                {key.region ? (
+                  <Badge color="grey" size="sm" description={getRegionLabel(key.region)}>
+                    {key.region}
+                  </Badge>
+                ) : (
+                  <span className="text-xs text-zinc-400">—</span>
+                )}
+              </Table.Cell>
+            )}
 
             {/* Buckets */}
             {showBuckets && (
