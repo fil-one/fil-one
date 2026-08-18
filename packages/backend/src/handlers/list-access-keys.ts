@@ -91,7 +91,12 @@ export async function baseHandler(
 
   const keys: AccessKey[] = (result.Items ?? [])
     .map((item) => unmarshall(item))
-    .filter((record) => withinScope(scope, record.createdBy as string | undefined))
+    .filter((record) =>
+      withinScope(scope, {
+        createdBy: record.createdBy as string | undefined,
+        recovered: record.recovered as boolean | undefined,
+      }),
+    )
     .map((record) => ({
       id: (record.sk as string).replace('ACCESSKEY#', ''),
       keyName: record.keyName as string,

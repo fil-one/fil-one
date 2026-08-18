@@ -71,8 +71,8 @@ function eventWithKey(keyId: string | undefined, role?: OrgRole): AuthenticatedE
   }) as unknown as AuthenticatedEvent;
 }
 
-function accessKeyItem(region?: string, createdBy?: string) {
-  const item: Record<string, { S: string }> = {
+function accessKeyItem(region?: string, createdBy?: string, recovered?: boolean) {
+  const item: Record<string, { S: string } | { BOOL: boolean }> = {
     pk: { S: 'ORG#org-1' },
     sk: { S: `ACCESSKEY#${KEY_ID}` },
     keyName: { S: 'My Key' },
@@ -82,6 +82,7 @@ function accessKeyItem(region?: string, createdBy?: string) {
   };
   if (region) item.region = { S: region };
   if (createdBy) item.createdBy = { S: createdBy };
+  if (recovered) item.recovered = { BOOL: true };
   return item;
 }
 
@@ -218,6 +219,37 @@ describe('whose key a caller may revoke', () => {
 
     expect(result.statusCode).toBe(403);
     expect(auroraDeleteAccessKey).not.toHaveBeenCalled();
+  });
+
+  it('refuses a Member a recovered key that names them, because the name is a guess', async () => {
+    // `recoverDuplicateKey` writes the retrying caller into createdBy after a
+    // partial failure. The collision that reaches that path is two people
+    // picking the same key name, so the row may well name the wrong one.
+    ddbMock
+      .on(GetItemCommand)
+      .resolves({ Item: accessKeyItem('eu-west-1', USER_INFO.userId, true) });
+
+    const result = (await baseHandler(eventWithKey(KEY_ID, OrgRole.Member))) as {
+      statusCode: number;
+      body: string;
+    };
+
+    expect(result.statusCode).toBe(403);
+    expect(JSON.parse(result.body).code).toBe(ApiErrorCode.FORBIDDEN_ROLE);
+    expect(auroraDeleteAccessKey).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
+  });
+
+  it('lets keys.manage_all revoke a recovered key', async () => {
+    ddbMock
+      .on(GetItemCommand)
+      .resolves({ Item: accessKeyItem('eu-west-1', USER_INFO.userId, true) });
+
+    const result = (await baseHandler(eventWithKey(KEY_ID, OrgRole.Admin))) as {
+      statusCode: number;
+    };
+
+    expect(result.statusCode).toBe(204);
   });
 
   it.each([OrgRole.Owner, OrgRole.Admin])('lets %s revoke any key in the org', async (role) => {

@@ -288,24 +288,35 @@ function useProfileForm(me: MeResponse) {
     queryClient.setQueryData<MeResponse>(queryKeys.meWithMfa, update);
   }
 
+  /**
+   * Apply what landed, then follow a landed email change to the verify page.
+   *
+   * The redirect belongs to the email having changed, not to the press as a
+   * whole having succeeded: a new address is unverified from the moment the
+   * profile PATCH returns, and `_app.tsx`'s gate is a `beforeLoad` redirect that
+   * never fires while the user stays on Settings. Both paths go through here so
+   * they cannot drift apart again. Returns whether the redirect was issued.
+   */
+  function applyAndFollow(saved: SavedFields): boolean {
+    applySaved(saved);
+    if (saved.email === undefined) return false;
+    // The cache update above means the verify-email page renders the unverified
+    // state immediately, without a /me round-trip.
+    void navigate({ to: '/verify-email' });
+    return true;
+  }
+
   const mutation = useMutation({
     mutationFn: saveProfileAndOrg,
     onSuccess: (saved) => {
-      applySaved(saved);
-
-      if (saved.email !== undefined) {
-        // The cache update above means the verify-email page renders the
-        // unverified state immediately, without a /me round-trip.
-        void navigate({ to: '/verify-email' });
-      } else {
-        toast.success('Profile updated');
-      }
+      if (!applyAndFollow(saved)) toast.success('Profile updated');
     },
     onError: (err) => {
       // A half that succeeded is applied even though the press as a whole
       // failed; discarding it would show the old value until the next refetch
-      // and invite the user to save it again.
-      if (err instanceof PartialSaveError) applySaved(err.saved);
+      // and invite the user to save it again. The error toast still names the
+      // half that failed, on the verify page if that is where this lands.
+      if (err instanceof PartialSaveError) applyAndFollow(err.saved);
       toast.error(messageFor(err, 'Failed to update profile'));
     },
   });

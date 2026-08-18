@@ -50,7 +50,10 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   // a Member revokes the keys they minted and no others. Checked before the
   // orchestrator is touched: the provider-side deletion is the irreversible
   // half.
-  if (!withinScope(keyScope(event), Item.createdBy?.S)) return notYourKeyResponse();
+  if (
+    !withinScope(keyScope(event), { createdBy: Item.createdBy?.S, recovered: Item.recovered?.BOOL })
+  )
+    return notYourKeyResponse();
 
   // Legacy rows written before multi-region routing don't carry a `region`
   // attribute — those predate FTH, so they belong to Aurora (eu-west-1).

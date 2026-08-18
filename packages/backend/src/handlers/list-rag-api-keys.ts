@@ -40,7 +40,7 @@ export async function baseHandler(
   // which must never reach a response.
   const keys: RagApiKey[] = (result.Items ?? [])
     .map((item) => unmarshall(item))
-    .filter((record) => withinScope(scope, record.createdBy as string | undefined))
+    .filter((record) => withinScope(scope, { createdBy: record.createdBy as string | undefined }))
     .map((record) => {
       const bucketScope = record.bucketScope as RagApiKey['bucketScope'];
       return {
