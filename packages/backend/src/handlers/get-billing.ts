@@ -2,7 +2,7 @@ import { convertToAttr } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { PlanId, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
+import { ApiErrorCode, PlanId, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
 import type { BillingInfo, ErrorResponse } from '@filone/shared';
 import type Stripe from 'stripe';
 import { getStripeClient } from '../lib/stripe-client.js';
@@ -37,8 +37,15 @@ export async function baseHandler(
   // gated route. Same eligibility test as the guard's, one implementation, and
   // it writes only when the claim is genuinely open.
   if (isTrialClaimable(billingRecord ?? undefined)) {
-    if ((await claimTrialIfEligible(userInfo)) === 'claimed') {
+    const outcome = await claimTrialIfEligible(userInfo);
+    if (outcome === 'claimed') {
       billingRecord = (await readSubscription(orgId, { consistentRead: true })) ?? null;
+    } else if (outcome === 'legacy-row') {
+      // The claim refused because a pre-re-key `CUSTOMER#` row is still
+      // standing: this account has billing the org key cannot see. Reporting
+      // "no plan" would be a lie the dashboard invites the user to act on, so
+      // the honest answer is that the state cannot be read right now.
+      return billingUnavailableResponse();
     }
   }
 
@@ -92,6 +99,25 @@ export async function baseHandler(
  * no DynamoDB write. A cached card is still reported so the console can offer
  * it once the user picks a plan.
  */
+/**
+ * The account's billing exists somewhere this route cannot read, so its state is
+ * unknown rather than absent.
+ *
+ * Same status and code as the subscription guard's refusal, because it is the
+ * same condition seen from the read side: the console shows "unable to load
+ * billing details" and offers no plan actions, instead of a "no plan" panel that
+ * would invite the user to buy a second subscription.
+ */
+function billingUnavailableResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(503)
+    .body<ErrorResponse>({
+      message: 'Unable to load billing details for this account. Please try again shortly.',
+      code: ApiErrorCode.SUBSCRIPTION_INACTIVE,
+    })
+    .build();
+}
+
 function inactiveResponse(
   billingRecord: SubscriptionRecord | null,
 ): APIGatewayProxyStructuredResultV2 {

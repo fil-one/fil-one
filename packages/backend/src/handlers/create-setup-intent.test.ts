@@ -30,6 +30,7 @@ vi.mock('sst', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
+import { ApiErrorCode } from '@filone/shared';
 import { baseHandler } from './create-setup-intent.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
@@ -157,6 +158,30 @@ describe('create-setup-intent baseHandler', () => {
     expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(1);
+  });
+
+  it('mints nothing while a pre-re-key CUSTOMER# row is still standing', async () => {
+    // No org row, but the legacy row says the backfill missed this account: the
+    // org already has a Stripe customer. Minting a second one here would have
+    // activate-subscription put a second live subscription beside the one that
+    // is still billing.
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    ddbMock
+      .on(GetItemCommand, { Key: ORG_KEY })
+      .resolves({})
+      .on(GetItemCommand, { Key: LEGACY_KEY })
+      .resolves(subscriptionItem(LEGACY_KEY, { stripeCustomerId: { S: 'cus_legacy_9' } }));
+
+    const result = await baseHandler(setupIntentEvent());
+
+    expect(result).toMatchObject({ statusCode: 503 });
+    expect(JSON.parse(String((result as { body: string }).body)).code).toBe(
+      ApiErrorCode.SUBSCRIPTION_INACTIVE,
+    );
+    expect(mockCustomersCreate).not.toHaveBeenCalled();
+    expect(mockSetupIntentsCreate).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    errorSpy.mockRestore();
   });
 
   it('swallows ConditionalCheckFailedException when a record was created concurrently', async () => {
