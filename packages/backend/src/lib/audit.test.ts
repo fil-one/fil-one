@@ -66,7 +66,7 @@ function revokedIntent(correlationId: string): AuditEventRecord<'key.deleted'> {
     type: 'key.deleted',
     actor: ACTOR,
     orgId: ORG_ID,
-    subject: AuditSubjects.key(KEY_ID),
+    subject: AuditSubjects.key('s3', KEY_ID),
     details: { keyKind: 's3', keyName: 'ci' },
     phase: 'intent',
     correlationId,
@@ -112,7 +112,10 @@ describe('AuditSubjects', () => {
     expect(AuditSubjects.org(ORG_ID)).toBe(`org:${ORG_ID}`);
     expect(AuditSubjects.user(USER_ID)).toBe(`user:${USER_ID}`);
     expect(AuditSubjects.invite('inv-1')).toBe('invite:inv-1');
-    expect(AuditSubjects.key(KEY_ID)).toBe(`key:${KEY_ID}`);
+    // Never the whole id: for an S3 key the id IS the AKIA… access key id, and
+    // the details of the same event carry only these four characters.
+    expect(AuditSubjects.key('s3', 'AKIAIOSFODNN7EXAMPLE')).toBe('key:MPLE');
+    expect(AuditSubjects.key('rag', 'sk_rag_AbC12xyz')).toBe('key:sk_rag_AbC12');
   });
 });
 
@@ -187,7 +190,7 @@ describe('auditEvent', () => {
       type: 'key.deleted',
       actor: ACTOR,
       orgId: ORG_ID,
-      subject: AuditSubjects.key(KEY_ID),
+      subject: AuditSubjects.key('s3', KEY_ID),
       details: { keyKind: 's3', keyName: 'ci' },
       phase: 'completion',
       correlationId,
@@ -552,6 +555,94 @@ describe('commitAudited', () => {
       );
     });
 
+    it('lands the mutation when the audit table itself is missing, in that mode', async () => {
+      // A deploy that never made the table refuses the whole transaction before
+      // any item applies. Rethrowing it strands exactly the mutation the mode
+      // exists to protect: the vendor key is already gone and its local row
+      // would survive.
+      const missingTable = Object.assign(new Error('Requested resource not found'), {
+        name: 'ResourceNotFoundException',
+      });
+      ddbMock.on(TransactWriteItemsCommand).rejectsOnce(missingTable).resolves({});
+
+      await commitAudited({
+        items: [MUTATION],
+        event: renamed(),
+        onAuditFailure: 'retry-without-audit',
+      });
+
+      const calls = ddbMock.commandCalls(TransactWriteItemsCommand);
+      expect(calls).toHaveLength(2);
+      expect(calls[1].args[0].input.TransactItems).toStrictEqual([MUTATION]);
+      expect(calls[1].args[0].input.ClientRequestToken).not.toBe(
+        calls[0].args[0].input.ClientRequestToken,
+      );
+    });
+
+    it('lands the mutation when the role may not write the audit table', async () => {
+      const denied = Object.assign(new Error('User is not authorized'), {
+        name: 'AccessDeniedException',
+      });
+      ddbMock.on(TransactWriteItemsCommand).rejectsOnce(denied).resolves({});
+
+      await commitAudited({
+        items: [MUTATION],
+        event: renamed(),
+        onAuditFailure: 'retry-without-audit',
+      });
+
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(2);
+    });
+
+    it('raises when the retry without the event fails too', async () => {
+      const missingTable = Object.assign(new Error('Requested resource not found'), {
+        name: 'ResourceNotFoundException',
+      });
+      ddbMock.on(TransactWriteItemsCommand).rejects(missingTable);
+
+      // The refusal may have been about the caller's own table, and the retry
+      // is what tells the two apart.
+      await expect(
+        commitAudited({
+          items: [MUTATION],
+          event: renamed(),
+          onAuditFailure: 'retry-without-audit',
+        }),
+      ).rejects.toThrow('Requested resource not found');
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(2);
+    });
+
+    it('still raises an ambiguous failure rather than re-running the mutation', async () => {
+      // A timeout or a 5xx may have applied the write; a fresh token would send
+      // the caller's items a second time against a table that already holds
+      // them.
+      const timeout = Object.assign(new Error('socket hang up'), {
+        name: 'TimeoutError',
+      });
+      ddbMock.on(TransactWriteItemsCommand).rejects(timeout);
+
+      await expect(
+        commitAudited({
+          items: [MUTATION],
+          event: renamed(),
+          onAuditFailure: 'retry-without-audit',
+        }),
+      ).rejects.toThrow('socket hang up');
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
+    });
+
+    it('leaves fail mode raising a missing audit table untouched', async () => {
+      const missingTable = Object.assign(new Error('Requested resource not found'), {
+        name: 'ResourceNotFoundException',
+      });
+      ddbMock.on(TransactWriteItemsCommand).rejects(missingTable);
+
+      await expect(commitAudited({ items: [MUTATION], event: renamed() })).rejects.toThrow(
+        'Requested resource not found',
+      );
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
+    });
+
     it('still fails the mutation on a mutation-side cancellation in that mode', async () => {
       ddbMock
         .on(TransactWriteItemsCommand)
@@ -626,7 +717,7 @@ describe('twoPhaseAudit', () => {
       type: 'key.deleted' as const,
       actor: ACTOR,
       orgId: ORG_ID,
-      subject: AuditSubjects.key(KEY_ID),
+      subject: AuditSubjects.key('s3', KEY_ID),
       details: { keyKind: 's3' as const, keyName: 'ci' },
       mode: 'best-effort' as const,
     };
