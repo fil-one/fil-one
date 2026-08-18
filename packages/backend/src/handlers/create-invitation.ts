@@ -222,15 +222,21 @@ function beyondCeilingResponse(role: OrgRole): APIGatewayProxyStructuredResultV2
 }
 
 /**
- * The beta gate's refusal. No `ApiErrorCode`: the two role codes describe what a
- * caller's role permits, and this says the feature is not on for them yet — a
- * message the console renders as-is, the way the RAG gate's is.
+ * The beta gate's refusal, under its own code.
+ *
+ * The two role codes describe what a caller's role permits; this says the
+ * feature is not on for them yet, and the console renders it as a state of the
+ * form rather than a failed attempt. It needs a code of its own to be told from
+ * the other code-less 403s this route can send — an expired CSRF cookie is the
+ * routine one — which would otherwise be reported as the beta gate and take the
+ * form off the page.
  */
 function betaOnlyResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(403)
     .body<ErrorResponse>({
       message: 'Inviting teammates is not enabled for this organization yet.',
+      code: ApiErrorCode.INVITES_NOT_ENABLED,
     })
     .build();
 }

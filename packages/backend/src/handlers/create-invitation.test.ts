@@ -383,9 +383,10 @@ describe('POST /api/org/invitations handler', () => {
     const result = await handler(inviteEvent(), buildContext());
 
     expect(result).toMatchObject({ statusCode: 403 });
-    // A message the console renders as-is: this is the feature not being on for
-    // them, not their role refusing them.
-    expect(body(result).code).toBeUndefined();
+    // Its own code, not the absence of one: this is the feature not being on
+    // for them rather than their role refusing them, and the console has a
+    // state for it that no other code-less 403 should reach.
+    expect(body(result).code).toBe(ApiErrorCode.INVITES_NOT_ENABLED);
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
   });
 

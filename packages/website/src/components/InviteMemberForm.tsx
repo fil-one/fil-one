@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { PaperPlaneTiltIcon } from '@phosphor-icons/react/dist/ssr';
 import { CreateInvitationSchema, OrgRole } from '@filone/shared';
 import type { CreateInvitationRequest } from '@filone/shared';
@@ -13,7 +13,11 @@ import { ROLE_DESCRIPTIONS } from '../lib/use-member-scope.js';
 export type InviteMemberFormProps = {
   /** The roles this caller may invite — their ceiling, as a list. */
   roles: readonly OrgRole[];
-  onSubmit: (body: CreateInvitationRequest) => void;
+  /**
+   * Awaited: the address is cleared when the invitation lands and kept when it
+   * does not, so a refusal leaves the operator the thing they typed.
+   */
+  onSubmit: (body: CreateInvitationRequest) => void | Promise<unknown>;
   submitting?: boolean;
   /**
    * The invite beta has not been switched on for this org. The server's own
@@ -50,6 +54,7 @@ export function InviteMemberForm({
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<OrgRole>(defaultRole(roles));
   const [emailError, setEmailError] = useState<string | null>(null);
+  const emailField = useRef<HTMLElement>(null);
 
   if (notEnabledMessage) {
     return (
@@ -63,16 +68,26 @@ export function InviteMemberForm({
     );
   }
 
-  function handleSubmit(event: React.FormEvent) {
+  async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     const parsed = CreateInvitationSchema.safeParse({ email, role });
     if (!parsed.success) {
       setEmailError(parsed.error.issues[0].message);
+      // Submitting moved focus to the button, and the message is about the
+      // field. Sending focus back is what makes it findable at all for anybody
+      // not reading the page by eye.
+      emailField.current?.focus();
       return;
     }
     setEmailError(null);
-    onSubmit(parsed.data);
-    setEmail('');
+    try {
+      await onSubmit(parsed.data);
+      setEmail('');
+    } catch {
+      // Rendered by the caller — as an alert on this form for the refusals
+      // worth keeping, a toast for the rest. The address stays put: a 409 on an
+      // emptied field leaves nothing to try again with.
+    }
   }
 
   return (
@@ -81,7 +96,7 @@ export function InviteMemberForm({
     // address is. Native validation would pre-empt it with a browser bubble
     // carrying different wording, in a different place, for the same field.
     <form
-      onSubmit={handleSubmit}
+      onSubmit={(event) => void handleSubmit(event)}
       noValidate
       className="flex flex-col gap-4"
       data-testid="invite-form"
@@ -91,6 +106,7 @@ export function InviteMemberForm({
           <FormField label="Email address" htmlFor="invite-email" error={emailError ?? undefined}>
             <Input
               id="invite-email"
+              ref={emailField}
               type="email"
               value={email}
               invalid={!!emailError}

@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
+import type { PlausibleRequestPayload } from '@plausible-analytics/tracker';
 
-import { scrubBreadcrumb, scrubEvent, scrubInviteToken } from './sentry-scrub.js';
+import { scrubBreadcrumb, scrubEvent, scrubInviteToken, scrubTrackedPayload } from './url-scrub.js';
+
+const TOKEN = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
 const LINK = 'https://app.filone.ai/invite/accept#token=super-secret-token';
 const SCRUBBED = 'https://app.filone.ai/invite/accept#token=REDACTED';
@@ -77,5 +80,43 @@ describe('scrubEvent', () => {
       type: undefined,
       message: 'boom',
     });
+  });
+});
+
+describe('what the analytics tracker is allowed to report', () => {
+  function pageview(over: Partial<PlausibleRequestPayload> = {}): PlausibleRequestPayload {
+    return { n: 'pageview', d: 'fil.one', u: 'https://fil.one/dashboard', ...over };
+  }
+
+  it('redacts the token out of the reported URL', () => {
+    const payload = scrubTrackedPayload(
+      pageview({ u: `https://fil.one/invite/accept#token=${TOKEN}` }),
+    );
+
+    // The tracker autocaptures its first pageview when its module is evaluated,
+    // which is before the route strips the fragment. Without this the token
+    // reaches the analytics endpoint on the one page load that carries it.
+    expect(payload.u).toBe('https://fil.one/invite/accept#token=REDACTED');
+    expect(payload.u).not.toContain(TOKEN);
+  });
+
+  it('redacts it out of the referrer too', () => {
+    // The pageview *after* the strip names the pre-strip URL as where it came
+    // from, so scrubbing only the URL moves the leak one event along.
+    const payload = scrubTrackedPayload(
+      pageview({ r: `https://fil.one/invite/accept#token=${TOKEN}` }),
+    );
+
+    expect(payload.r).toBe('https://fil.one/invite/accept#token=REDACTED');
+  });
+
+  it('leaves every other event as it was', () => {
+    const original = pageview({ r: 'https://example.com/', p: { plan: 'pro' } });
+
+    expect(scrubTrackedPayload(original)).toEqual(original);
+  });
+
+  it('keeps an absent referrer absent', () => {
+    expect(scrubTrackedPayload(pageview({ r: null })).r).toBeNull();
   });
 });

@@ -78,12 +78,19 @@ export function revokeInvitation(inviteId: string): Promise<void> {
  * Not gated on membership — the caller is by definition not a member yet — but
  * gated on the session's verified email matching the address invited, which
  * arrives as `INVITE_EMAIL_MISMATCH`.
+ *
+ * The only call that opts out of both pieces of app-wide plumbing. The org
+ * header would name an org this caller is not in, which the server can only
+ * refuse it for once org SSO ships; and the unverified-email redirect would
+ * navigate away from a page that has a better answer for that refusal, with the
+ * invitation still named.
  */
 export function acceptInvitation(token: string): Promise<AcceptInvitationResponse> {
-  return apiRequest<AcceptInvitationResponse>('/invitations/accept', {
-    method: 'POST',
-    body: JSON.stringify({ token }),
-  });
+  return apiRequest<AcceptInvitationResponse>(
+    '/invitations/accept',
+    { method: 'POST', body: JSON.stringify({ token }) },
+    { omitOrgHeader: true, rendersUnverifiedEmail: true },
+  );
 }
 
 /**

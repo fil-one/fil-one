@@ -162,19 +162,44 @@ function throwAccountDeleted(status: number, fromSessionProbe: boolean): never {
 }
 
 /**
+ * What a call wants done differently in the one funnel every call goes through.
+ *
+ * Both flags exist for the invitation accept, and both are about the same thing:
+ * the caller is not yet a member of the org they are joining, so the two pieces
+ * of app-wide plumbing that assume otherwise have to be opted out of rather than
+ * worked around at the call site.
+ */
+export interface ApiRequestBehavior {
+  /**
+   * Do not name the tab's active org. The header names an org the caller is by
+   * definition not in, and the accept route resolves the org from the
+   * invitation, so sending it can only add a refusal.
+   */
+  omitOrgHeader?: boolean;
+  /**
+   * Do not navigate to `/verify-email` on `EMAIL_NOT_VERIFIED`. The caller
+   * renders that state itself, with the invitation still named and the same CTA
+   * the redirect would have landed on.
+   */
+  rendersUnverifiedEmail?: boolean;
+}
+
+/**
  * The error a 403 becomes. Every denial the API can send is named here so a
  * caller renders intent rather than a generic toast, and the two role codes get
  * types a component can branch on.
  */
-function forbidden(body: { message?: string; code?: string }): Error {
+function forbidden(
+  body: { message?: string; code?: string },
+  behavior: ApiRequestBehavior = {},
+): Error {
   switch (body.code) {
     case ApiErrorCode.EMAIL_NOT_VERIFIED:
-      if (!isRedirecting) redirectTo('/verify-email');
-      // The code travels even though this branch is already navigating: the
-      // redirect is once per page load, so the second call to hit this gets an
-      // error and no navigation, and the accept page has a state to render for
-      // it — pointing at the verify-email surface rather than reporting a
-      // generic denial.
+      if (!isRedirecting && !behavior.rendersUnverifiedEmail) redirectTo('/verify-email');
+      // The code travels whether or not this branch navigated, so a caller that
+      // renders the state itself gets something to branch on — the accept page
+      // points at the verify-email surface with the invitation still named,
+      // which is better copy than the surface reached cold.
       return Object.assign(new Error('Email verification required'), {
         status: 403,
         code: ApiErrorCode.EMAIL_NOT_VERIFIED,
@@ -215,8 +240,9 @@ function forbidden(body: { message?: string; code?: string }): Error {
     // Every other 403 keeps its code, so a caller that knows one can branch on
     // it — the accept page tells INVITE_EMAIL_MISMATCH from the rest — while a
     // caller that does not still renders the message the server sent. A denial
-    // with no code at all arrives with none, which is itself a signal: the
-    // invite beta gate refuses that way on purpose.
+    // with no code arrives with none and means nothing in particular: an expired
+    // CSRF cookie is the routine one, so no component should read the absence of
+    // a code as a named refusal.
     default:
       return Object.assign(new Error(body.message ?? 'Access denied'), {
         status: 403,
@@ -231,7 +257,11 @@ function forbidden(body: { message?: string; code?: string }): Error {
  * - Redirects to Auth0 login on 401
  */
 // eslint-disable-next-line complexity/complexity
-export async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function apiRequest<T>(
+  path: string,
+  options: RequestInit = {},
+  behavior: ApiRequestBehavior = {},
+): Promise<T> {
   // The tab is on its way to another org. Held rather than rejected, for the
   // reason `getMe` returns instead of throwing on a mismatch: the page is
   // disappearing, and an error rendered over it would be the last thing the user
@@ -251,8 +281,9 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   // Every call names the org it is about. Without the header the server serves
   // the caller's own org, which is right on a first visit and wrong for anyone
   // who has switched — so the header goes on here, in the one funnel, rather
-  // than at each call site.
-  const activeOrgId = getActiveOrgId();
+  // than at each call site. The exception is a call about an org the caller is
+  // not in yet, which asks not to be asked.
+  const activeOrgId = behavior.omitOrgHeader ? null : getActiveOrgId();
   if (activeOrgId) headers.set(ORG_ID_HEADER, activeOrgId);
 
   const response = await fetch(`${API_URL}/api${path}`, {
@@ -301,7 +332,7 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
 
   if (response.status === 403) {
     const body = (await response.json().catch(() => ({}))) as { message?: string; code?: string };
-    throw forbidden(body);
+    throw forbidden(body, behavior);
   }
 
   // The code travels with the error, not just the message. Half the codes the
@@ -363,10 +394,17 @@ import type {
  * it for anything the header could be at fault for. What is left is `/me`
  * failing on its own account, and a stash held through it is worth dropping
  * once: the alternative is a tab that keeps naming an org nobody will answer for.
+ *
+ * `skipOrgReconcile` is for the one caller that cannot afford the recovery: the
+ * accept page holds a single-use token in memory, and a reload would spend the
+ * invitation without redeeming anything. It reads `/me` only to name the address
+ * this session carries, and the org it is joining is not the org the stash is
+ * about, so a mismatch there says nothing about the accept.
  */
 export async function getMe(options?: {
   forceRefresh?: boolean;
   include?: 'mfa';
+  skipOrgReconcile?: boolean;
 }): Promise<MeResponse> {
   const params = new URLSearchParams();
   if (options?.forceRefresh) params.set('forceRefresh', '1');
@@ -381,7 +419,7 @@ export async function getMe(options?: {
     clearActiveOrgAfterRefusal((err as { status?: number }).status);
     throw err;
   }
-  reconcileActiveOrg(me.orgId);
+  if (!options?.skipOrgReconcile) reconcileActiveOrg(me.orgId);
   return me;
 }
 

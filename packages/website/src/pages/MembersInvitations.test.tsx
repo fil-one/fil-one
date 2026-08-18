@@ -144,11 +144,20 @@ describe('MembersInvitations', () => {
     // Re-inviting is the retry, so the form is still there to do it with.
     expect(screen.getByTestId('invite-form')).toBeInTheDocument();
   });
+});
+
+describe('MembersInvitations — when the server refuses or the list goes stale', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
   it('renders the beta refusal as a state on the form, not an error', async () => {
     mockCreate.mockRejectedValue(
-      // The gate answers 403 with a message and deliberately no code.
-      apiError('Inviting teammates is not enabled for this organization yet.', 403),
+      apiError(
+        'Inviting teammates is not enabled for this organization yet.',
+        403,
+        ApiErrorCode.INVITES_NOT_ENABLED,
+      ),
     );
     renderSection();
 
@@ -159,6 +168,148 @@ describe('MembersInvitations', () => {
     expect(state).toHaveTextContent('not enabled for this organization yet');
     // The controls go: nothing on this form would work.
     expect(screen.queryByTestId('invite-form')).not.toBeInTheDocument();
+  });
+
+  it('leaves the form up for a 403 that names no refusal', async () => {
+    // An expired CSRF cookie answers this way, and it is the routine one: the
+    // next attempt works. Reading a code-less 403 as the beta gate took the
+    // form off the page for the rest of the visit.
+    mockCreate.mockRejectedValue(apiError('Invalid CSRF token', 403));
+    renderSection();
+
+    await typeEmail('new@example.com');
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+
+    expect(await screen.findByTestId('toast')).toHaveTextContent('Invalid CSRF token');
+    expect(screen.queryByTestId('invite-not-enabled')).not.toBeInTheDocument();
+    expect(screen.getByTestId('invite-form')).toBeInTheDocument();
+  });
+
+  it('keeps the address a refusal came back on, and clears it on success', async () => {
+    mockCreate
+      .mockRejectedValueOnce(apiError('Nope', 409, ApiErrorCode.INVITE_LIMIT_REACHED))
+      .mockResolvedValueOnce({
+        invitation: invitation({ email: 'new@example.com' }),
+        emailSent: true,
+      });
+    renderSection();
+
+    await typeEmail('new@example.com');
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+
+    // A 409 on an emptied field leaves nothing to try again with.
+    await screen.findByTestId('invite-error');
+    expect(await screen.findByLabelText('Email address')).toHaveValue('new@example.com');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+    await waitFor(() => expect(screen.getByLabelText('Email address')).toHaveValue(''));
+  });
+
+  it('drops the cap alert once a revoke frees the slot it named', async () => {
+    mockCreate.mockRejectedValue(
+      apiError(
+        'This organization already has 25 pending invitations. Revoke one before sending another.',
+        409,
+        ApiErrorCode.INVITE_LIMIT_REACHED,
+      ),
+    );
+    mockRevoke.mockResolvedValue(undefined);
+    renderSection(OrgRole.Owner, [invitation({ email: 'waiting@example.com' })]);
+
+    await typeEmail('new@example.com');
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+    await screen.findByTestId('invite-error');
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Revoke invitation for waiting@example.com' }),
+    );
+
+    await waitFor(() => expect(screen.queryByTestId('invite-error')).not.toBeInTheDocument());
+  });
+
+  it('says which field a validation failure is about, and goes back to it', async () => {
+    renderSection();
+
+    await typeEmail('not-an-address');
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+
+    const message = await screen.findByRole('alert');
+    expect(message).toHaveTextContent('Please provide a valid email address.');
+
+    const field = screen.getByLabelText('Email address');
+    expect(field).toHaveAttribute('aria-invalid', 'true');
+    expect(field).toHaveAttribute('aria-describedby', message.id);
+    expect(field).toHaveFocus();
+  });
+
+  it('keeps a rendered list when a refetch fails', async () => {
+    mockRevoke.mockResolvedValue(undefined);
+    renderSection(OrgRole.Owner, [
+      invitation({ inviteId: 'inv-1', email: 'waiting@example.com' }),
+      invitation({ inviteId: 'inv-2', email: 'other@example.com' }),
+    ]);
+
+    await screen.findAllByTestId('invitation-row');
+    // Every action here invalidates the list, so a refetch follows each one.
+    mockList.mockRejectedValue(apiError('Invitations are unavailable', 503));
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Revoke invitation for waiting@example.com' }),
+    );
+
+    expect(await screen.findByTestId('invitations-stale')).toHaveTextContent(
+      'Invitations are unavailable',
+    );
+    // The row the revoke removed is gone; the one beside it is still there.
+    expect(screen.getAllByTestId('invitation-row')).toHaveLength(1);
+    expect(screen.queryByTestId('invitations-error')).not.toBeInTheDocument();
+  });
+
+  it('keeps each in-flight revoke on its own row', async () => {
+    const held: Array<() => void> = [];
+    mockRevoke.mockImplementation(() => new Promise<void>((resolve) => held.push(resolve)));
+    renderSection(OrgRole.Owner, [
+      invitation({ inviteId: 'inv-1', email: 'waiting@example.com' }),
+      invitation({ inviteId: 'inv-2', email: 'other@example.com' }),
+    ]);
+
+    const first = await screen.findByRole('button', {
+      name: 'Revoke invitation for waiting@example.com',
+    });
+    fireEvent.click(first);
+    await waitFor(() => expect(first).toBeDisabled());
+
+    // A second revoke must not re-arm the first: one mutation instance carries
+    // one set of variables, and the row that asked it first is still going.
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Revoke invitation for other@example.com' }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Revoke invitation for other@example.com' }),
+      ).toBeDisabled(),
+    );
+    expect(first).toBeDisabled();
+
+    held.forEach((resolve) => resolve());
+  });
+
+  it('replaces the row for an address the server treats as the same one', async () => {
+    mockCreate.mockResolvedValue({
+      invitation: invitation({ inviteId: 'inv-2', email: 'bob@example.com' }),
+      emailSent: true,
+    });
+    // The refetch is held, so what is on screen is the optimistic answer alone.
+    renderSection(OrgRole.Owner, [invitation({ inviteId: 'inv-1', email: 'Bob@Example.com ' })]);
+
+    await screen.findByTestId('invitation-row');
+    mockList.mockReturnValue(new Promise(() => {}));
+
+    await typeEmail('bob@example.com');
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+
+    await waitFor(() => expect(screen.getAllByTestId('invitation-row')).toHaveLength(1));
+    expect(screen.getByTestId('invitation-row')).toHaveAttribute('data-invite-id', 'inv-2');
   });
 
   it('keeps the pending cap on the form so the remedy is beside the list', async () => {

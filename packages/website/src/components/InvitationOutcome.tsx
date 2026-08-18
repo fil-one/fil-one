@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { ApiErrorCode } from '@filone/shared';
 import type { AcceptInvitationResponse } from '@filone/shared';
 
@@ -11,27 +12,38 @@ import { ROLE_LABELS } from '../lib/use-member-scope.js';
  * A single centred panel, which is every state this surface has. It sits
  * outside the app shell: the caller is not yet a member of the org they are
  * joining, and the shell would greet them with the not-a-member interstitial.
+ *
+ * `takeFocus` is for the panels that replace the spinner. The whole page is one
+ * panel swapped for another, so a caller who is not watching it has no way to
+ * know the wait ended, what it ended as, or that there is now a button — and
+ * the live region below only reads the new text out, without moving them to it.
  */
 function Panel({
   title,
   children,
   testId,
+  takeFocus = false,
 }: {
   title: string;
   children: React.ReactNode;
   testId: string;
+  takeFocus?: boolean;
 }) {
+  const heading = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    if (takeFocus) heading.current?.focus();
+  }, [takeFocus]);
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 px-6">
-      <div
-        data-testid={testId}
-        className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-6 text-center"
-      >
-        <h1 className="text-base font-medium text-zinc-900">{title}</h1>
-        <div className="mt-2 flex flex-col items-center gap-4 text-sm text-zinc-600">
-          {children}
-        </div>
-      </div>
+    <div
+      data-testid={testId}
+      className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-6 text-center"
+    >
+      <h1 ref={heading} tabIndex={-1} className="text-base font-medium text-zinc-900 outline-none">
+        {title}
+      </h1>
+      <div className="mt-2 flex flex-col items-center gap-4 text-sm text-zinc-600">{children}</div>
     </div>
   );
 }
@@ -56,7 +68,11 @@ function Refused({
 
   if (code === ApiErrorCode.INVITE_EMAIL_MISMATCH) {
     return (
-      <Panel title="This invitation is for a different email address" testId="accept-mismatch">
+      <Panel
+        title="This invitation is for a different email address"
+        testId="accept-mismatch"
+        takeFocus
+      >
         <p>
           {sessionEmail
             ? `You are signed in as ${sessionEmail}, and this invitation names another address.`
@@ -72,7 +88,7 @@ function Refused({
 
   if (code === ApiErrorCode.EMAIL_NOT_VERIFIED) {
     return (
-      <Panel title="Verify your email address first" testId="accept-unverified">
+      <Panel title="Verify your email address first" testId="accept-unverified" takeFocus>
         <p>
           An invitation is accepted by the address it was sent to, so this account&rsquo;s email has
           to be verified first. The invitation is still waiting — verify, then open the link in the
@@ -87,14 +103,14 @@ function Refused({
 
   if (code === ApiErrorCode.INVITE_NOT_FOUND) {
     return (
-      <Panel title="This invitation is no longer valid" testId="accept-invalid">
+      <Panel title="This invitation is no longer valid" testId="accept-invalid" takeFocus>
         <p>{errorMessageOf(error, 'Ask whoever invited you to send a new invitation.')}</p>
       </Panel>
     );
   }
 
   return (
-    <Panel title="This invitation could not be accepted" testId="accept-failed">
+    <Panel title="This invitation could not be accepted" testId="accept-failed" takeFocus>
       <p>{errorMessageOf(error, 'Something went wrong. Ask for a new invitation.')}</p>
     </Panel>
   );
@@ -113,6 +129,7 @@ function Accepted({
     <Panel
       title={result.alreadyMember ? `You are already in ${orgName}` : `You have joined ${orgName}`}
       testId="accept-success"
+      takeFocus
     >
       <p>
         Your role in {orgName} is {ROLE_LABELS[result.role] ?? result.role}.
@@ -143,8 +160,32 @@ export type InvitationOutcomeProps = {
   onLogOut: () => void;
 };
 
-/** Every state redeeming an invitation can land in. */
+/**
+ * Every state redeeming an invitation can land in.
+ *
+ * The wrapper is the live region, and it is the same element in every state on
+ * purpose: a region announces what changes inside it, so one that is unmounted
+ * and replaced along with the panel announces nothing at all.
+ */
 export function InvitationOutcome({
+  status,
+  result,
+  error,
+  sessionEmail,
+  onContinue,
+  onLogOut,
+}: InvitationOutcomeProps) {
+  return (
+    <div
+      aria-live="polite"
+      className="flex min-h-screen items-center justify-center bg-zinc-50 px-6"
+    >
+      {panelFor({ status, result, error, sessionEmail, onContinue, onLogOut })}
+    </div>
+  );
+}
+
+function panelFor({
   status,
   result,
   error,

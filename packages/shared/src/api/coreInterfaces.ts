@@ -52,6 +52,13 @@ export enum ApiErrorCode {
    */
   INVITE_LIMIT_REACHED = 'INVITE_LIMIT_REACHED',
   /**
+   * Issuing invitations is not switched on for this organization yet. Its own
+   * code because the console renders it as a state of the form rather than a
+   * failed attempt, and the alternative — recognising it by the absence of a
+   * code — collects every other code-less 403 with it, CSRF expiry included.
+   */
+  INVITES_NOT_ENABLED = 'INVITES_NOT_ENABLED',
+  /**
    * The change would leave the organization with no Owner. Its own code because
    * the console's remedy is specific — promote somebody first, or transfer
    * ownership — and a generic conflict would send the user to support.

@@ -1,4 +1,5 @@
 import { canChangeRole, canManageTargetRole, OrgRole } from '@filone/shared';
+import type { MemberSummary } from '@filone/shared';
 
 import { usePermissions } from './use-permissions.js';
 
@@ -32,6 +33,39 @@ export const ROLE_DESCRIPTIONS: Record<OrgRole, string> = Object.freeze({
 
 export function roleLabel(role: string): string {
   return role in ROLE_LABELS ? ROLE_LABELS[role as OrgRole] : role;
+}
+
+/**
+ * How a member is named wherever the console names one — the row, the dialog
+ * about that row, and the toast that follows it.
+ *
+ * A user's display identity lives in Auth0; the membership row carries an id, a
+ * role, and when they joined, so `name` and `email` are usually absent today.
+ * One helper rather than one per surface, because the whole point of a dialog's
+ * sentence is that it is about the row behind it. The row prints the id under
+ * the name, which is what an operator quotes to support, so the fallback here
+ * does not have to.
+ */
+export function memberName(member: Pick<MemberSummary, 'name' | 'email'>): string {
+  return member.name || member.email || 'Unnamed member';
+}
+
+/**
+ * Whether the Owner seat can be handed to this member.
+ *
+ * Asked in two places — the row that offers the button, and the step-up resume
+ * that reopens the dialog after a trip through Auth0 — which have to agree: a
+ * resume is a second chance at the same action, and the caller's own role may
+ * have changed while they were away. The server enforces it either way; this
+ * keeps a refusal off the screen.
+ */
+export function canTransferTo(
+  member: Pick<MemberSummary, 'role' | 'userId'>,
+  scope: { mayTransfer: boolean; currentUserId?: string },
+): boolean {
+  return (
+    scope.mayTransfer && member.role !== OrgRole.Owner && member.userId !== scope.currentUserId
+  );
 }
 
 /**

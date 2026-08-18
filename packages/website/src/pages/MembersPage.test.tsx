@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
 import type { MemberSummary } from '@filone/shared';
 
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
+import { queryKeys } from '../lib/query-client.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 import { MembersPage } from './MembersPage.js';
 
@@ -63,13 +64,25 @@ function renderPage(role = OrgRole.Owner, members: MemberSummary[] = [OWNER, ADM
   mockListMembers.mockResolvedValue({ members });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   seedPermissions(client, role);
-  return render(
-    <QueryClientProvider client={client}>
-      <ToastProvider>
-        <MembersPage />
-      </ToastProvider>
-    </QueryClientProvider>,
+  return {
+    client,
+    ...render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <MembersPage />
+        </ToastProvider>
+      </QueryClientProvider>,
+    ),
+  };
+}
+
+/** A mutation that stays in flight until the test lets it finish. */
+function heldCalls<T>(mock: { mockImplementation: (fn: () => Promise<T>) => unknown }) {
+  const settle: Array<() => void> = [];
+  mock.mockImplementation(
+    () => new Promise<T>((resolve) => settle.push(() => resolve(undefined as T))),
   );
+  return () => settle.forEach((finish) => finish());
 }
 
 /** An error shaped the way `apiRequest` throws one. */
@@ -191,6 +204,37 @@ describe('MembersPage', () => {
     await waitFor(() => expect(mockRemove).toHaveBeenCalledWith('user-2'));
   });
 
+  it('asks before the caller changes their own role', async () => {
+    mockUpdateRole.mockResolvedValue({
+      userId: 'user-1',
+      role: OrgRole.Admin,
+      previousRole: OrgRole.Owner,
+    });
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText('Role for Ada Lovelace'), {
+      target: { value: OrgRole.Admin },
+    });
+
+    // One click or one arrow key used to be enough to give away the caller's
+    // own authority, with nobody but somebody else able to give it back.
+    expect(await screen.findByText('Change your own role?')).toBeInTheDocument();
+    expect(mockUpdateRole).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change my role' }));
+    await waitFor(() => expect(mockUpdateRole).toHaveBeenCalledWith('user-1', OrgRole.Admin));
+  });
+
+  it('names the members page the caller is about to lose', async () => {
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText('Role for Ada Lovelace'), {
+      target: { value: OrgRole.Member },
+    });
+
+    expect(await screen.findByText(/Managing members goes with it/)).toBeInTheDocument();
+  });
+
   it('keeps the last-owner refusal on the page with its remedy', async () => {
     mockUpdateRole.mockRejectedValue(
       apiError(
@@ -204,10 +248,58 @@ describe('MembersPage', () => {
     fireEvent.change(await screen.findByLabelText('Role for Ada Lovelace'), {
       target: { value: OrgRole.Admin },
     });
+    fireEvent.click(await screen.findByRole('button', { name: 'Change my role' }));
 
     const notice = await screen.findByTestId('members-last-owner');
     expect(notice).toHaveTextContent('Promote another member to owner first.');
     expect(notice).toHaveTextContent('An organization keeps at least one owner');
+  });
+
+  it('leaves the role picker usable while its own change is in flight', async () => {
+    const finish = heldCalls(mockUpdateRole);
+    renderPage();
+
+    const select = await screen.findByLabelText('Role for grace@example.com');
+    (select as HTMLSelectElement).focus();
+    fireEvent.change(select, { target: { value: OrgRole.Member } });
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('member-row')[1]).toHaveAttribute('aria-busy', 'true'),
+    );
+    // Disabling the control somebody just used drops focus to the body, and
+    // nothing puts it back. The row says it is busy instead.
+    expect(select).toBeEnabled();
+    expect(select).toHaveFocus();
+
+    fireEvent.change(select, { target: { value: OrgRole.ReadOnly } });
+    expect(mockUpdateRole).toHaveBeenCalledTimes(1);
+
+    await act(async () => finish());
+  });
+
+  it('tracks each in-flight row on its own account', async () => {
+    const finish = heldCalls(mockUpdateRole);
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText('Role for grace@example.com'), {
+      target: { value: OrgRole.Member },
+    });
+    await waitFor(() =>
+      expect(screen.getAllByTestId('member-row')[1]).toHaveAttribute('aria-busy', 'true'),
+    );
+
+    fireEvent.change(screen.getByLabelText('Role for Unnamed member'), {
+      target: { value: OrgRole.Admin },
+    });
+    await waitFor(() =>
+      expect(screen.getAllByTestId('member-row')[2]).toHaveAttribute('aria-busy', 'true'),
+    );
+
+    // One mutation instance carries one set of variables, so the second row
+    // starting used to say the first had finished.
+    expect(screen.getAllByTestId('member-row')[1]).toHaveAttribute('aria-busy', 'true');
+
+    await act(async () => finish());
   });
 
   it('surfaces a failed roster read in place of the table', async () => {
@@ -223,6 +315,38 @@ describe('MembersPage', () => {
     );
 
     expect(await screen.findByTestId('members-error')).toHaveTextContent('Members are unavailable');
+  });
+
+  it('keeps the roster on screen when a refetch fails', async () => {
+    mockRemove.mockResolvedValue(undefined);
+    renderPage();
+
+    await screen.findByText('Ada Lovelace');
+    // Every change on this page invalidates the roster, so a refetch follows
+    // each one — and one that does not come back used to take the page with it.
+    mockListMembers.mockRejectedValue(apiError('Members are unavailable', 503));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove grace@example.com' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove member' }));
+
+    expect(await screen.findByTestId('members-stale')).toHaveTextContent('Members are unavailable');
+    expect(screen.getAllByTestId('member-row')).toHaveLength(2);
+    expect(screen.queryByTestId('members-error')).not.toBeInTheDocument();
+  });
+
+  it('keeps a dialog’s copy about somebody through its closing transition', async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove grace@example.com' }));
+    await screen.findByText('Remove this member?');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    // The panel outlives the click by the length of its fade, and copy read off
+    // a target already set to null is a sentence about nobody.
+    expect(screen.getByTestId('confirm-dialog')).toHaveTextContent(
+      'grace@example.com loses access',
+    );
   });
 });
 
@@ -281,10 +405,16 @@ describe('MembersPage — transferring the owner seat', () => {
 
   it('reflects both seats when the transfer lands', async () => {
     // The transfer settles both seats server-side, so the refetch that follows
-    // answers with the roster as it now is.
+    // answers with the roster as it now is. The third row is the pin: the
+    // optimistic patch touches the two seats and nothing else, so a roster
+    // showing it can only have come from the refetch the invalidation asked for.
     mockTransfer.mockImplementation(async () => {
       mockListMembers.mockResolvedValue({
-        members: [{ ...OWNER, role: OrgRole.Admin }, { ...ADMIN, role: OrgRole.Owner }, PLAIN],
+        members: [
+          { ...OWNER, role: OrgRole.Admin },
+          { ...ADMIN, role: OrgRole.Owner },
+          { ...PLAIN, role: OrgRole.ReadOnly },
+        ],
       });
       return { userId: 'user-2', previousOwnerUserId: 'user-1' };
     });
@@ -300,7 +430,60 @@ describe('MembersPage — transferring the owner seat', () => {
       const rows = screen.getAllByTestId('member-row');
       expect(rows[0]).toHaveAttribute('data-member-role', OrgRole.Admin);
       expect(rows[1]).toHaveAttribute('data-member-role', OrgRole.Owner);
+      expect(rows[2]).toHaveAttribute('data-member-role', OrgRole.ReadOnly);
     });
+  });
+
+  it('closes the dialog once the seat has changed hands', async () => {
+    mockTransfer.mockResolvedValue({ userId: 'user-2', previousOwnerUserId: 'user-1' });
+    renderPage();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Transfer ownership to grace@example.com' }),
+    );
+    fireEvent.change(screen.getByLabelText('Type Acme to confirm'), { target: { value: 'Acme' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Transfer ownership' }));
+
+    // Left open, it offers a destructive button to a caller who is now an
+    // Admin, and the server answers the second click with a refusal.
+    await waitFor(() => expect(screen.queryByTestId('transfer-dialog')).not.toBeInTheDocument());
+    expect(mockTransfer).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores a resumed action naming somebody the caller cannot transfer to', async () => {
+    // A trip through Auth0 takes as long as the caller takes, and the roster it
+    // comes back to is the one that decides.
+    window.history.replaceState(null, '', '/members?action=transfer-ownership:user-2');
+    renderPage(OrgRole.Owner, [OWNER, { ...ADMIN, role: OrgRole.Owner }, PLAIN]);
+
+    await screen.findByText('Ada Lovelace');
+    expect(screen.queryByTestId('transfer-dialog')).not.toBeInTheDocument();
+  });
+
+  it('ignores a resumed action naming the caller themselves', async () => {
+    window.history.replaceState(null, '', '/members?action=transfer-ownership:user-1');
+    renderPage();
+
+    await screen.findByText('Ada Lovelace');
+    expect(screen.queryByTestId('transfer-dialog')).not.toBeInTheDocument();
+  });
+
+  it('does not reopen a resumed transfer the roster has already answered', async () => {
+    window.history.replaceState(null, '', '/members?action=transfer-ownership:user-2');
+    const { client } = renderPage(OrgRole.Owner, [OWNER, PLAIN]);
+
+    await screen.findByText('Ada Lovelace');
+    expect(screen.queryByTestId('transfer-dialog')).not.toBeInTheDocument();
+
+    // The member turns up in a later read. The resume was spent when the roster
+    // arrived without them, so nothing opens a dialog nobody asked for.
+    mockListMembers.mockResolvedValue({ members: [OWNER, ADMIN, PLAIN] });
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: queryKeys.members });
+    });
+
+    await waitFor(() => expect(screen.getAllByTestId('member-row')).toHaveLength(3));
+    expect(screen.queryByTestId('transfer-dialog')).not.toBeInTheDocument();
   });
 
   it('reopens the dialog on the member a step-up round trip was about', async () => {

@@ -6,20 +6,12 @@ import { Button } from './Button';
 import { RoleSelect } from './RoleSelect';
 import { Table } from './Table/Table';
 import { formatDate } from '../lib/time.js';
-import { ROLE_LABELS, ROLES_BY_AUTHORITY } from '../lib/use-member-scope.js';
-
-/**
- * How a member is named when the profile row has learned nothing about them.
- *
- * A user's display identity lives in Auth0; the row we hold carries their id,
- * their org, and when they joined. So `name` and `email` are usually absent
- * today, and the id is the only thing that is always true. It goes on every row
- * as the second line — it is also what an operator quotes to support — and the
- * first line falls back to it rather than inventing a placeholder person.
- */
-function memberName(member: MemberSummary): string {
-  return member.name || member.email || 'Unnamed member';
-}
+import {
+  canTransferTo,
+  memberName,
+  ROLE_LABELS,
+  ROLES_BY_AUTHORITY,
+} from '../lib/use-member-scope.js';
 
 function RoleBadge({ role }: { role: OrgRole }) {
   return (
@@ -49,9 +41,15 @@ export type MembersTableProps = {
   onChangeRole?: (member: MemberSummary, role: OrgRole) => void;
   onRemove?: (member: MemberSummary) => void;
   onTransfer?: (member: MemberSummary) => void;
-  /** The member a mutation is in flight for — that row's controls go inert. */
-  pendingUserId?: string;
+  /**
+   * The members a mutation is in flight for — those rows' controls go inert. A
+   * set rather than one id, so a second row going busy does not bring the first
+   * one back.
+   */
+  pendingUserIds?: ReadonlySet<string>;
 };
+
+const NONE_PENDING: ReadonlySet<string> = new Set();
 
 /**
  * The org's roster, and the verbs the caller's role reaches on each row.
@@ -71,7 +69,7 @@ export function MembersTable({
   onChangeRole,
   onRemove,
   onTransfer,
-  pendingUserId,
+  pendingUserIds = NONE_PENDING,
 }: MembersTableProps) {
   // The roles this caller could move this member into, current role included —
   // exactly the set the server would accept for them. One entry means the role
@@ -80,15 +78,12 @@ export function MembersTable({
     ROLES_BY_AUTHORITY.filter((role) => mayChangeRole(member.role, role));
 
   const canRemove = (member: MemberSummary) => Boolean(onRemove) && mayManageTarget(member.role);
-  const canTransferTo = (member: MemberSummary) =>
-    Boolean(onTransfer) &&
-    mayTransfer &&
-    member.role !== OrgRole.Owner &&
-    member.userId !== currentUserId;
+  const offersTransfer = (member: MemberSummary) =>
+    Boolean(onTransfer) && canTransferTo(member, { mayTransfer, currentUserId });
 
   // The header follows the cells: a column whose every row is empty is a column
   // of whitespace with a screen-reader label attached to nothing.
-  const showActions = members.some((m) => canRemove(m) || canTransferTo(m));
+  const showActions = members.some((m) => canRemove(m) || offersTransfer(m));
 
   return (
     <Table>
@@ -108,7 +103,7 @@ export function MembersTable({
         {members.map((member) => {
           const name = memberName(member);
           const roles = rolesFor(member);
-          const pending = pendingUserId === member.userId;
+          const pending = pendingUserIds.has(member.userId);
 
           return (
             <Table.Row
@@ -116,6 +111,7 @@ export function MembersTable({
               data-testid="member-row"
               data-member-id={member.userId}
               data-member-role={member.role}
+              aria-busy={pending || undefined}
             >
               <Table.Cell>
                 <div className="flex items-center gap-2">
@@ -131,12 +127,19 @@ export function MembersTable({
 
               <Table.Cell>
                 {onChangeRole && roles.length > 1 ? (
+                  // Left enabled while its own change is in flight, and the
+                  // change ignored instead. Disabling the control somebody just
+                  // used drops focus to the document body, and nothing puts it
+                  // back — so a keyboard caller loses their place on the row
+                  // they are working. `aria-busy` on the row says what the
+                  // disabled attribute used to.
                   <RoleSelect
                     value={member.role}
                     roles={roles}
-                    disabled={pending}
                     aria-label={`Role for ${name}`}
-                    onChange={(role) => onChangeRole(member, role)}
+                    onChange={(role) => {
+                      if (!pending) onChangeRole(member, role);
+                    }}
                   />
                 ) : (
                   <RoleBadge role={member.role} />
@@ -153,7 +156,7 @@ export function MembersTable({
               {showActions && (
                 <Table.Cell className="text-right">
                   <div className="flex justify-end gap-1">
-                    {canTransferTo(member) && onTransfer && (
+                    {offersTransfer(member) && onTransfer && (
                       <Button
                         variant="ghost"
                         size="sm"

@@ -44,9 +44,10 @@ describe('the accept route’s beforeLoad', () => {
 
     runBeforeLoad();
 
-    // The accept call happens on render, which is after this. The ordering is
-    // the whole security property: a fragment that is still in the URL when a
-    // request goes out is a fragment an error reporter can capture.
+    // What this pins is the ordering, which is the security property: the strip
+    // has happened by the time `beforeLoad` returns, and the accept call is
+    // fired on render, after it. So no request can go out while the token is
+    // still in a URL an error reporter would capture.
     expect(replaceState).toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
