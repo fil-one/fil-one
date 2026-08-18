@@ -1,6 +1,6 @@
 # ADR: Self-serve account deletion
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-08-13
 
 ## Context
@@ -81,9 +81,9 @@ The safeguard sits ahead of the confirmation instead: a code emailed to the requ
 
 The system has many write paths, so two guards divide them between each other. The profile fence covers everything a session or a credential can reach; the billing fence covers the asynchronous writers that have neither.
 
-| Guard                                              | Written at                             | Stops                                                                                                                                                                                 |
-| -------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ORG#/PROFILE.deleting = true`                     | confirm, re-applied each pass          | every session on its next request; RAG bearer-key queries; resource creation: access keys, RAG keys, buckets, tenant setup, RAG enablement; every background job, which skips the org |
+| Guard                                                | Written at                               | Stops                                                                                                                                                                                 |
+| ---------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ORG#/PROFILE.deleting = true`                       | confirm, re-applied each pass            | every session on its next request; RAG bearer-key queries; resource creation: access keys, RAG keys, buckets, tenant setup, RAG enablement; every background job, which skips the org |
 | `attribute_not_exists(deletedAt)` on billing updates | scrub, when `deletedAt` lands on the row | a Stripe webhook writing personal data back to a scrubbed billing row                                                                                                                 |
 
 **The request paths read the profile fence.** The flag is read at two points on a request's timeline. `authMiddleware` reads it after resolving the identity row and answers `410` when it is set, which is what makes the confirm kill every member's session at once. Each creation writer then checks the same flag again immediately before its irreversible action, because a request that passed auth before the fence landed can stay in flight for up to API Gateway's 29 seconds, and the auth-time check does nothing for a request already past it. Where the writer's final action is a DynamoDB write, the check is a condition on that write and the refusal is atomic. Where the resource is minted upstream (a bucket, an access key, a Stripe subscription), the check sits just ahead of the mint and narrows the window the deferred-risk section bounds. The RAG bearer path reads the same flag at query time, because a standalone credential has no session for the middleware to refuse.
