@@ -1,0 +1,224 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ApiErrorCode, OrgRole } from '@filone/shared';
+import type { InvitationSummary } from '@filone/shared';
+
+import { ToastProvider } from '../components/Toast/ToastProvider.js';
+import { seedPermissions } from '../lib/test-permissions.js';
+import { MembersInvitations } from './MembersInvitations.js';
+
+// ---------------------------------------------------------------------------
+// Mocks — API client boundary
+// ---------------------------------------------------------------------------
+
+const mockList = vi.fn();
+const mockCreate = vi.fn();
+const mockRevoke = vi.fn();
+
+vi.mock('../lib/members-api.js', () => ({
+  listInvitations: () => mockList(),
+  createInvitation: (...args: unknown[]) => mockCreate(...args),
+  revokeInvitation: (...args: unknown[]) => mockRevoke(...args),
+}));
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+function invitation(over: Partial<InvitationSummary> = {}): InvitationSummary {
+  return {
+    inviteId: 'inv-1',
+    email: 'new@example.com',
+    role: OrgRole.Member,
+    invitedBy: 'user-1',
+    createdAt: '2026-08-01T00:00:00Z',
+    expiresAt: '2026-08-15T00:00:00Z',
+    status: 'pending',
+    expired: false,
+    ...over,
+  };
+}
+
+function renderSection(role = OrgRole.Owner, invitations: InvitationSummary[] = []) {
+  mockList.mockResolvedValue({ invitations });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  seedPermissions(client, role);
+  return render(
+    <QueryClientProvider client={client}>
+      <ToastProvider>
+        <MembersInvitations />
+      </ToastProvider>
+    </QueryClientProvider>,
+  );
+}
+
+/** An error shaped the way `apiRequest` throws one. */
+function apiError(message: string, status: number, code?: string): Error {
+  return Object.assign(new Error(message), { status, code });
+}
+
+async function typeEmail(value: string) {
+  fireEvent.change(await screen.findByLabelText('Email address'), { target: { value } });
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('MembersInvitations', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('says nothing is outstanding when nothing is', async () => {
+    renderSection();
+    expect(await screen.findByTestId('invitations-empty')).toBeInTheDocument();
+  });
+
+  it('tells an expired invitation from one nobody received', async () => {
+    renderSection(OrgRole.Owner, [
+      invitation({ inviteId: 'inv-1', email: 'waiting@example.com' }),
+      invitation({ inviteId: 'inv-2', email: 'stale@example.com', expired: true }),
+      invitation({ inviteId: 'inv-3', email: 'unsent@example.com', lastSendFailed: true }),
+    ]);
+
+    expect(await screen.findAllByTestId('invitation-row')).toHaveLength(3);
+    expect(screen.getByTestId('invitation-expired')).toHaveTextContent('Expired');
+    expect(screen.getByTestId('invitation-undelivered')).toHaveTextContent('Not delivered');
+    expect(screen.getByText('Waiting')).toBeInTheDocument();
+  });
+
+  it('sends an invitation at the chosen role', async () => {
+    mockCreate.mockResolvedValue({ invitation: invitation(), emailSent: true });
+    renderSection();
+
+    await typeEmail('new@example.com');
+    fireEvent.change(screen.getByLabelText('Role'), { target: { value: OrgRole.Admin } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+
+    await waitFor(() =>
+      expect(mockCreate).toHaveBeenCalledWith({ email: 'new@example.com', role: OrgRole.Admin }),
+    );
+  });
+
+  it('bounds the role picker by the caller’s own ceiling', async () => {
+    renderSection(OrgRole.Admin);
+
+    const select = await screen.findByLabelText('Role');
+    const options = Array.from(select.querySelectorAll('option')).map((o) => o.value);
+    expect(options).toEqual([OrgRole.Admin, OrgRole.Member, OrgRole.ReadOnly]);
+  });
+
+  it('offers every role to an Owner', async () => {
+    renderSection(OrgRole.Owner);
+
+    const select = await screen.findByLabelText('Role');
+    const options = Array.from(select.querySelectorAll('option')).map((o) => o.value);
+    expect(options).toContain(OrgRole.Owner);
+  });
+
+  it('refuses an invalid address without asking the server', async () => {
+    renderSection();
+
+    await typeEmail('not-an-address');
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+
+    expect(await screen.findByText('Please provide a valid email address.')).toBeInTheDocument();
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it('says an invitation was created but never delivered, and offers the retry', async () => {
+    mockCreate.mockResolvedValue({
+      invitation: invitation({ email: 'unsent@example.com', lastSendFailed: true }),
+      emailSent: false,
+    });
+    renderSection();
+
+    await typeEmail('unsent@example.com');
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+
+    const notice = await screen.findByTestId('invite-undelivered');
+    expect(notice).toHaveTextContent('the email did not go out');
+    expect(notice).toHaveTextContent('unsent@example.com');
+    // Re-inviting is the retry, so the form is still there to do it with.
+    expect(screen.getByTestId('invite-form')).toBeInTheDocument();
+  });
+
+  it('renders the beta refusal as a state on the form, not an error', async () => {
+    mockCreate.mockRejectedValue(
+      // The gate answers 403 with a message and deliberately no code.
+      apiError('Inviting teammates is not enabled for this organization yet.', 403),
+    );
+    renderSection();
+
+    await typeEmail('new@example.com');
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+
+    const state = await screen.findByTestId('invite-not-enabled');
+    expect(state).toHaveTextContent('not enabled for this organization yet');
+    // The controls go: nothing on this form would work.
+    expect(screen.queryByTestId('invite-form')).not.toBeInTheDocument();
+  });
+
+  it('keeps the pending cap on the form so the remedy is beside the list', async () => {
+    mockCreate.mockRejectedValue(
+      apiError(
+        'This organization already has 25 pending invitations. Revoke one before sending another.',
+        409,
+        ApiErrorCode.INVITE_LIMIT_REACHED,
+      ),
+    );
+    renderSection();
+
+    await typeEmail('new@example.com');
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+
+    expect(await screen.findByTestId('invite-error')).toHaveTextContent(
+      'Revoke one before sending another.',
+    );
+    expect(screen.getByTestId('invite-form')).toBeInTheDocument();
+  });
+
+  it('withdraws an invitation', async () => {
+    mockRevoke.mockResolvedValue(undefined);
+    renderSection(OrgRole.Owner, [invitation({ email: 'waiting@example.com' })]);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Revoke invitation for waiting@example.com' }),
+    );
+
+    await waitFor(() => expect(mockRevoke).toHaveBeenCalledWith('inv-1'));
+  });
+
+  it('does not offer an Admin the revoke on an Owner invitation', async () => {
+    renderSection(OrgRole.Admin, [
+      invitation({ inviteId: 'inv-1', email: 'boss@example.com', role: OrgRole.Owner }),
+      invitation({ inviteId: 'inv-2', email: 'peer@example.com', role: OrgRole.Admin }),
+    ]);
+
+    expect(
+      await screen.findByRole('button', { name: 'Revoke invitation for peer@example.com' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Revoke invitation for boss@example.com' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('surfaces a failed invitations read in place of the list', async () => {
+    mockList.mockRejectedValue(apiError('Invitations are unavailable', 503));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seedPermissions(client, OrgRole.Owner);
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <MembersInvitations />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByTestId('invitations-error')).toHaveTextContent(
+      'Invitations are unavailable',
+    );
+  });
+});

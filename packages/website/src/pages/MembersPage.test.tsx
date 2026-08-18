@@ -22,6 +22,8 @@ vi.mock('../lib/members-api.js', () => ({
   updateMemberRole: (...args: unknown[]) => mockUpdateRole(...args),
   removeMember: (...args: unknown[]) => mockRemove(...args),
   listInvitations: () => mockListInvitations(),
+  createInvitation: vi.fn(),
+  revokeInvitation: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
