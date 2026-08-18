@@ -210,7 +210,21 @@ describe('getMe — when /me itself refuses', () => {
     vi.restoreAllMocks();
   });
 
-  it('drops the stash before surfacing the error', async () => {
+  it('drops the stash when the org header is what was refused', async () => {
+    const { api, stash } = await freshApi();
+    stash.setActiveOrgId(ORG_A);
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ message: 'not a member' }), { status: 403 }),
+    );
+
+    await expect(api.getMe()).rejects.toThrow();
+
+    // `/me` is the only carrier of the echo that clears a stale stash, so a
+    // refusal from it would otherwise leave the tab naming the same org forever.
+    expect(stash.getActiveOrgId()).toBeNull();
+  });
+
+  it('keeps the stash when /me failed on its own', async () => {
     const { api, stash } = await freshApi();
     stash.setActiveOrgId(ORG_A);
     vi.mocked(fetch).mockResolvedValue(
@@ -219,9 +233,10 @@ describe('getMe — when /me itself refuses', () => {
 
     await expect(api.getMe()).rejects.toThrow();
 
-    // `/me` is the only carrier of the echo that clears a stale stash, so a
-    // refusal from it would otherwise leave the tab naming the same org forever.
-    expect(stash.getActiveOrgId()).toBeNull();
+    // The query client retries a 5xx. Clearing here would send the retry with no
+    // header, the server would answer under the identity-row org, and the tab
+    // would silently rescope with the other org's data still on screen.
+    expect(stash.getActiveOrgId()).toBe(ORG_A);
   });
 
   it('leaves a good stash alone when the call succeeds', async () => {

@@ -144,9 +144,13 @@ describe('recovering from a /me that refuses', () => {
   beforeEach(() => {
     sessionStorage.clear();
     vi.resetModules();
+    reload.mockClear();
+    assign.mockClear();
+    vi.stubGlobal('location', { reload, assign });
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -160,26 +164,119 @@ describe('recovering from a /me that refuses', () => {
     const stash = await freshStash();
     stash.setActiveOrgId(ORG_A);
 
-    expect(stash.clearActiveOrgAfterRefusal()).toBe(true);
+    expect(stash.clearActiveOrgAfterRefusal(403)).toBe(true);
     expect(stash.getActiveOrgId()).toBeNull();
   });
+
+  it('reloads, so data for the org this tab has left does not outlive it', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const stash = await freshStash();
+    stash.setActiveOrgId(ORG_A);
+
+    stash.clearActiveOrgAfterRefusal(403);
+
+    expect(reload).toHaveBeenCalledTimes(1);
+    // And the page that comes back says why it changed under the user.
+    expect(stash.takeReconcileNotice()).toBe(true);
+  });
+
+  it.each([500, 502, undefined])(
+    'keeps the stash when /me failed on its own (%s)',
+    async (status) => {
+      // The query client retries a 5xx and a network error. Clearing on one sent
+      // the retry with no header, the server answered under the identity-row org,
+      // and org B's data stayed on screen while every later request landed
+      // somewhere else.
+      const stash = await freshStash();
+      stash.setActiveOrgId(ORG_A);
+
+      expect(stash.clearActiveOrgAfterRefusal(status)).toBe(false);
+      expect(stash.getActiveOrgId()).toBe(ORG_A);
+      expect(reload).not.toHaveBeenCalled();
+    },
+  );
 
   it('does it once per page load', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const stash = await freshStash();
     stash.setActiveOrgId(ORG_A);
-    stash.clearActiveOrgAfterRefusal();
+    stash.clearActiveOrgAfterRefusal(403);
     stash.setActiveOrgId(ORG_B);
 
-    // A `/me` failing for its own reasons must not turn into a tab that clears
+    // A `/me` refusing for its own reasons must not turn into a tab that clears
     // and retries without end.
-    expect(stash.clearActiveOrgAfterRefusal()).toBe(false);
+    expect(stash.clearActiveOrgAfterRefusal(403)).toBe(false);
     expect(stash.getActiveOrgId()).toBe(ORG_B);
   });
 
   it('does nothing when the tab had no stash', async () => {
     const stash = await freshStash();
 
-    expect(stash.clearActiveOrgAfterRefusal()).toBe(false);
+    expect(stash.clearActiveOrgAfterRefusal(403)).toBe(false);
+  });
+});
+
+describe('a switch whose navigation never happens', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    vi.resetModules();
+    vi.useFakeTimers();
+    reload.mockClear();
+    assign.mockClear();
+    vi.stubGlobal('location', { reload, assign });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('rolls back so the tab keeps working in the org still on screen', async () => {
+    // The upload page installs a cancelable `beforeunload` while a transfer is
+    // running. A user who answers "stay on this page" leaves a tab that asked to
+    // switch and did not: without the rollback every apiRequest hangs forever
+    // and the switcher's rows stay inert.
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const stash = await import('./active-org.js');
+    stash.setActiveOrgId(ORG_A);
+    const seen: boolean[] = [];
+    stash.onSwitchingOrgChange((switching) => seen.push(switching));
+
+    stash.switchToOrg(ORG_B);
+    expect(stash.isSwitchingOrg()).toBe(true);
+    expect(stash.getActiveOrgId()).toBe(ORG_B);
+
+    await vi.runAllTimersAsync();
+
+    expect(stash.isSwitchingOrg()).toBe(false);
+    expect(stash.getActiveOrgId()).toBe(ORG_A);
+    // The switcher hears both edges, so its rows re-enable.
+    expect(seen).toStrictEqual([true, false]);
+  });
+
+  it('clears the stash again for a tab that had none before the switch', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const stash = await import('./active-org.js');
+
+    stash.switchToOrg(ORG_B);
+    await vi.runAllTimersAsync();
+
+    expect(stash.getActiveOrgId()).toBeNull();
+    expect(stash.isSwitchingOrg()).toBe(false);
+  });
+
+  it('stays latched when the page really is leaving', async () => {
+    const stash = await import('./active-org.js');
+    stash.setActiveOrgId(ORG_A);
+
+    stash.switchToOrg(ORG_B);
+    window.dispatchEvent(new Event('pagehide'));
+    await vi.runAllTimersAsync();
+
+    // The load is on its way: rolling back here would put the old org back
+    // under the page that is about to render the new one.
+    expect(stash.isSwitchingOrg()).toBe(true);
+    expect(stash.getActiveOrgId()).toBe(ORG_B);
   });
 });
