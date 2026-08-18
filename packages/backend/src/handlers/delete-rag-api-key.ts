@@ -112,15 +112,41 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
       }),
     });
   } catch (err) {
-    // A concurrent delete of the same key cancels the transaction — the key is
-    // gone either way, so report it as not found rather than a server error.
-    // Only the deletes can get here: an audit-side cancellation never becomes a
-    // 404, which would report a key that is still live as revoked.
-    if (err instanceof TransactionCanceledException) return notFoundResponse();
+    // A concurrent delete of the same key fails the deletes' own conditions —
+    // the key is gone either way, so report it as not found rather than a
+    // server error.
+    if (deleteConditionFailed(err)) return notFoundResponse();
     throw err;
   }
 
   return { statusCode: 204, body: '' };
+}
+
+/**
+ * The ORG record and the hash LOOKUP row, which lead the transaction: the audit
+ * event is appended after them, and the retry that drops the event sends these
+ * two alone. Either way their cancellation reasons are the first two.
+ */
+const DELETE_ITEM_COUNT = 2;
+
+/**
+ * Whether the deletes' own conditions are what cancelled the transaction.
+ *
+ * Only `ConditionalCheckFailed` on the delete items means the rows went away
+ * under this request. A `TransactionConflict` or a throttle cancels the same
+ * items and means the opposite: nothing was deleted, the LOOKUP row still
+ * authorises the key, and a retry may still land — so a 404 there reports a
+ * live key as revoked and hides a retryable failure from the caller. The audit
+ * item's own failures never reach here: `commitAudited` retries the deletes
+ * without the event.
+ */
+function deleteConditionFailed(err: unknown): boolean {
+  if (!(err instanceof TransactionCanceledException)) return false;
+  const cancelled = (err.CancellationReasons ?? [])
+    .slice(0, DELETE_ITEM_COUNT)
+    .map((reason) => reason.Code)
+    .filter((code) => code && code !== 'None');
+  return cancelled.length > 0 && cancelled.every((code) => code === 'ConditionalCheckFailed');
 }
 
 export const handler = middy(baseHandler)
