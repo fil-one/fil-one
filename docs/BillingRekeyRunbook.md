@@ -384,11 +384,13 @@ the legacy rows are still there to recover from.
 scan-driven jobs keep one subscription row per org, and each says so at the
 severity the finding deserves:
 
-- `[<job>] Not an org row, skipping` and `[<job>] Leftover CUSTOMER# row beside
-its org row`, at **warning**. Every org whose legacy row is still standing
-  produces one on every run. This is the expected reading of a half-cleaned
-  table: the jobs act on org rows only, so a frozen legacy row can neither
-  disable a paying tenant nor meter usage to a superseded subscription.
+- `[<job>] Not an org row, skipping`, at **warning**. Every org whose legacy row
+  is still standing produces one on every run. This is the expected reading of a
+  half-cleaned table: the jobs act on org rows only, so a frozen legacy row can
+  neither disable a paying tenant nor meter usage to a superseded subscription.
+  (`[<job>] Leftover CUSTOMER# row beside its org row` reports the same pair to
+  code that calls `assertOneRowPerOrg` with rows the scan did not filter. No job
+  run emits it, because the scan drops those rows first.)
 - `[<job>] INVARIANT VIOLATED: two subscription rows for one org`, at **error**,
   naming both rows' `subscriptionId`s. Two rows of the same kind for one org —
   the collision the backfill's resolution was supposed to have settled. This one

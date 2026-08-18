@@ -402,6 +402,11 @@ export function scannedSubscription(
  * - An `ORG#` row beside a `CUSTOMER#` row of the same org is the expected state
  *   between the flip and the dated cleanup step. Nothing writes the legacy row
  *   any more, so it is a frozen leftover — logged at WARN, naming it as one.
+ *   That branch is a backstop for a direct caller: `scanSubscriptions` drops
+ *   non-org rows in `scannableOwner`, so a job run reports its leftovers as
+ *   `Not an org row, skipping` and never reaches this line. The check stays
+ *   because this function is exported, and a caller handing it unfiltered rows
+ *   would otherwise silently drop one of them.
  * - Two rows of the SAME kind is the real violation: two live subscriptions for
  *   one org, which the backfill's collision resolution was supposed to have
  *   settled. Logged at ERROR with both `subscriptionId`s, because which of them

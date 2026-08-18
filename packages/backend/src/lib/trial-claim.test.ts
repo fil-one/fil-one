@@ -15,16 +15,19 @@ vi.mock('sst', () => ({
 
 vi.mock('./trial-entitlement.js', () => ({ ensureTrialEntitlement: vi.fn() }));
 vi.mock('./org-membership.js', () => ({ listMemberships: vi.fn() }));
+vi.mock('./stripe-webhook-metrics.js', () => ({ emitTrialClaimBlockedByLegacyRow: vi.fn() }));
 
 const ddbMock = mockClient(DynamoDBClient);
 
 import { claimTrialIfEligible } from './trial-claim.js';
 import { listMemberships } from './org-membership.js';
+import { emitTrialClaimBlockedByLegacyRow } from './stripe-webhook-metrics.js';
 import { ensureTrialEntitlement } from './trial-entitlement.js';
 import type { UserInfo } from './user-context.js';
 
 const mockEnsureTrialEntitlement = vi.mocked(ensureTrialEntitlement);
 const mockListMemberships = vi.mocked(listMemberships);
+const mockEmitBlocked = vi.mocked(emitTrialClaimBlockedByLegacyRow);
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -75,9 +78,25 @@ describe('claimTrialIfEligible', () => {
     await expect(claimTrialIfEligible(soloOwner())).resolves.toBe('legacy-row');
 
     expect(mockEnsureTrialEntitlement).not.toHaveBeenCalled();
-    // Before the eligibility read too, so no caller can reorder its way past it.
-    expect(mockListMemberships).not.toHaveBeenCalled();
+    expect(mockEmitBlocked).toHaveBeenCalledOnce();
     errorSpy.mockRestore();
+  });
+
+  it('answers not-own-org for an invited member whose own org has a legacy row', async () => {
+    // The row is keyed by user and the request is about another org, so the
+    // legacy refusal is not the answer here: it would return a 503 "billing is
+    // unavailable" for a member opening a second org, and inflate the denial
+    // rate the runbook's cleanup precondition reads. Nothing can be minted
+    // either way — the mint is downstream of the ownership test.
+    ddbMock.on(GetItemCommand, { Key: LEGACY_KEY }).resolves({ Item: LEGACY_KEY });
+    const invited = soloOwner({
+      membership: { orgId: ORG_ID, userId: USER_ID, role: OrgRole.Member, source: 'invitation' },
+    } as Partial<UserInfo>);
+
+    await expect(claimTrialIfEligible(invited)).resolves.toBe('not-own-org');
+
+    expect(mockEmitBlocked).not.toHaveBeenCalled();
+    expect(mockEnsureTrialEntitlement).not.toHaveBeenCalled();
   });
 
   it('reads the row consistently, so a claim moments old is not missed', async () => {
