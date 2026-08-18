@@ -109,6 +109,22 @@ function cancelledOnTheUpdate() {
   });
 }
 
+/** The same item cancelled by a transient, which means the write did not land. */
+function cancelledByAConflict() {
+  return new TransactionCanceledException({
+    message: 'cancelled',
+    $metadata: {},
+    CancellationReasons: [{ Code: 'TransactionConflict' }, { Code: 'None' }],
+  });
+}
+
+/** Every read of the org's profile row, in the order the handler made them. */
+function profileReads() {
+  return ddbMock
+    .commandCalls(GetItemCommand)
+    .filter((call) => call.args[0].input.Key?.sk?.S === 'PROFILE');
+}
+
 /** Answer the profile-row read the rename makes to capture the previous name. */
 function orgProfileNamed(name?: string) {
   ddbMock
@@ -279,6 +295,33 @@ describe('PATCH /api/org handler', () => {
     expect(JSON.parse((result as { body: string }).body).message).toStrictEqual(
       expect.stringContaining('renamed by someone else'),
     );
+  });
+
+  it('does not answer a transient cancellation with a conflict', async () => {
+    // A TransactionConflict cancels the same item and means the opposite of a
+    // failed condition: the write did not happen, and telling the caller the
+    // org was renamed under them states something untrue about a failure they
+    // could retry.
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledByAConflict());
+
+    const result = await handler(renameEvent({ name: 'New Corp' }), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 500 });
+    // The conflict path never ran: only the rename's own read touched the
+    // profile row.
+    expect(profileReads()).toHaveLength(1);
+  });
+
+  it('reads the profile row consistently before calling the org gone', async () => {
+    // The rename already proved the row existed on the leader milliseconds
+    // ago, so a stale replica answering this read would report a live org as
+    // deleted.
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledOnTheUpdate());
+
+    await handler(renameEvent({ name: 'New Corp' }), buildContext());
+
+    expect(profileReads()).toHaveLength(2);
+    expect(profileReads().every((call) => call.args[0].input.ConsistentRead === true)).toBe(true);
   });
 
   it('escapes the stored name', async () => {

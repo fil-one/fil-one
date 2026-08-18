@@ -36,6 +36,8 @@ import type { AuthenticatedEvent } from '../lib/user-context.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1', emailVerified: true };
 const TOKEN_HASH = 'b'.repeat(64);
+/** The twelve characters the console lists a RAG key by. */
+const KEY_PREFIX = 'sk_rag_AbC12';
 
 function deleteEvent(keyId?: string, role?: OrgRole): AuthenticatedEvent {
   const event = buildEvent({
@@ -93,6 +95,7 @@ describe('delete-rag-api-key baseHandler', () => {
         sk: 'RAGKEY#key-1',
         tokenHash: TOKEN_HASH,
         keyName: 'ci key',
+        keyPrefix: KEY_PREFIX,
       }),
     });
     ddbMock.on(TransactWriteItemsCommand).resolves({});
@@ -106,13 +109,32 @@ describe('delete-rag-api-key baseHandler', () => {
       pk: 'ORG#org-1',
       type: 'key.deleted',
       orgId: 'org-1',
-      subject: 'key:key-1',
+      // Both halves name the key the way the console lists it, so an event and
+      // a key on screen match. The internal id is a UUID nothing shows.
+      subject: `key:${KEY_PREFIX}`,
       actor: { kind: 'user', id: 'user-1' },
-      details: { keyKind: 'rag', keyName: 'ci key' },
+      details: { keyKind: 'rag', keyName: 'ci key', keyIdSuffix: KEY_PREFIX },
     });
     // The token hash is the credential's lookup key and never reaches the log.
     expect(JSON.stringify(auditItem)).not.toContain(TOKEN_HASH);
     expectNoSecrets(auditItem);
+  });
+
+  it('names a row written before the prefix was stored by its key id', async () => {
+    // Otherwise a legacy revocation has no subject at all, and the viewer
+    // cannot group it with anything.
+    ddbMock.on(GetItemCommand).resolves({
+      Item: marshall({ pk: 'ORG#org-1', sk: 'RAGKEY#key-1', tokenHash: TOKEN_HASH }),
+    });
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+    await baseHandler(deleteEvent('key-1'));
+
+    const items =
+      ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems ?? [];
+    const event = unmarshall(auditItemIn(items));
+    expect(event.subject).toBe('key:key-1');
+    expect(event.details).not.toHaveProperty('keyIdSuffix');
   });
 
   it('deletes the key when the event item is the half the table refused', async () => {

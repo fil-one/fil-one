@@ -204,28 +204,46 @@ describe('delete-access-key baseHandler', () => {
       pk: 'ORG#org-1',
       type: 'key.deleted',
       phase: 'intent',
-      // An S3 key's id is the AKIA… access key id itself, which the log may not
-      // hold in full, so the subject records the same trailing four the details
-      // do (KEY_ID here is 'key-1').
-      subject: 'key:ey-1',
+      // The console lists the AKIA… access key id, which the log may not hold
+      // in full, so both the subject and the details record its trailing four.
+      // The path parameter is the orchestrator's own id for the row and names
+      // nothing on screen.
+      subject: 'key:1111',
       actor: { kind: 'user', id: 'user-1' },
-      // The key id is known up front here, so both halves are filed under it —
-      // and the trailing four of the access key id name it the way the console
-      // does.
+      // The key is known up front here, so both halves are filed under it.
       details: { keyKind: 's3', keyName: 'My Key', region: 'eu-west-1', keyIdSuffix: '1111' },
     });
     expect(completion).toMatchObject({
       type: 'key.deleted',
       phase: 'completion',
       outcome: 'succeeded',
-      subject: 'key:ey-1',
+      subject: 'key:1111',
     });
     // The pair is what makes a crash between them legible.
     expect(completion.correlationId).toBe(intent.correlationId);
     expect(completion.eventId).not.toBe(intent.eventId);
+    // The two halves of the same event name the key the same way.
+    expect(intent.subject).toBe(`key:${completion.details.keyIdSuffix}`);
     expectNoSecrets(
       auditItemIn(ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems),
     );
+  });
+
+  it('names a row written before the access key id was stored by its key id', async () => {
+    // Nothing to show an operator, but a subject the viewer can still group by
+    // beats none at all.
+    const legacyRow = accessKeyItem('eu-west-1');
+    delete legacyRow.accessKeyId;
+    ddbMock.on(GetItemCommand).resolves({ Item: legacyRow });
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+    auroraIsTenantReady.mockReturnValue('aurora-t-1');
+    auroraDeleteAccessKey.mockResolvedValue(undefined);
+
+    await baseHandler(eventWithKey(KEY_ID));
+
+    const [intent] = intentEvents();
+    expect(intent.subject).toBe('key:ey-1');
+    expect(intent.details).not.toHaveProperty('keyIdSuffix');
   });
 
   it('revokes the key anyway when the intent cannot be written', async () => {
