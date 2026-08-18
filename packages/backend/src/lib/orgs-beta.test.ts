@@ -56,7 +56,7 @@ describe('hasOrgsBetaAccess', () => {
     expect(await hasOrgsBetaAccess({ orgId: ORG_ID })).toBe(true);
   });
 
-  it('reads both rows consistently and in one round trip', async () => {
+  it('reads both rows consistently and in parallel', async () => {
     await hasOrgsBetaAccess({ verifiedEmail: EMAIL, orgId: ORG_ID });
 
     const calls = ddbMock.commandCalls(GetItemCommand);

@@ -36,6 +36,9 @@ import { resolveOrgName } from './org-profile.js';
  * transactions that change an org's name and its membership span both tables.
  */
 
+/** The canonical membership sort-key prefix, shared by the builder and the parser. */
+const memberSkPrefix = (): string => 'MEMBER#';
+
 /** The inverse item's sort-key prefix, shared by the builder and the parser. */
 const membershipSkPrefix = (): string => 'MEMBERSHIP#';
 
@@ -44,8 +47,19 @@ const inviteSkPrefix = (): string => 'INVITE#';
 
 export const OrgKeys = {
   orgPk: (orgId: string): string => `ORG#${orgId}`,
-  memberSk: (userId: string): string => `MEMBER#${userId}`,
-  memberSkPrefix: (): string => 'MEMBER#',
+  memberSk: (userId: string): string => `${memberSkPrefix()}${userId}`,
+  memberSkPrefix,
+  /**
+   * Inverse of {@link memberSk}, for the Query that walks an org's member rows.
+   * User ids are UUIDs, so the same no-`#` check as {@link parseMembershipSk}
+   * makes the split unambiguous; a row the rule rejects is dropped rather than
+   * returned under an id no lookup would match.
+   */
+  parseMemberSk: (sk: string): string | undefined => {
+    const prefix = memberSkPrefix();
+    const userId = sk.startsWith(prefix) ? sk.slice(prefix.length) : undefined;
+    return userId && !userId.includes('#') ? userId : undefined;
+  },
   orgMetaSk: (): string => 'META',
   userPk: (userId: string): string => `USER#${userId}`,
   membershipSk: (orgId: string): string => `MEMBERSHIP#${orgId}`,
@@ -290,8 +304,7 @@ function toMembership(
   orgId: string,
 ): OrgMembership | undefined {
   const sk = item.sk?.S ?? '';
-  const prefix = OrgKeys.memberSkPrefix();
-  const userId = sk.startsWith(prefix) ? sk.slice(prefix.length) : undefined;
+  const userId = OrgKeys.parseMemberSk(sk);
   if (!userId) {
     console.error('[org-membership] Row in the member range has no member key — dropped', {
       orgId,
