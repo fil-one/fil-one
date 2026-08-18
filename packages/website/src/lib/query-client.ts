@@ -87,6 +87,12 @@ export const queryKeys = {
     ['access-keys', bucketName, region] as const,
   bucketAnalytics: (bucketName: string, region: S3Region) =>
     ['bucket-analytics', bucketName, region] as const,
+  // The org's roster and its outstanding invitations. Two keys rather than one:
+  // every role may read the members list, while the invitations list is
+  // `members.manage`, so a single key would tie a query most callers can run to
+  // one most callers cannot.
+  members: ['members'] as const,
+  invitations: ['invitations'] as const,
   instatusSummary: ['instatus-summary'] as const,
   preferences: ['preferences'] as const,
   // RAG Pipeline (FIL-555). Distinct from `buckets` so the RAG surface can be
