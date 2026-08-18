@@ -204,7 +204,10 @@ describe('delete-access-key baseHandler', () => {
       pk: 'ORG#org-1',
       type: 'key.deleted',
       phase: 'intent',
-      subject: `key:${KEY_ID}`,
+      // An S3 key's id is the AKIA… access key id itself, which the log may not
+      // hold in full, so the subject records the same trailing four the details
+      // do (KEY_ID here is 'key-1').
+      subject: 'key:ey-1',
       actor: { kind: 'user', id: 'user-1' },
       // The key id is known up front here, so both halves are filed under it —
       // and the trailing four of the access key id name it the way the console
@@ -215,7 +218,7 @@ describe('delete-access-key baseHandler', () => {
       type: 'key.deleted',
       phase: 'completion',
       outcome: 'succeeded',
-      subject: `key:${KEY_ID}`,
+      subject: 'key:ey-1',
     });
     // The pair is what makes a crash between them legible.
     expect(completion.correlationId).toBe(intent.correlationId);
@@ -367,7 +370,7 @@ describe('whose key a caller may revoke', () => {
     expect(result.statusCode).toBe(403);
     expect(JSON.parse(result.body).code).toBe(ApiErrorCode.FORBIDDEN_ROLE);
     expect(auroraDeleteAccessKey).not.toHaveBeenCalled();
-    expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
   });
 
   it('lets keys.manage_all revoke a recovered key', async () => {

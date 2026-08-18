@@ -145,6 +145,35 @@ describe('delete-rag-api-key baseHandler', () => {
     expect(calls[1].args[0].input.TransactItems).toHaveLength(2);
   });
 
+  it.each([
+    ['the audit table is missing', 'ResourceNotFoundException', 'Requested resource not found'],
+    ['the role may not write it', 'AccessDeniedException', 'User is not authorized'],
+  ])('revokes the key when %s', async (_label, name, message) => {
+    ddbMock.on(GetItemCommand).resolves({
+      Item: marshall({ pk: 'ORG#org-1', sk: 'RAGKEY#key-1', tokenHash: TOKEN_HASH }),
+    });
+    // Not a cancellation: the whole transaction is refused before any item
+    // applies. Rethrowing it would leave a leaked key live and answer 500.
+    ddbMock
+      .on(TransactWriteItemsCommand)
+      .rejectsOnce(Object.assign(new Error(message), { name }))
+      .resolves({});
+
+    const result = await baseHandler(deleteEvent('key-1'));
+
+    expect(result).toMatchObject({ statusCode: 204 });
+    const calls = ddbMock.commandCalls(TransactWriteItemsCommand);
+    expect(calls).toHaveLength(2);
+    // Both key rows land; only the event is dropped.
+    const retried = calls[1].args[0].input.TransactItems ?? [];
+    expect(hasAuditItem(retried)).toBe(false);
+    expect(retried).toHaveLength(2);
+    expect(retried[0].Delete!.Key).toEqual(marshall({ pk: 'ORG#org-1', sk: 'RAGKEY#key-1' }));
+    expect(retried[1].Delete!.Key).toEqual(
+      marshall({ pk: RagApiKeyKeys.lookupPk(TOKEN_HASH), sk: RagApiKeyKeys.lookupSk() }),
+    );
+  });
+
   it('returns 404 for a keyId the org does not own (partition miss)', async () => {
     ddbMock.on(GetItemCommand).resolves({});
 

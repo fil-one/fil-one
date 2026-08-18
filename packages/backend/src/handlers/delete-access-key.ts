@@ -82,7 +82,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     mode: 'best-effort',
     actor: userActor({ userId, email: getVerifiedEmail(event) }),
     orgId,
-    subject: AuditSubjects.key(keyId),
+    subject: AuditSubjects.key('s3', keyId),
     details: {
       keyKind: 's3',
       region,

@@ -99,7 +99,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
         type: 'key.deleted',
         actor: userActor({ userId, email }),
         orgId,
-        subject: AuditSubjects.key(keyId),
+        subject: AuditSubjects.key('rag', keyId),
         details: {
           keyKind: 'rag',
           ...(keyName ? { keyName } : {}),
