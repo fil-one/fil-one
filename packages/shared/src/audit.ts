@@ -278,8 +278,15 @@ export type AuditEventRecord<T extends AuditEventType = AuditEventType> = AuditE
 /** Any stored event, narrowable by `type`. */
 export type AuditEvent = { [T in AuditEventType]: AuditEventRecord<T> }[AuditEventType];
 
-/** An event of a type that can carry a phase — what `appendAuditEvent` accepts. */
-export type TwoPhaseAuditEvent = Extract<AuditEvent, { type: TwoPhaseAuditEventType }>;
+/**
+ * A phased event — what `appendAuditEvent` accepts.
+ *
+ * The intersection is what makes it phased: extracting by `type` alone leaves
+ * {@link AuditSinglePhase} leading the union, so an unphased `key.created`
+ * would compile and land as a half with nothing to pair it to.
+ */
+export type TwoPhaseAuditEvent = Extract<AuditEvent, { type: TwoPhaseAuditEventType }> &
+  (AuditIntentPhase | AuditCompletionPhase);
 
 /**
  * How long an event survives: the IAM PRD's 90-day audit retention, carried

@@ -8,7 +8,12 @@ import {
   TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
 import { AUDIT_EVENT_TYPES, AUDIT_RETENTION_DAYS, OrgRole } from '@filone/shared';
-import type { AuditEventDetails, AuditEventRecord, AuditEventType } from '@filone/shared';
+import type {
+  AuditEventDetails,
+  AuditEventRecord,
+  AuditEventType,
+  TwoPhaseAuditEvent,
+} from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.js';
 
 vi.mock('sst', () => sstResourceMock());
@@ -61,7 +66,7 @@ function renamed(): AuditEventRecord<'org.renamed'> {
   });
 }
 
-function revokedIntent(correlationId: string): AuditEventRecord<'key.deleted'> {
+function revokedIntent(correlationId: string): TwoPhaseAuditEvent {
   return auditEvent({
     type: 'key.deleted',
     actor: ACTOR,
