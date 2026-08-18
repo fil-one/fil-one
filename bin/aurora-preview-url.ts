@@ -38,20 +38,20 @@ if (!tenantId || !bucketName || !objectKey) {
   process.exit(1);
 }
 
-// The AWS SDK resolves credentials from the profile; without it the SSM call
-// fails late with an unhelpful CredentialsProviderError.
-if (!process.env.AWS_PROFILE) {
-  console.error(
-    'AWS_PROFILE is not set. Log in and activate the profile first (see README.md):\n' +
-      '  aws sso login --profile filone\n' +
-      '  export AWS_PROFILE=filone',
-  );
-  process.exit(1);
-}
-
 const stage = process.env.STAGE ?? 'production';
 const isProduction = stage === 'production';
 
+// The AWS SDK resolves credentials from the profile; without it the SSM call
+// fails late with an unhelpful CredentialsProviderError.
+if (!process.env.AWS_PROFILE) {
+  const profile = isProduction ? 'filone-production' : 'filone-sandbox';
+  console.error(
+    'AWS_PROFILE is not set. Log in and activate the profile first (see README.md):\n' +
+      `  aws sso login --profile ${profile}\n` +
+      `  export AWS_PROFILE=${profile}`,
+  );
+  process.exit(1);
+}
 console.error(`Stage: ${stage}`);
 console.error(`Tenant ID: ${tenantId}`);
 console.error(`Bucket: ${bucketName}`);
