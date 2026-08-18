@@ -1,15 +1,16 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole, S3Region } from '@filone/shared';
 
 import { BucketsTab, type RagBucket } from './RagPipelineBucketsTab.js';
+import { ToastProvider } from '../components/Toast/ToastProvider.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 
 // ---------------------------------------------------------------------------
-// Mocks — the query playground client (only touched once a drawer opens, which
-// these row-level display tests never do). Mocked so the module graph stays
-// free of the network/router boundary.
+// Mocks — the query playground client. Only the permission tests below open a
+// drawer, and none of them asks a question, so the call is never made; it is
+// mocked to keep the module graph free of the network boundary.
 // ---------------------------------------------------------------------------
 
 vi.mock('../lib/rag-bucket-api.js', async (importOriginal) => ({
@@ -39,14 +40,17 @@ function renderTab(buckets: RagBucket[], role = OrgRole.Owner) {
   seedPermissions(client, role);
   return render(
     <QueryClientProvider client={client}>
-      <BucketsTab
-        buckets={buckets}
-        isLoading={false}
-        isError={false}
-        errorMessage={undefined}
-        togglingBucket={null}
-        onConfirmToggle={() => undefined}
-      />
+      {/* The drawer's code snippet copies to the clipboard through a toast. */}
+      <ToastProvider>
+        <BucketsTab
+          buckets={buckets}
+          isLoading={false}
+          isError={false}
+          errorMessage={undefined}
+          togglingBucket={null}
+          onConfirmToggle={() => undefined}
+        />
+      </ToastProvider>
     </QueryClientProvider>,
   );
 }
@@ -228,5 +232,25 @@ describe('BucketsTab — permissions', () => {
     renderTab([bucket({ enabled: true })], OrgRole.Admin);
 
     expect(screen.getByRole('button', { name: 'Bucket actions' })).toBeInTheDocument();
+  });
+
+  it.each([OrgRole.Member, OrgRole.ReadOnly])(
+    'hides stop indexing inside the drawer from %s as well as in the row',
+    async (role) => {
+      // The drawer stays open to them — it holds the API snippet — so hiding the
+      // row's kebab alone still left a button that comes back 403.
+      renderTab([bucket({ enabled: true })], role);
+      fireEvent.click(screen.getByTestId('bucket-row-ask'));
+
+      expect(await screen.findByTestId('bucket-drawer')).toBeInTheDocument();
+      expect(screen.queryByTestId('bucket-drawer-stop')).not.toBeInTheDocument();
+    },
+  );
+
+  it('offers stop indexing inside the drawer to an Admin', async () => {
+    renderTab([bucket({ enabled: true })], OrgRole.Admin);
+    fireEvent.click(screen.getByTestId('bucket-row-ask'));
+
+    expect(await screen.findByTestId('bucket-drawer-stop')).toBeInTheDocument();
   });
 });

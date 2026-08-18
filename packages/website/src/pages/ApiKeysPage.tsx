@@ -487,7 +487,11 @@ export function ApiKeysPage() {
     gcTime: LIST_GC_TIME,
     enabled: mayList,
   });
-  const keys = data?.keys ?? [];
+  // Read through the permission, not just `enabled`: react-query keeps serving a
+  // disabled query's cached answer, and a mounted page is a live observer, so a
+  // mid-session downgrade would leave the key names in the table and the count on
+  // the tab above the no-access card.
+  const keys = mayList ? (data?.keys ?? []) : [];
 
   const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
 
