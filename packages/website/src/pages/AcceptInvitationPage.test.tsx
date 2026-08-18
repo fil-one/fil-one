@@ -247,7 +247,9 @@ describe('AcceptInvitationPage', () => {
   });
 
   it('reads /me without the reconciliation that would reload the page', async () => {
-    mockAccept.mockReturnValue(new Promise(() => {}));
+    mockAccept.mockRejectedValue(
+      apiError('Sent to another address', 403, ApiErrorCode.INVITE_EMAIL_MISMATCH),
+    );
     const { getMe } = await import('../lib/api.js');
     vi.mocked(getMe).mockResolvedValue({ email: 'invitee@example.com' } as never);
 
@@ -261,5 +263,30 @@ describe('AcceptInvitationPage', () => {
     // The reload the reconcile performs would destroy the token this page is
     // holding, and the org it is joining is not the org the stash is about.
     await waitFor(() => expect(getMe).toHaveBeenCalledWith({ skipOrgReconcile: true }));
+  });
+
+  it('does not put /me in flight beside the accept it explains', async () => {
+    sessionStorage.clear();
+    let refuse: (error: unknown) => void = () => {};
+    mockAccept.mockReturnValue(new Promise((_resolve, reject) => (refuse = reject)));
+    const { getMe } = await import('../lib/api.js');
+    // Both calls answer 401 over an expired session, and whichever lands first
+    // starts the navigation to login. If /me were in flight it could get there
+    // first, the unload would cancel the accept, and the rejection would arrive
+    // as a TypeError carrying no status — so the re-stash below would not run.
+    vi.mocked(getMe).mockRejectedValue(apiError('Session expired', 401));
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>{withRouter(TOKEN)}</ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(mockAccept).toHaveBeenCalledWith(TOKEN));
+    expect(getMe).not.toHaveBeenCalled();
+
+    refuse(apiError('Session expired. Redirecting to login...', 401));
+    await waitFor(() => expect(hasPendingInviteToken()).toBe(true));
   });
 });

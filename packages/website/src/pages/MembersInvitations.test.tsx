@@ -44,13 +44,16 @@ function renderSection(role = OrgRole.Owner, invitations: InvitationSummary[] = 
   mockList.mockResolvedValue({ invitations });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   seedPermissions(client, role);
-  return render(
-    <QueryClientProvider client={client}>
-      <ToastProvider>
-        <MembersInvitations />
-      </ToastProvider>
-    </QueryClientProvider>,
-  );
+  return {
+    client,
+    ...render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <MembersInvitations />
+        </ToastProvider>
+      </QueryClientProvider>,
+    ),
+  };
 }
 
 /** An error shaped the way `apiRequest` throws one. */
@@ -116,6 +119,29 @@ describe('MembersInvitations', () => {
     const select = await screen.findByLabelText('Role');
     const options = Array.from(select.querySelectorAll('option')).map((o) => o.value);
     expect(options).toContain(OrgRole.Owner);
+  });
+
+  it('falls back to Member when the ceiling shrinks under the open form', async () => {
+    mockCreate.mockResolvedValue({ invitation: invitation(), emailSent: true });
+    // An Owner picks Owner, then demotes themselves elsewhere on this page. The
+    // form stays mounted while `/me` comes back saying Admin, so the role it is
+    // holding is one the server would now refuse.
+    const { client } = renderSection(OrgRole.Owner);
+
+    await typeEmail('new@example.com');
+    fireEvent.change(screen.getByLabelText('Role'), { target: { value: OrgRole.Owner } });
+    seedPermissions(client, OrgRole.Admin);
+
+    await waitFor(() => expect(screen.getByLabelText('Role')).toHaveValue(OrgRole.Member));
+    const options = Array.from(screen.getByLabelText('Role').querySelectorAll('option')).map(
+      (o) => o.value,
+    );
+    expect(options).not.toContain(OrgRole.Owner);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+    await waitFor(() =>
+      expect(mockCreate).toHaveBeenCalledWith({ email: 'new@example.com', role: OrgRole.Member }),
+    );
   });
 
   it('refuses an invalid address without asking the server', async () => {
@@ -371,5 +397,49 @@ describe('MembersInvitations — when the server refuses or the list goes stale'
     expect(await screen.findByTestId('invitations-error')).toHaveTextContent(
       'Invitations are unavailable',
     );
+  });
+});
+
+describe('MembersInvitations — the alert for an invitation nobody received', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('drops the alert when the invitation it names is withdrawn', async () => {
+    const unsent = invitation({ inviteId: 'inv-1', email: 'unsent@example.com' });
+    mockCreate.mockResolvedValue({ invitation: unsent, emailSent: false });
+    mockRevoke.mockResolvedValue(undefined);
+    renderSection(OrgRole.Owner, [unsent]);
+
+    await typeEmail('unsent@example.com');
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+    await screen.findByTestId('invite-undelivered');
+
+    // Left up, it asks for a retry on an invitation that no longer exists.
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Revoke invitation for unsent@example.com' }),
+    );
+
+    await waitFor(() => expect(screen.queryByTestId('invite-undelivered')).not.toBeInTheDocument());
+  });
+
+  it('keeps the alert when a different invitation is withdrawn', async () => {
+    mockCreate.mockResolvedValue({
+      invitation: invitation({ inviteId: 'inv-2', email: 'unsent@example.com' }),
+      emailSent: false,
+    });
+    mockRevoke.mockResolvedValue(undefined);
+    renderSection(OrgRole.Owner, [invitation({ inviteId: 'inv-1', email: 'waiting@example.com' })]);
+
+    await typeEmail('unsent@example.com');
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+    await screen.findByTestId('invite-undelivered');
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Revoke invitation for waiting@example.com' }),
+    );
+
+    await waitFor(() => expect(mockRevoke).toHaveBeenCalledWith('inv-1'));
+    expect(screen.getByTestId('invite-undelivered')).toBeInTheDocument();
   });
 });

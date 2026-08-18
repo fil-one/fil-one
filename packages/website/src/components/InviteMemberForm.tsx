@@ -56,6 +56,14 @@ export function InviteMemberForm({
   const [emailError, setEmailError] = useState<string | null>(null);
   const emailField = useRef<HTMLElement>(null);
 
+  // The ceiling can shrink under a form that is already open: an Owner who
+  // demotes themselves on this same page loses Owner from `roles` while `role`
+  // still holds it, and `RoleSelect` renders an out-of-ceiling value as an extra
+  // option — so the form would look valid and the server would answer 403. Read
+  // the role through the current list rather than trusting the state that was
+  // seeded from an older one.
+  const effectiveRole = roles.includes(role) ? role : defaultRole(roles);
+
   if (notEnabledMessage) {
     return (
       <div data-testid="invite-not-enabled">
@@ -70,7 +78,7 @@ export function InviteMemberForm({
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    const parsed = CreateInvitationSchema.safeParse({ email, role });
+    const parsed = CreateInvitationSchema.safeParse({ email, role: effectiveRole });
     if (!parsed.success) {
       setEmailError(parsed.error.issues[0].message);
       // Submitting moved focus to the button, and the message is about the
@@ -120,8 +128,12 @@ export function InviteMemberForm({
           </FormField>
         </div>
         <div className="sm:w-56">
-          <FormField label="Role" htmlFor="invite-role" description={ROLE_DESCRIPTIONS[role]}>
-            <RoleSelect id="invite-role" value={role} roles={roles} onChange={setRole} />
+          <FormField
+            label="Role"
+            htmlFor="invite-role"
+            description={ROLE_DESCRIPTIONS[effectiveRole]}
+          >
+            <RoleSelect id="invite-role" value={effectiveRole} roles={roles} onChange={setRole} />
           </FormField>
         </div>
       </div>

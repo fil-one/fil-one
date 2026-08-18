@@ -103,10 +103,31 @@ function useInviteRefusals() {
   };
 }
 
+/**
+ * The address of an invitation that was created but never sent.
+ *
+ * Held here rather than read off the list, because the row carries
+ * `lastSendFailed` for every stale attempt and this alert is about the one the
+ * operator just made. It is cleared by the two things that answer it: a send
+ * that works, and withdrawing the invitation it names.
+ */
+function useUndeliveredInvite() {
+  const [email, setEmail] = useState<string | null>(null);
+
+  return {
+    email,
+    set: setEmail,
+    /** Drop the alert when this is the address it is about. */
+    clearFor: (address: string) => {
+      setEmail((current) => (current && sameAddress(address, current) ? null : current));
+    },
+  };
+}
+
 function useCreateInvitation(
   client: QueryClient,
   refusals: ReturnType<typeof useInviteRefusals>,
-  onUndelivered: (email: string | null) => void,
+  undelivered: ReturnType<typeof useUndeliveredInvite>,
 ) {
   const { toast } = useToast();
 
@@ -121,10 +142,10 @@ function useCreateInvitation(
       upsertInvitation(client, result.invitation);
       void client.invalidateQueries({ queryKey: queryKeys.invitations });
       if (result.emailSent) {
-        onUndelivered(null);
+        undelivered.set(null);
         toast.success(`Invitation sent to ${result.invitation.email}`);
       } else {
-        onUndelivered(result.invitation.email);
+        undelivered.set(result.invitation.email);
       }
     },
     onError: (err) => {
@@ -138,6 +159,7 @@ function useRevokeInvitation(
   client: QueryClient,
   refusals: ReturnType<typeof useInviteRefusals>,
   pending: ReturnType<typeof usePendingRows>,
+  undelivered: ReturnType<typeof useUndeliveredInvite>,
 ) {
   const { toast } = useToast();
 
@@ -151,6 +173,9 @@ function useRevokeInvitation(
       void client.invalidateQueries({ queryKey: queryKeys.invitations });
       // This is the slot the cap alert was asking for.
       refusals.clear();
+      // The undelivered alert asks the operator to invite the address again. It
+      // has nothing to ask about once the invitation it names is withdrawn.
+      undelivered.clearFor(invitation.email);
       toast.success(`The invitation for ${invitation.email} was withdrawn`);
     },
     onError: (err) => {
@@ -184,11 +209,11 @@ export function MembersInvitations() {
   const scope = useMemberActionScope();
   const refusals = useInviteRefusals();
   const revoking = usePendingRows();
-  const [undelivered, setUndelivered] = useState<string | null>(null);
+  const undelivered = useUndeliveredInvite();
 
   const pending = useQuery({ queryKey: queryKeys.invitations, queryFn: listInvitations });
-  const create = useCreateInvitation(client, refusals, setUndelivered);
-  const revoke = useRevokeInvitation(client, refusals, revoking);
+  const create = useCreateInvitation(client, refusals, undelivered);
+  const revoke = useRevokeInvitation(client, refusals, revoking, undelivered);
 
   const invitations = pending.data?.invitations ?? [];
 
@@ -209,7 +234,7 @@ export function MembersInvitations() {
           submitting={create.isPending}
           notEnabledMessage={refusals.notEnabled}
           errorMessage={refusals.error}
-          undeliveredEmail={undelivered}
+          undeliveredEmail={undelivered.email}
         />
       </Card>
 

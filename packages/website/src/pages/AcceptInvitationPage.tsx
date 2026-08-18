@@ -36,8 +36,13 @@ export function AcceptInvitationPage({ token }: { token: string | null }) {
   const [outcome, setOutcome] = useState<Outcome>({ status: 'accepting' });
 
   // The signed-in address, for the one refusal that is about which account this
-  // is. Asked alongside the accept rather than before it, so the ordinary path
-  // does not wait on it.
+  // is. Asked only once the accept has been refused, so it never races the call
+  // it exists to explain: two requests in flight together over an expired
+  // session both answer 401, and whichever lands first starts the navigation to
+  // login. If that is `/me`, the accept fetch is cancelled by the unload and
+  // rejects as a `TypeError` carrying no status, so the re-stash below never
+  // runs and the post-login visit has nothing to redeem. Waiting also drops a
+  // request from the path that works.
   //
   // `skipOrgReconcile` because the recovery `/me` normally performs is a page
   // reload, and this page is holding a single-use token in memory. A tab left
@@ -47,7 +52,7 @@ export function AcceptInvitationPage({ token }: { token: string | null }) {
     queryKey: queryKeys.me,
     queryFn: () => getMe({ skipOrgReconcile: true }),
     staleTime: ME_STALE_TIME,
-    enabled: token !== null,
+    enabled: token !== null && outcome.status === 'refused',
   });
 
   // Once. React runs effects twice in development's strict mode, and the token
