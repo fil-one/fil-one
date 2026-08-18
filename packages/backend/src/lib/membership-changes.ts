@@ -136,17 +136,27 @@ export function roleChangeItems({
 /**
  * Removal, on both rows.
  *
- * The canonical delete is conditional on the row existing so a removal of
- * somebody already gone is a clean 404 rather than a silent success; the inverse
- * delete is unconditional, because a member whose inverse item is missing must
- * still be removable.
+ * The canonical delete carries the role the caller read, the same condition
+ * {@link roleChangeItems} puts on a role change, and for the same reason: the
+ * transaction's `ownerCount` delta is decided from that reading, and a
+ * promotion committing in the gap touches only the member row and META —
+ * neither one an item this transaction conflicts on. Without the condition an
+ * Owner is deleted with no decrement, the counter overcounts, and
+ * `ownerCount > :one` then passes for the genuine last Owner.
+ *
+ * `attribute_exists(pk)` stays alongside it so a removal of somebody already
+ * gone is a clean 404 rather than a silent success. The inverse delete is
+ * unconditional, because a member whose inverse item is missing must still be
+ * removable.
  */
 export function membershipDeleteItems({
   orgId,
   userId,
+  fromRole,
 }: {
   orgId: string;
   userId: string;
+  fromRole: OrgRole;
 }): TransactWriteItem[] {
   const tableName = Resource.OrgTable.name;
 
@@ -155,7 +165,9 @@ export function membershipDeleteItems({
       Delete: {
         TableName: tableName,
         Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: OrgKeys.memberSk(userId) } },
-        ConditionExpression: 'attribute_exists(pk)',
+        ConditionExpression: 'attribute_exists(pk) AND #role = :fromRole',
+        ExpressionAttributeNames: { '#role': 'role' },
+        ExpressionAttributeValues: { ':fromRole': { S: fromRole } },
       },
     },
     {

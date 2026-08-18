@@ -3,6 +3,7 @@ import { mockClient } from 'aws-sdk-client-mock';
 import {
   ConditionalCheckFailedException,
   DynamoDBClient,
+  GetItemCommand,
   PutItemCommand,
   QueryCommand,
   ScanCommand,
@@ -74,14 +75,34 @@ function repairsEmitted(spy: ReturnType<typeof vi.spyOn>): number {
 /**
  * The org's own partition, read consistently, which is what every repair is
  * written from. The Scan only decides which orgs to look at.
+ *
+ * Two reads, because the recount makes two: the META row on its own, ahead of
+ * the member pages, and then the members.
  */
 function stubPartition(orgId: string, items: Record<string, unknown>[]) {
+  stubOrgMeta(orgId, items.find(isMetaRow));
+  stubMemberPages(orgId).resolves({ Items: items.filter((item) => !isMetaRow(item)) as never });
+}
+
+function isMetaRow(item: Record<string, unknown>): boolean {
+  return (item as { sk?: { S?: string } }).sk?.S === 'META';
+}
+
+/** The counter read the recount takes before it pages anything. */
+function stubOrgMeta(orgId: string, meta: Record<string, unknown> | undefined) {
   ddbMock
-    .on(QueryCommand, {
+    .on(GetItemCommand, {
       TableName: 'OrgTable',
-      ExpressionAttributeValues: { ':pk': { S: `ORG#${orgId}` } },
+      Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'META' } },
     })
-    .resolves({ Items: items as never });
+    .resolves(meta ? { Item: meta as never } : {});
+}
+
+function stubMemberPages(orgId: string) {
+  return ddbMock.on(QueryCommand, {
+    TableName: 'OrgTable',
+    ExpressionAttributeValues: { ':pk': { S: `ORG#${orgId}` } },
+  });
 }
 
 function logsMatching(spy: ReturnType<typeof vi.spyOn>, message: string) {
@@ -104,6 +125,8 @@ describe('owner-count-drift-checker', () => {
     stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // An org with no META row, until a test stubs one.
+    ddbMock.on(GetItemCommand).resolves({});
   });
 
   afterEach(() => {
@@ -161,8 +184,18 @@ describe('owner-count-drift-checker', () => {
     // written from a count no instant ever held is what put us here.
     expect(ddbMock.commandCalls(QueryCommand)[0].args[0].input).toMatchObject({
       TableName: 'OrgTable',
-      KeyConditionExpression: 'pk = :pk',
-      ExpressionAttributeValues: { ':pk': { S: `ORG#${ORG_ID}` } },
+      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :memberPrefix)',
+      ExpressionAttributeValues: {
+        ':pk': { S: `ORG#${ORG_ID}` },
+        ':memberPrefix': { S: 'MEMBER#' },
+      },
+      ConsistentRead: true,
+    });
+    // And the counter it conditions on comes from its own read of the META row,
+    // taken before the pages rather than off whichever one it landed on.
+    expect(ddbMock.commandCalls(GetItemCommand)[0].args[0].input).toMatchObject({
+      TableName: 'OrgTable',
+      Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'META' } },
       ConsistentRead: true,
     });
 
@@ -401,14 +434,30 @@ describe('owner-count-drift-checker', () => {
     ]);
   });
 
-  it('skips the repair when a transfer commits between the recount pages', async () => {
-    // A transfer's META update is net zero, so `ownerCount = :stale` still holds
-    // while the paged Query observed the transfer half applied — writing that
-    // reading would inflate the counter and defeat the last-Owner guard. The
-    // revision is what the counter cannot say, and DynamoDB refuses the write.
-    const rows = [metaRow(ORG_ID, 1, 7), memberRow(ORG_ID, 'user-1'), memberRow(ORG_ID, 'user-2')];
-    ddbMock.on(ScanCommand).resolves({ Items: rows });
-    stubPartition(ORG_ID, rows);
+  it('holds a transfer that commits between the member pages against the revision it started from', async () => {
+    // The real ordering, simulated: `MEMBER#` sorts before `META`, so a paged
+    // partition delivers the counter last. Page one still shows the outgoing
+    // Owner; a transfer commits; page two shows the incoming one, and the META
+    // row that arrives with it already carries the moved revision. Counted two
+    // Owners for an org that has one — and a repair written against revision 8
+    // would be accepted, inflating the counter and defeating the
+    // `ownerCount > :one` last-Owner guard.
+    //
+    // The recount reads the counter before it pages anything, so the write is
+    // conditioned on revision 7 and DynamoDB refuses it. The META row on page
+    // two is exactly what must not win.
+    ddbMock.on(ScanCommand).resolves({
+      Items: [metaRow(ORG_ID, 1, 7), memberRow(ORG_ID, 'user-1'), memberRow(ORG_ID, 'user-2')],
+    });
+    stubOrgMeta(ORG_ID, metaRow(ORG_ID, 1, 7));
+    stubMemberPages(ORG_ID)
+      .resolvesOnce({
+        Items: [memberRow(ORG_ID, 'user-1')] as never,
+        LastEvaluatedKey: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'MEMBER#user-1' } },
+      })
+      .resolvesOnce({
+        Items: [memberRow(ORG_ID, 'user-2'), metaRow(ORG_ID, 1, 8)] as never,
+      });
     ddbMock
       .on(UpdateItemCommand)
       .rejects(
@@ -417,15 +466,39 @@ describe('owner-count-drift-checker', () => {
 
     await handler();
 
-    expect(updateInputs()[0]).toMatchObject({
-      ConditionExpression: 'ownerCount = :stale AND ownerSetRev = :rev',
-      ExpressionAttributeValues: { ':counted': { N: '2' }, ':rev': { N: '7' } },
-    });
+    expect(updateInputs()).toEqual([
+      {
+        TableName: 'OrgTable',
+        Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'META' } },
+        UpdateExpression: 'SET ownerCount = :counted',
+        ConditionExpression: 'ownerCount = :stale AND ownerSetRev = :rev',
+        ExpressionAttributeValues: {
+          ':counted': { N: '2' },
+          ':stale': { N: '1' },
+          ':rev': { N: '7' },
+        },
+      },
+    ]);
     // Not a failure: the counter is whatever the transfer left, and the next run
     // recounts an org nothing is changing under it.
     expect(logsMatching(logSpy, 'repair skipped, the counter moved')).toHaveLength(1);
     expect(logsMatching(errorSpy, 'repair failed')).toHaveLength(0);
     expect(repairsEmitted(stdoutSpy)).toBe(0);
+  });
+
+  it('reads the counter before the first member page', async () => {
+    const rows = [metaRow(ORG_ID, 3, 7), memberRow(ORG_ID, 'user-1')];
+    ddbMock.on(ScanCommand).resolves({ Items: rows });
+    stubPartition(ORG_ID, rows);
+
+    await handler();
+
+    // Ordering is the fix, so it is asserted rather than inferred from the
+    // condition: a counter read after the pages dates to the end of an interval
+    // it is supposed to cover.
+    const commands = ddbMock.calls().map((call) => (call.args[0] as object).constructor.name);
+    expect(commands.indexOf('GetItemCommand')).toBeGreaterThanOrEqual(0);
+    expect(commands.indexOf('GetItemCommand')).toBeLessThan(commands.indexOf('QueryCommand'));
   });
 
   it('treats a repair that lost its condition as the counter having moved', async () => {
