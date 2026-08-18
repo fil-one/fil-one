@@ -13,6 +13,7 @@ import {
   QuestionIcon,
   ChatTeardropDotsIcon,
   RobotIcon,
+  UsersIcon,
 } from '@phosphor-icons/react/dist/ssr';
 import { Link, useMatchRoute } from '@tanstack/react-router';
 
@@ -156,8 +157,18 @@ function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps
   );
 }
 
-// Billing carries a permission; Settings is every member's own account.
+// Billing carries a permission; Settings is every member's own account. Members
+// is declared with the permission it needs even though all four roles hold it,
+// so the entry stays hidden while `/me` is in flight rather than appearing for
+// a caller whose role turns out not to reach it.
 const utilityNavItems: NavItem[] = [
+  {
+    path: '/members',
+    icon: UsersIcon,
+    label: 'Members',
+    testId: 'nav-members',
+    permission: 'members.read',
+  },
   {
     path: '/billing',
     icon: CreditCardIcon,

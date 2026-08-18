@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { Permission } from '@filone/shared';
+import type { OrgRole, Permission } from '@filone/shared';
 
 import { getMe } from './api.js';
 import { ME_STALE_TIME, queryKeys } from './query-client.js';
@@ -30,6 +30,17 @@ export function usePermissions(): {
    * refetch `/me` for everybody.
    */
   userId: string | undefined;
+  /**
+   * The caller's role in the active org, for the two rules the permission list
+   * cannot express on its own: which roles they may hand out, and which members
+   * they may touch. Both are the shared target ceiling, which is written over
+   * roles — so the console asks it the same question the server does instead of
+   * re-deriving the answer from permissions and drifting.
+   *
+   * Undefined until `/me` answers, and undefined for a caller with no membership
+   * row, which fails those rules closed like everything else here.
+   */
+  role: OrgRole | undefined;
   /** True while the answer is not yet known — render nothing rather than guess. */
   isPending: boolean;
   /** True when `/me` could not be read, which also grants nothing. */
@@ -52,6 +63,7 @@ export function usePermissions(): {
   return {
     has: (permission: Permission) => permissions?.includes(permission) ?? false,
     userId: me?.userId,
+    role: me?.role,
     isPending,
     isError,
     // `role` is absent exactly when the caller has no membership row, which the

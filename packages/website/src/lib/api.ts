@@ -105,6 +105,30 @@ export class NotAMemberError extends Error {
   }
 }
 
+/**
+ * The API error code an error carries, when it carries one.
+ *
+ * Every error `apiRequest` throws is an `Error` with fields assigned onto it, so
+ * a caller wanting the code writes the same unsafe cast each time. Named once
+ * here, and narrowed to a string, so a component branches on a value rather than
+ * on `unknown`.
+ */
+export function errorCodeOf(error: unknown): string | undefined {
+  const code = (error as { code?: unknown } | null | undefined)?.code;
+  return typeof code === 'string' ? code : undefined;
+}
+
+/** The HTTP status an error carries, when it carries one. */
+export function errorStatusOf(error: unknown): number | undefined {
+  const status = (error as { status?: unknown } | null | undefined)?.status;
+  return typeof status === 'number' ? status : undefined;
+}
+
+/** An error's message, or a fallback for anything that is not an `Error`. */
+export function errorMessageOf(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 function getCsrfToken(): string | undefined {
   return document.cookie
     .split('; ')
@@ -203,8 +227,16 @@ function forbidden(body: { message?: string; code?: string }): Error {
         { status: 403 },
       );
 
+    // Every other 403 keeps its code, so a caller that knows one can branch on
+    // it — the accept page tells INVITE_EMAIL_MISMATCH from the rest — while a
+    // caller that does not still renders the message the server sent. A denial
+    // with no code at all arrives with none, which is itself a signal: the
+    // invite beta gate refuses that way on purpose.
     default:
-      return Object.assign(new Error(body.message ?? 'Access denied'), { status: 403 });
+      return Object.assign(new Error(body.message ?? 'Access denied'), {
+        status: 403,
+        code: body.code,
+      });
   }
 }
 
@@ -304,6 +336,11 @@ export async function apiRequest<T>(
     throw forbidden(body);
   }
 
+  // The code travels with the error, not just the message. Half the codes the
+  // API can send arrive on a 404 or a 409 — LAST_OWNER, INVITE_NOT_FOUND,
+  // INVITE_LIMIT_REACHED — and each exists so the console can offer a specific
+  // remedy rather than repeating a sentence at the user. Dropping it here left
+  // every caller matching on message text.
   if (!response.ok) {
     const error = (await response.json().catch(() => ({}))) as {
       message?: string;
