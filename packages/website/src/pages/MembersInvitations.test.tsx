@@ -6,6 +6,7 @@ import type { InvitationSummary } from '@filone/shared';
 
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
 import { seedPermissions } from '../lib/test-permissions.js';
+import { ROLE_DESCRIPTIONS } from '../lib/use-member-scope.js';
 import { MembersInvitations } from './MembersInvitations.js';
 
 // ---------------------------------------------------------------------------
@@ -137,6 +138,35 @@ describe('MembersInvitations', () => {
       (o) => o.value,
     );
     expect(options).not.toContain(OrgRole.Owner);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+    await waitFor(() =>
+      expect(mockCreate).toHaveBeenCalledWith({ email: 'new@example.com', role: OrgRole.Member }),
+    );
+  });
+
+  it('does not hand the dropped role back when the ceiling widens again', async () => {
+    mockCreate.mockResolvedValue({ invitation: invitation(), emailSent: true });
+    // The same Owner, demoted and then made an Owner again while the form stays
+    // mounted. The demotion is what settled the picker on Member; nobody has
+    // asked for Owner since, so the promotion must not restore it.
+    const { client } = renderSection(OrgRole.Owner);
+
+    await typeEmail('new@example.com');
+    fireEvent.change(screen.getByLabelText('Role'), { target: { value: OrgRole.Owner } });
+    seedPermissions(client, OrgRole.Admin);
+    await waitFor(() => expect(screen.getByLabelText('Role')).toHaveValue(OrgRole.Member));
+
+    seedPermissions(client, OrgRole.Owner);
+
+    await waitFor(() =>
+      expect(
+        Array.from(screen.getByLabelText('Role').querySelectorAll('option')).map((o) => o.value),
+      ).toContain(OrgRole.Owner),
+    );
+    // The picker, the sentence under it, and the body all read the same role.
+    expect(screen.getByLabelText('Role')).toHaveValue(OrgRole.Member);
+    expect(screen.getByText(ROLE_DESCRIPTIONS[OrgRole.Member])).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
     await waitFor(() =>
