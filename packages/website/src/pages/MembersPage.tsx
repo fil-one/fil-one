@@ -14,6 +14,7 @@ import { errorCodeOf, errorMessageOf } from '../lib/api.js';
 import { listMembers, removeMember, updateMemberRole } from '../lib/members-api.js';
 import { queryKeys } from '../lib/query-client.js';
 import { ROLE_LABELS, useMemberActionScope } from '../lib/use-member-scope.js';
+import { MembersInvitations } from './MembersInvitations.js';
 
 /**
  * How a member is named in a dialog and a toast. The same fallback the table
@@ -204,6 +205,12 @@ export function MembersPage() {
           onRemove={scope.mayManage ? setRemovalTarget : undefined}
           pendingUserId={inFlightUserId(roleChange, removal)}
         />
+
+        {/* The invitations endpoint is `members.manage` rather than
+            `members.read`, so for anybody else this section is a request the
+            server refuses. It arrives a moment after the roster, which is what
+            gating fail-closed on `/me` costs. */}
+        {scope.mayInvite && <MembersInvitations />}
       </div>
 
       <ConfirmDialog
