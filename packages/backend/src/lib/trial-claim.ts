@@ -65,13 +65,22 @@ export async function claimTrialIfEligible(userInfo: UserInfo): Promise<TrialCla
   const { sub, userId, orgId, email, emailVerified, apiKeySession } = userInfo;
   if (apiKeySession) return 'api-key-session';
 
-  // First, and here rather than at a call site. The claim mints a Stripe
-  // customer and a subscription; if a pre-re-key `CUSTOMER#` row is still
-  // standing for this user, the backfill missed their account and this org
-  // already has billing that nothing reading the org key can see. Minting would
-  // give one account two Stripe customers, two subscriptions and two meters,
-  // which no later run can undo. Any route that can reach this function can
-  // reach that outcome, so the refusal cannot live in one of them.
+  if (!(await isSoloPersonalOrg(userInfo))) return 'not-own-org';
+
+  // Here rather than at a call site, and immediately before the mint. The claim
+  // mints a Stripe customer and a subscription; if a pre-re-key `CUSTOMER#` row
+  // is still standing for this user, the backfill missed their account and this
+  // org already has billing that nothing reading the org key can see. Minting
+  // would give one account two Stripe customers, two subscriptions and two
+  // meters, which no later run can undo. Any route that can reach this function
+  // can reach that outcome, so the refusal cannot live in one of them — and
+  // every path that mints runs through this line, because the mint is the next
+  // one.
+  //
+  // The row is the user's, so it says nothing about an org they were invited
+  // to: refusing before the ownership test answered "billing is unavailable" —
+  // a 503, the on-call's signal — for a member simply opening a second org, and
+  // the runbook's cleanup precondition reads that denial rate.
   //
   // A dead check once the runbook's dated cleanup has deleted those rows, and
   // it goes with them.
@@ -83,8 +92,6 @@ export async function claimTrialIfEligible(userInfo: UserInfo): Promise<TrialCla
     );
     return 'legacy-row';
   }
-
-  if (!(await isSoloPersonalOrg(userInfo))) return 'not-own-org';
 
   const entitled = await ensureTrialEntitlement({
     sub,

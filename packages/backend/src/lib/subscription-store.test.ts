@@ -310,6 +310,9 @@ describe('assertOneRowPerOrg', () => {
   it('warns about a leftover CUSTOMER# row beside its org row', () => {
     // The expected state between the flip and the dated cleanup step. Paging
     // somebody at 3am for it would teach them to ignore the alert that matters.
+    // A direct call like this one is the only way to reach the branch: a job's
+    // scan drops non-org rows before the dedupe sees them, and reports each as
+    // `Not an org row, skipping`.
     const rows = [
       { pk: 'ORG#a', orgId: 'a', userId: 'u1' },
       { pk: 'CUSTOMER#u2', orgId: 'a', userId: 'u2' },

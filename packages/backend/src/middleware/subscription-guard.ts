@@ -209,10 +209,15 @@ function buildOrgBillingInactiveResponse(): APIGatewayProxyStructuredResultV2 {
 
 /**
  * The account has billing this deploy cannot address — a row the re-key left
- * behind. Not `SUBSCRIPTION_INACTIVE`: that tells the customer to update their
- * payment method, and there is nothing wrong with their payment method. A 503
- * says the same thing to the customer and to the on-call: come back, somebody is
- * looking at it.
+ * behind.
+ *
+ * The 503 is what separates this from an inactive subscription: it says the same
+ * thing to the customer and to the on-call, come back, somebody is looking at
+ * it, and it carries no instruction to update a payment method there is nothing
+ * wrong with. The code stays `SUBSCRIPTION_INACTIVE`, shared with the read-side
+ * twin in `get-billing` and with the plain denial, so the runbook's post-flip
+ * watch on the denial rate sees every refusal the re-key can cause on one
+ * signal.
  */
 function buildBillingUnavailableResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
