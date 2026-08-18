@@ -10,7 +10,12 @@ import {
   TrashIcon,
 } from '@phosphor-icons/react/dist/ssr';
 
-import type { CreateRagApiKeyResponse, RagApiKey, RagKeyBucketRef } from '@filone/shared';
+import type {
+  CreateRagApiKeyResponse,
+  ListRagApiKeysResponse,
+  RagApiKey,
+  RagKeyBucketRef,
+} from '@filone/shared';
 import { KEY_NAME_MAX_LENGTH, KEY_NAME_PATTERN } from '@filone/shared';
 
 import { Alert } from '../components/Alert.js';
@@ -371,6 +376,18 @@ function RagKeysTable({
 // RagApiKeysTab
 // ---------------------------------------------------------------------------
 
+/**
+ * The keys to render, read through the permission that gated the fetch.
+ *
+ * react-query keeps serving a disabled query's cached answer, and a mounted tab
+ * is a live observer so nothing collects it. Gating only `enabled` leaves the
+ * names, prefixes and scopes on screen after a mid-session downgrade; reading
+ * through `mayList` makes them go with the permission.
+ */
+function visibleKeys(mayList: boolean, data: ListRagApiKeysResponse | undefined): RagApiKey[] {
+  return mayList ? (data?.keys ?? []) : [];
+}
+
 export function RagApiKeysTab({ buckets }: { buckets: RagBucket[] }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -394,7 +411,7 @@ export function RagApiKeysTab({ buckets }: { buckets: RagBucket[] }) {
     queryFn: () => listRagApiKeys(),
     enabled: mayList,
   });
-  const keys = data?.keys ?? [];
+  const keys = visibleKeys(mayList, data);
   // A disabled query never leaves `pending`, so the answer for a role that
   // cannot list is "no keys to show", not "still loading".
   const isPending = mayList && queryPending;

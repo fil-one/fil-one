@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole } from '@filone/shared';
 import { seedPermissions } from '../lib/test-permissions.js';
@@ -7,6 +7,7 @@ import { S3Region } from '@filone/shared';
 import type { RagApiKey } from '@filone/shared';
 
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
+import { queryKeys } from '../lib/query-client.js';
 import { RagApiKeysTab } from './RagPipelineKeysTab.js';
 import type { RagBucket } from '../lib/rag-bucket-api.js';
 
@@ -65,13 +66,14 @@ function renderTab(buckets: RagBucket[] = [bucket()], role = OrgRole.Owner) {
   // Key controls are gated on `keys.*`, so the caller's role has to be known
   // before the tab renders.
   seedPermissions(client, role);
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>
       <ToastProvider>
         <RagApiKeysTab buckets={buckets} />
       </ToastProvider>
     </QueryClientProvider>,
   );
+  return { ...view, client };
 }
 
 // ---------------------------------------------------------------------------
@@ -248,6 +250,22 @@ describe('RagApiKeysTab — permissions', () => {
     expect(
       screen.queryByRole('button', { name: 'Delete API key someone elses key' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('drops the key list when the caller loses keys.manage_own mid-session', async () => {
+    // Disabling a query does not evict what it already fetched, and a mounted
+    // tab is a live observer, so the names and prefixes would stay on screen
+    // until a reload.
+    mockList.mockResolvedValue({ keys: [KEY] });
+    const { client } = renderTab([bucket()], OrgRole.Member);
+    expect(await screen.findByText('ci key')).toBeInTheDocument();
+
+    // What a /me refetch after a demotion does.
+    act(() => seedPermissions(client, OrgRole.ReadOnly));
+
+    await waitFor(() => expect(screen.queryByText('ci key')).not.toBeInTheDocument());
+    // The cached response is still there — the read is what changed.
+    expect(client.getQueryData(queryKeys.ragApiKeys)).toBeDefined();
   });
 
   it('gives an Admin the action on every key', async () => {

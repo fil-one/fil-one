@@ -195,7 +195,10 @@ function useBucketData(bucketName: string, region: S3Region, mayListKeys: boolea
     objectsIsError,
     objectsError,
     analyticsData,
-    accessKeys: accessKeysData?.keys ?? [],
+    // Through the permission, not just `enabled`: react-query keeps serving a
+    // disabled query's cached rows, so a mid-session downgrade would leave the
+    // key metadata in the tab and its count until the page reloaded.
+    accessKeys: mayListKeys ? (accessKeysData?.keys ?? []) : [],
     // A disabled query stays pending forever, which would spin the tab's
     // spinner for a role that is never going to get an answer.
     accessKeysLoading: mayListKeys && accessKeysPending,
@@ -358,9 +361,14 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
           <Tab testId="bucket-objects-tab">
             Objects ({displayObjectCount(analyticsData, versions).toLocaleString()})
           </Tab>
-          <Tab testId="bucket-keys-tab">
-            API Keys{!accessKeysLoading && ` (${accessKeys.length.toLocaleString()})`}
-          </Tab>
+          {/* Absent, not empty, for a role that cannot list keys: an "API Keys
+              (0)" tab reads as an org with no keys rather than a view this
+              caller does not get. */}
+          {mayListKeys && (
+            <Tab testId="bucket-keys-tab">
+              API Keys{!accessKeysLoading && ` (${accessKeys.length.toLocaleString()})`}
+            </Tab>
+          )}
         </TabList>
 
         <TabPanels>
@@ -379,20 +387,22 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
             />
           </TabPanel>
 
-          <TabPanel>
-            <BucketAccessTab
-              bucketName={bucketName}
-              s3Endpoint={s3Endpoint}
-              region={region}
-              accessKeys={accessKeys}
-              accessKeysLoading={accessKeysLoading}
-              accessKeysError={accessKeysIsError}
-              {...(accessKeysError?.message
-                ? { accessKeysErrorMessage: accessKeysError.message }
-                : {})}
-              onCreateOpen={() => setAddKeyOpen(true)}
-            />
-          </TabPanel>
+          {mayListKeys && (
+            <TabPanel>
+              <BucketAccessTab
+                bucketName={bucketName}
+                s3Endpoint={s3Endpoint}
+                region={region}
+                accessKeys={accessKeys}
+                accessKeysLoading={accessKeysLoading}
+                accessKeysError={accessKeysIsError}
+                {...(accessKeysError?.message
+                  ? { accessKeysErrorMessage: accessKeysError.message }
+                  : {})}
+                onCreateOpen={() => setAddKeyOpen(true)}
+              />
+            </TabPanel>
+          )}
         </TabPanels>
       </Tabs>
 

@@ -116,11 +116,17 @@ export function DashboardPage() {
     staleTime: USAGE_STALE_TIME,
   });
 
-  const { data: billing } = useQuery({
+  const { data: billingData } = useQuery({
     queryKey: queryKeys.billing,
     queryFn: getBilling,
     enabled: mayReadBilling,
   });
+  // Read through the permission, not just the `enabled` flag. A mounted page is
+  // a live observer, so nothing collects the answer this query already has, and
+  // react-query keeps serving it once the query is disabled — the plan card,
+  // the trial banner and the cost estimate would all keep rendering after a
+  // demotion. Reading it here makes every derived value go absent at once.
+  const billing = mayReadBilling ? billingData : undefined;
 
   // Activity is optional — silently ignored if it fails
   const { data: activityData } = useQuery({
