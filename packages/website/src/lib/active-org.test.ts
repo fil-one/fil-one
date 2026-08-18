@@ -294,6 +294,36 @@ describe('a switch whose navigation never happens', () => {
     expect(reload).toHaveBeenCalled();
   });
 
+  it('does not hand back an org the server refused', async () => {
+    // `/me` answered under another org, and the reload that recovery asks for
+    // was cancelled. Putting the stash back would re-attach the header the
+    // server has already declined to every later request, and each one would
+    // come back NOT_A_MEMBER — the state the clear exists to leave behind.
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const stash = await import('./active-org.js');
+    stash.setActiveOrgId(ORG_A);
+
+    expect(stash.reconcileActiveOrg(ORG_B)).toBe(true);
+    await vi.runAllTimersAsync();
+
+    expect(stash.getActiveOrgId()).toBeNull();
+    expect(stash.isSwitchingOrg()).toBe(false);
+  });
+
+  it('does not hand back an org /me refused outright', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const stash = await import('./active-org.js');
+    stash.setActiveOrgId(ORG_A);
+
+    expect(stash.clearActiveOrgAfterRefusal(403)).toBe(true);
+    await vi.runAllTimersAsync();
+
+    // `/me` is the one call whose answer could fix this tab, and it is refusing
+    // the header. The tab carries on in the caller's own org instead.
+    expect(stash.getActiveOrgId()).toBeNull();
+    expect(stash.isSwitchingOrg()).toBe(false);
+  });
+
   it('leaves an ordinary load alone', async () => {
     const stash = await import('./active-org.js');
     stash.setActiveOrgId(ORG_A);
