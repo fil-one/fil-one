@@ -227,6 +227,33 @@ describe('delete-rag-api-key baseHandler', () => {
     expect(result).toMatchObject({ statusCode: 404 });
   });
 
+  it.each([
+    ['the key row', ['TransactionConflict', 'None']],
+    ['the lookup row', ['None', 'TransactionConflict']],
+    // A condition that failed alongside a transient says nothing about the key:
+    // the transaction cancelled whole, so the lookup delete never ran.
+    ['both rows at once', ['ConditionalCheckFailed', 'TransactionConflict']],
+  ])(
+    'fails rather than reporting the key gone when a conflict cancels %s',
+    async (_label, codes) => {
+      ddbMock.on(GetItemCommand).resolves({
+        Item: marshall({ pk: 'ORG#org-1', sk: 'RAGKEY#key-1', tokenHash: TOKEN_HASH }),
+      });
+      ddbMock.on(TransactWriteItemsCommand).rejects(
+        new TransactionCanceledException({
+          message: 'cancelled',
+          $metadata: {},
+          CancellationReasons: [...codes.map((Code) => ({ Code })), { Code: 'None' }],
+        }),
+      );
+
+      // Nothing was deleted and the LOOKUP row still authorises the key, so 404
+      // would tell the caller a live key is revoked. The error surfaces instead,
+      // which the error handler answers as a 500 the caller can retry.
+      await expect(baseHandler(deleteEvent('key-1'))).rejects.toThrow(TransactionCanceledException);
+    },
+  );
+
   it('rethrows unexpected transaction errors', async () => {
     ddbMock.on(GetItemCommand).resolves({
       Item: marshall({ pk: 'ORG#org-1', sk: 'RAGKEY#key-1', tokenHash: TOKEN_HASH }),
