@@ -193,7 +193,15 @@ function forbidden(body: { message?: string; code?: string }): Error {
   switch (body.code) {
     case ApiErrorCode.EMAIL_NOT_VERIFIED:
       if (!isRedirecting) redirectTo('/verify-email');
-      return Object.assign(new Error('Email verification required'), { status: 403 });
+      // The code travels even though this branch is already navigating: the
+      // redirect is once per page load, so the second call to hit this gets an
+      // error and no navigation, and the accept page has a state to render for
+      // it — pointing at the verify-email surface rather than reporting a
+      // generic denial.
+      return Object.assign(new Error('Email verification required'), {
+        status: 403,
+        code: ApiErrorCode.EMAIL_NOT_VERIFIED,
+      });
 
     case ApiErrorCode.NOT_A_MEMBER:
       return new NotAMemberError(body.message);
