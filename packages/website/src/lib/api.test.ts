@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ApiErrorCode } from '@filone/shared';
+import { ApiErrorCode, ORG_ID_HEADER } from '@filone/shared';
 
 import { apiRequest, ForbiddenRoleError, getMe, NotAMemberError } from './api.js';
 import { setActiveOrgId } from './active-org.js';
@@ -168,15 +168,18 @@ async function freshApi() {
 }
 
 describe('apiRequest — a switch in flight', () => {
+  const ORG_A = '11111111-1111-1111-1111-111111111111';
   const ORG_B = '22222222-2222-2222-2222-222222222222';
 
   beforeEach(() => {
     sessionStorage.clear();
+    vi.useFakeTimers();
     vi.stubGlobal('fetch', vi.fn());
     vi.stubGlobal('location', { assign: vi.fn(), reload: vi.fn() });
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -192,6 +195,33 @@ describe('apiRequest — a switch in flight', () => {
     // than rejected so no error renders over a page that is disappearing.
     expect(settled).toBe('pending');
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('sends a held request in the org still on screen once the switch rolls back', async () => {
+    // The switch was cancelled — a `beforeunload` guard, and a user who
+    // answered "stay on this page". A request handed out inside that window has
+    // no other resolution path: React Query starts no second fetch for a key
+    // whose fetch is still in flight, so the panel would spin until a reload.
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { api, stash } = await freshApi();
+    stash.setActiveOrgId(ORG_A);
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ buckets: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    stash.switchToOrg(ORG_B);
+    const held = api.apiRequest('/buckets');
+
+    await vi.runAllTimersAsync();
+
+    await expect(held).resolves.toStrictEqual({ buckets: [] });
+    // The rollback put ORG_A back before the request read the stash, so the
+    // call names the org the page is still showing.
+    const sent = vi.mocked(fetch).mock.calls[0]?.[1]?.headers as Headers;
+    expect(sent.get(ORG_ID_HEADER)).toBe(ORG_A);
   });
 });
 
@@ -260,22 +290,54 @@ describe('logout', () => {
 
   beforeEach(() => {
     sessionStorage.clear();
+    vi.useFakeTimers();
     vi.stubGlobal('location', { href: '' });
   });
 
   afterEach(() => {
+    // The give-up timeout is what takes the `pagehide` listener off the window,
+    // and the window outlives the module reload each case starts with.
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
-  it('drops the org this tab was operating in', async () => {
+  it('drops the org this tab was operating in when the navigation commits', async () => {
     const { api, stash } = await freshApi();
     stash.setActiveOrgId(ORG_A);
 
     api.logout();
+    window.dispatchEvent(new Event('pagehide'));
 
     // sessionStorage belongs to the tab, and logging out is a same-tab
     // navigation: on a shared machine the next user would otherwise start
     // inside the previous user's org.
     expect(stash.getActiveOrgId()).toBeNull();
+  });
+
+  it('keeps the org when the logout is cancelled', async () => {
+    // The upload page's `beforeunload` guard covers every way out of the page,
+    // logout included. A user who answers "stay on this page" would otherwise
+    // be left rendering org B with no stash, and every later request — a delete
+    // among them — would land in their personal org.
+    const { api, stash } = await freshApi();
+    stash.setActiveOrgId(ORG_A);
+
+    api.logout();
+
+    expect(stash.getActiveOrgId()).toBe(ORG_A);
+  });
+
+  it('stops waiting for a logout navigation that never comes', async () => {
+    const { api, stash } = await freshApi();
+    stash.setActiveOrgId(ORG_A);
+
+    api.logout();
+    await vi.advanceTimersByTimeAsync(10_000);
+    // A later navigation is a different trip, and must not carry out the clear
+    // this one asked for.
+    window.dispatchEvent(new Event('pagehide'));
+
+    expect(stash.getActiveOrgId()).toBe(ORG_A);
   });
 });

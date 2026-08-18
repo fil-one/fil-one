@@ -73,6 +73,30 @@ export function onSwitchingOrgChange(listener: (switching: boolean) => void): ()
   return () => switchingListeners.delete(listener);
 }
 
+/**
+ * Wait out a switch that is in progress.
+ *
+ * Resolves when the latch comes down, which is the rollback: the navigation
+ * never happened, the previous stash is back, and a request held in that window
+ * can go ahead against the org still on screen. It never resolves when the
+ * navigation commits, which is the whole point of holding — the page is going,
+ * and the answer would be discarded by the load anyway.
+ *
+ * Without this a held request has no resolution path at all. React Query starts
+ * no second fetch for a key whose fetch is still in flight, so a cancelled
+ * switch left every panel opened in that window spinning until a manual reload.
+ */
+export function waitWhileSwitching(): Promise<void> {
+  if (!switching) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const unsubscribe = onSwitchingOrgChange((next) => {
+      if (next) return;
+      unsubscribe();
+      resolve();
+    });
+  });
+}
+
 function setSwitching(next: boolean): void {
   switching = next;
   for (const listener of switchingListeners) listener(next);
@@ -90,23 +114,71 @@ function setSwitching(next: boolean): void {
  * `pagehide` fires when the page really is going, and cancels the rollback. What
  * is left is the cancelled case, where the prior stash goes back so the tab
  * keeps working in the org still on screen.
+ *
+ * `pagehide` also fires on the way into the back/forward cache, and what comes
+ * back out of it is this same document: the latch is still up and the rollback
+ * timer is already cancelled, so `apiRequest` would hold every request and the
+ * switcher would stay disabled — a console that looks alive and does nothing.
+ * The restored page is showing an org the user has left, so it reloads.
  */
 function latchUntilNavigation(previousOrgId: string | null): void {
   setSwitching(true);
 
   const rollback = setTimeout(() => {
-    window.removeEventListener('pagehide', cancel);
+    stopListening();
     if (previousOrgId === null) clearActiveOrgId();
     else setActiveOrgId(previousOrgId);
     console.warn('[active-org] The org switch never navigated — staying in the current org');
     setSwitching(false);
   }, NAVIGATION_GIVE_UP_MS);
 
+  function stopListening(): void {
+    window.removeEventListener('pagehide', cancel);
+    window.removeEventListener('pageshow', restore);
+  }
+
+  // Only its own listener: the restore below is the other half of a bfcache
+  // round trip, which starts with the `pagehide` this handles.
   function cancel(): void {
     clearTimeout(rollback);
     window.removeEventListener('pagehide', cancel);
   }
+
+  function restore(event: PageTransitionEvent): void {
+    if (!event.persisted || !switching) return;
+    stopListening();
+    window.location.reload();
+  }
+
   window.addEventListener('pagehide', cancel);
+  window.addEventListener('pageshow', restore);
+}
+
+/**
+ * Clear the stash when this navigation commits, and not before.
+ *
+ * Logging out has to drop the org: `sessionStorage` belongs to the tab, and on
+ * a shared machine the next person to sign in would otherwise start inside the
+ * previous user's org whenever they are also a member of it. Clearing at the
+ * click is too early, because the click may not become a navigation — the
+ * upload page installs a `beforeunload` guard while a transfer is running, and
+ * a user who answers "stay on this page" would be left rendering org B with no
+ * stash, so every later request, a delete among them, lands in their personal
+ * org instead.
+ *
+ * `pagehide` fires when the page really is going. A navigation that has not
+ * committed by the time the switch latch would have given up is not coming, and
+ * the listener goes rather than outliving the click it was registered for.
+ */
+export function clearActiveOrgOnNavigation(): void {
+  const clear = (): void => {
+    clearTimeout(giveUp);
+    clearActiveOrgId();
+  };
+  const giveUp = setTimeout(() => {
+    window.removeEventListener('pagehide', clear);
+  }, NAVIGATION_GIVE_UP_MS);
+  window.addEventListener('pagehide', clear, { once: true });
 }
 
 /**

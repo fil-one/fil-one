@@ -387,7 +387,12 @@ export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) 
   const isUploading = upload.uploadStep === 'uploading';
   useEffect(() => {
     if (!isUploading) return;
-    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      // `preventDefault` is the current trigger; older Chromium and Safari
+      // builds key the confirmation dialog off this instead.
+      e.returnValue = '';
+    };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [isUploading]);
