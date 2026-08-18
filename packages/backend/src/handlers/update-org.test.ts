@@ -118,11 +118,17 @@ function cancelledByAConflict() {
   });
 }
 
-/** Every read of the org's profile row, in the order the handler made them. */
-function profileReads() {
-  return ddbMock
-    .commandCalls(GetItemCommand)
-    .filter((call) => call.args[0].input.Key?.sk?.S === 'PROFILE');
+/**
+ * A replica that has not caught up with the row: an eventually consistent read
+ * of the profile finds nothing, a consistent one finds the org.
+ */
+function onlyTheLeaderHasTheProfileRow() {
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+    })
+    .callsFake((input) => (input.ConsistentRead ? { Item: { name: { S: 'Old Corp' } } } : {}));
 }
 
 /** Answer the profile-row read the rename makes to capture the previous name. */
@@ -307,21 +313,19 @@ describe('PATCH /api/org handler', () => {
     const result = await handler(renameEvent({ name: 'New Corp' }), buildContext());
 
     expect(result).toMatchObject({ statusCode: 500 });
-    // The conflict path never ran: only the rename's own read touched the
-    // profile row.
-    expect(profileReads()).toHaveLength(1);
+    expect((result as { body: string }).body).not.toContain('renamed by someone else');
   });
 
-  it('reads the profile row consistently before calling the org gone', async () => {
-    // The rename already proved the row existed on the leader milliseconds
-    // ago, so a stale replica answering this read would report a live org as
-    // deleted.
+  it('answers a conflict from the leader rather than a stale replica', async () => {
+    // The rename proved on the leader milliseconds ago that the row exists, so
+    // a replica that has not caught up would turn a rename someone else won
+    // into "your organization does not exist".
+    onlyTheLeaderHasTheProfileRow();
     ddbMock.on(TransactWriteItemsCommand).rejects(cancelledOnTheUpdate());
 
-    await handler(renameEvent({ name: 'New Corp' }), buildContext());
+    const result = await handler(renameEvent({ name: 'New Corp' }), buildContext());
 
-    expect(profileReads()).toHaveLength(2);
-    expect(profileReads().every((call) => call.args[0].input.ConsistentRead === true)).toBe(true);
+    expect(result).toMatchObject({ statusCode: 409 });
   });
 
   it('escapes the stored name', async () => {
