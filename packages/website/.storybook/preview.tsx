@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole } from '@filone/shared';
 import '../src/styles.css';
 import { ToastProvider } from '../src/components/Toast';
+import { queryKeys } from '../src/lib/query-client.js';
 import { seedPermissions } from '../src/lib/test-permissions.js';
 
 /**
@@ -13,10 +14,15 @@ import { seedPermissions } from '../src/lib/test-permissions.js';
  * never does — so a gated control simply was not in its own story. A client per
  * story, seeded before first render, gives each story the role it is about:
  * `parameters: { role: OrgRole.Member }` on a story or its meta.
+ *
+ * The app sets its `/me` staleTime at the key rather than at each hook, and the
+ * seeded role has to inherit that: an observer without one treats the seed as
+ * stale on mount and refetches, and there is no server behind a story to answer.
  */
 function usePreviewClient(role: OrgRole) {
   return useMemo(() => {
     const created = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    created.setQueryDefaults(queryKeys.me, { staleTime: Infinity });
     seedPermissions(created, role);
     return created;
   }, [role]);
