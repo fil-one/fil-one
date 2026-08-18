@@ -208,7 +208,7 @@ async function fetchAccessKeyActivities(orgId: string, scope: KeyScope): Promise
   );
   return (keysResult.Items ?? [])
     .map((item) => unmarshall(item) as AccessKeyRecord)
-    .filter((key) => withinScope(scope, key.createdBy))
+    .filter((key) => withinScope(scope, key))
     .map((key) => ({
       id: `key-${key.sk.replace('ACCESSKEY#', '')}`,
       action: 'key.created' as const,

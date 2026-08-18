@@ -18,6 +18,12 @@ import { getUserInfo } from './user-context.js';
  * Rows older than that name nobody, and nobody may claim them: they are visible
  * and revocable only under `keys.manage_all`, so a Member cannot revoke a key
  * that might be the org's rather than theirs.
+ *
+ * A recovered row is the same case wearing a name. `recoverDuplicateKey` writes
+ * the retrying caller into `createdBy` because a key with no owner at all is
+ * worse, but the row is a guess, and the guess is wrong exactly when two people
+ * pick the same key name — which is what makes it reachable at all. So a
+ * recovered row is treated like an unattributed one: `keys.manage_all` only.
  */
 export type KeyScope =
   /** `keys.manage_all` — every key in the org, including unattributed rows. */
@@ -37,11 +43,19 @@ export function keyScope(event: AuthenticatedEvent): KeyScope {
   return { sees: 'none' };
 }
 
+/** What a stored key row says about who minted it, and how sure the row is. */
+export interface KeyAttributionRead {
+  createdBy?: string | undefined;
+  /** Set on a row reconstructed after a partial failure — attribution is a guess. */
+  recovered?: boolean | undefined;
+}
+
 /** Whether a stored key belongs to the caller under this scope. */
-export function withinScope(scope: KeyScope, createdBy: string | undefined): boolean {
+export function withinScope(scope: KeyScope, key: KeyAttributionRead): boolean {
   if (scope.sees === 'all') return true;
   if (scope.sees === 'none') return false;
-  return createdBy !== undefined && createdBy === scope.userId;
+  if (key.recovered) return false;
+  return key.createdBy !== undefined && key.createdBy === scope.userId;
 }
 
 /**

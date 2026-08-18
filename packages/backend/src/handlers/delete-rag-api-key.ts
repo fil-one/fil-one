@@ -58,7 +58,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
 
   // Revoking is `keys.manage_own` unless the caller holds `keys.manage_all`, so
   // a Member revokes the keys they minted and no others.
-  if (!withinScope(keyScope(event), Item?.createdBy?.S)) return notYourKeyResponse();
+  if (!withinScope(keyScope(event), { createdBy: Item?.createdBy?.S })) return notYourKeyResponse();
 
   try {
     await dynamo.send(

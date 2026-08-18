@@ -48,6 +48,7 @@ function ddbItem(overrides: {
   expiresAt?: string;
   region?: string;
   createdBy?: string;
+  recovered?: boolean;
 }) {
   const item: Record<string, AttributeValue> = {
     pk: { S: `ORG#${USER_INFO.orgId}` },
@@ -58,6 +59,7 @@ function ddbItem(overrides: {
     status: { S: overrides.status ?? 'active' },
   };
   if (overrides.createdBy) item.createdBy = { S: overrides.createdBy };
+  if (overrides.recovered) item.recovered = { BOOL: true };
   if (overrides.permissions) item.permissions = { L: overrides.permissions.map((p) => ({ S: p })) };
   if (overrides.granularPermissions)
     item.granularPermissions = { L: overrides.granularPermissions.map((g) => ({ S: g })) };
@@ -541,11 +543,21 @@ describe('who sees which keys', () => {
     accessKeyId: 'AKIALEGACY',
     createdAt: '2026-01-03T00:00:00Z',
   });
+  // Reconstructed after a partial failure: it names the caller who retried, not
+  // a confirmed creator, so it is treated like the unattributed row.
+  const RECOVERED = ddbItem({
+    id: 'key-recovered',
+    keyName: 'Recovered',
+    accessKeyId: 'AKIARECOVERED',
+    createdAt: '2026-01-04T00:00:00Z',
+    createdBy: USER_INFO.userId,
+    recovered: true,
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
-    ddbMock.on(QueryCommand).resolves({ Items: [OWN, SOMEONE_ELSES, UNATTRIBUTED] });
+    ddbMock.on(QueryCommand).resolves({ Items: [OWN, SOMEONE_ELSES, UNATTRIBUTED, RECOVERED] });
   });
 
   async function keyNamesFor(role: OrgRole) {
@@ -560,10 +572,10 @@ describe('who sees which keys', () => {
   }
 
   it.each([OrgRole.Owner, OrgRole.Admin])('shows %s every key in the org', async (role) => {
-    expect(await keyNamesFor(role)).toStrictEqual(['Mine', 'Theirs', 'Legacy']);
+    expect(await keyNamesFor(role)).toStrictEqual(['Mine', 'Theirs', 'Legacy', 'Recovered']);
   });
 
-  it('shows a Member only the keys they created', async () => {
+  it('shows a Member only the keys they created, and not a recovered row naming them', async () => {
     expect(await keyNamesFor(OrgRole.Member)).toStrictEqual(['Mine']);
   });
 
@@ -576,6 +588,7 @@ describe('who sees which keys', () => {
       'user-2',
       // An unattributed row carries no creator rather than a made-up one.
       undefined,
+      USER_INFO.userId,
     ]);
   });
 });
