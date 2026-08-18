@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { PaperPlaneTiltIcon } from '@phosphor-icons/react/dist/ssr';
 import { CreateInvitationSchema, OrgRole } from '@filone/shared';
 import type { CreateInvitationRequest } from '@filone/shared';
@@ -63,6 +63,22 @@ export function InviteMemberForm({
   // the role through the current list rather than trusting the state that was
   // seeded from an older one.
   const effectiveRole = roles.includes(role) ? role : defaultRole(roles);
+
+  // Reading through the list settles this render. The state behind it still
+  // holds the role the ceiling dropped, so a list that widens again — a
+  // re-promotion, or a second org answering for the same mounted form — puts
+  // that role back in the picker, in the sentence under it, and in the body,
+  // with nobody having chosen it. Drop it instead, the way
+  // `AccessKeyPermissionsFields` prunes a selection its role no longer grants.
+  // No dependency list, for the same reason it has none there: the caller
+  // rebuilds `roles` on every render, so the comparison above is the guard, and
+  // the value it settles on is always in the list, so this runs once. An empty
+  // list is a ceiling nobody has answered for yet rather than a narrower one,
+  // and resetting on it would spend the operator's choice on a `/me` still in
+  // flight.
+  useEffect(() => {
+    if (roles.length > 0 && effectiveRole !== role) setRole(effectiveRole);
+  });
 
   if (notEnabledMessage) {
     return (
