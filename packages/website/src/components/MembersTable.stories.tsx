@@ -59,9 +59,13 @@ const meta: Meta<typeof MembersTable> = {
 export default meta;
 type Story = StoryObj<typeof MembersTable>;
 
-/** An Owner reaches every row, including their own. */
+/**
+ * An Owner reaches every row, including their own, and is the only role that can
+ * hand the seat over. The transfer is absent from their own row and from any
+ * other Owner's: neither is a transfer.
+ */
 export const AsOwner: Story = {
-  args: { ...scopeFor(OrgRole.Owner) },
+  args: { ...scopeFor(OrgRole.Owner), mayTransfer: true, onTransfer: () => {} },
 };
 
 /**

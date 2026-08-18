@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
@@ -7,12 +7,18 @@ import type { ListMembersResponse, MemberSummary } from '@filone/shared';
 import { Alert } from '../components/Alert';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { MembersTable } from '../components/MembersTable';
+import { TransferOwnershipDialog } from '../components/TransferOwnershipDialog';
 import { PageLayout } from '../components/PageLayout.js';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
-import { errorCodeOf, errorMessageOf } from '../lib/api.js';
-import { listMembers, removeMember, updateMemberRole } from '../lib/members-api.js';
-import { queryKeys } from '../lib/query-client.js';
+import { errorCodeOf, errorMessageOf, getMe } from '../lib/api.js';
+import {
+  listMembers,
+  removeMember,
+  transferOwnership,
+  updateMemberRole,
+} from '../lib/members-api.js';
+import { ME_STALE_TIME, queryKeys } from '../lib/query-client.js';
 import { ROLE_LABELS, useMemberActionScope } from '../lib/use-member-scope.js';
 import { MembersInvitations } from './MembersInvitations.js';
 
@@ -133,6 +139,85 @@ function useMemberRemoval(ctx: MutationContext) {
   });
 }
 
+/**
+ * The step-up action name, carrying who the transfer was for.
+ *
+ * The step-up stash holds an action string and a return path and nothing else,
+ * and the target is lost across a full-page trip through Auth0. Naming the
+ * member in the action is the one channel that survives it, which is why the id
+ * rides along here rather than in a stash of its own.
+ */
+const TRANSFER_ACTION = 'transfer-ownership';
+
+function transferStepUpAction(userId: string): string {
+  return `${TRANSFER_ACTION}:${userId}`;
+}
+
+/**
+ * Read the member a step-up round trip was about, and take it out of the URL so
+ * a refresh does not reopen the dialog.
+ */
+function takeResumedTransferTarget(): string | null {
+  const params = new URLSearchParams(window.location.search);
+  const action = params.get('action');
+  if (action === null || !action.startsWith(`${TRANSFER_ACTION}:`)) return null;
+
+  params.delete('action');
+  const query = params.toString();
+  const url = `${window.location.pathname}${query ? `?${query}` : ''}`;
+  window.history.replaceState(window.history.state, '', url);
+
+  return action.slice(TRANSFER_ACTION.length + 1) || null;
+}
+
+function useOwnershipTransfer(ctx: MutationContext) {
+  return useMutation({
+    mutationFn: (member: MemberSummary) =>
+      transferOwnership(member.userId, { stepUpAction: transferStepUpAction(member.userId) }),
+    onSuccess: (result, member) => {
+      // The org keeps exactly one Owner: the target gains the seat and the
+      // caller lands as an Admin, which their own controls have to reflect
+      // before they click anything else.
+      patchRosterRole(ctx.client, result.userId, OrgRole.Owner);
+      patchRosterRole(ctx.client, result.previousOwnerUserId, OrgRole.Admin);
+      settleAfterChange(ctx.client, result.previousOwnerUserId, ctx.selfUserId);
+      ctx.notice.clear();
+      ctx.toastSuccess(`${nameOf(member)} owns this organization now. You are an admin.`);
+    },
+    onError: (err) => {
+      ctx.toastError(errorMessageOf(err, 'Failed to transfer ownership'));
+    },
+  });
+}
+
+/**
+ * Who the transfer dialog is about, reopening it when a step-up sent the caller
+ * through Auth0 and back.
+ *
+ * Reopened rather than resubmitted. The step-up is there because this is the
+ * change nobody can reverse on their own, and firing it off the back of a
+ * redirect the caller may have abandoned would be exactly the click-through the
+ * dialog exists to prevent.
+ */
+function useTransferTarget(members: MemberSummary[]) {
+  const [target, setTarget] = useState<MemberSummary | null>(null);
+  const [resumedUserId, setResumedUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setResumedUserId(takeResumedTransferTarget());
+  }, []);
+
+  useEffect(() => {
+    if (resumedUserId === null) return;
+    const member = members.find((m) => m.userId === resumedUserId);
+    if (!member) return;
+    setResumedUserId(null);
+    setTarget(member);
+  }, [resumedUserId, members]);
+
+  return [target, setTarget] as const;
+}
+
 /** The member a mutation is in flight for — that row's controls go inert. */
 function inFlightUserId(
   roleChange: ReturnType<typeof useRoleChange>,
@@ -154,6 +239,12 @@ export function MembersPage() {
   const notice = useLastOwnerNotice();
 
   const roster = useQuery({ queryKey: queryKeys.members, queryFn: listMembers });
+  // The organization's name, which the transfer dialog makes the caller type.
+  const { data: me } = useQuery({
+    queryKey: queryKeys.me,
+    queryFn: () => getMe(),
+    staleTime: ME_STALE_TIME,
+  });
 
   const ctx: MutationContext = {
     client,
@@ -164,6 +255,10 @@ export function MembersPage() {
   };
   const roleChange = useRoleChange(ctx);
   const removal = useMemberRemoval(ctx);
+  const transfer = useOwnershipTransfer(ctx);
+
+  const members = roster.data?.members ?? NO_MEMBERS;
+  const [transferTarget, setTransferTarget] = useTransferTarget(members);
 
   // Promoting somebody to Owner is not a role change like the others: the org
   // gains a second person who can manage billing and remove anybody, the caller
@@ -196,13 +291,14 @@ export function MembersPage() {
         )}
 
         <MembersPanel
-          members={roster.data?.members ?? []}
+          members={members}
           isPending={roster.isPending}
           isError={roster.isError}
           errorMessage={roster.error?.message}
           scope={scope}
           onChangeRole={scope.mayManage ? handleRoleChange : undefined}
           onRemove={scope.mayManage ? setRemovalTarget : undefined}
+          onTransfer={setTransferTarget}
           pendingUserId={inFlightUserId(roleChange, removal)}
         />
 
@@ -238,9 +334,26 @@ export function MembersPage() {
         }
         confirmLabel="Remove member"
       />
+
+      <TransferOwnershipDialog
+        open={transferTarget !== null}
+        orgName={me?.orgName ?? 'this organization'}
+        memberName={transferTarget ? nameOf(transferTarget) : ''}
+        pending={transfer.isPending}
+        onClose={() => setTransferTarget(null)}
+        onConfirm={() => {
+          if (transferTarget) transfer.mutate(transferTarget);
+        }}
+      />
     </PageLayout>
   );
 }
+
+/**
+ * One empty array for every render with no roster yet, so effects keyed on the
+ * member list do not re-run on every render before it arrives.
+ */
+const NO_MEMBERS: MemberSummary[] = [];
 
 /**
  * Run a confirmed mutation against the dialog's target and swallow its
@@ -275,6 +388,7 @@ function MembersPanel({
   scope,
   onChangeRole,
   onRemove,
+  onTransfer,
   pendingUserId,
 }: {
   members: MemberSummary[];
@@ -284,6 +398,7 @@ function MembersPanel({
   scope: ReturnType<typeof useMemberActionScope>;
   onChangeRole?: (member: MemberSummary, role: OrgRole) => void;
   onRemove?: (member: MemberSummary) => void;
+  onTransfer?: (member: MemberSummary) => void;
   pendingUserId?: string;
 }) {
   if (isPending) {
@@ -315,8 +430,10 @@ function MembersPanel({
         currentUserId={scope.userId}
         mayChangeRole={scope.mayChangeRole}
         mayManageTarget={scope.mayManageTarget}
+        mayTransfer={scope.mayTransfer}
         onChangeRole={onChangeRole}
         onRemove={onRemove}
+        onTransfer={onTransfer}
         pendingUserId={pendingUserId}
       />
     </div>
