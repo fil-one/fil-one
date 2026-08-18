@@ -111,8 +111,9 @@ export const AuditSubjects = {
  * The audit actor for an authenticated request.
  *
  * One builder rather than a literal at each call site, so the rule about the
- * email is enforced in one place: only a verified claim, because an unverified
- * one names whoever typed it and the viewer shows it as the member's identity.
+ * email is stated in one place: callers pass only a verified claim, from
+ * `getVerifiedEmail`, because an unverified one names whoever typed it and the
+ * viewer shows it as the member's identity.
  */
 export function userActor({ userId, email }: { userId: string; email?: string }): AuditActor {
   return { kind: 'user', id: userId, ...(email ? { email } : {}) };
@@ -311,14 +312,15 @@ interface PhaseFieldsView {
  *
  * Two overloads rather than one conditional parameter, because only the event
  * types that call a vendor have two halves and the pairing is worth a compile
- * error rather than a runtime check.
+ * error rather than a runtime check. The phased overload also returns a phased
+ * event, so what it builds is what {@link appendAuditEvent} takes.
  */
 export function auditEvent<T extends AuditEventType>(
   input: AuditEventInput<T>,
 ): Extract<AuditEvent, { type: T }>;
 export function auditEvent<T extends TwoPhaseAuditEventType>(
   input: PhasedAuditEventInput<T>,
-): Extract<AuditEvent, { type: T }>;
+): Extract<AuditEvent, { type: T }> & (AuditIntentPhase | AuditCompletionPhase);
 export function auditEvent<T extends AuditEventType>(
   input: AuditEventFields<T> & PhaseFieldsView,
 ): Extract<AuditEvent, { type: T }> {
@@ -398,8 +400,9 @@ export function auditPut(event: AuditEvent): TransactWriteItem {
 /**
  * Append an event on its own.
  *
- * Only for the `intent` half of a provider-backed mutation, which by definition
- * has no local write to ride with — everything else uses {@link commitAudited}.
+ * For a phase half with no local write to ride with: the `intent` of a
+ * provider-backed mutation, which by definition has none, and a `completion`
+ * whose request made no mutation. Everything else uses {@link commitAudited}.
  *
  * Not create-only. An automatic SDK retry after a lost response collides with
  * its own landed write, and a create-only condition would turn that into a
