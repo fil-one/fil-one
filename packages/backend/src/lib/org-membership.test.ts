@@ -53,6 +53,17 @@ describe('OrgKeys', () => {
       expect(OrgKeys.parseMembershipSk(sk)).toBeUndefined();
     },
   );
+
+  it('parses a member id back out of the canonical sort key', () => {
+    expect(OrgKeys.parseMemberSk(OrgKeys.memberSk(USER_ID))).toBe(USER_ID);
+  });
+
+  it.each([['MEMBERSHIP#abc'], ['MEMBER#'], ['MEMBER#has#hash'], ['META'], ['']])(
+    'rejects %s as a member key',
+    (sk) => {
+      expect(OrgKeys.parseMemberSk(sk)).toBeUndefined();
+    },
+  );
 });
 
 describe('resolveMembership', () => {
@@ -478,6 +489,22 @@ describe('listMembers', () => {
 
     expect(members.map((member) => member.userId)).toStrictEqual([USER_ID]);
     expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it('drops a row whose sort key is not a well-formed member key, loudly', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    ddbMock.on(QueryCommand).resolves({
+      Items: [memberItem(USER_ID, OrgRole.Owner), memberItem('has#hash', OrgRole.Member)],
+    });
+
+    const members = await listMembers(ORG_ID);
+
+    expect(members.map((member) => member.userId)).toStrictEqual([USER_ID]);
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining('member key'),
+      expect.objectContaining({ orgId: ORG_ID, sk: 'MEMBER#has#hash' }),
+    );
     consoleError.mockRestore();
   });
 

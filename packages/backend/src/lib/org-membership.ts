@@ -36,6 +36,9 @@ import { resolveOrgName } from './org-profile.js';
  * transactions that change an org's name and its membership span both tables.
  */
 
+/** The canonical membership sort-key prefix, shared by the builder and the parser. */
+const memberSkPrefix = (): string => 'MEMBER#';
+
 /** The inverse item's sort-key prefix, shared by the builder and the parser. */
 const membershipSkPrefix = (): string => 'MEMBERSHIP#';
 
@@ -44,19 +47,19 @@ const inviteSkPrefix = (): string => 'INVITE#';
 
 export const OrgKeys = {
   orgPk: (orgId: string): string => `ORG#${orgId}`,
-  memberSk: (userId: string): string => `MEMBER#${userId}`,
-  memberSkPrefix: (): string => 'MEMBER#',
+  memberSk: (userId: string): string => `${memberSkPrefix()}${userId}`,
+  memberSkPrefix,
   /**
-   * Inverse of {@link memberSk}. User ids are UUIDs and contain no `#`, so the
-   * split is unambiguous; returns undefined for any other shape, `MEMBER#` with
-   * nothing after it included — an empty user id addresses `USER#`, a partition
-   * belonging to nobody. Every reader of this key shape parses it here so the
-   * census and the teardown cannot disagree about what a member row is.
+   * Inverse of {@link memberSk}. User ids are UUIDs, so the same no-`#` check as
+   * {@link parseMembershipSk} makes the split unambiguous; returns undefined for
+   * any other shape, `MEMBER#` with nothing after it included — an empty user id
+   * addresses `USER#`, a partition belonging to nobody. Every reader of this key
+   * shape parses it here so the census and the teardown cannot disagree about
+   * what a member row is.
    */
   parseMemberSk: (sk: string | undefined): string | undefined => {
-    const prefix = 'MEMBER#';
-    if (!sk?.startsWith(prefix)) return undefined;
-    const userId = sk.slice(prefix.length);
+    const prefix = memberSkPrefix();
+    const userId = sk?.startsWith(prefix) ? sk.slice(prefix.length) : undefined;
     return userId && !userId.includes('#') ? userId : undefined;
   },
   orgMetaSk: (): string => 'META',
@@ -318,8 +321,7 @@ function toMembership(
   orgId: string,
 ): OrgMembership | undefined {
   const sk = item.sk?.S ?? '';
-  const prefix = OrgKeys.memberSkPrefix();
-  const userId = sk.startsWith(prefix) ? sk.slice(prefix.length) : undefined;
+  const userId = OrgKeys.parseMemberSk(sk);
   if (!userId) {
     console.error('[org-membership] Row in the member range has no member key — dropped', {
       orgId,
