@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ApiErrorCode, S3Region } from '@filone/shared';
+import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
 import type { ListBucketsResponse } from '@filone/shared';
 
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
+import { seedPermissions } from '../lib/test-permissions.js';
 import { BucketsPage } from './BucketsPage.js';
 
 // ---------------------------------------------------------------------------
@@ -60,8 +61,11 @@ const DEGRADED: ListBucketsResponse = {
 
 const DEGRADED_MESSAGE = 'Cannot list buckets in the us-east-1 region. Please try again later.';
 
-function renderPage() {
+function renderPage(role = OrgRole.Owner) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // Delete is gated on `buckets.delete`, so the caller's role has to be in the
+  // cache before the rows render or the control is absent for the wrong reason.
+  seedPermissions(client, role);
   return render(
     <QueryClientProvider client={client}>
       <ToastProvider>
@@ -73,9 +77,9 @@ function renderPage() {
 
 // Resolves once the bucket list has rendered and its action menu is open, so
 // the "Delete bucket" menu item is present.
-async function renderPageWithBucketMenuOpen() {
+async function renderPageWithBucketMenuOpen(role = OrgRole.Owner) {
   mockApiResponses();
-  renderPage();
+  renderPage(role);
   fireEvent.click(await screen.findByRole('button', { name: 'Bucket actions' }));
   return screen.findByRole('menuitem', { name: 'Delete bucket' });
 }
@@ -146,6 +150,19 @@ describe('BucketsPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Delete bucket' }));
 
     expect(await screen.findByText('Tenant setup is not complete')).toBeInTheDocument();
+  });
+
+  // A Member creates buckets but does not delete them, so the control is absent
+  // rather than disabled — the gate is on `buckets.delete` specifically, not on
+  // bucket access in general.
+  it('gives a Member no delete control', async () => {
+    mockApiResponses();
+    renderPage(OrgRole.Member);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Bucket actions' }));
+
+    expect(await screen.findByRole('menuitem', { name: 'Browse objects' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Delete bucket' })).not.toBeInTheDocument();
   });
 });
 
