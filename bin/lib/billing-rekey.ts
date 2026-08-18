@@ -125,7 +125,12 @@ export interface OrgBillingState {
 }
 
 /** Why a row is left for a human. */
-export type BillingAnomalyReason = 'collision' | 'no-org-id' | 'foreign-org-row' | 'app-row-behind';
+export type BillingAnomalyReason =
+  | 'collision'
+  | 'no-org-id'
+  | 'foreign-org-row'
+  | 'app-row-behind'
+  | 'app-row-mismatch';
 
 export interface CopyPlan {
   kind: 'copy';
@@ -210,26 +215,7 @@ export function classifyOrgBilling(
 
   if (!orgRow) return copyPlan(state, source, 'first-copy');
 
-  // A row the application wrote is never overwritten: it is live billing state
-  // with no provenance, so a copy over it could not be reverted and might not
-  // even describe the same subscription. It is still compared, because two
-  // subscriptions claiming one org and a legacy row holding newer state are both
-  // things the operator has to know before the flip drops the legacy key.
-  if (!orgRow.rekeyedFrom) {
-    if (!isNewerThan(source.updatedAt, orgRow.updatedAt)) {
-      return { kind: 'already-copied', orgId, origin: 'application' };
-    }
-    return {
-      kind: 'anomaly',
-      orgId,
-      reason: 'app-row-behind',
-      detail:
-        `the application's org row (updatedAt=${orgRow.updatedAt ?? '(none)'}) is older than ` +
-        `${source.pk} (updatedAt=${source.updatedAt ?? '(none)'}), and the flip deletes the legacy row. ` +
-        'Reconcile the two by hand, or delete the org row and let the next run copy it',
-      rows: [source.pk],
-    };
-  }
+  if (!orgRow.rekeyedFrom) return applicationRowPlan(orgId, orgRow, source);
 
   // The org row records which legacy row won, so the source is settled. What is
   // left is which half is newer.
@@ -238,6 +224,57 @@ export function classifyOrgBilling(
   }
 
   return { kind: 'already-copied', orgId, origin: 'backfill' };
+}
+
+/**
+ * One org whose org row the application wrote, weighed against the legacy row
+ * still claiming it.
+ *
+ * The row is never overwritten: it is live billing state with no provenance, so
+ * a copy over it could not be reverted and might not even describe the same
+ * subscription. It is still compared, because two subscriptions claiming one org
+ * and a legacy row holding newer state are both things the operator has to know
+ * before the flip drops the legacy key.
+ *
+ * Identity comes first, and an absent `subscriptionId` agrees with nothing. Two
+ * rows naming different subscriptions is a fact about the account whichever of
+ * them was written last, and nothing downstream would catch it: verification
+ * exempts a row with no `rekeyedFrom` from the faithfulness check, and the
+ * timestamp comparison reads a newer org row as settled.
+ */
+function applicationRowPlan(
+  orgId: string,
+  orgRow: SubscriptionRow,
+  source: SubscriptionRow,
+): BillingPlan {
+  if ((orgRow.subscriptionId ?? '') !== (source.subscriptionId ?? '')) {
+    return {
+      kind: 'anomaly',
+      orgId,
+      reason: 'app-row-mismatch',
+      detail:
+        `the application's org row names subscription ${orgRow.subscriptionId ?? '(none)'} while ` +
+        `${source.pk} names ${source.subscriptionId ?? '(none)'}, so one of the two is about to be ` +
+        'lost when the flip deletes the legacy row. Confirm in Stripe which subscription is live, ' +
+        'then reconcile the two by hand',
+      rows: [source.pk],
+    };
+  }
+
+  if (!isNewerThan(source.updatedAt, orgRow.updatedAt)) {
+    return { kind: 'already-copied', orgId, origin: 'application' };
+  }
+
+  return {
+    kind: 'anomaly',
+    orgId,
+    reason: 'app-row-behind',
+    detail:
+      `the application's org row (updatedAt=${orgRow.updatedAt ?? '(none)'}) is older than ` +
+      `${source.pk} (updatedAt=${source.updatedAt ?? '(none)'}), and the flip deletes the legacy row. ` +
+      'Reconcile the two by hand, or delete the org row and let the next run copy it',
+    rows: [source.pk],
+  };
 }
 
 /**
@@ -346,6 +383,39 @@ function collisionAnomaly(state: OrgBillingState): BillingAnomalyPlan {
     detail: `${state.legacyRows.length} legacy rows name this org with different subscriptions: ${described}`,
     rows: state.legacyRows.map((row) => row.pk),
   };
+}
+
+/**
+ * The legacy rows whose `orgId` attribute cannot be half of a key, as one
+ * anomaly per org they claim.
+ *
+ * These rows are held out of the grouping rather than filed under the org they
+ * name: `ORG#a#b` is a key {@link isKeyable} refuses and the backend's
+ * `startsWith` accepts, so a copy written there is a row the application can
+ * read and this script can no longer account for. Naming them as anomalies puts
+ * them in the plan a dry run prints, which is what `--execute` then skips —
+ * `findUnkeyableOrgIds` says the same thing from the verify side, after the
+ * fact.
+ */
+export function unkeyableOrgAnomalies(rows: readonly SubscriptionRow[]): BillingAnomalyPlan[] {
+  const byOrg = new Map<string, string[]>();
+
+  for (const row of rows) {
+    if (row.orgId === undefined || isKeyable(row.orgId)) continue;
+    byOrg.set(row.orgId, [...(byOrg.get(row.orgId) ?? []), row.pk]);
+  }
+
+  return [...byOrg]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([orgId, pks]) => ({
+      kind: 'anomaly',
+      orgId,
+      reason: 'no-org-id',
+      detail:
+        `orgId=${JSON.stringify(orgId)} cannot be half of a key, so ${pks.join(', ')} has no org ` +
+        'row to copy to. Correct the attribute on the row, or dispose of the row, before the flip',
+      rows: pks,
+    }));
 }
 
 /**
@@ -470,12 +540,16 @@ function orgRowUnchanged(plan: CopyPlan): {
  * left alone. The legacy row is untouched by both directions: the backfill never
  * deleted it, which is what makes the revert a delete and not a restore.
  *
- * And conditional on that legacy row still existing. The revert's whole claim is
- * that every read falls back to the `CUSTOMER#` row, so the accounts it reverts
- * keep working — after the dated cleanup step there is no such row, and running
- * this then would delete the only subscription an account has while printing
- * that nothing was lost. Asserting the fallback makes the claim true: the revert
- * declines per org rather than emptying the table.
+ * And conditional on that legacy row still existing AND still serving this org.
+ * The revert's whole claim is that every read falls back to the `CUSTOMER#` row,
+ * so the accounts it reverts keep working — after the dated cleanup step there
+ * is no such row, and running this then would delete the only subscription an
+ * account has while printing that nothing was lost. The store's fallback is
+ * narrower than "the row exists": a legacy row whose `orgId` names a different
+ * org is refused, and a row carrying no `orgId` is served, so the condition is
+ * written the same way. Asserting the fallback the application actually applies
+ * makes the claim true: the revert declines per org rather than emptying the
+ * table.
  */
 export function buildRevertItem(
   orgId: string,
@@ -496,7 +570,10 @@ export function buildRevertItem(
       ConditionCheck: {
         TableName: tableName,
         Key: { pk: { S: rekeyedFrom }, sk: { S: BillingKeys.subscriptionSk() } },
-        ConditionExpression: 'attribute_exists(pk)',
+        ConditionExpression:
+          'attribute_exists(pk) AND (attribute_not_exists(#orgId) OR #orgId = :orgId)',
+        ExpressionAttributeNames: { '#orgId': 'orgId' },
+        ExpressionAttributeValues: { ':orgId': { S: orgId } },
       },
     },
   ];

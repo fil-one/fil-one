@@ -31,9 +31,9 @@
 // org row is the only row anyone looks at, and deleting it takes the account's
 // subscription with it — reverting billing then means reverting that deploy too.
 //
-// An --execute run holds the same BillingTable lock row the backfill takes, so
-// the two can never run at once. --force-unlock drops a lock a crashed run left
-// behind.
+// An --execute run holds the same BillingTable lock row the backfill takes, and
+// holds it from before the scan, so neither run can act on a plan the other has
+// already changed. --force-unlock drops a lock a crashed run left behind.
 //
 // There is no DynamoDB PITR/backup, so the per-row log is the only audit trail —
 // capture the whole run when running for real:
@@ -138,24 +138,13 @@ async function scanCopiedRows(): Promise<void> {
   copies.sort((a, b) => a.orgId.localeCompare(b.orgId));
 }
 
-await scanCopiedRows();
-
-console.log(`Org SUBSCRIPTION rows: ${orgRows}`);
-console.log(`  Written by the backfill (deletable): ${copies.length}`);
-console.log(`  Written by the application (kept):   ${applicationRows}`);
-console.log('');
-if (applicationRows > 0) {
-  console.log('The application-written rows are live billing state with no legacy row behind');
-  console.log('them. They are never deleted here — see the runbook for why.');
-  console.log('');
-}
-console.log(`Deletes ${copies.length} org rows. No CUSTOMER# row is touched.`);
-console.log('');
-
 const outcomes = { deleted: 0, changed: 0 };
 
-// Held for the whole write phase: the backfill re-creates the rows this run
-// deletes, and one landing mid-run would re-copy an org this run just reverted.
+// Held across the scan as well as the deletes, the way the backfill holds it.
+// A backfill that commits copies while this run is scanning writes rows the
+// plan does not contain, and the run then deletes the older inventory and
+// prints a count an operator reads as the whole revert. Holding the lock from
+// before the read makes the plan and the deletes describe one table.
 const lock = cli.execute
   ? await acquireRunLock(dynamo, billingTable, {
       script: 'revert-billing-backfill.ts',
@@ -165,6 +154,20 @@ const lock = cli.execute
   : undefined;
 
 try {
+  await scanCopiedRows();
+
+  console.log(`Org SUBSCRIPTION rows: ${orgRows}`);
+  console.log(`  Written by the backfill (deletable): ${copies.length}`);
+  console.log(`  Written by the application (kept):   ${applicationRows}`);
+  console.log('');
+  if (applicationRows > 0) {
+    console.log('The application-written rows are live billing state with no legacy row behind');
+    console.log('them. They are never deleted here — see the runbook for why.');
+    console.log('');
+  }
+  console.log(`Deletes ${copies.length} org rows. No CUSTOMER# row is touched.`);
+  console.log('');
+
   for (const copy of copies) {
     const label = `${BillingKeys.orgPk(copy.orgId)} (copied from ${copy.rekeyedFrom})`;
 
@@ -182,11 +185,12 @@ try {
     if (conditionFailed) {
       // Either the org row changed between the scan and the delete — re-copied
       // from a different source, or replaced by the application — or its legacy
-      // row is gone, which means there is no fallback to revert to and deleting
-      // would take the account's subscription with it.
+      // row is gone or now names a different org, which means there is no
+      // fallback to revert to and deleting would take the account's
+      // subscription with it.
       outcomes.changed++;
       console.log(
-        `  KEPT ${label} — the org row changed since the scan, or its CUSTOMER# row is gone`,
+        `  KEPT ${label} — the org row changed since the scan, or its CUSTOMER# row is gone or names another org`,
       );
     } else {
       outcomes.deleted++;
