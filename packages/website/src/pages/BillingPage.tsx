@@ -323,10 +323,10 @@ export function BillingPage() {
               <div>
                 <h2 className="text-[13px] font-medium tracking-[-0.325px] leading-[19.5px] text-zinc-900">
                   {isActive || isPastDue || isGracePeriod || isCanceled
-                    ? 'Pay-as-you-go'
+                    ? 'Pay as you go'
                     : isInactive
                       ? 'No active plan'
-                      : 'Free Trial'}
+                      : 'Free trial'}
                 </h2>
                 <p className="text-[13px] text-zinc-500 leading-[19.5px]">
                   {isActive || isPastDue
@@ -485,7 +485,7 @@ export function BillingPage() {
                   </div>
                   <ProgressBar value={egressPct} size="md" label="Egress usage" />
                   <p className="text-xs text-zinc-500">
-                    No egress fees after upgrading to pay-as-you-go
+                    No egress fees after upgrading to pay as you go
                   </p>
                 </div>
               )}
@@ -638,7 +638,7 @@ export function BillingPage() {
           <div className="rounded-lg border border-zinc-200 bg-white shadow-sm overflow-hidden p-px">
             {/* Header */}
             <div className="flex flex-col gap-[6px] px-4 pt-4 pb-[13px] border-b border-zinc-200/50 bg-zinc-50">
-              <Overline>Pay-as-you-go</Overline>
+              <Overline>Pay as you go</Overline>
               <div className="flex items-baseline gap-1">
                 <span className="text-3xl font-bold leading-9 text-zinc-900">$4.99</span>
                 <span className="text-[12px] leading-[18px] text-zinc-500">/ TB / month</span>

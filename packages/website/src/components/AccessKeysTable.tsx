@@ -18,6 +18,7 @@ import {
 import { Badge } from './Badge';
 import { Button } from './Button';
 import { CopyButton } from './CopyButton';
+import { IconButton } from './IconButton';
 import { Table } from './Table/Table';
 import { formatDate } from '../lib/time.js';
 
@@ -27,7 +28,7 @@ function StatusBadge({ status }: { status: AccessKey['status'] }) {
       Active
     </Badge>
   ) : (
-    <Badge color="grey" size="sm" weight="medium">
+    <Badge color="grey" dot size="sm" weight="medium">
       Inactive
     </Badge>
   );
@@ -151,15 +152,13 @@ function ActionMenu({ onDelete }: { onDelete: () => void }) {
 
   return (
     <div className="relative inline-block">
-      <button
+      <IconButton
         ref={buttonRef}
-        type="button"
+        icon={DotsThreeIcon}
         aria-label="Key actions"
+        size="md"
         onClick={handleOpen}
-        className="rounded p-1.5 text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
-      >
-        <DotsThreeIcon weight="bold" width={18} height={18} aria-hidden="true" />
-      </button>
+      />
       {open && (
         <div
           ref={menuRef}
@@ -210,7 +209,7 @@ export function AccessKeysTable({
 }: AccessKeysTableProps) {
   if (keys.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white px-6 py-16 text-center">
+      <div className="flex flex-col items-center justify-center rounded-xl border border-zinc-200 bg-white px-6 py-16 text-center">
         <IconBox icon={KeyIcon} size="md" color="blue" className="mb-4" />
         <p className="mb-1 text-sm font-medium text-zinc-900">{emptyTitle}</p>
         <p className="mb-4 max-w-xs text-sm text-zinc-500">{emptyDescription}</p>

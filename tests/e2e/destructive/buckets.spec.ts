@@ -120,7 +120,10 @@ async function submitUploadExpectingSuccess(
 // selects the in-memory file under the given object name, and submits. Stops
 // at submit so callers can assert success or failure for their role.
 async function submitUpload(page: Page, bucketName: string, objectName: string): Promise<void> {
-  await page.locator('#upload-object-button').click();
+  // The page header CTA renders only for non-empty buckets; an empty bucket
+  // offers the upload CTA in the object browser's empty state instead. The
+  // unpaid role's buckets are always empty, since that role can never upload.
+  await page.locator('#upload-object-button, #object-browser-upload-button').first().click();
   await expect(page).toHaveURL((url) => url.pathname === `/buckets/${bucketName}/upload`);
 
   // Setting files directly on the (hidden) files input triggers React's
@@ -135,10 +138,10 @@ for (const region of REGIONS) {
   test.describe(`paid user (${region})`, () => {
     test.use({ storageState: STORAGE_STATE.paid });
 
-    // TODO: Re-enable once bucket deletion lands so we can clean up after each
-    // run. Account-wide bucket limit is 100 and buckets are not yet deletable
-    // in either region (the delete API routes every region to Aurora, which
-    // does not implement deletion).
+    // TODO: Re-enable once this spec has a teardown step that empties and deletes
+    // the bucket it creates. Bucket deletion itself is now implemented for every
+    // region; what is missing is the cleanup, and the account-wide bucket limit is
+    // 100.
     // https://linear.app/filecoin-foundation/issue/FIL-204/delete-bucket
     test.skip(`paid user can create bucket and access key (${region})`, async ({ page }) => {
       await page.goto('/dashboard');
@@ -173,10 +176,10 @@ for (const region of REGIONS) {
   test.describe(`trial user (${region})`, () => {
     test.use({ storageState: STORAGE_STATE.trial });
 
-    // TODO: Re-enable once bucket deletion lands so we can clean up after each
-    // run. Account-wide bucket limit is 100 and buckets are not yet deletable
-    // in either region (the delete API routes every region to Aurora, which
-    // does not implement deletion).
+    // TODO: Re-enable once this spec has a teardown step that empties and deletes
+    // the bucket it creates. Bucket deletion itself is now implemented for every
+    // region; what is missing is the cleanup, and the account-wide bucket limit is
+    // 100.
     // https://linear.app/filecoin-foundation/issue/FIL-204/delete-bucket
     test.skip(`trial user can create bucket and access key (${region})`, async ({ page }) => {
       await page.goto('/dashboard');
