@@ -5,6 +5,7 @@ import {
   clearActiveOrgAfterRefusal,
   clearActiveOrgOnNavigation,
   getActiveOrgId,
+  NAVIGATION_GIVE_UP_MS,
   reconcileActiveOrg,
   waitWhileSwitching,
 } from './active-org.js';
@@ -13,6 +14,36 @@ import type { PreferencesResponse, UpdatePreferencesRequest } from '@filone/shar
 
 // Prevents multiple simultaneous 401 responses from each triggering a redirect.
 let isRedirecting = false;
+
+/**
+ * Send the page somewhere, and let the latch down if it never gets there.
+ *
+ * The latch is what keeps a page full of failing requests from firing one
+ * redirect each. It has to come down again, because a navigation can be
+ * refused: the upload page installs a `beforeunload` guard while a transfer is
+ * running, and a user who answers "stay on this page" leaves the document alive
+ * with the latch up. Every later 401 would then skip the redirect and the tab
+ * would sit on an expired session, every panel failing and nothing offering the
+ * way back in.
+ *
+ * `pagehide` fires when the page really is going, so it cancels the release —
+ * the same shape the org-switch latch uses, on the same clock.
+ */
+function redirectTo(href: string): void {
+  isRedirecting = true;
+
+  const release = setTimeout(() => {
+    window.removeEventListener('pagehide', cancel);
+    isRedirecting = false;
+  }, NAVIGATION_GIVE_UP_MS);
+
+  function cancel(): void {
+    clearTimeout(release);
+  }
+
+  window.addEventListener('pagehide', cancel, { once: true });
+  window.location.href = href;
+}
 
 /** Sentinel error subclass thrown when the backend returns step_up_required. */
 export class StepUpRequiredError extends Error {
@@ -64,8 +95,7 @@ function getCsrfToken(): string | undefined {
  */
 export function redirectToLogin(): void {
   if (isRedirecting) return;
-  isRedirecting = true;
-  window.location.href = `${API_URL}/login`;
+  redirectTo(`${API_URL}/login`);
 }
 
 /**
@@ -115,10 +145,7 @@ function throwAccountDeleted(status: number, fromSessionProbe: boolean): never {
 function forbidden(body: { message?: string; code?: string }): Error {
   switch (body.code) {
     case ApiErrorCode.EMAIL_NOT_VERIFIED:
-      if (!isRedirecting) {
-        isRedirecting = true;
-        window.location.href = '/verify-email';
-      }
+      if (!isRedirecting) redirectTo('/verify-email');
       return Object.assign(new Error('Email verification required'), { status: 403 });
 
     case ApiErrorCode.NOT_A_MEMBER:

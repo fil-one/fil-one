@@ -285,6 +285,90 @@ describe('getMe — when /me itself refuses', () => {
   });
 });
 
+describe('the redirect that answers an expired session', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn());
+    // Only `href` is read on these paths, so the stub carries nothing else.
+    vi.stubGlobal('location', { href: '' });
+  });
+
+  afterEach(() => {
+    // The give-up timeout is what takes the `pagehide` listener off the window,
+    // and the window outlives the module reload each case starts with.
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * A fresh response per call: these cases make the same request twice, and a
+   * body can only be read once.
+   */
+  function alwaysRespond(make: () => Response) {
+    vi.mocked(fetch).mockImplementation(() => Promise.resolve(make()));
+  }
+
+  function unauthorized(): Response {
+    return new Response('{}', { status: 401, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  it('sends the tab to login', async () => {
+    const { api } = await freshApi();
+    alwaysRespond(unauthorized);
+
+    await expect(api.apiRequest('/buckets')).rejects.toThrow(/Session expired/);
+
+    expect(location.href).toContain('/login');
+  });
+
+  it('redirects again after a login navigation that was cancelled', async () => {
+    // The upload page's `beforeunload` guard, and a user who answered "stay on
+    // this page": the document is still here and the session is still expired.
+    // A latch held for the life of the document would swallow every later 401
+    // and leave the tab failing with no way back in.
+    const { api } = await freshApi();
+    alwaysRespond(unauthorized);
+    await expect(api.apiRequest('/buckets')).rejects.toThrow();
+
+    location.href = '';
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(api.apiRequest('/buckets')).rejects.toThrow();
+
+    expect(location.href).toContain('/login');
+  });
+
+  it('holds the latch when the page really is leaving', async () => {
+    const { api } = await freshApi();
+    alwaysRespond(unauthorized);
+    await expect(api.apiRequest('/buckets')).rejects.toThrow();
+
+    window.dispatchEvent(new Event('pagehide'));
+    location.href = '';
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(api.apiRequest('/buckets')).rejects.toThrow();
+
+    // The login page is on its way. A second redirect would race the load it is
+    // already making.
+    expect(location.href).toBe('');
+  });
+
+  it('redirects again after a cancelled trip to /verify-email', async () => {
+    const { api } = await freshApi();
+    alwaysRespond(() => forbiddenResponse(ApiErrorCode.EMAIL_NOT_VERIFIED));
+    await expect(api.apiRequest('/buckets')).rejects.toThrow();
+    expect(location.href).toBe('/verify-email');
+
+    location.href = '';
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(api.apiRequest('/buckets')).rejects.toThrow();
+
+    expect(location.href).toBe('/verify-email');
+  });
+});
+
 describe('logout', () => {
   const ORG_A = '11111111-1111-1111-1111-111111111111';
 

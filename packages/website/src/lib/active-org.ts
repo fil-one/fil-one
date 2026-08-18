@@ -48,8 +48,11 @@ let switching = false;
  * How long the tab waits for a navigation it asked for before deciding it is not
  * coming. Long enough that a slow load is never mistaken for a cancelled one,
  * short enough that a user who chose to stay is not left with an inert page.
+ *
+ * Exported because `api.ts` waits out its auth redirects on the same clock, and
+ * two numbers that have to agree are better as one.
  */
-const NAVIGATION_GIVE_UP_MS = 4000;
+export const NAVIGATION_GIVE_UP_MS = 4000;
 
 /** Told the latch went up or came down, so React can re-render the switcher. */
 const switchingListeners = new Set<(switching: boolean) => void>();
@@ -112,8 +115,11 @@ function setSwitching(next: boolean): void {
  * and does nothing.
  *
  * `pagehide` fires when the page really is going, and cancels the rollback. What
- * is left is the cancelled case, where the prior stash goes back so the tab
- * keeps working in the org still on screen.
+ * is left is the cancelled case, where `rollbackTo` becomes the stash again so
+ * the tab keeps working. A switch names the org it came from, which is the one
+ * still on screen. A refusal names nothing: the server has just declined that
+ * org, and putting it back would re-attach the same header to every later
+ * request and have each one refused in turn — the state the clear was for.
  *
  * `pagehide` also fires on the way into the back/forward cache, and what comes
  * back out of it is this same document: the latch is still up and the rollback
@@ -121,14 +127,14 @@ function setSwitching(next: boolean): void {
  * switcher would stay disabled — a console that looks alive and does nothing.
  * The restored page is showing an org the user has left, so it reloads.
  */
-function latchUntilNavigation(previousOrgId: string | null): void {
+function latchUntilNavigation(rollbackTo: string | null): void {
   setSwitching(true);
 
   const rollback = setTimeout(() => {
     stopListening();
-    if (previousOrgId === null) clearActiveOrgId();
-    else setActiveOrgId(previousOrgId);
-    console.warn('[active-org] The org switch never navigated — staying in the current org');
+    if (rollbackTo === null) clearActiveOrgId();
+    else setActiveOrgId(rollbackTo);
+    console.warn('[active-org] The navigation never happened — releasing the latch');
     setSwitching(false);
   }, NAVIGATION_GIVE_UP_MS);
 
@@ -231,7 +237,9 @@ export function reconcileActiveOrg(resolvedOrgId: string | undefined): boolean {
   });
   clearActiveOrgId();
   noteReconcile();
-  latchUntilNavigation(stashed);
+  // Cleared is where a cancelled reload has to leave the tab: the org it asked
+  // for is not the org it got, and asking again would go the same way.
+  latchUntilNavigation(null);
   window.location.reload();
   return true;
 }
@@ -295,7 +303,10 @@ export function clearActiveOrgAfterRefusal(status: number | undefined): boolean 
   console.warn('[active-org] /me refused the org this tab asked for — dropping it', { status });
   clearActiveOrgId();
   noteReconcile();
-  latchUntilNavigation(stashed);
+  // The refused org does not come back if the reload is cancelled. Restoring it
+  // would send the same header to every later request, and `/me` among them is
+  // the one call whose answer could have fixed the tab.
+  latchUntilNavigation(null);
   window.location.reload();
   return true;
 }
