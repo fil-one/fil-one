@@ -114,7 +114,7 @@ export async function baseHandler(
         type: 'key.created',
         actor: userActor({ userId, email: creatorEmail }),
         orgId,
-        subject: AuditSubjects.key(keyId),
+        subject: AuditSubjects.key('rag', keyId),
         // The display prefix, which is what the console lists a RAG key by, so an
         // operator reading the event can find the key it names. Twelve characters
         // of a fifty-character token: the prefix plus five, not the credential.
