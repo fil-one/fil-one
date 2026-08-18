@@ -3,27 +3,76 @@
 import { client } from './client.gen.ts';
 import type { Client, Options as Options2, TDataShape } from './client/index.ts';
 import type {
+  AllocateAndAssignPublicIpToVpcData,
+  AllocateAndAssignPublicIpToVpcResponses,
+  AttachVolumeData,
+  AttachVolumeErrors,
+  AttachVolumeResponses,
+  ChangePublicIpAddressData,
+  ChangePublicIpAddressErrors,
+  ChangePublicIpAddressResponses,
   CloneObjectData,
   CloneObjectErrors,
   CloneObjectResponses,
   CreateBucketData,
   CreateBucketErrors,
   CreateBucketResponses,
+  CreateInstanceData,
+  CreateInstanceErrors,
+  CreateInstanceResponses,
+  CreateNetworkData,
+  CreateNetworkErrors,
+  CreateNetworkResponses,
   CreateS3AccessKeyData,
   CreateS3AccessKeyErrors,
   CreateS3AccessKeyResponses,
+  CreateSshKeyData,
+  CreateSshKeyErrors,
+  CreateSshKeyResponses,
   CreateTokenData,
   CreateTokenErrors,
   CreateTokenResponses,
+  CreateVolumeData,
+  CreateVolumeErrors,
+  CreateVolumeResponses,
+  CreateVolumeSnapshotData,
+  CreateVolumeSnapshotErrors,
+  CreateVolumeSnapshotResponses,
+  CreateVpcData,
+  CreateVpcErrors,
+  CreateVpcResponses,
+  DeleteBucketData,
+  DeleteBucketErrors,
+  DeleteBucketResponses,
+  DeleteInstanceData,
+  DeleteInstanceResponses,
+  DeleteNetworkData,
+  DeleteNetworkErrors,
+  DeleteNetworkResponses,
   DeleteS3AccessKeyData,
   DeleteS3AccessKeyErrors,
   DeleteS3AccessKeyResponses,
+  DeleteSshKeyData,
+  DeleteSshKeyResponses,
   DeleteTokenData,
   DeleteTokenErrors,
   DeleteTokenResponses,
+  DeleteVolumeData,
+  DeleteVolumeResponses,
+  DeleteVolumeSnapshotData,
+  DeleteVolumeSnapshotErrors,
+  DeleteVolumeSnapshotResponses,
+  DeleteVpcData,
+  DeleteVpcResponses,
+  DetachVolumeData,
+  DetachVolumeResponses,
+  DisassociateVpcPublicIpAddressData,
+  DisassociateVpcPublicIpAddressResponses,
   EditBucketData,
   EditBucketErrors,
   EditBucketResponses,
+  ForceStopInstanceData,
+  ForceStopInstanceResponses,
   GetBucketInfoData,
   GetBucketInfoErrors,
   GetBucketInfoResponses,
@@ -36,11 +85,21 @@ import type {
   GetEnvironmentData,
   GetEnvironmentErrors,
   GetEnvironmentResponses,
+  GetInstanceData,
+  GetInstanceResponses,
+  GetJobInfoData,
+  GetJobInfoResponses,
+  GetNetworkData,
+  GetNetworkErrors,
+  GetNetworkResponses,
   GetS3AccessKeyData,
   GetS3AccessKeyErrors,
   GetS3AccessKeyResponses,
   GetTenantData,
   GetTenantErrors,
+  GetTenantInferenceUsageData,
+  GetTenantInferenceUsageErrors,
+  GetTenantInferenceUsageResponses,
   GetTenantMetricsData,
   GetTenantMetricsErrors,
   GetTenantMetricsResponses,
@@ -54,18 +113,62 @@ import type {
   GetTokenData,
   GetTokenErrors,
   GetTokenResponses,
+  GetVolumeData,
+  GetVolumeErrors,
+  GetVolumeResponses,
+  GetVolumeSnapshotData,
+  GetVolumeSnapshotErrors,
+  GetVolumeSnapshotResponses,
+  GetVpcData,
+  GetVpcResponses,
   ListBucketsData,
-  ListBucketsErrors,
   ListBucketsResponses,
+  ListInstancesData,
+  ListInstancesResponses,
+  ListNetworksData,
+  ListNetworksResponses,
+  ListOfferingsData,
+  ListOfferingsResponses,
+  ListPendingJobsData,
+  ListPendingJobsResponses,
   ListS3AccessKeysData,
-  ListS3AccessKeysErrors,
   ListS3AccessKeysResponses,
+  ListSshKeysData,
+  ListSshKeysResponses,
+  ListTagsData,
+  ListTagsErrors,
+  ListTagsResponses,
+  ListTemplatesData,
+  ListTemplatesResponses,
   ListTenantsData,
-  ListTenantsErrors,
   ListTenantsResponses,
   ListTokensData,
-  ListTokensErrors,
   ListTokensResponses,
+  ListVolumesData,
+  ListVolumeSnapshotsData,
+  ListVolumeSnapshotsResponses,
+  ListVolumesResponses,
+  ListVpcPublicIpsData,
+  ListVpcPublicIpsResponses,
+  ListVpcsData,
+  ListVpcsResponses,
+  RebootInstanceData,
+  RebootInstanceResponses,
+  ResizeVolumeData,
+  ResizeVolumeErrors,
+  ResizeVolumeResponses,
+  RestoreVolumeSnapshotData,
+  RestoreVolumeSnapshotErrors,
+  RestoreVolumeSnapshotResponses,
+  UpdateInstanceData,
+  UpdateInstanceErrors,
+  UpdateInstanceResponses,
+  UpdateInstanceStateData,
+  UpdateInstanceStateErrors,
+  UpdateInstanceStateResponses,
+  UpdateTagsData,
+  UpdateTagsErrors,
+  UpdateTagsResponses,
 } from './types.gen.ts';
 
 export type Options<
@@ -85,6 +188,24 @@ export type Options<
    */
   meta?: Record<string, unknown>;
 };
+
+/**
+ * Get tenant inference usage metrics
+ *
+ * Returns inference usage metrics (token counts, requests, errors) for the authenticated tenant in the given time range, optionally resampled by window duration and grouped by model
+ */
+export const getTenantInferenceUsage = <ThrowOnError extends boolean = false>(
+  options: Options<GetTenantInferenceUsageData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetTenantInferenceUsageResponses,
+    GetTenantInferenceUsageErrors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/analytics/v1/inference/myorg',
+    ...options,
+  });
 
 /**
  * Get bucket operation metrics
@@ -166,7 +287,7 @@ export const getTenantStorageMetrics = <ThrowOnError extends boolean = false>(
 export const listTokens = <ThrowOnError extends boolean = false>(
   options: Options<ListTokensData, ThrowOnError>,
 ) =>
-  (options.client ?? client).get<ListTokensResponses, ListTokensErrors, ThrowOnError>({
+  (options.client ?? client).get<ListTokensResponses, unknown, ThrowOnError>({
     security: [{ name: 'X-Api-Key', type: 'apiKey' }],
     url: '/auth/v1/tenants/{tenantId}/tokens',
     ...options,
@@ -219,6 +340,620 @@ export const getToken = <ThrowOnError extends boolean = false>(
   });
 
 /**
+ * [BETA] List VM instances
+ *
+ * Returns a paginated list of VM instances for a tenant
+ */
+export const listInstances = <ThrowOnError extends boolean = false>(
+  options: Options<ListInstancesData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<ListInstancesResponses, unknown, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/instances',
+    ...options,
+  });
+
+/**
+ * [BETA] Create VM instance
+ *
+ * Handles the creation of a new virtual machine instance for a specific tenant. If sshKeys are provided, they are associated with the instance.
+ */
+export const createInstance = <ThrowOnError extends boolean = false>(
+  options: Options<CreateInstanceData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<CreateInstanceResponses, CreateInstanceErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/instances',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * [BETA] Delete VM instance
+ *
+ * Deletes a specific VM instance
+ */
+export const deleteInstance = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteInstanceData, ThrowOnError>,
+) =>
+  (options.client ?? client).delete<DeleteInstanceResponses, unknown, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/instances/{instanceId}',
+    ...options,
+  });
+
+/**
+ * [BETA] Get VM instance
+ *
+ * Returns details of a specific VM instance
+ */
+export const getInstance = <ThrowOnError extends boolean = false>(
+  options: Options<GetInstanceData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<GetInstanceResponses, unknown, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/instances/{instanceId}',
+    ...options,
+  });
+
+/**
+ * [BETA] Update VM instance
+ *
+ * Updates details of a specific VM instance
+ */
+export const updateInstance = <ThrowOnError extends boolean = false>(
+  options: Options<UpdateInstanceData, ThrowOnError>,
+) =>
+  (options.client ?? client).patch<UpdateInstanceResponses, UpdateInstanceErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/instances/{instanceId}',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * [BETA] Force stop VM instance
+ *
+ * Forcefully stops a specific VM instance
+ */
+export const forceStopInstance = <ThrowOnError extends boolean = false>(
+  options: Options<ForceStopInstanceData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<ForceStopInstanceResponses, unknown, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/instances/{instanceId}/force-stop',
+    ...options,
+  });
+
+/**
+ * [BETA] Change public IP address
+ *
+ * Changes or releases the public IP address of a VM instance
+ */
+export const changePublicIpAddress = <ThrowOnError extends boolean = false>(
+  options: Options<ChangePublicIpAddressData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    ChangePublicIpAddressResponses,
+    ChangePublicIpAddressErrors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/instances/{instanceId}/public-ip',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * [BETA] Reboot VM instance
+ *
+ * Reboots a specific VM instance
+ */
+export const rebootInstance = <ThrowOnError extends boolean = false>(
+  options: Options<RebootInstanceData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<RebootInstanceResponses, unknown, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/instances/{instanceId}/reboot',
+    ...options,
+  });
+
+/**
+ * [BETA] Update VM instance state
+ *
+ * Updates the state (e.g. start/stop) of a specific VM instance
+ */
+export const updateInstanceState = <ThrowOnError extends boolean = false>(
+  options: Options<UpdateInstanceStateData, ThrowOnError>,
+) =>
+  (options.client ?? client).put<
+    UpdateInstanceStateResponses,
+    UpdateInstanceStateErrors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/instances/{instanceId}/state',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * [BETA] List pending jobs
+ *
+ * Returns a list of pending asynchronous jobs for a tenant
+ */
+export const listPendingJobs = <ThrowOnError extends boolean = false>(
+  options: Options<ListPendingJobsData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<ListPendingJobsResponses, unknown, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/jobs',
+    ...options,
+  });
+
+/**
+ * [BETA] Get job info
+ *
+ * Returns status and details of a specific asynchronous job
+ */
+export const getJobInfo = <ThrowOnError extends boolean = false>(
+  options: Options<GetJobInfoData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<GetJobInfoResponses, unknown, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/jobs/{jobId}',
+    ...options,
+  });
+
+/**
+ * [BETA] List SSH keys
+ *
+ * Returns a list of SSH keys for a tenant
+ */
+export const listSshKeys = <ThrowOnError extends boolean = false>(
+  options: Options<ListSshKeysData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<ListSshKeysResponses, unknown, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/ssh-keys',
+    ...options,
+  });
+
+/**
+ * [BETA] Create SSH key
+ *
+ * Creates a new SSH key for a tenant
+ */
+export const createSshKey = <ThrowOnError extends boolean = false>(
+  options: Options<CreateSshKeyData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<CreateSshKeyResponses, CreateSshKeyErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/ssh-keys',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * [BETA] Delete SSH key
+ *
+ * Deletes a specific SSH key
+ */
+export const deleteSshKey = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteSshKeyData, ThrowOnError>,
+) =>
+  (options.client ?? client).delete<DeleteSshKeyResponses, unknown, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/ssh-keys/{sshKeyId}',
+    ...options,
+  });
+
+/**
+ * [BETA] List VM offerings
+ *
+ * Returns list of available VM offerings
+ */
+export const listOfferings = <ThrowOnError extends boolean = false>(
+  options: Options<ListOfferingsData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<ListOfferingsResponses, unknown, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/vm/offerings',
+    ...options,
+  });
+
+/**
+ * [BETA] List VM templates
+ *
+ * Returns list of available VM templates
+ */
+export const listTemplates = <ThrowOnError extends boolean = false>(
+  options: Options<ListTemplatesData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<ListTemplatesResponses, unknown, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/vm/templates',
+    ...options,
+  });
+
+/**
+ * [BETA] List volumes
+ *
+ * Returns a paginated list of volumes for a tenant
+ */
+export const listVolumes = <ThrowOnError extends boolean = false>(
+  options: Options<ListVolumesData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<ListVolumesResponses, unknown, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/volumes',
+    ...options,
+  });
+
+/**
+ * [BETA] Create volume
+ *
+ * Creates a new volume for a tenant
+ */
+export const createVolume = <ThrowOnError extends boolean = false>(
+  options: Options<CreateVolumeData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<CreateVolumeResponses, CreateVolumeErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/volumes',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * [BETA] Delete volume
+ *
+ * Deletes a volume by ID
+ */
+export const deleteVolume = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteVolumeData, ThrowOnError>,
+) =>
+  (options.client ?? client).delete<DeleteVolumeResponses, unknown, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/volumes/{volumeId}',
+    ...options,
+  });
+
+/**
+ * [BETA] Get volume
+ *
+ * Returns a volume by ID
+ */
+export const getVolume = <ThrowOnError extends boolean = false>(
+  options: Options<GetVolumeData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<GetVolumeResponses, GetVolumeErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/volumes/{volumeId}',
+    ...options,
+  });
+
+/**
+ * [BETA] Detach volume
+ *
+ * Detaches a volume from its current virtual machine
+ */
+export const detachVolume = <ThrowOnError extends boolean = false>(
+  options: Options<DetachVolumeData, ThrowOnError>,
+) =>
+  (options.client ?? client).delete<DetachVolumeResponses, unknown, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/volumes/{volumeId}/attach',
+    ...options,
+  });
+
+/**
+ * [BETA] Attach volume
+ *
+ * Attaches a volume to a virtual machine
+ */
+export const attachVolume = <ThrowOnError extends boolean = false>(
+  options: Options<AttachVolumeData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<AttachVolumeResponses, AttachVolumeErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/volumes/{volumeId}/attach',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * [BETA] Resize volume
+ *
+ * Increases the size of a volume
+ */
+export const resizeVolume = <ThrowOnError extends boolean = false>(
+  options: Options<ResizeVolumeData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<ResizeVolumeResponses, ResizeVolumeErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/volumes/{volumeId}/resize',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * [BETA] List volume snapshots
+ *
+ * Returns a paginated list of snapshots for a volume
+ */
+export const listVolumeSnapshots = <ThrowOnError extends boolean = false>(
+  options: Options<ListVolumeSnapshotsData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<ListVolumeSnapshotsResponses, unknown, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/volumes/{volumeId}/snapshots',
+    ...options,
+  });
+
+/**
+ * [BETA] Create volume snapshot
+ *
+ * Creates a new snapshot for a volume. The volume must be in the "Ready" state to perform this operation.
+ */
+export const createVolumeSnapshot = <ThrowOnError extends boolean = false>(
+  options: Options<CreateVolumeSnapshotData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    CreateVolumeSnapshotResponses,
+    CreateVolumeSnapshotErrors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/volumes/{volumeId}/snapshots',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * [BETA] Delete volume snapshot
+ *
+ * Deletes a volume snapshot by ID
+ */
+export const deleteVolumeSnapshot = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteVolumeSnapshotData, ThrowOnError>,
+) =>
+  (options.client ?? client).delete<
+    DeleteVolumeSnapshotResponses,
+    DeleteVolumeSnapshotErrors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/volumes/{volumeId}/snapshots/{snapshotId}',
+    ...options,
+  });
+
+/**
+ * [BETA] Get volume snapshot
+ *
+ * Returns a volume snapshot by ID
+ */
+export const getVolumeSnapshot = <ThrowOnError extends boolean = false>(
+  options: Options<GetVolumeSnapshotData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<GetVolumeSnapshotResponses, GetVolumeSnapshotErrors, ThrowOnError>(
+    {
+      security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+      url: '/compute/v1/tenants/{tenantId}/volumes/{volumeId}/snapshots/{snapshotId}',
+      ...options,
+    },
+  );
+
+/**
+ * [BETA] Restore volume snapshot
+ *
+ * Reverts a volume to the state captured by the given snapshot. The VM to which the volume is attached must be stopped before performing this operation.
+ */
+export const restoreVolumeSnapshot = <ThrowOnError extends boolean = false>(
+  options: Options<RestoreVolumeSnapshotData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    RestoreVolumeSnapshotResponses,
+    RestoreVolumeSnapshotErrors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/volumes/{volumeId}/snapshots/{snapshotId}/restore',
+    ...options,
+  });
+
+/**
+ * [BETA] List VPCs
+ *
+ * Returns a paginated list of VPCs for a tenant
+ */
+export const listVpcs = <ThrowOnError extends boolean = false>(
+  options: Options<ListVpcsData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<ListVpcsResponses, unknown, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/vpc',
+    ...options,
+  });
+
+/**
+ * [BETA] Create VPC
+ *
+ * Creates a new VPC for a tenant
+ */
+export const createVpc = <ThrowOnError extends boolean = false>(
+  options: Options<CreateVpcData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<CreateVpcResponses, CreateVpcErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/vpc',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * [BETA] Delete VPC
+ *
+ * Deletes a specific VPC
+ */
+export const deleteVpc = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteVpcData, ThrowOnError>,
+) =>
+  (options.client ?? client).delete<DeleteVpcResponses, unknown, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/vpc/{vpcId}',
+    ...options,
+  });
+
+/**
+ * [BETA] Get VPC
+ *
+ * Returns details of a specific VPC
+ */
+export const getVpc = <ThrowOnError extends boolean = false>(
+  options: Options<GetVpcData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<GetVpcResponses, unknown, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/vpc/{vpcId}',
+    ...options,
+  });
+
+/**
+ * [BETA] List networks
+ *
+ * Returns a paginated list of networks within a VPC
+ */
+export const listNetworks = <ThrowOnError extends boolean = false>(
+  options: Options<ListNetworksData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<ListNetworksResponses, unknown, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/vpc/{vpcId}/networks',
+    ...options,
+  });
+
+/**
+ * [BETA] Create network
+ *
+ * Creates a new network within a VPC
+ */
+export const createNetwork = <ThrowOnError extends boolean = false>(
+  options: Options<CreateNetworkData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<CreateNetworkResponses, CreateNetworkErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/vpc/{vpcId}/networks',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * [BETA] Delete network
+ *
+ * Deletes a specific network
+ */
+export const deleteNetwork = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteNetworkData, ThrowOnError>,
+) =>
+  (options.client ?? client).delete<DeleteNetworkResponses, DeleteNetworkErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/vpc/{vpcId}/networks/{networkId}',
+    ...options,
+  });
+
+/**
+ * [BETA] Get network
+ *
+ * Returns details of a specific network
+ */
+export const getNetwork = <ThrowOnError extends boolean = false>(
+  options: Options<GetNetworkData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<GetNetworkResponses, GetNetworkErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/vpc/{vpcId}/networks/{networkId}',
+    ...options,
+  });
+
+/**
+ * [BETA] List VPC public IPs
+ *
+ * Returns a list of public IPs associated with a VPC
+ */
+export const listVpcPublicIps = <ThrowOnError extends boolean = false>(
+  options: Options<ListVpcPublicIpsData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<ListVpcPublicIpsResponses, unknown, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/vpc/{vpcId}/public-addresses',
+    ...options,
+  });
+
+/**
+ * [BETA] Allocate and assign public IP to VPC
+ *
+ * Allocates a new public IP and assigns it to a VPC
+ */
+export const allocateAndAssignPublicIpToVpc = <ThrowOnError extends boolean = false>(
+  options: Options<AllocateAndAssignPublicIpToVpcData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<AllocateAndAssignPublicIpToVpcResponses, unknown, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/compute/v1/tenants/{tenantId}/vpc/{vpcId}/public-addresses',
+    ...options,
+  });
+
+/**
+ * [BETA] Disassociate VPC public IP address
+ *
+ * Disassociates and deallocates a public IP address from a VPC
+ */
+export const disassociateVpcPublicIpAddress = <ThrowOnError extends boolean = false>(
+  options: Options<DisassociateVpcPublicIpAddressData, ThrowOnError>,
+) =>
+  (options.client ?? client).delete<DisassociateVpcPublicIpAddressResponses, unknown, ThrowOnError>(
+    {
+      security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+      url: '/compute/v1/tenants/{tenantId}/vpc/{vpcId}/public-addresses/{ipId}',
+      ...options,
+    },
+  );
+
+/**
  * Get portal environment configuration
  *
  * Returns environment configuration for the portal web application, including Auth0 settings
@@ -239,7 +974,7 @@ export const getEnvironment = <ThrowOnError extends boolean = false>(
 export const listTenants = <ThrowOnError extends boolean = false>(
   options?: Options<ListTenantsData, ThrowOnError>,
 ) =>
-  (options?.client ?? client).get<ListTenantsResponses, ListTenantsErrors, ThrowOnError>({
+  (options?.client ?? client).get<ListTenantsResponses, unknown, ThrowOnError>({
     security: [{ name: 'X-Api-Key', type: 'apiKey' }],
     url: '/v1/tenants',
     ...options,
@@ -267,7 +1002,7 @@ export const getTenant = <ThrowOnError extends boolean = false>(
 export const listS3AccessKeys = <ThrowOnError extends boolean = false>(
   options: Options<ListS3AccessKeysData, ThrowOnError>,
 ) =>
-  (options.client ?? client).get<ListS3AccessKeysResponses, ListS3AccessKeysErrors, ThrowOnError>({
+  (options.client ?? client).get<ListS3AccessKeysResponses, unknown, ThrowOnError>({
     security: [{ name: 'X-Api-Key', type: 'apiKey' }],
     url: '/v1/tenants/{tenantId}/access_keys',
     ...options,
@@ -335,7 +1070,7 @@ export const getS3AccessKey = <ThrowOnError extends boolean = false>(
 export const listBuckets = <ThrowOnError extends boolean = false>(
   options: Options<ListBucketsData, ThrowOnError>,
 ) =>
-  (options.client ?? client).get<ListBucketsResponses, ListBucketsErrors, ThrowOnError>({
+  (options.client ?? client).get<ListBucketsResponses, unknown, ThrowOnError>({
     security: [{ name: 'X-Api-Key', type: 'apiKey' }],
     url: '/v1/tenants/{tenantId}/buckets',
     ...options,
@@ -357,6 +1092,20 @@ export const createBucket = <ThrowOnError extends boolean = false>(
       'Content-Type': 'application/json',
       ...options.headers,
     },
+  });
+
+/**
+ * Delete bucket
+ *
+ * Delete bucket for the given tenant
+ */
+export const deleteBucket = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteBucketData, ThrowOnError>,
+) =>
+  (options.client ?? client).delete<DeleteBucketResponses, DeleteBucketErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/tenants/{tenantId}/buckets/{bucketName}',
+    ...options,
   });
 
 /**
@@ -421,4 +1170,36 @@ export const getTenantMetrics = <ThrowOnError extends boolean = false>(
     security: [{ name: 'X-Api-Key', type: 'apiKey' }],
     url: '/v1/tenants/{tenantId}/metrics',
     ...options,
+  });
+
+/**
+ * List resource tags
+ *
+ * Returns list of tags for the given resource
+ */
+export const listTags = <ThrowOnError extends boolean = false>(
+  options: Options<ListTagsData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<ListTagsResponses, ListTagsErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/tenants/{tenantId}/tags',
+    ...options,
+  });
+
+/**
+ * Update resource tags
+ *
+ * Updates the list of tags for the given resource. Allowed characters for tag are: letters, numbers, spaces representable in UTF-8, and _ . : / = + - @
+ */
+export const updateTags = <ThrowOnError extends boolean = false>(
+  options: Options<UpdateTagsData, ThrowOnError>,
+) =>
+  (options.client ?? client).put<UpdateTagsResponses, UpdateTagsErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/tenants/{tenantId}/tags',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
   });

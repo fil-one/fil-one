@@ -12,12 +12,17 @@ export type ButtonProps = {
   variant: ButtonVariant;
   icon?: IconProps['component'];
   iconPosition?: ButtonIconPosition;
+  /** Overrides the size-derived icon size (px) when a glyph needs more presence. */
+  iconSize?: number;
   href?: BaseLinkProps['href'];
   size?: ButtonSize;
   children: React.ReactNode;
 } & React.ComponentPropsWithoutRef<'button'>;
 
-type ButtonInnerProps = Pick<ButtonProps, 'children' | 'icon' | 'iconPosition' | 'size'> & {
+type ButtonInnerProps = Pick<
+  ButtonProps,
+  'children' | 'icon' | 'iconPosition' | 'iconSize' | 'size'
+> & {
   isExternalLink?: boolean;
 };
 
@@ -50,6 +55,7 @@ export function Button({
   className,
   icon,
   iconPosition = 'left',
+  iconSize,
   children,
   disabled,
   href,
@@ -69,7 +75,7 @@ export function Button({
   if (typeof href === 'undefined' || disabled) {
     return (
       <button id={id} className={classes} disabled={disabled} {...rest}>
-        <ButtonInner icon={icon} iconPosition={iconPosition} size={size}>
+        <ButtonInner icon={icon} iconPosition={iconPosition} iconSize={iconSize} size={size}>
           {children}
         </ButtonInner>
       </button>
@@ -82,6 +88,7 @@ export function Button({
         isExternalLink={isExternalHref(href)}
         icon={icon}
         iconPosition={iconPosition}
+        iconSize={iconSize}
         size={size}
       >
         {children}
@@ -93,14 +100,15 @@ export function Button({
 function ButtonInner({
   icon: Icon,
   iconPosition = 'left',
+  iconSize,
   children,
   isExternalLink,
   size = 'md',
 }: ButtonInnerProps) {
-  const iconSize = iconSizes[size];
+  const defaultIconSize = iconSizes[size];
   const iconEl = Icon && (
     <span className="button-custom-icon">
-      <IconComponent component={Icon} size={iconSize} />
+      <IconComponent component={Icon} size={iconSize ?? defaultIconSize} />
     </span>
   );
 
@@ -111,7 +119,7 @@ function ButtonInner({
       {iconPosition === 'right' && iconEl}
       {isExternalLink && (
         <span className="button-arrow-icon">
-          <IconComponent component={ArrowUpRightIcon} size={iconSize} />
+          <IconComponent component={ArrowUpRightIcon} size={defaultIconSize} />
         </span>
       )}
     </>

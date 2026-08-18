@@ -5,6 +5,19 @@ export class BucketAlreadyExistsError extends Error {
   }
 }
 
+// Thrown when a bucket cannot be deleted because it still holds objects or object
+// versions. Every transport translates its own flavour of this failure (S3
+// `BucketNotEmpty`, Aurora Portal 409) into this one error so handlers can return a
+// single machine-readable 409 the frontend acts on.
+export class BucketNotEmptyError extends Error {
+  readonly bucketName: string;
+  constructor(bucketName: string, options?: ErrorOptions) {
+    super(`Bucket "${bucketName}" is not empty`, options);
+    this.name = 'BucketNotEmptyError';
+    this.bucketName = bucketName;
+  }
+}
+
 // Thrown when a bucket is created successfully but a follow-up configuration
 // step (versioning / object-lock / default retention) fails. These steps are
 // non-atomic with the create, so on this error the bucket already exists and a

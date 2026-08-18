@@ -110,7 +110,12 @@ export function Tooltip({ children, content, side = 'right', className }: Toolti
           <div
             ref={tooltipRef}
             role="tooltip"
-            className="pointer-events-none fixed z-50 w-max max-w-[220px] whitespace-normal rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs leading-relaxed text-zinc-900 shadow-md"
+            // `w-max` sizes the box to its content; the max-width is only a
+            // readability cap so a long hint wraps instead of running edge to
+            // edge. It's max-w-sm (384px) rather than a tighter value so a
+            // one-sentence hint stays on a single line. `text-balance` evens out
+            // the lines of the longer hints that do wrap.
+            className="pointer-events-none fixed z-50 w-max max-w-sm whitespace-normal text-balance rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs leading-relaxed text-zinc-900 shadow-md"
           >
             {content}
           </div>,

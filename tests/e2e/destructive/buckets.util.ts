@@ -4,10 +4,9 @@ import { isRegion, REGIONS, type Region } from './regions.util.ts';
 
 // Bucket names are globally unique across regions and rejected with 409 if
 // taken, so each caller mints a fresh name. We do not delete buckets afterward
-// because the delete API is not wired for any region yet — it routes to the
-// Aurora orchestrator, which does not support deletion, and the UI delete
-// button is disabled for the same reason (see
-// packages/website/src/pages/BucketsPage.tsx).
+// because these specs have no teardown step yet — deletion itself is wired for
+// every region (see packages/backend/src/handlers/delete-bucket.ts), but a
+// bucket must be emptied before it can be deleted.
 export function uniqueBucketName(role: string, region: Region): string {
   return `e2e-${role}-${region}-${randomUUID()}`;
 }
@@ -15,9 +14,8 @@ export function uniqueBucketName(role: string, region: Region): string {
 // Seeds the logged-in account with one bucket per region, but only for regions
 // that have none yet. Staging occasionally resets its storage layer and all
 // buckets disappear; without this the upload tests fail until someone re-seeds
-// the test accounts by hand. Creation is conditional because buckets are not
-// deletable and the account-wide limit is 100
-// (https://linear.app/filecoin-foundation/issue/FIL-204/delete-bucket).
+// the test accounts by hand. Creation is conditional because these specs never
+// delete the buckets they make and the account-wide limit is 100.
 export async function ensureBucketInEachRegion(page: Page, role: string): Promise<void> {
   const regionsWithBucket = await listRegionsWithBucket(page);
   for (const region of REGIONS) {

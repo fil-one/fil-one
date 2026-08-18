@@ -2,6 +2,7 @@
 
 import {
   CreateBucketCommand,
+  DeleteBucketCommand,
   GetBucketVersioningCommand,
   GetObjectCommand,
   GetObjectLockConfigurationCommand,
@@ -12,7 +13,7 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import type { RetentionDurationType, RetentionMode, S3Object } from '@filone/shared';
-import { BucketAlreadyExistsError } from './errors.js';
+import { BucketAlreadyExistsError, BucketNotEmptyError } from './errors.js';
 
 export interface CreateBucketOptions {
   bucketName: string;
@@ -208,4 +209,27 @@ export async function getObjectBytes(
     bytes,
     ...(result.ContentType && { contentType: result.ContentType }),
   };
+}
+
+export async function deleteBucket(s3: S3Client, bucketName: string): Promise<void> {
+  try {
+    await s3.send(
+      new DeleteBucketCommand({
+        Bucket: bucketName,
+      }),
+    );
+  } catch (err) {
+    const name = (err as { name?: string }).name;
+
+    // Already deleted — treat as success
+    if (name === 'NoSuchBucket') {
+      return;
+    }
+
+    if (name === 'BucketNotEmpty') {
+      throw new BucketNotEmptyError(bucketName, { cause: err as Error });
+    }
+
+    throw err;
+  }
 }
