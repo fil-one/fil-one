@@ -3,10 +3,10 @@ import { ApiErrorCode, CSRF_COOKIE_NAME, ORG_ID_HEADER } from '@filone/shared';
 import type { StepUpRequiredResponse } from '@filone/shared';
 import {
   clearActiveOrgAfterRefusal,
-  clearActiveOrgId,
+  clearActiveOrgOnNavigation,
   getActiveOrgId,
-  isSwitchingOrg,
   reconcileActiveOrg,
+  waitWhileSwitching,
 } from './active-org.js';
 import { redirectToStepUp } from './step-up.js';
 import type { PreferencesResponse, UpdatePreferencesRequest } from '@filone/shared';
@@ -69,15 +69,15 @@ export function redirectToLogin(): void {
 }
 
 /**
- * Log out, and drop the org this tab was operating in.
+ * Log out, and drop the org this tab was operating in once the logout
+ * navigation commits.
  *
- * `sessionStorage` belongs to the tab, not the session, and logging out is a
- * same-tab navigation — so without this the next person to sign in on a shared
- * machine starts inside the previous user's org whenever they are also a member
- * of it.
+ * `sessionStorage` belongs to the tab, not the session, so a shared machine
+ * needs the clear; it waits for the navigation because the click may not become
+ * one. See `clearActiveOrgOnNavigation`.
  */
 export function logout(): void {
-  clearActiveOrgId();
+  clearActiveOrgOnNavigation();
   window.location.href = `${API_URL}/logout`;
 }
 
@@ -168,8 +168,9 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   // The tab is on its way to another org. Held rather than rejected, for the
   // reason `getMe` returns instead of throwing on a mismatch: the page is
   // disappearing, and an error rendered over it would be the last thing the user
-  // sees of the org they just left.
-  if (isSwitchingOrg()) return new Promise<T>(() => {});
+  // sees of the org they just left. A switch that never navigates rolls back
+  // instead, and the request goes ahead below against the restored stash.
+  await waitWhileSwitching();
 
   const method = options.method?.toUpperCase() ?? 'GET';
   const headers = new Headers(options.headers);

@@ -279,4 +279,31 @@ describe('a switch whose navigation never happens', () => {
     expect(stash.isSwitchingOrg()).toBe(true);
     expect(stash.getActiveOrgId()).toBe(ORG_B);
   });
+
+  it('reloads a page that comes back out of the back/forward cache', async () => {
+    // Same document, same heap: the latch is still up and the rollback timer is
+    // gone, so every request would be held and the switcher would stay
+    // disabled. The page is showing an org the user has left.
+    const stash = await import('./active-org.js');
+    stash.setActiveOrgId(ORG_A);
+
+    stash.switchToOrg(ORG_B);
+    window.dispatchEvent(new Event('pagehide'));
+    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+
+    expect(reload).toHaveBeenCalled();
+  });
+
+  it('leaves an ordinary load alone', async () => {
+    const stash = await import('./active-org.js');
+    stash.setActiveOrgId(ORG_A);
+
+    stash.switchToOrg(ORG_B);
+    window.dispatchEvent(new Event('pagehide'));
+    // A `pageshow` without `persisted` is a fresh document, which has no latch
+    // to clear and nothing to reload.
+    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: false }));
+
+    expect(reload).not.toHaveBeenCalled();
+  });
 });
