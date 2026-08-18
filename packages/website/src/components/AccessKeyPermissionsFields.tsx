@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import type {
   AccessKeyPermission,
   BucketInfoPermission,
@@ -58,11 +59,28 @@ export function AccessKeyPermissionsFields({
   // here. `PutObjectRetention` and `PutObjectLegalHold` are the sharp end:
   // `privileged.grant` is an Owner's, and the rows simply are not there for
   // anyone else.
-  const { has } = usePermissions();
+  const { has, isPending, isError } = usePermissions();
   const mayGrant = (keyPermission: AccessKeyPermission) =>
     has(ACCESS_KEY_PERMISSION_REQUIREMENT[keyPermission]);
   const mayGrantGranular = (granular: GranularPermission) =>
     has(GRANULAR_PERMISSION_REQUIREMENT[granular]);
+
+  // Hiding a row decides only what can be added. A box checked before a
+  // demotion is still in the form's state, and submitting it earns the 403 the
+  // rows above are here to avoid, so the selection is pruned to the same
+  // ceiling from the same two tables. Only once `/me` has answered: `has`
+  // grants nothing while the query is pending or failed, and pruning on that
+  // would clear the form's default selection with nothing to put it back.
+  const ceilingKnown = !isPending && !isError;
+  const allowed = value.filter(mayGrant);
+  const allowedGranular = granularPermissions.filter(mayGrantGranular);
+  useEffect(() => {
+    if (!ceilingKnown) return;
+    if (allowed.length !== value.length) onChange(allowed);
+    if (allowedGranular.length !== granularPermissions.length) {
+      onGranularPermissionsChange(allowedGranular);
+    }
+  });
 
   function toggleBasic(permission: ObjectPermission) {
     if (value.includes(permission)) {

@@ -11,11 +11,17 @@ export function useSidebarData() {
   // says whether the console may know them. Without it the request is not made,
   // and the banners are absent rather than guessed at.
   const mayReadBilling = useHasPermission('billing.view');
-  const { data: billing } = useQuery({
+  const { data: billingData } = useQuery({
     queryKey: queryKeys.billing,
     queryFn: getBilling,
     enabled: mayReadBilling,
   });
+  // Read through the permission, not just the `enabled` flag. A mounted sidebar
+  // is a live observer, so a disabled query keeps serving the answer it already
+  // has — the "No active plan" and "Payment failed" banners would keep offering
+  // a /billing button the caller can no longer open. Same read as
+  // `DashboardPage.tsx`, so every derived value goes absent at once.
+  const billing = mayReadBilling ? billingData : undefined;
   const { data: usage } = useQuery({
     queryKey: queryKeys.usage,
     queryFn: getUsage,
@@ -48,7 +54,7 @@ export function useSidebarData() {
   const limits = getUsageLimits(!!isActivePaid);
   const storageUsed = usage?.storage.usedBytes ?? 0;
   const egressUsed = usage?.egress.usedBytes ?? 0;
-  const limitsKnown = mayReadBilling && billing !== undefined;
+  const limitsKnown = billing !== undefined;
   const storagePct =
     limitsKnown && limits.storageLimitBytes > 0
       ? Math.min(100, (storageUsed / limits.storageLimitBytes) * 100)

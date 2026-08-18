@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   OrgRole,
@@ -14,32 +14,54 @@ vi.mock('../lib/api.js', () => ({ getMe: vi.fn(() => new Promise(() => {})) }));
 import { AccessKeyPermissionsFields } from './AccessKeyPermissionsFields.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 
-function Harness({ region }: { region: S3Region }) {
-  const [value, setValue] = useState<AccessKeyPermission[]>([]);
+function Harness({
+  region,
+  initialPermissions = [],
+}: {
+  region: S3Region;
+  initialPermissions?: AccessKeyPermission[];
+}) {
+  const [value, setValue] = useState<AccessKeyPermission[]>(initialPermissions);
   const [granular, setGranular] = useState<GranularPermission[]>([]);
   return (
-    <AccessKeyPermissionsFields
-      value={value}
-      onChange={setValue}
-      granularPermissions={granular}
-      onGranularPermissionsChange={setGranular}
-      region={region}
-    />
+    <>
+      <AccessKeyPermissionsFields
+        value={value}
+        onChange={setValue}
+        granularPermissions={granular}
+        onGranularPermissionsChange={setGranular}
+        region={region}
+      />
+      {/* What would be submitted, which the rendered rows do not show once a
+          permission is dropped from the offer. */}
+      <div data-testid="selected">{value.join(' ')}</div>
+      <div data-testid="selected-granular">{granular.join(' ')}</div>
+    </>
   );
 }
 
 /**
  * The form offers only what the caller's role can grant, so the role has to be
  * seeded before it renders. Owner unless a test is about a narrower one.
+ *
+ * The client comes back so a test can re-seed it mid-render, which is what a
+ * role change under an open form looks like.
  */
-function renderFields(region: S3Region, role = OrgRole.Owner) {
+function renderFields(
+  region: S3Region,
+  role: OrgRole | undefined = OrgRole.Owner,
+  initialPermissions?: AccessKeyPermission[],
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  seedPermissions(client, role);
-  return render(
-    <QueryClientProvider client={client}>
-      <Harness region={region} />
-    </QueryClientProvider>,
-  );
+  if (role !== undefined) seedPermissions(client, role);
+  return {
+    client,
+    ...render(
+      <QueryClientProvider client={client}>
+        <Harness region={region} initialPermissions={initialPermissions} />
+      </QueryClientProvider>,
+    ),
+  };
 }
 
 describe('AccessKeyPermissionsFields — bucket-info permissions', () => {
@@ -112,5 +134,52 @@ describe('AccessKeyPermissionsFields — what a role may grant', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Write' }));
 
     expect(screen.getByTestId('granular-permission-PutObjectRetention')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A role that narrows while the form is open
+// ---------------------------------------------------------------------------
+
+describe('AccessKeyPermissionsFields — a demotion under an open form', () => {
+  it('drops a selected permission the caller may no longer grant', async () => {
+    // Checked as an Owner, then demoted to Member: hiding the row leaves the
+    // choice in the form's state, and submitting it earns a 403 naming a
+    // permission that is no longer on screen.
+    const { client } = renderFields(S3Region.UsEast1, OrgRole.Owner);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Create bucket' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Delete bucket' }));
+    expect(screen.getByTestId('selected')).toHaveTextContent('DeleteBucket');
+
+    seedPermissions(client, OrgRole.Member);
+
+    // A Member keeps `buckets.create`, so Create Bucket is still selected and
+    // only the one they can no longer grant goes.
+    await waitFor(() => expect(screen.getByTestId('selected')).toHaveTextContent(/^CreateBucket$/));
+    expect(screen.queryByTestId('permission-DeleteBucket')).not.toBeInTheDocument();
+  });
+
+  it('drops a selected granular the caller may no longer grant', async () => {
+    const { client } = renderFields(S3Region.UsEast1, OrgRole.Owner);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Write' }));
+    fireEvent.click(
+      within(screen.getByTestId('granular-permission-PutObjectRetention')).getByRole('checkbox'),
+    );
+    expect(screen.getByTestId('selected-granular')).toHaveTextContent('PutObjectRetention');
+
+    // Admin holds `objects.write` and not `privileged.grant`, so Write stays
+    // and only the elevated granular goes.
+    seedPermissions(client, OrgRole.Admin);
+
+    await waitFor(() => expect(screen.getByTestId('selected-granular')).toBeEmptyDOMElement());
+    expect(screen.getByTestId('selected')).toHaveTextContent('write');
+  });
+
+  it('leaves the selection alone while the role is still unknown', () => {
+    // `has()` grants nothing until `/me` answers. Pruning on that would clear
+    // the form's default permissions on mount, and nothing would restore them.
+    renderFields(S3Region.UsEast1, undefined, ['read', 'write', 'list']);
+
+    expect(screen.getByTestId('selected')).toHaveTextContent('read write list');
   });
 });

@@ -52,12 +52,19 @@ function setQueries(data: { me?: unknown; billing?: unknown; usage?: unknown }) 
 }
 
 /**
+ * A caller who holds `billing.view`. Every billing fact the sidebar derives is
+ * read through the permission, so a case about one has to seed a caller who
+ * may know it.
+ */
+const billingViewer = { permissions: ['billing.view'] };
+
+/**
  * A caller who may read billing, and a plan for them to read. Usage meters need
  * both: `billing.view` is what makes the request, and the answer is what says
  * which limits apply.
  */
 const billingReader = {
-  me: { permissions: ['billing.view'] },
+  me: billingViewer,
   billing: { subscription: { status: 'trialing' } },
 };
 
@@ -91,6 +98,7 @@ describe('useSidebarData', () => {
   describe('subscription status flags', () => {
     it('flags trialing subscriptions and computes trialDays + label', () => {
       setQueries({
+        me: billingViewer,
         billing: { subscription: { status: 'trialing', trialEndsAt: '2026-01-01' } },
       });
       const { result } = renderHook(() => useSidebarData());
@@ -102,6 +110,7 @@ describe('useSidebarData', () => {
 
     it('does not compute trialDays when not trialing', () => {
       setQueries({
+        me: billingViewer,
         billing: { subscription: { status: 'active', trialEndsAt: '2026-01-01' } },
       });
       const { result } = renderHook(() => useSidebarData());
@@ -112,13 +121,13 @@ describe('useSidebarData', () => {
     });
 
     it('flags past-due subscriptions', () => {
-      setQueries({ billing: { subscription: { status: 'past_due' } } });
+      setQueries({ me: billingViewer, billing: { subscription: { status: 'past_due' } } });
       const { result } = renderHook(() => useSidebarData());
       expect(result.current.isPastDue).toBe(true);
     });
 
     it('flags inactive subscriptions (no entitlement)', () => {
-      setQueries({ billing: { subscription: { status: 'inactive' } } });
+      setQueries({ me: billingViewer, billing: { subscription: { status: 'inactive' } } });
       const { result } = renderHook(() => useSidebarData());
       expect(result.current.isInactive).toBe(true);
       expect(result.current.isTrialing).toBe(false);
@@ -133,6 +142,7 @@ describe('useSidebarData', () => {
 
     it('computes graceDays + label when gracePeriodEndsAt is set', () => {
       setQueries({
+        me: billingViewer,
         billing: { subscription: { status: 'grace_period', gracePeriodEndsAt: '2026-01-01' } },
       });
       const { result } = renderHook(() => useSidebarData());
@@ -140,8 +150,26 @@ describe('useSidebarData', () => {
       expect(result.current.graceEndsLabel).toBe('Expires Jan 1, 2026');
     });
 
+    it('drops every banner fact when billing becomes unreadable', () => {
+      // A disabled query keeps its cached answer and a mounted sidebar keeps
+      // reading it. After a demotion the "Payment failed" banner would still
+      // render, with a /billing button the caller can no longer open.
+      setQueries({
+        me: { permissions: ['buckets.read'] },
+        billing: {
+          subscription: { status: 'past_due', gracePeriodEndsAt: '2026-01-01' },
+        },
+      });
+      const { result } = renderHook(() => useSidebarData());
+      expect(result.current.isPastDue).toBe(false);
+      expect(result.current.isInactive).toBe(false);
+      expect(result.current.graceDays).toBeNull();
+      expect(result.current.graceEndsLabel).toBeUndefined();
+      expect(result.current.limitsKnown).toBe(false);
+    });
+
     it('leaves grace/trial fields nullish when dates are absent', () => {
-      setQueries({ billing: { subscription: { status: 'active' } } });
+      setQueries({ me: billingViewer, billing: { subscription: { status: 'active' } } });
       const { result } = renderHook(() => useSidebarData());
       expect(result.current.trialDays).toBeNull();
       expect(result.current.trialEndsLabel).toBeUndefined();
