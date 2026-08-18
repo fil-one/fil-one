@@ -385,7 +385,8 @@ describe('MembersPage — transferring the owner seat', () => {
 
     const confirm = await screen.findByRole('button', { name: 'Transfer ownership' });
     expect(confirm).toBeDisabled();
-    expect(screen.getByText(/becomes the owner of Acme, and you become an admin/)).toBeVisible();
+    expect(screen.getByText(/becomes an owner of Acme, and you become an admin/)).toBeVisible();
+    expect(screen.getByText(/You give up your owner role/)).toBeVisible();
 
     fireEvent.change(screen.getByLabelText('Type Acme to confirm'), {
       target: { value: 'not the org name' },
@@ -493,7 +494,7 @@ describe('MembersPage — transferring the owner seat', () => {
     renderPage();
 
     expect(await screen.findByTestId('transfer-dialog')).toBeInTheDocument();
-    expect(screen.getByText(/grace@example.com becomes the owner of Acme/)).toBeVisible();
+    expect(screen.getByText(/grace@example.com becomes an owner of Acme/)).toBeVisible();
     // Reopened, not resubmitted: the confirmation has to be given again.
     expect(screen.getByRole('button', { name: 'Transfer ownership' })).toBeDisabled();
     expect(mockTransfer).not.toHaveBeenCalled();
