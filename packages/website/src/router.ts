@@ -23,11 +23,13 @@ import { Route as aiAgentToolkitRoute } from './routes/_app/ai-agent-toolkit.js'
 import { Route as verifyEmailRoute } from './routes/verify-email.js';
 import { RouteErrorPage, RouteNotFoundPage } from './components/RouteRecoveryPage.js';
 import { Route as accountDeletedRoute } from './routes/account-deleted.js';
+import { Route as acceptInvitationRoute } from './routes/invite.accept.js';
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
   verifyEmailRoute,
   accountDeletedRoute,
+  acceptInvitationRoute,
   authRoute.addChildren([signInRoute, signUpRoute, loginErrorRoute]),
   appRoute.addChildren([
     dashboardRoute,

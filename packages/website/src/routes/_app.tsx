@@ -7,6 +7,7 @@ import { getMe, logout } from '../lib/api.js';
 import { queryClient, queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
 import { usePermissions } from '../lib/use-permissions.js';
 import { consumePendingMfaAction } from '../lib/step-up.js';
+import { hasPendingInviteToken } from '../lib/invite-token.js';
 import { useEffect } from 'react';
 
 export const Route = createRoute({
@@ -15,6 +16,13 @@ export const Route = createRoute({
   beforeLoad: async () => {
     if (!document.cookie.includes('hs_logged_in')) {
       throw redirect({ href: '/login', reloadDocument: true });
+    }
+    // An invitation was mid-acceptance when the login bounce happened. The auth
+    // flow has no `returnTo` and lands every login on `/dashboard`, so this is
+    // the return trip — ahead of the `/me` fetch below, because the accept call
+    // is what decides which org `/me` should be answering about.
+    if (hasPendingInviteToken()) {
+      throw redirect({ to: '/invite/accept' });
     }
     let me;
     try {
