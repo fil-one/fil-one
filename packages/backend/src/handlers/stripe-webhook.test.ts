@@ -117,6 +117,22 @@ function mockInvoice(overrides?: Record<string, unknown>) {
   };
 }
 
+/**
+ * An invoice carrying the subscription metadata Stripe snapshots onto it at
+ * finalization, which is where an invoice event learns its org.
+ */
+function mockInvoiceForOrgSubscription(overrides?: Record<string, unknown>) {
+  return mockInvoice({
+    parent: {
+      subscription_details: {
+        subscription: MOCK_SUBSCRIPTION_ID,
+        metadata: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID },
+      },
+    },
+    ...overrides,
+  });
+}
+
 function setupStripeEvent(type: string, object: unknown) {
   mockConstructEvent.mockReturnValue({
     id: MOCK_EVENT_ID,
@@ -1870,6 +1886,18 @@ describe('stripe-webhook handler', () => {
       expectOrgIdBackfilled();
     });
 
+    // Stripe snapshots the subscription's metadata onto the invoice, so an
+    // invoice for a customer created before the metadata carried an orgId still
+    // names the org it is paying for.
+    it('payment succeeded persists orgId from the invoice subscription metadata', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoiceForOrgSubscription());
+      setupCustomerRetrieveWithoutOrg();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expectOrgIdBackfilled();
+    });
+
     it('payment succeeded writes nothing when metadata carries no orgId', async () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice());
       setupCustomerRetrieveWithoutOrg();
@@ -1882,6 +1910,15 @@ describe('stripe-webhook handler', () => {
     it('payment failed persists orgId from customer metadata', async () => {
       setupStripeEvent('invoice.payment_failed', mockInvoice());
       setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expectOrgIdBackfilled();
+    });
+
+    it('payment failed persists orgId from the invoice subscription metadata', async () => {
+      setupStripeEvent('invoice.payment_failed', mockInvoiceForOrgSubscription());
+      setupCustomerRetrieveWithoutOrg();
 
       await handler(buildWebhookEvent('{}'));
 

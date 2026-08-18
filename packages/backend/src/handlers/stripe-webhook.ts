@@ -19,7 +19,11 @@ import {
 } from '../lib/region-helpers.js';
 import { fromInternalStatus } from '../lib/hubspot-lifecycle-status.js';
 import { syncHubSpotStatusBestEffort } from '../lib/hubspot-status-sync.js';
-import { invoiceSubscriptionId, subscriptionSuperseded } from '../lib/billing-identity.js';
+import {
+  invoiceSubscriptionId,
+  invoiceSubscriptionMetadata,
+  subscriptionSuperseded,
+} from '../lib/billing-identity.js';
 import { getStripeClient, getWebhookSecret } from '../lib/stripe-client.js';
 import { updateSubscriptionByUser } from '../lib/subscription-store.js';
 import {
@@ -476,7 +480,10 @@ async function handlePaymentSucceeded(invoice: Stripe.Invoice): Promise<void> {
   const userId = customer.metadata?.userId;
   if (!userId) return;
 
-  const orgId = resolveOrgId(customer.metadata);
+  // The invoice's own subscription snapshot answers first, for the reason every
+  // subscription path prefers it: a customer can outlive an org, and the
+  // subscription that generated this invoice cannot.
+  const orgId = resolveOrgId(invoiceSubscriptionMetadata(invoice), customer.metadata);
   const backfill = orgIdBackfill(orgId);
   const updateResult = await updateSubscriptionByUser(
     { userId, orgId },
@@ -547,7 +554,10 @@ async function handlePaymentFailed(invoice: Stripe.Invoice): Promise<void> {
   // continue attempting payment. Grace period only begins when Stripe cancels
   // the subscription after all retries are exhausted.
   const now = new Date().toISOString();
-  const orgId = resolveOrgId(customer.metadata);
+  // The invoice's own subscription snapshot answers first, for the reason every
+  // subscription path prefers it: a customer can outlive an org, and the
+  // subscription that generated this invoice cannot.
+  const orgId = resolveOrgId(invoiceSubscriptionMetadata(invoice), customer.metadata);
   if (
     await subscriptionSuperseded({
       source: 'invoice.payment_failed',
