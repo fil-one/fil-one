@@ -123,6 +123,7 @@ import type {
   OrgBillingState,
   SubscriptionRow,
 } from './lib/billing-rekey.ts';
+import { buildBackfillScanInput } from './lib/billing-scan.ts';
 import {
   findUnkeyableOrgIds,
   formatBillingVerifyReport,
@@ -184,21 +185,11 @@ interface BillingRowAttributes {
 /**
  * One pass over BillingTable collects every subscription row.
  *
- * No `ProjectionExpression`: the copy carries every attribute the source holds,
- * so the whole row is what the run needs. The filter is the sort key alone —
- * webhook idempotency rows and usage reports live under other sort keys and are
- * never matched.
+ * What the pass asks the table for — the filter, the whole row, and the
+ * consistency `--verify` depends on — is {@link buildBackfillScanInput}.
  */
 async function scanBillingTable(): Promise<void> {
-  // ConsistentRead: this scan is what `--verify` gates the flip on, and an
-  // eventually-consistent miss reads as "no legacy row for that org" — the exact
-  // shape of the failure the gate exists to catch.
-  const items = scanAll(dynamo, {
-    TableName: billingTable,
-    FilterExpression: 'sk = :subscription',
-    ExpressionAttributeValues: { ':subscription': { S: BillingKeys.subscriptionSk() } },
-    ConsistentRead: true,
-  });
+  const items = scanAll(dynamo, buildBackfillScanInput(billingTable));
 
   for await (const item of items) {
     scan.subscriptionRows++;
