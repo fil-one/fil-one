@@ -31,6 +31,7 @@ import type {
   AuditSinglePhase,
   AuditOutcome,
   AuditSubject,
+  CommittableAuditEvent,
   TwoPhaseAuditEvent,
   TwoPhaseAuditEventType,
 } from '@filone/shared';
@@ -267,13 +268,22 @@ export function newCorrelationId(): string {
   return crypto.randomUUID();
 }
 
-/** What every event is built from, whatever its phase. */
-interface AuditEventFields<T extends AuditEventType> {
+/**
+ * What every event is built from, whatever its phase.
+ *
+ * Generic over the payload as well as the type, so the `keyKind` a caller wrote
+ * survives into the built event and {@link commitAudited} can tell a
+ * vendor-backed key event from a locally minted one.
+ */
+interface AuditEventFields<
+  T extends AuditEventType,
+  D extends AuditEventDetails[T] = AuditEventDetails[T],
+> {
   type: T;
   actor: AuditActor;
   orgId: string;
   subject: AuditSubject;
-  details: AuditEventDetails[T];
+  details: D;
 }
 
 /**
@@ -281,15 +291,30 @@ interface AuditEventFields<T extends AuditEventType> {
  * `phase` is typed as absent rather than optional. Stamping one on
  * `org.renamed` picks no overload and is a compile error.
  */
-export type AuditEventInput<T extends AuditEventType> = AuditEventFields<T> & AuditSinglePhase;
+export type AuditEventInput<
+  T extends AuditEventType,
+  D extends AuditEventDetails[T] = AuditEventDetails[T],
+> = AuditEventFields<T, D> & AuditSinglePhase;
 
 /**
  * Half of a two-phase pair. `phase` and `correlationId` arrive together and a
  * `completion` arrives with its outcome, so an unpairable record and an
  * outcomeless completion are both compile errors.
  */
-export type PhasedAuditEventInput<T extends TwoPhaseAuditEventType> = AuditEventFields<T> &
-  (AuditIntentPhase | AuditCompletionPhase);
+export type PhasedAuditEventInput<
+  T extends TwoPhaseAuditEventType,
+  D extends AuditEventDetails[T] = AuditEventDetails[T],
+> = AuditEventFields<T, D> & (AuditIntentPhase | AuditCompletionPhase);
+
+/**
+ * What the constructor hands back: the union member for the type it was given,
+ * narrowed to the key kind the caller wrote where there is one. The narrowing is
+ * on `keyKind` alone rather than on the whole payload, because a payload written
+ * without its optional fields is not the record type.
+ */
+type BuiltAuditEvent<T extends AuditEventType, D> = D extends { keyKind: infer K }
+  ? Extract<Extract<AuditEvent, { type: T }>, { details: { keyKind: K } }>
+  : Extract<AuditEvent, { type: T }>;
 
 /** The phase fields as the constructor reads them, once the generic is erased. */
 interface PhaseFieldsView {
@@ -315,11 +340,11 @@ interface PhaseFieldsView {
  * error rather than a runtime check. The phased overload also returns a phased
  * event, so what it builds is what {@link appendAuditEvent} takes.
  */
-export function auditEvent<T extends AuditEventType>(
-  input: AuditEventInput<T>,
-): Extract<AuditEvent, { type: T }>;
-export function auditEvent<T extends TwoPhaseAuditEventType>(
-  input: PhasedAuditEventInput<T>,
+export function auditEvent<T extends AuditEventType, D extends AuditEventDetails[T]>(
+  input: AuditEventInput<T, D>,
+): BuiltAuditEvent<T, D> & AuditSinglePhase;
+export function auditEvent<T extends TwoPhaseAuditEventType, D extends AuditEventDetails[T]>(
+  input: PhasedAuditEventInput<T, D>,
 ): Extract<AuditEvent, { type: T }> & (AuditIntentPhase | AuditCompletionPhase);
 export function auditEvent<T extends AuditEventType>(
   input: AuditEventFields<T> & PhaseFieldsView,
@@ -430,6 +455,11 @@ export type AuditFailureMode =
  * appended to them. Both land or neither does, across as many tables as the
  * caller already spans — signup's five items become six without changing shape.
  *
+ * Takes everything except a vendor-backed key event with no phase. That one's
+ * credential was minted outside the transaction, so the transaction is not what
+ * authorized it and a lone row recording it pairs to nothing — those flows go
+ * through {@link twoPhaseAudit}, whose completion rides the items instead.
+ *
  * A cancelled transaction is unwrapped rather than rethrown blind, because the
  * caller's mapping of a cancellation ("that row was gone, so 404") is only true
  * when the caller's own item is the one that failed its condition. When the
@@ -442,7 +472,7 @@ export async function commitAudited({
   onAuditFailure = 'fail',
 }: {
   items: TransactWriteItem[];
-  event: AuditEvent;
+  event: CommittableAuditEvent;
   onAuditFailure?: AuditFailureMode;
 }): Promise<void> {
   assertTransactionFits(items.length + 1);

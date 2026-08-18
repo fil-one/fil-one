@@ -272,11 +272,41 @@ export type AuditPhaseFields<T extends AuditEventType> =
  * `event.details.previousName` off an `org.renamed` type-checks, and reading it
  * off a `key.created` does not.
  */
-export type AuditEventRecord<T extends AuditEventType = AuditEventType> = AuditEventEnvelope<T> &
-  AuditPhaseFields<T>;
+export type AuditEventRecord<T extends AuditEventType = AuditEventType> = RecordPerKeyKind<
+  T,
+  AuditEventDetails[T] extends { keyKind: infer K } ? K : never
+>;
+
+/**
+ * One member per key kind, so `details.keyKind` discriminates: a vendor-backed
+ * key event and a locally minted one are separate members rather than one
+ * member with a union-typed field.
+ */
+type RecordPerKeyKind<T extends AuditEventType, K> = [K] extends [never]
+  ? AuditEventEnvelope<T> & AuditPhaseFields<T>
+  : K extends AuditKeyKind
+    ? Omit<AuditEventEnvelope<T>, 'details'> & {
+        details: AuditEventDetails[T] & { keyKind: K };
+      } & AuditPhaseFields<T>
+    : never;
 
 /** Any stored event, narrowable by `type`. */
 export type AuditEvent = { [T in AuditEventType]: AuditEventRecord<T> }[AuditEventType];
+
+/**
+ * A key event whose credential lives at the storage vendor, so the local write
+ * cannot be the thing that authorizes it.
+ */
+export type VendorBackedKeyEvent = Extract<AuditEvent, { details: { keyKind: 's3' } }>;
+
+/**
+ * An event that may ride a local transaction — what `commitAudited` accepts.
+ *
+ * Everything except a vendor-backed key event with no phase: that one names a
+ * credential minted outside the transaction, so a single row recording it is a
+ * half with nothing to pair it to.
+ */
+export type CommittableAuditEvent = Exclude<AuditEvent, VendorBackedKeyEvent & AuditSinglePhase>;
 
 /**
  * A phased event — what `appendAuditEvent` accepts.

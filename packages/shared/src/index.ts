@@ -99,8 +99,10 @@ export type {
   AuditPhaseFields,
   AuditSinglePhase,
   AuditSubject,
+  CommittableAuditEvent,
   TwoPhaseAuditEvent,
   TwoPhaseAuditEventType,
+  VendorBackedKeyEvent,
 } from './audit.js';
 
 export {
