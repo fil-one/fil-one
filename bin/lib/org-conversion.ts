@@ -78,6 +78,11 @@ export function parseMemberSk(sk: string): string | undefined {
   return parsePrefixed(sk, OrgKeys.memberSkPrefix());
 }
 
+/** `MEMBERSHIP#{orgId}` -> orgId, the inverse item's half of the same membership. */
+export function parseMembershipSk(sk: string): string | undefined {
+  return parsePrefixed(sk, OrgKeys.membershipSkPrefix());
+}
+
 function parsePrefixed(value: string, prefix: string): string | undefined {
   const rest = value.startsWith(prefix) ? value.slice(prefix.length) : undefined;
   return rest && !rest.includes('#') ? rest : undefined;
@@ -454,6 +459,30 @@ export function buildRevertTransactItems(
   ];
 }
 
+/**
+ * One membership, as read from either of the two OrgTable items that carry it:
+ * the canonical `ORG#{orgId}/MEMBER#{userId}` row or its
+ * `USER#{userId}/MEMBERSHIP#{orgId}` inverse. Both sides parse to the same pair,
+ * which is what lets `--verify` hold one against the other by identity rather
+ * than by count.
+ */
+export interface MembershipPair {
+  orgId: string;
+  userId: string;
+  role?: string;
+}
+
+/** Both halves of every OrgTable membership the scan saw, kept apart so they can be compared. */
+export interface MembershipScan {
+  members: MembershipPair[];
+  inverse: MembershipPair[];
+}
+
+/** `ORG#{orgId} MEMBER#{userId}` — one membership's identity, and the label a report prints. */
+export function membershipPairKey(pair: MembershipPair): string {
+  return `${OrgKeys.orgPk(pair.orgId)} ${OrgKeys.memberSk(pair.userId)}`;
+}
+
 /** What the two scans found, before any classification. */
 export interface ScanCounts {
   /** Rows the UserInfoTable scan's filter matched — not the table's size. */
@@ -467,6 +496,14 @@ export interface ScanCounts {
   /** `USER#{userId}/MEMBERSHIP#{orgId}` items — one per canonical membership row. */
   orgTableInverseRows: number;
   orgTableMetaRows: number;
+}
+
+/**
+ * What `--verify` reads: the counts the plan report prints, and both halves of
+ * every OrgTable membership, which the checks pair up rather than total.
+ */
+export interface ScanResult extends ScanCounts {
+  membership: MembershipScan;
 }
 
 /** What the classification decided, in the shape the report prints. */

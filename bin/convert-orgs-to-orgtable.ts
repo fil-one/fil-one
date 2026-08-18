@@ -93,12 +93,13 @@ import {
   legacyMemberKey,
   OrgKeys,
   parseMemberSk,
+  parseMembershipSk,
   parseOrgPk,
   parseUserPk,
   UNKNOWN_JOINED_AT,
   UserInfoKeys,
 } from './lib/org-conversion.ts';
-import type { ConvertPlan, OrgPlan, OrgState, ScanCounts } from './lib/org-conversion.ts';
+import type { ConvertPlan, OrgPlan, OrgState, ScanResult } from './lib/org-conversion.ts';
 import { formatVerifyReport, parseAcceptedAnomalies, verifyConversion } from './lib/org-verify.ts';
 
 /** Pause between orgs that write, so a few thousand transactions stay polite to a shared table. */
@@ -137,7 +138,7 @@ console.log(`  UserInfoTable: ${userInfoTable}`);
 console.log(`  OrgTable:      ${orgTable}`);
 console.log('');
 
-const scan: ScanCounts = {
+const scan: ScanResult = {
   userInfoRows: 0,
   orgProfiles: 0,
   legacyMemberRows: 0,
@@ -146,6 +147,9 @@ const scan: ScanCounts = {
   orgTableMemberRows: 0,
   orgTableInverseRows: 0,
   orgTableMetaRows: 0,
+  // Both halves of every OrgTable membership, kept as pairs rather than counted,
+  // so `--verify` can say which membership is missing which item.
+  membership: { members: [], inverse: [] },
 };
 
 const orgs = new Map<string, OrgState>();
@@ -178,6 +182,7 @@ interface UserInfoRow {
 interface OrgTableRow {
   pk: string;
   sk: string;
+  role: string;
 }
 
 /**
@@ -261,7 +266,8 @@ function collectUserInfoRow(item: Record<string, AttributeValue>): void {
  * is read because it outlives a removed membership — an org with META, no
  * member and no legacy row has been handled already, and repairing it from
  * `PROFILE.createdBy` would put back a membership somebody deleted. The inverse
- * items are counted so `--verify` can hold them against the canonical rows.
+ * items are read, key and role, so `--verify` can hold each one against the
+ * canonical row it belongs to rather than against a total.
  */
 async function scanOrgTable(): Promise<void> {
   const items = scanAll(dynamo, {
@@ -269,7 +275,9 @@ async function scanOrgTable(): Promise<void> {
     FilterExpression:
       '(begins_with(pk, :orgPrefix) AND (begins_with(sk, :memberPrefix) OR sk = :meta))' +
       ' OR (begins_with(pk, :userPrefix) AND begins_with(sk, :membershipPrefix))',
-    ProjectionExpression: 'pk, sk',
+    ProjectionExpression: 'pk, sk, #role',
+    // `role` is a DynamoDB reserved word, so it can only be projected by alias.
+    ExpressionAttributeNames: { '#role': 'role' },
     ExpressionAttributeValues: {
       ':orgPrefix': { S: OrgKeys.orgPkPrefix() },
       ':userPrefix': { S: OrgKeys.userPkPrefix() },
@@ -283,9 +291,20 @@ async function scanOrgTable(): Promise<void> {
     const row = decodeRow<OrgTableRow>(item);
     const pk = text(row.pk) ?? '';
     const sk = text(row.sk) ?? '';
+    const role = text(row.role);
 
-    if (parseUserPk(pk)) {
+    const inverseUserId = parseUserPk(pk);
+    if (inverseUserId) {
       scan.orgTableInverseRows++;
+      // A sort key that does not parse is still an item that ought to pair with
+      // a membership and cannot, so the org id it names is carried through as
+      // stored — it can match no canonical row, and the report says which item.
+      const inverseOrgId = parseMembershipSk(sk) ?? sk.slice(OrgKeys.membershipSkPrefix().length);
+      scan.membership.inverse.push({
+        orgId: inverseOrgId,
+        userId: inverseUserId,
+        ...(role ? { role } : {}),
+      });
       continue;
     }
 
@@ -302,6 +321,7 @@ async function scanOrgTable(): Promise<void> {
     if (!userId) continue;
     scan.orgTableMemberRows++;
     orgState(orgId).orgTableMemberUserIds.push(userId);
+    scan.membership.members.push({ orgId, userId, ...(role ? { role } : {}) });
   }
 }
 
