@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole, S3Region } from '@filone/shared';
 import type { AccessKey } from '@filone/shared';
@@ -14,6 +14,7 @@ vi.mock('@tanstack/react-router', () => ({ useNavigate: () => vi.fn() }));
 
 import { ApiKeysPage } from './ApiKeysPage.js';
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
+import { queryKeys } from '../lib/query-client.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 
 // ---------------------------------------------------------------------------
@@ -38,13 +39,14 @@ function key(over: Partial<AccessKey> = {}): AccessKey {
 function renderPage(role = OrgRole.Owner) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   seedPermissions(client, role);
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>
       <ToastProvider>
         <ApiKeysPage />
       </ToastProvider>
     </QueryClientProvider>,
   );
+  return { ...view, client };
 }
 
 // ---------------------------------------------------------------------------
@@ -66,6 +68,32 @@ describe('ApiKeysPage — a role that cannot list keys', () => {
     expect(mockApiRequest).not.toHaveBeenCalled();
     expect(screen.getByTestId('connection-details-tab')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Create new key' })).not.toBeInTheDocument();
+  });
+});
+
+describe('ApiKeysPage — a mid-session downgrade', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('drops the key list and its count when the caller loses keys.manage_own', async () => {
+    // Disabling a query does not evict what it already fetched, and a mounted
+    // page is a live observer, so the names and the tab count would sit above
+    // the no-access card until a reload.
+    mockApiRequest.mockResolvedValue({ keys: [key()] });
+    const { client } = renderPage(OrgRole.Member);
+
+    expect(await screen.findByText('my key')).toBeInTheDocument();
+    expect(screen.getByTestId('api-keys-tab')).toHaveTextContent('(1)');
+
+    // What a /me refetch after a demotion does.
+    act(() => seedPermissions(client, OrgRole.ReadOnly));
+
+    await waitFor(() => expect(screen.getByTestId('api-keys-no-access')).toBeInTheDocument());
+    expect(screen.queryByText('my key')).not.toBeInTheDocument();
+    expect(screen.getByTestId('api-keys-tab')).not.toHaveTextContent('(1)');
+    // The cached response is still there — the read is what changed.
+    expect(client.getQueryData(queryKeys.accessKeys)).toBeDefined();
   });
 });
 
