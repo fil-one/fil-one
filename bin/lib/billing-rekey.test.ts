@@ -18,6 +18,7 @@ import {
   parseLegacyPk,
   parseOrgPk,
   parseResolvedCollisions,
+  unkeyableOrgAnomalies,
   validateResolvedCollisions,
   REKEY_ATTRIBUTES,
   summarizeBillingPlans,
@@ -100,22 +101,28 @@ function copiedRow(
   };
 }
 
-/** An org row the application wrote: no provenance attributes. */
-function applicationRow(): SubscriptionRow {
+/**
+ * An org row the application wrote: no provenance attributes. It names the same
+ * subscription as {@link legacyRow} unless a test is about the two disagreeing.
+ */
+function applicationRow(overrides: Record<string, string> = {}): SubscriptionRow {
   const pk = BillingKeys.orgPk(ORG_ID);
+  const stored: Record<string, string> = {
+    pk,
+    sk: 'SUBSCRIPTION',
+    orgId: ORG_ID,
+    userId: USER_ID,
+    subscriptionId: 'sub_1',
+    updatedAt: NEWER,
+    ...overrides,
+  };
+
   return {
     pk,
-    attributes: attributes({
-      pk,
-      sk: 'SUBSCRIPTION',
-      orgId: ORG_ID,
-      userId: USER_ID,
-      subscriptionId: 'sub_app',
-      updatedAt: NEWER,
-    }),
-    orgId: ORG_ID,
-    subscriptionId: 'sub_app',
-    updatedAt: NEWER,
+    attributes: attributes(stored),
+    orgId: stored.orgId,
+    subscriptionId: stored.subscriptionId,
+    updatedAt: stored.updatedAt,
   };
 }
 
@@ -239,13 +246,35 @@ describe('classifyOrgBilling', () => {
     // The blanket exemption hid this: the flip deletes the legacy row, so state
     // only the legacy row holds is state about to be lost. The app row is still
     // never overwritten — a human reconciles it.
-    const behind = applicationRow();
-    behind.updatedAt = UPDATED_AT;
-    behind.attributes.updatedAt = { S: UPDATED_AT };
+    const behind = applicationRow({ updatedAt: UPDATED_AT });
 
     expect(
       classifyOrgBilling(state({ legacyRows: [legacyRow({ updatedAt: NEWER })], orgRow: behind })),
     ).toMatchObject({ kind: 'anomaly', reason: 'app-row-behind' });
+  });
+
+  it('reports an application row naming a different subscription than its legacy row', () => {
+    // Nothing downstream can catch this one: verification exempts a row with no
+    // rekeyedFrom from the faithfulness check, and the org row is newer, so the
+    // timestamp comparison passes it as settled. Two subscriptions for one org
+    // is the fact, whichever row is fresher.
+    const plan = classifyOrgBilling(
+      state({ legacyRows: [legacyRow()], orgRow: applicationRow({ subscriptionId: 'sub_app' }) }),
+    );
+
+    expect(plan).toMatchObject({ kind: 'anomaly', reason: 'app-row-mismatch' });
+    expect((plan as { detail: string }).detail).toContain('sub_app');
+    expect((plan as { detail: string }).detail).toContain('sub_1');
+  });
+
+  it('reports an application row that names no subscription at all', () => {
+    // Absent agrees with nothing: the legacy row holds the only subscription id
+    // either row has, and the flip is about to delete it.
+    expect(
+      classifyOrgBilling(
+        state({ legacyRows: [legacyRow()], orgRow: applicationRow({ subscriptionId: '' }) }),
+      ),
+    ).toMatchObject({ kind: 'anomaly', reason: 'app-row-mismatch' });
   });
 
   it('surfaces a collision even when an application row exists', () => {
@@ -464,6 +493,53 @@ describe('buildRevertItem', () => {
       ExpressionAttributeValues: { ':source': { S: BillingKeys.legacyPk(USER_ID) } },
     });
   });
+
+  it('requires the legacy row to still be the one the store would fall back to', () => {
+    // The fallback this delete promises is narrower than "the row exists":
+    // readSubscription refuses a legacy row whose orgId names another org, and
+    // serves one carrying no orgId. A revert conditioned on existence alone
+    // deletes the org row, prints DELETED, and leaves the account reading as
+    // having no subscription at all.
+    const [, check] = buildRevertItem(ORG_ID, BillingKeys.legacyPk(USER_ID), TABLE);
+
+    expect(check.ConditionCheck).toStrictEqual({
+      TableName: TABLE,
+      Key: { pk: { S: BillingKeys.legacyPk(USER_ID) }, sk: { S: 'SUBSCRIPTION' } },
+      ConditionExpression:
+        'attribute_exists(pk) AND (attribute_not_exists(#orgId) OR #orgId = :orgId)',
+      ExpressionAttributeNames: { '#orgId': 'orgId' },
+      ExpressionAttributeValues: { ':orgId': { S: ORG_ID } },
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Rows this migration cannot key
+// ---------------------------------------------------------------------------
+
+describe('unkeyableOrgAnomalies', () => {
+  it('names the rows whose orgId cannot form a key, one anomaly per org', () => {
+    // Before the plan, not after the write: an --execute run that copies these
+    // to ORG#a#b only finds out on the next run's --verify, by which time the
+    // row it fails on is one it wrote.
+    const anomalies = unkeyableOrgAnomalies([
+      legacyRow({ orgId: 'a#b' }),
+      legacyRow({ pk: BillingKeys.legacyPk(OTHER_USER_ID), orgId: 'a#b' }),
+    ]);
+
+    expect(anomalies).toHaveLength(1);
+    expect(anomalies[0]).toMatchObject({
+      kind: 'anomaly',
+      orgId: 'a#b',
+      reason: 'no-org-id',
+      rows: [BillingKeys.legacyPk(USER_ID), BillingKeys.legacyPk(OTHER_USER_ID)],
+    });
+    expect(anomalies[0].detail).toContain('cannot be half of a key');
+  });
+
+  it('leaves the rows this migration can key alone', () => {
+    expect(unkeyableOrgAnomalies([legacyRow(), legacyRow({ orgId: undefined })])).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -611,13 +687,24 @@ describe('verifyBillingRekey', () => {
   it('reports an application row whose legacy row holds newer state', () => {
     // The exemption used to cover this: the flip deletes the legacy row, so
     // state only it holds is state about to be lost.
-    const behind = applicationRow();
-    behind.updatedAt = UPDATED_AT;
-    behind.attributes.updatedAt = { S: UPDATED_AT };
     const { named } = checksFor([
-      state({ legacyRows: [legacyRow({ updatedAt: NEWER })], orgRow: behind }),
+      state({
+        legacyRows: [legacyRow({ updatedAt: NEWER })],
+        orgRow: applicationRow({ updatedAt: UPDATED_AT }),
+      }),
     ]);
 
+    expect(named('No org is claimed by two subscriptions').pass).toBe(false);
+  });
+
+  it('reports an application row and a legacy row naming different subscriptions', () => {
+    // The faithfulness check cannot see it — an application row has no source to
+    // be faithful to — so the anomaly check is the only place it surfaces.
+    const { named } = checksFor([
+      state({ legacyRows: [legacyRow()], orgRow: applicationRow({ subscriptionId: 'sub_app' }) }),
+    ]);
+
+    expect(named('Every org twin says what its source says').pass).toBe(true);
     expect(named('No org is claimed by two subscriptions').pass).toBe(false);
   });
 

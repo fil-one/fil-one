@@ -109,9 +109,11 @@ import {
   classifyOrgBilling,
   formatAppliedResolutions,
   formatBillingPlanReport,
+  isKeyable,
   parseLegacyPk,
   parseOrgPk,
   parseResolvedCollisions,
+  unkeyableOrgAnomalies,
   validateResolvedCollisions,
 } from './lib/billing-rekey.ts';
 import type {
@@ -154,6 +156,8 @@ const scan: BillingScanCounts = {
 const orgs = new Map<string, OrgBillingState>();
 /** Legacy rows with no `orgId` — there is no org to file them under. */
 const orglessRows: string[] = [];
+/** Legacy rows whose `orgId` cannot form a key — an org to copy to that does not exist. */
+const unkeyableRows: SubscriptionRow[] = [];
 /** Keys that parse as neither shape. Named, because a counted row is a row nobody looks at. */
 const unparsedRows: string[] = [];
 /** Every row the scan read, for the checks that are about keys rather than orgs. */
@@ -237,6 +241,15 @@ function collectRow(item: Record<string, AttributeValue>): void {
   if (!row.orgId) {
     scan.orglessRows++;
     orglessRows.push(pk);
+    return;
+  }
+
+  // An orgId with a `#` in it names no org this run can key to, so it is held
+  // out of the grouping rather than copied to `ORG#a#b` and reported by the
+  // NEXT run's --verify — the order that has the migration failing itself on a
+  // row it wrote.
+  if (!isKeyable(row.orgId)) {
+    unkeyableRows.push(row);
     return;
   }
 
@@ -409,7 +422,10 @@ async function run(): Promise<void> {
     return;
   }
 
-  const plans: BillingPlan[] = states.map((state) => classifyOrgBilling(state, resolved));
+  const plans: BillingPlan[] = [
+    ...states.map((state) => classifyOrgBilling(state, resolved)),
+    ...unkeyableOrgAnomalies(unkeyableRows),
+  ];
 
   if (verify) {
     reportVerification(states, plans);
@@ -430,13 +446,16 @@ async function run(): Promise<void> {
  * The gate the flip PR merges on.
  *
  * It prints the plan as well as the checks: a PASS whose reader cannot see what
- * was classified is a number to paste onto a PR, not evidence.
+ * was classified is a number to paste onto a PR, not evidence. The applied
+ * resolutions are part of that — a collision an operator decided is a decision
+ * the PASS rests on, and it is nowhere on the org row a later reader can see.
  */
 function reportVerification(
   states: readonly OrgBillingState[],
   plans: readonly BillingPlan[],
 ): void {
   console.log(formatBillingPlanReport(scan, plans, orglessRows));
+  for (const line of formatAppliedResolutions(resolved, plans)) console.log(line);
   console.log('');
   const checks = verifyBillingRekey({
     states,
