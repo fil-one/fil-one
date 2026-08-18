@@ -43,9 +43,14 @@ export type InvitationsTableProps = {
   /** Whether the caller may revoke an invitation for this role. */
   mayManageTarget: (targetRole: string) => boolean;
   onRevoke?: (invitation: InvitationSummary) => void;
-  /** The invitation a revoke is in flight for. */
-  pendingInviteId?: string;
+  /**
+   * The invitations a revoke is in flight for. A set rather than one id, so a
+   * second revoke does not re-arm the button on the first.
+   */
+  pendingInviteIds?: ReadonlySet<string>;
 };
+
+const NONE_PENDING: ReadonlySet<string> = new Set();
 
 /**
  * Every invitation this org is still waiting on.
@@ -57,7 +62,7 @@ export function InvitationsTable({
   invitations,
   mayManageTarget,
   onRevoke,
-  pendingInviteId,
+  pendingInviteIds = NONE_PENDING,
 }: InvitationsTableProps) {
   const canRevoke = (invitation: InvitationSummary) =>
     Boolean(onRevoke) && mayManageTarget(invitation.role);
@@ -84,6 +89,7 @@ export function InvitationsTable({
             key={invitation.inviteId}
             data-testid="invitation-row"
             data-invite-id={invitation.inviteId}
+            aria-busy={pendingInviteIds.has(invitation.inviteId) || undefined}
           >
             <Table.Cell>
               <p className="text-xs font-medium text-zinc-900">{invitation.email}</p>
@@ -110,7 +116,7 @@ export function InvitationsTable({
                   <Button
                     variant="ghost"
                     size="sm"
-                    disabled={pendingInviteId === invitation.inviteId}
+                    disabled={pendingInviteIds.has(invitation.inviteId)}
                     aria-label={`Revoke invitation for ${invitation.email}`}
                     onClick={() => onRevoke(invitation)}
                   >

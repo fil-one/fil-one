@@ -9,16 +9,23 @@ import type {
   ListInvitationsResponse,
 } from '@filone/shared';
 
+import { Alert } from '../components/Alert';
 import { Card } from '../components/Card';
 import { Heading } from '../components/Heading/Heading';
 import { InvitationsTable } from '../components/InvitationsTable';
 import { InviteMemberForm } from '../components/InviteMemberForm';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
-import { errorCodeOf, errorMessageOf, errorStatusOf } from '../lib/api.js';
+import { errorCodeOf, errorMessageOf } from '../lib/api.js';
 import { createInvitation, listInvitations, revokeInvitation } from '../lib/members-api.js';
 import { queryKeys } from '../lib/query-client.js';
 import { useMemberActionScope } from '../lib/use-member-scope.js';
+import { usePendingRows } from '../lib/use-pending-rows.js';
+
+/** The address as the server matches it: trimmed and case-folded. */
+function sameAddress(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
 
 /**
  * Put a created invitation at the top of the list, dropping any row for the same
@@ -26,13 +33,18 @@ import { useMemberActionScope } from '../lib/use-member-scope.js';
  *
  * Re-inviting revokes the live invitation and writes a new one, so the answer is
  * a replacement rather than an addition — and a list that kept both would show
- * an invitation the server has already withdrawn.
+ * an invitation the server has already withdrawn. Matched the way the server
+ * supersedes, since `Bob@Example.com` and `bob@example.com` are one invitation
+ * there and would otherwise be two rows here until the refetch lands.
  */
 function upsertInvitation(client: QueryClient, invitation: InvitationSummary): void {
   client.setQueryData<ListInvitationsResponse>(queryKeys.invitations, (old) =>
     old
       ? {
-          invitations: [invitation, ...old.invitations.filter((i) => i.email !== invitation.email)],
+          invitations: [
+            invitation,
+            ...old.invitations.filter((i) => !sameAddress(i.email, invitation.email)),
+          ],
         }
       : old,
   );
@@ -47,12 +59,15 @@ function dropInvitation(client: QueryClient, inviteId: string): void {
 /**
  * The two refusals the invite form keeps on screen instead of toasting.
  *
- * The beta gate answers 403 with a message and deliberately no code — it says
- * the feature is not switched on for this org rather than describing what a
- * role permits, and the console renders that sentence as-is. The pending cap
- * answers `INVITE_LIMIT_REACHED`, which needs an action taken on the list right
+ * Both are matched on their own code. `INVITES_NOT_ENABLED` says the feature is
+ * not switched on for this org, and the console renders that sentence in place
+ * of the form. `INVITE_LIMIT_REACHED` needs an action taken on the list right
  * beside the form. A toast for either would be gone before the operator had
  * finished reading the form it was about.
+ *
+ * Nothing here reads the absence of a code as a refusal. An expired CSRF cookie
+ * answers 403 with no code at all, and taking that for the beta gate took the
+ * form off the page for a caller whose next click would have worked.
  */
 function useInviteRefusals() {
   const [notEnabled, setNotEnabled] = useState<string | null>(null);
@@ -61,13 +76,19 @@ function useInviteRefusals() {
   return {
     notEnabled,
     error,
+    /**
+     * Drop the cap alert. It names a slot somebody has since freed, and it is
+     * cleared on the two things that free one: another attempt, and a revoke.
+     * The beta state is not cleared with it — the feature is either on for this
+     * org or it is not, and nothing on this page turns it on.
+     */
     clear: () => {
       setError(null);
     },
     /** @returns whether the refusal was rendered here rather than left to a toast. */
     capture: (err: unknown): boolean => {
       const code = errorCodeOf(err);
-      if (errorStatusOf(err) === 403 && code === undefined) {
+      if (code === ApiErrorCode.INVITES_NOT_ENABLED) {
         setNotEnabled(
           errorMessageOf(err, 'Inviting teammates is not enabled for this organization yet.'),
         );
@@ -91,10 +112,14 @@ function useCreateInvitation(
 
   return useMutation({
     mutationFn: (body: CreateInvitationRequest) => createInvitation(body),
+    // A new attempt is the answer to the cap alert, so the alert goes as the
+    // attempt starts rather than surviving beside its own remedy.
+    onMutate: () => {
+      refusals.clear();
+    },
     onSuccess: (result: CreateInvitationResponse) => {
       upsertInvitation(client, result.invitation);
       void client.invalidateQueries({ queryKey: queryKeys.invitations });
-      refusals.clear();
       if (result.emailSent) {
         onUndelivered(null);
         toast.success(`Invitation sent to ${result.invitation.email}`);
@@ -109,14 +134,23 @@ function useCreateInvitation(
   });
 }
 
-function useRevokeInvitation(client: QueryClient) {
+function useRevokeInvitation(
+  client: QueryClient,
+  refusals: ReturnType<typeof useInviteRefusals>,
+  pending: ReturnType<typeof usePendingRows>,
+) {
   const { toast } = useToast();
 
   return useMutation({
     mutationFn: (invitation: InvitationSummary) => revokeInvitation(invitation.inviteId),
+    onMutate: (invitation: InvitationSummary) => {
+      pending.add(invitation.inviteId);
+    },
     onSuccess: (_result, invitation) => {
       dropInvitation(client, invitation.inviteId);
       void client.invalidateQueries({ queryKey: queryKeys.invitations });
+      // This is the slot the cap alert was asking for.
+      refusals.clear();
       toast.success(`The invitation for ${invitation.email} was withdrawn`);
     },
     onError: (err) => {
@@ -132,6 +166,9 @@ function useRevokeInvitation(client: QueryClient) {
       }
       toast.error(errorMessageOf(err, 'Failed to withdraw that invitation'));
     },
+    onSettled: (_result, _err, invitation) => {
+      pending.remove(invitation.inviteId);
+    },
   });
 }
 
@@ -146,11 +183,12 @@ export function MembersInvitations() {
   const client = useQueryClient();
   const scope = useMemberActionScope();
   const refusals = useInviteRefusals();
+  const revoking = usePendingRows();
   const [undelivered, setUndelivered] = useState<string | null>(null);
 
   const pending = useQuery({ queryKey: queryKeys.invitations, queryFn: listInvitations });
   const create = useCreateInvitation(client, refusals, setUndelivered);
-  const revoke = useRevokeInvitation(client);
+  const revoke = useRevokeInvitation(client, refusals, revoking);
 
   const invitations = pending.data?.invitations ?? [];
 
@@ -167,7 +205,7 @@ export function MembersInvitations() {
       <Card>
         <InviteMemberForm
           roles={scope.assignableRoles}
-          onSubmit={(body) => create.mutate(body)}
+          onSubmit={(body) => create.mutateAsync(body)}
           submitting={create.isPending}
           notEnabledMessage={refusals.notEnabled}
           errorMessage={refusals.error}
@@ -179,31 +217,42 @@ export function MembersInvitations() {
         invitations={invitations}
         isPending={pending.isPending}
         isError={pending.isError}
+        hasData={pending.data !== undefined}
         errorMessage={pending.error?.message}
         mayManageTarget={scope.mayManageTarget}
         onRevoke={(invitation) => revoke.mutate(invitation)}
-        pendingInviteId={revoke.isPending ? revoke.variables?.inviteId : undefined}
+        pendingInviteIds={revoking.ids}
       />
     </section>
   );
 }
 
+/**
+ * The invitations list in each of its states.
+ *
+ * A failure with rows already on screen keeps them behind a notice rather than
+ * replacing them: every action on this section invalidates the list, so one
+ * refetch that does not come back would take away the invitation the operator
+ * just created along with the rest.
+ */
 function InvitationsPanel({
   invitations,
   isPending,
   isError,
+  hasData,
   errorMessage,
   mayManageTarget,
   onRevoke,
-  pendingInviteId,
+  pendingInviteIds,
 }: {
   invitations: InvitationSummary[];
   isPending: boolean;
   isError: boolean;
+  hasData: boolean;
   errorMessage?: string;
   mayManageTarget: (targetRole: string) => boolean;
   onRevoke: (invitation: InvitationSummary) => void;
-  pendingInviteId?: string;
+  pendingInviteIds: ReadonlySet<string>;
 }) {
   if (isPending) {
     return (
@@ -213,7 +262,7 @@ function InvitationsPanel({
     );
   }
 
-  if (isError) {
+  if (isError && !hasData) {
     return (
       <div
         data-testid="invitations-error"
@@ -224,20 +273,36 @@ function InvitationsPanel({
     );
   }
 
+  const stale = isError && (
+    <div data-testid="invitations-stale">
+      <Alert
+        variant="amber"
+        title="This list may be out of date"
+        description={`Refreshing failed: ${errorMessage ?? 'the request did not complete'}. What is below is the last answer that arrived.`}
+      />
+    </div>
+  );
+
   if (invitations.length === 0) {
     return (
-      <p data-testid="invitations-empty" className="text-sm text-zinc-500">
-        Nothing outstanding. Invitations appear here until they are accepted or withdrawn.
-      </p>
+      <div className="flex flex-col gap-3">
+        {stale}
+        <p data-testid="invitations-empty" className="text-sm text-zinc-500">
+          Nothing outstanding. Invitations appear here until they are accepted or withdrawn.
+        </p>
+      </div>
     );
   }
 
   return (
-    <InvitationsTable
-      invitations={invitations}
-      mayManageTarget={mayManageTarget}
-      onRevoke={onRevoke}
-      pendingInviteId={pendingInviteId}
-    />
+    <div className="flex flex-col gap-3">
+      {stale}
+      <InvitationsTable
+        invitations={invitations}
+        mayManageTarget={mayManageTarget}
+        onRevoke={onRevoke}
+        pendingInviteIds={pendingInviteIds}
+      />
+    </div>
   );
 }

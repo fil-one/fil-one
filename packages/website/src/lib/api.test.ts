@@ -3,6 +3,7 @@ import { ApiErrorCode, ORG_ID_HEADER } from '@filone/shared';
 
 import { apiRequest, ForbiddenRoleError, getMe, NotAMemberError } from './api.js';
 import { setActiveOrgId } from './active-org.js';
+import { acceptInvitation } from './members-api.js';
 
 /**
  * How `apiRequest` renders a denial. The role codes get their own error types
@@ -120,6 +121,26 @@ describe('apiRequest — the active org header', () => {
     expect(sentHeaders().has('X-Org-Id')).toBe(false);
   });
 
+  it('leaves the header off a call that asks it to', async () => {
+    setActiveOrgId(ORG_A);
+    respondWithJson({});
+
+    await apiRequest('/invitations/accept', { method: 'POST' }, { omitOrgHeader: true });
+
+    // Redeeming an invitation is about an org the caller is by definition not
+    // in, and the route resolves it from the invitation itself.
+    expect(sentHeaders().has('X-Org-Id')).toBe(false);
+  });
+
+  it('accepts an invitation without naming the org this tab was in', async () => {
+    setActiveOrgId(ORG_A);
+    respondWithJson({ orgId: ORG_B, orgName: 'Other', role: 'member', alreadyMember: false });
+
+    await acceptInvitation('a'.repeat(32));
+
+    expect(sentHeaders().has('X-Org-Id')).toBe(false);
+  });
+
   describe('the /me echo', () => {
     const reload = vi.fn();
 
@@ -163,6 +184,21 @@ describe('apiRequest — the active org header', () => {
       expect(reload).not.toHaveBeenCalled();
     });
 
+    it('leaves the recovery to somebody else when the caller cannot afford it', async () => {
+      setActiveOrgId(ORG_A);
+      respondWithJson({ orgId: ORG_B, orgName: 'Other' });
+
+      // The accept page holds a single-use token in memory: a reload spends the
+      // invitation without redeeming anything, and the org it is joining is not
+      // the org the stash is about.
+      await getMe({ skipOrgReconcile: true });
+
+      expect(sessionStorage.getItem('filone:activeOrgId')).toBe(ORG_A);
+      expect(reload).not.toHaveBeenCalled();
+    });
+
+    // Last in this block: a reconcile latches the tab as "switching orgs" for
+    // the rest of the module's life, and every request after it is held.
     it('clears the stash and reloads when the server resolved another org', async () => {
       vi.spyOn(console, 'warn').mockImplementation(() => {});
       setActiveOrgId(ORG_A);
@@ -175,6 +211,58 @@ describe('apiRequest — the active org header', () => {
       expect(sessionStorage.getItem('filone:activeOrgId')).toBeNull();
       expect(reload).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+describe('apiRequest — the unverified-email funnel', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  function respondUnverified() {
+    vi.mocked(fetch).mockResolvedValue(
+      forbiddenResponse(ApiErrorCode.EMAIL_NOT_VERIFIED, 'Email verification required'),
+    );
+  }
+
+  it('sends an ordinary call to the verify-email surface', async () => {
+    // `isRedirecting` is module state that a page load resets, so each of these
+    // gets its own module graph.
+    vi.resetModules();
+    const location = { href: '' };
+    vi.stubGlobal('location', location);
+    const { apiRequest: fresh } = await import('./api.js');
+    respondUnverified();
+
+    await fresh('/buckets').catch(() => {});
+
+    expect(location.href).toBe('/verify-email');
+  });
+
+  it('leaves the page alone for a call that renders the refusal itself', async () => {
+    vi.resetModules();
+    const location = { href: '' };
+    vi.stubGlobal('location', location);
+    const { apiRequest: fresh } = await import('./api.js');
+    respondUnverified();
+
+    const error = await fresh(
+      '/invitations/accept',
+      { method: 'POST' },
+      {
+        rendersUnverifiedEmail: true,
+      },
+    ).catch((err: unknown) => err);
+
+    // The accept page has a panel for this, with the invitation still named and
+    // the same link the redirect would have landed on.
+    expect(location.href).toBe('');
+    expect((error as { code?: string }).code).toBe(ApiErrorCode.EMAIL_NOT_VERIFIED);
   });
 });
 

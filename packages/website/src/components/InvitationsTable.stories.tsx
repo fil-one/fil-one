@@ -61,9 +61,9 @@ export const WithOwnerInvitation: Story = {
   },
 };
 
-/** A revoke in flight. */
+/** Two revokes in flight at once — each row says so on its own account. */
 export const Revoking: Story = {
-  args: { pendingInviteId: 'inv-1' },
+  args: { pendingInviteIds: new Set(['inv-1', 'inv-2']) },
 };
 
 /** Nothing to revoke: the actions column goes with the last row that had one. */

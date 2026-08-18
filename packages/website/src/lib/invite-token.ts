@@ -37,22 +37,34 @@ export function readAndStripInviteTokenFromHash(): string | null {
   return token ? token : null;
 }
 
+/**
+ * The token for a document whose storage refused to hold it.
+ *
+ * Narrow, and worth the five lines: a browser that denies storage but allows
+ * cookies — Firefox with `dom.storage.enabled` off, or a full quota — passes the
+ * signed-in check on the accept route and then finds nothing to redeem, so the
+ * link reads "no longer valid" in that browser and stays that way. Memory covers
+ * the case that needs no login round trip. One that does is a full navigation
+ * and loses this, as it loses everything else in the document.
+ */
+let inMemoryToken: string | null = null;
+
 export function stashInviteToken(token: string): void {
   try {
     sessionStorage.setItem(STASH_KEY, token);
   } catch {
-    // Storage disabled. The token is still in memory for this page load, so an
-    // accept that needs no login round trip still works; one that does will
-    // land on the dashboard instead, and the emailed link still works.
+    inMemoryToken = token;
   }
 }
 
 /**
  * Whether a token is waiting to be redeemed.
  *
- * Reads storage rather than the memo below, so that a token already taken does
- * not send the app back to the accept page again — which is what the app route
- * asks this question for.
+ * Storage only, and deliberately neither of the two module-level values around
+ * it. The app route asks this to decide whether to send a caller back to the
+ * accept page after a login bounce, and that is a question about a token that
+ * outlived a document: one already taken must not send them back again, and one
+ * held in memory belongs to a document that is gone.
  */
 export function hasPendingInviteToken(): boolean {
   try {
@@ -78,14 +90,16 @@ export function takeInviteToken(): string | null {
   try {
     const stored = sessionStorage.getItem(STASH_KEY);
     if (stored !== null) sessionStorage.removeItem(STASH_KEY);
-    taken = stored;
-    return stored;
+    taken = stored ?? inMemoryToken;
   } catch {
-    return null;
+    taken = inMemoryToken;
   }
+  inMemoryToken = null;
+  return taken;
 }
 
 /** Test seam: forget the token this page load has already taken. */
 export function resetTakenInviteToken(): void {
   taken = null;
+  inMemoryToken = null;
 }

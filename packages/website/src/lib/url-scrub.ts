@@ -1,13 +1,20 @@
 import type { Breadcrumb, ErrorEvent } from '@sentry/react';
+import type { PlausibleRequestPayload } from '@plausible-analytics/tracker';
 
 /**
- * Keep the invitation token out of Sentry.
+ * Keep the invitation token out of every URL this app reports.
+ *
+ * Two reporters capture URLs on their own initiative, and both are covered
+ * here: the error reporter, through the hooks it takes; the analytics tracker,
+ * through the transform it applies to each event.
  *
  * The accept page strips the fragment as its first act, and `history
  * .replaceState` is itself instrumented: the navigation breadcrumb it leaves
  * records the URL it navigated *from*, which is the one carrying the token. So
  * stripping early is necessary and not sufficient — anything that reads a URL
- * before or during that strip has to be scrubbed too.
+ * before or during that strip has to be scrubbed too, and the tracker's first
+ * pageview is captured when its module is evaluated, earlier than any route
+ * code runs at all.
  *
  * Redacting the value rather than dropping the fragment, so a report still shows
  * that somebody was on an accept link when whatever it is went wrong.
@@ -50,5 +57,20 @@ export function scrubEvent(event: ErrorEvent): ErrorEvent {
     ...event,
     ...(url ? { request: { ...event.request, url: scrubInviteToken(url) } } : {}),
     ...(breadcrumbs ? { breadcrumbs: breadcrumbs.map(scrubBreadcrumb) } : {}),
+  };
+}
+
+/**
+ * Redact the token out of an analytics event before it is sent.
+ *
+ * `u` is the URL the event is about and `r` the referrer, and either can be an
+ * accept link: the pageview after the strip names the pre-strip URL as where it
+ * came from.
+ */
+export function scrubTrackedPayload(payload: PlausibleRequestPayload): PlausibleRequestPayload {
+  return {
+    ...payload,
+    u: scrubInviteToken(payload.u),
+    ...(typeof payload.r === 'string' ? { r: scrubInviteToken(payload.r) } : {}),
   };
 }

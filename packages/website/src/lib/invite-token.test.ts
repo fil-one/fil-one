@@ -92,7 +92,7 @@ describe('invite-token', () => {
       expect(takeInviteToken()).toBeNull();
     });
 
-    it('survives storage being unavailable', () => {
+    it('keeps the token in memory when storage refuses it', () => {
       vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
         throw new Error('storage disabled');
       });
@@ -101,7 +101,19 @@ describe('invite-token', () => {
       });
 
       expect(() => stashInviteToken(TOKEN)).not.toThrow();
+      // Nothing is waiting for another document to pick up — memory does not
+      // outlive this one — but the accept that needs no login round trip has
+      // its token, which is the difference between the link working in this
+      // browser and never working in it.
       expect(hasPendingInviteToken()).toBe(false);
+      expect(takeInviteToken()).toBe(TOKEN);
+    });
+
+    it('answers with no token when storage is unavailable and nothing was stashed', () => {
+      vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+        throw new Error('storage disabled');
+      });
+
       expect(takeInviteToken()).toBeNull();
     });
   });

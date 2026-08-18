@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -11,6 +12,7 @@ import {
 import { ApiErrorCode, OrgRole } from '@filone/shared';
 
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
+import { hasPendingInviteToken } from '../lib/invite-token.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 import { AcceptInvitationPage } from './AcceptInvitationPage.js';
 
@@ -61,15 +63,23 @@ function withRouter(token: string | null) {
   return <RouterProvider router={router} />;
 }
 
+/**
+ * Rendered in `StrictMode`, which is how the app runs in development: effects
+ * fire twice, and the token this page spends is single-use. Anything that
+ * redeems once has to be shown doing so under the double invocation it guards
+ * against.
+ */
 function renderPage(token: string | null = TOKEN) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   // `/me` is seeded rather than fetched: the page reads it only to name the
   // address this session carries, and only when the invitation names another.
   seedPermissions(client, OrgRole.Member, { email: 'wrong@example.com' });
   return render(
-    <QueryClientProvider client={client}>
-      <ToastProvider>{withRouter(token)}</ToastProvider>
-    </QueryClientProvider>,
+    <StrictMode>
+      <QueryClientProvider client={client}>
+        <ToastProvider>{withRouter(token)}</ToastProvider>
+      </QueryClientProvider>
+    </StrictMode>,
   );
 }
 
@@ -205,5 +215,51 @@ describe('AcceptInvitationPage', () => {
     renderPage();
 
     expect(await screen.findByTestId('accept-pending')).toBeInTheDocument();
+  });
+
+  it('announces the outcome and moves to it', async () => {
+    mockAccept.mockResolvedValue({
+      orgId: 'org-9',
+      orgName: 'Acme',
+      role: OrgRole.Member,
+      alreadyMember: false,
+    });
+    renderPage();
+
+    const panel = await screen.findByTestId('accept-success');
+    // The wait and the answer are one panel replaced by another, so a caller
+    // not watching the page has to be told the swap happened and taken to it.
+    expect(panel.closest('[aria-live]')).toHaveAttribute('aria-live', 'polite');
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'You have joined Acme' })).toHaveFocus(),
+    );
+  });
+
+  it('puts the token back when the accept lands on the login funnel', async () => {
+    sessionStorage.clear();
+    mockAccept.mockRejectedValue(apiError('Session expired. Redirecting to login...', 401));
+    renderPage();
+
+    // The route took the token out of storage before this call went out, so a
+    // 401 would otherwise spend the trip through Auth0 and land on the
+    // dashboard with nothing left to redeem.
+    await waitFor(() => expect(hasPendingInviteToken()).toBe(true));
+  });
+
+  it('reads /me without the reconciliation that would reload the page', async () => {
+    mockAccept.mockReturnValue(new Promise(() => {}));
+    const { getMe } = await import('../lib/api.js');
+    vi.mocked(getMe).mockResolvedValue({ email: 'invitee@example.com' } as never);
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>{withRouter(TOKEN)}</ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    // The reload the reconcile performs would destroy the token this page is
+    // holding, and the org it is joining is not the org the stash is about.
+    await waitFor(() => expect(getMe).toHaveBeenCalledWith({ skipOrgReconcile: true }));
   });
 });
