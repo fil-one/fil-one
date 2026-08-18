@@ -1,5 +1,6 @@
 import {
   ConditionalCheckFailedException,
+  GetItemCommand,
   PutItemCommand,
   QueryCommand,
   ScanCommand,
@@ -158,27 +159,40 @@ function tallyRow(item: Record<string, AttributeValue>, tallies: Map<string, Org
  * Adds one row to an org's tally, and says whether it was one this job counts.
  *
  * Shared by the Scan and the per-org recount so the two can never disagree about
- * what an Owner row is. Everything that is not a membership or META row is
+ * what an Owner row is. The recount reaches only the membership branch — it
+ * reads the META row on its own, ahead of the member pages. Everything that is
+ * not a membership or META row is
  * ignored: the `USER#` inverse items carry a denormalized role and would double
  * every count, the `INVITETOKEN#` partitions are not orgs, and an invitation row
  * sits in the org's own partition carrying a role that is nobody's membership.
  */
 function addRow(item: Record<string, AttributeValue>, orgId: string, tally: OrgTally): boolean {
+  if ((item.sk?.S ?? '') !== OrgKeys.orgMetaSk()) return addMemberRow(item, orgId, tally);
+
+  tally.hasMeta = true;
+  tally.storedOwnerCount = readCounter(item.ownerCount, orgId);
+  const rev = Number(item[OWNER_SET_REV_ATTRIBUTE]?.N);
+  if (Number.isFinite(rev)) tally.ownerSetRev = rev;
+  return true;
+}
+
+/**
+ * The membership half of {@link addRow}, and the only half the recount runs.
+ *
+ * Separate so a META row cannot reach the tally from a member page: the recount
+ * has already read the counter and its revision, and a later page overwriting
+ * them with a fresher reading is the bug the ordering exists to close.
+ */
+function addMemberRow(
+  item: Record<string, AttributeValue>,
+  orgId: string,
+  tally: OrgTally,
+): boolean {
   const sk = item.sk?.S ?? '';
-  const isMeta = sk === OrgKeys.orgMetaSk();
-  const isMember = sk.startsWith(OrgKeys.memberSkPrefix());
-  if (!isMeta && !isMember) return false;
+  if (!sk.startsWith(OrgKeys.memberSkPrefix())) return false;
 
-  if (isMeta) {
-    tally.hasMeta = true;
-    tally.storedOwnerCount = readCounter(item.ownerCount, orgId);
-    const rev = Number(item[OWNER_SET_REV_ATTRIBUTE]?.N);
-    if (Number.isFinite(rev)) tally.ownerSetRev = rev;
-  } else {
-    tally.members += 1;
-    if (isOwnerRow(item.role, orgId, sk)) tally.owners += 1;
-  }
-
+  tally.members += 1;
+  if (isOwnerRow(item.role, orgId, sk)) tally.owners += 1;
   return true;
 }
 
@@ -235,39 +249,79 @@ interface Repair {
 }
 
 /**
- * One org's rows, read consistently, in one Query of its partition.
+ * One org's rows, read consistently: the counter first, then its members.
  *
- * Everything the repair decides comes from here rather than from the Scan: a
- * Query of one partition with `ConsistentRead` returns rows that were all
- * current at the same moment, which is exactly what a count the guard depends on
- * has to be. Paged, because a Query returns at most 1 MB.
+ * Everything the repair decides comes from here rather than from the Scan, and
+ * the order is the point. A Query returns at most 1 MB, so an org whose
+ * partition spans pages is read over an interval, and `MEMBER#` sorts before
+ * `META` — reading the counter and its revision off the last page would date
+ * them to the END of that interval, which is precisely the reading that cannot
+ * detect a transfer landing in the middle of it. Page one sees the outgoing
+ * Owner, page two sees the incoming one and a revision that has already moved,
+ * and the repair writes two Owners for a one-Owner org: the inflation that
+ * defeats the `ownerCount > :one` last-Owner guard.
+ *
+ * Read BEFORE the pages, the revision dates to the start of the interval, so
+ * any owner-set write during it leaves the repair's condition false and the
+ * repair is skipped. The next run recounts an org nothing is changing under.
  */
 async function recountOrg(orgId: string): Promise<OrgTally> {
-  const tally: OrgTally = { members: 0, owners: 0, hasMeta: false };
+  const tally: OrgTally = { members: 0, owners: 0, ...(await readOrgMeta(orgId)) };
   let cursor: Record<string, AttributeValue> | undefined;
 
   do {
     const result = await dynamo.send(
       new QueryCommand({
         TableName: Resource.OrgTable.name,
-        KeyConditionExpression: 'pk = :pk',
-        ExpressionAttributeValues: { ':pk': { S: OrgKeys.orgPk(orgId) } },
-        // The revision comes back with the counter here and not in the Scan:
-        // this is the reading the repair conditions on, and it is what says
-        // whether the owner set moved while these pages were being read.
-        ProjectionExpression: `pk, sk, #role, ownerCount, ${OWNER_SET_REV_ATTRIBUTE}`,
+        // Members only: the counter is already read, and a second reading of
+        // the META row off a later page would overwrite it with the very value
+        // this ordering exists to avoid.
+        KeyConditionExpression: 'pk = :pk AND begins_with(sk, :memberPrefix)',
+        ExpressionAttributeValues: {
+          ':pk': { S: OrgKeys.orgPk(orgId) },
+          ':memberPrefix': { S: OrgKeys.memberSkPrefix() },
+        },
+        ProjectionExpression: 'pk, sk, #role',
         ExpressionAttributeNames: { '#role': 'role' },
         ConsistentRead: true,
         ...(cursor ? { ExclusiveStartKey: cursor } : {}),
       }),
     );
 
-    for (const item of result.Items ?? []) addRow(item, orgId, tally);
+    for (const item of result.Items ?? []) addMemberRow(item, orgId, tally);
 
     cursor = result.LastEvaluatedKey;
   } while (cursor);
 
   return tally;
+}
+
+/**
+ * The counter and its revision, as one strongly consistent read of the META
+ * row, taken before a single member page.
+ *
+ * A row that is not there is an org with no counter, which the caller either
+ * leaves alone or creates a META row for — the same two outcomes the paged read
+ * used to reach by never setting `hasMeta`.
+ */
+async function readOrgMeta(orgId: string): Promise<Omit<OrgTally, 'members' | 'owners'>> {
+  const { Item } = await dynamo.send(
+    new GetItemCommand({
+      TableName: Resource.OrgTable.name,
+      Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: OrgKeys.orgMetaSk() } },
+      ProjectionExpression: `ownerCount, ${OWNER_SET_REV_ATTRIBUTE}`,
+      ConsistentRead: true,
+    }),
+  );
+
+  if (!Item) return { hasMeta: false };
+
+  const rev = Number(Item[OWNER_SET_REV_ATTRIBUTE]?.N);
+  return {
+    hasMeta: true,
+    storedOwnerCount: readCounter(Item.ownerCount, orgId),
+    ...(Number.isFinite(rev) ? { ownerSetRev: rev } : {}),
+  };
 }
 
 async function reconcileOrg(orgId: string, scanned: OrgTally, stats: RunStats): Promise<void> {
@@ -396,6 +450,10 @@ function isConditionalCheckFailure(error: unknown): boolean {
  * counter and defeat the `ownerCount > :one` last-Owner guard. The revision moves
  * on every owner-set write including that one, so conditioning on it makes any
  * concurrent change skip the repair; the next run recounts and converges.
+ *
+ * The revision this conditions on is the one read before the member pages
+ * ({@link recountOrg}), which is what makes the window it covers the whole
+ * recount rather than the moment after it.
  *
  * A row with no revision yet is one no owner-set transaction has touched since
  * the attribute shipped, so its absence is the condition.

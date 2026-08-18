@@ -85,6 +85,21 @@ function targetHolds(role: OrgRole | undefined, userId = TARGET_ID) {
   stubMembershipRead(ddbMock, { orgId: ORG_ID, userId, role });
 }
 
+/**
+ * A Member when the handler reads the row, and something else by the time the
+ * failure path looks again — which is the only thing that can tell a removal
+ * somebody else already made from a role that changed underneath it.
+ */
+function targetOnSecondRead(role: OrgRole | undefined) {
+  const key = { pk: { S: OrgKeys.orgPk(ORG_ID) }, sk: { S: OrgKeys.memberSk(TARGET_ID) } };
+  const row = (held: OrgRole) => ({ Item: { ...key, role: { S: held } } });
+
+  ddbMock
+    .on(GetItemCommand, { TableName: 'OrgTable', Key: key })
+    .resolvesOnce(row(OrgRole.Member))
+    .resolves(role ? row(role) : {});
+}
+
 function invitationRow({
   inviteId,
   emailNorm,
@@ -226,8 +241,11 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     expect(items).toHaveLength(3);
     expect(items[0].Delete).toMatchObject({
       Key: { pk: { S: OrgKeys.orgPk(ORG_ID) }, sk: { S: OrgKeys.memberSk(TARGET_ID) } },
-      // Removing somebody already gone is a clean 404, not a silent success.
-      ConditionExpression: 'attribute_exists(pk)',
+      // Removing somebody already gone is a clean 404, not a silent success; the
+      // role is there because the transaction's owner-count delta was decided
+      // from the reading above.
+      ConditionExpression: 'attribute_exists(pk) AND #role = :fromRole',
+      ExpressionAttributeValues: { ':fromRole': { S: OrgRole.Member } },
     });
     expect(items[1].Delete).toMatchObject({
       Key: { pk: { S: OrgKeys.userPk(TARGET_ID) }, sk: { S: OrgKeys.membershipSk(ORG_ID) } },
@@ -470,10 +488,28 @@ describe('DELETE /api/org/members/{userId} handler', () => {
 
   it('returns 404 when somebody else removed them first', async () => {
     ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(0, 3));
+    // The delete's condition covers the row and its role, so the row is what
+    // says which one lost: gone here, which is the outcome the caller wanted.
+    targetOnSecondRead(undefined);
 
     const result = await handler(removeEvent(), buildContext());
 
     expect(result).toMatchObject({ statusCode: 404 });
+  });
+
+  it('returns 409 when the member was promoted while the removal was in flight', async () => {
+    // A promotion touches the member row and META, neither of them an item this
+    // transaction conflicts on, so without the role condition the Owner would be
+    // deleted with no decrement and the counter would overcount — after which
+    // `ownerCount > :one` passes for the genuine last Owner. The condition
+    // cancels instead, and the answer is not "already removed".
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(0, 3));
+    targetOnSecondRead(OrgRole.Owner);
+
+    const result = await handler(removeEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 409 });
+    expect(body(result).message).toContain('role changed');
   });
 
   it('leaves the member’s keys alone', async () => {

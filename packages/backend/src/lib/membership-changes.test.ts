@@ -92,12 +92,22 @@ describe('roleChangeItems', () => {
 });
 
 describe('membershipDeleteItems', () => {
-  it('requires the canonical row and tolerates a missing inverse item', () => {
-    const [canonical, inverse] = membershipDeleteItems({ orgId: ORG_ID, userId: USER_ID });
+  it('requires the canonical row in the role it was read in, and tolerates a missing inverse item', () => {
+    const [canonical, inverse] = membershipDeleteItems({
+      orgId: ORG_ID,
+      userId: USER_ID,
+      fromRole: OrgRole.Owner,
+    });
 
+    // The role, because the transaction's owner-count delta was decided from it:
+    // a promotion landing in the gap would otherwise delete an Owner with no
+    // decrement, and the counter that overcounts is the one the last-Owner guard
+    // reads.
     expect(canonical.Delete).toMatchObject({
       Key: { pk: { S: OrgKeys.orgPk(ORG_ID) }, sk: { S: OrgKeys.memberSk(USER_ID) } },
-      ConditionExpression: 'attribute_exists(pk)',
+      ConditionExpression: 'attribute_exists(pk) AND #role = :fromRole',
+      ExpressionAttributeNames: { '#role': 'role' },
+      ExpressionAttributeValues: { ':fromRole': { S: OrgRole.Owner } },
     });
     expect(inverse.Delete?.ConditionExpression).toBeUndefined();
   });

@@ -91,7 +91,7 @@ export async function baseHandler(
   try {
     await commitAudited({
       items: [
-        ...membershipDeleteItems({ orgId, userId: targetUserId }),
+        ...membershipDeleteItems({ orgId, userId: targetUserId, fromRole: target.role }),
         ...(wasOwner ? [ownerCountItem(orgId, 'decrement')] : []),
         ...now.flatMap((invitation) => retireInvitationItems(invitation, 'revoked')),
       ],
@@ -107,7 +107,12 @@ export async function baseHandler(
       }),
     });
   } catch (err) {
-    return await removalFailureResponse(err, { orgId, wasOwner, revocations: now.length });
+    return await removalFailureResponse(err, {
+      orgId,
+      targetUserId,
+      wasOwner,
+      revocations: now.length,
+    });
   }
 
   await revokeDeferred(later);
@@ -137,7 +142,12 @@ async function removedMemberAddress(userId: string): Promise<string | undefined>
 
 async function removalFailureResponse(
   err: unknown,
-  { orgId, wasOwner, revocations }: { orgId: string; wasOwner: boolean; revocations: number },
+  {
+    orgId,
+    targetUserId,
+    wasOwner,
+    revocations,
+  }: { orgId: string; targetUserId: string; wasOwner: boolean; revocations: number },
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const failed = cancelledLabels(err, [
     'membership',
@@ -158,9 +168,14 @@ async function removalFailureResponse(
       : lastOwnerResponse();
   }
   if (failed.includes('invitation')) return invitationRaceResponse();
-  // The membership delete is conditional on the row existing, so this is a
-  // member somebody else removed first — the outcome the caller wanted.
-  return notAMemberResponse();
+  // The membership delete carries both the row's existence and its role, so a
+  // cancellation here is one of two things and the row says which: gone, which
+  // is the outcome the caller wanted, or still there under a role somebody
+  // changed while this was in flight — and that one must not read as removed,
+  // because the transaction's owner-count delta was decided from the old role.
+  return (await resolveMembership(orgId, targetUserId))
+    ? roleChangedResponse()
+    : notAMemberResponse();
 }
 
 function badRequestResponse(): APIGatewayProxyStructuredResultV2 {
@@ -211,6 +226,15 @@ function ownerCountUnavailableResponse(orgId: string): APIGatewayProxyStructured
     .status(409)
     .body<ErrorResponse>({
       message: 'The organization’s owner count could not be updated. Please contact support.',
+    })
+    .build();
+}
+
+function roleChangedResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(409)
+    .body<ErrorResponse>({
+      message: 'That member’s role changed while the removal was in flight — try again.',
     })
     .build();
 }
