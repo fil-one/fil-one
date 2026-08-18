@@ -303,7 +303,9 @@ export async function getMe(options?: {
   try {
     me = await apiRequest<MeResponse>(`/me${qs ? `?${qs}` : ''}`);
   } catch (err) {
-    clearActiveOrgAfterRefusal();
+    // The status decides: only a refusal the header can be blamed for drops the
+    // stash. A network error carries none at all.
+    clearActiveOrgAfterRefusal((err as { status?: number }).status);
     throw err;
   }
   reconcileActiveOrg(me.orgId);

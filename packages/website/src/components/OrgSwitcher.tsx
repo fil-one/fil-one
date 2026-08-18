@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CheckIcon } from '@phosphor-icons/react/dist/ssr';
 import type { OrgMembershipSummary } from '@filone/shared';
 
-import { switchToOrg } from '../lib/active-org.js';
+import { onSwitchingOrgChange, switchToOrg } from '../lib/active-org.js';
 
 type OrgSwitcherProps = {
   /** Every org the caller belongs to, as `/me` reported them. */
@@ -40,6 +40,11 @@ export function OrgSwitcher({ memberships, activeOrgId, inMenu, testId }: OrgSwi
   // it lands the list is inert: a second click would stash a third org while the
   // load for the second is already in flight.
   const [chosen, setChosen] = useState<string | null>(null);
+
+  // A navigation can be cancelled — the upload page asks before it leaves — and
+  // the tab then rolls the switch back. The rows come with it, or the user is
+  // left looking at a list that no longer responds.
+  useEffect(() => onSwitchingOrgChange((switching) => !switching && setChosen(null)), []);
 
   if (!memberships || memberships.length <= 1) return null;
 
