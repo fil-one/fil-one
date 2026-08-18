@@ -478,6 +478,60 @@ describe('commitAudited', () => {
     });
   });
 
+  it('takes a RAG key event with no phase, which is minted in this transaction', async () => {
+    const ragKey = auditEvent({
+      type: 'key.created',
+      actor: ACTOR,
+      orgId: ORG_ID,
+      subject: AuditSubjects.key('rag', KEY_ID),
+      details: { keyKind: 'rag', keyName: 'ci' },
+    });
+
+    await commitAudited({ items: [MUTATION], event: ragKey });
+
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
+  });
+
+  it('takes the completion half of an S3 key event', async () => {
+    const completion = auditEvent({
+      type: 'key.created',
+      actor: ACTOR,
+      orgId: ORG_ID,
+      subject: AuditSubjects.key('s3', KEY_ID),
+      details: { keyKind: 's3', keyName: 'ci' },
+      phase: 'completion',
+      correlationId: 'corr-1',
+      outcome: 'succeeded',
+    });
+
+    await commitAudited({ items: [MUTATION], event: completion });
+
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
+  });
+
+  it('will not take an S3 key event with no phase', () => {
+    const minted = auditEvent({
+      type: 'key.created',
+      actor: ACTOR,
+      orgId: ORG_ID,
+      subject: AuditSubjects.key('s3', KEY_ID),
+      details: { keyKind: 's3', keyName: 'ci' },
+    });
+
+    // Compiled, never run. The credential is minted at the vendor before any
+    // local write, so a row with no phase is a half with nothing to pair it to
+    // — and the write it would ride is not what authorized the key.
+    const refused = () =>
+      commitAudited({
+        items: [MUTATION],
+        // @ts-expect-error — an unphased vendor-backed key event is not committable.
+        event: minted,
+      });
+
+    expect(refused).toBeTypeOf('function');
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+  });
+
   it('composes with a transaction that already spans tables', async () => {
     const billing = {
       Put: { TableName: 'UserInfoTable', Item: { pk: { S: 'x' }, sk: { S: 'y' } } },
