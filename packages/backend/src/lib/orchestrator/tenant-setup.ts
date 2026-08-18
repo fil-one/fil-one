@@ -46,6 +46,7 @@ const CONSOLE_KEY_PERMISSIONS = [
   's3:PutObjectLegalHold',
   's3:ListBucket',
   's3:ListBucketVersions',
+  's3:ListBucketMultipartUploads',
   's3:DeleteObject',
   's3:DeleteObjectVersion',
 ] as const;
