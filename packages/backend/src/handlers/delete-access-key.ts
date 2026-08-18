@@ -82,7 +82,11 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     mode: 'best-effort',
     actor: userActor({ userId, email: getVerifiedEmail(event) }),
     orgId,
-    subject: AuditSubjects.key('s3', keyId),
+    // The access key id, which is what the console lists and what the details
+    // record four characters of — `keyId` is the orchestrator's own id for the
+    // row and four characters of it match nothing an operator can see. A row
+    // written before the id was stored falls back to it anyway.
+    subject: AuditSubjects.key('s3', accessKeyId ?? keyId),
     details: {
       keyKind: 's3',
       region,

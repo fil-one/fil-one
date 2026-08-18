@@ -862,9 +862,10 @@ describe('authMiddleware', () => {
             },
           },
         },
-        // The org.created event, sixth item: an org cannot come into existence
-        // unrecorded, because the rows that create it and the row that records
-        // it are the same transaction.
+        // The org.created event, seventh item and the one after the six rows an
+        // account is: an org cannot come into existence unrecorded, because the
+        // rows that create it and the row that records it are the same
+        // transaction.
         {
           Put: {
             TableName: 'AuditTable',

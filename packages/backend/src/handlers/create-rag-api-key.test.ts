@@ -139,10 +139,11 @@ describe('create-rag-api-key baseHandler', () => {
       pk: 'ORG#org-1',
       type: 'key.created',
       orgId: 'org-1',
-      // A RAG key's id is a UUID that names nothing secret, but the subject is
-      // reduced by the same rule as an S3 key's so no call site can pass a
-      // token here and have it persisted whole.
-      subject: `key:${(body.id as string).slice(0, 12)}`,
+      // The subject names the key the way the details do and the way the
+      // console lists it — the display prefix, reduced by the same rule as an
+      // S3 key's so no call site can pass a token here and have it persisted
+      // whole. The internal id is a UUID nothing on screen shows.
+      subject: `key:${body.keyPrefix as string}`,
       actor: { kind: 'user', id: 'user-1', email: 'dev@example.com' },
       // The display prefix, which is what the console lists a RAG key by, so an
       // operator reading the event can find the key it names.

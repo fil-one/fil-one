@@ -69,8 +69,7 @@ export async function baseHandler(
       actor: userActor({ userId, email }),
     });
   } catch (err) {
-    if (err instanceof TransactionCanceledException)
-      return await renameConflictResponse(profileKey);
+    if (renameConditionFailed(err)) return await renameConflictResponse(profileKey);
     throw err;
   }
 
@@ -106,18 +105,44 @@ async function readOrgName(key: OrgProfileKey): Promise<string | undefined> {
 }
 
 /**
+ * Whether the rename's own condition is what cancelled the transaction.
+ *
+ * Only `ConditionalCheckFailed` on the update item, which is the first item in
+ * the transaction, means the row moved under this request. A
+ * `TransactionConflict` or a throttle cancels the same item and means the
+ * opposite: the write did not happen and a retry may still land, so reporting
+ * it as "someone else renamed it" states something untrue and hides a
+ * retryable failure from the caller. The audit item's own failures never reach
+ * here — `commitAudited` raises `AuditAppendError` for those.
+ */
+function renameConditionFailed(err: unknown): boolean {
+  return (
+    err instanceof TransactionCanceledException &&
+    err.CancellationReasons?.[0]?.Code === 'ConditionalCheckFailed'
+  );
+}
+
+/**
  * Which of the two things the failed condition means.
  *
  * The condition covers both the row existing and its name still being the one
  * the event is about, so a cancellation is either an org deleted between the
  * session and this request or a rename that landed while this one was in
  * flight. One read tells them apart, and it only runs on this path.
+ *
+ * Consistent, for the same reason the read above is: a replica that has not
+ * caught up with a row the leader confirmed milliseconds ago would answer a
+ * conflict with "your organization does not exist".
  */
 async function renameConflictResponse(
   key: OrgProfileKey,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const { Item } = await getDynamoClient().send(
-    new GetItemCommand({ TableName: Resource.UserInfoTable.name, Key: key }),
+    new GetItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: key,
+      ConsistentRead: true,
+    }),
   );
 
   if (!Item) {

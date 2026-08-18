@@ -99,7 +99,11 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
         type: 'key.deleted',
         actor: userActor({ userId, email }),
         orgId,
-        subject: AuditSubjects.key('rag', keyId),
+        // The display prefix the details also carry, so both halves of the
+        // event name the key the way the console lists it. A row written
+        // before the prefix was stored has none, and the internal key id is
+        // better than no subject at all.
+        subject: AuditSubjects.key('rag', keyPrefix ?? keyId),
         details: {
           keyKind: 'rag',
           ...(keyName ? { keyName } : {}),
