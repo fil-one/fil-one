@@ -275,7 +275,7 @@ describe('gracePeriodMessage', () => {
 
   it('warns that the account is disabled today when the countdown reaches zero', () => {
     expect(gracePeriodMessage(0)).toBe(
-      'Your free trial has expired, and your account will be disabled later today. Upgrade to keep access or download your data immediately.',
+      "Your free trial has expired, and your account will be disabled later today. Upgrade to keep access or download your data before it's removed.",
     );
   });
 

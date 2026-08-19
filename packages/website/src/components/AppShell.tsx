@@ -88,7 +88,7 @@ export function gracePeriodMessage(graceDays: number | null): string {
     return "Your free trial has expired. Upgrade to keep access, or download your data before it's removed.";
   }
   if (graceDays === 0) {
-    return 'Your free trial has expired, and your account will be disabled later today. Upgrade to keep access or download your data immediately.';
+    return "Your free trial has expired, and your account will be disabled later today. Upgrade to keep access or download your data before it's removed.";
   }
   return `Your free trial has expired. ${pluralizeDays(graceDays)} left to upgrade or download your data.`;
 }
