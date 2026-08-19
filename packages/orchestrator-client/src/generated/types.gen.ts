@@ -95,6 +95,10 @@ export type UpdateTenantStatusRequest = {
  * * `s3:ListBucketVersions` — list object versions in a bucket.
  * (Same AWS quirk as `s3:ListBucket` above: the name says
  * "Bucket" but the action operates on object versions.)
+ * * `s3:ListBucketMultipartUploads` — list in-progress multipart
+ * uploads in a bucket. (Same AWS quirk as `s3:ListBucket`
+ * above: the name says "Bucket" but the action operates on
+ * uploads within it.)
  * * `s3:DeleteObject` — delete an object.
  * * `s3:DeleteObjectVersion` — delete a specific object version.
  *
@@ -112,6 +116,7 @@ export type AccessKeyPermission =
   | 's3:PutObjectLegalHold'
   | 's3:ListBucket'
   | 's3:ListBucketVersions'
+  | 's3:ListBucketMultipartUploads'
   | 's3:DeleteObject'
   | 's3:DeleteObjectVersion';
 
