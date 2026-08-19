@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, PutItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
-import { SubscriptionStatus } from '@filone/shared';
 import type { UsageReportingWorkerPayload } from './usage-reporting-worker.js';
 
 // ---------------------------------------------------------------------------
@@ -36,6 +35,11 @@ vi.mock('../lib/stripe-client.js', () => ({
 }));
 
 const mockEmitStripeCustomersOutOfSync = vi.hoisted(() => vi.fn());
+const mockStartDeletion = vi.fn(async (_params: unknown) => undefined);
+vi.mock('../lib/deletion-from-stripe.js', () => ({
+  startDeletionFromStripe: (params: unknown) => mockStartDeletion(params),
+}));
+
 vi.mock('../lib/usage-worker-metrics.js', () => ({
   emitStripeCustomersOutOfSync: (...args: unknown[]) => mockEmitStripeCustomersOutOfSync(...args),
 }));
@@ -482,8 +486,8 @@ describe('usage-reporting-worker', () => {
 
       await handler(trialPayload);
 
-      // The reconciliation path disables the tenant outright — never the trial write-lock.
-      expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith('aurora-tenant-123', 'disabled');
+      // The reconciliation starts the teardown — never the trial write-lock.
+      expect(mockStartDeletion).toHaveBeenCalled();
       expect(mockAuroraUpdateTenantStatus).not.toHaveBeenCalledWith(
         'aurora-tenant-123',
         'write-locked',
@@ -531,7 +535,9 @@ describe('usage-reporting-worker', () => {
       return putCalls[0].args[0].input.Item!;
     }
 
-    it('verifies deletion, disables tenants, cancels the record, audits reconciled', async () => {
+    // The audit that catches a customer deletion whose webhook was never
+    // delivered, routed through the same entry point as customer.deleted.
+    it('verifies the deletion, then starts the teardown and audits reconciled', async () => {
       mockGetTenantUsageMetrics.mockResolvedValue(oneTbUsage);
       mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
       mockGetCustomerExistence.mockResolvedValue('deleted');
@@ -539,19 +545,14 @@ describe('usage-reporting-worker', () => {
       await handler(basePayload);
 
       expect(mockGetCustomerExistence).toHaveBeenCalledWith('cus_123');
-      expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith('aurora-tenant-123', 'disabled');
-
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-      const input = updateCalls[0].args[0].input;
-      expect(input.Key).toEqual({
-        pk: { S: 'CUSTOMER#user-1' },
-        sk: { S: 'SUBSCRIPTION' },
+      expect(mockStartDeletion).toHaveBeenCalledWith({
+        userId: 'user-1',
+        customerId: 'cus_123',
+        orgId: 'org-1',
+        caller: 'usage-worker',
       });
-      expect(input.ExpressionAttributeValues![':status']).toEqual({
-        S: SubscriptionStatus.Canceled,
-      });
-      expect(input.ConditionExpression).toBe('attribute_exists(pk)');
+      // The teardown owns every write from here.
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
 
       expect(auditItem()).toEqual(
         expect.objectContaining({
@@ -571,7 +572,7 @@ describe('usage-reporting-worker', () => {
 
       await handler(basePayload);
 
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+      expect(mockStartDeletion).toHaveBeenCalled();
       expect(auditItem()).toEqual(
         expect.objectContaining({
           orgSyncAction: { S: 'reconciled:customer-deleted' },
@@ -664,26 +665,19 @@ describe('usage-reporting-worker', () => {
       expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(1);
     });
 
-    it('records reconcile-failed and leaves the record intact when a region fails to disable', async () => {
-      vi.useFakeTimers();
+    // startDeletionFromStripe never throws, so a failure to commit cannot break the
+    // rest of the run; it logs for an operator and this pass still audits.
+    it('completes the run when the deletion cannot be committed', async () => {
       mockGetTenantUsageMetrics.mockResolvedValue(oneTbUsage);
       mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
       mockGetCustomerExistence.mockResolvedValue('deleted');
-      // Fail every retry so the status-sync retry budget is exhausted.
-      mockAuroraUpdateTenantStatus.mockRejectedValue(new Error('Aurora down'));
 
-      const run = handler(basePayload);
-      await vi.runAllTimersAsync();
-      await run;
+      await expect(handler(basePayload)).resolves.toBeUndefined();
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
       expect(auditItem()).toEqual(
-        expect.objectContaining({
-          orgSyncAction: { S: 'reconcile-failed:aurora' },
-          lockAction: { S: 'error:sync-failed:aurora' },
-        }),
+        expect.objectContaining({ orgSyncAction: { S: 'reconciled:customer-deleted' } }),
       );
-      expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(1);
     });
 
     it('emits StripeCustomersOutOfSync=0 on a normal run', async () => {

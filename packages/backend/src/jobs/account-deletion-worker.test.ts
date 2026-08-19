@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  DeleteItemCommand,
+  DynamoDBClient,
+  GetItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 
 vi.mock('sst', () => ({
@@ -9,16 +14,28 @@ vi.mock('sst', () => ({
 
 const order: string[] = [];
 const mockTearDownStripe = vi.fn(async () => void order.push('stripe'));
-const mockPurge = vi.fn(async () => void order.push('purge'));
+const mockScrub = vi.fn(async () => void order.push('scrub'));
 const mockDeleteAuth0User = vi.fn(async (sub: string) => void order.push(`auth0:${sub}`));
+const mockGetAuth0UserEmail = vi.fn(async (sub: string) => {
+  order.push(`email:${sub}`);
+  return 'user@example.com' as string | undefined;
+});
 const mockDeleteTenant = vi.fn(async (tenantId: string) => void order.push(`tenant:${tenantId}`));
+const mockResolveTargets = vi.fn(async () => ({
+  members: [{ userId: 'user-1', sub: 'auth0|one' }],
+  tenantIds: { fth: '42' } as Record<string, string>,
+}));
 
 vi.mock('../lib/deletion-stripe-teardown.js', () => ({
   tearDownStripe: () => mockTearDownStripe(),
 }));
-vi.mock('../lib/deletion-purge.js', () => ({ purgeOrgRecords: () => mockPurge() }));
+vi.mock('../lib/deletion-scrub.js', () => ({ scrubOrgRecords: () => mockScrub() }));
+vi.mock('../lib/deletion-targets.js', () => ({
+  resolveDeletionTargets: () => mockResolveTargets(),
+}));
 vi.mock('../lib/auth0-management.js', () => ({
   deleteAuth0User: (sub: string) => mockDeleteAuth0User(sub),
+  getAuth0UserEmail: (sub: string) => mockGetAuth0UserEmail(sub),
 }));
 
 const mockGetAvailableOrchestrators = vi.fn();
@@ -38,10 +55,9 @@ function record(over: Record<string, unknown> = {}) {
     pk: `ORG#${ORG}`,
     sk: 'DELETION',
     status: 'PENDING',
+    trigger: 'USER_REQUEST',
     requestedAt: '2026-08-12T10:00:00.000Z',
     requestedByUserId: 'user-1',
-    members: [{ userId: 'user-1', sub: 'auth0|one' }],
-    tenantIds: { fth: '42' },
     attempts: 0,
     updatedAt: '2026-08-12T10:00:00.000Z',
     ...over,
@@ -59,15 +75,40 @@ describe('account-deletion-worker', () => {
     order.length = 0;
     ddbMock.on(GetItemCommand).resolves({ Item: record() });
     ddbMock.on(UpdateItemCommand).resolves({});
+    mockResolveTargets.mockResolvedValue({
+      members: [{ userId: 'user-1', sub: 'auth0|one' }],
+      tenantIds: { fth: '42' },
+    });
     mockGetAvailableOrchestrators.mockReturnValue([orchestrator('fth')]);
   });
 
-  // Stripe first because it is the only thing still costing money; our own rows
-  // last because they are the only route to the tenant ids and customers.
-  it('runs Stripe, tenants, purge and Auth0 in that order', async () => {
+  // Auth0 first because it holds the only copy of the email keying ALLOWLIST#, and
+  // the scrub last because it destroys the rows the earlier steps read.
+  it('runs Auth0, Stripe, tenants and the scrub in that order', async () => {
     await handler({ orgId: ORG });
 
-    expect(order).toEqual(['stripe', 'tenant:42', 'purge', 'auth0:auth0|one']);
+    expect(order).toEqual(['email:auth0|one', 'auth0:auth0|one', 'stripe', 'tenant:42', 'scrub']);
+  });
+
+  describe('the allowlist row', () => {
+    it('is revoked while Auth0 can still resolve the email that keys it', async () => {
+      await handler({ orgId: ORG });
+
+      expect(ddbMock.commandCalls(DeleteItemCommand)[0]!.args[0].input.Key).toEqual({
+        pk: { S: 'ALLOWLIST#user@example.com' },
+        sk: { S: 'RAG' },
+      });
+    });
+
+    // A previous pass already deleted the user, so the row is already gone too.
+    it('is skipped when the lookup 404s, and the user delete still runs', async () => {
+      mockGetAuth0UserEmail.mockResolvedValueOnce(undefined);
+
+      await handler({ orgId: ORG });
+
+      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
+      expect(mockDeleteAuth0User).toHaveBeenCalledWith('auth0|one');
+    });
   });
 
   it('reads the record consistently', async () => {
@@ -81,6 +122,18 @@ describe('account-deletion-worker', () => {
 
     const first = ddbMock.commandCalls(UpdateItemCommand)[0]!.args[0].input;
     expect(first.UpdateExpression).toBe('ADD attempts :one SET updatedAt = :now');
+  });
+
+  // Re-applied rather than trusted from confirm, so a teardown the sweeper picked
+  // up still fences every writer even if a racing upsert rebuilt the profile.
+  it('raises the fence again on every pass', async () => {
+    await handler({ orgId: ORG });
+
+    const fence = ddbMock
+      .commandCalls(UpdateItemCommand)
+      .find((c) => c.args[0].input.Key!.sk!.S === 'PROFILE')!.args[0].input;
+    expect(fence.UpdateExpression).toBe('SET deleting = :true, updatedAt = :now');
+    expect(fence.ConditionExpression).toBe('attribute_exists(pk)');
   });
 
   it('marks the record DONE last', async () => {
@@ -112,21 +165,22 @@ describe('account-deletion-worker', () => {
   });
 
   describe('tenant teardown', () => {
-    // Letting NotImplementedError through would block the purge and re-drive
+    // Letting NotImplementedError through would block the scrub and re-drive
     // forever for every Aurora org.
-    it('skips a provider that cannot delete tenants, and still purges', async () => {
+    it('skips a provider that cannot delete tenants, and still scrubs', async () => {
       const failing = vi.fn(async () => {
         throw new NotImplementedError('Aurora tenant deletion is not yet supported.');
       });
-      ddbMock
-        .on(GetItemCommand)
-        .resolves({ Item: record({ tenantIds: { aurora: 'aurora-t-1' } }) });
+      mockResolveTargets.mockResolvedValue({
+        members: [{ userId: 'user-1', sub: 'auth0|one' }],
+        tenantIds: { aurora: 'aurora-t-1' },
+      });
       mockGetAvailableOrchestrators.mockReturnValue([orchestrator('aurora', failing)]);
       const error = vi.spyOn(console, 'error').mockImplementation(() => {});
 
       try {
         await handler({ orgId: ORG });
-        expect(order).toEqual(['stripe', 'purge', 'auth0:auth0|one']);
+        expect(order).toEqual(['email:auth0|one', 'auth0:auth0|one', 'stripe', 'scrub']);
         expect(error).toHaveBeenCalledWith(
           expect.stringContaining('customer data survives upstream'),
           expect.objectContaining({ orchestratorId: 'aurora' }),
@@ -143,7 +197,7 @@ describe('account-deletion-worker', () => {
       mockGetAvailableOrchestrators.mockReturnValue([orchestrator('fth', failing)]);
 
       await expect(handler({ orgId: ORG })).rejects.toThrow('FTH 500');
-      expect(mockPurge).not.toHaveBeenCalled();
+      expect(mockScrub).not.toHaveBeenCalled();
       const marked = ddbMock
         .commandCalls(UpdateItemCommand)
         .some((c) => c.args[0].input.ExpressionAttributeValues?.[':done']);
@@ -151,14 +205,17 @@ describe('account-deletion-worker', () => {
     });
 
     it('skips a tenant whose orchestrator is not registered on this stage', async () => {
-      ddbMock.on(GetItemCommand).resolves({ Item: record({ tenantIds: { forge: 'forge-t-1' } }) });
+      mockResolveTargets.mockResolvedValue({
+        members: [{ userId: 'user-1', sub: 'auth0|one' }],
+        tenantIds: { forge: 'forge-t-1' },
+      });
       mockGetAvailableOrchestrators.mockReturnValue([orchestrator('fth')]);
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
       try {
         await handler({ orgId: ORG });
         expect(mockDeleteTenant).not.toHaveBeenCalled();
-        expect(order).toContain('purge');
+        expect(order).toContain('scrub');
       } finally {
         warn.mockRestore();
       }

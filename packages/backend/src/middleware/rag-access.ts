@@ -23,6 +23,11 @@ const dynamo = getDynamoClient();
  */
 const RAG_FLAG_SK = 'RAG';
 
+/** Shared with account teardown, which revokes the grant by deleting the row. */
+export function ragAllowlistKey(email: string): Record<string, { S: string }> {
+  return { pk: { S: `ALLOWLIST#${email.toLowerCase()}` }, sk: { S: RAG_FLAG_SK } };
+}
+
 /**
  * Whether `email` is on the per-email RAG allowlist stored in UserInfoTable.
  *
@@ -40,7 +45,7 @@ export async function isAllowlisted(verifiedEmail: string): Promise<boolean> {
   const { Item } = await dynamo.send(
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
-      Key: { pk: { S: `ALLOWLIST#${verifiedEmail.toLowerCase()}` }, sk: { S: RAG_FLAG_SK } },
+      Key: ragAllowlistKey(verifiedEmail),
       ConsistentRead: true,
     }),
   );
