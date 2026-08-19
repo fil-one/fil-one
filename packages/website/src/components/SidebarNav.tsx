@@ -23,6 +23,7 @@ import { useSidebarData } from './use-sidebar-data.js';
 import { StatusBanners } from './SidebarStatusBanners.js';
 import { StatusIndicator } from './StatusIndicator.js';
 import { Tooltip } from './Tooltip.js';
+import { UserAvatar } from './UserAvatar.js';
 
 type SidebarNavProps = {
   collapsed: boolean;
@@ -335,15 +336,14 @@ export function SidebarNav({
               ref={userButtonRef}
               type="button"
               data-testid="user-profile"
+              aria-label={`User menu for ${displayName}`}
               onClick={() => setUserMenuOpen((o) => !o)}
               className={[
                 'flex items-center rounded-lg hover:bg-zinc-100',
                 collapsed ? 'w-full justify-center py-1.5' : 'gap-2.5 px-2 py-1.5',
               ].join(' ')}
             >
-              <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-brand-600 text-xs font-semibold text-white">
-                {initial}
-              </span>
+              <UserAvatar src={me?.picture} initial={initial} />
               {!collapsed && (
                 <div className="min-w-0 overflow-hidden text-left">
                   <p className="truncate text-sm font-medium leading-tight text-zinc-900">
