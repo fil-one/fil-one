@@ -5,19 +5,21 @@ import { getDynamoClient } from './ddb-client.js';
 import type { DeletionMember } from './deletion-record.js';
 import { getProvisionedRegions } from './region-helpers.js';
 
+const LOG = '[deletion-targets]';
+
 /**
- * Everything teardown will need, read while the rows still exist. The purge
- * destroys all of it, which is why it is copied onto the DELETION record.
+ * Everything teardown needs, resolved at the start of each pass. The scrub retains
+ * every row read here, so a re-drive resolves the same answer.
  *
  * Reads are strongly consistent throughout: a member or tenant missed here is
  * never torn down, and nothing later can notice the omission.
  */
-export async function snapshotOrgForDeletion(orgId: string): Promise<{
+export async function resolveDeletionTargets(orgId: string): Promise<{
   members: DeletionMember[];
   tenantIds: Record<string, string>;
 }> {
   const [members, provisioned] = await Promise.all([
-    snapshotMembers(orgId),
+    resolveMembers(orgId),
     getProvisionedRegions(orgId, { consistent: true }),
   ]);
 
@@ -27,9 +29,10 @@ export async function snapshotOrgForDeletion(orgId: string): Promise<{
   };
 }
 
-async function snapshotMembers(orgId: string): Promise<DeletionMember[]> {
+async function resolveMembers(orgId: string): Promise<DeletionMember[]> {
   const userIds = await listMemberUserIds(orgId);
-  return Promise.all(userIds.map((userId) => snapshotMember(userId)));
+  const members = await Promise.all(userIds.map((userId) => resolveMember(userId)));
+  return members.filter((m): m is DeletionMember => m !== undefined);
 }
 
 async function listMemberUserIds(orgId: string): Promise<string[]> {
@@ -58,7 +61,7 @@ async function listMemberUserIds(orgId: string): Promise<string[]> {
   return userIds;
 }
 
-async function snapshotMember(userId: string): Promise<DeletionMember> {
+async function resolveMember(userId: string): Promise<DeletionMember | undefined> {
   const dynamo = getDynamoClient();
   const [profile, billing] = await Promise.all([
     dynamo.send(
@@ -81,9 +84,10 @@ async function snapshotMember(userId: string): Promise<DeletionMember> {
 
   const sub = profile.Item?.sub?.S;
   if (!sub) {
-    // Without it the Auth0 user survives and the identity row cannot be
-    // tombstoned, so the account could be re-created. Refuse the whole confirm.
-    throw new Error(`No sub on USER#${userId}/PROFILE; cannot record it for deletion`);
+    // Nothing to delete in Auth0 and no identity row to stamp. Loud, because it
+    // means the account can outlive its org, but it must not wedge the pass.
+    console.error(`${LOG} no sub on USER#${userId}/PROFILE; leaving that member behind`);
+    return undefined;
   }
 
   const stripeCustomerId = billing.Item?.stripeCustomerId?.S;

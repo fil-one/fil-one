@@ -16,7 +16,7 @@ import {
   hashDeletionCode,
   MAX_VERIFY_ATTEMPTS,
 } from './deletion-challenge.js';
-import { DELETION_STATUS, type DeletionMember } from './deletion-record.js';
+import { DELETION_STATUS, DELETION_TRIGGER, type DeletionTrigger } from './deletion-record.js';
 
 /** Matches the budget sendDeletionGuardedWrite uses for the same conflict. */
 const CONFLICT_RETRY = { retries: 2, minTimeout: 50, randomize: true } as const;
@@ -32,8 +32,6 @@ export interface ConfirmDeletionParams {
   requestedByUserId: string;
   code: string;
   salt: string;
-  members: DeletionMember[];
-  tenantIds: Record<string, string>;
 }
 
 /**
@@ -67,11 +65,55 @@ export async function confirmAccountDeletion(
   function createTransactionItems(): TransactWriteItem[] {
     return [
       createSpendChallengeItem(params, now),
-      createDeletionRecordItem(params, now),
+      createDeletionRecordItem(
+        params.orgId,
+        DELETION_TRIGGER.userRequest,
+        now,
+        params.requestedByUserId,
+      ),
       createOrgFenceItem(params.orgId, now),
-      ...params.members.map((member) => createIdentityTombstoneItem(member.sub)),
     ];
   }
+}
+
+/**
+ * The same deletion, committed without a code to spend: an admin deleting the
+ * org's Stripe customer is the standing response to trial abuse and means the
+ * account should go.
+ *
+ * `already_deleting` covers the teardown's own `customer.deleted` echo — the
+ * record already exists, the conditional write is refused, and the two triggers
+ * converge instead of compounding.
+ */
+export async function commitStripeTriggeredDeletion(
+  orgId: string,
+): Promise<{ outcome: 'confirmed' | 'already_deleting' }> {
+  const now = new Date().toISOString();
+
+  try {
+    await pRetry(
+      () =>
+        getDynamoClient().send(
+          new TransactWriteItemsCommand({
+            TransactItems: [
+              createDeletionRecordItem(orgId, DELETION_TRIGGER.stripeCustomerDeleted, now),
+              createOrgFenceItem(orgId, now),
+            ],
+          }),
+        ),
+      { ...CONFLICT_RETRY, shouldRetry: ({ error }) => isTransactionConflict(error) },
+    );
+  } catch (err) {
+    if (
+      err instanceof TransactionCanceledException &&
+      err.CancellationReasons?.[0]?.Code === 'ConditionalCheckFailed'
+    ) {
+      return { outcome: 'already_deleting' };
+    }
+    throw err;
+  }
+
+  return { outcome: 'confirmed' };
 }
 
 // Item 0 — the code. Conditional delete rather than read-then-write, so two
@@ -98,23 +140,27 @@ function createSpendChallengeItem(params: ConfirmDeletionParams, now: string): T
   };
 }
 
-// Item 1 — the record. attribute_not_exists makes a double-confirm a no-op
-// rather than a second teardown.
-function createDeletionRecordItem(params: ConfirmDeletionParams, now: string): TransactWriteItem {
+// The record. attribute_not_exists makes a double-confirm — and the teardown's own
+// customer.deleted echo — a no-op rather than a second teardown.
+function createDeletionRecordItem(
+  orgId: string,
+  trigger: DeletionTrigger,
+  requestedAt: string,
+  requestedByUserId?: string,
+): TransactWriteItem {
   return {
     Put: {
       TableName: Resource.UserInfoTable.name,
       Item: marshall(
         {
-          pk: `ORG#${params.orgId}`,
+          pk: `ORG#${orgId}`,
           sk: 'DELETION',
           status: DELETION_STATUS.pending,
-          requestedAt: now,
-          requestedByUserId: params.requestedByUserId,
-          members: params.members,
-          tenantIds: params.tenantIds,
+          trigger,
+          requestedAt,
+          requestedByUserId,
           attempts: 0,
-          updatedAt: now,
+          updatedAt: requestedAt,
         },
         { removeUndefinedValues: true },
       ),
@@ -123,7 +169,7 @@ function createDeletionRecordItem(params: ConfirmDeletionParams, now: string): T
   };
 }
 
-// Item 2 — the resource-creation fence.
+// Item 2 — the fence. Kills every member's session and refuses new resources.
 function createOrgFenceItem(orgId: string, now: string): TransactWriteItem {
   return {
     Update: {
@@ -133,20 +179,6 @@ function createOrgFenceItem(orgId: string, now: string): TransactWriteItem {
       ConditionExpression: 'attribute_exists(pk)',
       ExpressionAttributeValues: marshall({ ':true': true, ':now': now }),
     } satisfies UpdateItemCommandInput,
-  };
-}
-
-// Items 3..N — the session kill. Unconditional: a member whose identity row has
-// somehow vanished must still be fenced, and the upsert re-creates it as a
-// tombstone rather than leaving the sub free to sign up again.
-function createIdentityTombstoneItem(sub: string): TransactWriteItem {
-  return {
-    Update: {
-      TableName: Resource.UserInfoTable.name,
-      Key: marshall({ pk: `SUB#${sub}`, sk: 'IDENTITY' }),
-      UpdateExpression: 'SET deleted = :true',
-      ExpressionAttributeValues: marshall({ ':true': true }),
-    },
   };
 }
 

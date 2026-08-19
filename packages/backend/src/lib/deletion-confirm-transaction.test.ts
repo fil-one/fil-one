@@ -28,11 +28,6 @@ const PARAMS = {
   requestedByUserId: 'user-1',
   code: '123456',
   salt: 'deadbeef',
-  members: [
-    { userId: 'user-1', sub: 'auth0|one', stripeCustomerId: 'cus_1' },
-    { userId: 'user-2', sub: 'auth0|two' },
-  ],
-  tenantIds: { aurora: 'aurora-t-1', fth: '42' },
 };
 
 function cancelled(reasons: CancellationReason[]) {
@@ -55,18 +50,16 @@ describe('confirmAccountDeletion', () => {
     ddbMock.on(TransactWriteItemsCommand).resolves({});
   });
 
-  it('spends the code, records the deletion and fences every member atomically', async () => {
+  it('spends the code, records the deletion and raises the fence atomically', async () => {
     const result = await confirmAccountDeletion(PARAMS);
 
     expect(result).toEqual({ outcome: 'confirmed' });
     const items = sentItems();
-    // 3 fixed items + one tombstone per member.
-    expect(items).toHaveLength(5);
+    // One fence row rather than one per member, so the size never depends on the org.
+    expect(items).toHaveLength(3);
     expect(items[0]!.Delete?.TableName).toBe('DeletionChallengeTable');
     expect(items[1]!.Put?.ConditionExpression).toBe('attribute_not_exists(pk)');
     expect(items[2]!.Update?.Key).toEqual(marshall({ pk: 'ORG#org-1', sk: 'PROFILE' }));
-    expect(items[3]!.Update?.Key).toEqual(marshall({ pk: 'SUB#auth0|one', sk: 'IDENTITY' }));
-    expect(items[4]!.Update?.Key).toEqual(marshall({ pk: 'SUB#auth0|two', sk: 'IDENTITY' }));
   });
 
   it('never writes the plaintext code', async () => {
@@ -75,35 +68,31 @@ describe('confirmAccountDeletion', () => {
     expect(JSON.stringify(sentItems())).not.toContain(PARAMS.code);
   });
 
-  it('snapshots members and tenant ids onto the record', async () => {
+  // The receipt names its trigger, so it tells a user's own request apart from an
+  // admin deleting the org's Stripe customer.
+  it('writes the receipt, naming the user who asked', async () => {
     await confirmAccountDeletion(PARAMS);
 
-    const record = unmarshall(sentItems()[1]!.Put!.Item!);
-    expect(record).toMatchObject({
+    expect(unmarshall(sentItems()[1]!.Put!.Item!)).toMatchObject({
       pk: 'ORG#org-1',
       sk: 'DELETION',
       status: 'PENDING',
+      trigger: 'USER_REQUEST',
       requestedByUserId: 'user-1',
-      members: PARAMS.members,
-      tenantIds: PARAMS.tenantIds,
       attempts: 0,
     });
   });
 
-  // Only the tombstones are unconditional: a member whose identity row vanished
-  // must still be fenced.
-  it('fences the org conditionally but the identities unconditionally', async () => {
+  it('will not raise the fence on a profile that is not there', async () => {
     await confirmAccountDeletion(PARAMS);
 
-    const items = sentItems();
-    expect(items[2]!.Update?.ConditionExpression).toBe('attribute_exists(pk)');
-    expect(items[3]!.Update?.ConditionExpression).toBeUndefined();
+    expect(sentItems()[2]!.Update?.ConditionExpression).toBe('attribute_exists(pk)');
   });
 
   it('treats a double confirm as already deleting rather than a second teardown', async () => {
     ddbMock
       .on(TransactWriteItemsCommand)
-      .rejects(cancelled([OK, { Code: 'ConditionalCheckFailed' }, OK, OK, OK]));
+      .rejects(cancelled([OK, { Code: 'ConditionalCheckFailed' }, OK]));
 
     await expect(confirmAccountDeletion(PARAMS)).resolves.toEqual({
       outcome: 'already_deleting',

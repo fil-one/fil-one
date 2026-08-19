@@ -16,14 +16,6 @@ vi.mock('../lib/org-membership.js', () => ({ isOrgAdmin: () => mockIsOrgAdmin() 
 const mockGetOrgProfile = vi.fn(async () => ({ name: { S: 'Acme Corp' } }));
 vi.mock('../lib/org-profile.js', () => ({ getOrgProfile: () => mockGetOrgProfile() }));
 
-const mockSnapshot = vi.fn(async () => ({
-  members: [{ userId: 'user-1', sub: 'auth0|one' }],
-  tenantIds: { aurora: 'aurora-t-1' },
-}));
-vi.mock('../lib/deletion-snapshot.js', () => ({
-  snapshotOrgForDeletion: () => mockSnapshot(),
-}));
-
 const mockConfirm = vi.fn();
 const mockConsumeAttempt = vi.fn(async (_orgId: string) => undefined);
 vi.mock('../lib/deletion-confirm-transaction.js', () => ({
@@ -54,15 +46,11 @@ describe('confirm-account-deletion', () => {
     vi.clearAllMocks();
     mockIsOrgAdmin.mockResolvedValue(true);
     mockGetOrgProfile.mockResolvedValue({ name: { S: 'Acme Corp' } });
-    mockSnapshot.mockResolvedValue({
-      members: [{ userId: 'user-1', sub: 'auth0|one' }],
-      tenantIds: { aurora: 'aurora-t-1' },
-    });
     mockConfirm.mockResolvedValue({ outcome: 'confirmed' });
     ddbMock.on(GetItemCommand).resolves({ Item: { salt: { S: 'deadbeef' } } });
   });
 
-  it('202s and passes the snapshot into the transaction', async () => {
+  it('202s and commits the transaction', async () => {
     const result = await baseHandler(event(VALID));
 
     expect(result.statusCode).toBe(202);
@@ -71,8 +59,6 @@ describe('confirm-account-deletion', () => {
       requestedByUserId: 'user-1',
       code: '123456',
       salt: 'deadbeef',
-      members: [{ userId: 'user-1', sub: 'auth0|one' }],
-      tenantIds: { aurora: 'aurora-t-1' },
     });
   });
 
@@ -84,13 +70,12 @@ describe('confirm-account-deletion', () => {
     expect((await baseHandler(event(VALID))).statusCode).toBe(202);
   });
 
-  it('403s a non-admin before snapshotting anything', async () => {
+  it('403s a non-admin before spending anything', async () => {
     mockIsOrgAdmin.mockResolvedValue(false);
 
     const result = await baseHandler(event(VALID));
 
     expect(result.statusCode).toBe(403);
-    expect(mockSnapshot).not.toHaveBeenCalled();
     expect(mockConfirm).not.toHaveBeenCalled();
   });
 

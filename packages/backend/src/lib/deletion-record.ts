@@ -4,9 +4,17 @@ export const DELETION_STATUS = { pending: 'PENDING', done: 'DONE' } as const;
 export type DeletionStatus = (typeof DELETION_STATUS)[keyof typeof DELETION_STATUS];
 
 /**
- * A member as of confirm time. Everything teardown needs about them, because
- * the rows these were read from are destroyed by the purge.
+ * What committed the deletion. The receipt has to distinguish a user's own
+ * request from an admin deleting the org's Stripe customer, which is the standing
+ * response to trial abuse.
  */
+export const DELETION_TRIGGER = {
+  userRequest: 'USER_REQUEST',
+  stripeCustomerDeleted: 'STRIPE_CUSTOMER_DELETED',
+} as const;
+export type DeletionTrigger = (typeof DELETION_TRIGGER)[keyof typeof DELETION_TRIGGER];
+
+/** What teardown needs to know about one member, resolved per pass. */
 export interface DeletionMember {
   userId: string;
   /** Auth0 subject — the account to delete, and the audit correlation key. */
@@ -21,11 +29,10 @@ export interface DeletionMember {
  */
 export interface DeletionRecord {
   status: DeletionStatus;
+  trigger: DeletionTrigger;
   requestedAt: string;
-  requestedByUserId: string;
-  members: DeletionMember[];
-  /** `orchestratorId` → `tenantId`, snapshotted while the profile still exists. */
-  tenantIds: Record<string, string>;
+  /** Absent when an admin deleted the Stripe customer: there is no requester. */
+  requestedByUserId?: string;
   /** Worker passes so far; the alarm threshold input. */
   attempts: number;
   updatedAt: string;

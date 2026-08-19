@@ -12,7 +12,6 @@ import {
   consumeVerifyAttempt,
   type ConfirmResult,
 } from '../lib/deletion-confirm-transaction.js';
-import { snapshotOrgForDeletion } from '../lib/deletion-snapshot.js';
 import { getOrgProfile } from '../lib/org-profile.js';
 import { isOrgAdmin } from '../lib/org-membership.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
@@ -54,14 +53,11 @@ export async function baseHandler(
   const salt = await readChallengeSalt(orgId);
   if (!salt) return codeResponse({ outcome: 'code_expired_or_locked' }, orgId);
 
-  const { members, tenantIds } = await snapshotOrgForDeletion(orgId);
   const result = await confirmAccountDeletion({
     orgId,
     requestedByUserId: userId,
     code: parsed.data.code,
     salt,
-    members,
-    tenantIds,
   });
 
   if (result.outcome !== 'confirmed' && result.outcome !== 'already_deleting') {
@@ -71,8 +67,6 @@ export async function baseHandler(
   console.log('[confirm-account-deletion] deletion recorded', {
     orgId,
     requestedByUserId: userId,
-    memberCount: members.length,
-    tenantCount: Object.keys(tenantIds).length,
     alreadyRecorded: result.outcome === 'already_deleting',
   });
 
