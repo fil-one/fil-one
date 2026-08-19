@@ -96,42 +96,18 @@ export function supportsBucketManagement(region: S3Region): boolean {
 }
 
 /**
- * Domain dedicated to user data (FIL-627).
+ * Domain dedicated to user data (FIL-627). Reputation systems act on the
+ * registrable domain, so one abusive upload under `fil.one` could flag the
+ * console, website, docs and email with it. Nothing else is served from here.
  *
- * The gateways serve untrusted, user-controlled content, and reputation systems
- * act on the registrable domain rather than the subdomain — so hosting that
- * content under `fil.one` means one abusive upload through any single regional
- * operator can flag the console, website, docs and company email along with it.
- * Nothing but user data is served from here.
+ * Operators terminate TLS themselves — every one must serve this hostname
+ * before merge.
  */
-const CONTENT_DATA_DOMAIN = 's3.filonecontent.com';
-
-/** The original data domain, shared with front-of-house. Being migrated away from. */
-const LEGACY_DATA_DOMAIN = 's3.fil.one';
+const S3_DATA_DOMAIN = 's3.filonecontent.com';
 
 /**
- * Data domain serving each production region's S3 gateway.
- *
- * Regions migrate one at a time. Each is run by an independent operator that
- * terminates TLS itself, so each has to obtain its own certificate for its
- * hostname under {@link CONTENT_DATA_DOMAIN} before it can be flipped — and a
- * region must not be flipped before then, or every request to it fails TLS.
- * Flipping one entry here is the whole change for that region.
- *
- * `eu-central-3` starts on the content domain: it is not GA in production and
- * has never had a `fil.one` hostname, so there is nothing to deprecate. New
- * regions should launch on the content domain and never appear on the legacy one.
- */
-const PROD_DATA_DOMAIN_BY_REGION: Record<S3Region, string> = {
-  [S3Region.EuWest1]: LEGACY_DATA_DOMAIN,
-  [S3Region.UsEast1]: LEGACY_DATA_DOMAIN,
-  [S3Region.EuCentral3]: CONTENT_DATA_DOMAIN,
-};
-
-/**
- * Build the S3-compatible endpoint URL for a given region and stage.
- * e.g. https://eu-west-1.s3.fil.one (production). Non-production stages talk to
- * each operator's own hostname directly rather than through a `fil.one` name.
+ * Build the S3-compatible endpoint URL for a region and stage. Non-production
+ * stages talk to each operator's own hostname directly.
  */
 export function getS3Endpoint(region: S3Region, stage: Stage | string): string {
   //TODO change this when aurora supports staging URL structure through our DNS.
@@ -145,29 +121,7 @@ export function getS3Endpoint(region: S3Region, stage: Stage | string): string {
         return 'https://ingot.staging.fil.one';
     }
   }
-  return `https://${region}.${PROD_DATA_DOMAIN_BY_REGION[region]}`;
-}
-
-/**
- * Every S3 origin the console may need to reach, for CSP `connect-src`.
- *
- * CSP is a single static document header that cannot vary per user, so it has to
- * cover every regional endpoint any user could reach. In production that means
- * both data domains for the duration of the migration: presigned URLs sign the
- * `Host` header, so one minted just before a region flipped stays valid on the
- * old host and a page holding it may still retry the request.
- *
- * Drop {@link LEGACY_DATA_DOMAIN} from this list once every region has flipped
- * and the deprecation window has elapsed — see MAX_GET_OBJECT_EXPIRY_SECONDS,
- * the longest a presigned URL can outlive the flip that replaced it.
- */
-export function getS3CspOrigins(stage: Stage | string): string[] {
-  const regions = Object.values(S3Region);
-  if (stage !== Stage.Production) {
-    return [...new Set(regions.map((region) => getS3Endpoint(region, stage)))];
-  }
-  const domains = [CONTENT_DATA_DOMAIN, LEGACY_DATA_DOMAIN];
-  return regions.flatMap((region) => domains.map((domain) => `https://${region}.${domain}`));
+  return `https://${region}.${S3_DATA_DOMAIN}`;
 }
 
 /**
