@@ -84,6 +84,58 @@ aws iam list-roles --query 'length(Roles)' --output text
 | `REGION` | `us-east-2`                   | AWS region for regional resources        |
 | `REPO`   | auto-detected from git remote | GitHub `owner/repo` for PR state lookups |
 
+## The organizations beta flag
+
+`orgs-beta.ts` switches one organization, or one person, into the organizations
+beta. The flag decides two things: whether `POST /api/org/invitations` will
+create an invitation, and whether the console shows a members surface at all.
+
+```bash
+node bin/orgs-beta.ts list staging
+node bin/orgs-beta.ts grant staging 4f1c2a80-9b3e-4a51-8d77-6b0c2f9a1e34   # dry run
+node bin/orgs-beta.ts grant staging 4f1c2a80-9b3e-4a51-8d77-6b0c2f9a1e34 --execute
+node bin/orgs-beta.ts revoke staging someone@example.com --execute
+node bin/orgs-beta.ts check staging someone@example.com                    # exit 0 granted, 2 not
+```
+
+**Where the flag lives.** `UserInfoTable`, sort key `ORGS_BETA`, under either of
+two partition keys:
+
+| Key                            | Grants                                        |
+| ------------------------------ | --------------------------------------------- |
+| `ORG#{orgId}`                  | every member of that organization             |
+| `ALLOWLIST#{lowercased-email}` | that person, in whichever org they are active |
+
+The org row is the one an enterprise beta wants: FilOne learns an employee's
+address only at their first login, so the members cannot be enumerated in
+advance.
+
+**Presence is the grant.** The rows carry no attributes and none are read.
+Granting twice is the same as granting once, and revoking a row that was never
+written is not an error.
+
+**Either row grants.** Revoking an org does not revoke the people inside it who
+hold their own allowlist row — `list` shows both kinds, and the revoke output
+says so when it applies.
+
+**Reads are consistent.** `hasOrgsBetaAccess` reads both rows with
+`ConsistentRead`, because granting the flag is a manual step somebody performs
+and then immediately tries. What the script writes is what the next request
+sees. The console is the lag that remains: it caches `GET /me` for ten minutes,
+so a customer watching for the change may need to reload.
+
+**Grants and revokes are dry runs by default.** Both print the row they would
+write or delete and stop until `--execute` is passed. `list` and `check` only
+read.
+
+Targets are told apart by shape: anything containing `@` is an email, anything
+else must be an organization UUID. The script refuses a target that is neither
+before it touches AWS.
+
+Like `rag-access.ts`, this talks to AWS directly with your ambient credentials
+rather than through `sst shell`, which cannot evaluate pulumi providers against
+production. Set `AWS_PROFILE` first.
+
 ## Other Scripts
 
 | Script                         | Purpose                                                                                                                                                    |
@@ -92,6 +144,8 @@ aws iam list-roles --query 'length(Roles)' --output text
 | `revert-org-conversion.ts`     | Undo `convert-orgs-to-orgtable.ts`                                                                                                                         |
 | `backfill-billing-to-org.ts`   | Copy each BillingTable subscription row to its org key, and `--verify` the result (runbook: [docs/BillingRekeyRunbook.md](../docs/BillingRekeyRunbook.md)) |
 | `revert-billing-backfill.ts`   | Undo `backfill-billing-to-org.ts` — deletes only the org rows it wrote                                                                                     |
+| `orgs-beta.ts`                 | Grant, revoke, list, and check the organizations beta flag (see above)                                                                                     |
+| `rag-access.ts`                | Enable, disable, or check RAG access for one email                                                                                                         |
 | `extend-trial.ts`              | Reset a non-production test account back to a fresh `trialing` state, across Stripe, BillingTable, Aurora, and FTH                                         |
 | `tail-logs.sh`                 | Tail CloudWatch logs for a Lambda function                                                                                                                 |
 | `tail-tenant-setup-logs.sh`    | Tail logs for the Aurora tenant setup Lambda                                                                                                               |
