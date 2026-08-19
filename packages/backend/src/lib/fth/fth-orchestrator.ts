@@ -19,7 +19,6 @@ import {
   AccessKeyValidationError,
   BucketConfigurationError,
   BucketNotFoundError,
-  NotImplementedError,
 } from '../errors.js';
 import type {
   BucketDetails,
@@ -42,6 +41,7 @@ import { createS3Client } from '../s3-client.js';
 import {
   createBucket as s3CreateBucket,
   listBuckets as s3ListBuckets,
+  deleteBucket as s3DeleteBucket,
   setBucketVersioning,
   putObjectLockConfiguration,
   getBucketVersioning,
@@ -151,8 +151,10 @@ export const fthOrchestrator = {
     }
   },
 
-  async deleteBucket(_tenantId: string, _bucketName: string): Promise<void> {
-    throw new NotImplementedError('Bucket deletion is not implemented in this region yet');
+  async deleteBucket(tenantId: string, bucketName: string): Promise<void> {
+    const ctx = await fthOrchestrator.getS3ClientContext(tenantId);
+    const s3 = createS3Client(ctx);
+    await s3DeleteBucket(s3, bucketName);
   },
 
   async listBuckets(tenantId: string): Promise<BucketSummary[]> {

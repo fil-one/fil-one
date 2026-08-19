@@ -20,6 +20,7 @@ import {
   createAuroraBucket,
   createPortalClient,
   deleteAuroraAccessKey,
+  deleteAuroraBucket,
   findAuroraAccessKeyByName,
 } from '../aurora/aurora-portal.js';
 import {
@@ -35,7 +36,7 @@ import {
 import { isOrgSetupComplete } from '../org-setup-status.js';
 import type { OrgProfileItem } from '../org-profile.js';
 import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
-import { BucketNotFoundError, NotImplementedError } from '../errors.js';
+import { BucketNotFoundError } from '../errors.js';
 import type {
   BucketDetails,
   BucketProtection,
@@ -120,10 +121,8 @@ export const auroraOrchestrator = {
     });
   },
 
-  async deleteBucket(_tenantId: string, _bucketName: string): Promise<void> {
-    // TODO: Implement bucket deletion.
-    // https://linear.app/filecoin-foundation/issue/FIL-204/delete-bucket
-    throw new NotImplementedError('Aurora bucket deletion is not yet supported. See FIL-204.');
+  async deleteBucket(tenantId: string, bucketName: string): Promise<void> {
+    await deleteAuroraBucket({ tenantId, bucketName });
   },
 
   async listBuckets(tenantId: string): Promise<BucketSummary[]> {

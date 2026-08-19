@@ -28,7 +28,7 @@ function StatusBadge({ status }: { status: AccessKey['status'] }) {
       Active
     </Badge>
   ) : (
-    <Badge color="grey" size="sm" weight="medium">
+    <Badge color="grey" dot size="sm" weight="medium">
       Inactive
     </Badge>
   );

@@ -129,8 +129,8 @@ export function BucketsTable({
 }
 
 /**
- * Row actions. Delete stays in the menu, disabled with the reason, so the column
- * carries the things you can actually do instead of one button that can't run.
+ * Row actions. Delete opens the page's confirm dialog rather than acting
+ * immediately, since it's destructive and the bucket must be empty first.
  */
 function BucketRowActions({
   bucket,
@@ -175,10 +175,6 @@ function BucketRowActions({
         {
           label: 'Delete bucket',
           icon: TrashIcon,
-          // TODO: enable bucket deletion after Aurora implements this operation
-          // https://linear.app/filecoin-foundation/issue/FIL-204/delete-bucket
-          disabled: true,
-          hint: 'Not available yet',
           onSelect: () => onDelete(bucket.bucketName),
         },
       ]}

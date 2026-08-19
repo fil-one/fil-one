@@ -4,6 +4,7 @@ import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import {
   S3Client,
   CreateBucketCommand,
+  DeleteBucketCommand,
   ListBucketsCommand,
   PutBucketVersioningCommand,
   PutObjectLockConfigurationCommand,
@@ -66,6 +67,7 @@ import {
   AccessKeyValidationError,
   BucketAlreadyExistsError,
   BucketConfigurationError,
+  BucketNotEmptyError,
   BucketNotFoundError,
 } from '../errors.js';
 import { FthApiError, FthConflictError, FthNotFoundError } from './fth-management-client.js';
@@ -421,6 +423,51 @@ describe('fthOrchestrator.createBucket', () => {
 
     expect(s3Mock.commandCalls(PutBucketVersioningCommand)).toHaveLength(0);
     expect(s3Mock.commandCalls(PutObjectLockConfigurationCommand)).toHaveLength(0);
+  });
+});
+
+describe('fthOrchestrator.deleteBucket', () => {
+  beforeEach(() => {
+    ssmMock.on(GetParameterCommand).resolves({
+      Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
+    });
+  });
+
+  it('issues a DeleteBucketCommand against the tenant S3 client', async () => {
+    s3Mock.on(DeleteBucketCommand).resolves({});
+
+    await fthOrchestrator.deleteBucket(fthClientId, 'my-bucket');
+
+    const calls = s3Mock.commandCalls(DeleteBucketCommand);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args[0].input).toMatchObject({ Bucket: 'my-bucket' });
+  });
+
+  it('resolves when the delete succeeds', async () => {
+    s3Mock.on(DeleteBucketCommand).resolves({});
+
+    await expect(fthOrchestrator.deleteBucket(fthClientId, 'my-bucket')).resolves.toBeUndefined();
+  });
+
+  // s3DeleteBucket swallows NoSuchBucket, so an already-gone bucket is a success.
+  it('treats a NoSuchBucket error as an idempotent success', async () => {
+    const err = new Error('no such bucket');
+    (err as Error & { name: string }).name = 'NoSuchBucket';
+    s3Mock.on(DeleteBucketCommand).rejects(err);
+
+    await expect(fthOrchestrator.deleteBucket(fthClientId, 'my-bucket')).resolves.toBeUndefined();
+  });
+
+  // Surfaced as a domain error so delete-bucket can answer with a machine-readable
+  // 409 (BUCKET_NOT_EMPTY) instead of the generic 500 from errorHandlerMiddleware.
+  it('surfaces a BucketNotEmpty error as BucketNotEmptyError', async () => {
+    const err = new Error('bucket not empty');
+    (err as Error & { name: string }).name = 'BucketNotEmpty';
+    s3Mock.on(DeleteBucketCommand).rejects(err);
+
+    await expect(fthOrchestrator.deleteBucket(fthClientId, 'my-bucket')).rejects.toBeInstanceOf(
+      BucketNotEmptyError,
+    );
   });
 });
 
