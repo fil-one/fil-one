@@ -71,6 +71,7 @@ process.env.AURORA_PORTAL_URL = 'https://portal.dev.aur.lu/api';
 
 import { S3Region } from '@filone/shared';
 import { auroraOrchestrator, _resetSsmCacheForTesting } from './aurora-orchestrator.js';
+import { NotImplementedError } from '../errors.js';
 import type { OrgProfileItem } from '../org-profile.js';
 import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../org-setup-status.js';
 import {

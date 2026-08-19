@@ -36,7 +36,7 @@ import {
 import { isOrgSetupComplete } from '../org-setup-status.js';
 import type { OrgProfileItem } from '../org-profile.js';
 import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
-import { BucketNotFoundError } from '../errors.js';
+import { BucketNotFoundError, NotImplementedError } from '../errors.js';
 import type {
   BucketDetails,
   BucketSummary,
