@@ -203,6 +203,11 @@ export default $config({
       {
         domain: isEphemeralStage ? '*.dev.fil.one' : domainName,
         statuses: ['ISSUED'],
+        // The lookup errors if more than one ISSUED cert matches. That happens
+        // transiently whenever a cert is replaced rather than mutated in place,
+        // since both carry the same primary domain until the old one is retired.
+        // Picking the newest is right: the older one is the one going away.
+        mostRecent: true,
       },
       { provider: usEast1 },
     );
