@@ -36,7 +36,6 @@ import { isOrgSetupComplete } from '../org-setup-status.js';
 import type { OrgProfileItem } from '../org-profile.js';
 import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
 import { BucketNotFoundError, NotImplementedError } from '../errors.js';
-import { mapWithConcurrency } from '../map-with-concurrency.js';
 import type {
   BucketDetails,
   BucketProtection,
@@ -45,7 +44,6 @@ import type {
   GetTenantUsageMetricsOptions,
   IssueAccessKeyOpts,
   IssuedAccessKey,
-  ListBucketsOptions,
   ServiceOrchestrator,
   TenantStatusProbe,
   StorageUsageSample,
@@ -59,12 +57,6 @@ export const _resetSsmCacheForTesting = () => _resetS3CredentialsCacheForTesting
 function getStage(): string {
   return process.env.FILONE_STAGE!;
 }
-
-/**
- * In-flight per-bucket detail reads when a listing needs object-lock state.
- * Bounded so a tenant with many buckets doesn't burst the portal API.
- */
-const BUCKET_DETAIL_CONCURRENCY = 8;
 
 /** Object-lock and retention fields off a portal single-bucket response. */
 function toBucketProtection(data: BucketBucketResponse): BucketProtection {
@@ -134,11 +126,7 @@ export const auroraOrchestrator = {
     throw new NotImplementedError('Aurora bucket deletion is not yet supported. See FIL-204.');
   },
 
-  async listBuckets(tenantId: string, opts: ListBucketsOptions = {}): Promise<BucketSummary[]> {
-    // Aurora returns versioning inline via `flags`, so there's no per-bucket
-    // cost to skip; the option is honored only to keep the contract uniform
-    // with FTH (see ListBucketsOptions).
-    const includeVersioning = opts.includeVersioning ?? true;
+  async listBuckets(tenantId: string): Promise<BucketSummary[]> {
     const client = await createPortalClient(tenantId);
     const { data, error } = await listBuckets({
       client,
@@ -152,40 +140,15 @@ export const auroraOrchestrator = {
       });
     }
 
-    const summaries = (data?.items ?? [])
+    return (data?.items ?? [])
       .filter((b): b is typeof b & { name: string; createdAt: string } => !!b.name && !!b.createdAt)
       .map((b) => ({
         bucketName: b.name,
         region: auroraOrchestrator.region,
         createdAt: b.createdAt,
         isPublic: false,
-        versioning: includeVersioning ? (b.flags?.includes('versioned') ?? false) : false,
         encrypted: b.flags?.includes('encrypted') ?? true,
       }));
-
-    if (!opts.includeObjectLock) return summaries;
-
-    // The list response has no lock field at all, so each bucket needs its own
-    // getBucketInfo. Bounded, and a per-bucket failure degrades that row to
-    // "no lock" rather than failing the whole listing.
-    return mapWithConcurrency(summaries, BUCKET_DETAIL_CONCURRENCY, async (summary) => {
-      const { data: info, error: infoError } = await getBucketInfo({
-        client,
-        path: { tenantId, bucketName: summary.bucketName },
-        throwOnError: false,
-      });
-
-      if (infoError || !info) {
-        console.warn('[aurora] Failed to load object-lock state for bucket', {
-          tenantId,
-          bucketName: summary.bucketName,
-          error: infoError,
-        });
-        return summary;
-      }
-
-      return { ...summary, ...toBucketProtection(info) };
-    });
   },
 
   async getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null> {

@@ -28,7 +28,6 @@ import type {
   GetTenantUsageMetricsOptions,
   IssueAccessKeyOpts,
   IssuedAccessKey,
-  ListBucketsOptions,
   ServiceOrchestrator,
   TenantStatusProbe,
   StorageUsageSample,
@@ -40,7 +39,6 @@ import type { OrgProfileItem } from '../org-profile.js';
 import type { S3ClientContext } from '../s3-client.js';
 
 import { createS3Client } from '../s3-client.js';
-import { mapWithConcurrency } from '../map-with-concurrency.js';
 import {
   createBucket as s3CreateBucket,
   listBuckets as s3ListBuckets,
@@ -65,12 +63,6 @@ const FTH_CONSOLE_USER_CODE = 'filone-console';
 // bucket is created. Retry them so a transient S3 blip doesn't leave the bucket
 // partially configured (which would surface as a dead-end BucketConfigurationError).
 const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
-
-/**
- * In-flight per-bucket reads while listing (versioning, and object-lock when
- * asked for). Bounded so a tenant with many buckets doesn't burst S3.
- */
-const BUCKET_DETAIL_CONCURRENCY = 8;
 
 const consoleStorageUserCache = new QuickLRU<string, string>({ maxSize: 500 });
 const client = createInstrumentedFthClient();
@@ -163,55 +155,22 @@ export const fthOrchestrator = {
     throw new NotImplementedError('Bucket deletion is not implemented in this region yet');
   },
 
-  async listBuckets(tenantId: string, opts: ListBucketsOptions = {}): Promise<BucketSummary[]> {
-    // Loading versioning costs one GetBucketVersioning call per bucket (an N+1),
-    // so callers that don't surface it opt out via includeVersioning: false.
-    // Object-lock state is a second such call, off unless asked for.
-    const includeVersioning = opts.includeVersioning ?? true;
+  async listBuckets(tenantId: string): Promise<BucketSummary[]> {
+    // Versioning and object-lock both cost a GetBucket*/GetObjectLockConfiguration
+    // call per bucket, an N+1 nobody wants to pay just to render a list. Neither
+    // is returned here; getBucket loads both for the one bucket the detail page
+    // actually needs them for.
     const ctx = await fthOrchestrator.getS3ClientContext(tenantId);
     const s3 = createS3Client(ctx);
     const { buckets } = await s3ListBuckets(s3);
 
-    return mapWithConcurrency(buckets, BUCKET_DETAIL_CONCURRENCY, async (b) => {
-      const [versioning, lock] = await Promise.all([
-        includeVersioning ? getBucketVersioning(s3, b.name) : Promise.resolve(false),
-        // A failed object-lock read degrades this row rather than the whole
-        // listing: getBucketObjectLock rethrows anything that isn't a missing
-        // configuration, so one bucket denying GetObjectLockConfiguration would
-        // otherwise 500 the buckets page. Versioning still propagates, since the
-        // object browser's behaviour depends on it.
-        //
-        // `null` means the bucket has no lock configuration; `undefined` means we
-        // couldn't find out, which is why the two aren't collapsed.
-        opts.includeObjectLock
-          ? getBucketObjectLock(s3, b.name).catch((err: unknown) => {
-              console.warn('[fth] Failed to load object-lock state for bucket', {
-                tenantId,
-                bucketName: b.name,
-                error: err,
-              });
-              return undefined;
-            })
-          : Promise.resolve(undefined),
-      ]);
-
-      return {
-        bucketName: b.name,
-        region: fthOrchestrator.region,
-        createdAt: b.createdAt,
-        isPublic: false,
-        versioning,
-        encrypted: true,
-        // Reported only when the read succeeded. Left unset after a failure, so a
-        // locked bucket is never shown as unlocked on the strength of an error.
-        ...(lock !== undefined && { objectLockEnabled: lock?.objectLockEnabled ?? false }),
-        ...(lock?.defaultRetention && { defaultRetention: lock.defaultRetention }),
-        ...(lock?.retentionDuration != null && { retentionDuration: lock.retentionDuration }),
-        ...(lock?.retentionDurationType && {
-          retentionDurationType: lock.retentionDurationType,
-        }),
-      };
-    });
+    return buckets.map((b) => ({
+      bucketName: b.name,
+      region: fthOrchestrator.region,
+      createdAt: b.createdAt,
+      isPublic: false,
+      encrypted: true,
+    }));
   },
 
   async getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null> {

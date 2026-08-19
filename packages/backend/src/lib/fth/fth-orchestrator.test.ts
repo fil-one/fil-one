@@ -704,7 +704,6 @@ describe('fthOrchestrator.listBuckets', () => {
         region: 'us-east-1',
         createdAt: '2026-01-01T00:00:00.000Z',
         isPublic: false,
-        versioning: false,
         encrypted: true,
       },
       {
@@ -712,125 +711,31 @@ describe('fthOrchestrator.listBuckets', () => {
         region: 'us-east-1',
         createdAt: '2026-02-01T00:00:00.000Z',
         isPublic: false,
-        versioning: false,
         encrypted: true,
       },
     ]);
   });
 
-  it('reflects per-bucket versioning state from GetBucketVersioning', async () => {
-    ssmMock.on(GetParameterCommand).resolves({
-      Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
-    });
-    s3Mock.on(ListBucketsCommand).resolves({
-      Buckets: [
-        { Name: 'versioned', CreationDate: new Date('2026-01-01T00:00:00Z') },
-        { Name: 'plain', CreationDate: new Date('2026-02-01T00:00:00Z') },
-      ],
-    });
-    s3Mock.on(GetBucketVersioningCommand).callsFake((input) => ({
-      Status: input.Bucket === 'versioned' ? 'Enabled' : 'Suspended',
-    }));
-
-    const result = await fthOrchestrator.listBuckets(fthClientId);
-
-    expect(result.find((b) => b.bucketName === 'versioned')?.versioning).toBe(true);
-    expect(result.find((b) => b.bucketName === 'plain')?.versioning).toBe(false);
-  });
-
-  it('skips GetBucketVersioning and returns versioning:false when includeVersioning is false', async () => {
-    ssmMock.on(GetParameterCommand).resolves({
-      Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
-    });
-    s3Mock.on(ListBucketsCommand).resolves({
-      Buckets: [
-        { Name: 'b1', CreationDate: new Date('2026-01-01T00:00:00Z') },
-        { Name: 'b2', CreationDate: new Date('2026-02-01T00:00:00Z') },
-      ],
-    });
-    // If this were consulted the result would be versioning:true; the option
-    // must prevent the call entirely.
-    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
-
-    const result = await fthOrchestrator.listBuckets(fthClientId, { includeVersioning: false });
-
-    expect(s3Mock.commandCalls(GetBucketVersioningCommand)).toHaveLength(0);
-    expect(result.map((b) => b.versioning)).toEqual([false, false]);
-  });
-
-  it('loads object-lock state per bucket when includeObjectLock is set', async () => {
+  it('never reads GetBucketVersioning or GetObjectLockConfiguration: both cost a call per bucket', async () => {
     ssmMock.on(GetParameterCommand).resolves({
       Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
     });
     s3Mock.on(ListBucketsCommand).resolves({
       Buckets: [{ Name: 'b1', CreationDate: new Date('2026-01-01T00:00:00Z') }],
     });
+    // If either of these were consulted the result would carry the field; the
+    // listing must not call them at all.
     s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
     s3Mock.on(GetObjectLockConfigurationCommand).resolves({
-      ObjectLockConfiguration: {
-        ObjectLockEnabled: 'Enabled',
-        Rule: { DefaultRetention: { Mode: 'COMPLIANCE', Days: 30 } },
-      },
+      ObjectLockConfiguration: { ObjectLockEnabled: 'Enabled' },
     });
-
-    const result = await fthOrchestrator.listBuckets(fthClientId, { includeObjectLock: true });
-
-    expect(result[0]).toMatchObject({
-      bucketName: 'b1',
-      versioning: true,
-      objectLockEnabled: true,
-      defaultRetention: 'compliance',
-      retentionDuration: 30,
-      retentionDurationType: 'd',
-    });
-  });
-
-  it('degrades one bucket rather than the listing when its object-lock read fails', async () => {
-    ssmMock.on(GetParameterCommand).resolves({
-      Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
-    });
-    s3Mock.on(ListBucketsCommand).resolves({
-      Buckets: [{ Name: 'b1', CreationDate: new Date('2026-01-01T00:00:00Z') }],
-    });
-    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
-    // Anything other than a missing configuration is rethrown by
-    // getBucketObjectLock, which would otherwise fail the whole page.
-    s3Mock.on(GetObjectLockConfigurationCommand).rejects(new Error('AccessDenied'));
-
-    const result = await fthOrchestrator.listBuckets(fthClientId, { includeObjectLock: true });
-
-    expect(result).toHaveLength(1);
-    expect(result[0]?.versioning).toBe(true);
-    // Left unset, not false: a locked bucket must not read as unlocked because
-    // the read failed.
-    expect(result[0]?.objectLockEnabled).toBeUndefined();
-  });
-
-  it('skips GetObjectLockConfiguration unless includeObjectLock is set', async () => {
-    ssmMock.on(GetParameterCommand).resolves({
-      Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
-    });
-    s3Mock.on(ListBucketsCommand).resolves({
-      Buckets: [{ Name: 'b1', CreationDate: new Date('2026-01-01T00:00:00Z') }],
-    });
-    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
 
     const result = await fthOrchestrator.listBuckets(fthClientId);
 
+    expect(s3Mock.commandCalls(GetBucketVersioningCommand)).toHaveLength(0);
     expect(s3Mock.commandCalls(GetObjectLockConfigurationCommand)).toHaveLength(0);
-    expect(result[0]?.objectLockEnabled).toBeUndefined();
-  });
-
-  it('propagates GetBucketVersioning failures instead of swallowing them', async () => {
-    ssmMock.on(GetParameterCommand).resolves({
-      Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
-    });
-    s3Mock.on(ListBucketsCommand).resolves({
-      Buckets: [{ Name: 'b1', CreationDate: new Date('2026-01-01T00:00:00Z') }],
-    });
-    s3Mock.on(GetBucketVersioningCommand).rejects(new Error('AccessDenied'));
-
-    await expect(fthOrchestrator.listBuckets(fthClientId)).rejects.toThrow(/AccessDenied/);
+    expect(result[0]).not.toHaveProperty('versioning');
+    expect(result[0]).not.toHaveProperty('objectLockEnabled');
   });
 
   it('propagates ListBuckets failures', async () => {

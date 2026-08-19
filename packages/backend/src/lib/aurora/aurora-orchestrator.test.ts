@@ -239,7 +239,6 @@ describe('auroraOrchestrator', () => {
           region: S3Region.EuWest1,
           createdAt: '2026-01-01T00:00:00Z',
           isPublic: false,
-          versioning: false,
           encrypted: true,
         },
         {
@@ -247,78 +246,12 @@ describe('auroraOrchestrator', () => {
           region: S3Region.EuWest1,
           createdAt: '2026-01-02T00:00:00Z',
           isPublic: false,
-          versioning: true,
           encrypted: true,
         },
       ]);
     });
 
-    it('returns versioning:false when includeVersioning is false, even for versioned buckets', async () => {
-      mockGetAuroraPortalApiKey.mockResolvedValue('api-key');
-      mockPortalListBuckets.mockResolvedValue({
-        data: {
-          items: [
-            {
-              name: 'b',
-              createdAt: '2026-01-02T00:00:00Z',
-              flags: ['versioned', 'encrypted'],
-            },
-          ],
-        },
-        error: undefined,
-      });
-
-      const result = await auroraOrchestrator.listBuckets('aurora-t-1', {
-        includeVersioning: false,
-      });
-
-      expect(result[0]?.versioning).toBe(false);
-      // encrypted is independent of the versioning option.
-      expect(result[0]?.encrypted).toBe(true);
-    });
-
-    it('loads object-lock state per bucket when includeObjectLock is set', async () => {
-      mockGetAuroraPortalApiKey.mockResolvedValue('api-key');
-      mockPortalListBuckets.mockResolvedValue({
-        data: {
-          items: [
-            { name: 'locked', createdAt: '2026-01-01T00:00:00Z', flags: ['versioned'] },
-            { name: 'plain', createdAt: '2026-01-02T00:00:00Z' },
-          ],
-        },
-        error: undefined,
-      });
-      mockPortalGetBucketInfo.mockImplementation(({ path }: { path: { bucketName: string } }) =>
-        path.bucketName === 'locked'
-          ? {
-              data: {
-                objectLock: true,
-                defaultRetention: 'compliance',
-                retentionDuration: 30,
-                retentionDurationType: 'd',
-              },
-              error: undefined,
-            }
-          : { data: { objectLock: false, defaultRetention: 'off' }, error: undefined },
-      );
-
-      const result = await auroraOrchestrator.listBuckets('aurora-t-1', {
-        includeObjectLock: true,
-      });
-
-      expect(result[0]).toMatchObject({
-        bucketName: 'locked',
-        objectLockEnabled: true,
-        defaultRetention: 'compliance',
-        retentionDuration: 30,
-        retentionDurationType: 'd',
-      });
-      expect(result[1]).toMatchObject({ bucketName: 'plain', objectLockEnabled: false });
-      // 'off' is the portal's "no policy", not a retention mode.
-      expect(result[1]?.defaultRetention).toBeUndefined();
-    });
-
-    it('does not read per-bucket detail unless includeObjectLock is set', async () => {
+    it('never reads per-bucket detail: versioning and object-lock cost a call per bucket', async () => {
       mockGetAuroraPortalApiKey.mockResolvedValue('api-key');
       mockPortalListBuckets.mockResolvedValue({
         data: { items: [{ name: 'a', createdAt: '2026-01-01T00:00:00Z' }] },
@@ -328,34 +261,8 @@ describe('auroraOrchestrator', () => {
       const result = await auroraOrchestrator.listBuckets('aurora-t-1');
 
       expect(mockPortalGetBucketInfo).not.toHaveBeenCalled();
-      expect(result[0]?.objectLockEnabled).toBeUndefined();
-    });
-
-    it('keeps listing when one bucket-detail read fails', async () => {
-      mockGetAuroraPortalApiKey.mockResolvedValue('api-key');
-      mockPortalListBuckets.mockResolvedValue({
-        data: {
-          items: [
-            { name: 'ok', createdAt: '2026-01-01T00:00:00Z' },
-            { name: 'broken', createdAt: '2026-01-02T00:00:00Z' },
-          ],
-        },
-        error: undefined,
-      });
-      mockPortalGetBucketInfo.mockImplementation(({ path }: { path: { bucketName: string } }) =>
-        path.bucketName === 'broken'
-          ? { data: undefined, error: { message: 'boom' } }
-          : { data: { objectLock: true }, error: undefined },
-      );
-
-      const result = await auroraOrchestrator.listBuckets('aurora-t-1', {
-        includeObjectLock: true,
-      });
-
-      expect(result).toHaveLength(2);
-      expect(result[0]?.objectLockEnabled).toBe(true);
-      // The failing leg degrades to "unknown" rather than sinking the listing.
-      expect(result[1]?.objectLockEnabled).toBeUndefined();
+      expect(result[0]).not.toHaveProperty('versioning');
+      expect(result[0]).not.toHaveProperty('objectLockEnabled');
     });
 
     it('drops items missing name or createdAt', async () => {

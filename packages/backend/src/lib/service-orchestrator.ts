@@ -11,8 +11,8 @@ import type { OrgProfileItem } from './org-profile.js';
 
 /**
  * Object-lock and retention state. Neither orchestrator's bucket *list* carries
- * it, so it costs one call per bucket to load and is absent unless asked for
- * (see {@link ListBucketsOptions.includeObjectLock}).
+ * it, and a per-bucket read on every row would mean an N+1 on a page every user
+ * hits, so it's loaded only for a single bucket (see {@link BucketDetails}).
  */
 export interface BucketProtection {
   objectLockEnabled?: boolean;
@@ -21,7 +21,22 @@ export interface BucketProtection {
   retentionDurationType?: RetentionDurationType;
 }
 
-export interface BucketSummary extends BucketProtection {
+/**
+ * A row in the bucket list: only what each provider's native list call already
+ * returns inline, so listing a tenant's buckets costs one call per orchestrator
+ * regardless of bucket count. Versioning and object-lock aren't included for the
+ * same reason — both cost a call per bucket on at least one orchestrator.
+ */
+export interface BucketSummary {
+  bucketName: string;
+  region: S3Region;
+  createdAt: string;
+  isPublic: boolean;
+  encrypted: boolean;
+}
+
+/** A single-bucket read, which always loads versioning and the protection state. */
+export interface BucketDetails extends BucketProtection {
   bucketName: string;
   region: S3Region;
   createdAt: string;
@@ -29,9 +44,6 @@ export interface BucketSummary extends BucketProtection {
   versioning: boolean;
   encrypted: boolean;
 }
-
-/** A single-bucket read, which always loads the protection state. */
-export type BucketDetails = BucketSummary;
 
 export interface CreateBucketArgs {
   bucketName: string;
@@ -82,24 +94,6 @@ export interface EgressUsageSample {
 export interface TenantUsageMetrics {
   storage: StorageUsageSample[];
   egress: EgressUsageSample[];
-}
-
-export interface ListBucketsOptions {
-  /**
-   * When false, skip loading each bucket's versioning state and return
-   * `versioning: false`. Lets read paths that don't surface versioning
-   * (e.g. get-activity) avoid FTH's per-bucket GetBucketVersioning N+1.
-   * Defaults to true.
-   */
-  includeVersioning?: boolean;
-
-  /**
-   * When true, load each bucket's object-lock and retention state. Neither
-   * orchestrator returns it on the list itself (Aurora's list response carries
-   * only `flags: unencrypted | encrypted | versioned`), so this costs one extra
-   * call per bucket on both. Off by default: only the buckets table needs it.
-   */
-  includeObjectLock?: boolean;
 }
 
 export interface GetTenantUsageMetricsOptions {
@@ -206,7 +200,7 @@ export interface ServiceOrchestrator {
 
   createBucket(tenantId: string, args: CreateBucketArgs): Promise<void>;
   deleteBucket(tenantId: string, bucketName: string): Promise<void>;
-  listBuckets(tenantId: string, opts?: ListBucketsOptions): Promise<BucketSummary[]>;
+  listBuckets(tenantId: string): Promise<BucketSummary[]>;
   getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null>;
 
   /**
