@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
+  ConditionalCheckFailedException,
   DeleteItemCommand,
   DynamoDBClient,
   QueryCommand,
@@ -37,20 +38,11 @@ vi.mock('../jobs/rag-indexer-manifest.js', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { purgeOrgRecords } from './deletion-purge.js';
-import { DELETION_STATUS, type DeletionRecord } from './deletion-record.js';
+import { scrubOrgRecords } from './deletion-scrub.js';
+import type { DeletionMember } from './deletion-record.js';
 
 const ORG = 'org-1';
-
-const RECORD: DeletionRecord = {
-  status: DELETION_STATUS.pending,
-  requestedAt: '2026-08-12T10:00:00.000Z',
-  requestedByUserId: 'user-1',
-  members: [{ userId: 'user-1', sub: 'auth0|one' }],
-  tenantIds: { aurora: 'aurora-t-1' },
-  attempts: 1,
-  updatedAt: '2026-08-12T10:00:00.000Z',
-};
+const MEMBERS: DeletionMember[] = [{ userId: 'user-1', sub: 'auth0|one' }];
 
 /** Every key passed to DeleteItem, in call order, as `table:pk/sk`. */
 function deletedKeys(): string[] {
@@ -58,6 +50,21 @@ function deletedKeys(): string[] {
     const { TableName, Key } = call.args[0].input;
     return `${TableName}:${Key!.pk!.S}/${Key!.sk!.S}`;
   });
+}
+
+function updateKey(input: { TableName?: string; Key?: Record<string, { S?: string }> }): string {
+  return `${input.TableName}:${input.Key!.pk!.S}/${input.Key!.sk!.S}`;
+}
+
+/** Every key passed to UpdateItem, in call order, as `table:pk/sk`. */
+function scrubbedKeys(): string[] {
+  return ddbMock.commandCalls(UpdateItemCommand).map((call) => updateKey(call.args[0].input));
+}
+
+/** The scrub of one row, addressed the same way scrubbedKeys reports it. */
+function scrubOf(key: string) {
+  return ddbMock.commandCalls(UpdateItemCommand).find((c) => updateKey(c.args[0].input) === key)!
+    .args[0].input;
 }
 
 function orgRow(sk: string, extra: Record<string, unknown> = {}) {
@@ -72,7 +79,7 @@ function stubEmpty() {
   ddbMock.on(UpdateItemCommand).resolves({});
 }
 
-describe('purgeOrgRecords', () => {
+describe('scrubOrgRecords', () => {
   beforeEach(() => {
     ddbMock.reset();
     vi.clearAllMocks();
@@ -80,25 +87,39 @@ describe('purgeOrgRecords', () => {
     stubEmpty();
   });
 
-  it('keeps the erasure receipt and deletes the org profile last', async () => {
+  it('destroys credentials and keeps every row that describes the org', async () => {
     ddbMock.on(QueryCommand).resolves({
       Items: [
         orgRow('DELETION'),
         orgRow('PROFILE'),
         orgRow('MEMBER#user-1'),
         orgRow('ACCESSKEY#ak-1'),
+        orgRow('RAGKEY#key-1', { tokenHash: 'hash-1' }),
       ],
     });
 
-    await purgeOrgRecords(ORG, RECORD);
+    await scrubOrgRecords(ORG, MEMBERS);
 
-    const keys = deletedKeys();
-    expect(keys).not.toContain(`UserInfoTable:ORG#${ORG}/DELETION`);
-    expect(keys).toContain(`UserInfoTable:ORG#${ORG}/MEMBER#user-1`);
-    expect(keys).toContain(`UserInfoTable:ORG#${ORG}/ACCESSKEY#ak-1`);
-    // The profile holds the tenant ids and the `deleting` fence a resumed pass
-    // would need, so it can only go once everything else is gone.
-    expect(keys.at(-1)).toBe(`UserInfoTable:ORG#${ORG}/PROFILE`);
+    expect(deletedKeys()).toEqual([
+      'UserInfoTable:RAGKEYHASH#hash-1/LOOKUP',
+      `UserInfoTable:ORG#${ORG}/ACCESSKEY#ak-1`,
+      `UserInfoTable:ORG#${ORG}/RAGKEY#key-1`,
+    ]);
+    const kept = scrubbedKeys();
+    expect(kept).toContain(`UserInfoTable:ORG#${ORG}/MEMBER#user-1`);
+    // Last: it holds the tenant ids a resumed pass reads.
+    expect(kept.at(-1)).toBe(`UserInfoTable:ORG#${ORG}/PROFILE`);
+  });
+
+  it('strips the name off the org profile and leaves the fence up', async () => {
+    await scrubOrgRecords(ORG, MEMBERS);
+
+    const update = scrubOf(`UserInfoTable:ORG#${ORG}/PROFILE`);
+    expect(update.UpdateExpression).toBe(
+      'SET deletedAt = if_not_exists(deletedAt, :now) REMOVE #name',
+    );
+    expect(update.ExpressionAttributeNames).toEqual({ '#name': 'name' });
+    expect(update.ConditionExpression).toBe('attribute_exists(pk)');
   });
 
   // A lookup pk derives from the tokenHash on the RAGKEY# row, so deleting the
@@ -108,7 +129,7 @@ describe('purgeOrgRecords', () => {
       Items: [orgRow('RAGKEY#key-1', { tokenHash: 'hash-1' }), orgRow('MEMBER#user-1')],
     });
 
-    await purgeOrgRecords(ORG, RECORD);
+    await scrubOrgRecords(ORG, MEMBERS);
 
     const keys = deletedKeys();
     const lookup = keys.indexOf('UserInfoTable:RAGKEYHASH#hash-1/LOOKUP');
@@ -117,46 +138,72 @@ describe('purgeOrgRecords', () => {
     expect(lookup).toBeLessThan(ragKey);
   });
 
-  it('tombstones the identity row instead of deleting it', async () => {
-    await purgeOrgRecords(ORG, RECORD);
+  // Emptying the row would break auth: it branches on the row holding both ids,
+  // and without them a live JWT takes the new-user path and mints a fresh org.
+  it('stamps the identity row without touching userId or orgId', async () => {
+    await scrubOrgRecords(ORG, MEMBERS);
 
-    expect(deletedKeys()).not.toContain('UserInfoTable:SUB#auth0|one/IDENTITY');
-
-    const update = ddbMock.commandCalls(UpdateItemCommand)[0]!.args[0].input;
-    expect(update.Key).toEqual(marshall({ pk: 'SUB#auth0|one', sk: 'IDENTITY' }));
-    expect(update.UpdateExpression).toBe(
-      'SET deleted = :true, deletedAt = if_not_exists(deletedAt, :now) ' +
-        'REMOVE userId, orgId, emailEntitlementClaimed, createdAt',
+    expect(scrubOf('UserInfoTable:SUB#auth0|one/IDENTITY').UpdateExpression).toBe(
+      'SET deletedAt = if_not_exists(deletedAt, :now)',
     );
   });
 
-  it('deletes each member profile and billing row', async () => {
-    const record = {
-      ...RECORD,
-      members: [
-        { userId: 'user-1', sub: 'auth0|one' },
-        { userId: 'user-2', sub: 'auth0|two' },
-      ],
-    };
+  it('stamps every row that survives, and deletes none of them', async () => {
+    await scrubOrgRecords(ORG, [
+      { userId: 'user-1', sub: 'auth0|one' },
+      { userId: 'user-2', sub: 'auth0|two' },
+    ]);
 
-    await purgeOrgRecords(ORG, record);
-
-    const keys = deletedKeys();
-    expect(keys).toContain('UserInfoTable:USER#user-1/PROFILE');
-    expect(keys).toContain('UserInfoTable:USER#user-2/PROFILE');
-    expect(keys).toContain('BillingTable:CUSTOMER#user-1/SUBSCRIPTION');
-    expect(keys).toContain('BillingTable:CUSTOMER#user-2/SUBSCRIPTION');
-    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(2);
+    expect(scrubbedKeys()).toEqual([
+      'BillingTable:CUSTOMER#user-1/SUBSCRIPTION',
+      'BillingTable:CUSTOMER#user-2/SUBSCRIPTION',
+      'UserInfoTable:SUB#auth0|one/IDENTITY',
+      'UserInfoTable:USER#user-1/PROFILE',
+      `UserInfoTable:ORG#${ORG}/MEMBER#user-1`,
+      'UserInfoTable:SUB#auth0|two/IDENTITY',
+      'UserInfoTable:USER#user-2/PROFILE',
+      `UserInfoTable:ORG#${ORG}/MEMBER#user-2`,
+      `UserInfoTable:ORG#${ORG}/PROFILE`,
+    ]);
+    expect(deletedKeys()).toEqual([]);
   });
 
-  it('deletes the daily usage audit rows', async () => {
+  // The worker writes `canceled` itself, after the Stripe cancel has succeeded, so
+  // the row and Stripe cannot disagree whatever order the webhooks arrive in.
+  it('strips the card fields off the billing row and cancels it', async () => {
+    await scrubOrgRecords(ORG, MEMBERS);
+
+    const update = scrubOf('BillingTable:CUSTOMER#user-1/SUBSCRIPTION');
+    expect(update.TableName).toBe('BillingTable');
+    expect(update.UpdateExpression).toBe(
+      'SET deletedAt = if_not_exists(deletedAt, :now), ' +
+        'subscriptionStatus = :canceled, updatedAt = :now ' +
+        'REMOVE paymentMethodId, paymentMethodLast4, paymentMethodBrand, ' +
+        'paymentMethodExpMonth, paymentMethodExpYear, gracePeriodEndsAt',
+    );
+    expect(update.ExpressionAttributeValues![':canceled']).toEqual({ S: 'canceled' });
+  });
+
+  // A financial record with no personal data, on its own TTL.
+  it('leaves the usage audit rows alone', async () => {
     ddbMock
       .on(QueryCommand, { TableName: 'BillingTable' })
       .resolves({ Items: [marshall({ pk: `ORG#${ORG}`, sk: 'USAGE_REPORT#2026-08-01' })] });
 
-    await purgeOrgRecords(ORG, RECORD);
+    await scrubOrgRecords(ORG, MEMBERS);
 
-    expect(deletedKeys()).toContain(`BillingTable:ORG#${ORG}/USAGE_REPORT#2026-08-01`);
+    expect(deletedKeys()).not.toContain(`BillingTable:ORG#${ORG}/USAGE_REPORT#2026-08-01`);
+    expect(scrubbedKeys()).not.toContain(`BillingTable:ORG#${ORG}/USAGE_REPORT#2026-08-01`);
+  });
+
+  // A member who never onboarded has no billing row, and a bare UpdateItem would
+  // upsert one holding nothing but a stamp.
+  it('does not recreate a row that is not there', async () => {
+    ddbMock
+      .on(UpdateItemCommand)
+      .rejects(new ConditionalCheckFailedException({ $metadata: {}, message: 'nope' }));
+
+    await expect(scrubOrgRecords(ORG, MEMBERS)).resolves.toBeUndefined();
   });
 
   describe('RAG state', () => {
@@ -166,7 +213,7 @@ describe('purgeOrgRecords', () => {
       ddbMock.on(ScanCommand).resolves({ Items: [marshall({ pk: BUCKET_PK })] });
       mockLoadManifest.mockResolvedValue(new Map([['reports/q1.pdf', {}]]));
 
-      await purgeOrgRecords(ORG, RECORD);
+      await scrubOrgRecords(ORG, MEMBERS);
 
       expect(mockDeleteManifestEntry).toHaveBeenCalledWith(
         ORG,
@@ -185,7 +232,7 @@ describe('purgeOrgRecords', () => {
       ddbMock.on(ScanCommand).resolves({ Items: [marshall({ pk: BUCKET_PK })] });
       mockLoadManifest.mockResolvedValue(new Map([['odd#name#2.pdf', {}]]));
 
-      await purgeOrgRecords(ORG, RECORD);
+      await scrubOrgRecords(ORG, MEMBERS);
 
       expect(mockDeleteManifestEntry).toHaveBeenCalledWith(
         ORG,
@@ -203,14 +250,14 @@ describe('purgeOrgRecords', () => {
         ],
       });
 
-      await purgeOrgRecords(ORG, RECORD);
+      await scrubOrgRecords(ORG, MEMBERS);
 
       expect(mockDropIndex).toHaveBeenCalledTimes(1);
       expect(mockClearCheckpoint).toHaveBeenCalledTimes(1);
     });
 
     it('scans only this org, for both pk shapes', async () => {
-      await purgeOrgRecords(ORG, RECORD);
+      await scrubOrgRecords(ORG, MEMBERS);
 
       const scan = ddbMock.commandCalls(ScanCommand)[0]!.args[0].input;
       expect(scan.FilterExpression).toBe(
@@ -229,7 +276,7 @@ describe('purgeOrgRecords', () => {
       .resolvesOnce({ Items: [orgRow('ACCESSKEY#ak-1')], LastEvaluatedKey: cursor })
       .resolves({ Items: [orgRow('ACCESSKEY#ak-2')] });
 
-    await purgeOrgRecords(ORG, RECORD);
+    await scrubOrgRecords(ORG, MEMBERS);
 
     const queries = ddbMock
       .commandCalls(QueryCommand)
@@ -239,19 +286,18 @@ describe('purgeOrgRecords', () => {
     expect(deletedKeys()).toContain(`UserInfoTable:ORG#${ORG}/ACCESSKEY#ak-2`);
   });
 
-  // What a re-drive after a completed purge looks like: the partition is empty
-  // apart from the receipt, and nothing throws.
+  // A re-drive after a completed pass: the credentials are already gone, and the
+  // stamps land again on rows that keep the first pass's time.
   it('is a clean no-op on a second pass', async () => {
     ddbMock
       .on(QueryCommand, { TableName: 'UserInfoTable' })
-      .resolves({ Items: [orgRow('DELETION')] });
+      .resolves({ Items: [orgRow('DELETION'), orgRow('PROFILE'), orgRow('MEMBER#user-1')] });
 
-    await expect(purgeOrgRecords(ORG, RECORD)).resolves.toBeUndefined();
+    await expect(scrubOrgRecords(ORG, MEMBERS)).resolves.toBeUndefined();
 
-    expect(deletedKeys()).toEqual([
-      'BillingTable:CUSTOMER#user-1/SUBSCRIPTION',
-      'UserInfoTable:USER#user-1/PROFILE',
-      `UserInfoTable:ORG#${ORG}/PROFILE`,
-    ]);
+    expect(deletedKeys()).toEqual([]);
+    for (const call of ddbMock.commandCalls(UpdateItemCommand)) {
+      expect(call.args[0].input.UpdateExpression).toContain('if_not_exists(deletedAt, :now)');
+    }
   });
 });
