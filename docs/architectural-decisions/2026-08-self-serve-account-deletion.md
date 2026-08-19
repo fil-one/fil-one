@@ -115,9 +115,13 @@ There are two reasons for this:
 - `UserInfoTable` has no TTL configured. Enabling it there would make any accidental write of `ttl` attribute on an identity row a silent hard delete of account data.
 - `BillingTable` has TTL and already holds `ORG#` partitions. But a short-lived security credential there widens what the billing writers' IAM policy covers and widens the scope of the table.
 
-The code is stored as a salted hash over `orgId:userId:salt:code`, rather than a plain digest, since a six digit code is cheap to enumerate offline from a table dump. Verification happens inside a `ConditionExpression`, so the digest never reaches our process. The plaintext is never persisted.
+The code is stored as an HMAC-SHA256 over `orgId:userId:salt:code`, rather than a plain digest, since a six digit code is cheap to enumerate offline from a table dump. Verification happens inside a `ConditionExpression`, so the digest never reaches our process. The plaintext is never persisted.
 
-The salt is a single deployment-wide secret, held as an `sst.Secret` alongside the other key material. A per-row random salt cannot work anywhere the hash is a key: the row is found _by_ the hash, so computing it would mean reading the salt out of the row the hash locates. The same constraint applies in decision 9.
+The HMAC key is a single deployment-wide secret, held as an `sst.Secret` alongside the other key material. It is what stands between a table dump and the code space, and an HMAC rather than `sha256(secret‖message)` because the keyed construction needs no argument about length extension or where in the message the secret sits.
+
+The `salt` in that message is 16 random bytes per row, stored in plaintext beside the digest. It adds nothing against a dump — the attacker reads it out of the same row — and it does not domain-separate rows, which `orgId:userId` already does. What it buys is that the stored digest is not a pure function of the code: codes are re-issuable on a cooldown, so without it the same code recurring for the same user stores the same digest, and one historical disclosure of a (digest, code) pair would stay useful against that user indefinitely.
+
+A per-row salt is only possible because this row is found by its `orgId`, not by its hash. Anywhere the hash _is_ the key, computing it would mean reading the salt out of the row the hash locates, so the deployment-wide secret has to carry the whole burden. That is the case in decision 9, and it is why the two hashing sites differ.
 
 ### 7. Delete the Stripe customer rather than redacting it
 
@@ -186,7 +190,7 @@ Credentials are destroyed rather than retained, because a scrubbed credential ro
 
 `ALLOWLIST#` is keyed by a plaintext email address, and the worker deletes it by resolving that key while it still can: inside the Auth0 step, the email read and the allowlist delete come before the user delete, as decision 8 orders. The row needs no scrub, since its presence is the grant and deleting it revokes the grant. Rows for live users stay keyed by plaintext email, which keeps the access list readable.
 
-`EMAIL_NORM#` shares the key shape and cannot take the same treatment. No retained row stores a user's email, so once the Auth0 user is gone the key cannot be reconstructed, and the row must survive regardless: it is the anti-abuse record that prevents a second free trial. Rekeying it to a salted hash, under the same single-secret constraint as decision 6, is what removes this personal data, and it ships as **its own PR with a migration** rather than inside the deletion work. The migration repoints the primary key of a live record whose writer claims it with `attribute_not_exists(pk)`, so a partial run either grants a second free trial or locks a legitimate user out of their first.
+`EMAIL_NORM#` shares the key shape and cannot take the same treatment. No retained row stores a user's email, so once the Auth0 user is gone the key cannot be reconstructed, and the row must survive regardless: it is the anti-abuse record that prevents a second free trial. Rekeying it to a keyed hash of the address, with no per-row salt for the reason decision 6 gives, is what removes this personal data, and it ships as **its own PR with a migration** rather than inside the deletion work. The migration repoints the primary key of a live record whose writer claims it with `attribute_not_exists(pk)`, so a partial run either grants a second free trial or locks a legitimate user out of their first.
 
 ### 10. Observability
 
