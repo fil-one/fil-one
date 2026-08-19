@@ -16,12 +16,16 @@ const LOG = '[account-deletion-sweeper]';
  */
 const STALE_AFTER_MINUTES = 30;
 
-/** Passes beyond which a teardown is not retrying, it is wedged. */
-const WEDGED_ATTEMPTS = 10;
+/** Passes beyond which a teardown is not retrying, it is blocked. */
+const BLOCKED_ATTEMPTS = 10;
 
-interface StuckDeletion {
+const HOUR_MS = 60 * 60 * 1000;
+
+interface PendingDeletion {
   orgId: string;
   attempts: number;
+  requestedAt: string;
+  updatedAt: string;
 }
 
 /**
@@ -31,12 +35,17 @@ interface StuckDeletion {
  * the DLQ, and a pass killed mid-purge all converge here.
  */
 export async function handler(): Promise<void> {
-  const stuck = await scanStuckDeletions();
-  const wedged = stuck.filter((record) => record.attempts > WEDGED_ATTEMPTS);
+  const pending = await scanPendingDeletions();
+  const cutoff = new Date(Date.now() - STALE_AFTER_MINUTES * 60 * 1000).toISOString();
+  const stuck = pending.filter((record) => record.updatedAt < cutoff);
+  const blocked = stuck.filter((record) => record.attempts > BLOCKED_ATTEMPTS);
 
+  // Both gauges are emitted every run, including at zero, so an alert on them
+  // auto-clears rather than staying lit on the last bad value.
   reportStuckCount(stuck.length);
-  for (const record of wedged) {
-    reportWedged(record);
+  reportOldestPendingAge(pending);
+  for (const record of blocked) {
+    reportBlocked(record);
   }
 
   for (const { orgId, attempts } of stuck) {
@@ -44,33 +53,37 @@ export async function handler(): Promise<void> {
     await invokeAccountDeletionWorker(orgId);
   }
 
-  console.log(`${LOG} complete`, { stuck: stuck.length, wedged: wedged.length });
+  console.log(`${LOG} complete`, {
+    pending: pending.length,
+    stuck: stuck.length,
+    blocked: blocked.length,
+  });
 }
 
 /**
- * A paged Scan: UserInfoTable has only the pk/sk index, so there is no way to
- * query for pending deletions. The filter trims what is returned, not what is
- * read — fine at current table size, and the escape at scale is a sparse GSI on
- * an attribute present only while PENDING.
+ * Every deletion not yet DONE, stale or not: the age gauge measures the oldest of
+ * all of them, and the staleness split is a comparison the caller makes.
+ *
+ * A paged Scan, because UserInfoTable has only the pk/sk index. The filter trims
+ * what is returned, not what is read — fine at current table size, and the escape
+ * at scale is a sparse GSI on an attribute present only while PENDING.
  */
-async function scanStuckDeletions(): Promise<StuckDeletion[]> {
+async function scanPendingDeletions(): Promise<PendingDeletion[]> {
   const dynamo = getDynamoClient();
-  const cutoff = new Date(Date.now() - STALE_AFTER_MINUTES * 60 * 1000).toISOString();
-  const stuck: StuckDeletion[] = [];
+  const pending: PendingDeletion[] = [];
   let cursor: Record<string, AttributeValue> | undefined;
 
   do {
     const page = await dynamo.send(
       new ScanCommand({
         TableName: Resource.UserInfoTable.name,
-        FilterExpression: 'sk = :sk AND #status <> :done AND updatedAt < :cutoff',
+        FilterExpression: 'sk = :sk AND #status <> :done',
         ExpressionAttributeNames: { '#status': 'status' },
         ExpressionAttributeValues: marshall({
           ':sk': 'DELETION',
           ':done': DELETION_STATUS.done,
-          ':cutoff': cutoff,
         }),
-        ProjectionExpression: 'pk, attempts',
+        ProjectionExpression: 'pk, attempts, requestedAt, updatedAt',
         ...(cursor ? { ExclusiveStartKey: cursor } : {}),
       }),
     );
@@ -78,15 +91,17 @@ async function scanStuckDeletions(): Promise<StuckDeletion[]> {
     for (const item of page.Items ?? []) {
       const pk = item.pk?.S;
       if (!pk) continue;
-      stuck.push({
+      pending.push({
         orgId: pk.replace('ORG#', ''),
         attempts: Number(item.attempts?.N ?? '0'),
+        requestedAt: item.requestedAt?.S ?? '',
+        updatedAt: item.updatedAt?.S ?? '',
       });
     }
     cursor = page.LastEvaluatedKey;
   } while (cursor);
 
-  return stuck;
+  return pending;
 }
 
 function reportStuckCount(count: number): void {
@@ -105,21 +120,53 @@ function reportStuckCount(count: number): void {
   });
 }
 
-/** Carries the orgId so an operator can go straight to the record. */
-function reportWedged({ orgId, attempts }: StuckDeletion): void {
-  console.error(`${LOG} deletion is wedged and needs an operator`, { orgId, attempts });
+/**
+ * The age of the oldest deletion still running, which is a different question
+ * from whether any has stalled: a teardown can bump `updatedAt` every pass and
+ * still never finish. A Grafana alert at 168 hours encodes the seven-day
+ * completion promise in the customer documentation.
+ */
+function reportOldestPendingAge(pending: PendingDeletion[]): void {
+  const now = Date.now();
+  const ages = pending
+    .map((record) => Date.parse(record.requestedAt))
+    .filter((requestedAt) => !Number.isNaN(requestedAt))
+    .map((requestedAt) => (now - requestedAt) / HOUR_MS);
+
+  reportMetric({
+    _aws: {
+      Timestamp: now,
+      CloudWatchMetrics: [
+        {
+          Namespace: 'FilOne',
+          Dimensions: [[]],
+          // CloudWatch has no Hours unit; the metric name carries it.
+          Metrics: [{ Name: 'OldestPendingDeletionAgeHours', Unit: 'None' }],
+        },
+      ],
+    },
+    OldestPendingDeletionAgeHours: ages.length > 0 ? Math.max(...ages) : 0,
+  });
+}
+
+/**
+ * No dimension: the paired log line carries the orgId, and a Loki JSON query on
+ * it is the pattern the FTH errors and tenant-setup failures already use. An
+ * orgId dimension would put unbounded cardinality in the metric stream.
+ */
+function reportBlocked({ orgId, attempts }: PendingDeletion): void {
+  console.error(`${LOG} deletion is blocked and needs an operator`, { orgId, attempts });
   reportMetric({
     _aws: {
       Timestamp: Date.now(),
       CloudWatchMetrics: [
         {
           Namespace: 'FilOne',
-          Dimensions: [['orgId']],
-          Metrics: [{ Name: 'WedgedAccountDeletion', Unit: 'Count' }],
+          Dimensions: [[]],
+          Metrics: [{ Name: 'BlockedAccountDeletion', Unit: 'Count' }],
         },
       ],
     },
-    orgId,
-    WedgedAccountDeletion: 1,
+    BlockedAccountDeletion: 1,
   });
 }
