@@ -203,8 +203,7 @@ async function createOrUpdateSubscription({
   // The metadata is what every webhook writer resolves the org from. A
   // subscription created without it arrives at the webhook naming no org, and
   // that subscription's whole lifecycle — status changes, payment failures,
-  // cancellation — falls back to a billing-row lookup or, once the re-key
-  // finishes, to nothing at all.
+  // cancellation — cannot be written at all.
   return stripe.subscriptions.create({
     customer: record.stripeCustomerId!,
     items: [{ price: secrets.STRIPE_PRICE_ID }],

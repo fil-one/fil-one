@@ -71,6 +71,7 @@ const ddbMock = mockClient(DynamoDBClient);
 import { handler } from './stripe-webhook.js';
 import { WEBHOOK_STATUS_SYNC_RETRY } from '../lib/region-helpers.js';
 import { BILLING_IDENTITY_PROJECTION } from '../lib/subscription-store.js';
+import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -235,6 +236,30 @@ function regionSyncFailure(cause: Error) {
       cause,
     },
   ];
+}
+
+function setupAuroraTenantResolution() {
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'BillingTable',
+      Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'SUBSCRIPTION' } },
+    })
+    .resolves({
+      Item: marshall({ pk: `ORG#${MOCK_ORG_ID}`, sk: 'SUBSCRIPTION', orgId: MOCK_ORG_ID }),
+    });
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+    })
+    .resolves({
+      Item: marshall({
+        pk: `ORG#${MOCK_ORG_ID}`,
+        sk: 'PROFILE',
+        auroraTenantId: MOCK_AURORA_TENANT_ID,
+        auroraSetupStatus: FINAL_SETUP_STATUS,
+      }),
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -1845,11 +1870,30 @@ describe('stripe-webhook handler', () => {
       expectOrgIdBackfilled();
     });
 
-    it('subscription update writes nothing when metadata carries no orgId', async () => {
+    // A subscription created before the metadata stamped an orgId still names
+    // its user, and that alone used to take the no-fetch path and reach the
+    // store with no org — a permanent 500 for every status change on every
+    // legacy subscription. The customer is where the org actually is.
+    it('subscription update falls back to customer metadata when the subscription names only the user', async () => {
       setupStripeEvent(
         'customer.subscription.updated',
         mockSubscription({ metadata: { userId: MOCK_USER_ID } }),
       );
+      setupCustomerRetrieve();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expectOrgIdBackfilled();
+      expect(mockCustomersRetrieve).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('subscription update writes nothing when neither the subscription nor the customer names an org', async () => {
+      setupStripeEvent(
+        'customer.subscription.updated',
+        mockSubscription({ metadata: { userId: MOCK_USER_ID } }),
+      );
+      setupCustomerRetrieveWithoutOrg();
 
       const result = await handler(buildWebhookEvent('{}'));
 
@@ -2081,7 +2125,7 @@ describe('stripe-webhook handler', () => {
         id: MOCK_CUSTOMER_ID,
         deleted: false,
         email: 'customer@example.com',
-        metadata: { userId: MOCK_USER_ID },
+        metadata: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID },
       });
 
       await handler(buildWebhookEvent('{}'));
