@@ -1,5 +1,6 @@
 import { Input as HeadlessInput, type InputProps as HeadlessInputProps } from '@headlessui/react';
 import { clsx } from 'clsx';
+import { type AccessibleControlName, warnIfUnnamedControl } from './accessible-control.js';
 
 /**
  * `md` is the form field. `sm` is toolbar chrome: shorter and quieter, for
@@ -16,9 +17,11 @@ type InputProps = {
   onChange: (value: string) => void;
   invalid?: boolean;
   inputSize?: InputSize;
-} & Omit<HeadlessInputProps, 'onChange'>;
+} & Omit<HeadlessInputProps, 'onChange' | 'id' | 'aria-label' | 'aria-labelledby'> &
+  AccessibleControlName;
 
 export function Input({ onChange, invalid, inputSize = 'md', className, ...rest }: InputProps) {
+  warnIfUnnamedControl('Input', rest.id ?? rest['aria-label']);
   return (
     <HeadlessInput
       {...rest}

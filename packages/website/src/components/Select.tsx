@@ -4,6 +4,7 @@ import {
 } from '@headlessui/react';
 import { CaretDownIcon } from '@phosphor-icons/react/dist/ssr';
 import { clsx } from 'clsx';
+import { type AccessibleControlName, warnIfUnnamedControl } from './accessible-control.js';
 
 import type { InputSize } from './Input';
 
@@ -17,7 +18,8 @@ type SelectProps = {
   onChange: (value: string) => void;
   invalid?: boolean;
   selectSize?: InputSize;
-} & Omit<HeadlessSelectProps, 'onChange'>;
+} & Omit<HeadlessSelectProps, 'onChange' | 'id' | 'aria-label' | 'aria-labelledby'> &
+  AccessibleControlName;
 
 export function Select({
   onChange,
@@ -27,6 +29,7 @@ export function Select({
   children,
   ...rest
 }: SelectProps) {
+  warnIfUnnamedControl('Select', rest.id ?? rest['aria-label']);
   const { control, caret } = SIZES[selectSize];
 
   return (

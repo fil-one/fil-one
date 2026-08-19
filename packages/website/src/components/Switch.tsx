@@ -1,18 +1,17 @@
 import { Switch as HeadlessSwitch } from '@headlessui/react';
 import clsx from 'clsx';
+import { type AccessibleControlName, warnIfUnnamedControl } from './accessible-control.js';
 
 type SwitchProps = {
   checked: boolean;
   onChange: (checked: boolean) => void;
   disabled?: boolean;
-  id?: string;
   'data-testid'?: string;
-  'aria-label'?: string;
-  'aria-labelledby'?: string;
   'aria-describedby'?: string;
-};
+} & AccessibleControlName;
 
 export function Switch({ checked, onChange, disabled, ...passthroughProps }: SwitchProps) {
+  warnIfUnnamedControl('Switch', passthroughProps.id ?? passthroughProps['aria-label']);
   return (
     <HeadlessSwitch
       {...passthroughProps}
