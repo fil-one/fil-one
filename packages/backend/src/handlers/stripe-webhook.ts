@@ -289,41 +289,47 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription): Prom
 
   // Find billing record by Stripe customer ID — we need to scan or use a GSI.
   // For MVP, use metadata.userId set during customer creation.
-  const userId = subscription.metadata?.userId;
-  if (!userId) {
-    // Try fetching from Stripe customer metadata
-    const stripe = getStripeClient();
-    const customer = await stripe.customers.retrieve(customerId);
-    if ('deleted' in customer && customer.deleted) {
-      console.warn('[stripe-webhook] Customer deleted, skipping subscription update', {
-        customerId,
-        subscriptionId: subscription.id,
-      });
-      return;
-    }
-    const metaUserId = customer.metadata?.userId;
-    if (!metaUserId) {
-      console.warn('[stripe-webhook] No userId in metadata for customer:', customerId);
-      return;
-    }
+  // Empty-string metadata reads the same as absent, here and in resolveOrgId.
+  const eventUserId = subscription.metadata?.userId || undefined;
+  const eventOrgId = resolveOrgId(subscription.metadata);
+
+  // The event already names the org the row is keyed by, so it addresses the
+  // write on its own and the Stripe call is skipped.
+  if (eventUserId && eventOrgId) {
     await updateBillingRecord({
-      userId: metaUserId,
+      userId: eventUserId,
       subscription,
       mappedStatus,
-      orgId: resolveOrgId(subscription.metadata, customer.metadata),
-      email: customer.email,
+      orgId: eventOrgId,
     });
     return;
   }
 
-  // The customer is not fetched on this path, so the row is the fallback rather
-  // than the customer's metadata — one read against one Stripe API call, for the
-  // same answer.
+  // Whatever the subscription is missing, the customer may still carry: a
+  // subscription created before the metadata stamped an orgId names none, and
+  // the org is the key the row is written under. Fetch the customer and resolve
+  // against both — writing with no org resolves nothing and throws
+  // MissingOrgIdError, which Stripe would retry forever.
+  const stripe = getStripeClient();
+  const customer = await stripe.customers.retrieve(customerId);
+  if ('deleted' in customer && customer.deleted) {
+    console.warn('[stripe-webhook] Customer deleted, skipping subscription update', {
+      customerId,
+      subscriptionId: subscription.id,
+    });
+    return;
+  }
+  const userId = eventUserId ?? customer.metadata?.userId;
+  if (!userId) {
+    console.warn('[stripe-webhook] No userId in metadata for customer:', customerId);
+    return;
+  }
   await updateBillingRecord({
     userId,
     subscription,
     mappedStatus,
-    orgId: resolveOrgId(subscription.metadata),
+    orgId: resolveOrgId(subscription.metadata, customer.metadata),
+    email: customer.email,
   });
 }
 

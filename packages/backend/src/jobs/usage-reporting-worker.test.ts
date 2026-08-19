@@ -662,18 +662,22 @@ describe('usage-reporting-worker', () => {
       expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(0);
     });
 
-    it('reconciles a row that names no user, since the close-out is keyed by org', async () => {
-      // The user id appears in the close-out's logs and nowhere else. Skipping
-      // on a missing one left the tenant enabled for a customer Stripe had
-      // deleted, and promised a next run that would find the same absent
-      // attribute and skip again.
+    it('reconciles a row that names no user, since the deletion is keyed by org', async () => {
+      // The user id feeds the deletion trigger's legacy fallback and its logs
+      // and nowhere else. Skipping on a missing one left the tenant enabled for
+      // a customer Stripe had deleted, and promised a next run that would find
+      // the same absent attribute and skip again.
       mockGetTenantUsageMetrics.mockResolvedValue(oneTbUsage);
       mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
       mockGetCustomerExistence.mockResolvedValue('deleted');
 
       await handler({ ...basePayload, userId: undefined });
 
-      expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith('aurora-tenant-123', 'disabled');
+      expect(mockStartDeletion).toHaveBeenCalledWith({
+        customerId: 'cus_123',
+        orgId: 'org-1',
+        caller: 'usage-worker',
+      });
       const item = auditItem();
       expect(item.orgSyncAction).toEqual({ S: 'reconciled:customer-deleted' });
       expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(0);
