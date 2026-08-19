@@ -403,22 +403,24 @@ describe('deleteBucket', () => {
 });
 
 describe('listBuckets', () => {
-  it('maps S3 gateway buckets to summaries with per-bucket versioning', async () => {
+  it('maps S3 gateway buckets to summaries without a per-bucket versioning read', async () => {
     stubS3Credentials();
     s3Mock.on(ListBucketsCommand).resolves({
       Buckets: [{ Name: 'bucket-a', CreationDate: new Date('2026-01-01T00:00:00Z') }],
     });
+    // If this were consulted the result would carry `versioning`; the listing
+    // must not call it at all.
     s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
 
     const result = await orchestrator.listBuckets(tenantId);
 
+    expect(s3Mock.commandCalls(GetBucketVersioningCommand)).toHaveLength(0);
     expect(result).toEqual([
       {
         bucketName: 'bucket-a',
         region: S3Region.UsEast1,
         createdAt: '2026-01-01T00:00:00.000Z',
         isPublic: false,
-        versioning: true,
         encrypted: true,
       },
     ]);

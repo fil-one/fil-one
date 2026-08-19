@@ -238,17 +238,17 @@ function buildBucketMethods(
       const ctx = await getS3ClientContext(tenantId);
       const s3 = createS3Client(ctx);
       const { buckets } = await s3ListBuckets(s3);
-      return Promise.all(
-        buckets.map(async (b) => ({
-          bucketName: b.name,
-          region: config.region,
-          createdAt: b.createdAt,
-          isPublic: false,
-          versioning: await getBucketVersioning(s3, b.name),
-          // The contract mandates server-side encryption by default.
-          encrypted: true,
-        })),
-      );
+      // Versioning and object-lock both cost a call per bucket; neither is
+      // returned here (see aurora/fth-orchestrator.ts). getBucket loads both
+      // for the one bucket the detail page actually needs them for.
+      return buckets.map((b) => ({
+        bucketName: b.name,
+        region: config.region,
+        createdAt: b.createdAt,
+        isPublic: false,
+        // The contract mandates server-side encryption by default.
+        encrypted: true,
+      }));
     },
 
     async getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null> {
