@@ -24,6 +24,7 @@ function meWith(role: OrgRole | undefined): MeResponse {
     emailVerified: true,
     mfaEnrollments: [],
     ragAccess: false,
+    orgsBeta: false,
     userId: 'user-1',
     ...(role ? { role } : {}),
     permissions: role ? ROLE_PERMISSIONS[role] : [],
