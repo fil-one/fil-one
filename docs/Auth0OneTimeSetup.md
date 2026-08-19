@@ -80,6 +80,32 @@ The deploy-time setup Lambda (`setup-integrations`) PATCHes the `Username-Passwo
 
 The custom domain (`auth.fil.one`) is the WebAuthn relying-party identifier baked into every enrolled passkey. **Any change to the custom domain invalidates every enrolled passkey across the tenant**, with no migration path. Treat domain changes as a forced re-enrollment event for every user, and coordinate accordingly. Cross-link: `docs/architectural-decisions/2026-05-passkey-primary-authentication.md`.
 
+Note this concerns _replacing_ the custom domain. Adding a second login domain leaves `auth.fil.one` untouched, because each domain carries its own relying-party identifier and therefore its own passkey enrollments.
+
+**4a. Demo-alias login domain (FIL-897):**
+
+The console is also served from unlisted demo-alias hostnames (`PROD_CONSOLE_ALIAS_HOSTS` in `packages/shared/src/constants.ts`, currently `app.filone.ai`) for use when `fil.one` is blocklisted. Those hostnames **cannot** use `auth.fil.one`: it sits on the same flagged TLD the alias exists to escape, and a second Auth0 custom domain requires an Enterprise plan. They authenticate against the tenant's own domain (`fil-one.us.auth0.com`) instead, which remains available alongside a custom domain.
+
+Worth knowing while you are in this file: `filone.ai` is also the domain this tenant sends from (`no-reply@filone.ai`, set as `default_from_address` by the same setup Lambda). Serving a login page under it couples the alias's web reputation to the deliverability of every verification, password-reset and MFA email. That was an accepted trade in FIL-897, taken because the zone already existed and needed no registration or delegation — but if the alias is ever reported for phishing, check mail deliverability, not just the console.
+
+`AUTH0_DOMAIN_BY_CONSOLE_ORIGIN` maps each console origin to its login domain, and `resolveAuth0Domain` (`packages/backend/src/lib/auth0-domain.ts`) selects one per request from the **request host** — not from the resolved origin, so a dev origin can never select an Auth0 domain. Cookies carry no `Domain=` attribute, so sessions are host-scoped and the correct domain is a pure function of that host; no cross-issuer token acceptance is involved.
+
+Consequences to expect, none of them a regression:
+
+- **Passkeys do not carry across.** One enrolled through `auth.fil.one` cannot be used through the tenant domain, or vice versa; users signing in via an alias are offered enrollment for that domain. Demo accounts should use a password or a social connection, or enroll once per domain. Brief demo operators, or this reads as a bug.
+- **Sessions do not carry across** either, for the same host-scoped-cookie reason. Signing in on one console hostname does not sign you in on the other.
+- **Emails still link to `fil.one`.** Password-reset and verification emails render against the tenant's default custom domain, so their links point at the canonical host wherever the user signed up.
+- **The login URL is unbranded** on an alias: the address bar reads `fil-one.us.auth0.com` during login. Universal Login branding itself is unaffected.
+
+No dashboard work is needed to add an alias, since the tenant domain already exists. Adding a _new_ alias hostname means all of the following — each omission leaves a silently half-working alias:
+
+1. `PROD_CONSOLE_ALIAS_HOSTS` in `packages/shared/src/constants.ts`. The first entry is the ACM cert's primary domain, which is how `sst.config.ts` finds the cert.
+2. `AUTH0_DOMAIN_BY_CONSOLE_ORIGIN` in the same file, or its login goes through `auth.fil.one` on the flagged TLD.
+3. `MARKETING_URL_BY_CONSOLE_ORIGIN` in the same file, or signing out returns the user to `fil.one` — the domain the alias exists to route around. The completeness tests in `packages/shared/src/constants.test.ts` fail if you miss either table.
+4. `CONSOLE_ORIGIN_BY_SITE_HOST` in `fil-one/website` `src/lib/console-url.ts`, or the marketing CTAs on the alias point at the canonical console. Separate repo, so nothing enforces this.
+5. The CloudFront certificate and DNS in `fil-one/infrastructure` `environments/prod/filone-ai.tf`.
+6. The `Version` property on `SetupStack` in `sst.config.ts` — the custom resource only re-runs on a property change, so without a bump the new callback URL is never registered.
+
 **5. Verification after first deploy:**
 
 1. Sign up a new test user in the affected tenant.

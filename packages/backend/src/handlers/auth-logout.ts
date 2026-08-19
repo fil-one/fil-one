@@ -6,12 +6,15 @@ import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { COOKIE_NAMES, makeClearCookieHeader } from '../lib/response-builder.js';
 import { parseCookies } from '../lib/cookies.js';
 import { resolveOrigin } from '../lib/resolve-origin.js';
+import { resolveAuth0Domain } from '../lib/auth0-domain.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
 async function baseHandler(
   event: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const domain = process.env.AUTH0_DOMAIN!;
+  // Must be the domain that issued this session, both to revoke the refresh
+  // token and to land on a /v2/logout that recognises it.
+  const domain = resolveAuth0Domain(event);
   const secrets = getAuthSecrets();
 
   // Revoke the refresh token at Auth0 before clearing cookies so it cannot
