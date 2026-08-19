@@ -448,9 +448,9 @@ export default $config({
               // Derived from aliasHosts rather than allowedOrigins: the latter
               // also carries https://localhost:5173 outside production, which
               // must never be written into the shared Auth0 tenant.
-              AliasSiteUrls: aliasHosts.map((h) => `https://${h}`).join(','),
+              SiteAliasUrls: aliasHosts.map((h) => `https://${h}`).join(','),
               Stage: $app.stage,
-              // Bumped for the AliasSiteUrls property: this custom resource only
+              // Bumped for the SiteAliasUrls property: this custom resource only
               // re-runs when a property changes, and SiteUrl is unchanged, so
               // without a bump the alias never reaches the Auth0 client.
               Version: '2.12',

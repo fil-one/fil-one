@@ -26,7 +26,7 @@ interface SetupProperties {
    * demo aliases). Optional so stacks deployed before it existed still update
    * cleanly — CloudFormation custom-resource properties are always strings.
    */
-  AliasSiteUrls?: string;
+  SiteAliasUrls?: string;
   Stage: string;
 }
 
@@ -358,7 +358,7 @@ interface StageContext {
   stripe: Stripe | undefined;
   mgmtDomain: string;
   siteUrl: string;
-  aliasSiteUrls: string[];
+  siteAliasUrls: string[];
   stage: string;
   isStagingOrProd: boolean;
   isPreview: boolean;
@@ -366,7 +366,7 @@ interface StageContext {
 
 async function handleDelete(ctx: StageContext): Promise<void> {
   const tasks: Promise<unknown>[] = [
-    teardownAuth0Callbacks(ctx.mgmtDomain, ctx.siteUrl, ctx.aliasSiteUrls, ctx.isStagingOrProd),
+    teardownAuth0Callbacks(ctx.mgmtDomain, ctx.siteUrl, ctx.siteAliasUrls, ctx.isStagingOrProd),
   ];
   if (!ctx.isPreview) {
     tasks.push(teardownStripeWebhook(ctx.stripe!, ctx.siteUrl, ctx.stage));
@@ -378,10 +378,10 @@ async function handleDelete(ctx: StageContext): Promise<void> {
 async function handleOldUrlTeardown(
   ctx: StageContext,
   oldUrl: string,
-  oldAliasUrls: string[],
+  oldSiteAliasUrls: string[],
 ): Promise<void> {
   const tasks: Promise<unknown>[] = [
-    teardownAuth0Callbacks(ctx.mgmtDomain, oldUrl, oldAliasUrls, ctx.isStagingOrProd),
+    teardownAuth0Callbacks(ctx.mgmtDomain, oldUrl, oldSiteAliasUrls, ctx.isStagingOrProd),
   ];
   if (!ctx.isPreview) {
     tasks.push(teardownStripeWebhook(ctx.stripe!, oldUrl, ctx.stage));
@@ -393,7 +393,7 @@ async function handleSetup(
   ctx: StageContext,
 ): Promise<{ webhookSecret: string; webhookEndpointId: string } | undefined> {
   if (ctx.isPreview) {
-    await setupAuth0Callbacks(ctx.mgmtDomain, ctx.siteUrl, ctx.aliasSiteUrls, ctx.isStagingOrProd);
+    await setupAuth0Callbacks(ctx.mgmtDomain, ctx.siteUrl, ctx.siteAliasUrls, ctx.isStagingOrProd);
     console.log('Setup complete (preview, Stripe skipped):', {
       siteUrl: ctx.siteUrl,
       stage: ctx.stage,
@@ -407,7 +407,7 @@ async function handleSetup(
     ...Promise<void>[],
   ] = [
     setupStripeWebhook(ctx.stripe!, ctx.siteUrl, ctx.stage),
-    setupAuth0Callbacks(ctx.mgmtDomain, ctx.siteUrl, ctx.aliasSiteUrls, ctx.isStagingOrProd),
+    setupAuth0Callbacks(ctx.mgmtDomain, ctx.siteUrl, ctx.siteAliasUrls, ctx.isStagingOrProd),
   ];
   if (ctx.isStagingOrProd) {
     tasks.push(setupAuth0EmailProvider(ctx.mgmtDomain, ctx.stage === 'production'));
@@ -427,15 +427,15 @@ async function handleSetup(
 // ── Handler ───────────────────────────────────────────────────────────
 
 /**
- * Parse the comma-joined AliasSiteUrls property into origins. The trailing-slash
+ * Parse the comma-joined SiteAliasUrls property into origins. The trailing-slash
  * strip matches how SiteUrl is normalised below.
  */
-function parseAliasSiteUrls(value: string | undefined): string[] {
+function parseSiteAliasUrls(value: string | undefined): string[] {
   if (!value) return [];
   return value.split(',').map((url) => url.replace(/\/$/, ''));
 }
 
-function buildStageContext(stage: string, siteUrl: string, aliasSiteUrls: string[]): StageContext {
+function buildStageContext(stage: string, siteUrl: string, siteAliasUrls: string[]): StageContext {
   const isProduction = stage === 'production';
   const isStagingOrProd = stage === 'staging' || isProduction;
   const isPreview = isPreviewStage(stage);
@@ -448,7 +448,7 @@ function buildStageContext(stage: string, siteUrl: string, aliasSiteUrls: string
     stripe: isPreview ? undefined : new Stripe(Resource.StripeSecretKey.value),
     mgmtDomain: process.env.AUTH0_MGMT_DOMAIN ?? process.env.AUTH0_DOMAIN!,
     siteUrl,
-    aliasSiteUrls,
+    siteAliasUrls,
     stage,
     isStagingOrProd,
     isPreview,
@@ -456,15 +456,15 @@ function buildStageContext(stage: string, siteUrl: string, aliasSiteUrls: string
 }
 
 export async function handler(event: SetupEvent): Promise<void> {
-  const { SiteUrl, AliasSiteUrls, Stage } = event.ResourceProperties;
+  const { SiteUrl, SiteAliasUrls, Stage } = event.ResourceProperties;
   const siteUrl = SiteUrl.replace(/\/$/, '');
-  const aliasSiteUrls = parseAliasSiteUrls(AliasSiteUrls);
+  const siteAliasUrls = parseSiteAliasUrls(SiteAliasUrls);
   const physicalResourceId =
     ('PhysicalResourceId' in event ? event.PhysicalResourceId : undefined) ??
     `filone-setup-${Stage}`;
 
   try {
-    const ctx = buildStageContext(Stage, siteUrl, aliasSiteUrls);
+    const ctx = buildStageContext(Stage, siteUrl, siteAliasUrls);
 
     if (event.RequestType === 'Delete') {
       await handleDelete(ctx);
@@ -480,7 +480,7 @@ export async function handler(event: SetupEvent): Promise<void> {
     }
 
     // Create or Update — if Update changed the SiteUrl, clean up old URLs first.
-    // Note this keys off SiteUrl only: dropping an entry from AliasSiteUrls while
+    // Note this keys off SiteUrl only: dropping an entry from SiteAliasUrls while
     // SiteUrl is unchanged does not tear that alias down, matching the additive
     // design of the rest of this resource. Retiring an alias is a manual cleanup.
     const oldUrl =
@@ -492,7 +492,7 @@ export async function handler(event: SetupEvent): Promise<void> {
         ctx,
         oldUrl,
         event.RequestType === 'Update'
-          ? parseAliasSiteUrls(event.OldResourceProperties.AliasSiteUrls)
+          ? parseSiteAliasUrls(event.OldResourceProperties.SiteAliasUrls)
           : [],
       );
     }

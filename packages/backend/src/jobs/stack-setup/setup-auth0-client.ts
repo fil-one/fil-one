@@ -5,7 +5,7 @@
  * without disturbing the ones other stages rely on.
  */
 import { Resource } from 'sst';
-import { DEFAULT_MARKETING_URL, MARKETING_URL_BY_CONSOLE_ORIGIN } from '@filone/shared';
+import { MARKETING_URL_BY_CONSOLE_ORIGIN, logoutReturnTo } from '@filone/shared';
 import { getAuth0ManagementToken } from './auth0-mgmt-token.js';
 import { throwIfNotOk } from '../../lib/auth0-management.js';
 
@@ -59,7 +59,7 @@ function removeValue(existing: string[], value: string): string[] {
 export async function setupAuth0Callbacks(
   domain: string,
   siteUrl: string,
-  aliasSiteUrls: string[],
+  siteAliasUrls: string[],
   isStagingOrProd: boolean,
 ): Promise<void> {
   const token = await getAuth0ManagementToken(domain);
@@ -69,7 +69,7 @@ export async function setupAuth0Callbacks(
   // The same deployment answers on the canonical site URL and on each demo
   // alias, and Auth0 matches callbacks and origins exactly (no wildcards for
   // https in production tenants), so every origin needs its own entry.
-  const origins = [siteUrl, ...aliasSiteUrls];
+  const origins = [siteUrl, ...siteAliasUrls];
   const loginUrl = `${siteUrl}/login`;
 
   const patch: Partial<Auth0Client> = {
@@ -77,9 +77,10 @@ export async function setupAuth0Callbacks(
       (acc, origin) => addUnique(acc, `${origin}/api/auth/callback`),
       client.callbacks ?? [],
     ),
+    // Derived from the same helper the logout handler sends its `returnTo` through, so
+    // a value it can produce can never be missing here.
     allowed_logout_urls: origins.reduce(
-      (acc, origin) =>
-        addUnique(acc, MARKETING_URL_BY_CONSOLE_ORIGIN[origin] ?? DEFAULT_MARKETING_URL),
+      (acc, origin) => addUnique(acc, logoutReturnTo(origin)),
       client.allowed_logout_urls ?? [],
     ),
     web_origins: origins.reduce((acc, origin) => addUnique(acc, origin), client.web_origins ?? []),
@@ -97,23 +98,27 @@ export async function setupAuth0Callbacks(
 export async function teardownAuth0Callbacks(
   domain: string,
   siteUrl: string,
-  aliasSiteUrls: string[],
+  siteAliasUrls: string[],
   isStagingOrProd: boolean,
 ): Promise<void> {
   const token = await getAuth0ManagementToken(domain);
   const clientId = Resource.Auth0ClientId.value;
   const client = await getAuth0Client(domain, token, clientId);
 
-  const origins = [siteUrl, ...aliasSiteUrls];
+  const origins = [siteUrl, ...siteAliasUrls];
 
   const patch: Partial<Auth0Client> = {
     callbacks: origins.reduce(
       (acc, origin) => removeValue(acc, `${origin}/api/auth/callback`),
       client.callbacks ?? [],
     ),
-    // Logout URLs are deliberately left alone: they are marketing sites shared
-    // by every stage, not per-deployment values, so removing one here would
-    // break logout for all the other stages still using it.
+    // A stage that logs out to its own console owns that entry, so it goes when the
+    // stage does. Marketing sites are shared by every stage and are left alone —
+    // removing one here would break logout for all the others still using it.
+    allowed_logout_urls: origins.reduce(
+      (acc, origin) => (MARKETING_URL_BY_CONSOLE_ORIGIN[origin] ? acc : removeValue(acc, origin)),
+      client.allowed_logout_urls ?? [],
+    ),
     web_origins: origins.reduce(
       (acc, origin) => removeValue(acc, origin),
       client.web_origins ?? [],

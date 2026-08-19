@@ -20,7 +20,15 @@ Auth0 credentials are managed as SST secrets (`Auth0ClientId`, `Auth0ClientSecre
 
 ## Application
 
-**Callback and logout URLs are configured automatically during deploy** — no manual Dashboard edits needed. The deploy-time setup Lambda adds the correct URLs for the deployed domain (custom domain or CloudFront).
+**Callback and logout URLs are configured automatically during deploy** — no manual Dashboard edits needed. The deploy-time setup Lambda adds the correct URLs for the deployed domain (custom domain or CloudFront). A production stage logs out to its marketing site; every other stage logs out back to its own console, so you land on the sign-in screen and can switch user (see `logoutReturnTo` in `@filone/shared`).
+
+**One exception — local development.** The Vite dev proxy sends `X-Dev-Origin: https://localhost:5173`, and both login and logout follow it, but `https://localhost:5173` is deliberately never written into the shared Auth0 tenant by the setup Lambda (see the comment on `SiteAliasUrls` in `sst.config.ts`). So in the **dev tenant only**, add it by hand under Applications > your app > Settings:
+
+- **Allowed Callback URLs**: `https://localhost:5173/api/auth/callback`
+- **Allowed Logout URLs**: `https://localhost:5173`
+- **Allowed Web Origins**: `https://localhost:5173`
+
+Without the logout entry, signing out of the local dev server shows an Auth0 error page instead of redirecting.
 
 **Application settings** (Applications > your app > Settings):
 

@@ -155,8 +155,21 @@ export const MARKETING_URL_BY_CONSOLE_ORIGIN: Readonly<Record<string, string | u
   'https://app.filone.ai': 'https://filone.ai',
 };
 
-/** Marketing site for any origin absent from {@link MARKETING_URL_BY_CONSOLE_ORIGIN}. */
-export const DEFAULT_MARKETING_URL = 'https://fil.one';
+/**
+ * Where to send a user after they sign out of the console served at `origin`.
+ *
+ * A production console hands off to its marketing site, and an alias hands off to the
+ * alias marketing site rather than to fil.one, which may be blocklisted. Every other
+ * stage returns to its own console, so switching the signed-in user on staging or a dev
+ * stage leaves you on the stage you were testing instead of on production marketing.
+ *
+ * The result reaches Auth0 as `returnTo`, so every value this can produce must also
+ * appear in the client's allowed_logout_urls; setup-auth0-client.ts derives them from
+ * this same function so the two cannot drift.
+ */
+export function logoutReturnTo(origin: string): string {
+  return MARKETING_URL_BY_CONSOLE_ORIGIN[origin] ?? origin;
+}
 
 const PRODUCTION_HOSTS: ReadonlySet<string> = new Set([
   PROD_CONSOLE_HOST,

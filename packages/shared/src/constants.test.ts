@@ -11,7 +11,7 @@ import {
   PROD_CONSOLE_HOST,
   PROD_CONSOLE_ALIAS_HOSTS,
   MARKETING_URL_BY_CONSOLE_ORIGIN,
-  DEFAULT_MARKETING_URL,
+  logoutReturnTo,
   getAvailableRegions,
   supportsBucketManagement,
   isFoundationEmail,
@@ -159,9 +159,8 @@ describe('demo alias constants', () => {
     expect(MARKETING_URL_BY_CONSOLE_ORIGIN['https://app.filone.ai']).toBe('https://filone.ai');
   });
 
-  it('leaves origins outside the table to the shared default', () => {
+  it('leaves non-production origins out of the table', () => {
     expect(MARKETING_URL_BY_CONSOLE_ORIGIN['https://staging.fil.one']).toBeUndefined();
-    expect(DEFAULT_MARKETING_URL).toBe('https://fil.one');
   });
 
   // getStageFromHostname lowercases its input before comparing, so an entry
@@ -177,6 +176,30 @@ describe('demo alias constants', () => {
       expect(host.endsWith('.fil.one')).toBe(false);
     }
   });
+});
+
+describe('logoutReturnTo', () => {
+  it('hands a production console off to its marketing site', () => {
+    expect(logoutReturnTo(`https://${PROD_CONSOLE_HOST}`)).toBe('https://fil.one');
+  });
+
+  it('hands a demo alias off to the alias marketing site', () => {
+    expect(logoutReturnTo('https://app.filone.ai')).toBe('https://filone.ai');
+  });
+
+  // Non-production stages have no marketing site of their own, and being thrown onto
+  // production marketing is a nuisance when you are only switching the signed-in user.
+  const nonProductionOrigins = [
+    'https://staging.fil.one',
+    'https://pr-42.dev.fil.one',
+    'https://localhost:5173',
+  ];
+
+  for (const origin of nonProductionOrigins) {
+    it(`returns "${origin}" to itself`, () => {
+      expect(logoutReturnTo(origin)).toBe(origin);
+    });
+  }
 });
 
 describe('getAvailableRegions', () => {
