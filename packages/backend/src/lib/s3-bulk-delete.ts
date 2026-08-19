@@ -13,6 +13,7 @@ import {
   type S3Client,
 } from '@aws-sdk/client-s3';
 import { BulkDeleteScope, type BulkDeleteFailure } from '@filone/shared';
+import type { BucketVersioningStatus } from './s3-bucket-operations.js';
 
 /** S3 caps DeleteObjects at 1000 keys per request. */
 const MULTI_DELETE_BATCH_SIZE = 1000;
@@ -41,6 +42,15 @@ export interface EnumerateDeletionPageOptions {
   scope: BulkDeleteScope;
   cursor?: BulkDeleteCursor;
   maxKeys?: number;
+  /**
+   * Required for `AllVersions`; irrelevant for `Current`, which never lists by
+   * version. Decides whether a literal "null" version id from ListObjectVersions
+   * is dropped (a plain delete, for a bucket that never enabled versioning) or
+   * kept (an explicit version-scoped delete, for a suspended bucket, where a
+   * plain delete would leave the null version behind a new delete marker
+   * instead of removing it).
+   */
+  bucketVersioningStatus?: BucketVersioningStatus;
 }
 
 export interface EnumerateDeletionPageResult {
@@ -93,7 +103,7 @@ async function enumerateCurrentPage(
 async function enumerateAllVersionsPage(
   options: EnumerateDeletionPageOptions,
 ): Promise<EnumerateDeletionPageResult> {
-  const { s3, bucket, prefix, cursor, maxKeys } = options;
+  const { s3, bucket, prefix, cursor, maxKeys, bucketVersioningStatus } = options;
 
   const result = await s3.send(
     new ListObjectVersionsCommand({
@@ -105,16 +115,22 @@ async function enumerateAllVersionsPage(
     }),
   );
 
+  // A bucket that never enabled versioning reports every object as the literal
+  // "null" version. Deleting by that id is a version-scoped delete
+  // (s3:DeleteObjectVersion), which such a bucket neither needs nor reliably
+  // permits, so it comes back AccessDenied: drop it and issue a plain object
+  // delete instead. A *suspended* bucket also reports "null" versions, but
+  // there a plain delete only inserts a new null-version delete marker over the
+  // existing one rather than removing it, so the bucket never actually empties;
+  // the null version id there must be kept and deleted explicitly.
+  const dropNullVersionId = bucketVersioningStatus !== 'Suspended';
+
   const targets: BulkDeleteTarget[] = [...(result.Versions ?? []), ...(result.DeleteMarkers ?? [])]
     .filter((item) => item.Key !== undefined)
     .map((item) => ({
       key: item.Key!,
-      // A non-versioned (or versioning-suspended) bucket reports every object as
-      // the literal "null" version. Deleting by that id is a version-scoped
-      // delete (s3:DeleteObjectVersion), which such a bucket neither needs nor
-      // reliably permits, so it comes back AccessDenied. Drop it and issue a
-      // plain object delete instead.
-      ...(item.VersionId && item.VersionId !== 'null' && { versionId: item.VersionId }),
+      ...(item.VersionId &&
+        !(dropNullVersionId && item.VersionId === 'null') && { versionId: item.VersionId }),
     }));
 
   const nextKeyMarker = result.IsTruncated ? result.NextKeyMarker : undefined;

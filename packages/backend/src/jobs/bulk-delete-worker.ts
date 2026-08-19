@@ -19,7 +19,7 @@
 
 import type { Context, SQSEvent, SQSRecord } from 'aws-lambda';
 
-import { isTerminalBulkDeleteStatus } from '@filone/shared';
+import { BulkDeleteScope, isTerminalBulkDeleteStatus } from '@filone/shared';
 
 import {
   applyPageResult,
@@ -37,6 +37,7 @@ import type { BulkDeleteJobRecord } from '../lib/dynamo-records.js';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { getOrgProfile } from '../lib/org-profile.js';
 import { createS3Client } from '../lib/s3-client.js';
+import { getBucketVersioningStatus } from '../lib/s3-bucket-operations.js';
 import { deleteTargets, enumerateDeletionPage } from '../lib/s3-bulk-delete.js';
 
 const LOG = '[bulk-delete-worker]';
@@ -92,7 +93,6 @@ export async function processJob(
   getRemainingTimeInMillis: RemainingTimeFn,
 ): Promise<void> {
   const { orgId, jobId } = event;
-  const deadlineEpochMs = computeDeadline(getRemainingTimeInMillis);
 
   const job = await getBulkDeleteJob(orgId, jobId);
   if (!job) {
@@ -108,7 +108,7 @@ export async function processJob(
   // invocation rather than regressing to the start-of-invocation counts.
   let latestJob = job;
   try {
-    const outcome = await runPages(job, deadlineEpochMs, (progressed) => {
+    const outcome = await runPages(job, getRemainingTimeInMillis, (progressed) => {
       latestJob = progressed;
     });
     if (outcome.exhausted) {
@@ -158,11 +158,19 @@ interface RunOutcome {
 
 async function runPages(
   initial: BulkDeleteJobRecord,
-  deadlineEpochMs: number,
+  getRemainingTimeInMillis: RemainingTimeFn,
   onProgress: (job: BulkDeleteJobRecord) => void,
 ): Promise<RunOutcome> {
   const s3 = createS3Client(await resolveClientContext(initial));
   let job = initial;
+
+  // Only AllVersions ever sees a literal "null" version id (Current lists by
+  // key only), and a job's bucket doesn't change mid-run, so this is resolved
+  // once per invocation rather than per page.
+  const bucketVersioningStatus =
+    job.scope === BulkDeleteScope.AllVersions
+      ? await getBucketVersioningStatus(s3, job.bucketName)
+      : undefined;
 
   for (;;) {
     const page = await enumerateDeletionPage({
@@ -171,6 +179,7 @@ async function runPages(
       prefix: job.prefix,
       scope: job.scope,
       ...(job.cursor && { cursor: job.cursor }),
+      ...(bucketVersioningStatus && { bucketVersioningStatus }),
       maxKeys: PAGE_SIZE,
     });
 
@@ -189,7 +198,10 @@ async function runPages(
     // re-walking the whole bucket.
     await putBulkDeleteJob(job);
 
-    if (Date.now() >= deadlineEpochMs) return { job, exhausted: false };
+    // Lambda's own remaining-time clock, not a wall-clock deadline derived from
+    // Date.now(): the wall clock is NTP-adjusted and not guaranteed monotonic,
+    // while this is the exact budget Lambda will enforce.
+    if (getRemainingTimeInMillis() <= DEADLINE_BUFFER_MS) return { job, exhausted: false };
   }
 }
 
@@ -206,14 +218,4 @@ async function resolveClientContext(job: BulkDeleteJobRecord) {
     throw new NonRetryableBulkDeleteError(`Tenant is not provisioned in region ${job.region}`);
   }
   return orchestrator.getS3ClientContext(tenantId);
-}
-
-function computeDeadline(getRemainingTimeInMillis: RemainingTimeFn): number {
-  const remaining = getRemainingTimeInMillis();
-  if (Number.isFinite(remaining) && remaining > DEADLINE_BUFFER_MS) {
-    return Date.now() + (remaining - DEADLINE_BUFFER_MS);
-  }
-  // No reliable signal: take one page and hand off rather than risk a hard stop
-  // mid-page with no checkpoint written.
-  return 0;
 }

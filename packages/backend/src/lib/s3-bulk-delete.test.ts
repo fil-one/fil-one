@@ -106,10 +106,10 @@ describe('enumerateDeletionPage — all versions scope', () => {
     ]);
   });
 
-  it('drops the literal "null" version so non-versioned buckets get plain deletes', async () => {
-    // A non-versioned or versioning-suspended bucket reports every object as the
+  it('drops the literal "null" version so a bucket that never versioned gets a plain delete', async () => {
+    // A bucket that never enabled versioning reports every object as the
     // "null" version. Carrying that id turns the delete into a version-scoped
-    // one (s3:DeleteObjectVersion), which such buckets come back AccessDenied on.
+    // one (s3:DeleteObjectVersion), which such a bucket comes back AccessDenied on.
     s3Mock.on(ListObjectVersionsCommand).resolves({
       Versions: [{ Key: 'a.txt', VersionId: 'null' }],
       IsTruncated: false,
@@ -120,9 +120,31 @@ describe('enumerateDeletionPage — all versions scope', () => {
       bucket,
       prefix: '',
       scope: BulkDeleteScope.AllVersions,
+      bucketVersioningStatus: 'Never',
     });
 
     expect(result.targets).toEqual([{ key: 'a.txt' }]);
+  });
+
+  it('keeps the literal "null" version for a suspended bucket so it is actually removed', async () => {
+    // On a versioning-suspended bucket, a plain delete only inserts a new
+    // null-version delete marker over the existing null version rather than
+    // removing it, so the bucket never empties. The null version id must be
+    // kept and deleted explicitly there.
+    s3Mock.on(ListObjectVersionsCommand).resolves({
+      Versions: [{ Key: 'a.txt', VersionId: 'null' }],
+      IsTruncated: false,
+    });
+
+    const result = await enumerateDeletionPage({
+      s3,
+      bucket,
+      prefix: '',
+      scope: BulkDeleteScope.AllVersions,
+      bucketVersioningStatus: 'Suspended',
+    });
+
+    expect(result.targets).toEqual([{ key: 'a.txt', versionId: 'null' }]);
   });
 
   it('returns the key and version-id marker pair while truncated', async () => {

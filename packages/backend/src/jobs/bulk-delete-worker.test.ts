@@ -23,6 +23,9 @@ vi.mock('../lib/s3-bulk-delete.js', () => ({
   enumerateDeletionPage: vi.fn(),
   deleteTargets: vi.fn(),
 }));
+vi.mock('../lib/s3-bucket-operations.js', () => ({
+  getBucketVersioningStatus: vi.fn(async () => 'Enabled'),
+}));
 vi.mock('../lib/s3-client.js', () => ({ createS3Client: vi.fn(() => ({})) }));
 vi.mock('../lib/org-profile.js', () => ({ getOrgProfile: vi.fn(async () => ({})) }));
 vi.mock('../lib/service-orchestrator-registry.js', () => ({

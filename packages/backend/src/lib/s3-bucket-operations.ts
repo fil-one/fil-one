@@ -101,9 +101,27 @@ export async function putObjectLockConfiguration(
   );
 }
 
-export async function getBucketVersioning(s3: S3Client, bucketName: string): Promise<boolean> {
+/**
+ * S3's three-state versioning model. `Suspended` is distinct from `Never`: a
+ * bucket that had versioning enabled and later suspended it still tracks a
+ * `null` version per key, and a plain (no version id) delete on such a key
+ * leaves that null version in place behind a new null-version delete marker
+ * rather than removing it. `Never` never went through `Enabled`, so its
+ * objects have no real version identity and only support a plain delete.
+ */
+export type BucketVersioningStatus = 'Enabled' | 'Suspended' | 'Never';
+
+export async function getBucketVersioningStatus(
+  s3: S3Client,
+  bucketName: string,
+): Promise<BucketVersioningStatus> {
   const result = await s3.send(new GetBucketVersioningCommand({ Bucket: bucketName }));
-  return result.Status === 'Enabled';
+  if (result.Status === 'Enabled' || result.Status === 'Suspended') return result.Status;
+  return 'Never';
+}
+
+export async function getBucketVersioning(s3: S3Client, bucketName: string): Promise<boolean> {
+  return (await getBucketVersioningStatus(s3, bucketName)) === 'Enabled';
 }
 
 export interface BucketObjectLockState {

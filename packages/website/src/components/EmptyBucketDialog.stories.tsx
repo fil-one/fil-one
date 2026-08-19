@@ -47,18 +47,36 @@ export const Starting: Story = {
   args: { starting: true },
 };
 
+/**
+ * Current scope deletes only current object keys, the same thing
+ * totalObjectCount counts, so the two are comparable and the bar shows a real
+ * percentage.
+ */
 export const InProgress: Story = {
+  args: {
+    job: job({ deletedCount: 7400, scope: BulkDeleteScope.Current }),
+    isRunning: true,
+  },
+};
+
+/**
+ * AllVersions (the default scope) counts every version and delete marker, not
+ * just current keys, so deletedCount is not comparable to totalObjectCount
+ * even though both are present. The bar shows activity without claiming a
+ * percentage it can't back up.
+ */
+export const InProgressAllVersions: Story = {
   args: {
     job: job({ deletedCount: 7400 }),
     isRunning: true,
   },
 };
 
-/** Without a total there is nothing to measure against, so no progress bar. */
+/** Without a total there is nothing to measure against, so no numeric bar. */
 export const InProgressWithoutTotal: Story = {
   args: {
     totalObjectCount: undefined,
-    job: job({ deletedCount: 7400 }),
+    job: job({ deletedCount: 7400, scope: BulkDeleteScope.Current }),
     isRunning: true,
   },
 };

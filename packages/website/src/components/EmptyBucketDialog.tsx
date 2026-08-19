@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { DialogTitle } from '@headlessui/react';
 import { CheckCircleIcon, WarningCircleIcon, WarningIcon } from '@phosphor-icons/react/dist/ssr';
 
-import { BulkDeleteJobStatus, type BulkDeleteJob } from '@filone/shared';
+import { BulkDeleteJobStatus, BulkDeleteScope, type BulkDeleteJob } from '@filone/shared';
 
 import { Button } from './Button';
 import { IconBox, type IconBoxColor } from './IconBox';
@@ -157,18 +157,34 @@ function BulkDeleteBody({
   }
 
   if (isRunning) {
+    // totalObjectCount is an analytics count of current object keys.
+    // job.deletedCount only counts the same thing when the job itself is
+    // scoped to current objects; the default scope deletes every version and
+    // delete marker too, so the two numbers are different units and a job
+    // past its first key can already "exceed" the total. Only pair them up
+    // when they are actually comparable; otherwise show progress without
+    // pretending to know the target.
+    const comparableTotal =
+      job.scope === BulkDeleteScope.Current &&
+      totalObjectCount !== undefined &&
+      totalObjectCount > 0
+        ? totalObjectCount
+        : undefined;
+
     return (
       <div className="flex w-full flex-col gap-2">
         <p className="text-sm text-zinc-500">
           Deleted {job.deletedCount.toLocaleString()}
-          {totalObjectCount !== undefined && ` of ${totalObjectCount.toLocaleString()}`}. You can
+          {comparableTotal !== undefined && ` of ${comparableTotal.toLocaleString()}`}. You can
           close this and it will keep running.
         </p>
-        {totalObjectCount !== undefined && totalObjectCount > 0 && (
+        {comparableTotal !== undefined ? (
           <ProgressBar
-            value={Math.min(100, Math.round((job.deletedCount / totalObjectCount) * 100))}
+            value={Math.min(100, Math.round((job.deletedCount / comparableTotal) * 100))}
             label="Deletion progress"
           />
+        ) : (
+          <ProgressBar indeterminate label="Deletion progress" />
         )}
       </div>
     );

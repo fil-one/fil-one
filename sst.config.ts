@@ -733,7 +733,7 @@ export default $config({
     // Messages that fail every delivery land here rather than disappearing, so
     // a stalled deletion is visible instead of being inferred from a job row
     // that stopped moving.
-    const bulkDeleteDlq = new sst.aws.Queue('BulkDeleteDlq');
+    const bulkDeleteDlq = new sst.aws.Queue('BulkDeleteDlq', { fifo: true });
 
     // FIFO so the message group (the job id) admits one in-flight message per
     // job: a redelivery can never run alongside the invocation it is replacing
@@ -764,6 +764,19 @@ export default $config({
     // applies. One message at a time: a job owns the whole invocation's time
     // budget, and a partial batch failure would replay siblings needlessly.
     bulkDeleteQueue.subscribe(bulkDeleteWorker.arn, { batch: { size: 1 } });
+
+    // A message only reaches the DLQ once the worker's own retries are spent.
+    // The worker fails the job itself before its last delivery rethrows, but
+    // that path never runs on a hard kill (Lambda timeout, OOM, process
+    // termination) — the job row is left non-terminal with nothing left to move
+    // it, and the client would poll it forever. This watchdog closes that gap:
+    // any job whose message lands here without a terminal status gets failed.
+    const bulkDeleteDlqWatchdog = createFn('BulkDeleteDlqWatchdog', {
+      handler: 'packages/backend/src/jobs/bulk-delete-dlq-watchdog.handler',
+      link: [bulkDeleteTable],
+      timeout: '30 seconds',
+    });
+    bulkDeleteDlq.subscribe(bulkDeleteDlqWatchdog.arn);
 
     addRoute({
       method: 'POST',
