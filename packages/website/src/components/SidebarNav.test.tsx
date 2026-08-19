@@ -95,3 +95,14 @@ describe('SidebarNav e2e selector uniqueness (desktop + drawer mounted)', () => 
     expect(container.querySelectorAll('#user-menu-logout-button')).toHaveLength(1);
   });
 });
+
+describe('SidebarNav user profile accessible name', () => {
+  // Collapsed mode hides the display name and the avatar is decorative, so the
+  // button's own label is the only accessible name left.
+  it.each([true, false])('names the user-profile button when collapsed=%s', (collapsed) => {
+    const { getByTestId } = render(
+      <SidebarNav collapsed={collapsed} onToggle={() => {}} showTestIds={true} />,
+    );
+    expect(getByTestId('user-profile')).toHaveAccessibleName('User menu for Ada');
+  });
+});

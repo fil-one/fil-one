@@ -20,6 +20,7 @@ vi.mock('./aurora-tenant-setup.js', () => ({
 }));
 
 const mockCreateAuroraBucket = vi.fn();
+const mockDeleteAuroraBucket = vi.fn();
 const mockCreateAuroraAccessKey = vi.fn();
 const mockFindAuroraAccessKeyByName = vi.fn();
 const mockGetAuroraPortalApiKey = vi.fn();
@@ -30,6 +31,7 @@ vi.mock('./aurora-portal.js', async (importOriginal) => {
   return {
     ...original,
     createAuroraBucket: (...args: unknown[]) => mockCreateAuroraBucket(...args),
+    deleteAuroraBucket: (...args: unknown[]) => mockDeleteAuroraBucket(...args),
     createAuroraAccessKey: (...args: unknown[]) => mockCreateAuroraAccessKey(...args),
     findAuroraAccessKeyByName: (...args: unknown[]) => mockFindAuroraAccessKeyByName(...args),
     getAuroraPortalApiKey: (...args: unknown[]) => mockGetAuroraPortalApiKey(...args),
@@ -76,7 +78,6 @@ import {
   AccessKeyValidationError,
   BucketAlreadyExistsError,
   BucketNotFoundError,
-  NotImplementedError,
 } from '../errors.js';
 
 // ---------------------------------------------------------------------------
@@ -195,10 +196,31 @@ describe('auroraOrchestrator', () => {
   });
 
   describe('deleteBucket', () => {
-    it('throws NotImplementedError — Aurora delete is tracked in FIL-204', async () => {
+    it('delegates to deleteAuroraBucket with the tenantId and bucketName', async () => {
+      mockDeleteAuroraBucket.mockResolvedValue(undefined);
+
+      await auroraOrchestrator.deleteBucket('aurora-t-1', 'my-bucket');
+
+      expect(mockDeleteAuroraBucket).toHaveBeenCalledWith({
+        tenantId: 'aurora-t-1',
+        bucketName: 'my-bucket',
+      });
+    });
+
+    it('resolves when the Aurora portal delete succeeds', async () => {
+      mockDeleteAuroraBucket.mockResolvedValue(undefined);
+
       await expect(
         auroraOrchestrator.deleteBucket('aurora-t-1', 'my-bucket'),
-      ).rejects.toBeInstanceOf(NotImplementedError);
+      ).resolves.toBeUndefined();
+    });
+
+    it('propagates errors from the Aurora portal unchanged', async () => {
+      mockDeleteAuroraBucket.mockRejectedValue(new Error('upstream 500'));
+
+      await expect(auroraOrchestrator.deleteBucket('aurora-t-1', 'my-bucket')).rejects.toThrow(
+        'upstream 500',
+      );
     });
   });
 

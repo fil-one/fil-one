@@ -27,7 +27,7 @@ export function LoginErrorPage({ error }: LoginErrorPageProps) {
       <a
         id="login-error-retry-button"
         href="/login"
-        className="button button--filled w-full justify-center"
+        className="button button--primary w-full justify-center"
       >
         Try signing in again
       </a>

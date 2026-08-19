@@ -12,6 +12,7 @@ import type {
   CloudFormationCustomResourceResponse,
 } from 'aws-lambda';
 import { onExecutePostLogin } from './mfa-action.js';
+import { setupAuth0Callbacks, teardownAuth0Callbacks } from './setup-auth0-client.js';
 import { setupAuth0PasskeyAuth } from './setup-passkey.js';
 import { getAuth0ManagementToken } from './auth0-mgmt-token.js';
 import { throwIfNotOk } from '../../lib/auth0-management.js';
@@ -20,6 +21,12 @@ import { throwIfNotOk } from '../../lib/auth0-management.js';
 
 interface SetupProperties {
   SiteUrl: string;
+  /**
+   * Comma-joined extra origins the same deployment is served from (the FIL-897
+   * demo aliases). Optional so stacks deployed before it existed still update
+   * cleanly — CloudFormation custom-resource properties are always strings.
+   */
+  SiteAliasUrls?: string;
   Stage: string;
 }
 
@@ -28,13 +35,6 @@ type SetupResponse = CloudFormationCustomResourceResponse<{
   webhookSecret: string;
   webhookEndpointId: string;
 }>;
-
-interface Auth0Client {
-  callbacks?: string[];
-  allowed_logout_urls?: string[];
-  web_origins?: string[];
-  initiate_login_uri?: string;
-}
 
 interface Auth0Action {
   id: string;
@@ -188,97 +188,6 @@ async function teardownStripeWebhook(
   }
 
   await deleteWebhookSecret(stage);
-}
-
-// ── Auth0 helpers ─────────────────────────────────────────────────────
-
-async function getAuth0Client(
-  domain: string,
-  token: string,
-  clientId: string,
-): Promise<Auth0Client> {
-  const resp = await fetch(`https://${domain}/api/v2/clients/${clientId}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  await throwIfNotOk(resp, 'Auth0 get client failed');
-
-  return (await resp.json()) as Auth0Client;
-}
-
-async function patchAuth0Client(
-  domain: string,
-  token: string,
-  clientId: string,
-  patch: Partial<Auth0Client>,
-): Promise<void> {
-  const resp = await fetch(`https://${domain}/api/v2/clients/${clientId}`, {
-    method: 'PATCH',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(patch),
-  });
-
-  await throwIfNotOk(resp, 'Auth0 update client failed');
-}
-
-function addUnique(existing: string[], value: string): string[] {
-  return existing.includes(value) ? existing : [...existing, value];
-}
-
-function removeValue(existing: string[], value: string): string[] {
-  return existing.filter((v) => v !== value);
-}
-
-async function setupAuth0Callbacks(
-  domain: string,
-  siteUrl: string,
-  isStagingOrProd: boolean,
-): Promise<void> {
-  const token = await getAuth0ManagementToken(domain);
-  const clientId = Resource.Auth0ClientId.value;
-  const client = await getAuth0Client(domain, token, clientId);
-
-  const callbackUrl = `${siteUrl}/api/auth/callback`;
-  const loginUrl = `${siteUrl}/login`;
-
-  const patch: Partial<Auth0Client> = {
-    callbacks: addUnique(client.callbacks ?? [], callbackUrl),
-    allowed_logout_urls: addUnique(client.allowed_logout_urls ?? [], 'https://fil.one'),
-    web_origins: addUnique(client.web_origins ?? [], siteUrl),
-  };
-
-  if (isStagingOrProd) {
-    patch.initiate_login_uri = loginUrl;
-  }
-
-  await patchAuth0Client(domain, token, clientId, patch);
-}
-
-async function teardownAuth0Callbacks(
-  domain: string,
-  siteUrl: string,
-  isStagingOrProd: boolean,
-): Promise<void> {
-  const token = await getAuth0ManagementToken(domain);
-  const clientId = Resource.Auth0ClientId.value;
-  const client = await getAuth0Client(domain, token, clientId);
-
-  const callbackUrl = `${siteUrl}/api/auth/callback`;
-
-  const patch: Partial<Auth0Client> = {
-    callbacks: removeValue(client.callbacks ?? [], callbackUrl),
-    // Do not remove the shared logout URL 'https://fil.one' here, as it is used by all stages.
-    web_origins: removeValue(client.web_origins ?? [], siteUrl),
-  };
-
-  if (isStagingOrProd) {
-    patch.initiate_login_uri = '';
-  }
-
-  await patchAuth0Client(domain, token, clientId, patch);
 }
 
 // ── Auth0 email provider helper ───────────────────────────────────────
@@ -449,6 +358,7 @@ interface StageContext {
   stripe: Stripe | undefined;
   mgmtDomain: string;
   siteUrl: string;
+  siteAliasUrls: string[];
   stage: string;
   isStagingOrProd: boolean;
   isPreview: boolean;
@@ -456,7 +366,7 @@ interface StageContext {
 
 async function handleDelete(ctx: StageContext): Promise<void> {
   const tasks: Promise<unknown>[] = [
-    teardownAuth0Callbacks(ctx.mgmtDomain, ctx.siteUrl, ctx.isStagingOrProd),
+    teardownAuth0Callbacks(ctx.mgmtDomain, ctx.siteUrl, ctx.siteAliasUrls, ctx.isStagingOrProd),
   ];
   if (!ctx.isPreview) {
     tasks.push(teardownStripeWebhook(ctx.stripe!, ctx.siteUrl, ctx.stage));
@@ -465,9 +375,13 @@ async function handleDelete(ctx: StageContext): Promise<void> {
   console.log('Teardown complete:', { siteUrl: ctx.siteUrl, stage: ctx.stage });
 }
 
-async function handleOldUrlTeardown(ctx: StageContext, oldUrl: string): Promise<void> {
+async function handleOldUrlTeardown(
+  ctx: StageContext,
+  oldUrl: string,
+  oldSiteAliasUrls: string[],
+): Promise<void> {
   const tasks: Promise<unknown>[] = [
-    teardownAuth0Callbacks(ctx.mgmtDomain, oldUrl, ctx.isStagingOrProd),
+    teardownAuth0Callbacks(ctx.mgmtDomain, oldUrl, oldSiteAliasUrls, ctx.isStagingOrProd),
   ];
   if (!ctx.isPreview) {
     tasks.push(teardownStripeWebhook(ctx.stripe!, oldUrl, ctx.stage));
@@ -479,7 +393,7 @@ async function handleSetup(
   ctx: StageContext,
 ): Promise<{ webhookSecret: string; webhookEndpointId: string } | undefined> {
   if (ctx.isPreview) {
-    await setupAuth0Callbacks(ctx.mgmtDomain, ctx.siteUrl, ctx.isStagingOrProd);
+    await setupAuth0Callbacks(ctx.mgmtDomain, ctx.siteUrl, ctx.siteAliasUrls, ctx.isStagingOrProd);
     console.log('Setup complete (preview, Stripe skipped):', {
       siteUrl: ctx.siteUrl,
       stage: ctx.stage,
@@ -493,7 +407,7 @@ async function handleSetup(
     ...Promise<void>[],
   ] = [
     setupStripeWebhook(ctx.stripe!, ctx.siteUrl, ctx.stage),
-    setupAuth0Callbacks(ctx.mgmtDomain, ctx.siteUrl, ctx.isStagingOrProd),
+    setupAuth0Callbacks(ctx.mgmtDomain, ctx.siteUrl, ctx.siteAliasUrls, ctx.isStagingOrProd),
   ];
   if (ctx.isStagingOrProd) {
     tasks.push(setupAuth0EmailProvider(ctx.mgmtDomain, ctx.stage === 'production'));
@@ -512,7 +426,16 @@ async function handleSetup(
 
 // ── Handler ───────────────────────────────────────────────────────────
 
-function buildStageContext(stage: string, siteUrl: string): StageContext {
+/**
+ * Parse the comma-joined SiteAliasUrls property into origins. The trailing-slash
+ * strip matches how SiteUrl is normalised below.
+ */
+function parseSiteAliasUrls(value: string | undefined): string[] {
+  if (!value) return [];
+  return value.split(',').map((url) => url.replace(/\/$/, ''));
+}
+
+function buildStageContext(stage: string, siteUrl: string, siteAliasUrls: string[]): StageContext {
   const isProduction = stage === 'production';
   const isStagingOrProd = stage === 'staging' || isProduction;
   const isPreview = isPreviewStage(stage);
@@ -525,6 +448,7 @@ function buildStageContext(stage: string, siteUrl: string): StageContext {
     stripe: isPreview ? undefined : new Stripe(Resource.StripeSecretKey.value),
     mgmtDomain: process.env.AUTH0_MGMT_DOMAIN ?? process.env.AUTH0_DOMAIN!,
     siteUrl,
+    siteAliasUrls,
     stage,
     isStagingOrProd,
     isPreview,
@@ -532,14 +456,15 @@ function buildStageContext(stage: string, siteUrl: string): StageContext {
 }
 
 export async function handler(event: SetupEvent): Promise<void> {
-  const { SiteUrl, Stage } = event.ResourceProperties;
+  const { SiteUrl, SiteAliasUrls, Stage } = event.ResourceProperties;
   const siteUrl = SiteUrl.replace(/\/$/, '');
+  const siteAliasUrls = parseSiteAliasUrls(SiteAliasUrls);
   const physicalResourceId =
     ('PhysicalResourceId' in event ? event.PhysicalResourceId : undefined) ??
     `filone-setup-${Stage}`;
 
   try {
-    const ctx = buildStageContext(Stage, siteUrl);
+    const ctx = buildStageContext(Stage, siteUrl, siteAliasUrls);
 
     if (event.RequestType === 'Delete') {
       await handleDelete(ctx);
@@ -554,13 +479,22 @@ export async function handler(event: SetupEvent): Promise<void> {
       return;
     }
 
-    // Create or Update — if Update changed the SiteUrl, clean up old URLs first
+    // Create or Update — if Update changed the SiteUrl, clean up old URLs first.
+    // Note this keys off SiteUrl only: dropping an entry from SiteAliasUrls while
+    // SiteUrl is unchanged does not tear that alias down, matching the additive
+    // design of the rest of this resource. Retiring an alias is a manual cleanup.
     const oldUrl =
       event.RequestType === 'Update'
         ? event.OldResourceProperties.SiteUrl?.replace(/\/$/, '')
         : undefined;
     if (oldUrl && oldUrl !== siteUrl) {
-      await handleOldUrlTeardown(ctx, oldUrl);
+      await handleOldUrlTeardown(
+        ctx,
+        oldUrl,
+        event.RequestType === 'Update'
+          ? parseSiteAliasUrls(event.OldResourceProperties.SiteAliasUrls)
+          : [],
+      );
     }
 
     const stripeResult = await handleSetup(ctx);
