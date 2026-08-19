@@ -21,6 +21,7 @@ const mockFthClient = {
   listAccessKeys: vi.fn(),
   deleteAccessKey: vi.fn(),
   listStorageUsers: vi.fn(),
+  deleteClient: vi.fn(),
 };
 
 const fthClient = mockFthClient as unknown as FthManagementClient;
@@ -34,6 +35,7 @@ process.env.FTH_MANAGEMENT_API_URL = 'https://api.fortilyx.test';
 
 import { ensureTenantReady } from './fth-tenant-setup.js';
 import { OrgDeletingError } from '../org-profile.js';
+import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 const fthClientId = '42';
@@ -84,6 +86,57 @@ describe('ensureTenantReady', () => {
 
     expect(result).toBe(fthClientId);
     expect(mockFthClient.createClient).not.toHaveBeenCalled();
+  });
+
+  // The deferred risk: this request read the profile before the fence landed, so
+  // it created a client upstream that will never get a local pointer.
+  describe('when the fence lands mid-setup', () => {
+    function refuseWith(item?: Record<string, unknown>) {
+      ddbMock.on(GetItemCommand).resolves({ Item: profileItem({}) });
+      ddbMock.on(UpdateItemCommand).rejects(
+        new ConditionalCheckFailedException({
+          message: 'refused',
+          $metadata: {},
+          Item: item,
+        } as never),
+      );
+    }
+
+    it('deletes the orphaned client and refuses, rather than answering 503', async () => {
+      stubSetupApiCalls();
+      refuseWith({ deleting: { BOOL: true } });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      try {
+        await expect(ensureTenantReady(fthClient, orgId)).rejects.toBeInstanceOf(OrgDeletingError);
+        expect(mockFthClient.deleteClient).toHaveBeenCalledWith(fthClientId);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('treats a refusal with no fence on the row as a lost race', async () => {
+      stubSetupApiCalls();
+      refuseWith({ fthTenantId: { S: fthClientId } });
+
+      await expect(ensureTenantReady(fthClient, orgId)).resolves.toBe(fthClientId);
+      expect(mockFthClient.deleteClient).not.toHaveBeenCalled();
+    });
+
+    // A failed rollback must not turn the refusal into "try again in a moment".
+    it('still refuses when the client cannot be deleted', async () => {
+      stubSetupApiCalls();
+      refuseWith({ deleting: { BOOL: true } });
+      mockFthClient.deleteClient.mockRejectedValue(new Error('FTH 500'));
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      try {
+        await expect(ensureTenantReady(fthClient, orgId)).rejects.toBeInstanceOf(OrgDeletingError);
+        expect(error).toHaveBeenCalled();
+      } finally {
+        error.mockRestore();
+      }
+    });
   });
 
   // Before any upstream call: refusing only the final pointer write would

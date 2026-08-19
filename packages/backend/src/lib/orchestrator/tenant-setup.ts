@@ -16,7 +16,9 @@ import { SSMClient, GetParameterCommand, PutParameterCommand } from '@aws-sdk/cl
 import { Resource } from 'sst';
 import { getDynamoClient } from '../ddb-client.js';
 import { OrgDeletingError } from '../org-profile.js';
+import { resolveRefusedTenantWrite } from '../tenant-setup-fence.js';
 import {
+  deleteTenantsByTenantId,
   deleteTenantsByTenantIdAccessKeysByAccessKeyId,
   getTenantsByTenantIdAccessKeys,
   postTenantsByTenantIdAccessKeys,
@@ -138,24 +140,46 @@ async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise
     );
   }
 
-  await dynamo.send(
-    new UpdateItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: key,
-      UpdateExpression: 'SET #tenantIdAttr = :tenantId, updatedAt = :now',
-      // attribute_exists(pk) is the anti-resurrection half: UpdateItem creates the
-      // item when absent, so after the purge an unconditional write would put the
-      // ORG profile row back as a stub.
-      ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
-      ExpressionAttributeNames: {
-        '#tenantIdAttr': tenantIdAttribute,
+  try {
+    await dynamo.send(
+      new UpdateItemCommand({
+        TableName: Resource.UserInfoTable.name,
+        Key: key,
+        UpdateExpression: 'SET #tenantIdAttr = :tenantId, updatedAt = :now',
+        // UpdateItem creates the item when absent, so without attribute_exists(pk)
+        // a write for an org that has no profile row would create one holding
+        // nothing but a tenant id.
+        ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
+        // Lets the catch tell a deleting org apart from a lost race without a
+        // second read — the two need opposite handling.
+        ReturnValuesOnConditionCheckFailure: 'ALL_OLD',
+        ExpressionAttributeNames: {
+          '#tenantIdAttr': tenantIdAttribute,
+        },
+        ExpressionAttributeValues: {
+          ':tenantId': { S: orgId },
+          ':now': { S: new Date().toISOString() },
+        },
+      }),
+    );
+  } catch (err) {
+    await resolveRefusedTenantWrite({
+      orgId,
+      orchestratorId: id,
+      tenantId: orgId,
+      err,
+      deleteTenant: async () => {
+        const { error } = await deleteTenantsByTenantId({
+          client,
+          path: { tenantId: orgId },
+          throwOnError: false,
+        });
+        if (error) throw new Error(`Failed to delete tenant ${orgId}`, { cause: error });
       },
-      ExpressionAttributeValues: {
-        ':tenantId': { S: orgId },
-        ':now': { S: new Date().toISOString() },
-      },
-    }),
-  );
+    });
+    // A lost race: the winner wrote the same client-supplied tenantId.
+    return orgId;
+  }
 
   return orgId;
 }
