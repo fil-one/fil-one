@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { SubscriptionStatus } from '@filone/shared';
 import { SidebarNav } from './SidebarNav';
 import { Banner } from './Banner';
+import { UserAvatar } from './UserAvatar';
 import { getUsage, getBilling, getMe, logout } from '../lib/api';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { daysUntil, pluralizeDays } from '../lib/time.js';
@@ -45,9 +46,7 @@ function MobileUserMenu() {
         aria-haspopup="menu"
         className="flex h-11 w-11 items-center justify-center rounded-lg"
       >
-        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-600 text-xs font-semibold text-white">
-          {initial}
-        </span>
+        <UserAvatar src={me?.picture} initial={initial} />
       </button>
       {open && (
         <div

@@ -1,11 +1,11 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { S3_REGION } from '@filone/shared';
+import { ApiErrorCode, S3_REGION } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
+import { BucketNotEmptyError } from '../lib/errors.js';
 import { getOrgProfile } from '../lib/org-profile.js';
-import { NotImplementedError } from '../lib/errors.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -39,10 +39,13 @@ export async function baseHandler(
   try {
     await orchestrator.deleteBucket(tenantId, bucketName);
   } catch (err) {
-    if (err instanceof NotImplementedError) {
+    if (err instanceof BucketNotEmptyError) {
       return new ResponseBuilder()
-        .status(501)
-        .body<ErrorResponse>({ message: 'Bucket deletion is not yet supported for this region' })
+        .status(409)
+        .body<ErrorResponse>({
+          message: `Bucket "${bucketName}" is not empty. Delete its objects and object versions before deleting the bucket.`,
+          code: ApiErrorCode.BUCKET_NOT_EMPTY,
+        })
         .build();
     }
     throw err;
