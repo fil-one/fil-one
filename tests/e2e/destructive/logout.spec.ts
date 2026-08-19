@@ -11,17 +11,28 @@ test('paid user logs out and session cookies are cleared', async ({ browser }) =
   const context = await browser.newContext({ storageState: STORAGE_STATE.paid });
   const page = await context.newPage();
 
+  // The returnTo landing is only a waypoint — the console root bounces an unauthenticated
+  // visitor on to the sign-in screen — so record the chain rather than assert a final URL.
+  const visited: string[] = [];
+  page.on('framenavigated', (frame) => {
+    if (frame === page.mainFrame()) visited.push(frame.url());
+  });
+
   await page.goto('/dashboard');
   await expect(page.locator('#dashboard-heading')).toBeVisible();
 
   await page.getByTestId('user-profile').click();
   await page.locator('#user-menu-logout-button').click();
 
-  // Wait for the full /logout -> Auth0 /v2/logout -> returnTo chain to settle.
-  // Accept either the apex (https://fil.one) or the www subdomain, since the
-  // returnTo target may resolve to www.fil.one.
-  await page.waitForURL(/^https:\/\/(www\.)?fil\.one\/?$/, { timeout: 30_000 });
-  await expect(page).toHaveURL(/^https:\/\/(www\.)?fil\.one\/?$/);
+  // Wait for the full /logout -> Auth0 /v2/logout -> returnTo -> sign-in chain to settle.
+  await page.waitForURL(/login/, { timeout: 30_000 });
+
+  // Non-production stages log out to their own console (logoutReturnTo in
+  // @filone/shared), so you can sign straight back in as a different user. Landing on
+  // the production marketing site instead is the regression this guards.
+  const consoleOrigin = new URL(process.env.BASE_URL!).origin;
+  expect(visited.some((url) => new URL(url).origin === consoleOrigin)).toBe(true);
+  expect(visited.some((url) => /^https:\/\/(www\.)?fil\.one\/?$/.test(url))).toBe(false);
 
   const cookies = await context.cookies();
   for (const name of AUTH_COOKIES) {

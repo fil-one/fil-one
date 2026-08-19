@@ -7,6 +7,7 @@ import type { CreatePortalSessionResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getStripeClient } from '../lib/stripe-client.js';
+import { resolveOrigin } from '../lib/resolve-origin.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -19,7 +20,11 @@ const dynamo = getDynamoClient();
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { userId } = getUserInfo(event);
   const tableName = Resource.BillingTable.name;
-  const websiteUrl = process.env.WEBSITE_URL!;
+  // Follows the hostname the user is actually on, so a session started from a
+  // demo alias returns there instead of jumping to the canonical host. Stripe
+  // applies no allowlist of its own to `return_url`, so resolveOrigin's exact
+  // match against ALLOWED_REDIRECT_ORIGINS is the only control on this value.
+  const websiteUrl = resolveOrigin(event);
   const stripe = getStripeClient();
 
   // Get customer record
