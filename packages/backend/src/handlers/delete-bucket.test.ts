@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NotImplementedError } from '../lib/errors.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -32,6 +31,7 @@ vi.mock('../lib/org-profile.js', () => ({
 process.env.FILONE_STAGE = 'test';
 
 import { baseHandler } from './delete-bucket.js';
+import { BucketNotEmptyError } from '../lib/errors.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
@@ -68,16 +68,50 @@ describe('delete-bucket baseHandler', () => {
     expect(mockOrchestratorDeleteBucket).not.toHaveBeenCalled();
   });
 
-  it('returns 501 when the orchestrator throws NotImplementedError', async () => {
-    mockOrchestratorDeleteBucket.mockRejectedValue(
-      new NotImplementedError('Aurora bucket deletion is not yet supported. See FIL-204.'),
-    );
+  it('calls orchestrator.deleteBucket and returns 204 with an empty body on success', async () => {
+    mockOrchestratorDeleteBucket.mockResolvedValue(undefined);
 
     const event = buildEvent({ userInfo: USER_INFO });
     event.pathParameters = { name: 'my-bucket' };
     const result = await baseHandler(event);
 
-    expect(result.statusCode).toBe(501);
+    expect(result).toMatchObject({ statusCode: 204, body: '' });
     expect(mockOrchestratorDeleteBucket).toHaveBeenCalledWith('aurora-t-1', 'my-bucket');
+  });
+
+  it('passes the tenantId from isTenantReady through to deleteBucket', async () => {
+    mockIsTenantReady.mockReturnValue('tenant-xyz');
+    mockOrchestratorDeleteBucket.mockResolvedValue(undefined);
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    event.pathParameters = { name: 'some-bucket' };
+    await baseHandler(event);
+
+    expect(mockOrchestratorDeleteBucket).toHaveBeenCalledWith('tenant-xyz', 'some-bucket');
+  });
+
+  // A non-empty bucket is the one failure translated to a response here, so the
+  // console can tell the user to empty the bucket first.
+  it('returns 409 BUCKET_NOT_EMPTY when the bucket still holds objects', async () => {
+    mockOrchestratorDeleteBucket.mockRejectedValue(new BucketNotEmptyError('my-bucket'));
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    event.pathParameters = { name: 'my-bucket' };
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(409);
+    const body = JSON.parse(result.body!) as { message: string; code: string };
+    expect(body.code).toBe('BUCKET_NOT_EMPTY');
+    expect(body.message).toMatch(/not empty/);
+  });
+
+  // Every other failure propagates to errorHandlerMiddleware (which renders the 5xx).
+  it('rethrows other failures from the orchestrator', async () => {
+    mockOrchestratorDeleteBucket.mockRejectedValue(new Error('S3 gateway unavailable'));
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    event.pathParameters = { name: 'my-bucket' };
+
+    await expect(baseHandler(event)).rejects.toThrow('S3 gateway unavailable');
   });
 });

@@ -11,6 +11,7 @@ import {
   PutBucketVersioningCommand,
   PutObjectLockConfigurationCommand,
   S3Client,
+  DeleteBucketCommand,
 } from '@aws-sdk/client-s3';
 
 import {
@@ -22,9 +23,10 @@ import {
   listObjects,
   putObjectLockConfiguration,
   setBucketVersioning,
+  deleteBucket,
 } from './s3-bucket-operations.js';
 import { createS3Client } from './s3-client.js';
-import { BucketAlreadyExistsError } from './errors.js';
+import { BucketAlreadyExistsError, BucketNotEmptyError } from './errors.js';
 import type { S3ClientContext } from './s3-client.js';
 
 // ---------------------------------------------------------------------------
@@ -104,6 +106,55 @@ describe('s3 bucket operations', () => {
       s3Mock.on(CreateBucketCommand).rejects(sdkErr);
 
       await expect(createBucket(s3, { bucketName: 'my-bucket' })).rejects.toBe(sdkErr);
+    });
+  });
+
+  describe('deleteBucket', () => {
+    it('sends a DeleteBucketCommand with the supplied bucket name', async () => {
+      s3Mock.on(DeleteBucketCommand).resolves({});
+
+      await deleteBucket(s3, 'my-bucket');
+
+      const calls = s3Mock.commandCalls(DeleteBucketCommand);
+      expect(calls).toHaveLength(1);
+      expect(calls[0].args[0].input).toEqual({ Bucket: 'my-bucket' });
+    });
+
+    it('resolves without throwing on a successful delete', async () => {
+      s3Mock.on(DeleteBucketCommand).resolves({});
+
+      await expect(deleteBucket(s3, 'my-bucket')).resolves.toBeUndefined();
+    });
+
+    // Delete is idempotent: a bucket that is already gone is a success, not an error.
+    it('treats a NoSuchBucket error as success', async () => {
+      const sdkErr = Object.assign(new Error('no such bucket'), { name: 'NoSuchBucket' });
+      s3Mock.on(DeleteBucketCommand).rejects(sdkErr);
+
+      await expect(deleteBucket(s3, 'my-bucket')).resolves.toBeUndefined();
+    });
+
+    // A non-empty bucket must NOT be swallowed — only NoSuchBucket is. It becomes a
+    // domain error so the handler can return a machine-readable 409.
+    it('translates a BucketNotEmpty error into BucketNotEmptyError', async () => {
+      const sdkErr = Object.assign(new Error('bucket not empty'), { name: 'BucketNotEmpty' });
+      s3Mock.on(DeleteBucketCommand).rejects(sdkErr);
+
+      await expect(deleteBucket(s3, 'my-bucket')).rejects.toBeInstanceOf(BucketNotEmptyError);
+    });
+
+    it('attaches the original SDK error as the cause of BucketNotEmptyError', async () => {
+      const sdkErr = Object.assign(new Error('bucket not empty'), { name: 'BucketNotEmpty' });
+      s3Mock.on(DeleteBucketCommand).rejects(sdkErr);
+
+      await expect(deleteBucket(s3, 'my-bucket')).rejects.toMatchObject({ cause: sdkErr });
+    });
+
+    it('propagates unrelated SDK errors unchanged', async () => {
+      const sdkErr = Object.assign(new Error('denied'), { name: 'AccessDenied' });
+      s3Mock.on(DeleteBucketCommand).rejects(sdkErr);
+
+      await expect(deleteBucket(s3, 'my-bucket')).rejects.toBe(sdkErr);
     });
   });
 

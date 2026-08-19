@@ -29,6 +29,58 @@ export type UseFileUploadOptions = {
 
 const PRESIGN_BATCH_SIZE = 10;
 
+const SYSTEM_FILE_NAMES = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini']);
+
+/** The path a folder upload carries, or undefined for a file the user picked one by one. */
+function folderPathOf(item: FileInput): string | undefined {
+  if (!(item instanceof File)) return item.relativePath;
+  return (item as File & { webkitRelativePath?: string }).webkitRelativePath || undefined;
+}
+
+/**
+ * Junk that comes along with a folder: OS metadata files, dot-prefixed entries and __MACOSX
+ * resource forks. A file the user selected on its own is never filtered, whatever it is named.
+ */
+export function isSystemFileInput(item: FileInput): boolean {
+  const folderPath = folderPathOf(item);
+  if (!folderPath) return false;
+  return folderPath
+    .split('/')
+    .filter(Boolean)
+    .some(
+      (segment) =>
+        SYSTEM_FILE_NAMES.has(segment) || segment === '__MACOSX' || segment.startsWith('.'),
+    );
+}
+
+function uploadedFraction(entry: FileEntry): number {
+  if (entry.status === 'done') return 1;
+  if (entry.status !== 'uploading') return 0;
+  if (!Number.isFinite(entry.progress)) return 0;
+  return Math.min(100, Math.max(0, entry.progress)) / 100;
+}
+
+export function calculateUploadProgress(entries: readonly FileEntry[]) {
+  let totalBytes = 0;
+  let uploadedBytes = 0;
+  let totalWeight = 0;
+  let uploadedWeight = 0;
+
+  for (const entry of entries) {
+    const fraction = uploadedFraction(entry);
+    // An empty file weighs one byte so it cannot sit at 100% while it is still queued.
+    const weight = Math.max(entry.file.size, 1);
+    totalBytes += entry.file.size;
+    uploadedBytes += entry.file.size * fraction;
+    totalWeight += weight;
+    uploadedWeight += weight * fraction;
+  }
+
+  // Floor, not round, so 100% appears only once every file is done.
+  const percent = totalWeight > 0 ? Math.floor((uploadedWeight / totalWeight) * 100) : 0;
+  return { totalBytes, uploadedBytes: Math.floor(uploadedBytes), percent };
+}
+
 function deriveKey(fileName: string, prefix: string): string {
   if (prefix.trim()) {
     return `${prefix.trim().replace(/\/+$/, '')}/${fileName}`;
@@ -80,7 +132,9 @@ function uploadFile(
   return new Promise((resolve) => {
     const xhr = new XMLHttpRequest();
     xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+      if (e.lengthComputable && e.total > 0) {
+        onProgress(Math.floor((e.loaded / e.total) * 100));
+      }
     };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
@@ -109,7 +163,7 @@ async function uploadEntries(
   for (const result of presignResults) {
     if (result.type === 'error') {
       for (const e of result.entries) {
-        updateEntry(e.id, { status: 'error', error: result.message });
+        updateEntry(e.id, { status: 'error', progress: 0, error: result.message });
         failedCount++;
       }
     } else {
@@ -126,7 +180,7 @@ async function uploadEntries(
       if (result.success) {
         updateEntry(entry.id, { status: 'done', progress: 100 });
       } else {
-        updateEntry(entry.id, { status: 'error', error: result.error });
+        updateEntry(entry.id, { status: 'error', progress: 0, error: result.error });
         failedCount++;
       }
     }),
@@ -154,30 +208,36 @@ export function useFileUpload({ bucketName, region, onSuccess }: UseFileUploadOp
     if (folderInputRef.current) folderInputRef.current.value = '';
   }, []);
 
-  const addFiles = useCallback((incoming: FileInput[], currentPrefix: string) => {
-    const entries: FileEntry[] = incoming.map((item) => {
-      const file = item instanceof File ? item : item.file;
-      const relativePath =
-        item instanceof File
-          ? (item as File & { webkitRelativePath?: string }).webkitRelativePath || undefined
-          : item.relativePath;
-      const key = relativePath ? relativePath : deriveKey(file.name, currentPrefix);
-      return {
-        id: `${++idCounter.current}`,
-        file,
-        relativePath,
-        key,
-        status: 'pending' as FileUploadStatus,
-        progress: 0,
-      };
-    });
+  const addFiles = useCallback(
+    (incoming: FileInput[], currentPrefix: string) => {
+      const accepted = incoming.filter((item) => !isSystemFileInput(item));
+      const entries: FileEntry[] = accepted.map((item) => {
+        const file = item instanceof File ? item : item.file;
+        const relativePath = folderPathOf(item);
+        const key = relativePath ? relativePath : deriveKey(file.name, currentPrefix);
+        return {
+          id: `${++idCounter.current}`,
+          file,
+          relativePath,
+          key,
+          status: 'pending' as FileUploadStatus,
+          progress: 0,
+        };
+      });
 
-    setFiles((prev) => {
-      const existingIds = new Set(prev.map((e) => e.id));
-      const fresh = entries.filter((e) => !existingIds.has(e.id));
-      return [...prev, ...fresh];
-    });
-  }, []);
+      setFiles((prev) => {
+        const existingIds = new Set(prev.map((e) => e.id));
+        const fresh = entries.filter((e) => !existingIds.has(e.id));
+        return [...prev, ...fresh];
+      });
+
+      const skipped = incoming.length - accepted.length;
+      if (skipped > 0) {
+        toast.info(`Skipped ${skipped} system file${skipped > 1 ? 's' : ''}`);
+      }
+    },
+    [toast],
+  );
 
   const handleFilesSelect = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -271,6 +331,7 @@ export function useFileUpload({ bucketName, region, onSuccess }: UseFileUploadOp
   const pendingCount = files.filter((e) => e.status === 'pending').length;
   const canUpload = files.some((e) => e.status === 'pending' || e.status === 'error');
   const hasIndividualFiles = files.some((e) => !e.relativePath);
+  const progress = calculateUploadProgress(files);
 
   return {
     uploadStep,
@@ -292,5 +353,8 @@ export function useFileUpload({ bucketName, region, onSuccess }: UseFileUploadOp
     pendingCount,
     canUpload,
     hasIndividualFiles,
+    totalBytes: progress.totalBytes,
+    uploadedBytes: progress.uploadedBytes,
+    progressPercent: progress.percent,
   };
 }
