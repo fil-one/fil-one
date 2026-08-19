@@ -66,7 +66,13 @@ importers:
       '@aws-sdk/client-dynamodb':
         specifier: ^3.1031.0
         version: 3.1031.0
+      '@aws-sdk/client-s3':
+        specifier: ^3.1031.0
+        version: 3.1031.0
       '@aws-sdk/client-ssm':
+        specifier: ^3.1031.0
+        version: 3.1031.0
+      '@aws-sdk/s3-request-presigner':
         specifier: ^3.1031.0
         version: 3.1031.0
       '@aws-sdk/util-dynamodb':

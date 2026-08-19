@@ -138,10 +138,10 @@ for (const region of REGIONS) {
   test.describe(`paid user (${region})`, () => {
     test.use({ storageState: STORAGE_STATE.paid });
 
-    // TODO: Re-enable once bucket deletion lands so we can clean up after each
-    // run. Account-wide bucket limit is 100 and buckets are not yet deletable
-    // in either region (the delete API routes every region to Aurora, which
-    // does not implement deletion).
+    // TODO: Re-enable once this spec has a teardown step that empties and deletes
+    // the bucket it creates. Bucket deletion itself is now implemented for every
+    // region; what is missing is the cleanup, and the account-wide bucket limit is
+    // 100.
     // https://linear.app/filecoin-foundation/issue/FIL-204/delete-bucket
     test.skip(`paid user can create bucket and access key (${region})`, async ({ page }) => {
       await page.goto('/dashboard');
@@ -176,10 +176,10 @@ for (const region of REGIONS) {
   test.describe(`trial user (${region})`, () => {
     test.use({ storageState: STORAGE_STATE.trial });
 
-    // TODO: Re-enable once bucket deletion lands so we can clean up after each
-    // run. Account-wide bucket limit is 100 and buckets are not yet deletable
-    // in either region (the delete API routes every region to Aurora, which
-    // does not implement deletion).
+    // TODO: Re-enable once this spec has a teardown step that empties and deletes
+    // the bucket it creates. Bucket deletion itself is now implemented for every
+    // region; what is missing is the cleanup, and the account-wide bucket limit is
+    // 100.
     // https://linear.app/filecoin-foundation/issue/FIL-204/delete-bucket
     test.skip(`trial user can create bucket and access key (${region})`, async ({ page }) => {
       await page.goto('/dashboard');
