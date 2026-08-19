@@ -98,6 +98,14 @@ node bin/orgs-beta.ts revoke staging someone@example.com --execute
 node bin/orgs-beta.ts check staging someone@example.com                    # exit 0 granted, 2 not
 ```
 
+**Revoking an org with members needs `--force-members`.** The console offers the
+members surface to a caller who belongs to more than one organization, or one
+whose organization holds this flag. An Owner who belongs to no other org is
+therefore the case that breaks: revoking their org's row leaves every member in
+place and takes away the roster, the role picker, removal and transfer, while
+the API keeps serving all four. So a revoke against an org with more than one
+member prints the count and stops until `--force-members` says it was meant.
+
 **Where the flag lives.** `UserInfoTable`, sort key `ORGS_BETA`, under either of
 two partition keys:
 
@@ -115,8 +123,16 @@ Granting twice is the same as granting once, and revoking a row that was never
 written is not an error.
 
 **Either row grants.** Revoking an org does not revoke the people inside it who
-hold their own allowlist row — `list` shows both kinds, and the revoke output
-says so when it applies.
+hold their own allowlist row, and revoking an address does not revoke their
+org's row. `list` shows both kinds, and `revoke` and `check` name the direction
+they did not read, because neither can answer whether a person is in the beta:
+the gate ORs the two rows and resolves the org from the request.
+
+**Invitations already sent stay acceptable.** Accepting one reads no flag
+(`accept-invitation.ts`), so a revoke removes the console path to withdrawing an
+invitation rather than the invitation. `revoke` lists what is still redeemable —
+the org's pending rows for an `ORG#` target, and the rows naming that address
+for an `ALLOWLIST#` one — so the operator sees what they left behind.
 
 **Reads are consistent.** `hasOrgsBetaAccess` reads both rows with
 `ConsistentRead`, because granting the flag is a manual step somebody performs
@@ -125,12 +141,18 @@ sees. The console is the lag that remains: it caches `GET /me` for ten minutes,
 so a customer watching for the change may need to reload.
 
 **Grants and revokes are dry runs by default.** Both print the row they would
-write or delete and stop until `--execute` is passed. `list` and `check` only
-read.
+write or delete and stop until `--execute` is passed. `--dry-run` beats
+`--execute` when both are given, as it does in the migration scripts, and any
+other `--` argument stops the run rather than being ignored. `list` and `check`
+only read.
 
 Targets are told apart by shape: anything containing `@` is an email, anything
 else must be an organization UUID. The script refuses a target that is neither
-before it touches AWS.
+before it touches AWS. A UUID also has to name an organization that exists:
+`grant` and `check` read its `ORG#{orgId}/PROFILE` row first and exit 1 when
+there is none, because `GET /me` reports `orgId` beside `userId` and both are
+UUIDs — an id taken from the wrong field would otherwise be written as a grant
+that reads back in `list` and grants nothing.
 
 Like `rag-access.ts`, this talks to AWS directly with your ambient credentials
 rather than through `sst shell`, which cannot evaluate pulumi providers against
