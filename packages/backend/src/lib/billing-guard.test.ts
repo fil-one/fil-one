@@ -23,14 +23,14 @@ describe('sendGuardedBillingUpdate', () => {
     ddbMock.reset();
   });
 
-  it('conditions every write on the row still existing', async () => {
+  it('conditions every write on the row not being scrubbed', async () => {
     ddbMock.on(UpdateItemCommand).resolves({});
 
     await sendGuardedBillingUpdate(INPUT, CONTEXT);
 
     expect(ddbMock.commandCalls(UpdateItemCommand)[0]!.args[0].input).toMatchObject({
       ...INPUT,
-      ConditionExpression: 'attribute_exists(pk)',
+      ConditionExpression: 'attribute_not_exists(deletedAt)',
     });
   });
 
@@ -46,7 +46,7 @@ describe('sendGuardedBillingUpdate', () => {
 
   // A webhook that threw here would be retried by Stripe for days over a row
   // that is never coming back.
-  it('treats a purged row as a no-op rather than an error', async () => {
+  it('treats a scrubbed row as a no-op rather than an error', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     ddbMock
       .on(UpdateItemCommand)
@@ -54,7 +54,7 @@ describe('sendGuardedBillingUpdate', () => {
 
     try {
       await expect(sendGuardedBillingUpdate(INPUT, CONTEXT)).resolves.toBeUndefined();
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('purged billing row'), CONTEXT);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('scrubbed billing row'), CONTEXT);
     } finally {
       warn.mockRestore();
     }
