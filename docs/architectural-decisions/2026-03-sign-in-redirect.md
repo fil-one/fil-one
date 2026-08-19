@@ -98,11 +98,11 @@ These can be linked from external sites, emails, or documentation without requir
 
 ## Logout redirect
 
-After clearing session cookies, the logout handler redirects to Auth0's `/v2/logout` endpoint with `returnTo=https://fil.one`. This sends the user to the marketing site rather than back into the login flow. The `returnTo` is hardcoded to `https://fil.one` rather than derived from the request origin because the application is only deployed at that domain. `https://fil.one` must be registered in the Auth0 application's Allowed Logout URLs (handled by the `setup-integrations` stack job).
+After clearing session cookies, the logout handler redirects to Auth0's `/v2/logout` endpoint with a `returnTo` derived from the console host the user signed out of, via `logoutReturnTo` in `@filone/shared`. A production console hands off to its marketing site (`app.fil.one` → `https://fil.one`, and the demo alias `app.filone.ai` → `https://filone.ai`, so a demo never lands on a domain that may be blocklisted); every other stage returns to its own console, which lands the user on the sign-in screen so they can switch user. A closed table rather than string surgery, because every value it can produce must also be registered in the Auth0 application's Allowed Logout URLs — the `setup-integrations` stack job derives those from the same function, so the two cannot drift.
 
 ## Consequences
 
 - External links and bookmarks can point to `/login` for immediate server-side redirect without loading JS.
 - Auth0 configuration (`VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, `VITE_AUTH0_AUDIENCE`) has been fully removed from the frontend bundle. Auth0 credentials live exclusively in the backend, reducing the attack surface of the SPA.
 - The `SignInPage` and `SignUpPage` components are now unused and can be removed.
-- Logout returns users to `https://fil.one` via Auth0's `/v2/logout` with `returnTo=https://fil.one`, taking them to the marketing site rather than back into the login flow.
+- Logout goes through Auth0's `/v2/logout`, with a `returnTo` that follows the console host: the marketing site in production, the console itself on every other stage.
