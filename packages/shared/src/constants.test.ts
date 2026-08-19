@@ -8,6 +8,10 @@ import {
   getS3Endpoint,
   getAuth0Domain,
   getStageFromHostname,
+  PROD_CONSOLE_HOST,
+  PROD_CONSOLE_ALIAS_HOSTS,
+  MARKETING_URL_BY_CONSOLE_ORIGIN,
+  logoutReturnTo,
   getAvailableRegions,
   supportsBucketManagement,
   isFoundationEmail,
@@ -109,17 +113,91 @@ describe('getStageFromHostname', () => {
     expect(getStageFromHostname('app.fil.one')).toBe(Stage.Production);
   });
 
+  for (const hostname of PROD_CONSOLE_ALIAS_HOSTS) {
+    it(`returns Production for the demo alias "${hostname}"`, () => {
+      expect(getStageFromHostname(hostname)).toBe(Stage.Production);
+    });
+  }
+
+  it('ignores hostname casing', () => {
+    expect(getStageFromHostname('APP.FIL.ONE')).toBe(Stage.Production);
+  });
+
   const nonProductionHostnames = [
     'staging.fil.one',
     'pr-42.fil.one',
     'localhost',
     'd123abc.cloudfront.net',
     '',
+    // Guards against this ever being relaxed into a suffix or substring match.
+    // Each of these is a hostname an attacker could control that ends with,
+    // starts with, or contains a production host.
+    'app.fil.one.attacker.example',
+    'app.filone.ai.attacker.example',
+    'notapp.filone.ai',
+    'filone.ai',
+    'fil.one',
   ];
 
   for (const hostname of nonProductionHostnames) {
     it(`returns Staging for "${hostname}"`, () => {
       expect(getStageFromHostname(hostname)).toBe(Stage.Staging);
+    });
+  }
+});
+
+describe('demo alias constants', () => {
+  it('gives every production console origin a marketing site to log out to', () => {
+    for (const host of [PROD_CONSOLE_HOST, ...PROD_CONSOLE_ALIAS_HOSTS]) {
+      expect(MARKETING_URL_BY_CONSOLE_ORIGIN[`https://${host}`]).toBeDefined();
+    }
+  });
+
+  // The alias console must not send a signed-out user to fil.one, which is the
+  // domain the alias exists to route around.
+  it('keeps each alias console on its own marketing domain', () => {
+    expect(MARKETING_URL_BY_CONSOLE_ORIGIN['https://app.filone.ai']).toBe('https://filone.ai');
+  });
+
+  it('leaves non-production origins out of the table', () => {
+    expect(MARKETING_URL_BY_CONSOLE_ORIGIN['https://staging.fil.one']).toBeUndefined();
+  });
+
+  // getStageFromHostname lowercases its input before comparing, so an entry
+  // carrying any uppercase could never match.
+  it('declares every host in lowercase', () => {
+    for (const host of [PROD_CONSOLE_HOST, ...PROD_CONSOLE_ALIAS_HOSTS]) {
+      expect(host).toBe(host.toLowerCase());
+    }
+  });
+
+  it('keeps aliases off the flagged domain they exist to avoid', () => {
+    for (const host of PROD_CONSOLE_ALIAS_HOSTS) {
+      expect(host.endsWith('.fil.one')).toBe(false);
+    }
+  });
+});
+
+describe('logoutReturnTo', () => {
+  it('hands a production console off to its marketing site', () => {
+    expect(logoutReturnTo(`https://${PROD_CONSOLE_HOST}`)).toBe('https://fil.one');
+  });
+
+  it('hands a demo alias off to the alias marketing site', () => {
+    expect(logoutReturnTo('https://app.filone.ai')).toBe('https://filone.ai');
+  });
+
+  // Non-production stages have no marketing site of their own, and being thrown onto
+  // production marketing is a nuisance when you are only switching the signed-in user.
+  const nonProductionOrigins = [
+    'https://staging.fil.one',
+    'https://pr-42.dev.fil.one',
+    'https://localhost:5173',
+  ];
+
+  for (const origin of nonProductionOrigins) {
+    it(`returns "${origin}" to itself`, () => {
+      expect(logoutReturnTo(origin)).toBe(origin);
     });
   }
 });
