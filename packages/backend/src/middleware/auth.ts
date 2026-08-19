@@ -286,9 +286,7 @@ async function resolveUserAndOrg(
     }),
   );
 
-  // Checked before the userId/orgId branch: the purge strips both attributes
-  // off the tombstone, so a deleted user would otherwise fall through and be
-  // treated as a brand-new signup.
+  // Before the userId/orgId branch, so a stamped row can never be read as a new signup.
   if (isIdentityTombstoned(result.Item)) throw new AccountDeletedError();
 
   if (result.Item?.userId?.S && result.Item?.orgId?.S) {

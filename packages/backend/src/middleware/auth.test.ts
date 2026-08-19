@@ -243,7 +243,6 @@ describe('authMiddleware', () => {
         .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
         .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
 
-      // The purge strips userId/orgId and leaves `deleted` behind.
       ddbMock
         .on(GetItemCommand, {
           Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
@@ -252,7 +251,6 @@ describe('authMiddleware', () => {
           Item: {
             pk: { S: `SUB#${MOCK_SUB}` },
             sk: { S: 'IDENTITY' },
-            deleted: { BOOL: true },
             deletedAt: { S: '2026-08-12T00:00:00.000Z' },
           },
         });
@@ -279,7 +277,11 @@ describe('authMiddleware', () => {
       mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } });
 
       ddbMock.on(GetItemCommand).resolves({
-        Item: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' }, deleted: { BOOL: true } },
+        Item: {
+          pk: { S: `SUB#${MOCK_SUB}` },
+          sk: { S: 'IDENTITY' },
+          deletedAt: { S: '2026-08-12T00:00:00.000Z' },
+        },
       });
 
       const { before } = authMiddleware({ requireVerifiedEmail: false });

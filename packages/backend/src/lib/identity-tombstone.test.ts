@@ -2,9 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { isIdentityTombstoned } from './identity-tombstone.js';
 
 describe('isIdentityTombstoned', () => {
-  it('is true only for an explicit BOOL true', () => {
-    expect(isIdentityTombstoned({ deleted: { BOOL: true } })).toBe(true);
-    expect(isIdentityTombstoned({ deleted: { BOOL: false } })).toBe(false);
+  it('reads the deletedAt stamp the scrub writes', () => {
+    expect(isIdentityTombstoned({ deletedAt: { S: '2026-08-12T00:00:00.000Z' } })).toBe(true);
   });
 
   it('is false for a live identity row', () => {
