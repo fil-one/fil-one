@@ -8,6 +8,7 @@ import {
   deleteS3AccessKey,
   getS3AccessKey,
   listS3AccessKeys,
+  deleteBucket,
 } from '@filone/aurora-portal-client';
 import type {
   AccessKeyPermission,
@@ -22,6 +23,7 @@ import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
   BucketAlreadyExistsError,
+  BucketNotEmptyError,
 } from '../errors.js';
 import { instrumentClient } from './aurora-api-metrics.js';
 
@@ -352,4 +354,35 @@ export async function getAuroraPortalApiKey(stage: string, tenantId: string): Pr
 
   ssmCache.set(cacheKey, apiKey);
   return apiKey;
+}
+
+export async function deleteAuroraBucket({
+  tenantId,
+  bucketName,
+}: {
+  tenantId: string;
+  bucketName: string;
+}): Promise<void> {
+  const client = await createPortalClient(tenantId);
+
+  const { error, response } = await deleteBucket({
+    client,
+    path: { tenantId, bucketName },
+    throwOnError: false,
+  });
+
+  if (error) {
+    if (response?.status === 404) {
+      // Already deleted — treat as success
+      return;
+    }
+    // The Portal returns 409 only for "can't delete a bucket with objects/versions
+    // present", matching the S3 gateway's BucketNotEmpty.
+    if (response?.status === 409) {
+      throw new BucketNotEmptyError(bucketName, { cause: error as Error });
+    }
+    throw new Error(`Failed to delete Aurora bucket "${bucketName}" for tenant ${tenantId}`, {
+      cause: error,
+    });
+  }
 }

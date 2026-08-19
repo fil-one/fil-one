@@ -110,10 +110,15 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   }
 
   if (!response.ok) {
-    const error = (await response.json().catch(() => ({}))) as { message?: string };
+    const error = (await response.json().catch(() => ({}))) as {
+      message?: string;
+      code?: ApiErrorCode;
+    };
+    // Carry the backend's error code through so callers can render specific copy
+    // (e.g. BUCKET_NOT_EMPTY) instead of only the generic message.
     throw Object.assign(
       new Error(error.message ?? `Request failed with status ${response.status}`),
-      { status: response.status },
+      { status: response.status, ...(error.code && { code: error.code }) },
     );
   }
 

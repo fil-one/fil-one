@@ -202,6 +202,25 @@ describe('auth-login handler', () => {
     );
   });
 
+  // The whole login round-trip has to stay on the host the user started from: a demo
+  // on the alias must never be bounced onto the canonical domain it exists to avoid,
+  // and vice versa. CloudFront supplies the viewer host as x-forwarded-host.
+  const consoleHosts = ['app.fil.one', 'app.filone.ai'];
+
+  for (const host of consoleHosts) {
+    it(`builds redirect_uri on the console host "${host}"`, async () => {
+      process.env.ALLOWED_REDIRECT_ORIGINS = 'https://app.fil.one,https://app.filone.ai';
+      const event = buildEvent();
+      event.headers['x-forwarded-host'] = host;
+
+      const result = await handler(event, stubContext);
+
+      expect(parseLocation(result).searchParams.get('redirect_uri')).toBe(
+        `https://${host}/api/auth/callback`,
+      );
+    });
+  }
+
   it('ignores X-Dev-Origin when not in ALLOWED_REDIRECT_ORIGINS', async () => {
     process.env.ALLOWED_REDIRECT_ORIGINS = '';
     const event = buildEvent();
