@@ -13,6 +13,7 @@ import { parseCookies } from '../lib/cookies.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { resolveOrigin } from '../lib/resolve-origin.js';
+import { resolveAuth0Domain } from '../lib/auth0-domain.js';
 
 function redirect(location: string, cookies: string[] = []): APIGatewayProxyStructuredResultV2 {
   return {
@@ -48,7 +49,9 @@ async function baseHandler(
     ]);
   }
 
-  const domain = process.env.AUTH0_DOMAIN!;
+  // Must be the domain that issued the authorization code, i.e. the one
+  // auth-login sent the user to for this same host.
+  const domain = resolveAuth0Domain(event);
   const audience = process.env.AUTH0_AUDIENCE!;
   const callbackUrl = `${origin}/api/auth/callback`;
   const secrets = getAuthSecrets();
