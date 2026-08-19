@@ -37,6 +37,9 @@ export const queryKeys = {
   // also invalidates the trends charts.
   usageTrends: (period: '7d' | '30d') => ['usage', 'trends', period] as const,
   buckets: ['buckets'] as const,
+  // Shares the ['buckets'] prefix so deleting a bucket invalidates both the
+  // unfiltered baseline and whatever filtered/sorted view is active.
+  bucketsFiltered: (params: Record<string, string>) => ['buckets', 'filtered', params] as const,
   bucket: (bucketName: string, region: S3Region) => ['bucket', bucketName, region] as const,
   objects: (bucketName: string, region: S3Region) => ['objects', bucketName, region] as const,
   objectMetadata: (bucketName: string, objectKey: string, versionId?: string) =>

@@ -77,6 +77,26 @@ export interface ListBucketsResponse {
   buckets: Bucket[];
 }
 
+export const BUCKET_SORT_KEYS = ['bucketName', 'region', 'createdAt'] as const;
+export type BucketSortKey = (typeof BUCKET_SORT_KEYS)[number];
+
+export const SORT_DIRECTIONS = ['asc', 'desc'] as const;
+export type SortDirection = (typeof SORT_DIRECTIONS)[number];
+
+/**
+ * `/buckets` query params. Filtering and sorting happen on the backend
+ * (FIL-324): the frontend forwards these rather than filtering a full list
+ * client-side, and a `region` match lets the handler skip calling orchestrators
+ * outside that region entirely.
+ */
+export interface ListBucketsQuery {
+  /** Case-insensitive substring match against bucketName. */
+  search?: string;
+  region?: string;
+  sortKey?: BucketSortKey;
+  sortDirection?: SortDirection;
+}
+
 export interface CreateBucketRequest {
   bucketName: string;
   region: string;

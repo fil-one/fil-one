@@ -7,10 +7,11 @@ import {
   DEFAULT_BUCKET_SORT,
   EMPTY_BUCKET_FILTERS,
   bucketRegions,
-  filterBuckets,
+  bucketsQueryParams,
+  hasActiveFilters,
+  hasRefinements,
   nextBucketSort,
   shouldShowBucketControls,
-  sortBuckets,
 } from './bucket-table.js';
 
 function bucket(overrides: Partial<Bucket> & { bucketName: string }): Bucket {
@@ -70,99 +71,80 @@ describe('bucketRegions', () => {
 });
 
 // ---------------------------------------------------------------------------
-// filterBuckets
+// hasActiveFilters / hasRefinements
 // ---------------------------------------------------------------------------
 
-describe('filterBuckets', () => {
-  it('returns everything with empty filters', () => {
-    expect(filterBuckets(BUCKETS, EMPTY_BUCKET_FILTERS)).toHaveLength(3);
+describe('hasActiveFilters', () => {
+  it('is false for the empty filters', () => {
+    expect(hasActiveFilters(EMPTY_BUCKET_FILTERS)).toBe(false);
   });
 
-  it('matches the name case-insensitively on a substring', () => {
-    const result = filterBuckets(BUCKETS, { query: 'LOAD', region: ALL_REGIONS });
-    expect(result.map((b) => b.bucketName)).toEqual(['Uploads']);
+  it('is true for a non-empty query', () => {
+    expect(hasActiveFilters({ query: 'media', region: ALL_REGIONS })).toBe(true);
   });
 
-  it('ignores surrounding whitespace in the query', () => {
-    const result = filterBuckets(BUCKETS, { query: '  media  ', region: ALL_REGIONS });
-    expect(result.map((b) => b.bucketName)).toEqual(['media']);
+  it('is true for a region other than "all"', () => {
+    expect(hasActiveFilters({ query: '', region: 'eu-west-1' })).toBe(true);
+  });
+});
+
+describe('hasRefinements', () => {
+  it('is false with default filters and default sort', () => {
+    expect(hasRefinements(EMPTY_BUCKET_FILTERS, DEFAULT_BUCKET_SORT)).toBe(false);
   });
 
-  it('filters by region', () => {
-    const result = filterBuckets(BUCKETS, { query: '', region: 'us-east-1' });
-    expect(result.map((b) => b.bucketName)).toEqual(['archive']);
+  it('is true when a filter is active, even with the default sort', () => {
+    expect(hasRefinements({ query: 'media', region: ALL_REGIONS }, DEFAULT_BUCKET_SORT)).toBe(true);
   });
 
-  it('applies query and region together', () => {
-    // 'a' alone matches all three; the region narrows it to the one in France.
-    const result = filterBuckets(BUCKETS, { query: 'a', region: 'eu-west-1' });
-    expect(result.map((b) => b.bucketName)).toEqual(['media']);
-  });
-
-  it('returns nothing when the query and region disagree', () => {
-    expect(filterBuckets(BUCKETS, { query: 'media', region: 'us-east-1' })).toEqual([]);
+  it('is true when the sort is non-default, even with no active filters', () => {
+    expect(hasRefinements(EMPTY_BUCKET_FILTERS, { key: 'createdAt', direction: 'asc' })).toBe(true);
+    expect(hasRefinements(EMPTY_BUCKET_FILTERS, { key: 'bucketName', direction: 'desc' })).toBe(
+      true,
+    );
   });
 });
 
 // ---------------------------------------------------------------------------
-// sortBuckets
+// bucketsQueryParams
 // ---------------------------------------------------------------------------
 
-describe('sortBuckets', () => {
-  it('sorts by name ascending, ignoring case', () => {
-    const result = sortBuckets(BUCKETS, DEFAULT_BUCKET_SORT);
-    expect(result.map((b) => b.bucketName)).toEqual(['archive', 'media', 'Uploads']);
+describe('bucketsQueryParams', () => {
+  it('is empty for default filters and sort', () => {
+    expect(bucketsQueryParams(EMPTY_BUCKET_FILTERS, DEFAULT_BUCKET_SORT).toString()).toBe('');
   });
 
-  it('sorts by name descending', () => {
-    const result = sortBuckets(BUCKETS, { key: 'bucketName', direction: 'desc' });
-    expect(result.map((b) => b.bucketName)).toEqual(['Uploads', 'media', 'archive']);
+  it('trims and forwards a non-empty search', () => {
+    const params = bucketsQueryParams(
+      { query: '  media  ', region: ALL_REGIONS },
+      DEFAULT_BUCKET_SORT,
+    );
+    expect(params.get('search')).toBe('media');
   });
 
-  it('sorts by creation date, oldest first when ascending', () => {
-    const result = sortBuckets(BUCKETS, { key: 'createdAt', direction: 'asc' });
-    expect(result.map((b) => b.bucketName)).toEqual(['media', 'Uploads', 'archive']);
+  it('omits search entirely for a blank query', () => {
+    const params = bucketsQueryParams({ query: '   ', region: ALL_REGIONS }, DEFAULT_BUCKET_SORT);
+    expect(params.has('search')).toBe(false);
   });
 
-  it('sorts by creation date, newest first when descending', () => {
-    const result = sortBuckets(BUCKETS, { key: 'createdAt', direction: 'desc' });
-    expect(result.map((b) => b.bucketName)).toEqual(['archive', 'Uploads', 'media']);
+  it('forwards a region other than "all"', () => {
+    const params = bucketsQueryParams({ query: '', region: 'us-east-1' }, DEFAULT_BUCKET_SORT);
+    expect(params.get('region')).toBe('us-east-1');
   });
 
-  it('sorts by region label, which is what the row displays', () => {
-    // Europe (Amsterdam), Europe (France), US East (Michigan).
-    const result = sortBuckets(BUCKETS, { key: 'region', direction: 'asc' });
-    expect(result.map((b) => b.region)).toEqual(['eu-central-3', 'eu-west-1', 'us-east-1']);
+  it('forwards a non-default sort key and direction', () => {
+    const params = bucketsQueryParams(EMPTY_BUCKET_FILTERS, {
+      key: 'createdAt',
+      direction: 'desc',
+    });
+    expect(params.get('sortKey')).toBe('createdAt');
+    expect(params.get('sortDirection')).toBe('desc');
   });
 
-  it('breaks a region-label tie on the region code', () => {
-    // Unknown codes fall back to the code as their label, so two unknowns in the
-    // same list must still land in a deterministic order.
-    const unknown = [
-      bucket({ bucketName: 'a', region: 'zz-south-1' }),
-      bucket({ bucketName: 'b', region: 'aa-north-1' }),
-    ];
-    const result = sortBuckets(unknown, { key: 'region', direction: 'asc' });
-    expect(result.map((b) => b.region)).toEqual(['aa-north-1', 'zz-south-1']);
-  });
-
-  it('keeps tied rows in their original order in both directions', () => {
-    const tied = [
-      bucket({ bucketName: 'b', createdAt: '2026-01-01T00:00:00Z' }),
-      bucket({ bucketName: 'a', createdAt: '2026-01-01T00:00:00Z' }),
-    ];
-    expect(
-      sortBuckets(tied, { key: 'createdAt', direction: 'asc' }).map((b) => b.bucketName),
-    ).toEqual(['b', 'a']);
-    expect(
-      sortBuckets(tied, { key: 'createdAt', direction: 'desc' }).map((b) => b.bucketName),
-    ).toEqual(['b', 'a']);
-  });
-
-  it('does not mutate the input array', () => {
-    const input = [...BUCKETS];
-    sortBuckets(input, { key: 'createdAt', direction: 'desc' });
-    expect(input.map((b) => b.bucketName)).toEqual(['archive', 'media', 'Uploads']);
+  it('omits sortDirection when only the key changed to a non-default one at the default direction', () => {
+    const params = bucketsQueryParams(EMPTY_BUCKET_FILTERS, { key: 'region', direction: 'asc' });
+    expect(params.get('sortKey')).toBe('region');
+    expect(params.has('sortDirection')).toBe(false);
   });
 });
 

@@ -1,4 +1,3 @@
-import { useMemo, useState } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import {
   CopyIcon,
@@ -12,7 +11,6 @@ import {
 import type { Bucket, S3Region } from '@filone/shared';
 import { S3_REGION, getRegionLabel, getS3Endpoint } from '@filone/shared';
 
-import { Badge } from './Badge';
 import { Button } from './Button';
 import { EmptyStateCard } from './EmptyStateCard';
 import { RegionFlag } from './RegionFlag';
@@ -26,18 +24,15 @@ import { FILONE_STAGE } from '../env.js';
 import { useCopyToClipboard } from '../lib/use-copy-to-clipboard.js';
 import { formatDate } from '../lib/time.js';
 import {
-  DEFAULT_BUCKET_SORT,
   EMPTY_BUCKET_FILTERS,
+  type BucketFilters,
+  type BucketSort,
   type BucketSortKey,
-  bucketRegions,
-  filterBuckets,
   nextBucketSort,
-  shouldShowBucketControls,
-  sortBuckets,
 } from '../lib/bucket-table.js';
 
 /**
- * Columns dropped below `sm`. Five columns plus cell padding overflow a phone, and
+ * Columns dropped below `sm`. Four columns plus cell padding overflow a phone, and
  * horizontal scrolling would push the row's action menu off-screen. What's left
  * is the name, its secondary line (region and storage), and the actions; the
  * bucket detail page carries the rest.
@@ -45,28 +40,36 @@ import {
 const SECONDARY_COLUMN = 'hidden sm:table-cell';
 
 type BucketsTableProps = {
+  /** Already filtered and sorted server-side; this component only renders. */
   buckets: Bucket[];
   onDelete: (bucketName: string) => void;
+  showControls: boolean;
+  filters: BucketFilters;
+  onFiltersChange: (filters: BucketFilters) => void;
+  sort: BucketSort;
+  onSortChange: (sort: BucketSort) => void;
+  regions: string[];
+  matchCount: number;
+  totalCount: number;
 };
 
-export function BucketsTable({ buckets, onDelete }: BucketsTableProps) {
-  const [filters, setFilters] = useState(EMPTY_BUCKET_FILTERS);
-  const [sort, setSort] = useState(DEFAULT_BUCKET_SORT);
-
-  // Gated on the total, not the filtered count, so narrowing a search down to a
-  // couple of rows can't pull the search field out from under the cursor.
-  const showControls = shouldShowBucketControls(buckets.length);
-  const regions = useMemo(() => bucketRegions(buckets), [buckets]);
-  const visibleBuckets = useMemo(
-    () => sortBuckets(showControls ? filterBuckets(buckets, filters) : buckets, sort),
-    [buckets, filters, sort, showControls],
-  );
-
+export function BucketsTable({
+  buckets,
+  onDelete,
+  showControls,
+  filters,
+  onFiltersChange,
+  sort,
+  onSortChange,
+  regions,
+  matchCount,
+  totalCount,
+}: BucketsTableProps) {
   // Short lists are scannable as they are, so they keep plain, inert headers.
   const sortProps = (key: BucketSortKey) =>
     showControls
       ? {
-          onSort: () => setSort((current) => nextBucketSort(current, key)),
+          onSort: () => onSortChange(nextBucketSort(sort, key)),
           sortDirection: sort.key === key ? sort.direction : undefined,
         }
       : {};
@@ -76,14 +79,14 @@ export function BucketsTable({ buckets, onDelete }: BucketsTableProps) {
       {showControls && (
         <BucketsToolbar
           filters={filters}
-          onChange={setFilters}
+          onChange={onFiltersChange}
           regions={regions}
-          matchCount={visibleBuckets.length}
-          totalCount={buckets.length}
+          matchCount={matchCount}
+          totalCount={totalCount}
         />
       )}
 
-      {visibleBuckets.length === 0 ? (
+      {buckets.length === 0 ? (
         <EmptyStateCard
           icon={MagnifyingGlassIcon}
           iconColor="grey"
@@ -93,7 +96,7 @@ export function BucketsTable({ buckets, onDelete }: BucketsTableProps) {
           <Button
             id="buckets-clear-filters-button"
             variant="ghost"
-            onClick={() => setFilters(EMPTY_BUCKET_FILTERS)}
+            onClick={() => onFiltersChange(EMPTY_BUCKET_FILTERS)}
           >
             Clear filters
           </Button>
@@ -109,12 +112,13 @@ export function BucketsTable({ buckets, onDelete }: BucketsTableProps) {
               <Table.Head {...sortProps('createdAt')} className={SECONDARY_COLUMN}>
                 Created
               </Table.Head>
-              <Table.Head className={SECONDARY_COLUMN}>Versioning</Table.Head>
-              <Table.Head aria-label="Actions" />
+              <Table.Head>
+                <span className="sr-only">Actions</span>
+              </Table.Head>
             </Table.Row>
           </Table.Header>
           <Table.Body>
-            {visibleBuckets.map((bucket) => (
+            {buckets.map((bucket) => (
               <BucketRow key={bucket.bucketName} bucket={bucket} onDelete={onDelete} />
             ))}
           </Table.Body>
@@ -122,26 +126,6 @@ export function BucketsTable({ buckets, onDelete }: BucketsTableProps) {
       )}
     </>
   );
-}
-
-/**
- * Whether versioning is on. Object Lock and its retention policy aren't shown in
- * the list: reading them costs a call per bucket, and the bucket detail card
- * carries that state instead. Versioning rides along on the listing, so it stays,
- * as its own column now that it's the only feature here.
- */
-function BucketVersioning({ bucket }: { bucket: Bucket }) {
-  if (bucket.versioning) {
-    return (
-      <Badge color="blue" size="sm" weight="medium">
-        Enabled
-      </Badge>
-    );
-  }
-
-  // Quiet text, not a badge: an off state shouldn't draw the eye the way the
-  // enabled one does.
-  return <span className="text-xs text-zinc-500">Disabled</span>;
 }
 
 /**
@@ -263,9 +247,6 @@ function BucketRow({ bucket, onDelete }: { bucket: Bucket; onDelete: (name: stri
       {/* text-xs to match the region cell beside it */}
       <Table.Cell className={`text-xs text-zinc-600 ${SECONDARY_COLUMN}`}>
         {formatDate(bucket.createdAt)}
-      </Table.Cell>
-      <Table.Cell className={SECONDARY_COLUMN}>
-        <BucketVersioning bucket={bucket} />
       </Table.Cell>
       <Table.Cell className="text-right">
         <BucketRowActions bucket={bucket} region={region} onDelete={onDelete} />

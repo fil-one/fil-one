@@ -1,9 +1,13 @@
-// Filtering and sorting for the buckets table. Kept as pure functions so the
-// page component stays presentational and the ordering rules can be tested
-// without rendering.
+// Bucket-table filter/sort state and helpers. The actual filtering and sorting
+// happen on the backend now (FIL-324): a tenant with many buckets shouldn't ship
+// its full list to the browser just to narrow it down there. This module only
+// holds the UI state shapes, the query-params they map to, and the controls
+// visibility rule.
 
-import type { Bucket } from '@filone/shared';
+import type { Bucket, BucketSortKey, SortDirection } from '@filone/shared';
 import { S3_REGION, getRegionLabel } from '@filone/shared';
+
+export type { BucketSortKey, SortDirection };
 
 /**
  * Bucket count at which the table starts showing its search, sort and filter
@@ -16,15 +20,12 @@ export function shouldShowBucketControls(bucketCount: number): boolean {
   return bucketCount >= BUCKET_TABLE_CONTROLS_MIN;
 }
 
-export type BucketSortKey = 'bucketName' | 'region' | 'createdAt';
-export type SortDirection = 'asc' | 'desc';
-
 export type BucketSort = {
   key: BucketSortKey;
   direction: SortDirection;
 };
 
-/** Matches the order `list-buckets` returns, so the initial render is stable. */
+/** Matches the order `list-buckets` returns by default, so the initial render is stable. */
 export const DEFAULT_BUCKET_SORT: BucketSort = { key: 'bucketName', direction: 'asc' };
 
 export type BucketFilters = {
@@ -46,6 +47,15 @@ export function hasActiveFilters(filters: BucketFilters): boolean {
   return filters.query.trim() !== '' || filters.region !== ALL_REGIONS;
 }
 
+/** True when either filters or sort deviate from what the unfiltered baseline already shows. */
+export function hasRefinements(filters: BucketFilters, sort: BucketSort): boolean {
+  return (
+    hasActiveFilters(filters) ||
+    sort.key !== DEFAULT_BUCKET_SORT.key ||
+    sort.direction !== DEFAULT_BUCKET_SORT.direction
+  );
+}
+
 /** A bucket's region, falling back to the default when the API omits it. */
 function regionOf(bucket: Bucket): string {
   return bucket.region ?? S3_REGION;
@@ -60,34 +70,15 @@ export function bucketRegions(buckets: Bucket[]): string[] {
   return regions.sort((a, b) => getRegionLabel(a).localeCompare(getRegionLabel(b)));
 }
 
-export function filterBuckets(buckets: Bucket[], filters: BucketFilters): Bucket[] {
-  const query = filters.query.trim().toLowerCase();
-  return buckets.filter((bucket) => {
-    const matchesQuery = query === '' || bucket.bucketName.toLowerCase().includes(query);
-    const matchesRegion = filters.region === ALL_REGIONS || regionOf(bucket) === filters.region;
-    return matchesQuery && matchesRegion;
-  });
-}
-
-function compare(a: Bucket, b: Bucket, key: BucketSortKey): number {
-  if (key === 'createdAt') {
-    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-  }
-  if (key === 'region') {
-    // Sort by what the row actually displays (the label), then by code so
-    // buckets sharing a label keep a deterministic order.
-    const byLabel = getRegionLabel(regionOf(a)).localeCompare(getRegionLabel(regionOf(b)));
-    return byLabel !== 0 ? byLabel : regionOf(a).localeCompare(regionOf(b));
-  }
-  return a.bucketName.localeCompare(b.bucketName);
-}
-
-export function sortBuckets(buckets: Bucket[], sort: BucketSort): Bucket[] {
-  const direction = sort.direction === 'asc' ? 1 : -1;
-  // Negating the comparator rather than reversing the result keeps the sort
-  // stable in both directions, so tied rows (e.g. two buckets created the same
-  // second) hold their relative order instead of flipping.
-  return [...buckets].sort((a, b) => direction * compare(a, b, sort.key));
+/** Query-string params `/buckets` accepts, built from the current UI state. */
+export function bucketsQueryParams(filters: BucketFilters, sort: BucketSort): URLSearchParams {
+  const params = new URLSearchParams();
+  const query = filters.query.trim();
+  if (query !== '') params.set('search', query);
+  if (filters.region !== ALL_REGIONS) params.set('region', filters.region);
+  if (sort.key !== DEFAULT_BUCKET_SORT.key) params.set('sortKey', sort.key);
+  if (sort.direction !== DEFAULT_BUCKET_SORT.direction) params.set('sortDirection', sort.direction);
+  return params;
 }
 
 /**
