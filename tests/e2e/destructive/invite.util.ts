@@ -28,6 +28,13 @@ import { Resource } from 'sst';
 // Two rules the teardowns keep, because the rest of the suite depends on them:
 // every E2E user ends a run in exactly one organization (their own), and that
 // organization ends it with exactly one Owner.
+//
+// Every key these helpers write or delete is derived from an E2E credential —
+// the paid account's org, the paid address, the trial address — so the suite
+// owns all three outright and the deletes are unconditional on purpose: a run
+// killed mid-test leaves rows behind, and a teardown that insisted on finding
+// what it expected would hand the next run a red `beforeAll` instead of a
+// repair.
 
 const AWS_REGION = process.env.AWS_REGION ?? 'us-east-2';
 
@@ -344,6 +351,15 @@ export async function deleteInvitationsFor({
  * which would quietly defeat the last-Owner guard the counter exists for. A spec
  * that needs a second Owner should reach one the way the product does, through
  * a transfer or a promotion.
+ *
+ * `membershipRows` conditions its canonical Put on `attribute_not_exists(pk)`
+ * and this drops it, the same way {@link setMembershipRole} drops the
+ * conditions on `roleChangeItems`. Production's condition is a race backstop
+ * behind a pre-read — an accept that loses to another accept loses cleanly — and
+ * a seed has the opposite job: it states the membership it wants whatever the
+ * last run left. Keeping the condition would turn the residues a killed run
+ * leaves into a permanently red `beforeAll` rather than one the next seed
+ * repairs.
  */
 export async function seedMembership({
   orgId,
@@ -497,6 +513,49 @@ export async function repairOwnerCount(orgId: string): Promise<number> {
   );
 
   return owners;
+}
+
+// ---------------------------------------------------------------------------
+// Teardown
+// ---------------------------------------------------------------------------
+
+/** One repair a teardown owes the org, and what to call it when it fails. */
+export interface CleanupStep {
+  /** What this puts back, named for the message a failure prints. */
+  label: string;
+  run: () => Promise<unknown>;
+}
+
+/**
+ * Run every teardown step, including the ones after a step that threw.
+ *
+ * A teardown is a list of independent repairs — a seat, a membership pair, a
+ * counter, a beta grant — and a bare `await` sequence gives the first transient
+ * failure the power to abandon all of them. `TransactWriteItems` can be
+ * cancelled by throttling or a conflict at any point, and the org the run
+ * abandons is the org the next run inherits: two Admins and no Owner fails a
+ * `beforeAll`, not the test that caused it.
+ *
+ * Steps run in the order given, which is the order the invariants need, and
+ * every failure is collected and thrown together at the end so a teardown that
+ * could not finish still fails the run.
+ */
+export async function runCleanup(steps: readonly CleanupStep[]): Promise<void> {
+  const failures: string[] = [];
+
+  for (const { label, run } of steps) {
+    try {
+      await run();
+    } catch (error) {
+      failures.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  if (failures.length > 0) {
+    throw new Error(
+      `Teardown could not finish ${failures.length} step(s):\n  ${failures.join('\n  ')}`,
+    );
+  }
 }
 
 /** Every row under one partition key with one sort-key prefix, paged to the end. */

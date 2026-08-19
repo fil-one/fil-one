@@ -116,9 +116,9 @@ The two-M2M split is intentional: the deploy-time app holds powerful scopes (`up
 
 ### JWKS and token verification
 
-- `createRemoteJWKSet(https://${AUTH0_DOMAIN}/.well-known/jwks.json)` is cached at module scope so warm Lambdas do not refetch ([`auth.ts:54-60`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/middleware/auth.ts#L54-L60)).
+- `createRemoteJWKSet(https://${AUTH0_DOMAIN}/.well-known/jwks.json)` is cached at module scope so warm Lambdas do not refetch ([`auth.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/middleware/auth.ts)).
 - Access tokens are verified with `jwtVerify(token, jwks, { audience, issuer })`.
-- ID tokens are verified separately to extract `email`, `email_verified`, `name`, `picture` ([`auth.ts:158-182`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/middleware/auth.ts#L158-L182)). Failure is non-fatal — the user is still authenticated, just without profile claims.
+- ID tokens are verified separately to extract `email`, `email_verified`, `name`, `picture` ([`auth.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/middleware/auth.ts)). Failure is non-fatal — the user is still authenticated, just without profile claims.
 
 ## Cookies and session
 
@@ -154,11 +154,11 @@ export const handler = middy(baseHandler)
   .use(errorHandlerMiddleware());
 ```
 
-Examples: [`list-buckets.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/list-buckets.ts) (read), [`create-bucket.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/create-bucket.ts) (write), [`transfer-ownership.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/transfer-ownership.ts) (the one route behind a step-up), [`get-me.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/get-me.ts) (`/api/me` skips both the permission and the subscription guard).
+Examples: [`list-buckets.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/list-buckets.ts) (read), [`create-bucket.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/create-bucket.ts) (write), [`transfer-ownership.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/transfer-ownership.ts) (the one org route behind a step-up), [`get-me.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/get-me.ts) (`/api/me` skips both the permission and the subscription guard).
 
 `authorize` sits before the subscription guard on purpose: a caller who is not a member, or whose role does not reach the route, gets an authorization error rather than a billing one, and the request skips the `BillingTable` read it was going to be denied after.
 
-### authMiddleware ([`auth.ts:345-493`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/middleware/auth.ts#L345-L493))
+### authMiddleware ([`auth.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/middleware/auth.ts))
 
 `before` hook — three steps, fail-open within reason:
 
@@ -168,11 +168,11 @@ Examples: [`list-buckets.ts`](https://github.com/filecoin-project/fil-one/blob/m
 
 If all three steps fail → 401.
 
-`after` hook — if the handler called `requestTokenRefresh(event)` ([`user-context.ts:30`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/lib/user-context.ts#L30)) or refresh tokens were minted earlier, write the cookies onto the response.
+`after` hook — if the handler called `requestTokenRefresh(event)` ([`user-context.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/lib/user-context.ts)) or refresh tokens were minted earlier, write the cookies onto the response.
 
 ### Identity resolution: `sub` → `userId` + `orgId`
 
-Implemented in `resolveUserAndOrg` ([`auth.ts:234-339`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/middleware/auth.ts#L234-L339)) backed by DynamoDB `UserInfoTable`.
+Implemented in `resolveUserAndOrg` ([`auth.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/middleware/auth.ts)) backed by DynamoDB `UserInfoTable`.
 
 Look up `pk=SUB#${sub}, sk=IDENTITY`:
 
@@ -193,7 +193,7 @@ The new user is now authenticated. Aurora tenant creation is _not_ triggered her
 
 ### CSRF middleware ([`csrf.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/middleware/csrf.ts))
 
-Double-submit token. On any non-safe method (anything other than GET/HEAD/OPTIONS), the `X-CSRF-Token` header must equal the `hs_csrf_token` cookie. The SPA reads the cookie and attaches the header in [`api.ts:40-43`](https://github.com/filecoin-project/fil-one/blob/main/packages/website/src/lib/api.ts#L40-L43). The token rotates on every token refresh.
+Double-submit token. On any non-safe method (anything other than GET/HEAD/OPTIONS), the `X-CSRF-Token` header must equal the `hs_csrf_token` cookie. The SPA reads the cookie and attaches the header in [`api.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/website/src/lib/api.ts). The token rotates on every token refresh.
 
 ## Organizations, membership, and roles
 
@@ -208,7 +208,7 @@ Membership lives in `OrgTable` as a pair of rows written together, so a membersh
 | `ORG#${orgId}`          | `MEMBER#${userId}`    | `role`, `joinedAt`, `source` — the org's roster          |
 | `USER#${userId}`        | `MEMBERSHIP#${orgId}` | `role`, `joinedAt` — the inverse item, for "which orgs?" |
 | `ORG#${orgId}`          | `META`                | `ownerCount`, the last-Owner invariant's counter         |
-| `ORG#${orgId}`          | `INVITE#${inviteId}`  | One outstanding invitation                               |
+| `ORG#${orgId}`          | `INVITE#${inviteId}`  | One invitation; the row stays after accept or revoke     |
 | `INVITETOKEN#${sha256}` | `LOOKUP`              | The invitation token's hash, so a token finds its invite |
 
 The inverse item is what answers "which organizations does this user belong to" without a table scan or a GSI. Both rows carry the role, and the conversion script's `--verify` compares them.
@@ -219,12 +219,12 @@ The inverse item is what answers "which organizations does this user belong to" 
 
 The registry is a frozen table in [`packages/shared/src/permissions.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/shared/src/permissions.ts), read by the backend to enforce and by the console to decide what to render. A role outside the table carries no permissions, so unrecognized data fails closed.
 
-| Role       | Reach                                                                                              |
-| ---------- | -------------------------------------------------------------------------------------------------- |
-| `owner`    | Everything: billing, ownership transfer, org deletion, granting and removing Owners, the audit log |
-| `admin`    | Members and invitations below Owner, org rename, all buckets, objects and keys, the audit log      |
-| `member`   | Buckets and objects, their own keys, and reading the roster                                        |
-| `readonly` | Reading buckets, objects, and the roster                                                           |
+| Role       | Reach                                                                                                                                  |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `owner`    | Everything: billing, ownership transfer, org deletion, granting and removing Owners, the audit log                                     |
+| `admin`    | Members and invitations below Owner, org rename, all buckets, objects and keys, the audit log, and `billing.view` (usage and invoices) |
+| `member`   | Buckets and objects, their own keys, and reading the roster                                                                            |
+| `readonly` | Reading buckets, objects, and the roster                                                                                               |
 
 Two permissions are narrower than the route that carries them, so the handler finishes the check the route cannot state:
 
@@ -248,11 +248,11 @@ Role and membership changes take effect on the next request. There is no session
 
 ### Invitations
 
-An invitation is a row plus a single-use token, and the token exists only in the email — the console never sees it and cannot resend it as a link. Accepting is one transaction that creates the membership pair, increments the counter when the invited role is Owner, deletes the invitation and its token lookup, and appends the audit event.
+An invitation is a row plus a single-use token, and the token exists only in the email — the console never sees it and cannot resend it as a link. Accepting is one transaction that creates the membership pair, increments the counter when the invited role is Owner, marks the invitation `accepted`, deletes the token lookup, and appends the audit event. That delete, plus a `status = pending` condition on the row, is what makes the token single-use. The row itself survives: expiry is a read-time comparison rather than a TTL delete, so the M2 audit export can still see it.
 
 Accepting is the one authenticated route with no org gate at all: the caller is not a member of the inviting org yet, so a membership check would refuse every invitation there is. Its authorization is the token plus a session whose verified email is the invited address, both checked in the handler.
 
-Creating an invitation is gated on the organizations beta flag — see [`bin/README.md`](https://github.com/filecoin-project/fil-one/blob/main/bin/README.md) for where the flag lives and how to grant it. Nothing downstream of an invitation existing is flagged.
+Creating an invitation is gated on the organizations beta flag — see [`bin/README.md`](https://github.com/filecoin-project/fil-one/blob/main/bin/README.md) for where the flag lives and how to grant it. Nothing downstream of an invitation existing is flagged: accepting, the roster, role changes, removal, and transfer never read it. The same flag reaches the console as `MeResponse.orgsBeta`, where it decides whether the Members nav entry and `/members` render for a caller who belongs to exactly one org. A caller with two or more memberships gets that surface either way.
 
 ### Ownership transfer
 
@@ -311,10 +311,12 @@ The middleware also stashes the resolved `subscriptionStatus` on `event.requestC
 
 ### Where it's applied
 
-Search: `grep -rn "subscriptionGuardMiddleware" packages/backend/src/handlers`. Today:
+Search: `grep -rn "subscriptionGuardMiddleware" packages/backend/src/handlers`. Fifteen handlers today:
 
-- **Read-gated:** `list-buckets`, `get-bucket`, `get-bucket-analytics`, `list-access-keys`, `presign`
-- **Write-gated:** `create-bucket`, `delete-bucket`, `create-access-key`, `delete-access-key`
+- **Read-gated:** `list-buckets`, `get-bucket`, `get-bucket-analytics`, `get-bucket-rag-enablement`, `list-access-keys`, `list-rag-api-keys`, `presign`, `query-bucket`
+- **Write-gated:** `create-bucket`, `delete-bucket`, `create-access-key`, `delete-access-key`, `create-rag-api-key`, `delete-rag-api-key`, `set-bucket-rag-enablement`
+
+The RAG surface rides the same guard: `/api/rag-api-keys`, `/api/buckets/{name}/query`, and `/api/buckets/{name}/rag/enabled`.
 
 Notably _not_ gated: `/api/me`, `/api/me/resend-verification`, anything under `/api/auth/*`, `/api/mfa/*`, `/api/billing/*`, the org and member routes, `stripe-webhook` (signature-verified, no auth middleware at all).
 
@@ -330,7 +332,7 @@ The SPA (React + TanStack Router, `packages/website`) is the only client. It doe
 
 ### Login / logout
 
-[`packages/website/src/lib/api.ts:18-22`](https://github.com/filecoin-project/fil-one/blob/main/packages/website/src/lib/api.ts#L18-L22) — `redirectToLogin()` is a `window.location.href = ${API_URL}/login` redirect. Logout works the same way against `/logout`. There is no SPA-side OAuth code; all of it happens in the Lambda BFF.
+[`packages/website/src/lib/api.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/website/src/lib/api.ts) — `redirectToLogin()` is a `window.location.href = ${API_URL}/login` redirect. Logout works the same way against `/logout`. There is no SPA-side OAuth code; all of it happens in the Lambda BFF.
 
 ### Route guarding
 
@@ -343,7 +345,7 @@ The SPA (React + TanStack Router, `packages/website`) is the only client. It doe
 
 ### API calls
 
-The fetch wrapper at [`api.ts:34-93`](https://github.com/filecoin-project/fil-one/blob/main/packages/website/src/lib/api.ts#L34-L93) does three relevant things:
+The fetch wrapper at [`api.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/website/src/lib/api.ts) does four relevant things:
 
 - `credentials: 'include'` so cookies are sent.
 - For mutations, reads `hs_csrf_token` from `document.cookie` and attaches `X-CSRF-Token`.
@@ -351,6 +353,8 @@ The fetch wrapper at [`api.ts:34-93`](https://github.com/filecoin-project/fil-on
 - On 401, calls `redirectToLogin()` — except the `step_up_required` 401, which becomes a `StepUpRequiredError` for the caller to handle.
 
 The console hides what the server would refuse: `usePermissions()` reads the permission list `/api/me` computes from the same registry the backend enforces, and gated pages render a refusal rather than redirecting. This is presentation only. Every decision is made again on the server.
+
+The Members surface is the one gate that hides something the server would serve: the nav entry and `/members` render on more than one membership or the `orgsBeta` flag, while all four roles hold `members.read` and no server route reads the flag on a read path.
 
 ## MFA
 
@@ -384,7 +388,7 @@ A recovery code is a portable, take-anywhere bypass — a stolen session must no
 - **Token claim:** `auth_time` is injected into the access token by the existing Post-Login Action via `api.accessToken.setCustomClaim('auth_time', ...)` ([`mfa-action.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/jobs/stack-setup/mfa-action.ts)) — sourced from the most recent `event.authentication.methods[].timestamp`. Updating the Action requires bumping the stack-setup function version (a plain string defined in SST — not tied to a version format) so it actually redeploys to Auth0. The same setup function configures more than the Action, so any change it deploys (Action source, callbacks, email provider, etc.) needs a bump.
 - **Frontend:** the `apiRequest` wrapper ([`packages/website/src/lib/api.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/website/src/lib/api.ts)) throws `StepUpRequiredError` on the `step_up_required` 401, and [`lib/step-up.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/website/src/lib/step-up.ts) stashes an action plus a return path and redirects to `/login` with `acr_values` and `max_age=0`. `max_age=0` forces a fresh authentication rather than reusing the Auth0 session, so the new ID token carries a current `auth_time`. That is the step-up signal for a user whose identity provider never emits `mfa` in `amr` — a federated login, where the challenge is not ours to issue.
 - **On return:** the app root reads the stash and sends the caller back to the page, which reopens its confirmation rather than resubmitting. A change that cannot be reversed by the person making it should not fire off the back of a redirect they may have abandoned.
-- **Consumers:** `POST /api/mfa/recovery-code/regenerate`, individual passkey deletes, and `POST /api/org/transfer`.
+- **Consumers:** `POST /api/mfa/recovery-code/regenerate`, `POST /api/mfa/disable`, `DELETE /api/mfa/enrollments/{enrollmentId}`, individual passkey deletes, and `POST /api/org/transfer`. The first four run `requireMfa()`; transfer runs `requireMfaIfEnrolled()`.
 
 Engineers adding a new sensitive endpoint should reach for `requireMfa` rather than rolling their own freshness check. For instance, account deletion might want a forced login prior to allowing.
 

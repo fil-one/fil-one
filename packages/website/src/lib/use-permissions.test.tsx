@@ -69,6 +69,17 @@ describe('usePermissions', () => {
     expect(result.current.isNotAMember).toBe(false);
   });
 
+  it('reports the organizations beta, false until /me says otherwise', async () => {
+    mockGetMe.mockResolvedValue({ ...meWith(OrgRole.Owner), orgsBeta: true });
+    const { result } = renderHook(() => usePermissions(), { wrapper: wrapperFor(freshClient()) });
+
+    // Fail-closed like the permission list: the invite form is gated on this,
+    // and a flag that briefly defaulted to on would offer a form the server
+    // refuses.
+    expect(result.current.orgsBeta).toBe(false);
+    await waitFor(() => expect(result.current.orgsBeta).toBe(true));
+  });
+
   it('names the caller with no membership row', async () => {
     mockGetMe.mockResolvedValue(meWith(undefined));
     const { result } = renderHook(() => usePermissions(), { wrapper: wrapperFor(freshClient()) });

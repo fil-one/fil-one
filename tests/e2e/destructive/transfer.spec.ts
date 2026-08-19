@@ -7,6 +7,7 @@ import {
   repairOwnerCount,
   resolvePersonalOrgId,
   revokeEmailBeta,
+  runCleanup,
   seedMembership,
   setMembershipRole,
 } from './invite.util.ts';
@@ -67,11 +68,22 @@ test.describe('trial owner transfers the organization', () => {
 
   test.afterAll(async () => {
     // The seat first, then the rows: putting the original Owner back before the
-    // successor's membership goes leaves the org owned at every step.
-    await setMembershipRole({ orgId, userId: ownerUserId, role: 'owner' });
-    await deleteMembership({ orgId, userId: successorUserId });
-    await repairOwnerCount(orgId);
-    await revokeEmailBeta(requireEmail(OWNER));
+    // successor's membership goes leaves the org owned at every step. Each step
+    // is isolated so a transaction cancelled by throttling or a conflict costs
+    // one repair rather than every repair after it — this is the spec that
+    // would otherwise leave the org with two Admins and no Owner.
+    await runCleanup([
+      {
+        label: 'owner seat',
+        run: () => setMembershipRole({ orgId, userId: ownerUserId, role: 'owner' }),
+      },
+      {
+        label: 'successor membership',
+        run: () => deleteMembership({ orgId, userId: successorUserId }),
+      },
+      { label: 'ownerCount', run: () => repairOwnerCount(orgId) },
+      { label: 'beta grant', run: () => revokeEmailBeta(requireEmail(OWNER)) },
+    ]);
   });
 
   test('trial owner hands the organization to another member', async ({ page }) => {

@@ -1,8 +1,9 @@
 # IAM M1 follow-ups
 
-Everything the M1 stack (#596–#611) deferred with a decision. Each item is real,
-bounded, and was left out on purpose; the body says what is wrong and why it
-waited. Items the reviews rebutted, and items later commits fixed, are not here.
+Everything the M1 stack deferred with a decision — #597–#610 plus the close-out
+#617, under stack #611, above ADR #596. Each item is real, bounded, and was left
+out on purpose; the body says what is wrong and why it waited. Items the reviews
+rebutted, and items later commits fixed, are not here.
 
 File references point at the top of the stack.
 
@@ -74,12 +75,14 @@ Require the fallback to be at least as current as the org row before deleting.
 
 ### Make the backfill's faithfulness check direction-aware
 
-`bin/lib/billing-verify.ts:204` — `classifyOrgBilling` treats an org row that is
-newer than its legacy source as safe, because it is authoritative and survives
-the flip. The comparison behind `--verify` still includes `updatedAt`, so it
-reports divergence forever on exactly those rows, and another backfill run skips
-them rather than repairing them. `--verify` is the migration gate, so a row it
-cannot pass and cannot fix blocks the gate. Compare in one direction.
+`bin/lib/billing-rekey.ts:196` — `classifyOrgBilling` treats an org row that is
+newer than its legacy source as safe (the newer-than branch at :222), because it
+is authoritative and survives the flip. The comparison behind `--verify` still
+includes `updatedAt` (`COMPARED_ATTRIBUTES`, :102, read by the `compareRows`
+call at `bin/lib/billing-verify.ts:204`), so it reports divergence forever on
+exactly those rows, and another backfill run skips them rather than repairing
+them. `--verify` is the migration gate, so a row it cannot pass and cannot fix
+blocks the gate. Compare in one direction.
 
 ## Console and accessibility
 
@@ -97,10 +100,10 @@ fixed.)
 
 ### Announce the sidebar user menu as a popup
 
-`packages/website/src/components/SidebarNav.tsx:363-372` — the trigger carries
+`packages/website/src/components/SidebarNav.tsx:386-409` — the trigger carries
 no `aria-expanded` and no `aria-haspopup`, so a screen reader announces a button
 that does nothing. The panel's contents are already labelled
-(`OrgSwitcher.tsx:35-41` renders `role="group"` with `aria-label`), and the
+(`OrgSwitcher.tsx:58-59` renders `role="group"` with `aria-label`), and the
 mobile twin at `AppShell.tsx:41-52` already sets both attributes, so the fix is
 to match the pattern that exists. Pre-existing on main rather than introduced by
 this stack.
@@ -114,7 +117,7 @@ delivered to that browser and ends at the next refetch.
 - `packages/website/src/pages/ApiKeysPage.tsx:479` — an Admin downgraded to
   Member keeps `mayList` (both roles hold `keys.manage_own`), so the cached
   org-wide response stays on screen with only the per-row actions narrowed.
-- `packages/website/src/pages/DashboardPage.tsx:140` — `accessKeys.count` is the
+- `packages/website/src/pages/DashboardPage.tsx:436` — `accessKeys.count` is the
   org's raw key count, authorized by `buckets.read`, so Member and ReadOnly see
   an inventory total they cannot list.
 - `packages/website/src/lib/query-client.ts:47` — a denial-triggered refresh
@@ -144,15 +147,33 @@ of which the success path runs. If the refetch then fails, the stale row stays
 actionable and its undelivered warning and cap refusal stand over an invitation
 that is confirmed gone.
 
+### Put the org's member count on /me
+
+`packages/website/src/lib/use-members-surface.ts:45` decides the members surface
+from the caller's own membership count and `orgsBeta`, and `MeResponse` carries
+nothing about the org's shape. One org shape therefore reads wrong: the founding
+Owner of a multi-member org holds a single membership, because every invited
+member keeps the personal org signup created for them and only the founder does
+not. Revoking that org's beta row takes the roster, the role picker, removal and
+transfer off their console while `GET /api/org/members` and the three writes keep
+serving — the org has members, and the person responsible for them cannot see
+them. `bin/orgs-beta.ts` refuses that revoke without `--force-members`, which is
+the operator-side half of the answer. The durable half is the count: carry the
+org's member count on `MeResponse` and let the surface read the org's shape
+rather than the caller's, which is the deferral
+`docs/architectural-decisions/2026-08-organizations-roles-m1.md:135` names.
+
 ## Infrastructure and CI
 
-### Typecheck the website package in CI
+### Give each package a tsc script for editor and CLI parity
 
-`.github/workflows/packages-ci.yaml` runs lint, build, and test; the website's
-build is Vite and its lint is oxlint, so nothing runs `tsc`. A missing or
-misspelled required prop compiles and ships green — the switcher mount that
-went out with `activeOrgId={me?.userId}` is the worked example. Add a typecheck
-script to `packages/website/package.json` and a step to the workflow.
+Type errors are caught on every PR: `oxlint.config.ts` sets `typeAware` and
+`typeCheck`, and `pnpm lint` runs first in `packages-ci.yaml` and again as the
+first half of `pnpm test`, so a misspelled required prop fails CI. What is
+missing is a way to ask the same question by hand — no package has a `typecheck`
+script. `tsc -p <package> --noEmit` exits clean for backend, shared and website,
+so the script is all that is left. Add a plain one per package, so an editor, a
+pre-push hook and CI all answer alike.
 
 ### Retire the hand-maintained backend sst-env.d.ts
 
@@ -168,13 +189,14 @@ keep and fix the header either way.
 
 ### Dedupe the org-profile read on requests that already made it
 
-`packages/backend/src/middleware/org-context.ts:133-136` reads
-`ORG#{resolvedOrg}/PROFILE` before the `header === userInfo.orgId` early return,
-so every authenticated request now pays one `GetItem` it did not pay before. The
-cost was accepted deliberately: the read is what closes the bypass-by-omission
-hole, and a failure of it is a 503 rather than a served request. What is left is
-that `get-me.ts` reads the same row a second time on the same request, and a
-dashboard load fires four requests that each pay it.
+`packages/backend/src/middleware/org-context.ts:102` — `enforceIdentityProvider`
+reads `ORG#{orgId}/PROFILE` with `ConsistentRead`, and `auth.ts:555` calls it for
+every request carrying a membership row, so every authenticated request now pays
+one `GetItem` it did not pay before. The cost was accepted deliberately: the read
+is what closes the bypass-by-omission hole, and a failure of it is a 503 rather
+than a served request. What is left is that `get-me.ts:33` reads the same row a
+second time on the same request, and a dashboard load fires four requests that
+each pay it.
 
 ### Assert the converted role, not just agreement between the two rows
 

@@ -41,6 +41,16 @@ export function usePermissions(): {
    * row, which fails those rules closed like everything else here.
    */
   role: OrgRole | undefined;
+  /**
+   * Whether the active org is in the organizations beta, which is not a
+   * permission: the role registry says who may invite, and this says whether
+   * the org may have invitations at all. `POST /api/org/invitations` checks
+   * both, so a surface that offers the form has to as well.
+   *
+   * It rides along here for the same reason `userId` does — one set of query
+   * options for `/me` — and false until `/me` answers, which fails closed.
+   */
+  orgsBeta: boolean;
   /** True while the answer is not yet known — render nothing rather than guess. */
   isPending: boolean;
   /** True when `/me` could not be read, which also grants nothing. */
@@ -64,6 +74,7 @@ export function usePermissions(): {
     has: (permission: Permission) => permissions?.includes(permission) ?? false,
     userId: me?.userId,
     role: me?.role,
+    orgsBeta: me?.orgsBeta ?? false,
     isPending,
     isError,
     // `role` is absent exactly when the caller has no membership row, which the

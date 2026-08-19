@@ -5,6 +5,7 @@ import {
   deleteMembership,
   readOrgName,
   resolvePersonalOrgId,
+  runCleanup,
   seedInvitation,
   type SeededInvitation,
 } from './invite.util.ts';
@@ -60,16 +61,25 @@ test.describe('trial user joins a second organization', () => {
   });
 
   test.afterAll(async () => {
-    // The single-membership invariant: every E2E account ends the run in its own
-    // organization and no other.
-    await deleteMembership({ orgId: hostOrgId, userId: inviteeUserId });
-    // Accepting deletes the token row and leaves the canonical row marked
-    // `accepted`; both keys are dropped here whichever state the test reached.
-    await deleteInvitation({
-      orgId: hostOrgId,
-      inviteId: invitation.inviteId,
-      tokenHash: invitation.tokenHash,
-    });
+    await runCleanup([
+      // The single-membership invariant: every E2E account ends the run in its
+      // own organization and no other.
+      {
+        label: 'accepted membership',
+        run: () => deleteMembership({ orgId: hostOrgId, userId: inviteeUserId }),
+      },
+      // Accepting deletes the token row and leaves the canonical row marked
+      // `accepted`; both keys are dropped here whichever state the test reached.
+      {
+        label: 'invitation rows',
+        run: () =>
+          deleteInvitation({
+            orgId: hostOrgId,
+            inviteId: invitation.inviteId,
+            tokenHash: invitation.tokenHash,
+          }),
+      },
+    ]);
   });
 
   test('trial user accepts an invitation and switches between organizations', async ({ page }) => {

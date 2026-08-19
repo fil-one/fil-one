@@ -5,6 +5,7 @@ import {
   grantOrgBeta,
   resolvePersonalOrgId,
   revokeOrgBeta,
+  runCleanup,
   uniqueInviteEmail,
 } from './invite.util.ts';
 
@@ -40,10 +41,12 @@ test.describe('paid user (organizations beta)', () => {
   });
 
   test.afterAll(async () => {
-    // Both the row the test withdrew and any row a failure left behind: the
-    // pending cap counts addresses, and a leaked one is a slot nobody frees.
-    await deleteInvitationsFor({ orgId, email: invitedEmail });
-    await revokeOrgBeta(orgId);
+    await runCleanup([
+      // Both the row the test withdrew and any row a failure left behind: the
+      // pending cap counts addresses, and a leaked one is a slot nobody frees.
+      { label: 'invitation rows', run: () => deleteInvitationsFor({ orgId, email: invitedEmail }) },
+      { label: 'beta grant', run: () => revokeOrgBeta(orgId) },
+    ]);
   });
 
   test('paid user invites a teammate and withdraws the invitation', async ({ page }) => {

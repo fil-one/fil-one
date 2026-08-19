@@ -7,7 +7,9 @@ import {
   repairOwnerCount,
   resolvePersonalOrgId,
   revokeEmailBeta,
+  runCleanup,
   seedMembership,
+  setMembershipRole,
 } from './invite.util.ts';
 
 // What an Owner can do to the people already in the organization, and what the
@@ -55,13 +57,25 @@ test.describe('paid owner manages members', () => {
   });
 
   test.afterAll(async () => {
-    // Idempotent: the removal test takes these rows away itself, and a run that
-    // failed before it leaves them for this.
-    await deleteMembership({ orgId, userId: memberUserId });
-    // Nothing above moves the owner set, but the counter is the last-Owner
-    // invariant and a teardown is the wrong place to assume that.
-    await repairOwnerCount(orgId);
-    await revokeEmailBeta(requireEmail(OWNER));
+    await runCleanup([
+      // The seat first, for the same reason transfer.spec.ts restores its own:
+      // nothing here should move the owner set, but the last-owner test only
+      // holds while the guard does, and the run that catches a regression is
+      // the one that leaves this account an Admin in its own org — a state no
+      // product path undoes, since only an Owner may hand out Owner. The
+      // counter below then recounts a set that is whole.
+      {
+        label: 'owner seat',
+        run: () => setMembershipRole({ orgId, userId: ownerUserId, role: 'owner' }),
+      },
+      // Idempotent: the removal test takes these rows away itself, and a run that
+      // failed before it leaves them for this.
+      { label: 'seeded membership', run: () => deleteMembership({ orgId, userId: memberUserId }) },
+      // The counter is the last-Owner invariant and a teardown is the wrong
+      // place to assume nothing touched it.
+      { label: 'ownerCount', run: () => repairOwnerCount(orgId) },
+      { label: 'beta grant', run: () => revokeEmailBeta(requireEmail(OWNER)) },
+    ]);
   });
 
   test('owner changes a member role through the picker', async ({ page }) => {
