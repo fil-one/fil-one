@@ -98,7 +98,8 @@ async function scanActiveSubscriptions(billingTableName: string): Promise<Active
     const result = await dynamo.send(
       new ScanCommand({
         TableName: billingTableName,
-        FilterExpression: 'sk = :sk AND subscriptionStatus = :active',
+        FilterExpression:
+          'sk = :sk AND subscriptionStatus = :active AND attribute_not_exists(deletedAt)',
         ExpressionAttributeValues: {
           ':sk': { S: 'SUBSCRIPTION' },
           ':active': { S: SubscriptionStatus.Active },

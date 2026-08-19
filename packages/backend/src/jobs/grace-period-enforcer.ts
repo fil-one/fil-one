@@ -99,7 +99,8 @@ async function scanGracePeriodCandidates(
     const result = await dynamo.send(
       new ScanCommand({
         TableName: billingTableName,
-        FilterExpression: 'sk = :sk AND subscriptionStatus = :gracePeriod',
+        FilterExpression:
+          'sk = :sk AND subscriptionStatus = :gracePeriod AND attribute_not_exists(deletedAt)',
         ExpressionAttributeValues: {
           ':sk': { S: 'SUBSCRIPTION' },
           ':gracePeriod': { S: SubscriptionStatus.GracePeriod },
