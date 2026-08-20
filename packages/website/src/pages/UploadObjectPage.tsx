@@ -106,7 +106,19 @@ function FileRow({
         </span>
         {entry.status === 'done' && <Icon component={CheckCircleIcon} size={13} color="success" />}
         {entry.status === 'error' && <Icon component={WarningCircleIcon} size={13} color="error" />}
-        {entry.status === 'uploading' && <Spinner size={12} ariaLabel="Uploading" />}
+        {entry.status === 'uploading' && (
+          <span
+            className="flex shrink-0 items-center gap-1.5 text-xs tabular-nums text-zinc-600"
+            role="progressbar"
+            aria-label={`Uploading ${entry.file.name}`}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={entry.progress}
+          >
+            {entry.progress}%
+            <Spinner size={12} ariaLabel="Uploading" />
+          </span>
+        )}
         {onRemove && entry.status === 'pending' && (
           <IconButton
             icon={XIcon}
@@ -438,17 +450,11 @@ export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) 
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-zinc-700">Uploading files…</span>
                 <span className="text-sm tabular-nums text-zinc-500">
-                  {upload.doneCount} / {upload.files.length}
+                  {upload.progressPercent}% · {formatBytes(upload.uploadedBytes)} /{' '}
+                  {formatBytes(upload.totalBytes)}
                 </span>
               </div>
-              <ProgressBar
-                value={
-                  upload.files.length > 0
-                    ? Math.round((upload.doneCount / upload.files.length) * 100)
-                    : 0
-                }
-                label="Overall upload progress"
-              />
+              <ProgressBar value={upload.progressPercent} label="Overall upload progress" />
             </div>
           )}
 

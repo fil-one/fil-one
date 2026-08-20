@@ -5,19 +5,19 @@ import { Select } from './Select';
 describe('Select', () => {
   it('renders options', () => {
     render(
-      <Select onChange={() => {}}>
+      <Select aria-label="Region" onChange={() => {}}>
         <option value="us-east-1">us-east-1</option>
         <option value="eu-west-1">eu-west-1</option>
       </Select>,
     );
-    expect(screen.getByRole('combobox')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Region' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'eu-west-1' })).toBeInTheDocument();
   });
 
   it('calls onChange with the selected value', () => {
     const onChange = vi.fn();
     render(
-      <Select onChange={onChange}>
+      <Select aria-label="Region" onChange={onChange}>
         <option value="us-east-1">us-east-1</option>
         <option value="eu-west-1">eu-west-1</option>
       </Select>,
@@ -28,7 +28,7 @@ describe('Select', () => {
 
   it('forwards the disabled prop', () => {
     render(
-      <Select onChange={() => {}} disabled>
+      <Select aria-label="Region" onChange={() => {}} disabled>
         <option value="a">a</option>
       </Select>,
     );
@@ -37,7 +37,7 @@ describe('Select', () => {
 
   it('sets aria-invalid when invalid is true', () => {
     render(
-      <Select onChange={() => {}} invalid>
+      <Select aria-label="Region" onChange={() => {}} invalid>
         <option value="a">a</option>
       </Select>,
     );
