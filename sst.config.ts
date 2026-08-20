@@ -723,16 +723,17 @@ export default $config({
       ],
     });
 
-    // ── Bulk object deletion (API → worker, resumed by self re-invoke) ──
+    // ── Bulk object deletion (API → FIFO queue → worker, resumed via SQS) ──
     // Empties a bucket, or a prefix within one, by walking the listing and
     // deleting page by page. A bucket can hold far more objects than one
     // invocation can process, so the worker checkpoints its listing cursor and
-    // re-invokes itself; it needs the full Lambda timeout and permission to
-    // call itself. DeleteBucket requires an empty bucket, so this is the step
-    // that makes deleting a non-trivial bucket possible at all.
-    // Messages that fail every delivery land here rather than disappearing, so
-    // a stalled deletion is visible instead of being inferred from a job row
-    // that stopped moving.
+    // queues itself a continuation message; it needs the full Lambda timeout.
+    // DeleteBucket requires an empty bucket, so this is the step that makes
+    // deleting a non-trivial bucket possible at all. See
+    // docs/architectural-decisions/2026-08-server-side-bulk-object-deletion.md.
+    // Messages that fail every delivery land in the DLQ rather than
+    // disappearing, so a stalled deletion is visible instead of being inferred
+    // from a job row that stopped moving.
     const bulkDeleteDlq = new sst.aws.Queue('BulkDeleteDlq', { fifo: true });
 
     // FIFO so the message group (the job id) admits one in-flight message per
