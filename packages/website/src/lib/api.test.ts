@@ -234,7 +234,7 @@ describe('apiRequest — the unverified-email funnel', () => {
     // `isRedirecting` is module state that a page load resets, so each of these
     // gets its own module graph.
     vi.resetModules();
-    const location = { href: '' };
+    const location = { hostname: 'localhost', href: '' };
     vi.stubGlobal('location', location);
     const { apiRequest: fresh } = await import('./api.js');
     respondUnverified();
@@ -246,7 +246,7 @@ describe('apiRequest — the unverified-email funnel', () => {
 
   it('leaves the page alone for a call that renders the refusal itself', async () => {
     vi.resetModules();
-    const location = { href: '' };
+    const location = { hostname: 'localhost', href: '' };
     vi.stubGlobal('location', location);
     const { apiRequest: fresh } = await import('./api.js');
     respondUnverified();
