@@ -15,7 +15,10 @@ import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand, PutParameterCommand } from '@aws-sdk/client-ssm';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../ddb-client.js';
+import { OrgDeletingError } from '../org-profile.js';
+import { resolveRefusedTenantWrite } from '../tenant-setup-fence.js';
 import {
+  deleteTenantsByTenantId,
   deleteTenantsByTenantIdAccessKeysByAccessKeyId,
   getTenantsByTenantIdAccessKeys,
   postTenantsByTenantIdAccessKeys,
@@ -74,6 +77,9 @@ export async function ensureTenantReady(
   try {
     return await processTenantSetup(deps, orgId);
   } catch (err) {
+    // Not a setup failure: retrying will never succeed, so it must not become
+    // a "try again in a moment".
+    if (err instanceof OrgDeletingError) throw err;
     console.error('[tenant-setup] setup failed', {
       orchestratorId: deps.id,
       orgId,
@@ -102,6 +108,11 @@ async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise
     return existingTenantId;
   }
 
+  // Before any upstream call: the tenant, its console key and its SSM secret
+  // are all created below, and refusing only the pointer write at the end
+  // would leave every one of them orphaned.
+  if (existing.Item?.deleting?.BOOL === true) throw new OrgDeletingError(orgId);
+
   // Idempotent on the client-supplied tenantId (= orgId): a retry after a
   // crash gets a 200 with the existing tenant instead of an error.
   const { error: putError } = await putTenantsByTenantId({
@@ -129,20 +140,44 @@ async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise
     );
   }
 
-  await dynamo.send(
-    new UpdateItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: key,
-      UpdateExpression: 'SET #tenantIdAttr = :tenantId, updatedAt = :now',
-      ExpressionAttributeNames: {
-        '#tenantIdAttr': tenantIdAttribute,
+  try {
+    await dynamo.send(
+      new UpdateItemCommand({
+        TableName: Resource.UserInfoTable.name,
+        Key: key,
+        UpdateExpression: 'SET #tenantIdAttr = :tenantId, updatedAt = :now',
+        // UpdateItem creates the item when absent, so without attribute_exists(pk)
+        // a write for an org that has no profile row would create one holding
+        // nothing but a tenant id.
+        ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
+        // Names the cause for the catch — a deleting profile, or none at all —
+        // without a second read.
+        ReturnValuesOnConditionCheckFailure: 'ALL_OLD',
+        ExpressionAttributeNames: {
+          '#tenantIdAttr': tenantIdAttribute,
+        },
+        ExpressionAttributeValues: {
+          ':tenantId': { S: orgId },
+          ':now': { S: new Date().toISOString() },
+        },
+      }),
+    );
+  } catch (err) {
+    await resolveRefusedTenantWrite({
+      orgId,
+      orchestratorId: id,
+      tenantId: orgId,
+      err,
+      deleteTenant: async () => {
+        const { error } = await deleteTenantsByTenantId({
+          client,
+          path: { tenantId: orgId },
+          throwOnError: false,
+        });
+        if (error) throw new Error(`Failed to delete tenant ${orgId}`, { cause: error });
       },
-      ExpressionAttributeValues: {
-        ':tenantId': { S: orgId },
-        ':now': { S: new Date().toISOString() },
-      },
-    }),
-  );
+    });
+  }
 
   return orgId;
 }

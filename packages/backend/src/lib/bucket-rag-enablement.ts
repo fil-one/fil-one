@@ -1,7 +1,6 @@
 import {
   ConditionalCheckFailedException,
   GetItemCommand,
-  PutItemCommand,
   UpdateItemCommand,
   type AttributeValue,
 } from '@aws-sdk/client-dynamodb';
@@ -9,6 +8,7 @@ import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import type { BucketRagEnablementResponse, S3Region } from '@filone/shared';
 import { getDynamoClient } from './ddb-client.js';
+import { sendDeletionGuardedWrite } from './org-profile.js';
 import {
   RAGKeys,
   type BucketRAGEnablementRecord,
@@ -82,12 +82,17 @@ export async function setBucketRagEnablement(args: {
     updatedAt: now,
   };
 
-  await dynamo.send(
-    new PutItemCommand({
-      TableName: Resource.RagIndexerTable.name,
-      Item: marshall(record, { removeUndefinedValues: true }),
-    }),
-  );
+  // Guarded rather than a bare put: the caller's pre-check is separated from this
+  // write by an upstream getBucket call, and a row written after the scrub would
+  // outlive the teardown that already swept this partition.
+  await sendDeletionGuardedWrite(orgId, [
+    {
+      Put: {
+        TableName: Resource.RagIndexerTable.name,
+        Item: marshall(record, { removeUndefinedValues: true }),
+      },
+    },
+  ]);
 
   return record;
 }

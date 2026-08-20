@@ -104,11 +104,14 @@ pnpx sst secret set AuroraBackofficeToken <value> [--stage <stage>]
 pnpx sst secret set SendGridApiKey <value> [--stage <stage>]
 pnpx sst secret set HubSpotServiceKey <value> [--stage <stage>]
 pnpx sst secret set GrafanaLokiAuth '<instanceId>:<apiKey>' [--stage <stage>]
+pnpx sst secret set DeletionCodeHmacKey <value> [--stage <stage>]
 ```
 
 Omit `--stage` to set for your personal dev stage (defaults to OS username).
 
 There are two Auth0 M2M credentials with different scopes — see [`docs/Auth0OneTimeSetup.md`](./docs/Auth0OneTimeSetup.md). The `AuroraBackofficeToken` is from the Aurora Back Office dashboard — see the [API token](#api-token) section below. The `GrafanaLokiAuth` secret is from Grafana Cloud — see the [Observability](#observability) section below.
+
+`DeletionCodeHmacKey` is the only entry with no dashboard to copy from — it is our own key, not a vendor credential, so generate it with `openssl rand -hex 32`. It keys the account-deletion code HMAC, and rotating it invalidates every code already issued on that stage. It has no default and is linked on every stage, so `sst deploy` fails without it; `staging` and `production` therefore need it set before any branch that links it reaches main, since both deploy automatically from there. CI preview stages generate their own.
 
 ## Commands
 

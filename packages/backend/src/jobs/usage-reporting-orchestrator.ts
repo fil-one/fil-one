@@ -90,8 +90,11 @@ async function scanActiveSubscriptionRecords(
     const result = await dynamo.send(
       new ScanCommand({
         TableName: billingTableName,
+        // attribute_not_exists(deletedAt) is redundant against the status a scrub
+        // writes, and deliberately so: either alone keeps a torn-down org out.
         FilterExpression:
-          'sk = :sk AND subscriptionStatus <> :canceled AND attribute_exists(subscriptionId)',
+          'sk = :sk AND subscriptionStatus <> :canceled AND attribute_exists(subscriptionId) ' +
+          'AND attribute_not_exists(deletedAt)',
         ExpressionAttributeValues: {
           ':sk': { S: 'SUBSCRIPTION' },
           ':canceled': { S: 'canceled' },

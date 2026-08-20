@@ -109,6 +109,7 @@ export function AccessKeyPermissionsFields({
                         className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-zinc-50"
                       >
                         <Checkbox
+                          aria-label={meta.label}
                           checked={granularPermissions.includes(granular)}
                           onChange={() => toggleGranular(granular)}
                         />

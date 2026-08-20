@@ -704,4 +704,37 @@ describe('updateTenantStatus', () => {
 
     expect(mockSetTenantStatus).toHaveBeenCalledTimes(1);
   });
+
+  it('throws on a 404 by default', async () => {
+    mockSetTenantStatus.mockResolvedValue({
+      error: { message: 'not found' },
+      response: { status: 404 },
+    });
+
+    await expect(updateTenantStatus({ tenantId: 'tenant-1', status: 'DISABLED' })).rejects.toThrow(
+      'Aurora status update failed for tenant tenant-1',
+    );
+  });
+
+  it('treats a 404 as success when allowMissing is set', async () => {
+    mockSetTenantStatus.mockResolvedValue({
+      error: { message: 'not found' },
+      response: { status: 404 },
+    });
+
+    await expect(
+      updateTenantStatus({ tenantId: 'tenant-1', status: 'DISABLED', allowMissing: true }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('still throws on a non-404 when allowMissing is set', async () => {
+    mockSetTenantStatus.mockResolvedValue({
+      error: { message: 'boom' },
+      response: { status: 500 },
+    });
+
+    await expect(
+      updateTenantStatus({ tenantId: 'tenant-1', status: 'DISABLED', allowMissing: true }),
+    ).rejects.toThrow('Aurora status update failed for tenant tenant-1');
+  });
 });

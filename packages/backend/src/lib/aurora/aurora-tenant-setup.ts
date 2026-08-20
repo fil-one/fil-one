@@ -17,6 +17,7 @@ import {
 import { ACCESS_KEY_PERMISSIONS, ErrorResponse } from '@filone/shared';
 import { createAuroraAccessKey } from './aurora-portal.js';
 import { reportMetric } from '../metrics.js';
+import { OrgDeletingError } from '../org-profile.js';
 import { OrgSetupStatus, isOrgSetupComplete } from '../org-setup-status.js';
 import { scanAndEmitStuckTenantCount } from '../stuck-tenant-metric.js';
 import { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
@@ -53,6 +54,9 @@ export async function ensureTenantReady(orgId: string): Promise<EnsureTenantRead
     const { auroraTenantId } = await processTenantSetup(orgId);
     return { ok: true, auroraTenantId };
   } catch (err) {
+    // Not a setup failure: retrying will never succeed, so it must neither
+    // become a "try again in a moment" nor inflate the stuck-tenant gauge.
+    if (err instanceof OrgDeletingError) throw err;
     console.error(`[tenant-setup] setup failed`, {
       orgId,
       error: format(err),
@@ -451,8 +455,11 @@ async function advanceStatus(opts: AdvanceStatusOptions): Promise<'wrote' | 'los
         TableName: Resource.UserInfoTable.name,
         Key: opts.orgProfileKey,
         UpdateExpression: setExpr,
-        ConditionExpression: 'auroraSetupStatus = :expected',
+        ConditionExpression: 'auroraSetupStatus = :expected AND attribute_not_exists(deleting)',
         ExpressionAttributeValues: exprValues,
+        // Lets the catch tell a deleting org apart from a lost race without a
+        // second read — the two need opposite handling.
+        ReturnValuesOnConditionCheckFailure: 'ALL_OLD',
         // On the terminal advance, read the prior auroraSetupFailureCount so
         // we can refresh the stuck-tenant gauge when this org was previously
         // stuck. The counter itself is left in place — it is a historical
@@ -472,6 +479,11 @@ async function advanceStatus(opts: AdvanceStatusOptions): Promise<'wrote' | 'los
     return 'wrote';
   } catch (err) {
     if (err instanceof ConditionalCheckFailedException) {
+      // Not a race: nobody will ever write the tenant id, so the caller's
+      // re-read would spin looking for a winner that does not exist.
+      if (err.Item?.deleting?.BOOL === true) {
+        throw new OrgDeletingError(opts.orgProfileKey.pk.S.replace('ORG#', ''));
+      }
       // A concurrent invocation already advanced past `expected`. Treat as
       // success at this step; the caller decides whether anything else needs
       // to happen (e.g. createTenant re-reads to fetch the winner's

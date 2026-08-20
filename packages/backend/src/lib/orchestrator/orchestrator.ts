@@ -39,6 +39,7 @@ import type {
   TenantStatusProbe,
   TenantUsageMetrics,
 } from '../service-orchestrator.js';
+import { TENANT_DELETE_RETRY } from '../service-orchestrator.js';
 import type { OrgProfileItem } from '../org-profile.js';
 import type { S3ClientContext } from '../s3-client.js';
 import { createS3Client } from '../s3-client.js';
@@ -54,6 +55,7 @@ import {
 import { getConsoleS3Credentials } from '../s3-credentials.js';
 import {
   createClient,
+  deleteTenantsByTenantId,
   deleteTenantsByTenantIdAccessKeysByAccessKeyId,
   getTenantsByTenantId,
   getTenantsByTenantIdAccessKeys,
@@ -104,6 +106,24 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
   };
   const tenantIdAttribute = `${config.id}TenantId`;
 
+  // Same lowercase-dashed status values as the contract, so no mapping is
+  // needed. Setting the same status twice is a no-op upstream.
+  const setTenantStatus = async (
+    tenantId: string,
+    status: TenantStatus,
+    opts?: { allowMissing?: boolean },
+  ): Promise<void> => {
+    const { error, response } = await postTenantsByTenantIdStatus({
+      client,
+      path: { tenantId },
+      body: { status },
+      throwOnError: false,
+    });
+    if (!error) return;
+    if (opts?.allowMissing && response?.status === 404) return;
+    throw new Error(`Failed to set tenant ${tenantId} status to "${status}"`, { cause: error });
+  };
+
   const getS3ClientContext = async (tenantId: string): Promise<S3ClientContext> => {
     const credentials = await getConsoleS3Credentials({
       orchestratorId: config.id,
@@ -135,18 +155,25 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
     },
 
     async updateTenantStatus(tenantId: string, status: TenantStatus): Promise<void> {
-      // The contract uses the same lowercase-dashed status values, so no
-      // mapping is needed. Setting the same status twice is a no-op upstream;
-      // transient failures are retried by the caller (region-helpers).
-      const { error } = await postTenantsByTenantIdStatus({
-        client,
-        path: { tenantId },
-        body: { status },
-        throwOnError: false,
-      });
-      if (error) {
-        throw new Error(`Failed to set tenant ${tenantId} status to "${status}"`, { cause: error });
-      }
+      await setTenantStatus(tenantId, status);
+    },
+
+    async deleteTenant(tenantId: string): Promise<void> {
+      await pRetry(async () => {
+        // Precondition only, so a 404 here must not skip the DELETE: a pass that
+        // failed partway leaves resources the DELETE still has to collect.
+        await setTenantStatus(tenantId, 'disabled', { allowMissing: true });
+
+        const { error, response } = await deleteTenantsByTenantId({
+          client,
+          path: { tenantId },
+          throwOnError: false,
+        });
+        // Already deleted answers 204; a 404 means the same.
+        if (error && response?.status !== 404) {
+          throw new Error(`Failed to delete ${config.id} tenant ${tenantId}`, { cause: error });
+        }
+      }, TENANT_DELETE_RETRY);
     },
 
     async getTenantStatus(tenantId: string): Promise<TenantStatusProbe> {
