@@ -309,7 +309,18 @@ describe('getProvisionedRegions', () => {
 
     await getProvisionedRegions('org-1');
 
-    expect(mockGetOrgProfile.mock.calls).toEqual([['org-1']]);
+    expect(mockGetOrgProfile).toHaveBeenCalledTimes(1);
+    expect(mockGetOrgProfile).toHaveBeenCalledWith('org-1', undefined);
+  });
+
+  // Teardown snapshots tenant ids from here; a stale read would orphan a live
+  // tenant permanently.
+  it('passes the consistent-read option through to the PROFILE read', async () => {
+    mockGetAvailableOrchestrators.mockReturnValue([fakeOrchestrator('aurora')]);
+
+    await getProvisionedRegions('org-1', { consistent: true });
+
+    expect(mockGetOrgProfile).toHaveBeenCalledWith('org-1', { consistent: true });
   });
 
   it('does not fetch the PROFILE row when no orchestrator is available', async () => {

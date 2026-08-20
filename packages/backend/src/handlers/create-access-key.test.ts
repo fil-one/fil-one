@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, PutItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
+import {
+  DynamoDBClient,
+  GetItemCommand,
+  PutItemCommand,
+  QueryCommand,
+} from '@aws-sdk/client-dynamodb';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -72,7 +77,34 @@ describe('create-access-key baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
+    // The org-deleting fence pre-check; no `deleting` attribute by default.
+    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
     mockEnsureTenantReady.mockResolvedValue('aurora-t-1');
+  });
+
+  it('410s without minting a key when the org is being deleted', async () => {
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } } })
+      .resolves({ Item: { pk: { S: 'ORG#org-1' }, deleting: { BOOL: true } } });
+
+    const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(410);
+    expect(mockEnsureTenantReady).not.toHaveBeenCalled();
+    expect(mockIssueAccessKey).not.toHaveBeenCalled();
+  });
+
+  it('reads the fence consistently', async () => {
+    ddbMock.on(PutItemCommand).resolves({});
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+
+    await baseHandler(buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO }));
+
+    expect(ddbMock.commandCalls(GetItemCommand)[0]!.args[0].input).toMatchObject({
+      Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
+      ConsistentRead: true,
+    });
   });
 
   it('returns 201 with keyName, accessKeyId, and secretAccessKey on success', async () => {

@@ -8,7 +8,9 @@ export const ME_STALE_TIME = 10 * 60_000;
 // redundant refetches on remount/refocus, never delays user-triggered updates.
 export const USAGE_STALE_TIME = 5 * 60_000;
 
-const NO_RETRY_STATUSES = new Set([401, 403]);
+// 410 included: the account is gone, so a retry can only fail again. apiRequest
+// throwing is not enough on its own — only this set stops the retry.
+const NO_RETRY_STATUSES = new Set([401, 403, 410]);
 
 export function defaultRetry(failureCount: number, error: unknown): boolean {
   const status = (error as { status?: number })?.status;

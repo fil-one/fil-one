@@ -23,8 +23,11 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getAvailableOrchestrators: (...args: unknown[]) => mockGetAvailableOrchestrators(...args),
 }));
 
+const mockIsOrgDeletedOrDeleting = vi.fn(async (_orgId: string) => false);
+
 vi.mock('../lib/org-profile.js', () => ({
   getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
+  isOrgDeletedOrDeleting: (orgId: string) => mockIsOrgDeletedOrDeleting(orgId),
 }));
 
 process.env.FILONE_STAGE = 'test';
@@ -86,6 +89,7 @@ describe('grace-period-enforcer', () => {
     ddbMock.on(UpdateItemCommand).resolves({});
     vi.clearAllMocks();
     aurora = fakeOrchestrator('aurora');
+    mockIsOrgDeletedOrDeleting.mockResolvedValue(false);
     mockGetAvailableOrchestrators.mockReturnValue([aurora]);
   });
 
@@ -98,6 +102,25 @@ describe('grace-period-enforcer', () => {
   // -----------------------------------------------------------------------
   it('does nothing when no records found', async () => {
     ddbMock.on(ScanCommand).resolves({ Items: [] });
+
+    await handler();
+
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    expect(aurora.updateTenantStatus).not.toHaveBeenCalled();
+  });
+
+  // Teardown owns the cancel and the disable once deletion starts; doing them
+  // here would race its Stripe calls.
+  it('skips a candidate whose org is deleted or being deleted', async () => {
+    mockIsOrgDeletedOrDeleting.mockResolvedValue(true);
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        buildBillingItem({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: pastDate(1),
+        }),
+      ],
+    });
 
     await handler();
 

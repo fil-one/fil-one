@@ -4,6 +4,7 @@
 //
 // PROFILE-row attributes used: `auroraTenantId` and `auroraSetupStatus`.
 
+import pRetry from 'p-retry';
 import { S3Region, getS3Endpoint, TenantStatus } from '@filone/shared';
 import type {
   AccessKeyPermission,
@@ -51,6 +52,7 @@ import type {
   TenantInfo,
   TenantUsageMetrics,
 } from '../service-orchestrator.js';
+import { TENANT_DELETE_RETRY } from '../service-orchestrator.js';
 import type { S3ClientContext } from '../s3-client.js';
 
 export const _resetSsmCacheForTesting = () => _resetS3CredentialsCacheForTesting();
@@ -93,6 +95,19 @@ export const auroraOrchestrator = {
 
   async updateTenantStatus(tenantId: string, status: TenantStatus): Promise<void> {
     await updateAuroraTenantStatusApi({ tenantId, status: mapToModelsTenantStatus(status) });
+  },
+
+  async deleteTenant(tenantId: string): Promise<void> {
+    await pRetry(async () => {
+      // allowMissing: a tenant that is already gone needs no disabling.
+      await updateAuroraTenantStatusApi({
+        tenantId,
+        status: mapToModelsTenantStatus('disabled'),
+        allowMissing: true,
+      });
+      // TODO(FIL-919): delete the tenant once Aurora's Backoffice API exposes a
+      // DELETE. Until then buckets and objects survive the teardown.
+    }, TENANT_DELETE_RETRY);
   },
 
   async getTenantStatus(tenantId: string): Promise<TenantStatusProbe> {

@@ -18,8 +18,17 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getOrchestratorForRegion: (...args: unknown[]) => mockGetOrchestratorForRegion(...args),
 }));
 
-vi.mock('../lib/org-profile.js', () => ({
-  getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
+const mockGetOrgProfile = vi.fn(async (orgId: string, _options?: { consistent?: boolean }) => ({
+  pk: { S: `ORG#${orgId}` },
+}));
+const mockIsOrgDeleting = vi.fn(
+  async (_orgId: string, _options?: { consistent?: boolean }) => false,
+);
+
+vi.mock('../lib/org-profile.js', async () => ({
+  ...(await vi.importActual<typeof import('../lib/org-profile.js')>('../lib/org-profile.js')),
+  getOrgProfile: (...args: Parameters<typeof mockGetOrgProfile>) => mockGetOrgProfile(...args),
+  isOrgDeleting: (...args: Parameters<typeof mockIsOrgDeleting>) => mockIsOrgDeleting(...args),
 }));
 
 const mockGetEnablement = vi.fn();
@@ -109,6 +118,23 @@ describe('set-bucket-rag-enablement baseHandler', () => {
     mockSetEnablement.mockImplementation(async (args: { enabled: boolean }) =>
       record({ status: args.enabled ? 'active' : 'disabled' }),
     );
+    mockGetOrgProfile.mockImplementation(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } }));
+    mockIsOrgDeleting.mockResolvedValue(false);
+  });
+
+  it('410s when the org is being deleted', async () => {
+    mockIsOrgDeleting.mockResolvedValue(true);
+
+    const result = await baseHandler(event({ enabled: true }));
+
+    expect(result.statusCode).toBe(410);
+    expect(mockSetEnablement).not.toHaveBeenCalled();
+  });
+
+  it('reads the fence consistently, so it cannot be missed', async () => {
+    await baseHandler(event({ enabled: true }));
+
+    expect(mockIsOrgDeleting).toHaveBeenCalledWith('org-1', { consistent: true });
   });
 
   it('enables RAG and returns 200 with the active enablement state', async () => {

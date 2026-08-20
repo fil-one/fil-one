@@ -27,8 +27,11 @@ vi.mock('../lib/metrics.js', () => ({
   reportMetric: (...args: unknown[]) => mockReportMetric(...args),
 }));
 
+const mockIsOrgDeletedOrDeleting = vi.fn(async (_orgId: string) => false);
+
 vi.mock('../lib/org-profile.js', () => ({
   getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
+  isOrgDeletedOrDeleting: (orgId: string) => mockIsOrgDeletedOrDeleting(orgId),
 }));
 
 process.env.FILONE_STAGE = 'test';
@@ -78,6 +81,7 @@ describe('subscription-drift-checker', () => {
     ddbMock.reset();
     vi.clearAllMocks();
     aurora = fakeOrchestrator('aurora');
+    mockIsOrgDeletedOrDeleting.mockResolvedValue(false);
     mockGetAvailableOrchestrators.mockReturnValue([aurora]);
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -101,6 +105,40 @@ describe('subscription-drift-checker', () => {
     });
     expect(aurora.getTenantStatus).not.toHaveBeenCalled();
     expect(outOfSyncLogs(logSpy)).toHaveLength(0);
+  });
+
+  // A tenant mid-teardown looks out of sync but is not drift, so it must not
+  // reach the probe or the counters — reporting it would page someone about an
+  // org that is supposed to be disappearing.
+  it('leaves a deleted or deleting org out of the run entirely', async () => {
+    mockIsOrgDeletedOrDeleting.mockResolvedValue(true);
+    ddbMock.on(ScanCommand).resolves({ Items: [activeBillingItem()] });
+
+    await handler();
+
+    expect(aurora.getTenantStatus).not.toHaveBeenCalled();
+    expect(emissionFor('aurora')).toMatchObject({
+      SubscriptionsTotal: 0,
+      SubscriptionsNotInSync: 0,
+      SubscriptionsProbeFailed: 0,
+    });
+  });
+
+  // A throttled probe must cost one candidate, not the run and its metrics.
+  it('counts a failing deletion probe as probeFailed and keeps going', async () => {
+    mockIsOrgDeletedOrDeleting.mockRejectedValue(new Error('ProvisionedThroughputExceeded'));
+    ddbMock.on(ScanCommand).resolves({ Items: [activeBillingItem()] });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await expect(handler()).resolves.toBeUndefined();
+      expect(emissionFor('aurora')).toMatchObject({
+        SubscriptionsTotal: 1,
+        SubscriptionsProbeFailed: 1,
+      });
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it('emits no out_of_sync log when the tenant is active', async () => {

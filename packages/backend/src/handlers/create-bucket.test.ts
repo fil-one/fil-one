@@ -28,6 +28,15 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
   },
 }));
 
+const mockIsOrgDeleting = vi.fn(
+  async (_orgId: string, _options?: { consistent?: boolean }) => false,
+);
+
+vi.mock('../lib/org-profile.js', async () => ({
+  ...(await vi.importActual<typeof import('../lib/org-profile.js')>('../lib/org-profile.js')),
+  isOrgDeleting: (...args: Parameters<typeof mockIsOrgDeleting>) => mockIsOrgDeleting(...args),
+}));
+
 import { baseHandler } from './create-bucket.js';
 import { BucketAlreadyExistsError, BucketConfigurationError } from '../lib/errors.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
@@ -51,6 +60,23 @@ describe('create-bucket baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEnsureTenantReady.mockResolvedValue('aurora-t-1');
+    mockIsOrgDeleting.mockResolvedValue(false);
+  });
+
+  it('410s without creating a bucket when the org is being deleted', async () => {
+    mockIsOrgDeleting.mockResolvedValue(true);
+
+    const result = await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO }));
+
+    expect(result.statusCode).toBe(410);
+    expect(mockEnsureTenantReady).not.toHaveBeenCalled();
+    expect(mockCreateBucket).not.toHaveBeenCalled();
+  });
+
+  it('reads the fence consistently', async () => {
+    await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO }));
+
+    expect(mockIsOrgDeleting).toHaveBeenCalledWith('org-1', { consistent: true });
   });
 
   it('returns 201 and calls orchestrator.createBucket on success', async () => {

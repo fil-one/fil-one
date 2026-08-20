@@ -33,6 +33,7 @@ import type {
   TenantInfo,
   TenantUsageMetrics,
 } from '../service-orchestrator.js';
+import { TENANT_DELETE_RETRY } from '../service-orchestrator.js';
 import type { OrgProfileItem } from '../org-profile.js';
 
 import type { S3ClientContext } from '../s3-client.js';
@@ -92,6 +93,27 @@ export const fthOrchestrator = {
     // A status PATCH is naturally idempotent, so no idempotency key is sent;
     // transient failures are retried by the caller (region-helpers).
     await client.updateClientStatus(tenantId, { status });
+  },
+
+  async deleteTenant(tenantId: string): Promise<void> {
+    await pRetry(async () => {
+      try {
+        await client.updateClientStatus(tenantId, { status: 'disabled' });
+      } catch (err) {
+        // Precondition only, so a not-found here must not skip the delete.
+        if (!(err instanceof FthNotFoundError)) {
+          throw new Error(`Failed to disable FTH tenant ${tenantId}`, { cause: err });
+        }
+      }
+
+      try {
+        await client.deleteClient(tenantId);
+      } catch (err) {
+        // Already deleted answers 204; a not-found means the same.
+        if (err instanceof FthNotFoundError) return;
+        throw new Error(`Failed to delete FTH tenant ${tenantId}`, { cause: err });
+      }
+    }, TENANT_DELETE_RETRY);
   },
 
   async getTenantStatus(tenantId: string): Promise<TenantStatusProbe> {

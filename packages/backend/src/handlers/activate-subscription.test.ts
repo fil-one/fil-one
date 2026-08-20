@@ -24,6 +24,16 @@ vi.mock('sst', () => ({
   },
 }));
 
+// Mocked rather than stubbed through ddbMock: the fence read would otherwise
+// shift every resolvesOnce sequence below by one.
+const mockIsOrgDeleting = vi.fn(
+  async (_orgId: string, _options?: { consistent?: boolean }) => false,
+);
+vi.mock('../lib/org-profile.js', async () => ({
+  ...(await vi.importActual<typeof import('../lib/org-profile.js')>('../lib/org-profile.js')),
+  isOrgDeleting: (...args: Parameters<typeof mockIsOrgDeleting>) => mockIsOrgDeleting(...args),
+}));
+
 // The orchestrator registry instantiates real clients at import time; mock it
 // so the otherwise-real region-helpers module can be loaded below.
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
@@ -130,6 +140,24 @@ describe('activate-subscription handler', () => {
       data: [{ status: 'succeeded', payment_method: 'pm_test_789' }],
     });
     mockSyncTenantStatusInProvisionedRegions.mockResolvedValue([]);
+    mockIsOrgDeleting.mockResolvedValue(false);
+  });
+
+  // A subscription created here is billable and postdates teardown's snapshot
+  // of stripeCustomerId, so nothing would ever cancel it.
+  it('410s without touching Stripe when the org is being deleted', async () => {
+    mockIsOrgDeleting.mockResolvedValue(true);
+
+    const event = buildEvent({
+      userInfo: { userId: 'user-1', orgId: 'org-1' },
+      body: JSON.stringify({}),
+    });
+
+    const result = await handler(event, {} as never);
+
+    expect((result as { statusCode: number }).statusCode).toBe(410);
+    expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
+    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
   });
 
   it('updates existing trial subscription when subscriptionId exists', async () => {
@@ -241,6 +269,7 @@ describe('activate-subscription handler', () => {
       customer: 'cus_test_123',
       items: [{ price: 'price_test_fake' }],
       default_payment_method: 'pm_test_789',
+      metadata: { userId: 'user-1', orgId: 'org-1' },
       expand: ['latest_invoice.payment_intent', 'default_payment_method'],
     });
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
@@ -277,6 +306,7 @@ describe('activate-subscription handler', () => {
       customer: 'cus_test_123',
       items: [{ price: 'price_test_fake' }],
       default_payment_method: 'pm_test_789',
+      metadata: { userId: 'user-1', orgId: 'org-1' },
       expand: ['latest_invoice.payment_intent', 'default_payment_method'],
     });
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
@@ -311,6 +341,7 @@ describe('activate-subscription handler', () => {
       customer: 'cus_test_123',
       items: [{ price: 'price_test_fake' }],
       default_payment_method: 'pm_test_789',
+      metadata: { userId: 'user-1', orgId: 'org-1' },
       expand: ['latest_invoice.payment_intent', 'default_payment_method'],
     });
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
@@ -468,6 +499,7 @@ describe('activate-subscription handler', () => {
       customer: 'cus_test_123',
       items: [{ price: 'price_test_fake' }],
       default_payment_method: 'pm_saved_1',
+      metadata: { userId: 'user-1', orgId: 'org-1' },
       expand: ['latest_invoice.payment_intent', 'default_payment_method'],
     });
     expect(body.subscription.status).toBe(SubscriptionStatus.Active);
@@ -657,6 +689,7 @@ describe('activate-subscription handler', () => {
         items: [{ price: 'price_test_fake' }],
         default_payment_method: 'pm_test_789',
         discounts: [{ promotion_code: 'promo_xxx' }],
+        metadata: { userId: 'user-1', orgId: 'org-1' },
         expand: ['latest_invoice.payment_intent', 'default_payment_method'],
       });
     });
@@ -690,6 +723,7 @@ describe('activate-subscription handler', () => {
         items: [{ price: 'price_test_fake' }],
         default_payment_method: 'pm_test_789',
         discounts: [{ promotion_code: 'promo_xxx' }],
+        metadata: { userId: 'user-1', orgId: 'org-1' },
         expand: ['latest_invoice.payment_intent', 'default_payment_method'],
       });
       expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
@@ -796,6 +830,7 @@ describe('activate-subscription handler', () => {
         items: [{ price: 'price_test_fake' }],
         default_payment_method: 'pm_saved_1',
         discounts: [{ promotion_code: 'promo_xxx' }],
+        metadata: { userId: 'user-1', orgId: 'org-1' },
         expand: ['latest_invoice.payment_intent', 'default_payment_method'],
       });
     });

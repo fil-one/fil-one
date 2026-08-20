@@ -3,6 +3,7 @@ import { mockClient } from 'aws-sdk-client-mock';
 import {
   DynamoDBClient,
   GetItemCommand,
+  TransactionCanceledException,
   TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
@@ -30,6 +31,7 @@ vi.mock('../middleware/subscription-guard.js', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler, handler } from './create-rag-api-key.js';
+import { OrgDeletingError } from '../lib/org-profile.js';
 import { hashRagKeyToken, RagApiKeyKeys } from '../lib/rag-api-keys.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
 
@@ -47,10 +49,16 @@ function createEvent(body: unknown) {
   });
 }
 
+/** The caller's items, with the deletion guard — always item 0 — asserted and stripped. */
 function sentTransactItems() {
   const calls = ddbMock.commandCalls(TransactWriteItemsCommand);
   expect(calls).toHaveLength(1);
-  return calls[0].args[0].input.TransactItems ?? [];
+  const items = calls[0].args[0].input.TransactItems ?? [];
+  expect(items[0]?.ConditionCheck).toMatchObject({
+    Key: { pk: { S: `ORG#${USER_INFO.orgId}` }, sk: { S: 'PROFILE' } },
+    ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
+  });
+  return items.slice(1);
 }
 
 describe('create-rag-api-key baseHandler', () => {
@@ -58,6 +66,26 @@ describe('create-rag-api-key baseHandler', () => {
     vi.clearAllMocks();
     ddbMock.reset();
     ddbMock.on(TransactWriteItemsCommand).resolves({});
+  });
+
+  // The 410 itself is errorHandlerMiddleware's job, so the handler's contract
+  // is simply that it refuses rather than persisting anything.
+  it('throws OrgDeletingError when the guard refuses a deleting org', async () => {
+    ddbMock.on(TransactWriteItemsCommand).rejects(
+      new TransactionCanceledException({
+        message: 'cancelled',
+        $metadata: {},
+        CancellationReasons: [
+          { Code: 'ConditionalCheckFailed' },
+          { Code: 'None' },
+          { Code: 'None' },
+        ],
+      }),
+    );
+
+    await expect(baseHandler(createEvent({ keyName: 'ci key' }))).rejects.toBeInstanceOf(
+      OrgDeletingError,
+    );
   });
 
   it('returns 201 with a plaintext token exactly once and persists only its hash', async () => {
