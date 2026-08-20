@@ -55,6 +55,9 @@ export default $config({
     const stripeSecretKey = new sst.Secret('StripeSecretKey');
     const stripePublishableKey = new sst.Secret('StripePublishableKey');
     const stripePriceId = new sst.Secret('StripePriceId');
+    // The Stripe meter every storage report writes to: the usage cron, its
+    // orchestrator, and the account teardown's final report before it cancels.
+    const stripeMeterEventName = 'gb_month_meter';
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
     const fthManagementApiToken = new sst.Secret('FthManagementApiToken');
     // linked on non-production stages.
@@ -1021,6 +1024,45 @@ export default $config({
     // step with packages/website/src/lib/account-deletion.ts.
     const accountDeletionEnabled = 'false';
 
+    // Catches payloads that exhaust Lambda's async retries. The sweeper
+    // re-drives independently off the DELETION record, so this is for triage
+    // rather than recovery.
+    const accountDeletionDlq = new sst.aws.Queue('AccountDeletionDlq');
+
+    const accountDeletionWorker = createFn('AccountDeletionWorker', {
+      handler: 'packages/backend/src/jobs/account-deletion-worker.handler',
+      link: [
+        billingTable,
+        userInfoTable,
+        ragIndexerTable,
+        ragVectorBucket,
+        stripeSecretKey,
+        ...managementApiTokens,
+        ...mgmtRuntimeResources,
+      ],
+      environment: {
+        ...orchestratorEnv,
+        AUTH0_MGMT_DOMAIN: auth0MgmtDomain,
+        // The teardown reports the outstanding period before it cancels.
+        STRIPE_METER_EVENT_NAME: stripeMeterEventName,
+      },
+      // The scrub pages whole partitions; a pass that runs out of time resumes
+      // against a smaller one next time.
+      timeout: '900 seconds',
+      memory: '1024 MB',
+      permissions: [
+        ...ragPermissions,
+        { actions: ['sqs:SendMessage'], resources: [accountDeletionDlq.arn] },
+      ],
+    });
+
+    new aws.lambda.FunctionEventInvokeConfig('AccountDeletionWorkerInvokeConfig', {
+      functionName: accountDeletionWorker.name,
+      destinationConfig: {
+        onFailure: { destination: accountDeletionDlq.arn },
+      },
+    });
+
     // No subscriptionGuardMiddleware on these: it blocks writes for cancelled
     // and inactive subscriptions, the population most likely to be leaving.
     addRoute({
@@ -1038,14 +1080,38 @@ export default $config({
       method: 'POST',
       routePath: '/api/account/deletion/confirm',
       handler: 'confirm-account-deletion',
-      // The member snapshot, tenant-id read and step-up enrollment lookup do not
-      // fit the 10s default.
+      // The org-name read, salt read and step-up enrollment lookup do not fit the
+      // 10s default.
       timeout: '30 seconds',
       extraLink: [deletionChallengeTable, deletionCodeHmacKey, ...mgmtRuntimeResources],
       extraEnv: {
         AUTH0_MGMT_DOMAIN: auth0MgmtDomain,
         ACCOUNT_DELETION_ENABLED: accountDeletionEnabled,
+        ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
       },
+      permissions: [{ actions: ['lambda:InvokeFunction'], resources: [accountDeletionWorker.arn] }],
+    });
+
+    // Declared after the deletion worker: customer.deleted commits a full account
+    // teardown and invokes it.
+    addRoute({
+      method: 'POST',
+      routePath: '/api/stripe/webhook',
+      handler: 'stripe-webhook',
+      extraEnv: {
+        ...orchestratorEnv,
+        STRIPE_WEBHOOK_SECRET_SSM_PATH: $interpolate`/filone/${$app.stage}/stripe-webhook-secret`,
+        ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
+      },
+      permissions: [
+        {
+          actions: ['ssm:GetParameter'],
+          resources: [
+            $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/stripe-webhook-secret`,
+          ],
+        },
+        { actions: ['lambda:InvokeFunction'], resources: [accountDeletionWorker.arn] },
+      ],
     });
 
     // ── Usage reporting (cron-based) ────────────────────────────────
@@ -1054,10 +1120,14 @@ export default $config({
       link: [billingTable, userInfoTable, stripeSecretKey, stripePriceId, ...managementApiTokens],
       environment: {
         ...orchestratorEnv,
-        STRIPE_METER_EVENT_NAME: 'gb_month_meter',
+        STRIPE_METER_EVENT_NAME: stripeMeterEventName,
+        ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
       },
       timeout: '60 seconds',
       memory: '256 MB',
+      // The deleted-customer audit starts a teardown for a customer.deleted event
+      // that was never delivered.
+      permissions: [{ actions: ['lambda:InvokeFunction'], resources: [accountDeletionWorker.arn] }],
     });
 
     const usageOrchestrator = createFn('UsageReportingOrchestrator', {
@@ -1065,7 +1135,7 @@ export default $config({
       link: [billingTable, userInfoTable],
       environment: {
         USAGE_WORKER_FUNCTION_NAME: usageWorker.name,
-        STRIPE_METER_EVENT_NAME: 'gb_month_meter',
+        STRIPE_METER_EVENT_NAME: stripeMeterEventName,
       },
       timeout: '300 seconds',
       memory: '256 MB',

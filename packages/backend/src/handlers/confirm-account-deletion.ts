@@ -9,6 +9,7 @@ import {
   isSelfServeDeletionEnabled,
   selfServeDeletionUnavailable,
 } from '../lib/account-deletion-flag.js';
+import { invokeAccountDeletionWorker } from '../lib/account-deletion-invoke.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { deletionChallengeKey } from '../lib/deletion-challenge.js';
 import {
@@ -75,6 +76,10 @@ export async function baseHandler(
     requestedByUserId: userId,
     alreadyRecorded: result.outcome === 'already_deleting',
   });
+
+  // Fire-and-forget by design: it never throws, and the sweeper re-drives from
+  // the record if it never lands.
+  await invokeAccountDeletionWorker(orgId);
 
   return new ResponseBuilder()
     .status(202)
