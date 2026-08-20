@@ -18,6 +18,14 @@ export enum ApiErrorCode {
   BUCKET_NOT_INDEXED = 'BUCKET_NOT_INDEXED',
   /** The bucket still holds objects or object versions — it must be emptied before deletion. */
   BUCKET_NOT_EMPTY = 'BUCKET_NOT_EMPTY',
+  /** The submitted account-deletion code does not match the issued one. */
+  DELETION_CODE_INVALID = 'DELETION_CODE_INVALID',
+  /** The account-deletion code has expired or its attempt budget is spent. */
+  DELETION_CODE_EXPIRED_OR_LOCKED = 'DELETION_CODE_EXPIRED_OR_LOCKED',
+  /** Too many account-deletion codes requested — retry after `resendAvailableAt`. */
+  DELETION_RATE_LIMITED = 'DELETION_RATE_LIMITED',
+  /** The account has been deleted; the session is dead and cannot be revived. */
+  ACCOUNT_DELETED = 'ACCOUNT_DELETED',
 }
 
 export interface ErrorResponse {

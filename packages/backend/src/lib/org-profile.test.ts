@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  DynamoDBClient,
+  GetItemCommand,
+  TransactionCanceledException,
+  TransactWriteItemsCommand,
+  type TransactWriteItem,
+} from '@aws-sdk/client-dynamodb';
 
 vi.mock('sst', () => ({
   Resource: {
@@ -10,7 +16,13 @@ vi.mock('sst', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { getOrgProfile } from './org-profile.js';
+import {
+  getOrgProfile,
+  isOrgDeleting,
+  orgNotDeletingCheck,
+  OrgDeletingError,
+  sendDeletionGuardedWrite,
+} from './org-profile.js';
 
 describe('getOrgProfile', () => {
   beforeEach(() => {
@@ -43,5 +55,94 @@ describe('getOrgProfile', () => {
     const result = await getOrgProfile('org-1');
 
     expect(result).toBeUndefined();
+  });
+
+  it('reads consistently only when asked', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: {} });
+
+    await getOrgProfile('org-1', { consistent: true });
+    expect(ddbMock.commandCalls(GetItemCommand)[0]?.args[0].input).toMatchObject({
+      ConsistentRead: true,
+    });
+
+    await getOrgProfile('org-1');
+    expect(ddbMock.commandCalls(GetItemCommand)[1]?.args[0].input.ConsistentRead).toBeUndefined();
+  });
+});
+
+describe('isOrgDeleting', () => {
+  it('is true only for an explicit BOOL true', () => {
+    expect(isOrgDeleting({ deleting: { BOOL: true } })).toBe(true);
+    expect(isOrgDeleting({ deleting: { BOOL: false } })).toBe(false);
+  });
+
+  it('fails open on an absent attribute or a missing row', () => {
+    expect(isOrgDeleting({ pk: { S: 'ORG#org-1' } })).toBe(false);
+    expect(isOrgDeleting(undefined)).toBe(false);
+  });
+});
+
+describe('orgNotDeletingCheck', () => {
+  it('conditions on the profile row existing and carrying no deleting flag', () => {
+    expect(orgNotDeletingCheck('org-1')).toEqual({
+      ConditionCheck: {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
+        ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
+      },
+    });
+  });
+});
+
+describe('sendDeletionGuardedWrite', () => {
+  const callerItem: TransactWriteItem = {
+    Put: { TableName: 'UserInfoTable', Item: { pk: { S: 'ORG#org-1' }, sk: { S: 'RAGKEY#1' } } },
+  };
+
+  function cancelledWith(codes: string[]) {
+    return new TransactionCanceledException({
+      message: 'cancelled',
+      $metadata: {},
+      CancellationReasons: codes.map((Code) => ({ Code })),
+    });
+  }
+
+  beforeEach(() => {
+    ddbMock.reset();
+  });
+
+  it('prepends the guard as item 0', async () => {
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+    await sendDeletionGuardedWrite('org-1', [callerItem]);
+
+    const { TransactItems } = ddbMock.commandCalls(TransactWriteItemsCommand)[0]!.args[0].input;
+    expect(TransactItems).toEqual([orgNotDeletingCheck('org-1'), callerItem]);
+  });
+
+  it('maps a guard rejection to OrgDeletingError', async () => {
+    ddbMock
+      .on(TransactWriteItemsCommand)
+      .rejects(cancelledWith(['ConditionalCheckFailed', 'None']));
+
+    await expect(sendDeletionGuardedWrite('org-1', [callerItem])).rejects.toBeInstanceOf(
+      OrgDeletingError,
+    );
+  });
+
+  it("rethrows when it is the caller's own condition that failed", async () => {
+    ddbMock
+      .on(TransactWriteItemsCommand)
+      .rejects(cancelledWith(['None', 'ConditionalCheckFailed']));
+
+    await expect(sendDeletionGuardedWrite('org-1', [callerItem])).rejects.not.toBeInstanceOf(
+      OrgDeletingError,
+    );
+  });
+
+  it('rethrows unrelated failures', async () => {
+    ddbMock.on(TransactWriteItemsCommand).rejects(new Error('throttled'));
+
+    await expect(sendDeletionGuardedWrite('org-1', [callerItem])).rejects.toThrow('throttled');
   });
 });

@@ -1,4 +1,10 @@
-import { GetItemCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
+import {
+  GetItemCommand,
+  TransactionCanceledException,
+  TransactWriteItemsCommand,
+  type AttributeValue,
+  type TransactWriteItem,
+} from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.js';
 
@@ -12,19 +18,89 @@ export type OrgProfileItem = Record<string, AttributeValue>;
 // per orchestrator.
 //
 // Read semantics:
-// - Eventually consistent on purpose: tenant-id attributes (auroraTenantId,
+// - Eventually consistent by default: tenant-id attributes (auroraTenantId,
 //   fthTenantId) are write-once, so a stale read can only transiently report
 //   "not provisioned" right after setup — never a wrong tenant id. Setup
 //   flows that need read-after-write (processTenantSetup) issue their own
 //   ConsistentRead and do not go through this helper.
+// - Pass `{ consistent: true }` to read the `deleting` fence; see isOrgDeleting.
 // - No ProjectionExpression: it would not reduce consumed RCUs, and different
 //   orchestrators need different attributes from the same row.
-export async function getOrgProfile(orgId: string): Promise<OrgProfileItem | undefined> {
+export async function getOrgProfile(
+  orgId: string,
+  options?: { consistent?: boolean },
+): Promise<OrgProfileItem | undefined> {
   const { Item } = await dynamo.send(
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+      ...(options?.consistent && { ConsistentRead: true }),
     }),
   );
   return Item;
+}
+
+/**
+ * Whether the org is being deleted. Absent means "not deleting", so a stale
+ * read fails open — callers must fetch the profile with `{ consistent: true }`
+ * or the fence can be missed.
+ */
+export function isOrgDeleting(orgProfile: OrgProfileItem | undefined): boolean {
+  return orgProfile?.deleting?.BOOL === true;
+}
+
+/** Thrown when a write is refused because the org is being deleted. */
+export class OrgDeletingError extends Error {
+  readonly orgId: string;
+
+  constructor(orgId: string) {
+    super(`Organization ${orgId} is being deleted`);
+    this.name = 'OrgDeletingError';
+    this.orgId = orgId;
+  }
+}
+
+/**
+ * Commits `items` only if the org is not being deleted, mapping the refusal to
+ * {@link OrgDeletingError}. For writes that create org-owned resources — a
+ * condition on the row being written cannot fence a write that creates it.
+ */
+export async function sendDeletionGuardedWrite(
+  orgId: string,
+  items: TransactWriteItem[],
+): Promise<void> {
+  try {
+    await dynamo.send(
+      new TransactWriteItemsCommand({ TransactItems: [orgNotDeletingCheck(orgId), ...items] }),
+    );
+  } catch (err) {
+    if (isGuardRejection(err)) throw new OrgDeletingError(orgId);
+    throw err;
+  }
+}
+
+/**
+ * The guard as a transaction item, for callers assembling their own
+ * TransactWriteItems. Must be item 0, since CancellationReasons is positional.
+ */
+export function orgNotDeletingCheck(orgId: string): TransactWriteItem {
+  return {
+    ConditionCheck: {
+      TableName: Resource.UserInfoTable.name,
+      Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+      // A ConditionCheck on a missing item reads every attribute as absent, so
+      // attribute_not_exists(deleting) alone would pass for an org that has no
+      // profile row. attribute_exists(pk) refuses that case instead.
+      ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
+    },
+  };
+}
+
+// Positional: reason 0 is the guard, so a caller's own failed condition reports
+// at its own index and is rethrown rather than mislabelled as a deletion.
+function isGuardRejection(err: unknown): boolean {
+  return (
+    err instanceof TransactionCanceledException &&
+    err.CancellationReasons?.[0]?.Code === 'ConditionalCheckFailed'
+  );
 }
