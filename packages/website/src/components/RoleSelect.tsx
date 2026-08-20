@@ -39,8 +39,7 @@ export function RoleSelect({
 
   return (
     <Select
-      id={id}
-      aria-label={ariaLabel}
+      {...(id ? { id } : { 'aria-label': ariaLabel ?? 'Role' })}
       value={value}
       invalid={invalid}
       onChange={(next) => onChange(next as OrgRole)}
