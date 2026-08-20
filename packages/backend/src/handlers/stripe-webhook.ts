@@ -1,4 +1,4 @@
-import { DeleteItemCommand, PutItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { DeleteItemCommand, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import Stripe from 'stripe';
@@ -9,6 +9,7 @@ import {
   mapStripeStatus,
 } from '@filone/shared';
 import { Resource } from 'sst';
+import { sendGuardedBillingUpdate } from '../lib/billing-guard.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import {
   closeOutDeletedCustomer,
@@ -210,8 +211,8 @@ async function updatePaymentMethod(
   userId: string,
   pm: Stripe.PaymentMethod,
 ): Promise<void> {
-  await dynamo.send(
-    new UpdateItemCommand({
+  await sendGuardedBillingUpdate(
+    {
       TableName: tableName,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -227,8 +228,8 @@ async function updatePaymentMethod(
         ':expYear': { N: String(pm.card?.exp_year ?? 0) },
         ':now': { S: new Date().toISOString() },
       },
-      ConditionExpression: 'attribute_exists(pk)',
-    }),
+    },
+    { userId, caller: 'customer.updated' },
   );
 }
 
@@ -345,8 +346,8 @@ async function updateBillingRecord({
   email,
 }: UpdateBillingRecordParams): Promise<void> {
   const backfill = orgIdBackfill(orgId);
-  await dynamo.send(
-    new UpdateItemCommand({
+  await sendGuardedBillingUpdate(
+    {
       TableName: tableName,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -365,7 +366,8 @@ async function updateBillingRecord({
         ':now': { S: new Date().toISOString() },
         ...backfill.values,
       },
-    }),
+    },
+    { userId, caller: 'subscription.updated' },
   );
 
   await syncHubSpotStatusBestEffort({ userId, status: fromInternalStatus(mappedStatus), email });
@@ -416,8 +418,8 @@ async function handleSubscriptionDeleted(
   const gracePeriodEndsAt = new Date(now.getTime() + graceDays * 24 * 60 * 60 * 1000).toISOString();
 
   const backfill = orgIdBackfill(customer.metadata?.orgId);
-  await dynamo.send(
-    new UpdateItemCommand({
+  await sendGuardedBillingUpdate(
+    {
       TableName: tableName,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -430,7 +432,8 @@ async function handleSubscriptionDeleted(
         ':grace': { S: gracePeriodEndsAt },
         ...backfill.values,
       },
-    }),
+    },
+    { userId, caller: 'subscription.deleted' },
   );
 
   const latestInvoice = subscription.latest_invoice;
@@ -481,8 +484,8 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   if (!userId) return;
 
   const backfill = orgIdBackfill(customer.metadata?.orgId);
-  const updateResult = await dynamo.send(
-    new UpdateItemCommand({
+  const updateResult = await sendGuardedBillingUpdate(
+    {
       TableName: tableName,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -495,10 +498,11 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
         ...backfill.values,
       },
       ReturnValues: 'ALL_OLD',
-    }),
+    },
+    { userId, caller: 'invoice.paid' },
   );
 
-  const priorStatus = updateResult.Attributes?.subscriptionStatus?.S;
+  const priorStatus = updateResult?.Attributes?.subscriptionStatus?.S;
   if (
     priorStatus === SubscriptionStatus.PastDue ||
     priorStatus === SubscriptionStatus.GracePeriod
@@ -552,8 +556,8 @@ async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): 
   // the subscription after all retries are exhausted.
   const now = new Date().toISOString();
   const backfill = orgIdBackfill(customer.metadata?.orgId);
-  await dynamo.send(
-    new UpdateItemCommand({
+  await sendGuardedBillingUpdate(
+    {
       TableName: tableName,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -566,7 +570,8 @@ async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): 
         ':now': { S: now },
         ...backfill.values,
       },
-    }),
+    },
+    { userId, caller: 'invoice.payment_failed' },
   );
 
   await syncHubSpotStatusBestEffort({
