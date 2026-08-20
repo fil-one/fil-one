@@ -10,6 +10,7 @@ import { PageLayout } from '../components/PageLayout.js';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { DeleteAccountModal } from '../components/DeleteAccountModal';
+import { ACCOUNT_DELETION_ENABLED } from '../lib/account-deletion';
 import { IconBox } from '../components/IconBox';
 import { FormField } from '../components/FormField';
 import { Input } from '../components/Input';
@@ -441,10 +442,23 @@ function DangerSection({ me }: { me: MeResponse }) {
         <div>
           <p className="text-sm font-medium text-zinc-900">Delete organization</p>
           <p className="text-xs text-zinc-500 mt-1">
-            Permanently deletes {me.orgName} and everything in it. This cannot be undone.
+            {ACCOUNT_DELETION_ENABLED ? (
+              <>Permanently deletes {me.orgName} and everything in it. This cannot be undone.</>
+            ) : (
+              <>
+                Not available yet. To delete {me.orgName}, email{' '}
+                <Link href="mailto:support@fil.one" variant="accent">
+                  support@fil.one
+                </Link>
+              </>
+            )}
           </p>
         </div>
-        <Button variant="destructive" onClick={() => setModalOpen(true)}>
+        <Button
+          variant="destructive"
+          disabled={!ACCOUNT_DELETION_ENABLED}
+          onClick={() => setModalOpen(true)}
+        >
           Delete
         </Button>
       </div>
