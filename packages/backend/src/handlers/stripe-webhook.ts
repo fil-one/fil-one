@@ -1,4 +1,4 @@
-import { DeleteItemCommand, PutItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { DeleteItemCommand, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import Stripe from 'stripe';
@@ -9,16 +9,17 @@ import {
   mapStripeStatus,
 } from '@filone/shared';
 import { Resource } from 'sst';
+import { sendGuardedBillingUpdate } from '../lib/billing-guard.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import {
-  closeOutDeletedCustomer,
-  resolveOrgIdFromSubscription,
-} from '../lib/deleted-customer-cleanup.js';
+import { resolveOrgIdFromSubscription } from '../lib/billing-org-lookup.js';
+import { startDeletionFromStripe } from '../lib/deletion-from-stripe.js';
 import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
   WEBHOOK_STATUS_SYNC_RETRY,
 } from '../lib/region-helpers.js';
+import { fromInternalStatus } from '../lib/hubspot-lifecycle-status.js';
+import { syncHubSpotStatusBestEffort } from '../lib/hubspot-status-sync.js';
 import { getStripeClient, getWebhookSecret } from '../lib/stripe-client.js';
 import {
   emitDunningEscalation,
@@ -208,8 +209,8 @@ async function updatePaymentMethod(
   userId: string,
   pm: Stripe.PaymentMethod,
 ): Promise<void> {
-  await dynamo.send(
-    new UpdateItemCommand({
+  await sendGuardedBillingUpdate(
+    {
       TableName: tableName,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -225,8 +226,8 @@ async function updatePaymentMethod(
         ':expYear': { N: String(pm.card?.exp_year ?? 0) },
         ':now': { S: new Date().toISOString() },
       },
-      ConditionExpression: 'attribute_exists(pk)',
-    }),
+    },
+    { userId, caller: 'customer.updated' },
   );
 }
 
@@ -235,32 +236,22 @@ async function handleCustomerDeleted(tableName: string, customer: Stripe.Custome
   // We do NOT retrieve from Stripe — the customer no longer exists there.
   const userId = customer.metadata?.userId;
   if (!userId) {
-    throw new Error(
-      `[stripe-webhook] customer.deleted missing metadata.userId; cannot disable customer ${customer.id}`,
-    );
-  }
-
-  // Disable immediately — no grace period. Tenants first; a failed region throws so the
-  // webhook returns 500 and Stripe retries (there is no cron fallback for canceled records).
-  // The sync is probe-first, so a retry skips regions that are already disabled.
-  const orgId = await resolveOrgIdFromSubscription(userId);
-  if (!orgId) {
-    console.warn('[stripe-webhook] customer.deleted: no tenant to disable', {
-      userId,
+    console.error('[stripe-webhook] customer.deleted has no metadata.userId; cannot resolve it', {
       customerId: customer.id,
     });
+    return;
   }
 
-  assertRegionSyncSucceeded(
-    await closeOutDeletedCustomer({ userId, orgId, retry: WEBHOOK_STATUS_SYNC_RETRY }),
-  );
-  if (orgId) {
-    console.log('[stripe-webhook] Tenant disabled (customer.deleted)', {
-      userId,
-      orgId,
-      customerId: customer.id,
-    });
-  }
+  // Deleting the customer in Stripe is an admin action against trial abuse, and
+  // terminating the account is its intended meaning — so this starts the full
+  // teardown rather than just disabling tenants. metadata.orgId is written at
+  // customer creation; the billing-row lookup covers customers that predate it.
+  await startDeletionFromStripe({
+    userId,
+    customerId: customer.id,
+    orgId: customer.metadata?.orgId,
+    caller: 'customer.deleted',
+  });
 
   emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
 }
@@ -277,6 +268,10 @@ async function handleSubscriptionUpdate(
       stripeStatus: subscription.status,
       subscriptionId: subscription.id,
       customerId,
+    });
+    await syncHubSpotStatusBestEffort({
+      userId: subscription.metadata?.userId,
+      status: fromInternalStatus(mappedStatus),
     });
     return;
   }
@@ -306,6 +301,7 @@ async function handleSubscriptionUpdate(
       subscription,
       mappedStatus,
       orgId: subscription.metadata?.orgId || customer.metadata?.orgId,
+      email: customer.email,
     });
     return;
   }
@@ -325,6 +321,8 @@ interface UpdateBillingRecordParams {
   subscription: Stripe.Subscription;
   mappedStatus: SubscriptionStatus;
   orgId: string | undefined;
+  /** Only used to bootstrap a contact that has no `filone_user_id` yet. */
+  email?: string | null;
 }
 
 async function updateBillingRecord({
@@ -333,10 +331,11 @@ async function updateBillingRecord({
   subscription,
   mappedStatus,
   orgId,
+  email,
 }: UpdateBillingRecordParams): Promise<void> {
   const backfill = orgIdBackfill(orgId);
-  await dynamo.send(
-    new UpdateItemCommand({
+  await sendGuardedBillingUpdate(
+    {
       TableName: tableName,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -355,8 +354,11 @@ async function updateBillingRecord({
         ':now': { S: new Date().toISOString() },
         ...backfill.values,
       },
-    }),
+    },
+    { userId, caller: 'subscription.updated' },
   );
+
+  await syncHubSpotStatusBestEffort({ userId, status: fromInternalStatus(mappedStatus), email });
 }
 
 async function handleSubscriptionDeleted(
@@ -374,23 +376,17 @@ async function handleSubscriptionDeleted(
     // to it at the time).
     const userId = subscription.metadata?.userId;
     if (!userId) {
-      throw new Error(
-        `[stripe-webhook] subscription.deleted for deleted customer ${customerId} has no metadata.userId; cannot close out billing record`,
+      console.error(
+        '[stripe-webhook] subscription.deleted for a deleted customer has no metadata.userId',
+        { customerId, subscriptionId: subscription.id },
       );
+      return;
     }
-    const orgId = await resolveOrgIdFromSubscription(userId);
-    assertRegionSyncSucceeded(
-      await closeOutDeletedCustomer({ userId, orgId, retry: WEBHOOK_STATUS_SYNC_RETRY }),
-    );
-    console.log(
-      '[stripe-webhook] Billing record closed out (subscription.deleted, customer deleted)',
-      {
-        userId,
-        orgId,
-        customerId,
-        subscriptionId: subscription.id,
-      },
-    );
+    await startDeletionFromStripe({
+      userId,
+      customerId,
+      caller: 'subscription.deleted',
+    });
     emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
     return;
   }
@@ -404,8 +400,8 @@ async function handleSubscriptionDeleted(
   const gracePeriodEndsAt = new Date(now.getTime() + graceDays * 24 * 60 * 60 * 1000).toISOString();
 
   const backfill = orgIdBackfill(customer.metadata?.orgId);
-  await dynamo.send(
-    new UpdateItemCommand({
+  await sendGuardedBillingUpdate(
+    {
       TableName: tableName,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -418,7 +414,8 @@ async function handleSubscriptionDeleted(
         ':grace': { S: gracePeriodEndsAt },
         ...backfill.values,
       },
-    }),
+    },
+    { userId, caller: 'subscription.deleted' },
   );
 
   const latestInvoice = subscription.latest_invoice;
@@ -449,6 +446,13 @@ async function handleSubscriptionDeleted(
   } catch (error) {
     console.error('[stripe-webhook] Failed to write-lock tenant', { userId, error });
   }
+
+  // Last: a slow CRM must not eat the route's 10s budget before the tenant sync.
+  await syncHubSpotStatusBestEffort({
+    userId,
+    status: fromInternalStatus(SubscriptionStatus.GracePeriod),
+    email: customer.email,
+  });
 }
 
 async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice): Promise<void> {
@@ -462,8 +466,8 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   if (!userId) return;
 
   const backfill = orgIdBackfill(customer.metadata?.orgId);
-  const updateResult = await dynamo.send(
-    new UpdateItemCommand({
+  const updateResult = await sendGuardedBillingUpdate(
+    {
       TableName: tableName,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -476,10 +480,11 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
         ...backfill.values,
       },
       ReturnValues: 'ALL_OLD',
-    }),
+    },
+    { userId, caller: 'invoice.paid' },
   );
 
-  const priorStatus = updateResult.Attributes?.subscriptionStatus?.S;
+  const priorStatus = updateResult?.Attributes?.subscriptionStatus?.S;
   if (
     priorStatus === SubscriptionStatus.PastDue ||
     priorStatus === SubscriptionStatus.GracePeriod
@@ -507,6 +512,15 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   } catch (error) {
     console.error('[stripe-webhook] Failed to re-activate tenant', { userId, error });
   }
+
+  // Last: a slow CRM must not eat the route's 10s budget before the re-activation
+  // above, which nothing else repairs — the idempotency claim survives a Lambda
+  // timeout, so Stripe's retry would be acknowledged as already processed.
+  await syncHubSpotStatusBestEffort({
+    userId,
+    status: fromInternalStatus(SubscriptionStatus.Active),
+    email: customer.email,
+  });
 }
 
 async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): Promise<void> {
@@ -524,8 +538,8 @@ async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): 
   // the subscription after all retries are exhausted.
   const now = new Date().toISOString();
   const backfill = orgIdBackfill(customer.metadata?.orgId);
-  await dynamo.send(
-    new UpdateItemCommand({
+  await sendGuardedBillingUpdate(
+    {
       TableName: tableName,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -538,8 +552,15 @@ async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): 
         ':now': { S: now },
         ...backfill.values,
       },
-    }),
+    },
+    { userId, caller: 'invoice.payment_failed' },
   );
+
+  await syncHubSpotStatusBestEffort({
+    userId,
+    status: fromInternalStatus(SubscriptionStatus.PastDue),
+    email: customer.email,
+  });
 
   const attemptCount = invoice.attempt_count ?? 0;
   emitDunningEscalation({

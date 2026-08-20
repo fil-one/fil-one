@@ -2,32 +2,18 @@ import { PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { Resource } from 'sst';
-import {
-  GB_BYTES,
-  TRIAL_STORAGE_LIMIT,
-  TRIAL_EGRESS_LIMIT,
-  formatBytes,
-  TenantStatus,
-} from '@filone/shared';
+import { TRIAL_STORAGE_LIMIT, TRIAL_EGRESS_LIMIT, formatBytes, TenantStatus } from '@filone/shared';
 import {
   getCustomerExistence,
-  getStripeClient,
   isStripeResourceMissing,
   updateCustomerMetadata,
 } from '../lib/stripe-client.js';
-import { closeOutDeletedCustomer } from '../lib/deleted-customer-cleanup.js';
+import { startDeletionFromStripe } from '../lib/deletion-from-stripe.js';
 import { emitStripeCustomersOutOfSync } from '../lib/usage-worker-metrics.js';
 import { STRIPE_METADATA_KEYS } from '../lib/stripe-metadata.js';
-import {
-  calculateAverageUsage,
-  mergeStorageSamples,
-  sortStorageSamplesByTimestamp,
-} from '../lib/usage-calculator.js';
-import type { TenantUsageMetrics } from '../lib/service-orchestrator.js';
-import {
-  getProvisionedRegions,
-  syncTenantStatusInProvisionedRegions,
-} from '../lib/region-helpers.js';
+import { reportOrgUsage, type AggregateUsage } from '../lib/org-usage-report.js';
+import { isOrgDeletedOrDeleting } from '../lib/org-profile.js';
+import { syncTenantStatusInProvisionedRegions } from '../lib/region-helpers.js';
 
 const dynamo = getDynamoClient();
 
@@ -45,13 +31,6 @@ export interface UsageReportingWorkerPayload {
   currentPeriodStart: string;
   subscriptionStatus: string;
   reportDate: string;
-}
-
-interface AggregateUsage {
-  averageStorageBytesUsed: number;
-  currentStorageBytes: number;
-  totalEgressBytes: number;
-  sampleCount: number;
 }
 
 async function enforceTenantLocks({
@@ -113,64 +92,27 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     throw new Error('STRIPE_METER_EVENT_NAME env var is not set');
   }
 
-  const now = new Date().toISOString();
-  const isTrial = subscriptionStatus === 'trialing';
-
-  // Resolve which regions this org is provisioned in by asking each
-  // stage-available orchestrator to resolve its tenant id (side-effect-free).
-  // Each region is then fetched independently, aggregated, and reported on the
-  // org-level.
-  const orgRegions = await getProvisionedRegions(orgId);
-
-  if (orgRegions.length === 0) {
-    console.warn('[usage-worker] Org not provisioned in any available region, skipping', { orgId });
+  // The payload predates the deletion: metering a customer being torn down,
+  // and the lock sync below would fight teardown over the tenant status.
+  if (await isOrgDeletedOrDeleting(orgId)) {
+    console.warn('[usage-worker] Org is deleted or being deleted, skipping', { orgId });
     return;
   }
 
-  let usageMetrics: TenantUsageMetrics[];
-  try {
-    usageMetrics = await Promise.all(
-      orgRegions.map(async (t) => {
-        try {
-          return await t.orchestrator.getTenantUsageMetrics(t.tenantId, {
-            from: currentPeriodStart,
-            to: now,
-            interval: '1d',
-          });
-        } catch (error) {
-          // Attach the failing region/tenant to the error itself — Promise.all
-          // only surfaces an index, and the escaping error is what the runtime
-          // logs (enumerable own properties included).
-          if (error instanceof Error) {
-            Object.assign(error, { orgId, region: t.orchestrator.region, tenantId: t.tenantId });
-          }
-          throw error;
-        }
-      }),
-    );
-  } catch (error) {
-    const e = error as Error & { cause?: unknown };
-    console.error('[usage-worker] Usage metrics fetch failed', {
-      orgId,
-      regions: orgRegions.map((r) => ({ region: r.orchestrator.region, tenantId: r.tenantId })),
-      subscriptionId,
-      message: e.message,
-      cause: e.cause,
-      stack: e.stack,
-    });
-    throw error;
-  }
+  const now = new Date().toISOString();
+  const isTrial = subscriptionStatus === 'trialing';
 
-  const aggregate = aggregateUsageMetrics(usageMetrics);
-  const averageStorageGbUsed = aggregate.averageStorageBytesUsed / GB_BYTES;
-
-  const meterResult = await reportStorageToStripe({
+  const usage = await reportOrgUsage({
     orgId,
     subscriptionId,
     stripeCustomerId,
-    averageStorageGbUsed,
+    currentPeriodStart,
+    to: now,
     meterEventName,
   });
+  if (!usage) return;
+
+  const { aggregate, averageStorageGbUsed } = usage;
 
   const { orgSyncAction, lockAction } = await resolveOrgSyncAndLockActions({
     orgId,
@@ -179,7 +121,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     stripeCustomerId,
     isTrial,
     aggregate,
-    meterCustomerMissing: meterResult.customerMissing,
+    meterCustomerMissing: usage.customerMissing,
   });
 
   await writeUsageAuditRecord({
@@ -194,35 +136,9 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     totalEgressBytes: aggregate.totalEgressBytes,
     sampleCount: aggregate.sampleCount,
     lockAction,
-    reportedToStripe: meterResult.reported,
+    reportedToStripe: usage.reported,
     orgSyncAction,
   });
-}
-
-/**
- * Aggregates per-region data into org-level totals. The storage average is
- * computed by merging the regions' time series (carrying forward each region's
- * last value) and averaging once — summing per-region means skews billing when
- * series are misaligned.
- */
-function aggregateUsageMetrics(usageMetrics: TenantUsageMetrics[]): AggregateUsage {
-  const sortedStorageMetrics = usageMetrics.map((r) => sortStorageSamplesByTimestamp(r.storage));
-  const averageUsage = calculateAverageUsage(mergeStorageSamples(sortedStorageMetrics));
-  const currentStorageBytes = sortedStorageMetrics.reduce(
-    (sum, r) => sum + (r.at(-1)?.bytesUsed ?? 0),
-    0,
-  );
-  const totalEgressBytes = usageMetrics.reduce(
-    (sum, r) => sum + r.egress.reduce((s, e) => s + (e.bytesUsed ?? 0), 0),
-    0,
-  );
-  return {
-    averageStorageBytesUsed: averageUsage.averageStorageBytesUsed,
-    currentStorageBytes,
-    totalEgressBytes,
-    // Number of distinct timestamps the org-level average is computed over.
-    sampleCount: averageUsage.sampleCount,
-  };
 }
 
 /**
@@ -297,46 +213,6 @@ async function resolveLockAction(params: {
 }): Promise<string> {
   if (!params.isTrial) return 'skipped:paid';
   return safeEnforceTrialLocks(params);
-}
-
-async function reportStorageToStripe(params: {
-  orgId: string;
-  subscriptionId: string;
-  stripeCustomerId: string;
-  averageStorageGbUsed: number;
-  meterEventName: string;
-}): Promise<{ reported: boolean; customerMissing: boolean }> {
-  const { orgId, subscriptionId, stripeCustomerId, averageStorageGbUsed, meterEventName } = params;
-  if (averageStorageGbUsed <= 0) return { reported: false, customerMissing: false };
-
-  const stripe = getStripeClient();
-  try {
-    await stripe.billing.meterEvents.create({
-      event_name: meterEventName,
-      payload: {
-        stripe_customer_id: stripeCustomerId,
-        value: String(averageStorageGbUsed),
-      },
-      timestamp: Math.floor(Date.now() / 1000),
-    });
-  } catch (error) {
-    if (isStripeResourceMissing(error)) {
-      console.warn('[usage-worker] Stripe customer missing — skipping meter event', {
-        orgId,
-        subscriptionId,
-        stripeCustomerId,
-        averageStorageGbUsed,
-        code: (error as { code?: string }).code,
-      });
-      return { reported: false, customerMissing: true };
-    }
-    throw error;
-  }
-  console.log('[usage-worker] Stripe meter event created', {
-    stripeCustomerId,
-    averageStorageGbUsed,
-  });
-  return { reported: true, customerMissing: false };
 }
 
 async function safeEnforceTrialLocks(params: {
@@ -451,26 +327,20 @@ async function reconcileDeletedCustomer(params: {
     };
   }
 
-  const outcomes = await closeOutDeletedCustomer({ userId, orgId });
-  const failed = outcomes.filter((o) => o.outcome === 'error');
-  if (failed.length > 0) {
-    // Record left non-canceled on purpose: tomorrow's run re-enters this path
-    // and retries the failed regions.
-    const failedRegions = failed.map((o) => o.orchestratorId).join(',');
-    return {
-      orgSyncAction: `reconcile-failed:${failedRegions}`,
-      lockAction: `error:sync-failed:${failedRegions}`,
-      outOfSync: true,
-    };
-  }
+  // Same entry point as the customer.deleted webhook: this is the audit that
+  // catches a customer deletion whose event was never delivered.
+  await startDeletionFromStripe({
+    userId,
+    customerId: stripeCustomerId,
+    orgId,
+    caller: 'usage-worker',
+  });
 
-  console.log('[usage-worker] Reconciled deleted Stripe customer', {
+  console.log('[usage-worker] Started deletion for a deleted Stripe customer', {
     orgId,
     userId,
     stripeCustomerId,
-    regions: outcomes.map((o) => ({ orchestratorId: o.orchestratorId, outcome: o.outcome })),
   });
-  // The reconciliation disabled the tenant in every provisioned region.
   return { orgSyncAction: 'reconciled:customer-deleted', lockAction: 'disabled', outOfSync: false };
 }
 

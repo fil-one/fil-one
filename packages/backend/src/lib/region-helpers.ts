@@ -9,10 +9,15 @@ export interface ProvisionedRegion {
   tenantId: string;
 }
 
-export async function getProvisionedRegions(orgId: string): Promise<ProvisionedRegion[]> {
+export async function getProvisionedRegions(
+  orgId: string,
+  // Account teardown snapshots tenant ids from here; a stale read there would
+  // orphan a live tenant permanently.
+  options?: { consistent?: boolean },
+): Promise<ProvisionedRegion[]> {
   const orchestrators = getAvailableOrchestrators();
   if (orchestrators.length === 0) return [];
-  const orgProfile = await getOrgProfile(orgId);
+  const orgProfile = await getOrgProfile(orgId, options);
   return orchestrators
     .map((orchestrator) => {
       const tenantId = orchestrator.isTenantReady(orgProfile);
