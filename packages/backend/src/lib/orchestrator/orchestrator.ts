@@ -13,7 +13,7 @@
 //     speaks S3 directly against the orchestrator's S3 gateway using the
 //     `filone-console` system key stashed in SSM during setup.
 
-import pRetry, { AbortError } from 'p-retry';
+import pRetry from 'p-retry';
 import type { S3Region, TenantStatus } from '@filone/shared';
 import type { AccessKeyPermission, GranularPermission } from '@filone/shared';
 import {
@@ -108,16 +108,20 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
 
   // Same lowercase-dashed status values as the contract, so no mapping is
   // needed. Setting the same status twice is a no-op upstream.
-  const setTenantStatus = async (tenantId: string, status: TenantStatus): Promise<void> => {
-    const { error } = await postTenantsByTenantIdStatus({
+  const setTenantStatus = async (
+    tenantId: string,
+    status: TenantStatus,
+    opts?: { allowMissing?: boolean },
+  ): Promise<void> => {
+    const { error, response } = await postTenantsByTenantIdStatus({
       client,
       path: { tenantId },
       body: { status },
       throwOnError: false,
     });
-    if (error) {
-      throw new Error(`Failed to set tenant ${tenantId} status to "${status}"`, { cause: error });
-    }
+    if (!error) return;
+    if (opts?.allowMissing && response?.status === 404) return;
+    throw new Error(`Failed to set tenant ${tenantId} status to "${status}"`, { cause: error });
   };
 
   const getS3ClientContext = async (tenantId: string): Promise<S3ClientContext> => {
@@ -156,19 +160,17 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
 
     async deleteTenant(tenantId: string): Promise<void> {
       await pRetry(async () => {
-        await setTenantStatus(tenantId, 'disabled');
+        // Precondition only, so a 404 here must not skip the DELETE: a pass that
+        // failed partway leaves resources the DELETE still has to collect.
+        await setTenantStatus(tenantId, 'disabled', { allowMissing: true });
+
         const { error, response } = await deleteTenantsByTenantId({
           client,
           path: { tenantId },
           throwOnError: false,
         });
-        if (error) {
-          // Already-deleted is 204, so a 404 means the id never resolved.
-          if (response?.status === 404) {
-            throw new AbortError(
-              `${config.id} tenant ${tenantId} did not resolve (HTTP 404) — check the endpoint and token scope`,
-            );
-          }
+        // Already deleted answers 204; a 404 means the same.
+        if (error && response?.status !== 404) {
           throw new Error(`Failed to delete ${config.id} tenant ${tenantId}`, { cause: error });
         }
       }, TENANT_DELETE_RETRY);

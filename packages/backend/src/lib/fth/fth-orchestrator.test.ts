@@ -199,16 +199,59 @@ describe('fthOrchestrator.deleteTenant', () => {
     vi.useRealTimers();
   });
 
-  it('does not retry a not-found, since an already-deleted tenant answers 204', async () => {
+  it('treats a not-found from the delete as gone, without retrying', async () => {
     mockUpdateClientStatus.mockResolvedValue(undefined);
     mockFthClient.deleteClient.mockRejectedValue(
       new FthNotFoundError('not found', { message: 'not found' }),
     );
 
-    await expect(fthOrchestrator.deleteTenant(fthClientId)).rejects.toThrow(
-      `FTH tenant ${fthClientId} did not resolve`,
-    );
+    await expect(fthOrchestrator.deleteTenant(fthClientId)).resolves.toBeUndefined();
     expect(mockFthClient.deleteClient).toHaveBeenCalledTimes(1);
+  });
+
+  // The disable is only the delete's precondition; skipping the delete would
+  // abandon a pass that failed partway through cleanup.
+  it('still deletes when the tenant is already missing from the status call', async () => {
+    mockUpdateClientStatus.mockRejectedValue(
+      new FthNotFoundError('not found', { message: 'not found' }),
+    );
+    mockFthClient.deleteClient.mockResolvedValue(undefined);
+
+    await expect(fthOrchestrator.deleteTenant(fthClientId)).resolves.toBeUndefined();
+    expect(mockFthClient.deleteClient).toHaveBeenCalledTimes(1);
+    expect(mockUpdateClientStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('propagates a failing delete even when the status call is not-found', async () => {
+    vi.useFakeTimers();
+    mockUpdateClientStatus.mockRejectedValue(
+      new FthNotFoundError('not found', { message: 'not found' }),
+    );
+    mockFthClient.deleteClient.mockRejectedValue(new FthApiError(500, 'boom', undefined));
+
+    const promise = fthOrchestrator.deleteTenant(fthClientId).catch((e: unknown) => e);
+    await vi.runAllTimersAsync();
+
+    expect(await promise).toMatchObject({
+      message: `Failed to delete FTH tenant ${fthClientId}`,
+    });
+    expect(mockFthClient.deleteClient).toHaveBeenCalledTimes(4);
+    vi.useRealTimers();
+  });
+
+  it('still throws when the status call fails for any other reason', async () => {
+    vi.useFakeTimers();
+    mockUpdateClientStatus.mockRejectedValue(new FthApiError(500, 'boom', undefined));
+    mockFthClient.deleteClient.mockResolvedValue(undefined);
+
+    const promise = fthOrchestrator.deleteTenant(fthClientId).catch((e: unknown) => e);
+    await vi.runAllTimersAsync();
+
+    expect(await promise).toMatchObject({
+      message: `Failed to disable FTH tenant ${fthClientId}`,
+    });
+    expect(mockFthClient.deleteClient).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 
   it('throws once the retry budget is exhausted', async () => {

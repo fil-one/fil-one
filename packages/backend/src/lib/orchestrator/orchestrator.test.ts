@@ -240,14 +240,53 @@ describe('deleteTenant', () => {
     vi.useRealTimers();
   });
 
-  it('does not retry a 404, since an already-deleted tenant answers 204', async () => {
+  it('treats a 404 from the delete as gone, without retrying', async () => {
     mockSetStatus.mockResolvedValue(noContent());
     mockDeleteTenant.mockResolvedValue(fail(404, 'not found'));
 
-    await expect(orchestrator.deleteTenant(tenantId)).rejects.toThrow(
-      `forge tenant ${tenantId} did not resolve`,
-    );
+    await expect(orchestrator.deleteTenant(tenantId)).resolves.toBeUndefined();
     expect(mockDeleteTenant).toHaveBeenCalledTimes(1);
+  });
+
+  // The disable is only the delete's precondition; skipping the delete would
+  // abandon a pass that failed partway through cleanup.
+  it('still deletes when the tenant is already missing from the status call', async () => {
+    mockSetStatus.mockResolvedValue(fail(404, 'not found'));
+    mockDeleteTenant.mockResolvedValue(noContent());
+
+    await expect(orchestrator.deleteTenant(tenantId)).resolves.toBeUndefined();
+    expect(mockDeleteTenant).toHaveBeenCalledTimes(1);
+    expect(mockSetStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('propagates a failing delete even when the status call 404s', async () => {
+    vi.useFakeTimers();
+    mockSetStatus.mockResolvedValue(fail(404, 'not found'));
+    mockDeleteTenant.mockResolvedValue(fail(500, 'boom'));
+
+    const promise = orchestrator.deleteTenant(tenantId).catch((e: unknown) => e);
+    await vi.runAllTimersAsync();
+
+    expect(await promise).toMatchObject({
+      message: `Failed to delete forge tenant ${tenantId}`,
+    });
+    expect(mockDeleteTenant).toHaveBeenCalledTimes(4);
+    vi.useRealTimers();
+  });
+
+  it('still throws when the status call fails for any other reason', async () => {
+    vi.useFakeTimers();
+    mockSetStatus.mockResolvedValue(fail(500, 'boom'));
+    mockDeleteTenant.mockResolvedValue(noContent());
+
+    const promise = orchestrator.deleteTenant(tenantId).catch((e: unknown) => e);
+    await vi.runAllTimersAsync();
+
+    expect(await promise).toMatchObject({
+      message: `Failed to set tenant ${tenantId} status to "disabled"`,
+    });
+    expect(mockDeleteTenant).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 
   it('throws once the retry budget is exhausted', async () => {

@@ -8,7 +8,7 @@
 //     getS3ClientContext) speak S3 directly against the FTH S3 endpoint
 //     using the service access key stashed in SSM during setup.
 
-import pRetry, { AbortError } from 'p-retry';
+import pRetry from 'p-retry';
 import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
 import { getS3Endpoint, S3Region, TenantStatus } from '@filone/shared';
@@ -98,17 +98,20 @@ export const fthOrchestrator = {
 
   async deleteTenant(tenantId: string): Promise<void> {
     await pRetry(async () => {
-      await client.updateClientStatus(tenantId, { status: 'disabled' });
+      try {
+        await client.updateClientStatus(tenantId, { status: 'disabled' });
+      } catch (err) {
+        // Precondition only, so a not-found here must not skip the delete.
+        if (!(err instanceof FthNotFoundError)) {
+          throw new Error(`Failed to disable FTH tenant ${tenantId}`, { cause: err });
+        }
+      }
+
       try {
         await client.deleteClient(tenantId);
       } catch (err) {
-        // A repeat delete of a resolvable ref answers 204, so a not-found means
-        // the ref never resolved.
-        if (err instanceof FthNotFoundError) {
-          throw new AbortError(
-            `FTH tenant ${tenantId} did not resolve — check the endpoint and token scope`,
-          );
-        }
+        // Already deleted answers 204; a not-found means the same.
+        if (err instanceof FthNotFoundError) return;
         throw new Error(`Failed to delete FTH tenant ${tenantId}`, { cause: err });
       }
     }, TENANT_DELETE_RETRY);

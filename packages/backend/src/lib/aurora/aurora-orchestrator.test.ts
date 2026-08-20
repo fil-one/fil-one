@@ -233,6 +233,19 @@ describe('auroraOrchestrator', () => {
       expect(mockUpdateAuroraTenantStatusApi).toHaveBeenCalledWith({
         tenantId: 'aurora-t-1',
         status: 'DISABLED',
+        allowMissing: true,
+      });
+    });
+
+    // A re-driven teardown disables a tenant a previous pass may have removed.
+    it('passes allowMissing, unlike updateTenantStatus', async () => {
+      mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+
+      await auroraOrchestrator.updateTenantStatus('aurora-t-1', 'disabled');
+
+      expect(mockUpdateAuroraTenantStatusApi).toHaveBeenCalledWith({
+        tenantId: 'aurora-t-1',
+        status: 'DISABLED',
       });
     });
 

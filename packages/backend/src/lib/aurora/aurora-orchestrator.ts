@@ -84,7 +84,12 @@ export const auroraOrchestrator = {
 
   async deleteTenant(tenantId: string): Promise<void> {
     await pRetry(async () => {
-      await auroraOrchestrator.updateTenantStatus(tenantId, 'disabled');
+      // allowMissing: a tenant that is already gone needs no disabling.
+      await updateAuroraTenantStatusApi({
+        tenantId,
+        status: mapToModelsTenantStatus('disabled'),
+        allowMissing: true,
+      });
       // TODO(FIL-919): delete the tenant once Aurora's Backoffice API exposes a
       // DELETE. Until then buckets and objects survive the teardown.
     }, TENANT_DELETE_RETRY);
