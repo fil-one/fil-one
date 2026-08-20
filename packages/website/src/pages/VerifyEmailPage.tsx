@@ -144,6 +144,13 @@ export function VerifyEmailPage({ me, onVerified }: VerifyEmailPageProps) {
         {verified ? 'Verified' : checking ? 'Checking…' : 'I verified my email'}
       </Button>
 
+      {/* A button label flipping to "Verified" is not reliably announced. This
+          polite live region gives screen-reader users the success before the
+          ~700ms hand-off to the dashboard. */}
+      <p role="status" aria-live="polite" className="sr-only">
+        {verified ? 'Email verified. Taking you to your dashboard.' : ''}
+      </p>
+
       {error && (
         <p role="alert" className="mt-3 text-xs text-red-600">
           {error}
