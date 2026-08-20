@@ -35,7 +35,7 @@ export function CodeBlock({ code, language, className }: CodeBlockProps) {
       </div>
 
       {/* Code content */}
-      <pre className="overflow-x-auto">
+      <pre className="overflow-x-auto rounded-md focus-visible:brand-outline" tabIndex={0}>
         <code>{code}</code>
       </pre>
     </div>

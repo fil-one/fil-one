@@ -1,16 +1,22 @@
 import { clsx } from 'clsx';
+import { type AccessibleControlName, warnIfUnnamedControl } from './accessible-control.js';
 
 export type TextareaProps = {
   onChange: (value: string) => void;
   invalid?: boolean;
   rows?: number;
   className?: string;
-} & Omit<React.ComponentPropsWithoutRef<'textarea'>, 'onChange'>;
+} & Omit<
+  React.ComponentPropsWithoutRef<'textarea'>,
+  'onChange' | 'id' | 'aria-label' | 'aria-labelledby'
+> &
+  AccessibleControlName;
 
 /** @deprecated Use `Textarea` instead */
 export const TextArea = (props: TextareaProps) => <Textarea {...props} />;
 
 export function Textarea({ onChange, invalid, rows = 4, className, ...rest }: TextareaProps) {
+  warnIfUnnamedControl('Textarea', rest.id ?? rest['aria-label']);
   return (
     <textarea
       {...rest}
