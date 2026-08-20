@@ -124,6 +124,23 @@ describe('subscription-drift-checker', () => {
     });
   });
 
+  // A throttled probe must cost one candidate, not the run and its metrics.
+  it('counts a failing deletion probe as probeFailed and keeps going', async () => {
+    mockIsOrgDeletedOrDeleting.mockRejectedValue(new Error('ProvisionedThroughputExceeded'));
+    ddbMock.on(ScanCommand).resolves({ Items: [activeBillingItem()] });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await expect(handler()).resolves.toBeUndefined();
+      expect(emissionFor('aurora')).toMatchObject({
+        SubscriptionsTotal: 1,
+        SubscriptionsProbeFailed: 1,
+      });
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
   it('emits no out_of_sync log when the tenant is active', async () => {
     ddbMock.on(ScanCommand).resolves({ Items: [activeBillingItem()] });
     aurora.getTenantStatus.mockResolvedValue({ kind: 'ok', status: 'active' });

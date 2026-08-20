@@ -216,6 +216,13 @@ async function indexRegion(args: IndexRegionArgs): Promise<RegionIndexStats> {
     objectsFailed: 0,
   };
   for (const bucketName of bucketNames) {
+    // Re-checked per bucket: this invocation runs to a 900s timeout, and
+    // ensureIndex would recreate an index the teardown has already dropped.
+    if (await isOrgDeletedOrDeleting(orgId)) {
+      console.warn(`${LOG} Org deletion started mid-run, stopping`, { orgId, region });
+      break;
+    }
+
     try {
       const result = await indexBucket(
         { orgId, s3, region, bucketName, vectorStore },

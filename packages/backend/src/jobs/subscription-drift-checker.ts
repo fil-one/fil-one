@@ -42,14 +42,15 @@ export async function handler(): Promise<void> {
   );
 
   for (const candidate of uniqueCandidates) {
-    // A tenant mid-teardown looks out of sync but is not drift, so it is left
-    // out of the stats rather than reported.
-    if (await isOrgDeletedOrDeleting(candidate.orgId)) continue;
-
     // A failed PROFILE read counts as probeFailed on every orchestrator so a
-    // transient DDB error skips just this candidate, not the whole run.
+    // transient DDB error skips just this candidate, not the whole run. The
+    // deletion probe is inside the try for that reason — it reads the same row.
     let orgProfile;
     try {
+      // A tenant mid-teardown looks out of sync but is not drift, so it is left
+      // out of the stats rather than reported.
+      if (await isOrgDeletedOrDeleting(candidate.orgId)) continue;
+
       orgProfile = await getOrgProfile(candidate.orgId);
     } catch (error) {
       console.error('[subscription-drift-checker] PROFILE read failed', {

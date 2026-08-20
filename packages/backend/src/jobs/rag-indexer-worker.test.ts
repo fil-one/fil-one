@@ -157,6 +157,31 @@ describe('rag-indexer-worker', () => {
     expect(mockIndexBucket).not.toHaveBeenCalled();
   });
 
+  // The invocation runs to a 900s timeout, so the fence can land mid-run. Without
+  // a per-bucket re-check, indexBucket calls ensureIndex and recreates an index
+  // the teardown already dropped.
+  it('stops indexing when the fence lands after the run started', async () => {
+    const aurora = makeOrchestrator('aurora', S3Region.EuWest1);
+    useRegions([provisioned(aurora, 'tenant-a')]);
+    // False for the up-front check, true by the time the first bucket starts.
+    mockIsOrgDeletedOrDeleting.mockResolvedValueOnce(false).mockResolvedValue(true);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      await handler(
+        payload([
+          { region: S3Region.EuWest1, bucketName: 'b1' },
+          { region: S3Region.EuWest1, bucketName: 'b2' },
+        ]),
+        AMPLE_CONTEXT,
+      );
+
+      expect(mockIndexBucket).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it('skips when the org is not provisioned in any region', async () => {
     mockGetProvisionedRegions.mockResolvedValue([]);
 
