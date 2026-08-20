@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+{% assign resolved_dir = dir | default: "auto" %}
+<html lang="{{locale}}" dir="{{resolved_dir}}">
+  <head>
+    {%- auth0:head -%}
+    <title>{{ prompt.screen.texts.pageTitle }}</title>
+    <style>
+      /* Fixes Auth0's widget cannot express through the branding editor.
+         Auth0's page-template docs warn that generated class names change on
+         every widget build, so prefer their `_`-prefixed classes and `data-`
+         attributes, which are semantic, over the hashed `c...` ones. Re-check
+         the live login screen after Auth0 releases. Nothing here is
+         load-bearing: if a selector stops matching, the screen still works and
+         only reverts to Auth0's default appearance. */
+
+      /* Social buttons render at 16px while the passkey and submit buttons are
+         14px, so the provider list looks mismatched. Note this is true on the
+         production tenant but not on dev, which is on a different build. */
+      [data-action-button-secondary='true'] { font-size: 0.875rem !important; }
+
+      /* Auth0 renders every button at weight 400. The console's `.button` base
+         class is font-medium, so match it. The branding editor's bold toggles
+         are binary (400 or 700) and cannot express 500. The label sits in a
+         span that carries its own weight, so the rule has to reach
+         descendants; setting it on the button alone does nothing. */
+      ._prompt-box-outer button,
+      ._prompt-box-outer button * { font-weight: 500 !important; }
+
+      /* The passkey button repeats the 24px margin its container already
+         applies, and the container's own margin then leaves ~50px of dead
+         space above the provider group. Zero both; ~26px of inherited spacing
+         remains, which is the gap we actually want. */
+      ._passkey-button-container { margin-top: 0 !important; }
+      ._passkey-button-container .passkey-begin-button { margin-top: 0 !important; }
+
+      /* Auth0 force-uppercases the separator in CSS, so the `separatorText`
+         custom-text value ("or") renders as "OR" regardless of what it is set to. */
+      ._prompt-box-outer * { text-transform: none !important; }
+
+      /* Required marker on a form where every field is required. Already
+         aria-hidden, so hiding it costs nothing for assistive tech. */
+      label .required { display: none; }
+
+      /* Auth0 leaves 16px below the h1, which reads loose against the
+         description line that follows it. Tighten to 8px so title and
+         description group as one unit. Applies to every screen that has a
+         description; the passkey-enrolment block below overrides this to 0,
+         since those titles stand alone with no description under them. */
+      ._prompt-box-outer h1 { margin-bottom: 8px !important; }
+
+      /* The email-verified result draws its status icon as an 88px masked span
+         (`.success-lock`), which dominates an otherwise calm card. Shrink the
+         box to 48px so it reads as an accent above the message. The mask is an
+         84px SVG, so size it to `contain` or it clips instead of scaling. The
+         class is semantic and appears only on this screen, so no screen guard
+         is needed: it matches nothing elsewhere. */
+      .success-lock {
+        width: 48px !important;
+        height: 48px !important;
+        -webkit-mask-size: contain !important;
+        mask-size: contain !important;
+      }
+
+      /* Passkey enrolment: the button renders above the benefits it is meant to
+         follow. The flex container holds the benefits form and a wrapper div
+         around the button, so `order` must go on the wrapper, not the button:
+         an order on the button itself is inert because its own parent is a
+         block. `:has()` reaches the wrapper without using its hashed class.
+         The alternate actions default to order:4, so they stay last. */
+      ._form-passkey-enrollment { order: 1 !important; }
+      ._prompt-box-outer div:has(> .passkey-begin-button) { order: 2 !important; }
+
+      /* Benefit list. The stock grey icons are off-brand and cannot be swapped
+         through CSS, so drop them and collapse the grid to a single column.
+         The list sits on a borderless zinc-50 plate with hairline dividers,
+         the same treatment the console uses for reference content. Dividers
+         replace the gaps rather than adding to them: two separation devices
+         for three rows reads airy and disconnected. */
+      .ulp-passkey-benefits {
+        background: #fafafa !important;
+        border-radius: 8px !important;
+        padding: 16px !important;
+        gap: 0 !important;
+        margin-bottom: 0 !important;
+      }
+      .ulp-passkey-benefit {
+        grid-template-columns: 1fr !important;
+        align-items: start !important;
+        padding: 12px 0 !important;
+        border-top: 1px solid rgba(0, 0, 0, 0.05) !important;
+      }
+      .ulp-passkey-benefit:first-child { border-top: 0 !important; padding-top: 0 !important; }
+      .ulp-passkey-benefit:last-child { padding-bottom: 0 !important; }
+      .ulp-passkey-benefit > *:not(.ulp-passkey-benefit-content) { display: none !important; }
+      .ulp-passkey-benefit-content { gap: 2px !important; }
+      .ulp-passkey-benefit-heading {
+        font-size: 0.875rem !important;
+        font-weight: 500 !important;
+        line-height: 1.4 !important;
+        margin: 0 !important;
+      }
+      .ulp-passkey-benefit-content > *:not(.ulp-passkey-benefit-heading) {
+        font-size: 0.875rem !important;
+        line-height: 1.5 !important;
+        margin: 0 !important;
+      }
+
+      /* A wrapper hard-codes min-height: 540px, so short screens like
+         reset-password and the email-verification result pad themselves out
+         with dead space to match the tall ones, and their vertically centred
+         content floats in the middle of it. Which node carries the height
+         varies by screen: the login flow puts it on the inner wrapper, the
+         verification result on the card itself. Zero both so the card always
+         hugs its content. Trade-off: the card now changes height between steps
+         of a flow rather than staying fixed. */
+      ._prompt-box-outer > div,
+      ._prompt-box-outer > div > div { min-height: 0 !important; }
+
+      /* Auth0's widget shadow is 0 12px 40px at 12% black, which floats the
+         card well off the page. Softer and layered, closer to the console. */
+      ._prompt-box-outer > div {
+        box-shadow:
+          0 1px 2px rgba(0, 0, 0, 0.04),
+          0 8px 24px rgba(0, 0, 0, 0.06) !important;
+      }
+    </style>
+    {% if prompt.screen.name == 'passkey-enrollment' or prompt.screen.name == 'passkey-enrollment-local' %}
+    <style>
+      /* On the enrolment screens the h1 sits 40px above the content: 16px of
+         its own margin plus 24px structural. Zeroing the margin lands on ~24px,
+         matching the login screen. Scoped by screen name because other titles
+         are followed by a description that needs the 16px. */
+      ._prompt-box-outer h1 { margin-bottom: 0 !important; }
+
+      /* Vertical rhythm around the benefits plate. 30px, not 24px, and this is
+         deliberate: the gap above the plate is 24px measured, but its neighbour
+         is a text line box whose bottom sits several pixels below the last
+         visible ink, so it reads as roughly 30px. The gap below neighbours a
+         solid button edge, where measured and perceived are the same. Equal
+         numbers here look unequal; do not "correct" this to 24.
+
+         Both alternate actions keep Auth0's 16px, which suits them as text
+         links; a tighter value only made sense while the opt-out was a button. */
+      .passkey-begin-button { margin-top: 30px !important; }
+
+    </style>
+    {% endif %}
+  </head>
+  <body class="_widget-auto-layout">
+    {%- auth0:widget -%}
+  </body>
+</html>
