@@ -72,5 +72,13 @@ declare module "sst" {
       value: string;
       type: "sst.Secret";
     };
+    DeletionChallengeTable: {
+      name: string;
+      type: "sst.aws.Dynamo";
+    };
+    DeletionCodeHmacKey: {
+      value: string;
+      type: "sst.Secret";
+    };
   }
 }
