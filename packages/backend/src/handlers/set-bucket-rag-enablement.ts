@@ -28,7 +28,7 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
  * POST /api/buckets/{name}/rag/enabled — toggle a bucket's RAG indexing on/off
  * for the caller's tenant (FIL-555).
  *
- * Body: `{ enabled: boolean }`. Creates/updates the `BUCKET#{region}#{name}` / `RAG`
+ * Body: `{ enabled: boolean }`. Creates/updates the `BUCKET#{orgId}#{region}#{name}` / `RAG`
  * enablement row, flipping `status` to `active`/`disabled` while preserving
  * telemetry and the original `createdAt`. Tenant-scoped (404 for buckets the
  * tenant does not own), RAG-gated, and Write-gated by the subscription guard.
