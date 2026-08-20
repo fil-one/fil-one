@@ -10,7 +10,9 @@ function renderWithProviders(ui: React.ReactElement) {
 describe('CodeBlock', () => {
   it('renders code content', () => {
     renderWithProviders(<CodeBlock code="const x = 1" />);
-    expect(screen.getByText('const x = 1')).toBeInTheDocument();
+    const code = screen.getByText('const x = 1');
+    expect(code).toBeInTheDocument();
+    expect(code.closest('pre')).toHaveAttribute('tabindex', '0');
   });
 
   it('renders language label', () => {

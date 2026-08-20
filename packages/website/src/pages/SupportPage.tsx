@@ -78,8 +78,9 @@ export function SupportPage() {
         <Card padding="none">
           <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-6">
             <div className="grid grid-cols-2 gap-4">
-              <FormField label="First name">
+              <FormField label="First name" htmlFor="support-first-name">
                 <Input
+                  id="support-first-name"
                   value={formFirstName}
                   onChange={setFormFirstName}
                   placeholder="Jane"
@@ -87,8 +88,9 @@ export function SupportPage() {
                 />
               </FormField>
 
-              <FormField label="Last name">
+              <FormField label="Last name" htmlFor="support-last-name">
                 <Input
+                  id="support-last-name"
                   value={formLastName}
                   onChange={setFormLastName}
                   placeholder="Smith"
@@ -97,8 +99,9 @@ export function SupportPage() {
               </FormField>
             </div>
 
-            <FormField label="Company name">
+            <FormField label="Company name" htmlFor="support-company">
               <Input
+                id="support-company"
                 value={formCompany}
                 onChange={setFormCompany}
                 placeholder="Acme Inc."
@@ -106,8 +109,9 @@ export function SupportPage() {
               />
             </FormField>
 
-            <FormField label="Email">
+            <FormField label="Email" htmlFor="support-email">
               <Input
+                id="support-email"
                 type="email"
                 value={formEmail}
                 onChange={setFormEmail}
@@ -132,8 +136,9 @@ export function SupportPage() {
               </div>
             </FormField>
 
-            <FormField label="Message">
+            <FormField label="Message" htmlFor="support-message">
               <Textarea
+                id="support-message"
                 value={formMessage}
                 onChange={setFormMessage}
                 placeholder="How can we help?"

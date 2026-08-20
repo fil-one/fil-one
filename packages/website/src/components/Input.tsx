@@ -1,12 +1,15 @@
 import { Input as HeadlessInput, type InputProps as HeadlessInputProps } from '@headlessui/react';
 import { clsx } from 'clsx';
+import { type AccessibleControlName, warnIfUnnamedControl } from './accessible-control.js';
 
 type InputProps = {
   onChange: (value: string) => void;
   invalid?: boolean;
-} & Omit<HeadlessInputProps, 'onChange'>;
+} & Omit<HeadlessInputProps, 'onChange' | 'id' | 'aria-label' | 'aria-labelledby'> &
+  AccessibleControlName;
 
 export function Input({ onChange, invalid, className, ...rest }: InputProps) {
+  warnIfUnnamedControl('Input', rest.id ?? rest['aria-label']);
   return (
     <HeadlessInput
       {...rest}

@@ -190,18 +190,45 @@ export default $config({
       );
     }
 
+    const {
+      getAuth0Domain,
+      getS3Endpoint,
+      PROD_CONSOLE_ALIAS_HOSTS,
+      PROD_CONSOLE_HOST,
+      S3Region,
+      Stage,
+      SUPPORTED_COMPLETION_MODELS,
+    } = await import('@filone/shared');
+
     const domainName = isProduction
-      ? 'app.fil.one'
+      ? PROD_CONSOLE_HOST
       : isStaging
         ? 'staging.fil.one'
         : `${stage}.dev.fil.one`;
 
+    // Extra hostnames the production console answers on: unlisted demo aliases on
+    // a domain with clean reputation, for when fil.one is blocklisted. They are
+    // alternate domain names on this same distribution, not another deployment.
+    const aliasHosts = isProduction ? [...PROD_CONSOLE_ALIAS_HOSTS] : [];
+
     // ACM cert must be in us-east-1 for CloudFront. Ephemeral stages share a
     // wildcard cert for *.dev.fil.one provisioned in the fil-one/infrastructure repo.
+    //
+    // In production the cert is looked up by its alias name rather than by
+    // domainName: CloudFront allows one viewer certificate per distribution, so a
+    // single cert has to carry every alias, and the one provisioned for this
+    // purpose deliberately uses the first alias host as its primary domain so the
+    // lookup cannot also match the older app.fil.one-only cert it supersedes.
+    // See environments/prod/filone-ai.tf in fil-one/infrastructure.
+    const certDomain = isEphemeralStage
+      ? '*.dev.fil.one'
+      : isProduction
+        ? PROD_CONSOLE_ALIAS_HOSTS[0]
+        : domainName;
     const usEast1 = new aws.Provider('useast1', { region: 'us-east-1' });
     const cert = await aws.acm.getCertificate(
       {
-        domain: isEphemeralStage ? '*.dev.fil.one' : domainName,
+        domain: certDomain,
         statuses: ['ISSUED'],
         // The lookup errors if more than one ISSUED cert matches. That happens
         // transiently whenever a cert is replaced rather than mutated in place,
@@ -216,7 +243,7 @@ export default $config({
     // ── API Gateway ──────────────────────────────────────────────────
     // While we stick to a same origin for both website and API,
     // we want to make sure to lock down to just our origin.
-    const allowedOrigins = [`https://${domainName}`];
+    const allowedOrigins = [`https://${domainName}`, ...aliasHosts.map((h) => `https://${h}`)];
     if (stage !== 'production') {
       allowedOrigins.push('https://localhost:5173');
     }
@@ -244,8 +271,6 @@ export default $config({
       },
     });
 
-    const { getAuth0Domain, getS3Endpoint, S3Region, Stage, SUPPORTED_COMPLETION_MODELS } =
-      await import('@filone/shared');
     const stageForEndpoints = isProduction ? Stage.Production : Stage.Staging;
     // The browser hits the S3 endpoint of every region directly — list-objects,
     // uploads, downloads, etc. — so each one needs to be in `connect-src` or the
@@ -328,6 +353,10 @@ export default $config({
       },
       domain: {
         name: domainName,
+        // Demo aliases keep visitors on the alias hostname (unlike `redirects`,
+        // which would bounce them back to the blocklisted canonical host). The
+        // cert above must cover every entry or CloudFront rejects the deploy.
+        aliases: aliasHosts,
         // Ephemeral stages: SST creates the Route 53 alias in the delegated
         // dev.fil.one zone. Staging/prod: records are managed in Cloudflare
         // by the fil-one/infrastructure Terraform.
@@ -416,8 +445,15 @@ export default $config({
             Properties: {
               ServiceToken: setupFn.arn,
               SiteUrl: siteUrl,
+              // Derived from aliasHosts rather than allowedOrigins: the latter
+              // also carries https://localhost:5173 outside production, which
+              // must never be written into the shared Auth0 tenant.
+              SiteAliasUrls: aliasHosts.map((h) => `https://${h}`).join(','),
               Stage: $app.stage,
-              Version: '2.11',
+              // Bumped for the SiteAliasUrls property: this custom resource only
+              // re-runs when a property changes, and SiteUrl is unchanged, so
+              // without a bump the alias never reaches the Auth0 client.
+              Version: '2.12',
             },
           },
         },
@@ -942,7 +978,9 @@ export default $config({
       method: 'POST',
       routePath: '/api/billing/portal',
       handler: 'create-portal-session',
-      extraEnv: { WEBSITE_URL: siteUrl },
+      // ALLOWED_REDIRECT_ORIGINS so the Stripe return_url can follow the alias
+      // the user is on; resolveOrigin falls back to WEBSITE_URL without it.
+      extraEnv: { WEBSITE_URL: siteUrl, ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins },
     });
     addRoute({
       method: 'POST',
