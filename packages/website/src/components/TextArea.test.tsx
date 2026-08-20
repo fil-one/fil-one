@@ -4,13 +4,14 @@ import { TextArea } from './TextArea';
 
 describe('TextArea', () => {
   it('renders with placeholder', () => {
-    render(<TextArea onChange={() => {}} placeholder="Enter message" />);
+    render(<TextArea aria-label="Message" onChange={() => {}} placeholder="Enter message" />);
+    expect(screen.getByRole('textbox', { name: 'Message' })).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Enter message')).toBeInTheDocument();
   });
 
   it('calls onChange with value', () => {
     const onChange = vi.fn();
-    render(<TextArea onChange={onChange} placeholder="test" />);
+    render(<TextArea aria-label="Message" onChange={onChange} placeholder="test" />);
     fireEvent.change(screen.getByPlaceholderText('test'), { target: { value: 'hello' } });
     expect(onChange).toHaveBeenCalledWith('hello');
   });

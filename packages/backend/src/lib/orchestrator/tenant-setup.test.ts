@@ -16,6 +16,7 @@ const mockPutTenant = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockCreateAccessKey = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockListAccessKeys = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockDeleteAccessKey = vi.fn((_options: Record<string, unknown>) => ({}));
+const mockDeleteTenant = vi.fn((_options: Record<string, unknown>) => ({}));
 
 vi.mock('@filone/orchestrator-client', () => ({
   putTenantsByTenantId: (options: Record<string, unknown>) => mockPutTenant(options),
@@ -24,6 +25,7 @@ vi.mock('@filone/orchestrator-client', () => ({
   getTenantsByTenantIdAccessKeys: (options: Record<string, unknown>) => mockListAccessKeys(options),
   deleteTenantsByTenantIdAccessKeysByAccessKeyId: (options: Record<string, unknown>) =>
     mockDeleteAccessKey(options),
+  deleteTenantsByTenantId: (options: Record<string, unknown>) => mockDeleteTenant(options),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
@@ -33,6 +35,8 @@ const ssmMock = mockClient(SSMClient);
 const client = 'mock-management-client' as unknown as Client;
 
 import { ensureTenantReady, CONSOLE_KEY_NAME } from './tenant-setup.js';
+import { OrgDeletingError } from '../org-profile.js';
+import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 const deps = { client, id: 'forge', stage: 'test', region: 'us-east-1' };
@@ -89,6 +93,93 @@ describe('ensureTenantReady', () => {
     expect(mockPutTenant).not.toHaveBeenCalled();
     // The read must be strongly consistent so a just-finished setup is seen.
     expect(ddbMock.commandCalls(GetItemCommand)[0].args[0].input.ConsistentRead).toBe(true);
+  });
+
+  // Before any upstream call: refusing only the final pointer write would
+  // leave the tenant, its console key and its SSM secret orphaned.
+  it('refuses a deleting org without provisioning anything', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: { ...profileItem({}), deleting: { BOOL: true } } });
+
+    await expect(ensureTenantReady(deps, orgId)).rejects.toBeInstanceOf(OrgDeletingError);
+    expect(mockPutTenant).not.toHaveBeenCalled();
+    expect(mockCreateAccessKey).not.toHaveBeenCalled();
+    expect(ssmMock.commandCalls(PutParameterCommand)).toHaveLength(0);
+  });
+
+  it('conditions the pointer write so it cannot resurrect a purged profile', async () => {
+    stubHappyPath();
+
+    await ensureTenantReady(deps, orgId);
+
+    expect(ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input.ConditionExpression).toBe(
+      'attribute_exists(pk) AND attribute_not_exists(deleting)',
+    );
+  });
+
+  // The deferred risk: this request read the profile before the fence landed, so
+  // it created a tenant upstream that will never get a local pointer.
+  describe('when the fence lands mid-setup', () => {
+    function refuseWith(item?: Record<string, unknown>) {
+      ddbMock.on(UpdateItemCommand).rejects(
+        new ConditionalCheckFailedException({
+          message: 'refused',
+          $metadata: {},
+          Item: item,
+        } as never),
+      );
+    }
+
+    it('deletes the orphaned tenant and refuses, rather than answering 503', async () => {
+      stubHappyPath();
+      refuseWith({ deleting: { BOOL: true } });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      try {
+        await expect(ensureTenantReady(deps, orgId)).rejects.toBeInstanceOf(OrgDeletingError);
+        expect(mockDeleteTenant).toHaveBeenCalledWith(
+          expect.objectContaining({ path: { tenantId: orgId } }),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    // The condition names no tenant-id attribute, so a concurrent writer cannot
+    // refuse this write. A refusal carrying no item means no profile row, and
+    // reporting the tenant ready would hide one nothing recorded.
+    it('deletes the orphaned tenant and refuses when the profile is missing', async () => {
+      stubHappyPath();
+      refuseWith(undefined);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      try {
+        // null, not the tenantId: the caller answers 503 instead of creating
+        // buckets against a tenant nothing recorded.
+        await expect(ensureTenantReady(deps, orgId)).resolves.toBeNull();
+        expect(mockDeleteTenant).toHaveBeenCalledWith(
+          expect.objectContaining({ path: { tenantId: orgId } }),
+        );
+      } finally {
+        warn.mockRestore();
+        error.mockRestore();
+      }
+    });
+
+    // A failed rollback must not turn the refusal into "try again in a moment".
+    it('still refuses when the tenant cannot be deleted', async () => {
+      stubHappyPath();
+      refuseWith({ deleting: { BOOL: true } });
+      mockDeleteTenant.mockReturnValue({ error: { message: 'no tenant DELETE yet' } });
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      try {
+        await expect(ensureTenantReady(deps, orgId)).rejects.toBeInstanceOf(OrgDeletingError);
+        expect(error).toHaveBeenCalled();
+      } finally {
+        error.mockRestore();
+      }
+    });
   });
 
   it('provisions tenant, console key, SSM cred and PROFILE row on first run', async () => {

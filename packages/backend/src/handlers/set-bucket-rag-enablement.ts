@@ -4,8 +4,9 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { BucketRagEnablementResponse, ErrorResponse } from '@filone/shared';
 import { S3_REGION, SetBucketRagEnabledSchema, isSupportedRegion } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
-import { getOrgProfile } from '../lib/org-profile.js';
+import { getOrgProfile, isOrgDeleting } from '../lib/org-profile.js';
 import {
+  accountDeletedResponse,
   ResponseBuilder,
   tenantNotReadyResponse,
   unsupportedRegionResponse,
@@ -27,7 +28,7 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
  * POST /api/buckets/{name}/rag/enabled — toggle a bucket's RAG indexing on/off
  * for the caller's tenant (FIL-555).
  *
- * Body: `{ enabled: boolean }`. Creates/updates the `BUCKET#{region}#{name}` / `RAG`
+ * Body: `{ enabled: boolean }`. Creates/updates the `BUCKET#{orgId}#{region}#{name}` / `RAG`
  * enablement row, flipping `status` to `active`/`disabled` while preserving
  * telemetry and the original `createdAt`. Tenant-scoped (404 for buckets the
  * tenant does not own), RAG-gated, and Write-gated by the subscription guard.
@@ -68,6 +69,8 @@ export async function baseHandler(
   if (!isSupportedRegion(region, process.env.FILONE_STAGE!)) {
     return unsupportedRegionResponse(region);
   }
+
+  if (await isOrgDeleting(orgId, { consistent: true })) return accountDeletedResponse();
 
   const orchestrator = getOrchestratorForRegion(region);
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));

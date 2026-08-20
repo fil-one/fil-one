@@ -36,6 +36,12 @@ const {
   fakeS3Client: { tag: 's3-client' },
 }));
 
+const mockIsOrgDeletedOrDeleting = vi.fn(async (_orgId: string) => false);
+
+vi.mock('../lib/org-profile.js', () => ({
+  isOrgDeletedOrDeleting: (orgId: string) => mockIsOrgDeletedOrDeleting(orgId),
+}));
+
 vi.mock('../lib/region-helpers.js', () => ({
   getProvisionedRegions: mockGetProvisionedRegions,
 }));
@@ -128,6 +134,7 @@ const reportedMetrics = (): MetricEvent[] => reportMetricMock.mock.calls.map(([e
 describe('rag-indexer-worker', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsOrgDeletedOrDeleting.mockResolvedValue(false);
     mockCreateS3Client.mockReturnValue(fakeS3Client);
     mockUpdateBucketTelemetry.mockResolvedValue(undefined);
     mockIndexBucket.mockResolvedValue({
@@ -137,6 +144,42 @@ describe('rag-indexer-worker', () => {
       failed: 0,
       completed: true,
     });
+  });
+
+  // Vectors and manifest rows written now are residue the purge has already
+  // swept past, and nothing else collects them.
+  it('skips an org that is deleted or being deleted, before resolving regions', async () => {
+    mockIsOrgDeletedOrDeleting.mockResolvedValue(true);
+
+    await handler(payload([{ region: S3Region.EuWest1, bucketName: 'b1' }]), AMPLE_CONTEXT);
+
+    expect(mockGetProvisionedRegions).not.toHaveBeenCalled();
+    expect(mockIndexBucket).not.toHaveBeenCalled();
+  });
+
+  // The invocation runs to a 900s timeout, so the fence can land mid-run. Without
+  // a per-bucket re-check, indexBucket calls ensureIndex and recreates an index
+  // the teardown already dropped.
+  it('stops indexing when the fence lands after the run started', async () => {
+    const aurora = makeOrchestrator('aurora', S3Region.EuWest1);
+    useRegions([provisioned(aurora, 'tenant-a')]);
+    // False for the up-front check, true by the time the first bucket starts.
+    mockIsOrgDeletedOrDeleting.mockResolvedValueOnce(false).mockResolvedValue(true);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      await handler(
+        payload([
+          { region: S3Region.EuWest1, bucketName: 'b1' },
+          { region: S3Region.EuWest1, bucketName: 'b2' },
+        ]),
+        AMPLE_CONTEXT,
+      );
+
+      expect(mockIndexBucket).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('skips when the org is not provisioned in any region', async () => {
