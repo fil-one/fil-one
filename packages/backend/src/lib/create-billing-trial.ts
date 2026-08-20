@@ -2,6 +2,7 @@ import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.js';
+import { isOrgDeleting, OrgDeletingError } from './org-profile.js';
 import { getStripeClient, getBillingSecrets } from './stripe-client.js';
 import { TRIAL_DURATION_DAYS } from '@filone/shared/src/constants.js';
 
@@ -26,6 +27,12 @@ export async function createBillingTrial({
     }),
   );
   if (existing.Item) return;
+
+  // Checked here rather than at the write below, which is deliberately
+  // unconditional (see step 3) and would therefore recreate a purged billing
+  // row. It also mints a Stripe customer that teardown's snapshot cannot know
+  // about, so nothing would ever cancel or delete it.
+  if (await isOrgDeleting(orgId, { consistent: true })) throw new OrgDeletingError(orgId);
 
   const now = new Date();
   const trialDurationMs = TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000;

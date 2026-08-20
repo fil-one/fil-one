@@ -6,7 +6,10 @@ import type {
   Context,
 } from 'aws-lambda';
 import type { StepUpRequiredResponse } from '@filone/shared';
+import { getMfaEnrollments, MFA_GUARDIAN_TYPES } from '../lib/auth0-management.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
+import type { AuthenticatedEvent } from '../lib/user-context.js';
+import { getUserInfo } from '../lib/user-context.js';
 import { getVerifiedIdTokenClaims } from './auth.js';
 
 /**
@@ -36,6 +39,33 @@ export function requireMfa() {
   ): Promise<APIGatewayProxyStructuredResultV2 | void> => {
     const { amr } = getVerifiedIdTokenClaims(request);
     if (!amr.includes('mfa') && !amr.includes('phr')) return stepUpResponse();
+  };
+
+  return { before } satisfies MiddlewareObj<APIGatewayProxyEventV2, APIGatewayProxyResultV2>;
+}
+
+/**
+ * Like {@link requireMfa}, but passes a user who has no MFA enrolled at all.
+ *
+ * For actions where the strict gate would be unsatisfiable rather than
+ * protective: an MFA-less user can never produce `mfa` in `amr`, so requireMfa
+ * would make the action permanently impossible for them. Account deletion is
+ * exactly that case, and the emailed code is their second factor.
+ *
+ * A Management API failure propagates, so the gate fails closed.
+ */
+export function requireMfaIfEnrolled() {
+  const before = async (
+    request: Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>,
+  ): Promise<APIGatewayProxyStructuredResultV2 | void> => {
+    const { amr } = getVerifiedIdTokenClaims(request);
+    if (amr.includes('mfa') || amr.includes('phr')) return;
+
+    const { sub } = getUserInfo(request.event as AuthenticatedEvent);
+    const enrollments = await getMfaEnrollments(sub);
+    if (enrollments.some((enrollment) => MFA_GUARDIAN_TYPES.has(enrollment.type))) {
+      return stepUpResponse();
+    }
   };
 
   return { before } satisfies MiddlewareObj<APIGatewayProxyEventV2, APIGatewayProxyResultV2>;

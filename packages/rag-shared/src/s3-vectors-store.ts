@@ -200,12 +200,27 @@ export class S3VectorsStore implements VectorStore {
   }
 
   async dropIndex(orgId: string, region: string, bucketName: string): Promise<void> {
-    await this.#client.send(
-      new DeleteIndexCommand({
-        vectorBucketName: this.#vectorBucketName,
-        indexName: this.#indexName(orgId, region, bucketName),
-      }),
-    );
+    try {
+      await this.#client.send(
+        new DeleteIndexCommand({
+          vectorBucketName: this.#vectorBucketName,
+          indexName: this.#indexName(orgId, region, bucketName),
+        }),
+      );
+    } catch (error: unknown) {
+      // Idempotent: a missing index surfaces as NotFoundException, so a repeated
+      // teardown pass succeeds instead of wedging. Logged because on the first
+      // pass it means the index was never created.
+      if ((error as { name?: string }).name === 'NotFoundException') {
+        console.warn('[s3-vectors-store] dropIndex found no index (NotFoundException)', {
+          orgId,
+          region,
+          bucketName,
+        });
+        return;
+      }
+      throw error;
+    }
   }
 
   /**
