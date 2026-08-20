@@ -126,7 +126,7 @@ describe('apiRequest — the active org header', () => {
     beforeEach(() => {
       reload.mockClear();
       // Only `reload` is read on these paths, so the stub carries nothing else.
-      vi.stubGlobal('location', { reload });
+      vi.stubGlobal('location', { hostname: 'localhost', reload });
     });
 
     it('leaves the stash alone when the server resolved the same org', async () => {
@@ -175,7 +175,7 @@ describe('apiRequest — a switch in flight', () => {
     sessionStorage.clear();
     vi.useFakeTimers();
     vi.stubGlobal('fetch', vi.fn());
-    vi.stubGlobal('location', { assign: vi.fn(), reload: vi.fn() });
+    vi.stubGlobal('location', { hostname: 'localhost', assign: vi.fn(), reload: vi.fn() });
   });
 
   afterEach(() => {
@@ -231,7 +231,7 @@ describe('getMe — when /me itself refuses', () => {
   beforeEach(() => {
     sessionStorage.clear();
     vi.stubGlobal('fetch', vi.fn());
-    vi.stubGlobal('location', { assign: vi.fn(), reload: vi.fn() });
+    vi.stubGlobal('location', { hostname: 'localhost', assign: vi.fn(), reload: vi.fn() });
     vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
@@ -291,7 +291,7 @@ describe('the redirect that answers an expired session', () => {
     vi.useFakeTimers();
     vi.stubGlobal('fetch', vi.fn());
     // Only `href` is read on these paths, so the stub carries nothing else.
-    vi.stubGlobal('location', { href: '' });
+    vi.stubGlobal('location', { hostname: 'localhost', href: '' });
   });
 
   afterEach(() => {
@@ -375,7 +375,7 @@ describe('logout', () => {
   beforeEach(() => {
     sessionStorage.clear();
     vi.useFakeTimers();
-    vi.stubGlobal('location', { href: '' });
+    vi.stubGlobal('location', { hostname: 'localhost', href: '' });
   });
 
   afterEach(() => {
