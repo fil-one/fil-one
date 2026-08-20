@@ -210,11 +210,13 @@ async function createOrUpdateSubscription({
       userId,
     });
   }
+  const orgId = record.orgId as string | undefined;
   return stripe.subscriptions.create({
     customer: record.stripeCustomerId as string,
     items: [{ price: secrets.STRIPE_PRICE_ID }],
     default_payment_method: paymentMethodId,
     ...(discounts ? { discounts } : {}),
+    metadata: { userId, ...(orgId ? { orgId } : {}) },
     expand: ['latest_invoice.payment_intent', 'default_payment_method'],
   });
 }

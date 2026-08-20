@@ -162,6 +162,10 @@ declare module "sst" {
       "type": "sst.sst.Secret"
       "value": string
     }
+    "HubSpotContactSync": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "HubSpotServiceKey": {
       "type": "sst.sst.Secret"
       "value": string

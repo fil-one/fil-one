@@ -19,6 +19,8 @@ import {
   syncTenantStatusInProvisionedRegions,
   WEBHOOK_STATUS_SYNC_RETRY,
 } from '../lib/region-helpers.js';
+import { fromInternalStatus } from '../lib/hubspot-lifecycle-status.js';
+import { syncHubSpotStatusBestEffort } from '../lib/hubspot-status-sync.js';
 import { getStripeClient, getWebhookSecret } from '../lib/stripe-client.js';
 import {
   emitDunningEscalation,
@@ -278,6 +280,10 @@ async function handleSubscriptionUpdate(
       subscriptionId: subscription.id,
       customerId,
     });
+    await syncHubSpotStatusBestEffort({
+      userId: subscription.metadata?.userId,
+      status: fromInternalStatus(mappedStatus),
+    });
     return;
   }
 
@@ -306,6 +312,7 @@ async function handleSubscriptionUpdate(
       subscription,
       mappedStatus,
       orgId: subscription.metadata?.orgId || customer.metadata?.orgId,
+      email: customer.email,
     });
     return;
   }
@@ -325,6 +332,8 @@ interface UpdateBillingRecordParams {
   subscription: Stripe.Subscription;
   mappedStatus: SubscriptionStatus;
   orgId: string | undefined;
+  /** Only used to bootstrap a contact that has no `filone_user_id` yet. */
+  email?: string | null;
 }
 
 async function updateBillingRecord({
@@ -333,6 +342,7 @@ async function updateBillingRecord({
   subscription,
   mappedStatus,
   orgId,
+  email,
 }: UpdateBillingRecordParams): Promise<void> {
   const backfill = orgIdBackfill(orgId);
   await dynamo.send(
@@ -357,6 +367,8 @@ async function updateBillingRecord({
       },
     }),
   );
+
+  await syncHubSpotStatusBestEffort({ userId, status: fromInternalStatus(mappedStatus), email });
 }
 
 async function handleSubscriptionDeleted(
@@ -449,6 +461,13 @@ async function handleSubscriptionDeleted(
   } catch (error) {
     console.error('[stripe-webhook] Failed to write-lock tenant', { userId, error });
   }
+
+  // Last: a slow CRM must not eat the route's 10s budget before the tenant sync.
+  await syncHubSpotStatusBestEffort({
+    userId,
+    status: fromInternalStatus(SubscriptionStatus.GracePeriod),
+    email: customer.email,
+  });
 }
 
 async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice): Promise<void> {
@@ -507,6 +526,15 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   } catch (error) {
     console.error('[stripe-webhook] Failed to re-activate tenant', { userId, error });
   }
+
+  // Last: a slow CRM must not eat the route's 10s budget before the re-activation
+  // above, which nothing else repairs — the idempotency claim survives a Lambda
+  // timeout, so Stripe's retry would be acknowledged as already processed.
+  await syncHubSpotStatusBestEffort({
+    userId,
+    status: fromInternalStatus(SubscriptionStatus.Active),
+    email: customer.email,
+  });
 }
 
 async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): Promise<void> {
@@ -540,6 +568,12 @@ async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): 
       },
     }),
   );
+
+  await syncHubSpotStatusBestEffort({
+    userId,
+    status: fromInternalStatus(SubscriptionStatus.PastDue),
+    email: customer.email,
+  });
 
   const attemptCount = invoice.attempt_count ?? 0;
   emitDunningEscalation({

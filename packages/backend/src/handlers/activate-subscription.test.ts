@@ -241,6 +241,7 @@ describe('activate-subscription handler', () => {
       customer: 'cus_test_123',
       items: [{ price: 'price_test_fake' }],
       default_payment_method: 'pm_test_789',
+      metadata: { userId: 'user-1', orgId: 'org-1' },
       expand: ['latest_invoice.payment_intent', 'default_payment_method'],
     });
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
@@ -277,6 +278,7 @@ describe('activate-subscription handler', () => {
       customer: 'cus_test_123',
       items: [{ price: 'price_test_fake' }],
       default_payment_method: 'pm_test_789',
+      metadata: { userId: 'user-1', orgId: 'org-1' },
       expand: ['latest_invoice.payment_intent', 'default_payment_method'],
     });
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
@@ -311,6 +313,7 @@ describe('activate-subscription handler', () => {
       customer: 'cus_test_123',
       items: [{ price: 'price_test_fake' }],
       default_payment_method: 'pm_test_789',
+      metadata: { userId: 'user-1', orgId: 'org-1' },
       expand: ['latest_invoice.payment_intent', 'default_payment_method'],
     });
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
@@ -468,6 +471,7 @@ describe('activate-subscription handler', () => {
       customer: 'cus_test_123',
       items: [{ price: 'price_test_fake' }],
       default_payment_method: 'pm_saved_1',
+      metadata: { userId: 'user-1', orgId: 'org-1' },
       expand: ['latest_invoice.payment_intent', 'default_payment_method'],
     });
     expect(body.subscription.status).toBe(SubscriptionStatus.Active);
@@ -657,6 +661,7 @@ describe('activate-subscription handler', () => {
         items: [{ price: 'price_test_fake' }],
         default_payment_method: 'pm_test_789',
         discounts: [{ promotion_code: 'promo_xxx' }],
+        metadata: { userId: 'user-1', orgId: 'org-1' },
         expand: ['latest_invoice.payment_intent', 'default_payment_method'],
       });
     });
@@ -690,6 +695,7 @@ describe('activate-subscription handler', () => {
         items: [{ price: 'price_test_fake' }],
         default_payment_method: 'pm_test_789',
         discounts: [{ promotion_code: 'promo_xxx' }],
+        metadata: { userId: 'user-1', orgId: 'org-1' },
         expand: ['latest_invoice.payment_intent', 'default_payment_method'],
       });
       expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
@@ -796,6 +802,7 @@ describe('activate-subscription handler', () => {
         items: [{ price: 'price_test_fake' }],
         default_payment_method: 'pm_saved_1',
         discounts: [{ promotion_code: 'promo_xxx' }],
+        metadata: { userId: 'user-1', orgId: 'org-1' },
         expand: ['latest_invoice.payment_intent', 'default_payment_method'],
       });
     });
