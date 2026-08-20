@@ -209,8 +209,17 @@ export class S3VectorsStore implements VectorStore {
       );
     } catch (error: unknown) {
       // Idempotent: a missing index surfaces as NotFoundException, so a repeated
-      // teardown pass succeeds instead of wedging.
-      if ((error as { name?: string }).name !== 'NotFoundException') throw error;
+      // teardown pass succeeds instead of wedging. Logged because on the first
+      // pass it means the index was never created.
+      if ((error as { name?: string }).name === 'NotFoundException') {
+        console.warn('[s3-vectors-store] dropIndex found no index (NotFoundException)', {
+          orgId,
+          region,
+          bucketName,
+        });
+        return;
+      }
+      throw error;
     }
   }
 
