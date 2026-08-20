@@ -267,16 +267,30 @@ async function revoke(pk: string): Promise<void> {
  * invitation.
  */
 function reportSurvivingGrants(pk: string, stranded: readonly AcceptableInvitation[]): void {
+  const allowlistTarget = !pk.startsWith(ORG_PK_PREFIX);
+
   console.error(
-    pk.startsWith(ORG_PK_PREFIX)
-      ? 'Members of that org keep the beta if they hold an ALLOWLIST# row of their own — `list` shows them.'
-      : 'Their organization may still hold an ORG# row, which grants the beta on its own — `list` shows it.',
+    allowlistTarget
+      ? 'Their organization may still hold an ORG# row, which grants the beta on its own — `list` shows it.'
+      : 'Members of that org keep the beta if they hold an ALLOWLIST# row of their own — `list` shows them.',
   );
+
+  if (allowlistTarget) {
+    // The rows below are matched by recipient (`emailNorm`); the sender is
+    // stored as a userId, so invitations this person already SENT cannot be
+    // found by email and are not listed. They stay acceptable exactly like the
+    // ones below — a revoked grant stops future creation, nothing else.
+    console.error(
+      'Invitations this person already sent are not listed (senders are stored by userId, ' +
+        'not email) and stay acceptable; withdraw those per org if they matter.',
+    );
+  }
 
   if (stranded.length === 0) return;
 
   console.error(
-    `${stranded.length} invitation(s) stay acceptable — accepting reads no flag, and each is good ` +
+    `${stranded.length} invitation(s) ${allowlistTarget ? 'addressed to this email' : 'sent by this org'} ` +
+      'stay acceptable — accepting reads no flag, and each is good ' +
       'until it expires or somebody holding members.manage withdraws it:',
   );
   for (const invitation of stranded) {

@@ -84,6 +84,18 @@ exactly those rows, and another backfill run skips them rather than repairing
 them. `--verify` is the migration gate, so a row it cannot pass and cannot fix
 blocks the gate. Compare in one direction.
 
+### Serialize Stripe customer creation per org
+
+`packages/backend/src/handlers/create-setup-intent.ts` swallows the
+`ConditionalCheckFailedException` when its `attribute_not_exists(pk)` write
+loses, then issues the SetupIntent against its own just-minted customer — a
+customer the billing row never references. Two concurrent first-billing-touch
+requests (a double-click today; two Owners once the beta widens) can therefore
+attach a payment method to an orphan. The loser should re-read the row, adopt
+the winner's `stripeCustomerId`, and best-effort delete its orphan at Stripe.
+The same race predates the re-key under `CUSTOMER#` keys; the org invariant
+makes it worth closing now.
+
 ## Console and accessibility
 
 ### Give a Textarea inside a FormField its error description
@@ -107,6 +119,26 @@ that does nothing. The panel's contents are already labelled
 mobile twin at `AppShell.tsx:41-52` already sets both attributes, so the fix is
 to match the pattern that exists. Pre-existing on main rather than introduced by
 this stack.
+
+### Reconcile the roster after a stale-target refusal
+
+Two shapes of the same staleness: a role change on a member who was promoted
+to Owner elsewhere returns `FORBIDDEN_ROLE`, and a transfer whose target was
+removed or promoted in another tab returns its permanent 404/409 — in both,
+the handlers (`packages/website/src/pages/MembersPage.tsx`) only toast, the
+global denial handler refreshes `/me` alone (`lib/query-client.ts:44-47`),
+and the stale row keeps offering the same refused actions. Invalidate the
+members query on these denials, and close or revalidate the transfer dialog's
+target.
+
+### Supersede expired same-address rows when re-inviting
+
+`create-invitation.ts` revokes-and-replaces only usable same-address rows,
+while `list-invitations.ts` deliberately returns expired rows flagged and
+revocable. Re-inviting an expired address therefore leaves two rows on the
+invitations surface, the fresh one and the expired one, which reads against
+the form's replacement behavior. Revoke expired same-address rows in the
+create transaction; the audit event already records what happened to them.
 
 ### Narrow cached data when a role narrows
 
