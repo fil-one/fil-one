@@ -39,7 +39,7 @@ The worker deletes one listing page at a time. After each page it writes the adv
 
 The time-budget check reads `context.getRemainingTimeInMillis()` directly rather than deriving a wall-clock deadline from `Date.now()`. `Date.now()` reads the system clock, which is NTP-adjusted and not guaranteed monotonic in Lambda, whereas `getRemainingTimeInMillis()` is the exact budget Lambda will enforce.
 
-The persisted cursor is load-bearing beyond resume: it is what steps the walk *past* an object that cannot be deleted. Object-lock retention makes per-object failures normal, and those failures are recorded per key and reported rather than aborting the run, so one locked object cannot strand the rest of the bucket. Without a cursor the loop would re-list from the start on every pass; with 1000 or more locked objects at the head of the listing, `IsTruncated` would stay true and the walk would never advance past them, deleting nothing on each iteration. The cursor is the `KeyMarker`/`VersionIdMarker` for the versioned scan and the continuation token for the current-only scan.
+The persisted cursor is load-bearing beyond resume: it is what steps the walk _past_ an object that cannot be deleted. Object-lock retention makes per-object failures normal, and those failures are recorded per key and reported rather than aborting the run, so one locked object cannot strand the rest of the bucket. Without a cursor the loop would re-list from the start on every pass; with 1000 or more locked objects at the head of the listing, `IsTruncated` would stay true and the walk would never advance past them, deleting nothing on each iteration. The cursor is the `KeyMarker`/`VersionIdMarker` for the versioned scan and the continuation token for the current-only scan.
 
 ### 5. Versioning-suspended buckets need explicit null-version deletes
 
@@ -51,7 +51,7 @@ Only a `Never` bucket gets the plain-delete treatment. On a `Suspended` bucket t
 
 The worker is driven by a FIFO SQS queue (`BulkDeleteQueue`) rather than a direct Lambda invoke. A direct invoke leaves no trace when a link in the chain dies: if the process is killed after a checkpoint but before it hands off, nothing re-drives it and the job sits `running` forever while the UI polls a row that never moves. SQS redelivers once the visibility timeout lapses (set to 16 minutes, longer than the worker's own 900-second timeout so a redelivery never runs alongside the invocation it replaces), and after a bounded number of attempts moves the message to a dead-letter queue (`BulkDeleteDlq`).
 
-FIFO, not standard, because the message group is the job id: SQS keeps at most one message per group in flight, so two workers can never walk the same job's cursor at once. Content-based deduplication stays off, since a job's continuation messages are byte-identical; the deduplication id is supplied explicitly as `${jobId}:${sequence}`, where `sequence` is 0 for the initial submission and the job's resume count for each hand-off. The advanced resume count is persisted *before* the continuation is enqueued, because a reused id inside SQS's 5-minute dedup window would silently swallow the hand-off and strand the job. `BulkDeleteDlq` must also be FIFO: AWS requires a dead-letter queue to match its source queue's type, and a standard DLQ on a FIFO source fails the deploy outright (`Dead-letter queue must be same type of queue as the source`).
+FIFO, not standard, because the message group is the job id: SQS keeps at most one message per group in flight, so two workers can never walk the same job's cursor at once. Content-based deduplication stays off, since a job's continuation messages are byte-identical; the deduplication id is supplied explicitly as `${jobId}:${sequence}`, where `sequence` is 0 for the initial submission and the job's resume count for each hand-off. The advanced resume count is persisted _before_ the continuation is enqueued, because a reused id inside SQS's 5-minute dedup window would silently swallow the hand-off and strand the job. `BulkDeleteDlq` must also be FIFO: AWS requires a dead-letter queue to match its source queue's type, and a standard DLQ on a FIFO source fails the deploy outright (`Dead-letter queue must be same type of queue as the source`).
 
 The worker distinguishes a retryable error from the final attempt using the message's `ApproximateReceiveCount` against `MAX_BULK_DELETE_DELIVERY_ATTEMPTS` (kept in step with the queue's `dlq.retry`). A retryable error on an earlier delivery is left to escape so the message returns to the queue and the next delivery resumes from the checkpoint. Only a non-retryable error (such as a region the org is not provisioned in), or the last delivery before the DLQ, marks the job `Failed`. Swallowing every error into a failed status would turn a transient throttle into a permanently dead job.
 
@@ -81,12 +81,12 @@ The confirmation dialog states no object count, deliberately. The count comes fr
 
 ### Accepted costs
 
-| Cost | Reasoning |
-| --- | --- |
-| A stalled job is only failed once its message reaches the DLQ | The watchdog cannot act before SQS exhausts the delivery count. Bounded by the visibility timeout times the retry count; the UI shows `running` until then. |
-| `deletedCount` can over-count across two overlapping jobs on one bucket | Cosmetic. Correctness comes from each job owning its row and `DeleteObjects` being idempotent, not from a lock. |
-| Emptying reads and rewrites the job row once per 1000-object page | The row is intentionally on its own table so this write rate does not touch `UserInfoTable`. Finished rows expire by TTL. |
-| The browser listing shows only the first page of a large bucket | The table is not virtualized. Truncation is stated in the UI, and the job is the supported path for large buckets. |
+| Cost                                                                    | Reasoning                                                                                                                                                   |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A stalled job is only failed once its message reaches the DLQ           | The watchdog cannot act before SQS exhausts the delivery count. Bounded by the visibility timeout times the retry count; the UI shows `running` until then. |
+| `deletedCount` can over-count across two overlapping jobs on one bucket | Cosmetic. Correctness comes from each job owning its row and `DeleteObjects` being idempotent, not from a lock.                                             |
+| Emptying reads and rewrites the job row once per 1000-object page       | The row is intentionally on its own table so this write rate does not touch `UserInfoTable`. Finished rows expire by TTL.                                   |
+| The browser listing shows only the first page of a large bucket         | The table is not virtualized. Truncation is stated in the UI, and the job is the supported path for large buckets.                                          |
 
 ### Deferred risk
 
