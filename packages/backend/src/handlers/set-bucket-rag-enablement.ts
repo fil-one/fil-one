@@ -4,8 +4,9 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { BucketRagEnablementResponse, ErrorResponse } from '@filone/shared';
 import { S3_REGION, SetBucketRagEnabledSchema, isSupportedRegion } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
-import { getOrgProfile } from '../lib/org-profile.js';
+import { getOrgProfile, isOrgDeleting } from '../lib/org-profile.js';
 import {
+  accountDeletedResponse,
   ResponseBuilder,
   tenantNotReadyResponse,
   unsupportedRegionResponse,
@@ -68,6 +69,8 @@ export async function baseHandler(
   if (!isSupportedRegion(region, process.env.FILONE_STAGE!)) {
     return unsupportedRegionResponse(region);
   }
+
+  if (await isOrgDeleting(orgId, { consistent: true })) return accountDeletedResponse();
 
   const orchestrator = getOrchestratorForRegion(region);
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));

@@ -1,4 +1,3 @@
-import { TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
@@ -6,7 +5,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { CreateRagApiKeySchema } from '@filone/shared';
 import type { CreateRagApiKeyResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
-import { getDynamoClient } from '../lib/ddb-client.js';
+import { sendDeletionGuardedWrite } from '../lib/org-profile.js';
 import {
   RagApiKeyKeys,
   generateRagKeyToken,
@@ -67,44 +66,42 @@ export async function baseHandler(
   const createdAt = new Date().toISOString();
 
   // Both rows or neither: the ORG record (listing/ownership) and the hash
-  // LOOKUP row (bearer-auth entry point) must never diverge.
-  await getDynamoClient().send(
-    new TransactWriteItemsCommand({
-      TransactItems: [
-        {
-          Put: {
-            TableName: Resource.UserInfoTable.name,
-            Item: marshall({
-              pk: RagApiKeyKeys.orgPk(orgId),
-              sk: RagApiKeyKeys.orgSk(keyId),
-              keyName,
-              keyPrefix,
-              tokenHash,
-              bucketScope,
-              ...(buckets ? { buckets } : {}),
-              createdBy: userId,
-              ...(creatorEmail ? { creatorEmail } : {}),
-              createdAt,
-            }),
-            ConditionExpression: 'attribute_not_exists(pk)',
-          },
-        },
-        {
-          Put: {
-            TableName: Resource.UserInfoTable.name,
-            Item: marshall({
-              pk: RagApiKeyKeys.lookupPk(tokenHash),
-              sk: RagApiKeyKeys.lookupSk(),
-              orgId,
-              keyId,
-              createdAt,
-            }),
-            ConditionExpression: 'attribute_not_exists(pk)',
-          },
-        },
-      ],
-    }),
-  );
+  // LOOKUP row (bearer-auth entry point) must never diverge. Guarded because
+  // the key is a live credential — neither row exists yet, so the deletion
+  // fence has to ride along as a separate check.
+  await sendDeletionGuardedWrite(orgId, [
+    {
+      Put: {
+        TableName: Resource.UserInfoTable.name,
+        Item: marshall({
+          pk: RagApiKeyKeys.orgPk(orgId),
+          sk: RagApiKeyKeys.orgSk(keyId),
+          keyName,
+          keyPrefix,
+          tokenHash,
+          bucketScope,
+          ...(buckets ? { buckets } : {}),
+          createdBy: userId,
+          ...(creatorEmail ? { creatorEmail } : {}),
+          createdAt,
+        }),
+        ConditionExpression: 'attribute_not_exists(pk)',
+      },
+    },
+    {
+      Put: {
+        TableName: Resource.UserInfoTable.name,
+        Item: marshall({
+          pk: RagApiKeyKeys.lookupPk(tokenHash),
+          sk: RagApiKeyKeys.lookupSk(),
+          orgId,
+          keyId,
+          createdAt,
+        }),
+        ConditionExpression: 'attribute_not_exists(pk)',
+      },
+    },
+  ]);
 
   return new ResponseBuilder()
     .status(201)

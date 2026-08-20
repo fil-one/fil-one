@@ -71,14 +71,36 @@ describe('getOrgProfile', () => {
 });
 
 describe('isOrgDeleting', () => {
-  it('is true only for an explicit BOOL true', () => {
-    expect(isOrgDeleting({ deleting: { BOOL: true } })).toBe(true);
-    expect(isOrgDeleting({ deleting: { BOOL: false } })).toBe(false);
+  beforeEach(() => {
+    ddbMock.reset();
   });
 
-  it('fails open on an absent attribute or a missing row', () => {
-    expect(isOrgDeleting({ pk: { S: 'ORG#org-1' } })).toBe(false);
-    expect(isOrgDeleting(undefined)).toBe(false);
+  it('is true only for an explicit BOOL true', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: { deleting: { BOOL: true } } });
+    await expect(isOrgDeleting('org-1')).resolves.toBe(true);
+
+    ddbMock.on(GetItemCommand).resolves({ Item: { deleting: { BOOL: false } } });
+    await expect(isOrgDeleting('org-1')).resolves.toBe(false);
+  });
+
+  it('fails open on an absent attribute or a missing row', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: { pk: { S: 'ORG#org-1' } } });
+    await expect(isOrgDeleting('org-1')).resolves.toBe(false);
+
+    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+    await expect(isOrgDeleting('org-1')).resolves.toBe(false);
+  });
+
+  it('reads eventually consistently unless asked otherwise', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+
+    await isOrgDeleting('org-1');
+    expect(ddbMock.commandCalls(GetItemCommand)[0]!.args[0].input.ConsistentRead).toBeUndefined();
+
+    await isOrgDeleting('org-1', { consistent: true });
+    expect(ddbMock.commandCalls(GetItemCommand)[1]!.args[0].input).toMatchObject({
+      ConsistentRead: true,
+    });
   });
 });
 

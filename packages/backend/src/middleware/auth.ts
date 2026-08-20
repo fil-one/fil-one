@@ -95,6 +95,7 @@ function getJWKS(domain: string): ReturnType<typeof createRemoteJWKSet> {
 import { parseCookies } from '../lib/cookies.js';
 import { CSRF_COOKIE_NAME } from '@filone/shared';
 import { AccountDeletedError, isIdentityTombstoned } from '../lib/identity-tombstone.js';
+import { isOrgDeleting } from '../lib/org-profile.js';
 
 function unauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder().status(401).body<ErrorResponse>({ message: 'Unauthorized' }).build();
@@ -292,6 +293,11 @@ async function resolveUserAndOrg(
   if (result.Item?.userId?.S && result.Item?.orgId?.S) {
     const userId = result.Item.userId.S;
     const orgId = result.Item.orgId.S;
+
+    // The session fence. On the org profile, so the confirm transaction stays three
+    // items at any org size. Ahead of the backfill: a deleted org must not trigger it.
+    if (await isOrgDeleting(orgId)) throw new AccountDeletedError();
+
     if (!email) {
       console.error(
         '[auth] Existing user authenticated without email claim — ID token verification may have failed',
