@@ -187,7 +187,7 @@ export type {
   CreateRagApiKeyResponse,
 } from './api/rag-api-keys.js';
 
-export { ACTIVITY_ACTION_LABELS } from './api/dashboard.js';
+export { ACTIVITY_ACTION_LABELS, getActivityActionLabel } from './api/dashboard.js';
 
 export type {
   UsageDataPoint,

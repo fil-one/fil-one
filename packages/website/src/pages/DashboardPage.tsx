@@ -23,7 +23,7 @@ import { ProgressBar } from '../components/ProgressBar';
 import { formatBytes } from '@filone/shared';
 
 import {
-  ACTIVITY_ACTION_LABELS,
+  getActivityActionLabel,
   PlanId,
   SubscriptionStatus,
   TB_BYTES,
@@ -466,7 +466,7 @@ export function DashboardPage() {
                     </Badge>
                   </div>
                   <p className="mt-0.5 text-[11px] text-zinc-500">
-                    {ACTIVITY_ACTION_LABELS[activity.action]}
+                    {getActivityActionLabel(activity.action)}
                   </p>
                 </div>
                 <span className="w-14 shrink-0 text-right text-[11px] text-zinc-500">
