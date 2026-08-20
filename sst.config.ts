@@ -1016,6 +1016,11 @@ export default $config({
     });
 
     // ── Account deletion ─────────────────────────────────────────────
+    // Off on every stage until FIL-919 gives Aurora a tenant DELETE. Gates the
+    // self-serve routes only — the customer.deleted trigger stays live. Keep in
+    // step with packages/website/src/lib/account-deletion.ts.
+    const accountDeletionEnabled = 'false';
+
     // No subscriptionGuardMiddleware on these: it blocks writes for cancelled
     // and inactive subscriptions, the population most likely to be leaving.
     addRoute({
@@ -1027,6 +1032,7 @@ export default $config({
         deletionCodeHmacKey,
         ...(sendGridApiKey ? [sendGridApiKey] : []),
       ],
+      extraEnv: { ACCOUNT_DELETION_ENABLED: accountDeletionEnabled },
     });
 
     // ── Usage reporting (cron-based) ────────────────────────────────

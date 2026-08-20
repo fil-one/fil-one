@@ -49,10 +49,23 @@ const CREATED = {
 describe('request-account-deletion', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.ACCOUNT_DELETION_ENABLED = 'true';
     mockIsOrgAdmin.mockResolvedValue(true);
     mockIsOrgDeleting.mockResolvedValue(false);
     mockGetOrgProfile.mockResolvedValue({ name: { S: 'Acme Corp' } });
     mockCreateChallenge.mockResolvedValue(CREATED);
+  });
+
+  // The route stays deployed while the feature is withheld (FIL-919), so the
+  // refusal has to come from the handler.
+  it('answers 501 without issuing a code when the feature is off', async () => {
+    process.env.ACCOUNT_DELETION_ENABLED = 'false';
+
+    const result = await baseHandler(event());
+
+    expect(result.statusCode).toBe(501);
+    expect(mockCreateChallenge).not.toHaveBeenCalled();
+    expect(mockSendEmail).not.toHaveBeenCalled();
   });
 
   it('emails the code and returns when it expires and when a resend is allowed', async () => {

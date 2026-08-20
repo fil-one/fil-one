@@ -3,6 +3,10 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ApiErrorCode } from '@filone/shared';
 import type { ErrorResponse, RequestAccountDeletionResponse } from '@filone/shared';
+import {
+  isSelfServeDeletionEnabled,
+  selfServeDeletionUnavailable,
+} from '../lib/account-deletion-flag.js';
 import { createDeletionChallenge } from '../lib/deletion-challenge.js';
 import { sendDeletionCodeEmail } from '../lib/deletion-email.js';
 import { getOrgProfile, isOrgDeleting } from '../lib/org-profile.js';
@@ -22,6 +26,8 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
+  if (!isSelfServeDeletionEnabled()) return selfServeDeletionUnavailable();
+
   const { orgId, userId } = getUserInfo(event);
 
   if (!(await isOrgAdmin(orgId, userId))) {
