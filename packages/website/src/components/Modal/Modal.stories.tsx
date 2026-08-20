@@ -119,23 +119,40 @@ export const ContactForm: Story = {
           <ModalBody>
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-medium text-(--color-text-base)">Name</label>
-                <Input value={name} onChange={setName} placeholder="Your name" />
+                <label
+                  htmlFor="contact-name"
+                  className="text-sm font-medium text-(--color-text-base)"
+                >
+                  Name
+                </label>
+                <Input id="contact-name" value={name} onChange={setName} placeholder="Your name" />
               </div>
               <div className="flex flex-col gap-1.5">
-                <label className="flex items-center gap-1.5 text-sm font-medium text-(--color-text-base)">
+                <label
+                  htmlFor="contact-company"
+                  className="flex items-center gap-1.5 text-sm font-medium text-(--color-text-base)"
+                >
                   Company name
                   <span className="text-sm font-normal text-(--color-paragraph-text-subtle)">
                     (optional)
                   </span>
                 </label>
-                <Input value={company} onChange={setCompany} placeholder="Your company" />
+                <Input
+                  id="contact-company"
+                  value={company}
+                  onChange={setCompany}
+                  placeholder="Your company"
+                />
               </div>
               <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-medium text-(--color-text-base)">
+                <label
+                  htmlFor="contact-message"
+                  className="text-sm font-medium text-(--color-text-base)"
+                >
                   How can we help?
                 </label>
                 <Textarea
+                  id="contact-message"
                   value={message}
                   onChange={setMessage}
                   rows={5}

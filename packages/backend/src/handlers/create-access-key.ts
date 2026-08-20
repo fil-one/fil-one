@@ -4,13 +4,19 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { CreateAccessKeySchema, S3Region, isSupportedRegion } from '@filone/shared';
-import type { CreateAccessKeyResponse, ErrorResponse } from '@filone/shared';
+import type {
+  CreateAccessKeyRequest,
+  CreateAccessKeyResponse,
+  ErrorResponse,
+} from '@filone/shared';
 import { Resource } from 'sst';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.js';
 import type { IssuedAccessKey, ServiceOrchestrator } from '../lib/service-orchestrator.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import { isOrgDeleting } from '../lib/org-profile.js';
 import {
+  accountDeletedResponse,
   ResponseBuilder,
   tenantNotReadyResponse,
   unsupportedRegionResponse,
@@ -55,6 +61,10 @@ export async function baseHandler(
     return unsupportedRegionResponse(region);
   }
 
+  // Before ensureTenantReady: the key is minted upstream, so a fence checked
+  // only at the DynamoDB write would leave a live credential behind.
+  if (await isOrgDeleting(orgId, { consistent: true })) return accountDeletedResponse();
+
   const orchestrator = getOrchestratorForRegion(region);
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
@@ -88,19 +98,16 @@ export async function baseHandler(
   await getDynamoClient().send(
     new PutItemCommand({
       TableName: Resource.UserInfoTable.name,
-      Item: marshall({
-        pk: `ORG#${orgId}`,
-        sk: `ACCESSKEY#${accessKey.id}`,
+      Item: buildAccessKeyItem({
+        orgId,
+        accessKey,
         keyName,
-        accessKeyId: accessKey.accessKeyId,
-        createdAt: accessKey.createdAt,
-        status: 'active',
         region,
         permissions,
-        ...(granularPermissions?.length ? { granularPermissions } : {}),
+        granularPermissions,
         bucketScope,
-        ...(buckets ? { buckets } : {}),
-        ...(expiresAt ? { expiresAt } : {}),
+        buckets,
+        expiresAt,
       }),
     }),
   );
@@ -115,6 +122,43 @@ export async function baseHandler(
       createdAt: accessKey.createdAt,
     })
     .build();
+}
+
+function buildAccessKeyItem({
+  orgId,
+  accessKey,
+  keyName,
+  region,
+  permissions,
+  granularPermissions,
+  bucketScope,
+  buckets,
+  expiresAt,
+}: {
+  orgId: string;
+  accessKey: IssuedAccessKey;
+  keyName: string;
+  region: S3Region;
+  permissions: CreateAccessKeyRequest['permissions'];
+  granularPermissions: CreateAccessKeyRequest['granularPermissions'];
+  bucketScope: CreateAccessKeyRequest['bucketScope'];
+  buckets: string[] | undefined;
+  expiresAt: string | null;
+}) {
+  return marshall({
+    pk: `ORG#${orgId}`,
+    sk: `ACCESSKEY#${accessKey.id}`,
+    keyName,
+    accessKeyId: accessKey.accessKeyId,
+    createdAt: accessKey.createdAt,
+    status: 'active',
+    region,
+    permissions,
+    ...(granularPermissions?.length ? { granularPermissions } : {}),
+    bucketScope,
+    ...(buckets ? { buckets } : {}),
+    ...(expiresAt ? { expiresAt } : {}),
+  });
 }
 
 interface RecoverDuplicateKeyParams {

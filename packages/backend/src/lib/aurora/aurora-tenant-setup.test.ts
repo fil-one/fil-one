@@ -67,6 +67,7 @@ import {
   recordSetupFailure,
   OrgSetupStatus,
 } from './aurora-tenant-setup.js';
+import { OrgDeletingError } from '../org-profile.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -198,7 +199,8 @@ describe('processTenantSetup', () => {
       Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
       UpdateExpression:
         'SET auroraTenantId = :auroraTenantId, auroraSetupStatus = :status, updatedAt = :now',
-      ConditionExpression: 'auroraSetupStatus = :expected',
+      ConditionExpression: 'auroraSetupStatus = :expected AND attribute_not_exists(deleting)',
+      ReturnValuesOnConditionCheckFailure: 'ALL_OLD',
       ExpressionAttributeValues: {
         ':auroraTenantId': { S: 'aurora-t-1' },
         ':status': { S: OrgSetupStatus.AURORA_TENANT_CREATED },
@@ -212,7 +214,8 @@ describe('processTenantSetup', () => {
       TableName: 'UserInfoTable',
       Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
       UpdateExpression: 'SET auroraSetupStatus = :status, updatedAt = :now',
-      ConditionExpression: 'auroraSetupStatus = :expected',
+      ConditionExpression: 'auroraSetupStatus = :expected AND attribute_not_exists(deleting)',
+      ReturnValuesOnConditionCheckFailure: 'ALL_OLD',
       ExpressionAttributeValues: {
         ':status': { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
         ':expected': { S: OrgSetupStatus.AURORA_TENANT_CREATED },
@@ -225,7 +228,8 @@ describe('processTenantSetup', () => {
       TableName: 'UserInfoTable',
       Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
       UpdateExpression: 'SET auroraSetupStatus = :status, updatedAt = :now',
-      ConditionExpression: 'auroraSetupStatus = :expected',
+      ConditionExpression: 'auroraSetupStatus = :expected AND attribute_not_exists(deleting)',
+      ReturnValuesOnConditionCheckFailure: 'ALL_OLD',
       ExpressionAttributeValues: {
         ':status': { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
         ':expected': { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
@@ -239,7 +243,8 @@ describe('processTenantSetup', () => {
       TableName: 'UserInfoTable',
       Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
       UpdateExpression: 'SET auroraSetupStatus = :status, updatedAt = :now',
-      ConditionExpression: 'auroraSetupStatus = :expected',
+      ConditionExpression: 'auroraSetupStatus = :expected AND attribute_not_exists(deleting)',
+      ReturnValuesOnConditionCheckFailure: 'ALL_OLD',
       ExpressionAttributeValues: {
         ':status': { S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED },
         ':expected': { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
@@ -750,6 +755,25 @@ describe('processTenantSetup', () => {
       message: 'The conditional request failed',
     });
   }
+
+  // A deleting org must not read as a lost race: nobody will ever write the
+  // tenant id, so the caller's re-read would look for a winner that cannot exist.
+  it('throws OrgDeletingError rather than lost-race when the fence rejects the advance', async () => {
+    ddbMock
+      .on(GetItemCommand)
+      .resolves(orgProfileItem({ auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED } }));
+    ddbMock.on(UpdateItemCommand).rejects(
+      new ConditionalCheckFailedException({
+        $metadata: {},
+        message: 'The conditional request failed',
+        Item: { pk: { S: 'ORG#org-1' }, deleting: { BOOL: true } },
+      }),
+    );
+    mockCreateAuroraTenant.mockResolvedValue({ auroraTenantId: 'aurora-t-1' });
+
+    await expect(processTenantSetup('org-1')).rejects.toBeInstanceOf(OrgDeletingError);
+    expect(mockSetupAuroraTenant).not.toHaveBeenCalled();
+  });
 
   it('continues the chain when createTenant loses the status-advance race', async () => {
     // Initial entry-point GetItem: status is FILONE_ORG_CREATED.

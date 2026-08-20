@@ -34,7 +34,8 @@ export function QueryAnswer({
         </p>
       )}
       {isPending ? (
-        <div data-testid="query-answer-loading" className="space-y-2.5" aria-label="Loading answer">
+        <div data-testid="query-answer-loading" role="status" className="space-y-2.5">
+          <span className="sr-only">Loading answer</span>
           <div className="h-2 w-3/4 animate-pulse rounded-full bg-zinc-200" />
           <div className="h-2 w-full animate-pulse rounded-full bg-zinc-200" />
           <div className="h-2 w-5/6 animate-pulse rounded-full bg-zinc-200" />
