@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { SubscriptionStatus } from '@filone/shared';
 import { SidebarNav } from './SidebarNav';
 import { Banner } from './Banner';
+import { UserAvatar } from './UserAvatar';
 import { getUsage, getBilling, getMe, logout } from '../lib/api';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { daysUntil } from '../lib/time.js';
@@ -45,9 +46,7 @@ function MobileUserMenu() {
         aria-haspopup="menu"
         className="flex h-11 w-11 items-center justify-center rounded-lg"
       >
-        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-600 text-xs font-semibold text-white">
-          {initial}
-        </span>
+        <UserAvatar src={me?.picture} initial={initial} />
       </button>
       {open && (
         <div
@@ -79,6 +78,21 @@ function MobileUserMenu() {
 type AppShellProps = {
   children: React.ReactNode;
 };
+
+// Grace-period banner copy. `daysUntil` compares calendar days and clamps to
+// >= 0, so 0 means the account is disabled later today; null means we have no
+// deadline to count down to. Only upgrading preserves access, so the copy never
+// implies that downloading data does.
+export function gracePeriodMessage(graceDays: number | null): string {
+  if (graceDays === null) {
+    return "Your free trial has expired. Upgrade to keep access, or download your data before it's removed.";
+  }
+  if (graceDays === 0) {
+    return 'Your free trial has expired, and your account will be disabled later today. Upgrade to keep access or download your data immediately.';
+  }
+  const unit = graceDays === 1 ? 'day' : 'days';
+  return `Your free trial has expired. ${graceDays} ${unit} left to upgrade or download your data.`;
+}
 
 export function AppShell({ children }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false);
@@ -157,7 +171,7 @@ export function AppShell({ children }: AppShellProps) {
       {tenantStatus === 'write-locked' && (
         <Banner variant="warning" action={{ label: 'Upgrade', href: '/billing' }}>
           {isGracePeriod
-            ? `Your free trial has expired.${graceDays !== null ? ` ${graceDays} days left` : ''} to upgrade or download your data.`
+            ? gracePeriodMessage(graceDays)
             : 'Storage limit exceeded. Uploads are disabled. Delete files or upgrade to resume.'}
         </Banner>
       )}

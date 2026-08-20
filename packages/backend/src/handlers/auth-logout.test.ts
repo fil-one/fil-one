@@ -21,6 +21,8 @@ vi.mock('../lib/auth-secrets.js', () => ({
 
 process.env.WEBSITE_URL = 'https://app.example.com';
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
+process.env.ALLOWED_REDIRECT_ORIGINS =
+  'https://app.fil.one,https://app.filone.ai,https://staging.fil.one';
 
 import { handler } from './auth-logout.js';
 
@@ -57,7 +59,43 @@ describe('auth-logout handler', () => {
 
     const location = new URL(result.headers!['Location'] as string);
     expect(location.searchParams.get('client_id')).toBe('test-client-id');
-    expect(location.searchParams.get('returnTo')).toBe('https://fil.one');
+    expect(location.searchParams.get('returnTo')).toBe('https://app.example.com');
+  });
+
+  // Signing out of a demo alias must not land the user on fil.one, which may be
+  // blocklisted — that would end a demo on a dead page.
+  describe('host-aware returnTo', () => {
+    async function returnToFor(forwardedHost?: string): Promise<string | null> {
+      const event = buildEvent();
+      // buildEvent always starts with empty headers, so set the viewer host here
+      // rather than through its props.
+      if (forwardedHost) event.headers = { 'x-forwarded-host': forwardedHost };
+      const result = await handler(event, stubContext);
+      return new URL(result.headers!['Location'] as string).searchParams.get('returnTo');
+    }
+
+    it('sends the canonical console to the canonical marketing site', async () => {
+      expect(await returnToFor('app.fil.one')).toBe('https://fil.one');
+    });
+
+    it('keeps a demo-alias logout on the alias marketing site', async () => {
+      expect(await returnToFor('app.filone.ai')).toBe('https://filone.ai');
+    });
+
+    // A non-production stage has no marketing site of its own, and dumping someone
+    // on production marketing is a nuisance when all they are doing is switching the
+    // signed-in user. It returns to the console it just signed out of instead.
+    it('returns a staging logout to the staging console', async () => {
+      expect(await returnToFor('staging.fil.one')).toBe('https://staging.fil.one');
+    });
+
+    it('falls back to WEBSITE_URL for a host outside the allowlist', async () => {
+      expect(await returnToFor('attacker.example')).toBe('https://app.example.com');
+    });
+
+    it('falls back to WEBSITE_URL when no host header is present', async () => {
+      expect(await returnToFor()).toBe('https://app.example.com');
+    });
   });
 
   it('clears all auth and CSRF cookies', async () => {

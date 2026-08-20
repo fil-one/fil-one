@@ -4,6 +4,7 @@
 //
 // PROFILE-row attributes used: `auroraTenantId` and `auroraSetupStatus`.
 
+import pRetry from 'p-retry';
 import { S3Region, getS3Endpoint, TenantStatus } from '@filone/shared';
 import type {
   AccessKeyPermission,
@@ -20,6 +21,7 @@ import {
   createAuroraBucket,
   createPortalClient,
   deleteAuroraAccessKey,
+  deleteAuroraBucket,
   findAuroraAccessKeyByName,
 } from '../aurora/aurora-portal.js';
 import {
@@ -35,7 +37,7 @@ import {
 import { isOrgSetupComplete } from '../org-setup-status.js';
 import type { OrgProfileItem } from '../org-profile.js';
 import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
-import { BucketNotFoundError, NotImplementedError } from '../errors.js';
+import { BucketNotFoundError } from '../errors.js';
 import type {
   BucketDetails,
   BucketSummary,
@@ -50,6 +52,7 @@ import type {
   TenantInfo,
   TenantUsageMetrics,
 } from '../service-orchestrator.js';
+import { TENANT_DELETE_RETRY } from '../service-orchestrator.js';
 import type { S3ClientContext } from '../s3-client.js';
 
 export const _resetSsmCacheForTesting = () => _resetS3CredentialsCacheForTesting();
@@ -79,6 +82,19 @@ export const auroraOrchestrator = {
     await updateAuroraTenantStatusApi({ tenantId, status: mapToModelsTenantStatus(status) });
   },
 
+  async deleteTenant(tenantId: string): Promise<void> {
+    await pRetry(async () => {
+      // allowMissing: a tenant that is already gone needs no disabling.
+      await updateAuroraTenantStatusApi({
+        tenantId,
+        status: mapToModelsTenantStatus('disabled'),
+        allowMissing: true,
+      });
+      // TODO(FIL-919): delete the tenant once Aurora's Backoffice API exposes a
+      // DELETE. Until then buckets and objects survive the teardown.
+    }, TENANT_DELETE_RETRY);
+  },
+
   async getTenantStatus(tenantId: string): Promise<TenantStatusProbe> {
     const result = await getAuroraTenantStatusApi({ tenantId });
     if (result.kind !== 'ok') return result;
@@ -105,10 +121,8 @@ export const auroraOrchestrator = {
     });
   },
 
-  async deleteBucket(_tenantId: string, _bucketName: string): Promise<void> {
-    // TODO: Implement bucket deletion.
-    // https://linear.app/filecoin-foundation/issue/FIL-204/delete-bucket
-    throw new NotImplementedError('Aurora bucket deletion is not yet supported. See FIL-204.');
+  async deleteBucket(tenantId: string, bucketName: string): Promise<void> {
+    await deleteAuroraBucket({ tenantId, bucketName });
   },
 
   async listBuckets(tenantId: string, opts: ListBucketsOptions = {}): Promise<BucketSummary[]> {

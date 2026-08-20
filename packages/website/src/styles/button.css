@@ -1,6 +1,6 @@
 @layer components {
   .button {
-    @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-md font-medium transition-all hover:no-underline;
+    @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-md font-medium whitespace-nowrap transition-all hover:no-underline;
 
     &:disabled {
       @apply cursor-not-allowed;

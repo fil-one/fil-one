@@ -4,13 +4,16 @@ import {
 } from '@headlessui/react';
 import { CaretDownIcon } from '@phosphor-icons/react/dist/ssr';
 import { clsx } from 'clsx';
+import { type AccessibleControlName, warnIfUnnamedControl } from './accessible-control.js';
 
 type SelectProps = {
   onChange: (value: string) => void;
   invalid?: boolean;
-} & Omit<HeadlessSelectProps, 'onChange'>;
+} & Omit<HeadlessSelectProps, 'onChange' | 'id' | 'aria-label' | 'aria-labelledby'> &
+  AccessibleControlName;
 
 export function Select({ onChange, invalid, className, children, ...rest }: SelectProps) {
+  warnIfUnnamedControl('Select', rest.id ?? rest['aria-label']);
   return (
     <div className="relative">
       <HeadlessSelect

@@ -20,6 +20,7 @@ vi.mock('./aurora-tenant-setup.js', () => ({
 }));
 
 const mockCreateAuroraBucket = vi.fn();
+const mockDeleteAuroraBucket = vi.fn();
 const mockCreateAuroraAccessKey = vi.fn();
 const mockFindAuroraAccessKeyByName = vi.fn();
 const mockGetAuroraPortalApiKey = vi.fn();
@@ -30,6 +31,7 @@ vi.mock('./aurora-portal.js', async (importOriginal) => {
   return {
     ...original,
     createAuroraBucket: (...args: unknown[]) => mockCreateAuroraBucket(...args),
+    deleteAuroraBucket: (...args: unknown[]) => mockDeleteAuroraBucket(...args),
     createAuroraAccessKey: (...args: unknown[]) => mockCreateAuroraAccessKey(...args),
     findAuroraAccessKeyByName: (...args: unknown[]) => mockFindAuroraAccessKeyByName(...args),
     getAuroraPortalApiKey: (...args: unknown[]) => mockGetAuroraPortalApiKey(...args),
@@ -76,7 +78,6 @@ import {
   AccessKeyValidationError,
   BucketAlreadyExistsError,
   BucketNotFoundError,
-  NotImplementedError,
 } from '../errors.js';
 
 // ---------------------------------------------------------------------------
@@ -195,10 +196,84 @@ describe('auroraOrchestrator', () => {
   });
 
   describe('deleteBucket', () => {
-    it('throws NotImplementedError — Aurora delete is tracked in FIL-204', async () => {
+    it('delegates to deleteAuroraBucket with the tenantId and bucketName', async () => {
+      mockDeleteAuroraBucket.mockResolvedValue(undefined);
+
+      await auroraOrchestrator.deleteBucket('aurora-t-1', 'my-bucket');
+
+      expect(mockDeleteAuroraBucket).toHaveBeenCalledWith({
+        tenantId: 'aurora-t-1',
+        bucketName: 'my-bucket',
+      });
+    });
+
+    it('resolves when the Aurora portal delete succeeds', async () => {
+      mockDeleteAuroraBucket.mockResolvedValue(undefined);
+
       await expect(
         auroraOrchestrator.deleteBucket('aurora-t-1', 'my-bucket'),
-      ).rejects.toBeInstanceOf(NotImplementedError);
+      ).resolves.toBeUndefined();
+    });
+
+    it('propagates errors from the Aurora portal unchanged', async () => {
+      mockDeleteAuroraBucket.mockRejectedValue(new Error('upstream 500'));
+
+      await expect(auroraOrchestrator.deleteBucket('aurora-t-1', 'my-bucket')).rejects.toThrow(
+        'upstream 500',
+      );
+    });
+  });
+
+  describe('deleteTenant', () => {
+    it('disables the tenant — Aurora exposes no tenant DELETE (FIL-919)', async () => {
+      mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+
+      await auroraOrchestrator.deleteTenant('aurora-t-1');
+
+      expect(mockUpdateAuroraTenantStatusApi).toHaveBeenCalledWith({
+        tenantId: 'aurora-t-1',
+        status: 'DISABLED',
+        allowMissing: true,
+      });
+    });
+
+    // A re-driven teardown disables a tenant a previous pass may have removed.
+    it('passes allowMissing, unlike updateTenantStatus', async () => {
+      mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+
+      await auroraOrchestrator.updateTenantStatus('aurora-t-1', 'disabled');
+
+      expect(mockUpdateAuroraTenantStatusApi).toHaveBeenCalledWith({
+        tenantId: 'aurora-t-1',
+        status: 'DISABLED',
+      });
+    });
+
+    it('retries a transient Backoffice failure', async () => {
+      vi.useFakeTimers();
+      mockUpdateAuroraTenantStatusApi
+        .mockRejectedValueOnce(new Error('Aurora status update failed'))
+        .mockResolvedValue(undefined);
+
+      const promise = auroraOrchestrator.deleteTenant('aurora-t-1');
+      await vi.runAllTimersAsync();
+      await promise;
+
+      expect(mockUpdateAuroraTenantStatusApi).toHaveBeenCalledTimes(2);
+      vi.useRealTimers();
+    });
+
+    it('throws once the retry budget is exhausted', async () => {
+      vi.useFakeTimers();
+      mockUpdateAuroraTenantStatusApi.mockRejectedValue(new Error('Aurora status update failed'));
+
+      const promise = auroraOrchestrator.deleteTenant('aurora-t-1').catch((e: unknown) => e);
+      await vi.runAllTimersAsync();
+
+      expect(await promise).toMatchObject({ message: 'Aurora status update failed' });
+      // 1 initial + 3 retries
+      expect(mockUpdateAuroraTenantStatusApi).toHaveBeenCalledTimes(4);
+      vi.useRealTimers();
     });
   });
 
