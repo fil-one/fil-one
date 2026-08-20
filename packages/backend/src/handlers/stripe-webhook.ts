@@ -433,12 +433,6 @@ async function handleSubscriptionDeleted(
     }),
   );
 
-  await syncHubSpotStatusBestEffort({
-    userId,
-    status: fromInternalStatus(SubscriptionStatus.GracePeriod),
-    email: customer.email,
-  });
-
   const latestInvoice = subscription.latest_invoice;
   const attemptCount =
     latestInvoice && typeof latestInvoice !== 'string' ? latestInvoice.attempt_count : undefined;
@@ -467,6 +461,13 @@ async function handleSubscriptionDeleted(
   } catch (error) {
     console.error('[stripe-webhook] Failed to write-lock tenant', { userId, error });
   }
+
+  // Last: a slow CRM must not eat the route's 10s budget before the tenant sync.
+  await syncHubSpotStatusBestEffort({
+    userId,
+    status: fromInternalStatus(SubscriptionStatus.GracePeriod),
+    email: customer.email,
+  });
 }
 
 async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice): Promise<void> {
@@ -511,12 +512,6 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
 
   emitInvoicePaid();
 
-  await syncHubSpotStatusBestEffort({
-    userId,
-    status: fromInternalStatus(SubscriptionStatus.Active),
-    email: customer.email,
-  });
-
   // Best-effort: re-enable the tenant on every orchestrator if recovering from
   // PastDue/GracePeriod. If this fails, the tenant may remain locked until
   // manual intervention.
@@ -531,6 +526,15 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   } catch (error) {
     console.error('[stripe-webhook] Failed to re-activate tenant', { userId, error });
   }
+
+  // Last: a slow CRM must not eat the route's 10s budget before the re-activation
+  // above, which nothing else repairs — the idempotency claim survives a Lambda
+  // timeout, so Stripe's retry would be acknowledged as already processed.
+  await syncHubSpotStatusBestEffort({
+    userId,
+    status: fromInternalStatus(SubscriptionStatus.Active),
+    email: customer.email,
+  });
 }
 
 async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): Promise<void> {

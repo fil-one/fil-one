@@ -15,6 +15,7 @@ vi.stubGlobal('fetch', mockFetch);
 
 import {
   HUBSPOT_MARKETING_SUBSCRIPTION_TYPE_ID,
+  HUBSPOT_WEBHOOK_RETRY,
   getContactSubscriptionStatus,
   getMarketingPreference,
   upsertContactSubscriptionStatus,
@@ -287,6 +288,23 @@ describe('upsertContactSubscriptionStatus', () => {
     });
 
     expect(outcome).toBe('updated');
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("honours the caller's retry budget", async () => {
+    // The webhook budget is one retry, not the default three — 1s/2s/4s of backoff
+    // does not fit the route's 10s timeout. A fresh Response per attempt: the body
+    // can only be read once.
+    mockFetch.mockImplementation(() => Promise.resolve(fail(503, 'unavailable')));
+
+    await expect(
+      upsertContactSubscriptionStatus({
+        userId: 'user-123',
+        status: HubSpotLifecycleStatus.Paying,
+        retry: HUBSPOT_WEBHOOK_RETRY,
+      }),
+    ).rejects.toThrow(/contact status update failed \(503\)/);
+
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 

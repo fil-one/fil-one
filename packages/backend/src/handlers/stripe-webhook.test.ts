@@ -50,7 +50,8 @@ vi.mock('../lib/stripe-client.js', () => ({
 }));
 
 const mockUpsertContact = vi.fn().mockResolvedValue('updated');
-vi.mock('../lib/hubspot-client.js', () => ({
+vi.mock('../lib/hubspot-client.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/hubspot-client.js')>()),
   upsertContactSubscriptionStatus: (...args: unknown[]) => mockUpsertContact(...args),
 }));
 
@@ -1880,6 +1881,43 @@ describe('stripe-webhook handler', () => {
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
       expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+    });
+
+    it('re-activates the tenant before writing to HubSpot', async () => {
+      // The CRM write is last on purpose: it shares the route's 10s timeout, and a
+      // Lambda killed mid-flight keeps its idempotency claim, so Stripe's retry is
+      // acknowledged as already processed and nothing repairs the re-activation.
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
+      setupCustomerRetrieve();
+      setupAuroraTenantResolution();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
+        MOCK_ORG_ID,
+        'active',
+        WEBHOOK_STATUS_SYNC_RETRY,
+      );
+      expect(mockSyncTenantStatusInProvisionedRegions.mock.invocationCallOrder[0]).toBeLessThan(
+        mockUpsertContact.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('write-locks the tenant before writing to HubSpot', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+      setupAuroraTenantResolution();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
+        MOCK_ORG_ID,
+        'write-locked',
+        WEBHOOK_STATUS_SYNC_RETRY,
+      );
+      expect(mockSyncTenantStatusInProvisionedRegions.mock.invocationCallOrder[0]).toBeLessThan(
+        mockUpsertContact.mock.invocationCallOrder[0],
+      );
     });
 
     it('emits a metric when the live write fails', async () => {

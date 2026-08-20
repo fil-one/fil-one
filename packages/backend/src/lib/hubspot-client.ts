@@ -16,10 +16,14 @@ export const HUBSPOT_USER_ID_PROPERTY = 'filone_user_id';
 export const HUBSPOT_SUBSCRIPTION_STATUS_PROPERTY = 'filone_subscription_status';
 export const HUBSPOT_SUBSCRIPTION_STATUS_UPDATED_PROPERTY = 'filone_subscription_status_updated';
 
-// Rides out HubSpot 429s and 5xxs; default 1s/2s/4s backoff stays inside the
-// webhook's Lambda budget. Other 4xx are not retried — a missing property or a
-// revoked scope will never succeed.
+// Rides out HubSpot 429s and 5xxs. Other 4xx are not retried — a missing
+// property or a revoked scope will never succeed.
 const HUBSPOT_RETRY: RetryOptions = { retries: 3 };
+
+// The default 1s/2s/4s backoff, twice over for the email-bootstrap path, does not
+// fit the webhook route's 10s budget. Live writes are best-effort and the
+// `hubspot-contact-sync` cron repairs what is dropped, so barely retry there.
+export const HUBSPOT_WEBHOOK_RETRY: RetryOptions = { retries: 1, minTimeout: 200 };
 
 function getAccessToken(): string {
   return Resource.HubSpotServiceKey.value;
@@ -123,6 +127,7 @@ async function hubSpotCrmFetch(
   path: string,
   init: RequestInit,
   operation: string,
+  retry: RetryOptions = HUBSPOT_RETRY,
 ): Promise<Response> {
   const token = getAccessToken();
 
@@ -141,7 +146,7 @@ async function hubSpotCrmFetch(
     const error = new HubSpotApiError(resp.status, body, operation);
     if (resp.status === 429 || resp.status >= 500) throw error;
     throw new AbortError(error);
-  }, HUBSPOT_RETRY);
+  }, retry);
 }
 
 /**
@@ -160,8 +165,10 @@ export async function upsertContactSubscriptionStatus(args: {
   userId: string;
   status: HubSpotLifecycleStatus;
   email?: string;
+  /** Callers on a latency budget pass `HUBSPOT_WEBHOOK_RETRY`. */
+  retry?: RetryOptions;
 }): Promise<ContactWriteOutcome> {
-  const { userId, status, email } = args;
+  const { userId, status, email, retry } = args;
   const properties = {
     [HUBSPOT_SUBSCRIPTION_STATUS_PROPERTY]: status,
     [HUBSPOT_SUBSCRIPTION_STATUS_UPDATED_PROPERTY]: new Date().toISOString(),
@@ -171,6 +178,7 @@ export async function upsertContactSubscriptionStatus(args: {
     `/crm/v3/objects/contacts/${encodeURIComponent(userId)}?idProperty=${HUBSPOT_USER_ID_PROPERTY}`,
     { method: 'PATCH', body: JSON.stringify({ properties }) },
     'contact status update',
+    retry,
   );
 
   if (updated.ok) return 'updated';
@@ -194,6 +202,7 @@ export async function upsertContactSubscriptionStatus(args: {
       }),
     },
     'contact bootstrap by email',
+    retry,
   );
 
   if (!bootstrapped.ok) return 'unmatched';
