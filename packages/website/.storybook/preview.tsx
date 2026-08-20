@@ -9,14 +9,11 @@ const queryClient = new QueryClient({
 
 const preview: Preview = {
   decorators: [
-    (Story, context) => {
-      // Full-page stories paint their own ground; the padded white frame would
-      // misrepresent them as floating on a white page.
-      const fullBleed = Boolean(context.parameters.fullBleed);
+    (Story) => {
       return (
         <QueryClientProvider client={queryClient}>
           <ToastProvider>
-            <div className={fullBleed ? 'light-section' : 'light-section bg-white p-8'}>
+            <div className="light-section bg-white p-8">
               <Story />
             </div>
           </ToastProvider>
