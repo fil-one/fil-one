@@ -1,5 +1,6 @@
 import { formatBytes } from '@filone/shared';
 
+import { daysRemainingLabel } from '../lib/time.js';
 import { Button } from './Button.js';
 import { ProgressBar } from './ProgressBar.js';
 
@@ -97,7 +98,7 @@ export function StatusBanners({
         <div className="border-t border-amber-200 bg-amber-50 px-3 py-4">
           <p className="text-xs font-medium text-amber-800" title={graceEndsLabel}>
             Payment failed. Update your payment method to avoid losing access.
-            {graceDays !== null ? ` ${graceDays} days remaining.` : ''}
+            {graceDays !== null ? ` ${daysRemainingLabel(graceDays)}.` : ''}
           </p>
           <div className="mt-3">
             <Button

@@ -208,7 +208,7 @@ export function PaymentForm({
               autoCorrect="off"
               spellCheck={false}
               maxLength={40}
-              className="rounded-[6px] border border-[#e1e4ea] bg-[#f9fafb] px-3 py-2.5 text-[13px] text-[#14181f] placeholder:text-[#99a0ae] focus:outline-none focus:ring-1 focus:ring-[#0080ff]"
+              className="rounded-[6px] border border-[#e1e4ea] bg-[#f9fafb] px-3 py-2.5 text-[13px] text-[#14181f] placeholder:text-[#99a0ae] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#0080ff]"
             />
           </div>
 

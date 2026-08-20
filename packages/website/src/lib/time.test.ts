@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { daysUntil, expiresAtFromForm, formatDate, formatDateTime, timeAgo } from './time.js';
+import {
+  daysRemainingLabel,
+  daysUntil,
+  expiresAtFromForm,
+  formatDate,
+  formatDateTime,
+  pluralizeDays,
+  timeAgo,
+} from './time.js';
 
 // ---------------------------------------------------------------------------
 // daysUntil — UTC calendar-day math
@@ -53,6 +61,38 @@ describe('daysUntil', () => {
   it('returns 1 for tomorrow', () => {
     vi.useFakeTimers({ now: new Date('2026-03-14T18:00:00Z') });
     expect(daysUntil('2026-03-15T00:00:00Z')).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// pluralizeDays / daysRemainingLabel — countdown copy
+// ---------------------------------------------------------------------------
+
+describe('pluralizeDays', () => {
+  it('uses the singular unit for one day', () => {
+    expect(pluralizeDays(1)).toBe('1 day');
+  });
+
+  it('uses the plural unit for more than one day', () => {
+    expect(pluralizeDays(5)).toBe('5 days');
+  });
+
+  it('uses the plural unit for zero days', () => {
+    expect(pluralizeDays(0)).toBe('0 days');
+  });
+});
+
+describe('daysRemainingLabel', () => {
+  it('avoids "0 days remaining" on the last day', () => {
+    expect(daysRemainingLabel(0)).toBe('Less than a day remaining');
+  });
+
+  it('avoids "1 days remaining"', () => {
+    expect(daysRemainingLabel(1)).toBe('1 day remaining');
+  });
+
+  it('pluralizes for more than one day', () => {
+    expect(daysRemainingLabel(5)).toBe('5 days remaining');
   });
 });
 
