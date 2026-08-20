@@ -17,7 +17,7 @@ export function RegionSelect({ id, value, onChange, disabled }: RegionSelectProp
 
   return (
     <Select
-      id={id}
+      {...(id ? { id } : { 'aria-label': 'Region' })}
       value={value}
       onChange={(v) => onChange(v as S3Region)}
       disabled={disabled || onlyOne}

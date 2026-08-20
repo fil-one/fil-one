@@ -1,5 +1,6 @@
 import { useId, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { DialogTitle } from '@headlessui/react';
 import { CaretDownIcon, CheckIcon, XIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { getMe } from '../lib/api.js';
@@ -221,9 +222,9 @@ function WaitlistSuccess({ title, onClose }: { title: string; onClose: () => voi
           <CheckIcon size={20} weight="bold" className="text-brand-700" />
         </div>
 
-        <Heading tag="h3" size="sm" className="text-zinc-900">
+        <DialogTitle as={Heading} tag="h3" size="sm" className="text-zinc-900">
           You're on the list
-        </Heading>
+        </DialogTitle>
         <p className="mt-2 max-w-[19rem] text-sm leading-relaxed text-zinc-500">
           {me?.email ? (
             <>

@@ -110,15 +110,17 @@ function ToggleRow({
 // ---------------------------------------------------------------------------
 
 function ProviderManagedField({
+  id,
   value,
   provider,
 }: {
+  id: string;
   value: string;
   provider?: ConnectionProvider;
 }) {
   return (
     <>
-      <Input value={value} onChange={() => {}} disabled />
+      <Input id={id} value={value} onChange={() => {}} disabled />
       <p className="text-xs text-zinc-500">
         Managed by {provider?.label}.{' '}
         <Link
@@ -247,7 +249,7 @@ function ProfileSection({ me }: { me: MeResponse }) {
           <div className="flex flex-1 flex-col">
             <FormField label="Full name" htmlFor="profile-name">
               {social ? (
-                <ProviderManagedField value={form.name} provider={provider} />
+                <ProviderManagedField id="profile-name" value={form.name} provider={provider} />
               ) : (
                 <Input
                   id="profile-name"
@@ -276,7 +278,7 @@ function ProfileSection({ me }: { me: MeResponse }) {
           description={!social ? 'You will need to verify any email change.' : undefined}
         >
           {social ? (
-            <ProviderManagedField value={form.email} provider={provider} />
+            <ProviderManagedField id="profile-email" value={form.email} provider={provider} />
           ) : (
             <Input
               id="profile-email"
