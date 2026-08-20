@@ -5,7 +5,9 @@ import type { CreateBucketResponse, ErrorResponse } from '@filone/shared';
 import { CreateBucketSchema, isSupportedRegion } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { BucketAlreadyExistsError, BucketConfigurationError } from '../lib/errors.js';
+import { isOrgDeleting } from '../lib/org-profile.js';
 import {
+  accountDeletedResponse,
   ResponseBuilder,
   tenantNotReadyResponse,
   unsupportedRegionResponse,
@@ -46,6 +48,10 @@ export async function baseHandler(
   if (!isSupportedRegion(region, process.env.FILONE_STAGE!)) {
     return unsupportedRegionResponse(region);
   }
+
+  // Before ensureTenantReady: the bucket is created upstream, so a fence
+  // checked only at the DynamoDB write would leave it behind.
+  if (await isOrgDeleting(orgId, { consistent: true })) return accountDeletedResponse();
 
   const orchestrator = getOrchestratorForRegion(region);
   const tenantId = await orchestrator.ensureTenantReady(orgId);

@@ -3,8 +3,9 @@ import { mockClient } from 'aws-sdk-client-mock';
 import {
   ConditionalCheckFailedException,
   DynamoDBClient,
+  TransactionCanceledException,
   GetItemCommand,
-  PutItemCommand,
+  TransactWriteItemsCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
@@ -12,6 +13,7 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 vi.mock('sst', () => ({
   Resource: {
     RagIndexerTable: { name: 'RagIndexerTable' },
+    UserInfoTable: { name: 'UserInfoTable' },
   },
 }));
 
@@ -24,6 +26,7 @@ import {
   updateBucketTelemetry,
 } from './bucket-rag-enablement.js';
 import type { BucketRAGEnablementRecord } from './dynamo-records.js';
+import { OrgDeletingError } from './org-profile.js';
 import { S3Region } from '@filone/shared';
 
 function record(over: Partial<BucketRAGEnablementRecord> = {}): BucketRAGEnablementRecord {
@@ -67,7 +70,7 @@ describe('setBucketRagEnablement', () => {
   beforeEach(() => ddbMock.reset());
 
   it('creates a new active record with zeroed telemetry when none exists', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
 
     const result = await setBucketRagEnablement({
       region: S3Region.EuWest1,
@@ -84,11 +87,33 @@ describe('setBucketRagEnablement', () => {
     expect(result.filesIndexed).toBe(0);
     expect(result.indexSize).toBe(0);
     expect(result.createdAt).toBe(result.updatedAt);
-    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(1);
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
+  });
+
+  // The handler's pre-check is separated from this write by an upstream getBucket
+  // call, so the fence has to be a condition on the write itself.
+  it('refuses the write when the org started deleting after the pre-check', async () => {
+    ddbMock.on(TransactWriteItemsCommand).rejects(
+      new TransactionCanceledException({
+        message: 'cancelled',
+        $metadata: {},
+        CancellationReasons: [{ Code: 'ConditionalCheckFailed' }],
+      }),
+    );
+
+    await expect(
+      setBucketRagEnablement({
+        region: S3Region.EuWest1,
+        bucketName: 'bucket-1',
+        orgId: 'org-1',
+        enabled: true,
+        existing: undefined,
+      }),
+    ).rejects.toBeInstanceOf(OrgDeletingError);
   });
 
   it('flips status to disabled while preserving telemetry + createdAt', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
     const existing = record({ filesIndexed: 99, indexSize: 5000 });
 
     const result = await setBucketRagEnablement({
@@ -171,7 +196,7 @@ describe('setBucketRagEnablement (sync-state + lastSyncError preservation)', () 
   beforeEach(() => ddbMock.reset());
 
   it('preserves a stored lastSyncError when toggling enablement', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
     const existing = record({ status: 'active', syncState: 'error', lastSyncError: 'boom' });
 
     const result = await setBucketRagEnablement({
@@ -186,7 +211,7 @@ describe('setBucketRagEnablement (sync-state + lastSyncError preservation)', () 
   });
 
   it('preserves the indexer-owned syncState when toggling enablement (decoupled)', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
     const existing = record({ status: 'active', syncState: 'syncing' });
 
     // Disabling enablement must not disturb the indexer's sync progress.

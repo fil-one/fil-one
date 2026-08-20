@@ -53,7 +53,7 @@ describe('QueryAnswer', () => {
 
   it('shows the loading skeleton while pending', async () => {
     renderWithRouter(() => <QueryAnswer {...base} isPending />);
-    expect(await screen.findByLabelText('Loading answer')).toBeInTheDocument();
+    expect(await screen.findByRole('status')).toHaveTextContent('Loading answer');
     expect(screen.getByText('"What is the retention period?"')).toBeInTheDocument();
   });
 

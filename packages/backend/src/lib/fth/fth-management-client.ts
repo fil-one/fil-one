@@ -18,6 +18,9 @@ export interface FthManagementClient {
     clientRef: string,
     args: { status: FthClientStatus; displayName?: string; idempotencyKey?: string },
   ): Promise<void>;
+  // No idempotency key: a repeat DELETE of a resolvable ref already answers
+  // 204, and a cached key would replay a 409 instead of retrying it.
+  deleteClient(clientRef: string): Promise<void>;
 
   createStorageUser(clientRef: string, args: CreateStorageUserArgs): Promise<FthStorageUser>;
   listStorageUsers(clientRef: string): Promise<FthStorageUser[]>;
@@ -381,6 +384,8 @@ function buildEndpointMethods(request: RequestFn): Omit<FthManagementClient, 'in
           idempotencyKey: args.idempotencyKey,
         },
       ),
+    deleteClient: (clientRef) =>
+      request<void>('DELETE', '/management/v1/clients/{clientRef}', { clientRef }),
 
     createStorageUser: (clientRef, args) =>
       request<FthStorageUser>(

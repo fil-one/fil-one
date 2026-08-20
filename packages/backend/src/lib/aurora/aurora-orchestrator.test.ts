@@ -224,6 +224,59 @@ describe('auroraOrchestrator', () => {
     });
   });
 
+  describe('deleteTenant', () => {
+    it('disables the tenant — Aurora exposes no tenant DELETE (FIL-919)', async () => {
+      mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+
+      await auroraOrchestrator.deleteTenant('aurora-t-1');
+
+      expect(mockUpdateAuroraTenantStatusApi).toHaveBeenCalledWith({
+        tenantId: 'aurora-t-1',
+        status: 'DISABLED',
+        allowMissing: true,
+      });
+    });
+
+    // A re-driven teardown disables a tenant a previous pass may have removed.
+    it('passes allowMissing, unlike updateTenantStatus', async () => {
+      mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+
+      await auroraOrchestrator.updateTenantStatus('aurora-t-1', 'disabled');
+
+      expect(mockUpdateAuroraTenantStatusApi).toHaveBeenCalledWith({
+        tenantId: 'aurora-t-1',
+        status: 'DISABLED',
+      });
+    });
+
+    it('retries a transient Backoffice failure', async () => {
+      vi.useFakeTimers();
+      mockUpdateAuroraTenantStatusApi
+        .mockRejectedValueOnce(new Error('Aurora status update failed'))
+        .mockResolvedValue(undefined);
+
+      const promise = auroraOrchestrator.deleteTenant('aurora-t-1');
+      await vi.runAllTimersAsync();
+      await promise;
+
+      expect(mockUpdateAuroraTenantStatusApi).toHaveBeenCalledTimes(2);
+      vi.useRealTimers();
+    });
+
+    it('throws once the retry budget is exhausted', async () => {
+      vi.useFakeTimers();
+      mockUpdateAuroraTenantStatusApi.mockRejectedValue(new Error('Aurora status update failed'));
+
+      const promise = auroraOrchestrator.deleteTenant('aurora-t-1').catch((e: unknown) => e);
+      await vi.runAllTimersAsync();
+
+      expect(await promise).toMatchObject({ message: 'Aurora status update failed' });
+      // 1 initial + 3 retries
+      expect(mockUpdateAuroraTenantStatusApi).toHaveBeenCalledTimes(4);
+      vi.useRealTimers();
+    });
+  });
+
   describe('listBuckets', () => {
     it('calls the Aurora Portal with the shared instrumented client', async () => {
       mockPortalListBuckets.mockResolvedValue({ data: { items: [] }, error: undefined });
