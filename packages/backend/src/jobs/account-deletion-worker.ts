@@ -18,7 +18,6 @@ import { resolveDeletionTargets } from '../lib/deletion-targets.js';
 import { ragAllowlistKey } from '../middleware/rag-access.js';
 import { scrubOrgRecords } from '../lib/deletion-scrub.js';
 import { tearDownStripe } from '../lib/deletion-stripe-teardown.js';
-import { NotImplementedError } from '../lib/errors.js';
 import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.js';
 
 const LOG = '[account-deletion-worker]';
@@ -115,11 +114,6 @@ async function raiseFence(orgId: string, now: string): Promise<void> {
   }
 }
 
-/**
- * NotImplementedError is skipped, not fatal: Aurora exposes no tenant DELETE
- * (FIL-919), and failing here would block the purge for every Aurora org. The
- * residual is a live tenant behind a deleted account, logged each pass.
- */
 async function deleteTenants(orgId: string, tenantIds: Record<string, string>): Promise<void> {
   for (const [orchestratorId, tenantId] of Object.entries(tenantIds ?? {})) {
     const orchestrator = getAvailableOrchestrators().find((o) => o.id === orchestratorId);
@@ -132,17 +126,8 @@ async function deleteTenants(orgId: string, tenantIds: Record<string, string>): 
       continue;
     }
 
-    try {
-      await orchestrator.deleteTenant(tenantId);
-      console.log(`${LOG} tenant deleted`, { orgId, orchestratorId, tenantId });
-    } catch (err) {
-      if (!(err instanceof NotImplementedError)) throw err;
-      console.error(`${LOG} provider cannot delete tenants; customer data survives upstream`, {
-        orgId,
-        orchestratorId,
-        tenantId,
-      });
-    }
+    await orchestrator.deleteTenant(tenantId);
+    console.log(`${LOG} tenant deleted`, { orgId, orchestratorId, tenantId });
   }
 }
 

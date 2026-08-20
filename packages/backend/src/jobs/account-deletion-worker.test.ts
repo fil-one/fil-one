@@ -46,7 +46,6 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 import { handler } from './account-deletion-worker.js';
-import { NotImplementedError } from '../lib/errors.js';
 
 const ORG = 'org-1';
 
@@ -165,32 +164,7 @@ describe('account-deletion-worker', () => {
   });
 
   describe('tenant teardown', () => {
-    // Letting NotImplementedError through would block the scrub and re-drive
-    // forever for every Aurora org.
-    it('skips a provider that cannot delete tenants, and still scrubs', async () => {
-      const failing = vi.fn(async () => {
-        throw new NotImplementedError('Aurora tenant deletion is not yet supported.');
-      });
-      mockResolveTargets.mockResolvedValue({
-        members: [{ userId: 'user-1', sub: 'auth0|one' }],
-        tenantIds: { aurora: 'aurora-t-1' },
-      });
-      mockGetAvailableOrchestrators.mockReturnValue([orchestrator('aurora', failing)]);
-      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-      try {
-        await handler({ orgId: ORG });
-        expect(order).toEqual(['email:auth0|one', 'auth0:auth0|one', 'stripe', 'scrub']);
-        expect(error).toHaveBeenCalledWith(
-          expect.stringContaining('customer data survives upstream'),
-          expect.objectContaining({ orchestratorId: 'aurora' }),
-        );
-      } finally {
-        error.mockRestore();
-      }
-    });
-
-    it('propagates any other tenant failure, leaving the record PENDING', async () => {
+    it('propagates a tenant failure, leaving the record PENDING', async () => {
       const failing = vi.fn(async () => {
         throw new Error('FTH 500');
       });
