@@ -523,14 +523,17 @@ export function mapFromModelsTenantStatus(status?: ModelsTenantStatus): TenantSt
 export async function updateTenantStatus({
   tenantId,
   status,
+  allowMissing,
 }: {
   tenantId: string;
   status: ModelsTenantStatus;
+  /** Treat a 404 as success — for callers whose goal is the tenant being gone. */
+  allowMissing?: boolean;
 }): Promise<void> {
   const partnerId = process.env.AURORA_PARTNER_ID!;
   const client = createBackofficeClient();
 
-  const { error } = await setTenantStatus({
+  const { error, response } = await setTenantStatus({
     client,
     path: { partnerId, tenantId },
     body: { status },
@@ -538,6 +541,7 @@ export async function updateTenantStatus({
   });
 
   if (error) {
+    if (allowMissing && response?.status === 404) return;
     throw new Error(`Aurora status update failed for tenant ${tenantId}`, {
       cause: error,
     });

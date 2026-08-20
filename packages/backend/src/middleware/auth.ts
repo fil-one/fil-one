@@ -19,6 +19,7 @@ import {
   ResponseBuilder,
 } from '../lib/response-builder.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
+import { resolveAuth0Domain } from '../lib/auth0-domain.js';
 import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { deriveOrgName } from '../lib/suggest-org-name.js';
@@ -73,12 +74,17 @@ export function getVerifiedIdTokenClaims(
 // Module-level JWKS cache — reused across Lambda warm starts
 // ---------------------------------------------------------------------------
 
-let cachedJWKS: ReturnType<typeof createRemoteJWKSet> | null = null;
+// Keyed by domain: the console is served from hostnames that authenticate against
+// different Auth0 domains, so a single cached set would hand the first caller's
+// JWKS to every later request no matter which domain it asked for.
+const jwksByDomain = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
 function getJWKS(domain: string): ReturnType<typeof createRemoteJWKSet> {
-  if (cachedJWKS) return cachedJWKS;
-  cachedJWKS = createRemoteJWKSet(new URL(`https://${domain}/.well-known/jwks.json`));
-  return cachedJWKS;
+  const cached = jwksByDomain.get(domain);
+  if (cached) return cached;
+  const jwks = createRemoteJWKSet(new URL(`https://${domain}/.well-known/jwks.json`));
+  jwksByDomain.set(domain, jwks);
+  return jwks;
 }
 
 // ---------------------------------------------------------------------------
@@ -105,9 +111,14 @@ function emailNotVerifiedResponse(): APIGatewayProxyStructuredResultV2 {
 /**
  * Exchange a refresh token for fresh access/id/refresh tokens.
  * Returns null if the refresh fails for any reason.
+ *
+ * `domain` must be the Auth0 domain that issued the refresh token — the request's
+ * domain, not the stage's configured one — or the exchange is rejected.
  */
-async function exchangeRefreshToken(refreshToken: string): Promise<NewTokens | null> {
-  const domain = process.env.AUTH0_DOMAIN!;
+async function exchangeRefreshToken(
+  refreshToken: string,
+  domain: string,
+): Promise<NewTokens | null> {
   const secrets = getAuthSecrets();
   try {
     const res = await fetch(`https://${domain}/oauth/token`, {
@@ -482,7 +493,10 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
     const idToken = cookies[COOKIE_NAMES.ID_TOKEN];
     const refreshToken = cookies[COOKIE_NAMES.REFRESH_TOKEN];
 
-    const domain = process.env.AUTH0_DOMAIN!;
+    // Derived from the request host, not the stage config: the alias hostnames
+    // authenticate against a different Auth0 domain, and `iss` plus the JWKS
+    // endpoint both have to match whichever domain minted these cookies.
+    const domain = resolveAuth0Domain(event);
     const audience = process.env.AUTH0_AUDIENCE!;
     const issuer = `https://${domain}/`;
     const secrets = getAuthSecrets();
@@ -515,7 +529,7 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
 
     // Step 2: Attempt token refresh (always runs when forceRefresh=1)
     if (refreshToken) {
-      const tokens = await exchangeRefreshToken(refreshToken);
+      const tokens = await exchangeRefreshToken(refreshToken, domain);
       if (tokens) {
         request.internal.newTokens = tokens;
         request.internal.refreshToken = tokens.refresh_token;
@@ -580,7 +594,10 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
     )._forceTokenRefresh;
 
     if (forceRefresh && request.internal.refreshToken) {
-      const refreshed = await exchangeRefreshToken(request.internal.refreshToken);
+      const refreshed = await exchangeRefreshToken(
+        request.internal.refreshToken,
+        resolveAuth0Domain(event),
+      );
       if (refreshed) {
         newTokens = refreshed;
         console.warn('[auth] Force token refresh succeeded');

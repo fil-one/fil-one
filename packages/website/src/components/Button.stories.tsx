@@ -115,3 +115,31 @@ export const AllVariants: Story = {
     </div>
   ),
 };
+
+// The base `.button` class sets `whitespace-nowrap`, so a label never breaks
+// mid-phrase ("Select / files"). A row too tight for its buttons must give them
+// room to reflow — `flex-wrap` here — because a button whose parent is a fixed
+// width narrower than its own label will overflow that parent rather than wrap.
+export const LabelsNeverWrap: Story = {
+  render: () => (
+    <div className="flex w-[220px] flex-col gap-5 p-4">
+      <div className="flex flex-col gap-2">
+        <p className="text-xs text-zinc-500">Row narrower than the pair needs, labels intact:</p>
+        <div className="flex flex-wrap gap-2 rounded-md border border-dashed border-zinc-300 p-2">
+          <Button variant="ghost" size="sm" icon={PlusIcon}>
+            Select files
+          </Button>
+          <Button variant="ghost" size="sm" icon={PlusIcon}>
+            Select folder
+          </Button>
+        </div>
+      </div>
+      <div className="flex flex-col gap-2">
+        <p className="text-xs text-zinc-500">A long label stays on one line:</p>
+        <Button variant="primary" size="sm">
+          Generate access key
+        </Button>
+      </div>
+    </div>
+  ),
+};

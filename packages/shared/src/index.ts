@@ -17,6 +17,11 @@ export {
   getS3Endpoint,
   getAuth0Domain,
   getStageFromHostname,
+  PROD_CONSOLE_HOST,
+  PROD_CONSOLE_ALIAS_HOSTS,
+  MARKETING_URL_BY_CONSOLE_ORIGIN,
+  logoutReturnTo,
+  AUTH0_DOMAIN_BY_CONSOLE_ORIGIN,
   OAUTH_STATE_COOKIE,
   CSRF_COOKIE_NAME,
   GB_BYTES,
@@ -56,6 +61,17 @@ export {
 } from './api/org.js';
 export { ApiErrorCode } from './api/coreInterfaces.js';
 export type { ErrorResponse } from './api/coreInterfaces.js';
+export {
+  DELETION_CODE_LENGTH,
+  DELETION_CODE_TTL_MINUTES,
+  DeletionCodeSchema,
+  DeleteAccountSchema,
+} from './api/account-deletion.js';
+export type {
+  DeleteAccountRequest,
+  RequestAccountDeletionResponse,
+  ConfirmAccountDeletionResponse,
+} from './api/account-deletion.js';
 
 export type {
   Bucket,
