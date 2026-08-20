@@ -238,6 +238,65 @@ describe('authMiddleware', () => {
       });
     });
 
+    it('410s a tombstoned identity instead of resolving it', async () => {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: {
+            pk: { S: `SUB#${MOCK_SUB}` },
+            sk: { S: 'IDENTITY' },
+            deletedAt: { S: '2026-08-12T00:00:00.000Z' },
+          },
+        });
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      const event = buildEvent({
+        cookies: ['hs_access_token=valid-token', 'hs_id_token=id-token'],
+      });
+
+      const result = await before(buildMiddyRequest(event));
+
+      expectErrorResponse(result, 410, {
+        message: 'This account has been deleted.',
+        code: ApiErrorCode.ACCOUNT_DELETED,
+      });
+      // Never re-created as a new signup.
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+    });
+
+    it('410s a tombstone rather than falling back to another token path', async () => {
+      // No ID token cookie, so only the access token is verified. A refresh
+      // token is present, and the tombstone must not be downgraded to a 401
+      // that sends the request down the refresh path.
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } });
+
+      ddbMock.on(GetItemCommand).resolves({
+        Item: {
+          pk: { S: `SUB#${MOCK_SUB}` },
+          sk: { S: 'IDENTITY' },
+          deletedAt: { S: '2026-08-12T00:00:00.000Z' },
+        },
+      });
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      const event = buildEvent({
+        cookies: ['hs_access_token=valid-token', 'hs_refresh_token=refresh-token'],
+      });
+
+      const result = await before(buildMiddyRequest(event));
+
+      expectErrorResponse(result, 410, {
+        message: 'This account has been deleted.',
+        code: ApiErrorCode.ACCOUNT_DELETED,
+      });
+    });
+
     it('extracts name and picture from ID token claims', async () => {
       const existingUserId = 'existing-user-uuid';
       const existingOrgId = 'existing-org-uuid';

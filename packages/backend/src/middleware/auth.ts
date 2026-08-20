@@ -12,6 +12,7 @@ import type { UserInfo } from '../lib/user-context.js';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
 import {
+  accountDeletedResponse,
   COOKIE_NAMES,
   TOKEN_MAX_AGE,
   makeCookieHeader,
@@ -93,6 +94,7 @@ function getJWKS(domain: string): ReturnType<typeof createRemoteJWKSet> {
 
 import { parseCookies } from '../lib/cookies.js';
 import { CSRF_COOKIE_NAME } from '@filone/shared';
+import { AccountDeletedError, isIdentityTombstoned } from '../lib/identity-tombstone.js';
 
 function unauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder().status(401).body<ErrorResponse>({ message: 'Unauthorized' }).build();
@@ -284,6 +286,9 @@ async function resolveUserAndOrg(
     }),
   );
 
+  // Before the userId/orgId branch, so a stamped row can never be read as a new signup.
+  if (isIdentityTombstoned(result.Item)) throw new AccountDeletedError();
+
   if (result.Item?.userId?.S && result.Item?.orgId?.S) {
     const userId = result.Item.userId.S;
     const orgId = result.Item.orgId.S;
@@ -450,6 +455,9 @@ async function tryValidateAccessToken({
     });
     return true;
   } catch (err) {
+    // A tombstoned identity is a decision, not a validation failure — it must
+    // not be downgraded to "try the next token path".
+    if (err instanceof AccountDeletedError) throw err;
     console.warn(failureLabel, { error: err });
     return false;
   }
@@ -483,7 +491,20 @@ function verifiedEmailGate(
 export function authMiddleware(options: AuthMiddlewareOptions = {}) {
   const { requireVerifiedEmail = true } = options;
 
+  // Mapped once here rather than at each attachIdentity call site, so no token
+  // path can turn a deleted account into a 401 and invite a retry.
   const before = async (
+    request: AuthMiddlewareRequest,
+  ): Promise<APIGatewayProxyStructuredResultV2 | void> => {
+    try {
+      return await authenticate(request);
+    } catch (err) {
+      if (err instanceof AccountDeletedError) return accountDeletedResponse();
+      throw err;
+    }
+  };
+
+  const authenticate = async (
     request: AuthMiddlewareRequest,
   ): Promise<APIGatewayProxyStructuredResultV2 | void> => {
     const { event } = request;

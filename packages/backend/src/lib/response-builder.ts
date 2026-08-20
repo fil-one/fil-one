@@ -1,4 +1,4 @@
-import type { ErrorResponse } from '@filone/shared';
+import { ApiErrorCode, type ErrorResponse } from '@filone/shared';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 
 export const COOKIE_ATTRIBUTES = 'HttpOnly; Secure; SameSite=Lax; Path=/';
@@ -70,6 +70,20 @@ export function unsupportedRegionResponse(region: string): APIGatewayProxyStruct
   return new ResponseBuilder()
     .status(400)
     .body<ErrorResponse>({ message: `Unsupported region "${region}"` })
+    .build();
+}
+
+/**
+ * 410 rather than 401: the session is not merely unauthenticated, it can never
+ * be revived, so the client must stop retrying and clear its state.
+ */
+export function accountDeletedResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(410)
+    .body<ErrorResponse>({
+      message: 'This account has been deleted.',
+      code: ApiErrorCode.ACCOUNT_DELETED,
+    })
     .build();
 }
 
