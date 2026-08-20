@@ -5,6 +5,10 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ApiErrorCode, DeleteAccountSchema } from '@filone/shared';
 import type { ConfirmAccountDeletionResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
+import {
+  isSelfServeDeletionEnabled,
+  selfServeDeletionUnavailable,
+} from '../lib/account-deletion-flag.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { deletionChallengeKey } from '../lib/deletion-challenge.js';
 import {
@@ -32,6 +36,8 @@ import { requireMfaIfEnrolled } from '../middleware/require-mfa.js';
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
+  if (!isSelfServeDeletionEnabled()) return selfServeDeletionUnavailable();
+
   const parsed = parseBody(event.body);
   if (!parsed.ok) return badRequest(parsed.message);
 

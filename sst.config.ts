@@ -1042,7 +1042,10 @@ export default $config({
       // fit the 10s default.
       timeout: '30 seconds',
       extraLink: [deletionChallengeTable, deletionCodeHmacKey, ...mgmtRuntimeResources],
-      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+      extraEnv: {
+        AUTH0_MGMT_DOMAIN: auth0MgmtDomain,
+        ACCOUNT_DELETION_ENABLED: accountDeletionEnabled,
+      },
     });
 
     // ── Usage reporting (cron-based) ────────────────────────────────

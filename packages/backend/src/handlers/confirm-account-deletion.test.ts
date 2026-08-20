@@ -44,10 +44,22 @@ describe('confirm-account-deletion', () => {
   beforeEach(() => {
     ddbMock.reset();
     vi.clearAllMocks();
+    process.env.ACCOUNT_DELETION_ENABLED = 'true';
     mockIsOrgAdmin.mockResolvedValue(true);
     mockGetOrgProfile.mockResolvedValue({ name: { S: 'Acme Corp' } });
     mockConfirm.mockResolvedValue({ outcome: 'confirmed' });
     ddbMock.on(GetItemCommand).resolves({ Item: { salt: { S: 'deadbeef' } } });
+  });
+
+  // The route stays deployed while the feature is withheld (FIL-919), so the
+  // refusal has to come from the handler — ahead of the code being spent.
+  it('answers 501 without committing the deletion when the feature is off', async () => {
+    process.env.ACCOUNT_DELETION_ENABLED = 'false';
+
+    const result = await baseHandler(event(VALID));
+
+    expect(result.statusCode).toBe(501);
+    expect(mockConfirm).not.toHaveBeenCalled();
   });
 
   it('202s and commits the transaction', async () => {
