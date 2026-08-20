@@ -24,6 +24,7 @@ import {
   sortStorageSamplesByTimestamp,
 } from '../lib/usage-calculator.js';
 import type { TenantUsageMetrics } from '../lib/service-orchestrator.js';
+import { isOrgDeletedOrDeleting } from '../lib/org-profile.js';
 import {
   getProvisionedRegions,
   syncTenantStatusInProvisionedRegions,
@@ -111,6 +112,13 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
   const meterEventName = process.env.STRIPE_METER_EVENT_NAME;
   if (!meterEventName) {
     throw new Error('STRIPE_METER_EVENT_NAME env var is not set');
+  }
+
+  // The payload predates the deletion: metering a customer being torn down,
+  // and the lock sync below would fight teardown over the tenant status.
+  if (await isOrgDeletedOrDeleting(orgId)) {
+    console.warn('[usage-worker] Org is deleted or being deleted, skipping', { orgId });
+    return;
   }
 
   const now = new Date().toISOString();

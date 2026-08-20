@@ -89,8 +89,11 @@ vi.mock('../lib/fth/fth-orchestrator.js', () => ({ fthOrchestrator }));
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getAvailableOrchestrators: () => [auroraOrchestrator, fthOrchestrator],
 }));
+const mockIsOrgDeletedOrDeleting = vi.fn(async (_orgId: string) => false);
+
 vi.mock('../lib/org-profile.js', () => ({
   getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
+  isOrgDeletedOrDeleting: (orgId: string) => mockIsOrgDeletedOrDeleting(orgId),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
@@ -134,11 +137,24 @@ describe('usage-reporting-worker', () => {
     mockAuroraGetTenantStatus.mockResolvedValue({ kind: 'ok', status: 'active' });
     mockFthGetTenantStatus.mockResolvedValue({ kind: 'ok', status: 'active' });
     mockAuroraUpdateTenantStatus.mockResolvedValue(undefined);
+    mockIsOrgDeletedOrDeleting.mockResolvedValue(false);
     mockFthUpdateTenantStatus.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  // The payload was built by a scan that predates the deletion, so it must not
+  // meter a customer being torn down or fight teardown over the tenant status.
+  it('skips an org that is deleted or being deleted', async () => {
+    mockIsOrgDeletedOrDeleting.mockResolvedValue(true);
+
+    await handler(basePayload);
+
+    expect(mockGetTenantUsageMetrics).not.toHaveBeenCalled();
+    expect(mockAuroraUpdateTenantStatus).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
   });
 
   it('calls getTenantUsageMetrics with auroraTenantId, not orgId', async () => {
