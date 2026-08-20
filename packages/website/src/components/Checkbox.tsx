@@ -22,7 +22,7 @@ export function Checkbox(props: CheckboxProps) {
   return (
     <HeadlessCheckbox
       {...props}
-      className="group inline-block cursor-pointer p-3 -m-3 focus:outline-hidden"
+      className="group inline-block cursor-pointer p-3 -m-3 focus-visible:outline-hidden"
     >
       <div
         className={clsx(
@@ -30,7 +30,7 @@ export function Checkbox(props: CheckboxProps) {
           'group-data-checked:border-brand-600 group-data-checked:bg-brand-600',
           'hover:border-zinc-400 hover:bg-zinc-50',
           'group-data-checked:hover:border-brand-600 group-data-checked:hover:bg-brand-600',
-          'group-focus:outline-2 group-focus:outline-offset-2 group-focus:outline-brand-600',
+          'group-focus-visible:outline-2 group-focus-visible:outline-offset-2 group-focus-visible:outline-brand-600',
           'group-data-disabled:cursor-not-allowed group-data-disabled:opacity-50',
         )}
       >
