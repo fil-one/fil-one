@@ -115,12 +115,22 @@ describe('ensureTenantReady', () => {
       }
     });
 
-    it('treats a refusal with no fence on the row as a lost race', async () => {
+    // The condition names no tenant-id attribute, so a concurrent writer cannot
+    // refuse this write. A refusal carrying no item means no profile row, and
+    // returning the id would hand back an upstream client nothing recorded.
+    it('deletes the orphaned client and refuses when the profile is missing', async () => {
       stubSetupApiCalls();
-      refuseWith({ fthTenantId: { S: fthClientId } });
+      refuseWith(undefined);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-      await expect(ensureTenantReady(fthClient, orgId)).resolves.toBe(fthClientId);
-      expect(mockFthClient.deleteClient).not.toHaveBeenCalled();
+      try {
+        await expect(ensureTenantReady(fthClient, orgId)).resolves.toBeNull();
+        expect(mockFthClient.deleteClient).toHaveBeenCalledWith(fthClientId);
+      } finally {
+        warn.mockRestore();
+        error.mockRestore();
+      }
     });
 
     // A failed rollback must not turn the refusal into "try again in a moment".

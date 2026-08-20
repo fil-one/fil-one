@@ -150,8 +150,8 @@ async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise
         // a write for an org that has no profile row would create one holding
         // nothing but a tenant id.
         ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
-        // Lets the catch tell a deleting org apart from a lost race without a
-        // second read — the two need opposite handling.
+        // Names the cause for the catch — a deleting profile, or none at all —
+        // without a second read.
         ReturnValuesOnConditionCheckFailure: 'ALL_OLD',
         ExpressionAttributeNames: {
           '#tenantIdAttr': tenantIdAttribute,
@@ -177,8 +177,6 @@ async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise
         if (error) throw new Error(`Failed to delete tenant ${orgId}`, { cause: error });
       },
     });
-    // A lost race: the winner wrote the same client-supplied tenantId.
-    return orgId;
   }
 
   return orgId;
