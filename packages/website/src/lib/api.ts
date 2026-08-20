@@ -41,7 +41,8 @@ function isSessionProbe(path: string): boolean {
 }
 
 /**
- * Always throws, so query-client will not retry. Navigates only when the
+ * Always throws; 410 is in query-client's NO_RETRY_STATUSES so it is not
+ * retried. Navigates only when the
  * *session probe* is what reported it, so a 410 arriving mid-action surfaces as
  * an error on that action rather than yanking the page out from under it; the
  * next probe redirects.
