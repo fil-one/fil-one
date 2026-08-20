@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { CheckIcon } from '@phosphor-icons/react/dist/ssr';
 import { Heading } from '../components/Heading/Heading';
@@ -29,6 +29,11 @@ export function VerifyEmailPage({ me, onVerified }: VerifyEmailPageProps) {
   const [resending, setResending] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const [verified, setVerified] = useState(false);
+  // Holds the ack delay so it can be cleared if the page unmounts before it
+  // fires, avoiding an onVerified() navigation on a gone component.
+  const ackTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => () => clearTimeout(ackTimer.current), []);
 
   useEffect(() => {
     if (resendCooldown <= 0) return;
@@ -48,7 +53,7 @@ export function VerifyEmailPage({ me, onVerified }: VerifyEmailPageProps) {
           void queryClient.resetQueries({ queryKey: queryKeys.me });
           // Confirm before leaving: navigating straight out gives the click no answer.
           setVerified(true);
-          setTimeout(onVerified, VERIFIED_ACK_MS);
+          ackTimer.current = setTimeout(onVerified, VERIFIED_ACK_MS);
           return;
         }
         if (!silent) {
