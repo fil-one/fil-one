@@ -71,7 +71,6 @@ process.env.AURORA_PORTAL_URL = 'https://portal.dev.aur.lu/api';
 
 import { S3Region } from '@filone/shared';
 import { auroraOrchestrator, _resetSsmCacheForTesting } from './aurora-orchestrator.js';
-import { NotImplementedError } from '../errors.js';
 import type { OrgProfileItem } from '../org-profile.js';
 import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../org-setup-status.js';
 import {
@@ -226,10 +225,42 @@ describe('auroraOrchestrator', () => {
   });
 
   describe('deleteTenant', () => {
-    it('throws NotImplementedError — Aurora exposes no tenant DELETE (FIL-919)', async () => {
-      await expect(auroraOrchestrator.deleteTenant('aurora-t-1')).rejects.toBeInstanceOf(
-        NotImplementedError,
-      );
+    it('disables the tenant — Aurora exposes no tenant DELETE (FIL-919)', async () => {
+      mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+
+      await auroraOrchestrator.deleteTenant('aurora-t-1');
+
+      expect(mockUpdateAuroraTenantStatusApi).toHaveBeenCalledWith({
+        tenantId: 'aurora-t-1',
+        status: 'DISABLED',
+      });
+    });
+
+    it('retries a transient Backoffice failure', async () => {
+      vi.useFakeTimers();
+      mockUpdateAuroraTenantStatusApi
+        .mockRejectedValueOnce(new Error('Aurora status update failed'))
+        .mockResolvedValue(undefined);
+
+      const promise = auroraOrchestrator.deleteTenant('aurora-t-1');
+      await vi.runAllTimersAsync();
+      await promise;
+
+      expect(mockUpdateAuroraTenantStatusApi).toHaveBeenCalledTimes(2);
+      vi.useRealTimers();
+    });
+
+    it('throws once the retry budget is exhausted', async () => {
+      vi.useFakeTimers();
+      mockUpdateAuroraTenantStatusApi.mockRejectedValue(new Error('Aurora status update failed'));
+
+      const promise = auroraOrchestrator.deleteTenant('aurora-t-1').catch((e: unknown) => e);
+      await vi.runAllTimersAsync();
+
+      expect(await promise).toMatchObject({ message: 'Aurora status update failed' });
+      // 1 initial + 3 retries
+      expect(mockUpdateAuroraTenantStatusApi).toHaveBeenCalledTimes(4);
+      vi.useRealTimers();
     });
   });
 

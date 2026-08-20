@@ -4,6 +4,7 @@
 //
 // PROFILE-row attributes used: `auroraTenantId` and `auroraSetupStatus`.
 
+import pRetry from 'p-retry';
 import { S3Region, getS3Endpoint, TenantStatus } from '@filone/shared';
 import type {
   AccessKeyPermission,
@@ -36,7 +37,7 @@ import {
 import { isOrgSetupComplete } from '../org-setup-status.js';
 import type { OrgProfileItem } from '../org-profile.js';
 import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
-import { BucketNotFoundError, NotImplementedError } from '../errors.js';
+import { BucketNotFoundError } from '../errors.js';
 import type {
   BucketDetails,
   BucketSummary,
@@ -51,6 +52,7 @@ import type {
   TenantInfo,
   TenantUsageMetrics,
 } from '../service-orchestrator.js';
+import { TENANT_DELETE_RETRY } from '../service-orchestrator.js';
 import type { S3ClientContext } from '../s3-client.js';
 
 export const _resetSsmCacheForTesting = () => _resetS3CredentialsCacheForTesting();
@@ -80,10 +82,12 @@ export const auroraOrchestrator = {
     await updateAuroraTenantStatusApi({ tenantId, status: mapToModelsTenantStatus(status) });
   },
 
-  async deleteTenant(_tenantId: string): Promise<void> {
-    // Aurora's Backoffice and Portal APIs expose no tenant DELETE; it is
-    // adopting the generic Management API contract, which supplies one.
-    throw new NotImplementedError('Aurora tenant deletion is not yet supported. See FIL-919.');
+  async deleteTenant(tenantId: string): Promise<void> {
+    await pRetry(async () => {
+      await auroraOrchestrator.updateTenantStatus(tenantId, 'disabled');
+      // TODO(FIL-919): delete the tenant once Aurora's Backoffice API exposes a
+      // DELETE. Until then buckets and objects survive the teardown.
+    }, TENANT_DELETE_RETRY);
   },
 
   async getTenantStatus(tenantId: string): Promise<TenantStatusProbe> {
