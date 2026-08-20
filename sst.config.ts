@@ -997,26 +997,6 @@ export default $config({
       // the user is on; resolveOrigin falls back to WEBSITE_URL without it.
       extraEnv: { WEBSITE_URL: siteUrl, ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins },
     });
-    addRoute({
-      method: 'POST',
-      routePath: '/api/stripe/webhook',
-      handler: 'stripe-webhook',
-      // HubSpot key: the webhook mirrors subscription status onto the contact
-      // so lifecycle sequences can tell a paying customer from a trial (FIL-828).
-      extraLink: [hubSpotServiceKey],
-      extraEnv: {
-        ...orchestratorEnv,
-        STRIPE_WEBHOOK_SECRET_SSM_PATH: $interpolate`/filone/${$app.stage}/stripe-webhook-secret`,
-      },
-      permissions: [
-        {
-          actions: ['ssm:GetParameter'],
-          resources: [
-            $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/stripe-webhook-secret`,
-          ],
-        },
-      ],
-    });
 
     // ── Account deletion ─────────────────────────────────────────────
     // Off on every stage until FIL-919 gives Aurora a tenant DELETE. Gates the
@@ -1117,6 +1097,9 @@ export default $config({
       method: 'POST',
       routePath: '/api/stripe/webhook',
       handler: 'stripe-webhook',
+      // HubSpot key: the webhook mirrors subscription status onto the contact
+      // so lifecycle sequences can tell a paying customer from a trial (FIL-828).
+      extraLink: [hubSpotServiceKey],
       extraEnv: {
         ...orchestratorEnv,
         STRIPE_WEBHOOK_SECRET_SSM_PATH: $interpolate`/filone/${$app.stage}/stripe-webhook-secret`,
