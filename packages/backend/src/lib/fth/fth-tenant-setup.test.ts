@@ -21,6 +21,7 @@ const mockFthClient = {
   listAccessKeys: vi.fn(),
   deleteAccessKey: vi.fn(),
   listStorageUsers: vi.fn(),
+  deleteClient: vi.fn(),
 };
 
 const fthClient = mockFthClient as unknown as FthManagementClient;
@@ -33,6 +34,8 @@ process.env.FILONE_STAGE = 'test';
 process.env.FTH_MANAGEMENT_API_URL = 'https://api.fortilyx.test';
 
 import { ensureTenantReady } from './fth-tenant-setup.js';
+import { OrgDeletingError } from '../org-profile.js';
+import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 const fthClientId = '42';
@@ -83,6 +86,90 @@ describe('ensureTenantReady', () => {
 
     expect(result).toBe(fthClientId);
     expect(mockFthClient.createClient).not.toHaveBeenCalled();
+  });
+
+  // The deferred risk: this request read the profile before the fence landed, so
+  // it created a client upstream that will never get a local pointer.
+  describe('when the fence lands mid-setup', () => {
+    function refuseWith(item?: Record<string, unknown>) {
+      ddbMock.on(GetItemCommand).resolves({ Item: profileItem({}) });
+      ddbMock.on(UpdateItemCommand).rejects(
+        new ConditionalCheckFailedException({
+          message: 'refused',
+          $metadata: {},
+          Item: item,
+        } as never),
+      );
+    }
+
+    it('deletes the orphaned client and refuses, rather than answering 503', async () => {
+      stubSetupApiCalls();
+      refuseWith({ deleting: { BOOL: true } });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      try {
+        await expect(ensureTenantReady(fthClient, orgId)).rejects.toBeInstanceOf(OrgDeletingError);
+        expect(mockFthClient.deleteClient).toHaveBeenCalledWith(fthClientId);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    // The condition names no tenant-id attribute, so a concurrent writer cannot
+    // refuse this write. A refusal carrying no item means no profile row, and
+    // returning the id would hand back an upstream client nothing recorded.
+    it('deletes the orphaned client and refuses when the profile is missing', async () => {
+      stubSetupApiCalls();
+      refuseWith(undefined);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      try {
+        await expect(ensureTenantReady(fthClient, orgId)).resolves.toBeNull();
+        expect(mockFthClient.deleteClient).toHaveBeenCalledWith(fthClientId);
+      } finally {
+        warn.mockRestore();
+        error.mockRestore();
+      }
+    });
+
+    // A failed rollback must not turn the refusal into "try again in a moment".
+    it('still refuses when the client cannot be deleted', async () => {
+      stubSetupApiCalls();
+      refuseWith({ deleting: { BOOL: true } });
+      mockFthClient.deleteClient.mockRejectedValue(new Error('FTH 500'));
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      try {
+        await expect(ensureTenantReady(fthClient, orgId)).rejects.toBeInstanceOf(OrgDeletingError);
+        expect(error).toHaveBeenCalled();
+      } finally {
+        error.mockRestore();
+      }
+    });
+  });
+
+  // Before any upstream call: refusing only the final pointer write would
+  // leave the client, its console key and its SSM secret orphaned.
+  it('refuses a deleting org without provisioning anything', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: { ...profileItem({}), deleting: { BOOL: true } } });
+
+    await expect(ensureTenantReady(fthClient, orgId)).rejects.toBeInstanceOf(OrgDeletingError);
+    expect(mockFthClient.createClient).not.toHaveBeenCalled();
+    expect(ssmMock.commandCalls(PutParameterCommand)).toHaveLength(0);
+  });
+
+  it('conditions the pointer write so it cannot resurrect a purged profile', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: profileItem({}) });
+    ddbMock.on(UpdateItemCommand).resolves({});
+    ssmMock.on(PutParameterCommand).resolves({});
+    stubSetupApiCalls();
+
+    await ensureTenantReady(fthClient, orgId);
+
+    expect(ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input.ConditionExpression).toBe(
+      'attribute_exists(pk) AND attribute_not_exists(deleting)',
+    );
   });
 
   it('creates client, storage user, access key, SSM cred and PROFILE row on first run', async () => {

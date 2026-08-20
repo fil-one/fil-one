@@ -19,8 +19,10 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getOrchestratorForRegion: (...args: unknown[]) => mockGetOrchestratorForRegion(...args),
 }));
 
-vi.mock('../lib/org-profile.js', () => ({
+vi.mock('../lib/org-profile.js', async () => ({
+  ...(await vi.importActual<typeof import('../lib/org-profile.js')>('../lib/org-profile.js')),
   getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
+  isOrgDeleting: vi.fn(async () => false),
 }));
 
 // The queryability gate reads the bucket's enablement row (RagIndexerTable).

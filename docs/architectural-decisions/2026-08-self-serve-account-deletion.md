@@ -115,9 +115,13 @@ There are two reasons for this:
 - `UserInfoTable` has no TTL configured. Enabling it there would make any accidental write of `ttl` attribute on an identity row a silent hard delete of account data.
 - `BillingTable` has TTL and already holds `ORG#` partitions. But a short-lived security credential there widens what the billing writers' IAM policy covers and widens the scope of the table.
 
-The code is stored as a salted hash over `orgId:userId:salt:code`, rather than a plain digest, since a six digit code is cheap to enumerate offline from a table dump. Verification happens inside a `ConditionExpression`, so the digest never reaches our process. The plaintext is never persisted.
+The code is stored as an HMAC-SHA256 over `orgId:userId:salt:code`, rather than a plain digest, since a six digit code is cheap to enumerate offline from a table dump. Verification happens inside a `ConditionExpression`, so the digest never reaches our process. The plaintext is never persisted.
 
-The salt is a single deployment-wide secret, held as an `sst.Secret` alongside the other key material. A per-row random salt cannot work anywhere the hash is a key: the row is found _by_ the hash, so computing it would mean reading the salt out of the row the hash locates. The same constraint applies in decision 9.
+The HMAC key is a single deployment-wide secret, held as an `sst.Secret` alongside the other key material. It is what stands between a table dump and the code space, and an HMAC rather than `sha256(secret‖message)` because the keyed construction needs no argument about length extension or where in the message the secret sits.
+
+The `salt` in that message is 16 random bytes per row, stored in plaintext beside the digest. It adds nothing against a dump — the attacker reads it out of the same row — and it does not domain-separate rows, which `orgId:userId` already does. What it buys is that the stored digest is not a pure function of the code: codes are re-issuable on a cooldown, so without it the same code recurring for the same user stores the same digest, and one historical disclosure of a (digest, code) pair would stay useful against that user indefinitely.
+
+A per-row salt is only possible because this row is found by its `orgId`, not by its hash. Anywhere the hash _is_ the key, computing it would mean reading the salt out of the row the hash locates, so the deployment-wide secret has to carry the whole burden. That is the case in decision 9, and it is why the two hashing sites differ.
 
 ### 7. Delete the Stripe customer rather than redacting it
 
@@ -159,6 +163,8 @@ Sessions are already refused at confirm by the profile fence, so no step is raci
 
 The Auth0 step goes first, and its three actions run in a fixed order: the email read and the allowlist delete precede the user delete, because the allowlist row is keyed by an email no retained row stores and Auth0 is the only place it can be read. A re-run that gets a `404` on the lookup skips the row for that member, which is safe because the in-step ordering guarantees the user is only gone once a previous pass finished the removal. Deleting an already-deleted Auth0 user likewise returns `404`, which the worker treats as success and moves past. `sub` originates in the JWT and is written to DynamoDB at signup, and decision 9 retains it on two rows, so it stays available as the audit correlation key after the Auth0 user is gone.
 
+One provider cannot complete its step. Aurora's Backoffice and Portal APIs expose no tenant DELETE, so `deleteTenant` disables the tenant and stops there; FIL-919 tracks the DELETE. An Aurora org therefore keeps its buckets and objects behind a deleted account, which is acceptable for the `customer.deleted` trigger — the response to trial abuse, where an inert account is the point — but not for a user who asked to be erased. Self-serve deletion is therefore withheld: `ACCOUNT_DELETION_ENABLED` is off on every stage, both HTTP routes answer `501`, and the console offers no button. The `customer.deleted` path in decision 1 is not gated and stays live. Removing the flag is part of FIL-919, not a separate decision.
+
 The destroyed rows go after every step that needs them: the RAG key lookup row's key derives from the token hash stored on the key row, and the `RagIndexerTable` keys are what address the vector indexes. The scrubbed rows keep their identifiers either way, so their position is free; they go last so a failed pass leaves the most context for troubleshooting. The pass ends by setting the `DELETION` record's status to `DONE`, which is what removes it from the sweeper's scan.
 
 ### 9. Which records survive
@@ -186,7 +192,7 @@ Credentials are destroyed rather than retained, because a scrubbed credential ro
 
 `ALLOWLIST#` is keyed by a plaintext email address, and the worker deletes it by resolving that key while it still can: inside the Auth0 step, the email read and the allowlist delete come before the user delete, as decision 8 orders. The row needs no scrub, since its presence is the grant and deleting it revokes the grant. Rows for live users stay keyed by plaintext email, which keeps the access list readable.
 
-`EMAIL_NORM#` shares the key shape and cannot take the same treatment. No retained row stores a user's email, so once the Auth0 user is gone the key cannot be reconstructed, and the row must survive regardless: it is the anti-abuse record that prevents a second free trial. Rekeying it to a salted hash, under the same single-secret constraint as decision 6, is what removes this personal data, and it ships as **its own PR with a migration** rather than inside the deletion work. The migration repoints the primary key of a live record whose writer claims it with `attribute_not_exists(pk)`, so a partial run either grants a second free trial or locks a legitimate user out of their first.
+`EMAIL_NORM#` shares the key shape and cannot take the same treatment. No retained row stores a user's email, so once the Auth0 user is gone the key cannot be reconstructed, and the row must survive regardless: it is the anti-abuse record that prevents a second free trial. Rekeying it to a keyed hash of the address, with no per-row salt for the reason decision 6 gives, is what removes this personal data, and it ships as **its own PR with a migration** rather than inside the deletion work. The migration repoints the primary key of a live record whose writer claims it with `attribute_not_exists(pk)`, so a partial run either grants a second free trial or locks a legitimate user out of their first.
 
 ### 10. Observability
 
@@ -212,6 +218,7 @@ Alert rules and panels for these metrics live in Grafana Cloud, outside this rep
 | Seconds of in-flight consumption after tenant disable go unbilled   | Bounded by a request timeout: sessions are dead at confirm and creation is fenced, so only requests already in flight when the disable lands can still write.                                                              |
 | Every authenticated request pays one extra sequential DynamoDB read | The session fence lives on the org profile, which keeps the confirm transaction at three items at any org size. A few milliseconds at the median; a per-container cache can absorb it if it ever shows in latency budgets. |
 | Finalized invoices keep their `customer_email` snapshot             | They are immutable, and retained on the same legal-obligation basis as the rest of the financial record.                                                                                                                   |
+| An Aurora org's buckets and objects outlive its teardown            | Aurora exposes no tenant DELETE, so the step disables the tenant and the record still reaches `DONE`. Tolerable only for the `customer.deleted` trigger, which is why self-serve deletion is off until FIL-919.            |
 | Deleted orgs keep a row in every partition they occupied            | The rows carry no personal data and no entitlement, and total under 10 KB per org. Retention is what makes the guards in decision 5 cheap and the re-runs in decision 2 possible.                                          |
 
 ### Deferred risk

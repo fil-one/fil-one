@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Request } from '@middy/core';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, Context } from 'aws-lambda';
+import { ApiErrorCode } from '@filone/shared';
 import { errorHandlerMiddleware } from './error-handler.js';
+import { OrgDeletingError } from '../lib/org-profile.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
 type ErrorRequest = Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>;
@@ -31,6 +33,28 @@ describe('errorHandlerMiddleware', () => {
       statusCode: 500,
       body: JSON.stringify({
         message: 'An unexpected server error occurred. Please try again later.',
+      }),
+    });
+  });
+
+  // Mapped centrally so no writer has to catch it, and so it can never be
+  // reported as a 500 the caller would retry.
+  it('maps OrgDeletingError to 410 ACCOUNT_DELETED', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { onError } = errorHandlerMiddleware();
+    const request = buildErrorRequest(new OrgDeletingError('org-1'));
+
+    try {
+      await onError!(request);
+    } finally {
+      warn.mockRestore();
+    }
+
+    expect(request.response).toMatchObject({
+      statusCode: 410,
+      body: JSON.stringify({
+        message: 'This account has been deleted.',
+        code: ApiErrorCode.ACCOUNT_DELETED,
       }),
     });
   });

@@ -7,7 +7,8 @@ import type {
 } from 'aws-lambda';
 import { S3Region } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
-import { ResponseBuilder } from '../lib/response-builder.js';
+import { isOrgDeleting } from '../lib/org-profile.js';
+import { accountDeletedResponse, ResponseBuilder } from '../lib/response-builder.js';
 import type { UserInfo } from '../lib/user-context.js';
 import { findRagKeyByToken, ragKeyAllowsBucket, touchRagKeyLastUsed } from '../lib/rag-api-keys.js';
 import { authMiddleware } from './auth.js';
@@ -76,6 +77,10 @@ async function bearerAuth(
 
   const record = await findRagKeyByToken(token);
   if (!record) return unauthorizedResponse();
+
+  // A RAG key is a standalone credential with no session behind it, so the
+  // SUB# tombstone that kills cookie auth never applies to it.
+  if (await isOrgDeleting(record.orgId, { consistent: true })) return accountDeletedResponse();
 
   // Same region resolution as the handler (query-bucket defaults to eu-west-1)
   // so the scope comparison and the handler can never disagree. Unsupported
