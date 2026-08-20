@@ -117,7 +117,7 @@ function printShareableSummary(summary: BillingSummary | null, url: string): voi
     console.log(`Subscription: ${summary.subscriptionStatus ?? 'none recorded'}`);
     if (summary.trialEndsAt) console.log(`Trial ends: ${summary.trialEndsAt}`);
     console.log(
-      `Payment method: ${summary.hasCachedPaymentMethod ? 'yes, cached' : 'none cached'}`,
+      `Payment method: ${summary.hasCachedPaymentMethod ? 'yes (cached)' : 'none cached'}`,
     );
     if (summary.stripeCustomerUrl) console.log(`Stripe dashboard: ${summary.stripeCustomerUrl}`);
   }
