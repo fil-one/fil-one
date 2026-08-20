@@ -198,6 +198,16 @@ than a served request. What is left is that `get-me.ts:33` reads the same row a
 second time on the same request, and a dashboard load fires four requests that
 each pay it.
 
+### Move the org profile row into OrgTable
+
+`ORG#{orgId}/PROFILE` is the one org-domain row still living in `UserInfoTable`;
+the ADR's data-placement decision defers the move. Reads funnel through
+`getOrgProfile` (`packages/backend/src/lib/org-profile.ts`); the writers are the
+first-login transaction, org rename, tenant setup, and the billing identity
+guard. A small standalone PR: new key builder, writer updates, one migration
+script under `sst shell` (dry run, verify, delete originals). Raised by bajtos
+on #596.
+
 ### Assert the converted role, not just agreement between the two rows
 
 `bin/lib/org-verify.ts:165` — the check compares the role on the membership row
