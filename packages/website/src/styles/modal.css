@@ -46,7 +46,7 @@
   .modal-header-close {
     @apply flex cursor-pointer items-center justify-center rounded-md p-1 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-950;
 
-    &:focus {
+    &:focus-visible {
       @apply brand-outline;
     }
   }

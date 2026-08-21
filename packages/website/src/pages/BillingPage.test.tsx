@@ -56,6 +56,15 @@ function trialingBilling(): BillingInfo {
   };
 }
 
+function payAsYouGoBilling(): BillingInfo {
+  return {
+    subscription: {
+      planId: PlanId.PayAsYouGo,
+      status: SubscriptionStatus.Active,
+    },
+  };
+}
+
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -108,5 +117,30 @@ describe('BillingPage — inactive subscription', () => {
     const cta = container.querySelector('#billing-plan-cta-button');
     expect(cta).toHaveTextContent('Upgrade now');
     expect(mockGetInvoices).not.toHaveBeenCalled();
+  });
+});
+
+describe('BillingPage — current usage meters', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetUsage.mockResolvedValue(USAGE);
+    mockGetInvoices.mockResolvedValue({ invoices: [] });
+  });
+
+  it('shows no storage bar on pay-as-you-go, where storage is unlimited', async () => {
+    mockGetBilling.mockResolvedValue(payAsYouGoBilling());
+    renderPage();
+
+    // The figure stays; only the bar, which implies a cap, goes away.
+    expect(await screen.findByText('Storage used')).toBeInTheDocument();
+    expect(screen.queryByRole('progressbar', { name: 'Storage usage' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the storage bar during the trial, which has a finite allowance', async () => {
+    mockGetBilling.mockResolvedValue(trialingBilling());
+    renderPage();
+
+    await screen.findByText('Storage used');
+    expect(screen.getByRole('progressbar', { name: 'Storage usage' })).toBeInTheDocument();
   });
 });

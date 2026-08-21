@@ -20,6 +20,22 @@ export function daysUntil(isoString: string): number {
   return Math.max(0, Math.round((endUTC - nowUTC) / (1000 * 60 * 60 * 24)));
 }
 
+/** Pluralized day count, e.g. "1 day", "3 days". */
+export function pluralizeDays(days: number): string {
+  return `${days} ${days === 1 ? 'day' : 'days'}`;
+}
+
+/**
+ * Countdown phrase for banners, e.g. "3 days remaining".
+ *
+ * `daysUntil` clamps to >= 0, so 0 means the deadline falls later today rather
+ * than "no time left"; it gets its own wording instead of "0 days remaining".
+ */
+export function daysRemainingLabel(days: number): string {
+  if (days === 0) return 'Less than a day remaining';
+  return `${pluralizeDays(days)} remaining`;
+}
+
 // ---------------------------------------------------------------------------
 // Locale-aware display
 // ---------------------------------------------------------------------------
