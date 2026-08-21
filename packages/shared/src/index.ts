@@ -63,7 +63,47 @@ export {
   ORG_NAME_PATTERN,
   ORG_NAME_DISALLOWED_CHARS,
 } from './api/org.js';
-export type { UpdateOrgRequest, UpdateOrgResponse } from './api/org.js';
+export type { OrgMembershipSource, UpdateOrgRequest, UpdateOrgResponse } from './api/org.js';
+
+export {
+  AUDIT_EVENT_TYPES,
+  AUDIT_ACTOR_KINDS,
+  AUDIT_EVENT_PHASES,
+  AUDIT_OUTCOMES,
+  AUDIT_REDACTED,
+  AUDIT_RETENTION_DAYS,
+  AUDIT_KEY_ID_SUFFIX_LENGTH,
+  AUDIT_SECRET_BLOB_MIN_LENGTH,
+  CREDENTIAL_VALUE_PATTERNS,
+  PROHIBITED_AUDIT_CONTENT,
+  PROHIBITED_AUDIT_FIELD_PATTERNS,
+  TWO_PHASE_AUDIT_EVENT_TYPES,
+  auditKeyIdSuffix,
+  isAuditEventType,
+  looksLikeCredential,
+} from './audit.js';
+export type {
+  AuditActor,
+  AuditActorKind,
+  AuditCompletionPhase,
+  AuditDetailRecord,
+  AuditDetailValue,
+  AuditEvent,
+  AuditEventDetails,
+  AuditEventPhase,
+  AuditEventRecord,
+  AuditEventType,
+  AuditIntentPhase,
+  AuditKeyKind,
+  AuditOutcome,
+  AuditPhaseFields,
+  AuditSinglePhase,
+  AuditSubject,
+  CommittableAuditEvent,
+  TwoPhaseAuditEvent,
+  TwoPhaseAuditEventType,
+  VendorBackedKeyEvent,
+} from './audit.js';
 
 export {
   PERMISSIONS,
