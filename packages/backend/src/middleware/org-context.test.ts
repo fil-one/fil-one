@@ -160,6 +160,23 @@ describe('enforceIdentityProvider', () => {
     expect(await enforceIdentityProvider(OTHER_ORG, null)).toBeUndefined();
   });
 
+  it('answers 410 for a deleting active org', async () => {
+    // The active-org half of the session fence: naming a deleting org in the
+    // header must not keep a member operating inside its teardown. A response
+    // rather than a throw, so /api/me's fallback can degrade a stashed
+    // deleting org to the caller's own.
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `ORG#${OTHER_ORG}` }, sk: { S: 'PROFILE' } },
+      })
+      .resolves({ Item: { name: { S: 'Acme' }, deleting: { BOOL: true } } });
+
+    const refusal = await enforceIdentityProvider(OTHER_ORG, null);
+
+    expect(refusal?.statusCode).toBe(410);
+  });
+
   it('refuses an org whose auth0OrgId the session did not authenticate at', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     stubRestrictedProfile(OTHER_ORG, 'org_auth0_acme');

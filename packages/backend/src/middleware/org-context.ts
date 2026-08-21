@@ -1,7 +1,7 @@
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ORG_ID_HEADER, isUuid } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
-import { ResponseBuilder } from '../lib/response-builder.js';
+import { accountDeletedResponse, ResponseBuilder } from '../lib/response-builder.js';
 import { getRequestHeader } from '../lib/request-headers.js';
 import { getOrgProfile } from '../lib/org-profile.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -99,7 +99,15 @@ export async function enforceIdentityProvider(
   try {
     // Consistent: `auth0OrgId` is not write-once, and a stale replica answering
     // "no restriction" would admit the session this rule exists to refuse.
-    auth0OrgId = (await getOrgProfile(orgId, { consistentRead: true }))?.auth0OrgId?.S;
+    const profile = await getOrgProfile(orgId, { consistentRead: true });
+    // The active-org half of the session fence. The sign-in path fences the
+    // identity row's org; this read — the only per-request look at the ACTIVE
+    // org's profile, and only a member gets this far — is where a deleting org
+    // named in `X-Org-Id` refuses, so a member cannot keep operating in a
+    // teardown through the header. A response rather than a throw, so `/api/me`'s
+    // fallback can degrade a stashed deleting org to the caller's own.
+    if (profile?.deleting?.BOOL === true) return accountDeletedResponse();
+    auth0OrgId = profile?.auth0OrgId?.S;
   } catch (err) {
     console.error('[org-context] Org profile read failed — cannot decide who may enter the org', {
       orgId,
