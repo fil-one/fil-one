@@ -2,7 +2,7 @@ import { GetItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
-import { OrgRole, isOrgRole, permissionsForRole } from '@filone/shared';
+import { OrgRole, isOrgRole } from '@filone/shared';
 import type { OrgMembershipSummary } from '@filone/shared';
 import { getDynamoClient } from './ddb-client.js';
 import { resolveOrgName } from './org-profile.js';
@@ -119,13 +119,16 @@ function decodeRow<T>(item: Record<string, AttributeValue>): Partial<T> {
 /**
  * The caller's membership in an org, or undefined when no row exists.
  *
- * Absence is reported honestly: the transition default that reads an absent row
- * as Owner belongs to `authMiddleware`, because the invite and removal paths
- * built on this helper must treat absence as denial.
+ * Absence means the caller is not a member, and `authorize` turns it into a
+ * 403. This helper never guesses at one: the invite, removal, and enforcement
+ * paths all read absence as denial.
+ *
+ * Only OrgTable is read. A pre-conversion account's `admin` row is in
+ * UserInfoTable, which nothing here touches — so an unconverted account reads
+ * as a non-member, which is what the conversion's verification gate is for.
  *
  * Read consistently — a membership written moments earlier (signup, an accepted
- * invitation, a role change) must not read as absent, and absence is the input
- * to that default.
+ * invitation, a role change) must not read as absent.
  */
 export async function resolveMembership(
   orgId: string,
@@ -145,9 +148,10 @@ export async function resolveMembership(
   const storedRole = attributes.role ?? '';
   if (!isOrgRole(storedRole)) {
     // Kept as stored rather than coerced or dropped: an unrecognized role
-    // carries no permissions, so it fails closed, while returning undefined
-    // would hand the row to the middleware's Owner default. Log it — the only
-    // way one gets here is a bad write or a conversion that missed a value.
+    // carries no permissions, so it fails closed on every check, while
+    // returning undefined would report a member who exists as no member at all
+    // and count against the conversion's lockout metric. Log it — the only way
+    // one gets here is a bad write or a conversion that missed a value.
     console.error('[org-membership] Membership row carries an unrecognized role', {
       orgId,
       userId,
@@ -280,20 +284,4 @@ export async function summarizeMemberships({
       role: row.role,
     })),
   );
-}
-
-/**
- * TRANSITION — the account-deletion stack's role gate, re-read from OrgTable.
- * The UserInfoTable `MEMBER#` row it used to read stops existing when the
- * conversion moves membership here. An absent row resolves as Owner — the same
- * transition default `authMiddleware` applies, repeated here because this gate
- * must authorize pre-conversion accounts too, and it is the read consistency
- * above that keeps a just-revoked role from passing. Deletion authority is
- * `org.delete`, which ties the answer to the matrix instead of a role
- * comparison. Folded into `authorize('org.delete')` when enforcement lands.
- */
-export async function isOrgAdmin(orgId: string, userId: string): Promise<boolean> {
-  const membership = await resolveMembership(orgId, userId);
-  const role = membership?.role ?? OrgRole.Owner;
-  return permissionsForRole(role).includes('org.delete');
 }

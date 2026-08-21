@@ -129,7 +129,7 @@ describe('roleHasPermission', () => {
   // total: any value at all resolves to a permission set, and only the four
   // roles resolve to a non-empty one.
   it.each([
-    ['the pre-M1 label that is not a role', 'billing'],
+    ['a word that is not one of the four roles', 'billing'],
     ['a role name in the wrong case', 'Owner'],
     ['the empty string', ''],
     ['an inherited method name', 'constructor'],
@@ -167,7 +167,7 @@ describe('canManageTargetRole', () => {
   });
 
   it.each([
-    ['the pre-M1 label that is not a role', 'billing'],
+    ['a word that is not one of the four roles', 'billing'],
     ['a role name in the wrong case', 'Owner'],
     ['an inherited method name', 'constructor'],
     ['the empty string', ''],

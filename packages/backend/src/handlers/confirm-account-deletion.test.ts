@@ -10,11 +10,11 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockIsOrgAdmin = vi.fn(async () => true);
-vi.mock('../lib/org-membership.js', () => ({ isOrgAdmin: () => mockIsOrgAdmin() }));
-
 const mockGetOrgProfile = vi.fn(async () => ({ name: { S: 'Acme Corp' } }));
-vi.mock('../lib/org-profile.js', () => ({ getOrgProfile: () => mockGetOrgProfile() }));
+vi.mock('../lib/org-profile.js', async () => ({
+  ...(await vi.importActual<typeof import('../lib/org-profile.js')>('../lib/org-profile.js')),
+  getOrgProfile: () => mockGetOrgProfile(),
+}));
 
 const mockConfirm = vi.fn();
 const mockConsumeAttempt = vi.fn(async (_orgId: string) => undefined);
@@ -25,8 +25,16 @@ vi.mock('../lib/deletion-confirm-transaction.js', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { baseHandler } from './confirm-account-deletion.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+vi.mock('../middleware/auth.js', () => ({
+  // Every gate downstream of the auth middleware returns its denials through
+  // this helper, so the partial mock has to carry it.
+  withRefreshedCookies: (_request: unknown, response: unknown) => response,
+  authMiddleware: () => ({ before: () => undefined }),
+}));
+
+import { baseHandler, handler } from './confirm-account-deletion.js';
+import { buildContext, buildEvent } from '../test/lambda-test-utilities.js';
+import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1', emailVerified: true };
 
@@ -45,7 +53,6 @@ describe('confirm-account-deletion', () => {
     ddbMock.reset();
     vi.clearAllMocks();
     process.env.ACCOUNT_DELETION_ENABLED = 'true';
-    mockIsOrgAdmin.mockResolvedValue(true);
     mockGetOrgProfile.mockResolvedValue({ name: { S: 'Acme Corp' } });
     mockConfirm.mockResolvedValue({ outcome: 'confirmed' });
     ddbMock.on(GetItemCommand).resolves({ Item: { salt: { S: 'deadbeef' } } });
@@ -80,15 +87,6 @@ describe('confirm-account-deletion', () => {
     mockConfirm.mockResolvedValue({ outcome: 'already_deleting' });
 
     expect((await baseHandler(event(VALID))).statusCode).toBe(202);
-  });
-
-  it('403s a non-admin before spending anything', async () => {
-    mockIsOrgAdmin.mockResolvedValue(false);
-
-    const result = await baseHandler(event(VALID));
-
-    expect(result.statusCode).toBe(403);
-    expect(mockConfirm).not.toHaveBeenCalled();
   });
 
   it('400s when the typed org name does not match', async () => {
@@ -149,4 +147,17 @@ describe('confirm-account-deletion', () => {
       ConsistentRead: true,
     });
   });
+});
+
+describeRoleEnforcement({
+  permission: 'org.delete',
+  invoke: (membership) =>
+    handler(
+      buildEvent({
+        userInfo: { ...USER_INFO, membership },
+        method: 'POST',
+        body: JSON.stringify(VALID),
+      }),
+      buildContext(),
+    ),
 });

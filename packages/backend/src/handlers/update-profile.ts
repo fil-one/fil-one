@@ -18,6 +18,7 @@ import {
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo, requestTokenRefresh } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { requireMembershipMiddleware } from '../middleware/authorize.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
@@ -189,5 +190,8 @@ export const handler = middy(baseHandler)
   // email_verified to false and re-trigger verification, so this cannot be
   // used to bypass the gate.
   .use(authMiddleware({ requireVerifiedEmail: false }))
+  // The org rename in this body needs `org.rename`, which the handler checks
+  // when the field is present. Membership is required either way.
+  .use(requireMembershipMiddleware())
   .use(csrfMiddleware())
   .use(errorHandlerMiddleware());

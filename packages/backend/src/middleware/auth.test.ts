@@ -92,11 +92,13 @@ function getUserInfoFromEvent(event: APIGatewayProxyEventV2) {
 }
 
 /**
- * What `userInfo` carries when OrgTable holds no membership row: the transition
- * fallback resolves Owner, which is every pre-conversion account's authority.
+ * What `userInfo` carries when OrgTable holds no membership row: nothing. The
+ * conversion has backfilled every account, so absence means the caller is not a
+ * member — `authorize` refuses the request, and the middleware's job is to
+ * report the absence honestly rather than default it away.
  */
-function ownerFallback(orgId: string, userId: string) {
-  return { membership: { orgId, userId, role: OrgRole.Owner } };
+function noMembership() {
+  return { membership: undefined };
 }
 
 /** What `userInfo` carries on the signup branch: the row just written, unread. */
@@ -125,8 +127,8 @@ describe('authMiddleware', () => {
     ddbMock.on(GetItemCommand).resolves({});
     uuidCallCount = 0;
     // Every authenticated request reads the membership row. Default: no row,
-    // which is what a pre-conversion account looks like; tests that care about
-    // a role stub the read again with one.
+    // which the middleware reports as absent and `authorize` refuses; tests
+    // that care about a role stub the read again with one.
     ddbMock.on(GetItemCommand, { TableName: 'OrgTable' }).resolves({});
   });
 
@@ -257,7 +259,7 @@ describe('authMiddleware', () => {
         emailVerified: false,
         name: undefined,
         picture: undefined,
-        ...ownerFallback(existingOrgId, existingUserId),
+        ...noMembership(),
       });
     });
 
@@ -408,6 +410,36 @@ describe('authMiddleware', () => {
       expect(getUserInfoFromEvent(event).membership?.role).toBe(OrgRole.ReadOnly);
     });
 
+    it('leaves an absent membership row absent, defaulting nothing', async () => {
+      // The conversion has run: an account with no row is not a member, and
+      // resolving one as Owner here would hand the whole org to whoever the
+      // conversion missed. `authorize` turns the absence into a 403.
+      const existingUserId = 'existing-user-uuid';
+      const existingOrgId = 'existing-org-uuid';
+
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: { userId: { S: existingUserId }, orgId: { S: existingOrgId } },
+        });
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+      });
+
+      // Authentication still succeeds — /api/me carries no role gate and must
+      // answer, so the console can say what happened.
+      expect(await before(buildMiddyRequest(event))).toBeUndefined();
+      expect(getUserInfoFromEvent(event).membership).toBeUndefined();
+    });
+
     describe('when the OrgTable membership read fails', () => {
       const existingUserId = 'existing-user-uuid';
       const existingOrgId = 'existing-org-uuid';
@@ -553,7 +585,7 @@ describe('authMiddleware', () => {
         emailVerified: true,
         name: MOCK_NAME,
         picture: MOCK_PICTURE,
-        ...ownerFallback(existingOrgId, existingUserId),
+        ...noMembership(),
       });
     });
 
@@ -621,7 +653,7 @@ describe('authMiddleware', () => {
         emailVerified: true,
         name: MOCK_NAME,
         picture: MOCK_PICTURE,
-        ...ownerFallback(existingOrgId, existingUserId),
+        ...noMembership(),
       });
     });
 
@@ -676,7 +708,7 @@ describe('authMiddleware', () => {
         emailVerified: false,
         name: undefined,
         picture: undefined,
-        ...ownerFallback(existingOrgId, existingUserId),
+        ...noMembership(),
       });
     });
 
@@ -948,7 +980,7 @@ describe('authMiddleware', () => {
         emailVerified: false,
         name: undefined,
         picture: undefined,
-        ...ownerFallback(existingOrgId, existingUserId),
+        ...noMembership(),
       });
       expect(request.internal.newTokens).toEqual({
         access_token: 'new-access-token',

@@ -17,8 +17,16 @@ const ddbMock = mockClient(DynamoDBClient);
 
 process.env.FILONE_STAGE = 'test';
 
-import { baseHandler } from './list-access-keys.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+vi.mock('../middleware/auth.js', () => ({
+  // Every gate downstream of the auth middleware returns its denials through
+  // this helper, so the partial mock has to carry it.
+  withRefreshedCookies: (_request: unknown, response: unknown) => response,
+  authMiddleware: () => ({ before: () => undefined }),
+}));
+
+import { baseHandler, handler } from './list-access-keys.js';
+import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -502,4 +510,10 @@ describe('list-access-keys baseHandler', () => {
     expect(consoleError).not.toHaveBeenCalled();
     consoleError.mockRestore();
   });
+});
+
+describeRoleEnforcement({
+  permission: 'keys.manage_all',
+  invoke: (membership) =>
+    handler(buildEvent({ userInfo: { ...USER_INFO, membership } }), buildContext()),
 });

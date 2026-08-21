@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { requireMfa } from './require-mfa.js';
 import type { IdTokenClaims } from './auth.js';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
+import { expectRefreshedCookies, REFRESHED_TOKENS } from '../test/assert-helpers.js';
 
 function buildRequest(claims?: Partial<IdTokenClaims>) {
   const event = buildEvent({ method: 'POST' });
@@ -70,5 +71,14 @@ describe('requireMfa', () => {
       statusCode: 401,
       body: JSON.stringify({ error: 'step_up_required' }),
     });
+  });
+
+  it('carries the rotated cookies on the step-up prompt', async () => {
+    // The step-up round trip sends the caller back through Auth0. Dropping the
+    // cookies this request rotated would make that a full logout instead.
+    const request = buildRequest({ amr: ['pwd'] });
+    request.internal.newTokens = REFRESHED_TOKENS;
+
+    expectRefreshedCookies(await requireMfa().before(request));
   });
 });

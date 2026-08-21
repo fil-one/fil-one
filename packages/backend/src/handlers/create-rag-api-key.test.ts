@@ -18,6 +18,9 @@ vi.mock('sst', () => ({
 // against DynamoDB); auth/csrf/subscription are covered by their own suites and
 // stubbed to pass-through here so the allowlist gate can be tested in isolation.
 vi.mock('../middleware/auth.js', () => ({
+  // Every gate downstream of the auth middleware returns its denials through
+  // this helper, so the partial mock has to carry it.
+  withRefreshedCookies: (_request: unknown, response: unknown) => response,
   authMiddleware: () => ({ before: () => undefined }),
 }));
 vi.mock('../middleware/csrf.js', () => ({
@@ -34,6 +37,7 @@ import { baseHandler, handler } from './create-rag-api-key.js';
 import { OrgDeletingError } from '../lib/org-profile.js';
 import { hashRagKeyToken, RagApiKeyKeys } from '../lib/rag-api-keys.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
 const USER_INFO = {
   userId: 'user-1',
@@ -219,4 +223,10 @@ describe('create-rag-api-key handler (allowlist gate)', () => {
     expect(result.statusCode).toBe(201);
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
   });
+});
+
+describeRoleEnforcement({
+  permission: 'keys.create',
+  invoke: (membership) =>
+    handler(buildEvent({ userInfo: { ...USER_INFO, membership } }), buildContext()),
 });

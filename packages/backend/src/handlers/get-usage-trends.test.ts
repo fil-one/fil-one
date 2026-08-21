@@ -15,8 +15,16 @@ vi.mock('../lib/org-profile.js', () => ({
 
 process.env.FILONE_STAGE = 'test';
 
-import { baseHandler } from './get-usage-trends.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+vi.mock('../middleware/auth.js', () => ({
+  // Every gate downstream of the auth middleware returns its denials through
+  // this helper, so the partial mock has to carry it.
+  withRefreshedCookies: (_request: unknown, response: unknown) => response,
+  authMiddleware: () => ({ before: () => undefined }),
+}));
+
+import { baseHandler, handler } from './get-usage-trends.js';
+import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { describeRoleEnforcement } from '../test/role-enforcement.js';
 import { fakeOrchestrator, fakeOrgProfile, tenantFor } from '../test/fake-orchestrator.js';
 import { S3Region } from '@filone/shared';
 
@@ -214,4 +222,10 @@ describe('get-usage-trends baseHandler', () => {
     const jan1 = '2026-01-01T23:59:59.999Z';
     expect(body.storage.find((p: { date: string }) => p.date === jan1).value).toBe(2000);
   });
+});
+
+describeRoleEnforcement({
+  permission: 'buckets.read',
+  invoke: (membership) =>
+    handler(buildEvent({ userInfo: { ...USER_INFO, membership } }), buildContext()),
 });

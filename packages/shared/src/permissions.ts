@@ -5,10 +5,10 @@ import { OrgRole, isOrgRole } from './api/org.js';
  * speaks, plus the fixed role → permission table behind it.
  *
  * Four roles and a closed permission set need no policy engine, so this is
- * plain data — a string-literal union and a fixed table. The enforcement PR
- * points the backend's `authorize()` middleware at it and ships the caller's
- * set to the console on `MeResponse.permissions`, so the UI hides what the
- * server would refuse.
+ * plain data — a string-literal union and a fixed table. The backend's
+ * `authorize()` middleware reads it on every gated route, and `/api/me` ships
+ * the caller's set to the console on `MeResponse.permissions` so the UI can
+ * hide what the server would refuse.
  *
  * Nothing here is customer-authored or runtime-editable. Changing a role's
  * capabilities means changing {@link ROLE_PERMISSIONS}.
@@ -170,8 +170,9 @@ export function roleHasPermission(role: string, permission: Permission): boolean
  * ceiling on both roles, which is {@link canChangeRole}.
  *
  * A target role that is not one of the four is unmanageable rather than
- * ordinary — otherwise a stored `'billing'` or a mis-cased `'Owner'` would miss
- * the Owner branch and be managed under `members.manage`.
+ * ordinary — otherwise a mis-cased `'Owner'`, or anything else a bad write left
+ * in the column, would miss the Owner branch and be managed under
+ * `members.manage`.
  */
 export function canManageTargetRole(actorRole: string, targetRole: string): boolean {
   if (!isOrgRole(targetRole)) return false;
