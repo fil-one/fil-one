@@ -16,9 +16,10 @@
 //
 // DRY RUN BY DEFAULT. Pass --execute to apply.
 //
-// --stage is required and has no default. The run re-execs itself under
-// `sst shell --stage <name>`, then asserts the resolved table name carries
-// `filone-<stage>-` before reading anything.
+// --stage is required and has no default. The run reads the physical table
+// name out of `sst state export --stage <name>` (`sst shell` cannot evaluate
+// providers against production), then asserts it carries `filone-<stage>-`
+// before reading anything. AWS calls use your ambient credentials.
 //
 //   ./bin/revert-billing-backfill.ts --stage staging
 //   ./bin/revert-billing-backfill.ts --stage staging --execute
@@ -45,7 +46,6 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import { parseCli } from './lib/args.ts';
-import { ensureSstShell } from './lib/stage.ts';
 
 const RUNBOOK = 'docs/BillingRekeyRunbook.md';
 
@@ -56,20 +56,19 @@ const cli = parseCli({
   help: ['--force-unlock  Drop the run lock a crashed --execute run left behind.'],
 });
 
-ensureSstShell(cli.stage, import.meta.filename, cli.argv);
-
-import { Resource } from 'sst';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { decodeRow, scanAll, text, transactWithRetry } from './lib/dynamo.ts';
 import { acquireRunLock, BILLING_REKEY_LOCK_PK, forceUnlock } from './lib/run-lock.ts';
-import { assertStageResources, awsRegionForStage } from './lib/stage.ts';
+import { assertStageResources, awsRegionForStage, resolveStageTables } from './lib/stage.ts';
 import { BillingKeys, buildRevertItem, parseOrgPk } from './lib/billing-rekey.ts';
 import { buildRevertScanInput } from './lib/billing-scan.ts';
 
 /** Pause between deletes, so a few thousand transactions stay polite to a shared table. */
 const WRITE_DELAY_MS = 50;
 
-const billingTable = Resource.BillingTable.name;
+const { BillingTable: billingTable } = resolveStageTables(cli.stage, {
+  BillingTable: '::BillingTableTable',
+});
 
 assertStageResources(cli.stage, { BillingTable: billingTable });
 

@@ -60,8 +60,9 @@ that state, and reconciling it is a decision for a person.
    the org rows, that fallback is the only thing serving every pre-existing
    account; merging the flip first takes their subscription away.
 3. Run from the repository root.
-4. Have the stage's AWS credentials. The script re-execs itself under
-   `sst shell --stage <name>`, which supplies them.
+4. Have the stage's AWS credentials in your environment (`AWS_PROFILE`). The
+   script talks to DynamoDB directly with them; nothing is routed through
+   `sst shell`, which cannot evaluate providers against production.
 
 **Run one script at a time.** The backfill and the revert move the same rows in
 opposite directions, so an `--execute` run of either takes a lock row
@@ -76,8 +77,8 @@ other. If a run is killed outright, drop the lock it left behind:
 
 ## Naming the stage
 
-`--stage <name>` is required and has no default. The script forwards it to
-`sst shell --stage <name>`, then asserts that the table name SST resolved carries
+`--stage <name>` is required and has no default. The script reads the physical
+table name out of `sst state export --stage <name>`, then asserts it carries
 `filone-<stage>-` before it reads anything — the flag alone is not trusted.
 Staging is AWS account 654654381893, production 811430801166.
 
@@ -303,20 +304,14 @@ Per row:
 4. Never guess an org. A row copied to the wrong `ORG#` partition gives that org
    somebody else's subscription.
 
-Spot-check one org from `billing-backfill.log` if you want the raw rows:
+Spot-check one org from `billing-backfill.log` if you want the raw rows. The run
+banner prints the physical `BillingTable` name; query it directly:
 
 ```sh
-pnpm exec sst shell --stage production -- node --input-type=module -e '
-  import { DynamoDBClient, QueryCommand } from "@aws-sdk/client-dynamodb";
-  import { Resource } from "sst";
-  const ddb = new DynamoDBClient({ region: "us-east-2" });
-  const { Items } = await ddb.send(new QueryCommand({
-    TableName: Resource.BillingTable.name,
-    KeyConditionExpression: "pk = :pk",
-    ExpressionAttributeValues: { ":pk": { S: "ORG#<orgId>" } },
-  }));
-  console.log(JSON.stringify(Items, null, 2));
-'
+aws dynamodb query --region us-east-2 \
+  --table-name "<BillingTable name from the run banner>" \
+  --key-condition-expression 'pk = :pk' \
+  --expression-attribute-values '{":pk":{"S":"ORG#<orgId>"}}'
 ```
 
 The query returns `SUBSCRIPTION` with `orgId`, `userId`, `rekeyedFrom`, and the
@@ -372,14 +367,15 @@ Preconditions, all of them:
 Then delete, stage by stage, keeping the output:
 
 ```sh
-pnpm exec sst shell --stage production -- node --input-type=module -e '
+BILLING_TABLE="<BillingTable name from the run banner>" \
+node --input-type=module -e '
   import { DynamoDBClient, DeleteItemCommand, ScanCommand } from "@aws-sdk/client-dynamodb";
-  import { Resource } from "sst";
+  const TableName = process.env.BILLING_TABLE;
   const ddb = new DynamoDBClient({ region: "us-east-2" });
   let key, deleted = 0;
   do {
     const page = await ddb.send(new ScanCommand({
-      TableName: Resource.BillingTable.name,
+      TableName,
       FilterExpression: "sk = :sk AND begins_with(pk, :legacy)",
       ExpressionAttributeValues: { ":sk": { S: "SUBSCRIPTION" }, ":legacy": { S: "CUSTOMER#" } },
       ExclusiveStartKey: key,
@@ -388,7 +384,7 @@ pnpm exec sst shell --stage production -- node --input-type=module -e '
       // The whole row, not just its key: this log is the record.
       console.log("DELETE", JSON.stringify(item));
       await ddb.send(new DeleteItemCommand({
-        TableName: Resource.BillingTable.name,
+        TableName,
         Key: { pk: item.pk, sk: { S: "SUBSCRIPTION" } },
       }));
       deleted++;

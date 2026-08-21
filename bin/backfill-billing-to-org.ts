@@ -34,9 +34,11 @@
 // anything, in both modes. Pass --execute to apply it.
 //
 // --stage is required and has no default: the target account is a decision, not
-// something to inherit from whatever the shell was last used for. The run
-// re-execs itself under `sst shell --stage <name>`, then asserts the resolved
-// table name carries `filone-<stage>-` before reading anything.
+// something to inherit from whatever the shell was last used for. The run reads
+// the physical table name out of `sst state export --stage <name>` (`sst
+// shell` cannot evaluate providers against production), then asserts it carries
+// `filone-<stage>-` before reading anything. AWS calls use your ambient
+// credentials.
 //
 //   ./bin/backfill-billing-to-org.ts --stage staging
 //   ./bin/backfill-billing-to-org.ts --stage staging --execute
@@ -74,7 +76,6 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import { parseCli } from './lib/args.ts';
-import { ensureSstShell } from './lib/stage.ts';
 
 const RUNBOOK = 'docs/BillingRekeyRunbook.md';
 
@@ -95,14 +96,11 @@ const cli = parseCli({
   ],
 });
 
-ensureSstShell(cli.stage, import.meta.filename, cli.argv);
-
-import { Resource } from 'sst';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { decodeRow, scanAll, text, transactWithRetry } from './lib/dynamo.ts';
 import { acquireRunLock, BILLING_REKEY_LOCK_PK, forceUnlock } from './lib/run-lock.ts';
-import { assertStageResources, awsRegionForStage } from './lib/stage.ts';
+import { assertStageResources, awsRegionForStage, resolveStageTables } from './lib/stage.ts';
 import {
   BillingKeys,
   buildCopyTransactItems,
@@ -133,7 +131,9 @@ import {
 /** Pause between orgs that write, so a few thousand transactions stay polite to a shared table. */
 const WRITE_DELAY_MS = 50;
 
-const billingTable = Resource.BillingTable.name;
+const { BillingTable: billingTable } = resolveStageTables(cli.stage, {
+  BillingTable: '::BillingTableTable',
+});
 
 assertStageResources(cli.stage, { BillingTable: billingTable });
 
