@@ -299,11 +299,8 @@ export default $config({
     });
 
     const stageForEndpoints = isProduction ? Stage.Production : Stage.Staging;
-    // The browser hits the S3 endpoint of every region directly — list-objects,
-    // uploads, downloads, etc. — so each one needs to be in `connect-src` or the
-    // browser blocks the request with a CSP violation before it ever leaves.
-    // CSP is a single static document header that cannot vary per user, so it
-    // must list every regional S3 endpoint any user could reach.
+    // The browser hits every region's S3 endpoint directly, and CSP is one static
+    // header that can't vary per user — so `connect-src` must list them all.
     const s3GatewayUrls = Object.values(S3Region)
       .map((r) => getS3Endpoint(r, stageForEndpoints))
       .join(' ');

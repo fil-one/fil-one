@@ -96,8 +96,18 @@ export function supportsBucketManagement(region: S3Region): boolean {
 }
 
 /**
- * Build the S3-compatible endpoint URL for a given region and stage.
- * e.g. https://eu-west-1.s3.fil.one (production) or https://eu-west-1.s3.staging.fil.one (non-prod).
+ * Domain dedicated to user data (FIL-627). Reputation systems act on the
+ * registrable domain, so one abusive upload under `fil.one` could flag the
+ * console, website, docs and email with it. Nothing else is served from here.
+ *
+ * Operators terminate TLS themselves — every one must serve this hostname
+ * before merge.
+ */
+const S3_DATA_DOMAIN = 's3.filonecontent.com';
+
+/**
+ * Build the S3-compatible endpoint URL for a region and stage. Non-production
+ * stages talk to each operator's own hostname directly.
  */
 export function getS3Endpoint(region: S3Region, stage: Stage | string): string {
   //TODO change this when aurora supports staging URL structure through our DNS.
@@ -111,9 +121,7 @@ export function getS3Endpoint(region: S3Region, stage: Stage | string): string {
         return 'https://ingot.staging.fil.one';
     }
   }
-  const base = 's3.fil.one';
-  // const base = stage === Stage.Production ? 's3.fil.one' : 's3.staging.fil.one';
-  return `https://${region}.${base}`;
+  return `https://${region}.${S3_DATA_DOMAIN}`;
 }
 
 /**
