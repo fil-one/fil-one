@@ -1,8 +1,8 @@
 import type { ErrorComponentProps } from '@tanstack/react-router';
-import { clsx } from 'clsx';
 
 import { Card } from './Card.js';
 import { Heading } from './Heading/Heading.js';
+import { AuthCard } from './AuthCard.js';
 
 type RecoveryLayoutProps = {
   title: string;
@@ -14,40 +14,33 @@ type RecoveryLayoutProps = {
    * renders on a bare page.
    */
   standalone?: boolean;
-  children?: React.ReactNode;
+  /** Actions (and any extras) rendered below the description. */
+  children: React.ReactNode;
 };
 
 function RecoveryLayout({ title, description, standalone, children }: RecoveryLayoutProps) {
+  const content = (
+    <>
+      <Heading tag="h1" size="lg" balance className="font-normal tracking-tight">
+        {title}
+      </Heading>
+      <p className="mt-2 text-sm text-(--color-paragraph-text)">{description}</p>
+      {children}
+    </>
+  );
+
+  // Standalone (404, root crash): the shared auth card supplies the full-screen
+  // ground and the Fil One lockup, matching verify-email and the Auth0 screens.
+  if (standalone) return <AuthCard>{content}</AuthCard>;
+
+  // Inside AppShell's <main>: the shell supplies the page chrome, so no
+  // full-screen ground here. The lockup still rides on the card so it reads as
+  // a deliberate surface, matching the standalone recovery and auth cards.
   return (
-    <div
-      className={clsx(
-        'flex items-center justify-center px-5 py-12',
-        standalone && 'min-h-screen bg-zinc-50',
-      )}
-    >
-      <Card className="w-full max-w-lg">
-        {standalone && (
-          <a href="/dashboard" className="mb-6 inline-block">
-            <img src="/fil-one-logo.svg" alt="Fil One" className="h-7 w-auto" />
-          </a>
-        )}
-        <Heading tag="h1" size="xl" description={description}>
-          {title}
-        </Heading>
-        <div className="mt-6 flex flex-wrap gap-3">
-          <button
-            type="button"
-            className="button button--primary"
-            onClick={() => window.location.reload()}
-          >
-            Reload page
-          </button>
-          {/* Plain anchor, not Link: a full document load is the reliable way out of a crashed route. */}
-          <a className="button button--ghost" href="/dashboard">
-            Back to dashboard
-          </a>
-        </div>
-        {children}
+    <div className="flex items-center justify-center px-5 py-12">
+      <Card padding="none" className="w-full max-w-[420px] p-8">
+        <img src="/fil-one-logo.svg" alt="Fil One" className="mb-8 h-5 w-auto" />
+        {content}
       </Card>
     </div>
   );
@@ -59,6 +52,20 @@ export function RouteErrorPage({ error }: ErrorComponentProps) {
       title="Something went wrong"
       description="We couldn't finish loading this page. Reload it or return to the dashboard."
     >
+      <button
+        type="button"
+        className="button button--primary button--lg mt-6 w-full justify-center py-3.5"
+        onClick={() => window.location.reload()}
+      >
+        Reload page
+      </button>
+      {/* Plain anchor, not Link: a full document load is the reliable way out of a crashed route. */}
+      <a
+        className="button button--ghost button--lg mt-3 w-full justify-center py-3.5"
+        href="/dashboard"
+      >
+        Back to dashboard
+      </a>
       {import.meta.env.DEV && (
         <details className="mt-6 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
           <summary className="cursor-pointer font-medium text-zinc-700">Technical details</summary>
@@ -77,6 +84,14 @@ export function RouteNotFoundPage() {
       standalone
       title="Page not found"
       description="The page may have moved, or the address may be incomplete."
-    />
+    >
+      {/* Reload is pointless on a 404, so the only action is a way back. */}
+      <a
+        className="button button--primary button--lg mt-6 w-full justify-center py-3.5"
+        href="/dashboard"
+      >
+        Back to dashboard
+      </a>
+    </RecoveryLayout>
   );
 }
