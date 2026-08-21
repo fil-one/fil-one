@@ -88,6 +88,8 @@ aws iam list-roles --query 'length(Roles)' --output text
 
 | Script                         | Purpose                                                                                                                                                |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `convert-orgs-to-orgtable.ts`  | Move org membership into OrgTable, `admin` → `owner` (runbook: [docs/OrgConversionRunbook.md](../docs/OrgConversionRunbook.md))                        |
+| `revert-org-conversion.ts`     | Undo `convert-orgs-to-orgtable.ts`                                                                                                                     |
 | `tail-logs.sh`                 | Tail CloudWatch logs for a Lambda function                                                                                                             |
 | `tail-tenant-setup-logs.sh`    | Tail logs for the Aurora tenant setup Lambda                                                                                                           |
 | `reset-db.ts`                  | Reset the Aurora database for a stage                                                                                                                  |
@@ -95,3 +97,11 @@ aws iam list-roles --query 'length(Roles)' --output text
 | `aurora-s3-env.ts`             | Print Aurora S3 environment variables                                                                                                                  |
 | `aurora-preview-url.ts`        | Pre-signed GetObject URL for an Aurora object, plus a billing report for the owning account (Stripe dashboard link, subscription status, latest usage) |
 | `aurora-demo.ts`               | Demo script for Aurora S3 operations                                                                                                                   |
+
+### Shared helpers (`bin/lib/`)
+
+| Module      | What it holds                                                                              |
+| ----------- | ------------------------------------------------------------------------------------------ |
+| `args.ts`   | `--stage` (required, no default), `--execute`/`--dry-run`, usage and help                  |
+| `stage.ts`  | Table names from `sst state export`, the resolved-name stage assertion, the region mapping |
+| `dynamo.ts` | Paging a Scan to the end, decoding rows, and retrying a cancelled transaction              |
