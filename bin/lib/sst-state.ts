@@ -5,8 +5,9 @@
 // talk to AWS with the operator's ambient credentials, which is why they take a
 // stage name rather than trusting whatever the environment happens to hold.
 //
-// The migration scripts do the opposite — see bin/lib/stage.ts — because they
-// need every linked resource, not one table.
+// The migration scripts read the same exported state through
+// bin/lib/stage.ts's resolveStageTables, which resolves several tables at
+// once; this helper answers for one table and derives its region from the ARN.
 
 import { execFileSync } from 'node:child_process';
 
