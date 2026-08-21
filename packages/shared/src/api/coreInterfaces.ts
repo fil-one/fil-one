@@ -38,6 +38,25 @@ export enum ApiErrorCode {
   NOT_A_MEMBER = 'NOT_A_MEMBER',
   /** The invitation was issued to a different email address than the session's. */
   INVITE_EMAIL_MISMATCH = 'INVITE_EMAIL_MISMATCH',
+  /**
+   * The token resolves to no usable invitation. One code for expired, revoked,
+   * already accepted, and never existed: the accept page says the link is no
+   * longer good and offers to ask for a new one, and telling the four apart
+   * would describe other people's invitations to whoever holds a stale link.
+   */
+  INVITE_NOT_FOUND = 'INVITE_NOT_FOUND',
+  /**
+   * The org already has as many pending invitations as it may hold. The cap is
+   * the only rate limit on the invite path, so this is a routine answer rather
+   * than an incident: revoking or accepting one frees a slot.
+   */
+  INVITE_LIMIT_REACHED = 'INVITE_LIMIT_REACHED',
+  /**
+   * The change would leave the organization with no Owner. Its own code because
+   * the console's remedy is specific — promote somebody first, or transfer
+   * ownership — and a generic conflict would send the user to support.
+   */
+  LAST_OWNER = 'LAST_OWNER',
 }
 
 export interface ErrorResponse {

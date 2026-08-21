@@ -248,4 +248,39 @@ describe('auth-login handler', () => {
     expect(params.has('screen_hint')).toBe(false);
     expect(params.has('connection')).toBe(false);
   });
+
+  // -------------------------------------------------------------------------
+  // Step-up: max_age
+  // -------------------------------------------------------------------------
+
+  it('passes max_age=0 through, which is the step-up request itself', async () => {
+    // Zero is the value that matters, so it must survive a truthiness test on
+    // its way to the authorize URL: it is what forces a fresh authentication
+    // and stamps a current `auth_time` on the new ID token.
+    const event = buildEvent({ queryStringParameters: { max_age: '0' } });
+
+    const result = await handler(event, stubContext);
+
+    expect(String(result.headers!['Location'])).toContain('max_age=0');
+  });
+
+  it('leaves max_age off an ordinary login', async () => {
+    const result = await handler(buildEvent(), stubContext);
+
+    expect(parseLocation(result).searchParams.has('max_age')).toBe(false);
+  });
+
+  it.each([
+    ['a word', 'soon'],
+    ['a negative number', '-1'],
+    ['a fraction', '1.5'],
+    ['an empty value', ''],
+  ])('drops %s rather than letting Auth0 reject the whole request', async (_label, max_age) => {
+    const event = buildEvent({ queryStringParameters: { max_age } });
+
+    const result = await handler(event, stubContext);
+
+    expect(result.statusCode).toBe(302);
+    expect(parseLocation(result).searchParams.has('max_age')).toBe(false);
+  });
 });

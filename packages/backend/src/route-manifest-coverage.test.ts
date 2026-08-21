@@ -74,7 +74,10 @@ const byRequirement = (requires: RouteManifestEntry['requires']) =>
 const permissionGated: { handler: string; permission: Permission }[] = ROUTE_MANIFEST.filter(
   (route) => route.category === 'authenticated',
 ).flatMap((route) =>
-  route.requires === undefined || route.requires === 'self' || route.requires === 'in-handler'
+  route.requires === undefined ||
+  route.requires === 'self' ||
+  route.requires === 'in-handler' ||
+  route.requires === 'invite-token'
     ? []
     : [{ handler: route.handler, permission: route.requires }],
 );
@@ -131,13 +134,29 @@ describe('route manifest coverage', () => {
 
   it('applies the declared cap in the handler on the routes that carry one', () => {
     // A route can hold a fixed permission in the chain and still narrow it on
-    // the body — create-access-key gates on `keys.create` and then caps the new
-    // key at the creator's own authority. The cap is the shared registry's, so
-    // a route declaring one without calling it is a cap that does not run.
+    // something the chain has not read — create-access-key gates on
+    // `keys.create` and caps the new key at the creator's own authority; the
+    // member and invitation routes gate on `members.manage` and cap the reach
+    // at the caller's own role. Both caps come from the shared registry, so a
+    // route declaring one without calling it is a cap that does not run.
+    const capIdiom = /\b(excessKeyPermissions|canManageTargetRole|canChangeRole)\(/;
     const uncapped = ROUTE_MANIFEST.filter((route) => route.capsInHandler)
-      .filter((route) => !/\bexcessKeyPermissions\(/.test(handlerSource(route.handler)))
+      .filter((route) => !capIdiom.test(handlerSource(route.handler)))
       .map((route) => route.handler);
     expect(uncapped).toStrictEqual([]);
+  });
+
+  it('leaves the invite-token route without an org gate, and makes it prove the token', () => {
+    // Accepting an invitation cannot ask for membership in the org it is about
+    // to create one in. What replaces the gate is in the handler: the token is
+    // resolved to an invitation, and the session's verified email is compared
+    // with the address it was issued to.
+    for (const route of byRequirement('invite-token')) {
+      const source = handlerSource(route.handler);
+      expect(/\b(authorize|requireMembershipMiddleware)\(/.test(source)).toBe(false);
+      expect(/\bresolveInvitationByToken\(/.test(source)).toBe(true);
+      expect(/\bnormalizeInviteEmail\(/.test(source)).toBe(true);
+    }
   });
 
   it('leaves the self-service routes without an org gate of any kind', () => {

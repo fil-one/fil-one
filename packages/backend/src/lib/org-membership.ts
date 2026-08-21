@@ -23,20 +23,43 @@ import { resolveOrgName } from './org-profile.js';
  *   with `ownerCount`, the last-Owner invariant. It sits beside the rows it
  *   counts so every owner-set transaction is single-table.
  *
- * The invitation rows (`INVITE#`, `INVITETOKEN#`) arrive with the invitations
- * PR, which adds their key builders here.
+ * Two more shapes belong to invitations, and their key builders are here beside
+ * the membership ones because an accept transaction writes both families at
+ * once:
+ * - `ORG#{orgId}` / `INVITE#{inviteId}` — the canonical invitation.
+ * - `INVITETOKEN#{sha256(token)}` / `LOOKUP` — the inverse item that resolves an
+ *   accept link, written and deleted in the same transaction as the row it
+ *   points at. Only the hash is ever stored; the token itself exists in the
+ *   email and nowhere else. The lifecycle lives in `lib/invitations.ts`.
  *
  * The org profile row stays in UserInfoTable (`ORG#{orgId}/PROFILE`), so the
  * transactions that change an org's name and its membership span both tables.
  */
 
+/** The canonical membership sort-key prefix, shared by the builder and the parser. */
+const memberSkPrefix = (): string => 'MEMBER#';
+
 /** The inverse item's sort-key prefix, shared by the builder and the parser. */
 const membershipSkPrefix = (): string => 'MEMBERSHIP#';
 
+/** The invitation sort-key prefix, shared by the builder and the parser. */
+const inviteSkPrefix = (): string => 'INVITE#';
+
 export const OrgKeys = {
   orgPk: (orgId: string): string => `ORG#${orgId}`,
-  memberSk: (userId: string): string => `MEMBER#${userId}`,
-  memberSkPrefix: (): string => 'MEMBER#',
+  memberSk: (userId: string): string => `${memberSkPrefix()}${userId}`,
+  memberSkPrefix,
+  /**
+   * Inverse of {@link memberSk}, for the Query that walks an org's member rows.
+   * User ids are UUIDs, so the same no-`#` check as {@link parseMembershipSk}
+   * makes the split unambiguous; a row the rule rejects is dropped rather than
+   * returned under an id no lookup would match.
+   */
+  parseMemberSk: (sk: string): string | undefined => {
+    const prefix = memberSkPrefix();
+    const userId = sk.startsWith(prefix) ? sk.slice(prefix.length) : undefined;
+    return userId && !userId.includes('#') ? userId : undefined;
+  },
   orgMetaSk: (): string => 'META',
   userPk: (userId: string): string => `USER#${userId}`,
   membershipSk: (orgId: string): string => `MEMBERSHIP#${orgId}`,
@@ -51,6 +74,25 @@ export const OrgKeys = {
     const orgId = sk.startsWith(prefix) ? sk.slice(prefix.length) : undefined;
     return orgId && !orgId.includes('#') ? orgId : undefined;
   },
+  inviteSk: (inviteId: string): string => `${inviteSkPrefix()}${inviteId}`,
+  inviteSkPrefix,
+  /**
+   * Inverse of {@link inviteSk}, for a Query that walks an org's invitations and
+   * needs each row's id back. Invitation ids are UUIDs, so the same
+   * no-`#` check as {@link parseMembershipSk} makes the split unambiguous.
+   */
+  parseInviteSk: (sk: string): string | undefined => {
+    const prefix = inviteSkPrefix();
+    const inviteId = sk.startsWith(prefix) ? sk.slice(prefix.length) : undefined;
+    return inviteId && !inviteId.includes('#') ? inviteId : undefined;
+  },
+  /**
+   * The token lookup, keyed by the token's SHA-256 and never by the token. The
+   * hash is what arrives from an accept request, so the digest is the address:
+   * there is nothing to compare and no row to scan.
+   */
+  inviteTokenPk: (tokenHash: string): string => `INVITETOKEN#${tokenHash}`,
+  inviteTokenSk: (): string => 'LOOKUP',
   /**
    * Reserved for SSO: an Auth0 organization id resolves to the FilOne org it
    * was created for. Nothing writes this row in M1 — reserving the key now
@@ -166,12 +208,124 @@ export async function resolveMembership(
 }
 
 /**
+ * The org's Owner counter, or undefined when the META row or the attribute is
+ * missing.
+ *
+ * Read only after a transaction cancelled on that counter, to tell two very
+ * different failures apart: the guard firing on an org's last Owner, and there
+ * being no counter for the guard to read. The first is the invariant working;
+ * the second is a conversion gap the drift checker repairs, and answering
+ * "you are the last Owner" for it would diagnose an org we cannot diagnose.
+ *
+ * Consistent, because the transaction that just failed is the thing it is
+ * explaining.
+ */
+export async function readOwnerCount(orgId: string): Promise<number | undefined> {
+  const { Item } = await getDynamoClient().send(
+    new GetItemCommand({
+      TableName: Resource.OrgTable.name,
+      Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: OrgKeys.orgMetaSk() } },
+      ConsistentRead: true,
+    }),
+  );
+
+  const stored = Item?.ownerCount?.N;
+  if (stored === undefined) return undefined;
+  const ownerCount = Number(stored);
+  return Number.isFinite(ownerCount) ? ownerCount : undefined;
+}
+
+/**
  * The most inverse items one Query walk will collect. An org of one has a
  * single row and an invited user a handful; a user with more memberships than
  * this is a bug or an attack, and truncating names both in the log rather than
  * paging forever on the login path.
  */
 const MAX_MEMBERSHIPS = 100;
+
+/**
+ * The most member rows the roster read will collect. An M1 org is a handful of
+ * people; a page that would need more than this is a product decision (paging,
+ * search) rather than something to discover by timing out.
+ */
+const MAX_MEMBERS = 500;
+
+/**
+ * Every member of an org, from the canonical rows. One Query on the org's
+ * partition — the access pattern the ADR chose OrgTable for — paged because a
+ * Query returns at most 1 MB per call.
+ *
+ * A row whose sort key is not a well-formed `MEMBER#{userId}` or whose role is
+ * not one of the four is dropped and logged: the roster is what the console
+ * renders role controls from, and a member with a role nothing can authorize
+ * would render controls that always fail.
+ */
+export async function listMembers(orgId: string): Promise<OrgMembership[]> {
+  const members: OrgMembership[] = [];
+  let startKey: Record<string, AttributeValue> | undefined;
+
+  do {
+    const { Items, LastEvaluatedKey } = await getDynamoClient().send(
+      new QueryCommand({
+        TableName: Resource.OrgTable.name,
+        KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
+        ExpressionAttributeValues: {
+          ':pk': { S: OrgKeys.orgPk(orgId) },
+          ':skPrefix': { S: OrgKeys.memberSkPrefix() },
+        },
+        // Consistent: a member added or removed moments ago must not still be
+        // the list the caller acts on next.
+        ConsistentRead: true,
+        ...(startKey ? { ExclusiveStartKey: startKey } : {}),
+      }),
+    );
+
+    for (const item of Items ?? []) {
+      const member = toMembership(item, orgId);
+      if (member) members.push(member);
+    }
+
+    if (members.length >= MAX_MEMBERS) {
+      console.error('[org-membership] Member list truncated at the cap', {
+        orgId,
+        cap: MAX_MEMBERS,
+      });
+      return members.slice(0, MAX_MEMBERS);
+    }
+
+    startKey = LastEvaluatedKey;
+  } while (startKey);
+
+  return members;
+}
+
+function toMembership(
+  item: Record<string, AttributeValue>,
+  orgId: string,
+): OrgMembership | undefined {
+  const sk = item.sk?.S ?? '';
+  const userId = OrgKeys.parseMemberSk(sk);
+  if (!userId) {
+    console.error('[org-membership] Row in the member range has no member key — dropped', {
+      orgId,
+      sk,
+    });
+    return undefined;
+  }
+
+  const attributes = decodeRow<OrgMembership>(item);
+  const storedRole = attributes.role ?? '';
+  if (!isOrgRole(storedRole)) {
+    console.error('[org-membership] Member row carries an unrecognized role — dropped', {
+      orgId,
+      userId,
+      role: storedRole,
+    });
+    return undefined;
+  }
+
+  return { ...attributes, orgId, userId, role: storedRole };
+}
 
 /**
  * Every org the user belongs to, from the inverse items. One Query, no index,

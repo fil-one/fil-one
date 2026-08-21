@@ -37,8 +37,15 @@ export type RouteCategory =
  * membership row is what went wrong. `'in-handler'` marks routes whose
  * permission depends on the request body; the chain gates them on membership
  * and the handler checks the permission against this same registry.
+ *
+ * `'invite-token'` marks the one route whose caller is, by definition, not yet a
+ * member of the org it acts on: accepting an invitation. Its authorization is
+ * the single-use token in the body plus a session whose verified email is the
+ * invited address, both checked in the handler; a membership gate in the chain
+ * would refuse every invitation there is. Deliberately not `'self'`, which is
+ * for routes that touch no org state at all — accepting creates a membership.
  */
-export type RouteRequirement = Permission | 'self' | 'in-handler';
+export type RouteRequirement = Permission | 'self' | 'in-handler' | 'invite-token';
 
 export interface RouteManifestEntry {
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -50,10 +57,12 @@ export interface RouteManifestEntry {
   /** Set on `authenticated` routes, absent on every other category. */
   requires?: RouteRequirement;
   /**
-   * Set on a route that carries a declared permission AND a second, body-
-   * dependent restriction the chain cannot express. `requires` still says what
-   * reaching the route costs; this says the handler narrows it further, so a
-   * reader of the manifest is not told the whole gate is in the chain.
+   * Set on a route that carries a declared permission AND a second restriction
+   * the chain cannot express, because it depends on something the chain has not
+   * read: the request body, or the role of the member or invitation the request
+   * names. `requires` still says what reaching the route costs; this says the
+   * handler narrows it further, so a reader of the manifest is not told the
+   * whole gate is in the chain.
    */
   capsInHandler?: boolean;
   /**
@@ -212,14 +221,99 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
   },
 
   // ── Organization ─────────────────────────────────────────────────
-  // Rename only. Ownership transfer and deletion carry their own permissions
-  // and get their own routes when they ship.
+  // Rename and ownership transfer. Deletion carries its own permission and gets
+  // its own route when it ships.
   {
     method: 'PATCH',
     path: '/api/org',
     handler: 'update-org',
     category: 'authenticated',
     requires: 'org.rename',
+  },
+  // Owner-only, and the one org action behind a step-up: it is the only verb
+  // that can take the caller's own authority away, so a session somebody walked
+  // away from must not be enough to move the seat.
+  {
+    method: 'POST',
+    path: '/api/org/transfer',
+    handler: 'transfer-ownership',
+    category: 'authenticated',
+    requires: 'org.transfer',
+  },
+
+  // ── Members ──────────────────────────────────────────────────────
+  // Every role reads the roster: the matrix grants `members.read` to all four,
+  // and a member who cannot see who else is in the org cannot tell who to ask
+  // for anything.
+  {
+    method: 'GET',
+    path: '/api/org/members',
+    handler: 'list-members',
+    category: 'authenticated',
+    requires: 'members.read',
+  },
+  // `members.manage` is what reaching these routes costs; the ceiling on the
+  // TARGET runs in the handler against the same registry, because the target's
+  // role is a row the chain has not read. Touching an Owner — promoting to,
+  // demoting from, removing — needs `owners.manage` there.
+  {
+    method: 'PATCH',
+    path: '/api/org/members/{userId}',
+    handler: 'update-member-role',
+    category: 'authenticated',
+    requires: 'members.manage',
+    capsInHandler: true,
+  },
+  {
+    method: 'DELETE',
+    path: '/api/org/members/{userId}',
+    handler: 'remove-member',
+    category: 'authenticated',
+    requires: 'members.manage',
+    capsInHandler: true,
+  },
+
+  // ── Invitations ──────────────────────────────────────────────────
+  // The same split the members routes have: `members.manage` is what reaching
+  // these costs, and the ceiling on the ROLE — the one being invited, or the one
+  // a pending invitation carries — runs in the handler against the same
+  // registry. An Admin cannot invite an Owner, and cannot revoke an Owner
+  // invitation either. Listing carries no ceiling: it is one org's own pending
+  // invitations, and every caller who reaches it may already manage them.
+  {
+    method: 'GET',
+    path: '/api/org/invitations',
+    handler: 'list-invitations',
+    category: 'authenticated',
+    requires: 'members.manage',
+  },
+  {
+    method: 'POST',
+    path: '/api/org/invitations',
+    handler: 'create-invitation',
+    category: 'authenticated',
+    requires: 'members.manage',
+    capsInHandler: true,
+  },
+  {
+    method: 'DELETE',
+    path: '/api/org/invitations/{inviteId}',
+    handler: 'revoke-invitation',
+    category: 'authenticated',
+    requires: 'members.manage',
+    capsInHandler: true,
+  },
+  // Outside the org gate, and it has to be: the caller is not a member of the
+  // inviting org yet, so a membership check here would refuse every invitation
+  // there is. The token plus a session whose verified email matches the
+  // invitation is the whole authorization, and neither is something a role can
+  // grant.
+  {
+    method: 'POST',
+    path: '/api/invitations/accept',
+    handler: 'accept-invitation',
+    category: 'authenticated',
+    requires: 'invite-token',
   },
 
   // ── Auth ─────────────────────────────────────────────────────────
