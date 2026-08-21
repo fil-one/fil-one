@@ -79,7 +79,9 @@ describe('getUsageLimits', () => {
 
 describe('getS3Endpoint', () => {
   it('returns the production URL with region prefix', () => {
-    expect(getS3Endpoint(S3Region.EuWest1, Stage.Production)).toBe('https://eu-west-1.s3.fil.one');
+    expect(getS3Endpoint(S3Region.EuWest1, Stage.Production)).toBe(
+      'https://eu-west-1.s3.filonecontent.com',
+    );
   });
 
   it('returns the dev URL for staging', () => {
@@ -92,6 +94,14 @@ describe('getS3Endpoint', () => {
 
   it('returns the eu-central-3 staging gateway', () => {
     expect(getS3Endpoint(S3Region.EuCentral3, Stage.Staging)).toBe('https://ingot.staging.fil.one');
+  });
+
+  it('serves every region from the content domain in production', () => {
+    for (const region of Object.values(S3Region)) {
+      expect(getS3Endpoint(region, Stage.Production)).toBe(
+        `https://${region}.s3.filonecontent.com`,
+      );
+    }
   });
 });
 
