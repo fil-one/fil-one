@@ -251,6 +251,38 @@ gate, so validate the expected `owner` on both rows.
 
 ## Backend correctness
 
+### Re-point the deletion teardown at OrgTable, before the conversion runs
+
+ADR §2 (account deletion in a multi-org world) pins this to the first merge
+group: `lib/deletion-targets.ts:38-62` enumerates an org's members from the
+`UserInfoTable` `MEMBER#` rows the conversion deletes, so the day the
+conversion runs, the live Stripe-triggered teardown resolves zero members and
+marks itself done having deleted nothing member-shaped. The re-point reads
+`listMembers` from OrgTable, applies the sole-membership census — identity
+teardown only for a member whose sole membership is this org and whose
+personal org it is — and scrubs the OrgTable rows nothing cleans today
+(`MEMBERSHIP#` inverse items, `META`, `INVITE#`, `INVITETOKEN#` lookups, the
+last of which is a standing accept path into a deleted org). No behavior
+changes while every org is an org of one.
+
+### Cancel the org's own Stripe objects in the teardown, with the flip
+
+The second pin from ADR §2: `lib/deletion-stripe-teardown.ts:30-33` cancels
+each member's `CUSTOMER#{userId}` billing, and the re-key moves the
+subscription to `ORG#{orgId}/SUBSCRIPTION` with one Stripe customer per org.
+After the flip's cleanup deletes the legacy rows, the teardown would cancel
+nothing. Read the org row's `stripeCustomerId`/`subscriptionId` and tear those
+down; `scrubBilling` stamps the org row rather than per-member rows.
+
+### The accept transaction refuses a deleting org
+
+ADR §2: accepting an invitation is the one write that creates a membership in
+an org the caller is not yet in, and the caller's own session fence looks at
+their active org, not the invited one. Add `orgNotDeletingCheck(orgId)` to the
+accept transaction (`accept-invitation`), positioned to keep the existing
+cancellation-reason indices intact, so a membership cannot be born into a
+teardown whose target snapshot has already been resolved.
+
 ### Page the RAG key query before filtering by creator
 
 `packages/backend/src/handlers/list-rag-api-keys.ts:43` filters the first Query
