@@ -8,7 +8,6 @@ import type {
 import type { StepUpRequiredResponse } from '@filone/shared';
 import { getMfaEnrollments } from '../lib/auth0-management.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
-import { getMfaEnrollments } from '../lib/auth0-management.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getVerifiedIdTokenClaims, withRefreshedCookies } from './auth.js';
 
