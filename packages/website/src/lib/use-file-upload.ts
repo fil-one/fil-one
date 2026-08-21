@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import type { S3Region } from '@filone/shared';
 import { useToast } from '../components/Toast/index.js';
+import { queryKeys } from './query-client.js';
 import { batchPresign } from './use-presign.js';
 
 export type UploadStep = 'idle' | 'uploading' | 'done';
@@ -189,8 +191,18 @@ async function uploadEntries(
   return { failedCount };
 }
 
+// New objects change the bucket's listing and its storage totals. The totals feed
+// the analytics query, which the buckets table and the detail card both read and
+// hold with a multi-minute staleTime, so without this the numbers sit stale for
+// minutes after an upload. Invalidation overrides staleTime.
+function invalidateAfterUpload(queryClient: QueryClient, bucketName: string, region: S3Region) {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.bucketAnalytics(bucketName, region) });
+}
+
 export function useFileUpload({ bucketName, region, onSuccess }: UseFileUploadOptions) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const [uploadStep, setUploadStep] = useState<UploadStep>('idle');
   const [files, setFiles] = useState<FileEntry[]>([]);
@@ -295,12 +307,13 @@ export function useFileUpload({ bucketName, region, onSuccess }: UseFileUploadOp
           : `${files.length} files uploaded successfully`,
       );
       setUploadStep('done');
+      invalidateAfterUpload(queryClient, bucketName, region);
       onSuccess?.();
     } else {
       toast.error(`${failedCount} file${failedCount > 1 ? 's' : ''} failed to upload`);
       setUploadStep('idle');
     }
-  }, [files, bucketName, region, updateEntry, toast, onSuccess]);
+  }, [files, bucketName, region, updateEntry, toast, queryClient, onSuccess]);
 
   const handleRetry = useCallback(async () => {
     const failed = files.filter((e) => e.status === 'error');
@@ -319,12 +332,13 @@ export function useFileUpload({ bucketName, region, onSuccess }: UseFileUploadOp
     if (failedCount === 0) {
       toast.success('All files uploaded successfully');
       setUploadStep('done');
+      invalidateAfterUpload(queryClient, bucketName, region);
       onSuccess?.();
     } else {
       toast.error(`${failedCount} file${failedCount > 1 ? 's' : ''} failed to upload`);
       setUploadStep('idle');
     }
-  }, [files, bucketName, region, updateEntry, toast, onSuccess]);
+  }, [files, bucketName, region, updateEntry, toast, queryClient, onSuccess]);
 
   const doneCount = files.filter((e) => e.status === 'done').length;
   const failedCount = files.filter((e) => e.status === 'error').length;
