@@ -314,7 +314,6 @@ describe('auroraOrchestrator', () => {
           region: S3Region.EuWest1,
           createdAt: '2026-01-01T00:00:00Z',
           isPublic: false,
-          versioning: false,
           encrypted: true,
         },
         {
@@ -322,34 +321,23 @@ describe('auroraOrchestrator', () => {
           region: S3Region.EuWest1,
           createdAt: '2026-01-02T00:00:00Z',
           isPublic: false,
-          versioning: true,
           encrypted: true,
         },
       ]);
     });
 
-    it('returns versioning:false when includeVersioning is false, even for versioned buckets', async () => {
+    it('never reads per-bucket detail: versioning and object-lock cost a call per bucket', async () => {
       mockGetAuroraPortalApiKey.mockResolvedValue('api-key');
       mockPortalListBuckets.mockResolvedValue({
-        data: {
-          items: [
-            {
-              name: 'b',
-              createdAt: '2026-01-02T00:00:00Z',
-              flags: ['versioned', 'encrypted'],
-            },
-          ],
-        },
+        data: { items: [{ name: 'a', createdAt: '2026-01-01T00:00:00Z' }] },
         error: undefined,
       });
 
-      const result = await auroraOrchestrator.listBuckets('aurora-t-1', {
-        includeVersioning: false,
-      });
+      const result = await auroraOrchestrator.listBuckets('aurora-t-1');
 
-      expect(result[0]?.versioning).toBe(false);
-      // encrypted is independent of the versioning option.
-      expect(result[0]?.encrypted).toBe(true);
+      expect(mockPortalGetBucketInfo).not.toHaveBeenCalled();
+      expect(result[0]).not.toHaveProperty('versioning');
+      expect(result[0]).not.toHaveProperty('objectLockEnabled');
     });
 
     it('drops items missing name or createdAt', async () => {

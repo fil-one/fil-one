@@ -27,7 +27,6 @@ import type {
   GetTenantUsageMetricsOptions,
   IssueAccessKeyOpts,
   IssuedAccessKey,
-  ListBucketsOptions,
   ServiceOrchestrator,
   TenantStatusProbe,
   StorageUsageSample,
@@ -180,23 +179,22 @@ export const fthOrchestrator = {
     await s3DeleteBucket(s3, bucketName);
   },
 
-  async listBuckets(tenantId: string, opts: ListBucketsOptions = {}): Promise<BucketSummary[]> {
-    // Loading versioning costs one GetBucketVersioning call per bucket (an N+1),
-    // so callers that don't surface it opt out via includeVersioning: false.
-    const includeVersioning = opts.includeVersioning ?? true;
+  async listBuckets(tenantId: string): Promise<BucketSummary[]> {
+    // Versioning and object-lock both cost a GetBucket*/GetObjectLockConfiguration
+    // call per bucket, an N+1 nobody wants to pay just to render a list. Neither
+    // is returned here; getBucket loads both for the one bucket the detail page
+    // actually needs them for.
     const ctx = await fthOrchestrator.getS3ClientContext(tenantId);
     const s3 = createS3Client(ctx);
     const { buckets } = await s3ListBuckets(s3);
-    return Promise.all(
-      buckets.map(async (b) => ({
-        bucketName: b.name,
-        region: fthOrchestrator.region,
-        createdAt: b.createdAt,
-        isPublic: false,
-        versioning: includeVersioning ? await getBucketVersioning(s3, b.name) : false,
-        encrypted: true,
-      })),
-    );
+
+    return buckets.map((b) => ({
+      bucketName: b.name,
+      region: fthOrchestrator.region,
+      createdAt: b.createdAt,
+      isPublic: false,
+      encrypted: true,
+    }));
   },
 
   async getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null> {
