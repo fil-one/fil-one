@@ -10,8 +10,8 @@ import { Heading } from '../components/Heading/Heading';
 import { PageLayout } from '../components/PageLayout.js';
 import { CodeBlock } from '../components/CodeBlock';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { Spinner } from '../components/Spinner';
 import { Tab, TabList, TabPanel, TabPanels, Tabs } from '../components/Tabs';
+import { TableSkeleton, type SkeletonColumn } from '../components/Table/TableSkeleton';
 import { useToast } from '../components/Toast';
 
 import type { AccessKey, ListAccessKeysResponse, S3Region } from '@filone/shared';
@@ -21,7 +21,7 @@ import { RegionSelect } from '../components/RegionSelect';
 import { FILONE_STAGE } from '../env';
 import { apiRequest } from '../lib/api.js';
 import { useCopyToClipboard } from '../lib/use-copy-to-clipboard.js';
-import { queryKeys } from '../lib/query-client.js';
+import { LIST_GC_TIME, LIST_STALE_TIME, queryKeys } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
 // Tab 1: Access Keys
@@ -371,6 +371,19 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 // Page
 // ---------------------------------------------------------------------------
 
+// Mirrors AccessKeysTable at its widest (showRegion + showBuckets +
+// showPermissions), matching each column's breakpoint so the loading
+// placeholder hides the same columns as the real table.
+const SKELETON_COLUMNS: SkeletonColumn[] = [
+  { label: 'Name' },
+  { label: 'Region', className: 'hidden md:table-cell' },
+  { label: 'Buckets', className: 'hidden lg:table-cell' },
+  { label: 'Permissions', className: 'hidden md:table-cell' },
+  { label: 'Status', className: 'hidden sm:table-cell' },
+  { label: 'Last Used', className: 'hidden md:table-cell' },
+  {},
+];
+
 export function ApiKeysPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -379,6 +392,8 @@ export function ApiKeysPage() {
   const { data, isPending, isError, error } = useQuery({
     queryKey: queryKeys.accessKeys,
     queryFn: () => apiRequest<ListAccessKeysResponse>('/access-keys'),
+    staleTime: LIST_STALE_TIME,
+    gcTime: LIST_GC_TIME,
   });
   const keys = data?.keys ?? [];
 
@@ -410,14 +425,6 @@ export function ApiKeysPage() {
     } catch {
       // error handled by mutation.onError
     }
-  }
-
-  if (isPending) {
-    return (
-      <div className="flex items-center justify-center p-16">
-        <Spinner ariaLabel="Loading access keys" size={32} />
-      </div>
-    );
   }
 
   if (isError) {
@@ -452,17 +459,29 @@ export function ApiKeysPage() {
     >
       <Tabs>
         <TabList>
-          <Tab testId="api-keys-tab">API keys {keys.length > 0 && `(${keys.length})`}</Tab>
+          <Tab testId="api-keys-tab">
+            API keys {!isPending && keys.length > 0 && `(${keys.length})`}
+          </Tab>
           <Tab testId="connection-details-tab">Connection details</Tab>
         </TabList>
 
         <TabPanels>
           <TabPanel>
-            <AccessKeysTab
-              keys={keys}
-              onCreateOpen={() => void navigate({ to: '/api-keys/create' })}
-              onDelete={handleDelete}
-            />
+            {isPending ? (
+              <div className="mt-4">
+                <TableSkeleton
+                  columns={SKELETON_COLUMNS}
+                  rows={4}
+                  aria-label="Loading access keys"
+                />
+              </div>
+            ) : (
+              <AccessKeysTab
+                keys={keys}
+                onCreateOpen={() => void navigate({ to: '/api-keys/create' })}
+                onDelete={handleDelete}
+              />
+            )}
           </TabPanel>
           <TabPanel>
             <ConnectionDetailsTab />

@@ -3,7 +3,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import type { ListBucketsResponse } from '@filone/shared';
 
 import { apiRequest } from './api.js';
-import { queryKeys } from './query-client.js';
+import { LIST_GC_TIME, LIST_STALE_TIME, queryKeys } from './query-client.js';
 import { useDebouncedValue } from './use-debounced-value.js';
 import {
   bucketRegions,
@@ -36,6 +36,8 @@ export function useBucketsListing(filters: BucketFilters, sort: BucketSort) {
   } = useQuery({
     queryKey: queryKeys.buckets,
     queryFn: () => apiRequest<ListBucketsResponse>('/buckets'),
+    staleTime: LIST_STALE_TIME,
+    gcTime: LIST_GC_TIME,
   });
   const baseBuckets = baseData?.buckets ?? [];
   const showControls = shouldShowBucketControls(baseBuckets.length);
