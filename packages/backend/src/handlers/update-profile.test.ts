@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { ApiErrorCode } from '@filone/shared';
+import { OrgRole } from '@filone/shared';
+import { sstResourceMock } from '../test/sst-resource-mock.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -20,16 +22,7 @@ vi.mock('../lib/auth0-management.js', () => ({
   getConnectionType: (sub: string) => sub.split('|')[0] ?? 'unknown',
 }));
 
-vi.mock('sst', () => ({
-  Resource: {
-    UserInfoTable: { name: 'UserInfoTable' },
-    Auth0ClientId: { value: 'test-client-id' },
-    Auth0ClientSecret: { value: 'test-client-secret' },
-    Auth0MgmtRuntimeClientId: { value: 'test-mgmt-runtime-client-id' },
-    Auth0MgmtRuntimeClientSecret: { value: 'test-mgmt-runtime-client-secret' },
-    AuroraBackofficeToken: { value: 'test-aurora-token' },
-  },
-}));
+vi.mock('sst', () => sstResourceMock());
 
 vi.mock('../lib/auth-secrets.js', () => ({
   getAuthSecrets: () => ({
@@ -51,7 +44,7 @@ process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
 import { handler } from './update-profile.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { buildEvent, buildContext, stubMembershipRead } from '../test/lambda-test-utilities.js';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
@@ -84,6 +77,11 @@ describe('PATCH /api/me/profile handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
+    stubMembershipRead(ddbMock, {
+      orgId: MOCK_ORG_ID,
+      userId: MOCK_USER_ID,
+      role: OrgRole.Owner,
+    });
     mockUpdateAuth0User.mockResolvedValue(undefined);
     mockSendVerificationEmail.mockResolvedValue(undefined);
 

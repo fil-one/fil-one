@@ -1,4 +1,5 @@
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
+import type { OrgMembership } from './org-membership.js';
 
 export interface UserInfo {
   sub: string;
@@ -8,6 +9,20 @@ export interface UserInfo {
   emailVerified: boolean;
   name?: string;
   picture?: string;
+  /**
+   * The caller's membership row in {@link UserInfo.orgId}, set by
+   * `authMiddleware` on every cookie-authenticated request. The row rather than
+   * a flattened role so the member bucket scope that lands on it reaches its
+   * consumers with no new plumbing.
+   *
+   * Absent on the RAG bearer branch, which bypasses `authMiddleware` entirely
+   * and resolves the key creator's membership itself once enforcement ships.
+   *
+   * The permissions it carries are not cached beside it: `permissionsForRole`
+   * is a table lookup, and a second copy of derived state is one more thing
+   * that can disagree with the row.
+   */
+  membership?: OrgMembership;
 }
 
 export interface AuthenticatedEvent extends APIGatewayProxyEventV2 {

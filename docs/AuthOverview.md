@@ -7,7 +7,7 @@ This document describes how authentication and authorization work in the Hypersp
 - **Identity provider:** Auth0 owns user pools, password storage, social/SSO connections, MFA challenges, and access/ID/refresh token issuance.
 - **BFF:** The console API (Lambda + API Gateway) is the Backend-for-Frontend. It handles the OAuth2 authorization-code exchange and writes HTTP-only cookies. The SPA never touches tokens.(AI loves this BFF term: I never seen it before but makes enough sense to me)
 - **Internal identity:** Each Auth0 `sub` is mapped 1:1 to an internal `userId` (UUID) and `orgId` (UUID) in DynamoDB on first login. The mapping is resolved in middleware on every request.
-- **Tenancy:** Users map 1:1 with orgs today (one user creates one org as Admin; multi-member orgs are not yet enabled). Each confirmed org gets up to one Aurora tenant.
+- **Tenancy:** Users map 1:1 with orgs today (one user creates one org as Owner; multi-member orgs are not yet enabled). Each confirmed org gets up to one Aurora tenant.
 - **Authorization:** A subscription guard middleware reads the user's Stripe subscription state from DynamoDB and gates routes by `AccessLevel.Read` or `AccessLevel.Write`.
 - **MFA:** Optional per user. OTP, WebAuthn, and biometric (fingerprint / Face ID) enrollment is driven by an Auth0 Post-Login Action and `app_metadata.mfa_enrolling`. Email is intentionally not offered as an MFA factor and we limit email's role to the sign-up verification gate (see Tenancy below).
 
@@ -164,11 +164,13 @@ Implemented in `resolveUserAndOrg` ([`auth.ts:234-339`](https://github.com/filec
 Look up `pk=SUB#${sub}, sk=IDENTITY`:
 
 - **Hit:** read `userId`, `orgId`. Return.
-- **Miss (first login):** atomic `TransactWriteItems` writes four records:
+- **Miss (first login):** atomic `TransactWriteItems` writes six records, spanning `UserInfoTable` and `OrgTable`:
   - `SUB#${sub} / IDENTITY` (with `attribute_not_exists(pk)` to guard concurrent first logins)
   - `USER#${userId} / PROFILE`
   - `ORG#${orgId} / PROFILE` with `setupStatus: FILONE_ORG_CREATED`, suggested `name`
-  - `ORG#${orgId} / MEMBER#${userId}` with `role: OrgRole.Admin`
+  - `ORG#${orgId} / META` with `ownerCount: 1` (OrgTable)
+  - `ORG#${orgId} / MEMBER#${userId}` with `role: OrgRole.Owner` (OrgTable)
+  - `USER#${userId} / MEMBERSHIP#${orgId}`, the inverse item (OrgTable)
 
 The new user is now authenticated. Aurora tenant creation is _not_ triggered here — see Tenancy below.
 
@@ -180,15 +182,15 @@ Double-submit token. On any non-safe method (anything other than GET/HEAD/OPTION
 
 Today, "1:1" describes the practical state, not a schema constraint:
 
-- One Auth0 user → one internal `userId` → one `orgId` they created as Admin.
-- The schema (`ORG#${orgId} / MEMBER#${userId}` rows) supports multiple members per org, but no invite/join flow exists yet. The DDB layout already accommodates multi-member growth without migration.
+- One Auth0 user → one internal `userId` → one `orgId` they created as Owner.
+- The schema (`ORG#${orgId} / MEMBER#${userId}` rows in `OrgTable`) supports multiple members per org, but no invite/join flow exists yet. The DDB layout already accommodates multi-member growth without migration.
 - No code path lets a user belong to more than one org. The `SUB#${sub} / IDENTITY` record holds a single `orgId`.
 
 So this is entirely expandable to multiple users in one org and we can attach different rights/access scopes to them, if desired. I suggest to think through the product requirements on multiple user support, what kind of authorization model to use, and how we want to link accounts or invite users before modifying this. Auth0 has ability to invite users and we can use their organization construct.
 
 ### Roles
 
-`OrgRole.Admin` is the only role assigned today (creator-as-admin). Auth0 RBAC is wired in the auth middleware design but not enforced in production — see the "RBAC (Planned)" section of the auth ADR. We do not need to use RBAC and can instead use resource based authZ which is also supported by Auth0 as an alternative and we have some notion of already between CSRF token enforcement and the stripe middleware guard.
+Auth0 RBAC is wired in the auth middleware design but not enforced in production — see the "RBAC (Planned)" section of the auth ADR. We do not need to use RBAC and can instead use resource based authZ which is also supported by Auth0 as an alternative and we have some notion of already between CSRF token enforcement and the stripe middleware guard.
 
 For user management in the console, using Roles over resource based Auth0 claims would be easier to implement and simpler for customer. Ultimately use of the S3 Layer is driven through key/credential Sigv4 with IAM style permissions which is the more important AuthZ need. But this means we need to define all the roles necessary and document the permission model vs enabling any sort of fine-grain control over resources. Product should decide on which type of access control is needed and how organizations will work.
 

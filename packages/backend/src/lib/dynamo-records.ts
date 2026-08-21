@@ -1,6 +1,22 @@
 import { S3Region } from '@filone/shared';
 import type { SubscriptionStatus } from '@filone/shared';
 
+/**
+ * The era a key was minted in.
+ *
+ * `pre-member-scope` records one fact: the key was created after the role
+ * vocabulary existed and before member bucket scope is enforced. It does not
+ * claim a cap was applied — the permission cap ships with enforcement, and
+ * bucket scope does not exist until FIL-1017, whose keys get the next value in
+ * this union. Keys older than roles carry no marker at all, and both cohorts
+ * are what the non-conforming-key review has to find. None of it is
+ * backfillable, which is why the marker ships now rather than with the surfaces
+ * that read it.
+ */
+export type AccessKeyPolicyVersion = 'pre-member-scope';
+
+export const ACCESS_KEY_POLICY_VERSION: AccessKeyPolicyVersion = 'pre-member-scope';
+
 /** UserInfoTable — pk: ORG#{orgId}, sk: ACCESSKEY#{id} */
 export interface AccessKeyRecord {
   pk: string;
@@ -9,6 +25,37 @@ export interface AccessKeyRecord {
   accessKeyId: string;
   createdAt: string;
   status: string;
+  /** The FilOne user who minted the key. Absent on keys older than roles. */
+  createdBy?: string;
+  /** The creator's verified email at creation time, for display without a join. */
+  creatorEmail?: string;
+  /** See {@link AccessKeyPolicyVersion}. */
+  policyVersion?: AccessKeyPolicyVersion;
+  /**
+   * Set when the row was reconstructed from the provider after a partial
+   * failure, so its attribution names the caller who retried rather than a
+   * confirmed creator. See `recoverDuplicateKey`.
+   */
+  recovered?: boolean;
+}
+
+/**
+ * Who minted a key and under what policy, for the row's attribution
+ * attributes. The email is verified-only, matching the RAG-key shape: an
+ * unverified address must never be the name attached to a credential.
+ */
+export function keyAttribution({
+  userId,
+  creatorEmail,
+}: {
+  userId: string;
+  creatorEmail?: string;
+}): Pick<AccessKeyRecord, 'createdBy' | 'creatorEmail' | 'policyVersion'> {
+  return {
+    createdBy: userId,
+    ...(creatorEmail ? { creatorEmail } : {}),
+    policyVersion: ACCESS_KEY_POLICY_VERSION,
+  };
 }
 
 /**

@@ -15,6 +15,7 @@ import {
 import { ApiErrorCode, OrgRole, Stage } from '@filone/shared';
 import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../lib/org-setup-status.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
+import { sstResourceMock } from '../test/sst-resource-mock.js';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
 import { expectErrorResponse } from '../test/assert-helpers.js';
 
@@ -39,14 +40,7 @@ vi.spyOn(crypto, 'randomUUID').mockImplementation(
   () => MOCK_UUIDS[uuidCallCount++] as `${string}-${string}-${string}-${string}-${string}`,
 );
 
-vi.mock('sst', () => ({
-  Resource: {
-    UserInfoTable: { name: 'UserInfoTable' },
-    Auth0ClientId: { value: 'test-client-id' },
-    Auth0ClientSecret: { value: 'test-client-secret' },
-    AuroraBackofficeToken: { value: 'test-aurora-token' },
-  },
-}));
+vi.mock('sst', () => sstResourceMock());
 
 vi.mock('../lib/auth-secrets.js', () => ({
   getAuthSecrets: () => ({
@@ -97,6 +91,27 @@ function getUserInfoFromEvent(event: APIGatewayProxyEventV2) {
   return (event as AuthenticatedEvent).requestContext.userInfo;
 }
 
+/**
+ * What `userInfo` carries when OrgTable holds no membership row: the transition
+ * fallback resolves Owner, which is every pre-conversion account's authority.
+ */
+function ownerFallback(orgId: string, userId: string) {
+  return { membership: { orgId, userId, role: OrgRole.Owner } };
+}
+
+/** What `userInfo` carries on the signup branch: the row just written, unread. */
+function createdMembership(orgId: string, userId: string) {
+  return {
+    membership: {
+      orgId,
+      userId,
+      role: OrgRole.Owner,
+      joinedAt: expect.any(String),
+      source: 'signup',
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -109,6 +124,10 @@ describe('authMiddleware', () => {
     // stubbed (the org-profile fence read) resolves undefined and throws.
     ddbMock.on(GetItemCommand).resolves({});
     uuidCallCount = 0;
+    // Every authenticated request reads the membership row. Default: no row,
+    // which is what a pre-conversion account looks like; tests that care about
+    // a role stub the read again with one.
+    ddbMock.on(GetItemCommand, { TableName: 'OrgTable' }).resolves({});
   });
 
   describe('before hook', () => {
@@ -238,6 +257,7 @@ describe('authMiddleware', () => {
         emailVerified: false,
         name: undefined,
         picture: undefined,
+        ...ownerFallback(existingOrgId, existingUserId),
       });
     });
 
@@ -343,6 +363,135 @@ describe('authMiddleware', () => {
       });
     });
 
+    it('resolves the role from the membership row', async () => {
+      const existingUserId = 'existing-user-uuid';
+      const existingOrgId = 'existing-org-uuid';
+
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: { userId: { S: existingUserId }, orgId: { S: existingOrgId } },
+        });
+
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'OrgTable',
+          Key: {
+            pk: { S: `ORG#${existingOrgId}` },
+            sk: { S: `MEMBER#${existingUserId}` },
+          },
+        })
+        .resolves({
+          Item: {
+            role: { S: OrgRole.ReadOnly },
+            joinedAt: { S: '2026-02-02T00:00:00.000Z' },
+            source: { S: 'invitation' },
+            invitedBy: { S: 'inviter-user-id' },
+          },
+        });
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+      });
+
+      await before(buildMiddyRequest(event));
+
+      // The row's field mapping is org-membership.test.ts's subject; what this
+      // one owns is that the middleware exposes the role the row carries.
+      expect(getUserInfoFromEvent(event).membership?.role).toBe(OrgRole.ReadOnly);
+    });
+
+    describe('when the OrgTable membership read fails', () => {
+      const existingUserId = 'existing-user-uuid';
+      const existingOrgId = 'existing-org-uuid';
+
+      function stubIdentityAndFailingMembership() {
+        ddbMock
+          .on(GetItemCommand, {
+            Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+          })
+          .resolves({
+            Item: { userId: { S: existingUserId }, orgId: { S: existingOrgId } },
+          });
+        ddbMock
+          .on(GetItemCommand, { TableName: 'OrgTable' })
+          .rejects(new Error('DynamoDB unavailable'));
+      }
+
+      it('answers a retryable 503 rather than spending a refresh on a good token', async () => {
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+        mockJwtVerify
+          .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+          .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+        stubIdentityAndFailingMembership();
+
+        const { before } = authMiddleware({ requireVerifiedEmail: false });
+        const request = buildMiddyRequest(
+          buildEvent({
+            cookies: [
+              `hs_access_token=valid-token`,
+              `hs_id_token=id-token`,
+              `hs_refresh_token=valid-refresh`,
+            ],
+          }),
+        );
+
+        const result = (await before(request)) as APIGatewayProxyStructuredResultV2;
+
+        expect(result.statusCode).toBe(503);
+        // The token was fine — a refresh would have burned the caller's
+        // refresh token to fix a failure that is ours.
+        expect(mockFetch).not.toHaveBeenCalled();
+        expect(consoleError).toHaveBeenCalledWith(
+          expect.stringContaining('OrgTable'),
+          expect.objectContaining({ orgId: existingOrgId, userId: existingUserId }),
+        );
+        consoleError.mockRestore();
+      });
+
+      it('answers the same 503 on the refresh branch, carrying the rotated cookies', async () => {
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+        mockJwtVerify
+          .mockRejectedValueOnce(new Error('token expired'))
+          .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+        mockDecodeJwt.mockReturnValue({ sub: MOCK_SUB });
+        mockFetch.mockResolvedValue({
+          ok: true,
+          json: async () => ({
+            access_token: 'new-access-token',
+            id_token: 'new-id-token',
+            refresh_token: 'new-refresh-token',
+          }),
+        });
+        stubIdentityAndFailingMembership();
+
+        const { before } = authMiddleware({ requireVerifiedEmail: false });
+        const request = buildMiddyRequest(
+          buildEvent({
+            cookies: [`hs_access_token=expired-token`, `hs_refresh_token=valid-refresh`],
+          }),
+        );
+
+        const result = (await before(request)) as APIGatewayProxyStructuredResultV2;
+
+        expect(result.statusCode).toBe(503);
+        // The refresh already happened: the old refresh token is spent, so the
+        // denial has to hand back the new one or the caller is logged out.
+        expect(result.cookies).toEqual(
+          expect.arrayContaining([expect.stringContaining('hs_refresh_token=new-refresh-token')]),
+        );
+        expect(consoleError).toHaveBeenCalled();
+        consoleError.mockRestore();
+      });
+    });
+
     it('extracts name and picture from ID token claims', async () => {
       const existingUserId = 'existing-user-uuid';
       const existingOrgId = 'existing-org-uuid';
@@ -404,6 +553,7 @@ describe('authMiddleware', () => {
         emailVerified: true,
         name: MOCK_NAME,
         picture: MOCK_PICTURE,
+        ...ownerFallback(existingOrgId, existingUserId),
       });
     });
 
@@ -471,6 +621,7 @@ describe('authMiddleware', () => {
         emailVerified: true,
         name: MOCK_NAME,
         picture: MOCK_PICTURE,
+        ...ownerFallback(existingOrgId, existingUserId),
       });
     });
 
@@ -525,6 +676,7 @@ describe('authMiddleware', () => {
         emailVerified: false,
         name: undefined,
         picture: undefined,
+        ...ownerFallback(existingOrgId, existingUserId),
       });
     });
 
@@ -555,6 +707,7 @@ describe('authMiddleware', () => {
         emailVerified: false,
         name: undefined,
         picture: undefined,
+        ...createdMembership(MOCK_ORG_ID, MOCK_USER_ID),
       });
     });
 
@@ -585,6 +738,7 @@ describe('authMiddleware', () => {
         emailVerified: false,
         name: 'Alice Johnson',
         picture: undefined,
+        ...createdMembership(MOCK_ORG_ID, MOCK_USER_ID),
       });
 
       const transactCalls = ddbMock.commandCalls(TransactWriteItemsCommand);
@@ -631,14 +785,38 @@ describe('authMiddleware', () => {
             },
           },
         },
-        // Org membership
+        // Owner count — in OrgTable, beside the membership rows it counts
         {
           Put: {
-            TableName: 'UserInfoTable',
+            TableName: 'OrgTable',
+            Item: {
+              pk: { S: `ORG#${MOCK_ORG_ID}` },
+              sk: { S: 'META' },
+              ownerCount: { N: '1' },
+            },
+          },
+        },
+        // Org membership — authoritative, in OrgTable, and the creator owns it
+        {
+          Put: {
+            TableName: 'OrgTable',
             Item: {
               pk: { S: `ORG#${MOCK_ORG_ID}` },
               sk: { S: `MEMBER#${MOCK_USER_ID}` },
-              role: { S: OrgRole.Admin },
+              role: { S: OrgRole.Owner },
+              joinedAt: { S: expect.any(String) },
+              source: { S: 'signup' },
+            },
+          },
+        },
+        // Inverse item — same transaction, so the two can never disagree
+        {
+          Put: {
+            TableName: 'OrgTable',
+            Item: {
+              pk: { S: `USER#${MOCK_USER_ID}` },
+              sk: { S: `MEMBERSHIP#${MOCK_ORG_ID}` },
+              role: { S: OrgRole.Owner },
               joinedAt: { S: expect.any(String) },
             },
           },
@@ -770,6 +948,7 @@ describe('authMiddleware', () => {
         emailVerified: false,
         name: undefined,
         picture: undefined,
+        ...ownerFallback(existingOrgId, existingUserId),
       });
       expect(request.internal.newTokens).toEqual({
         access_token: 'new-access-token',
@@ -839,7 +1018,9 @@ describe('authMiddleware', () => {
       mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } });
       mockFetch.mockResolvedValue({ ok: false, status: 401, text: async () => '' });
 
-      // Use call-order mocking: first GetItem is IDENTITY lookup, second is ORG PROFILE lookup
+      // Use call-order mocking: first GetItem is the IDENTITY lookup, second the
+      // ORG PROFILE lookup. Everything after — the membership read the
+      // middleware now makes — falls to the empty default.
       ddbMock
         .on(GetItemCommand)
         .resolvesOnce({ Item: { userId: { S: existingUserId }, orgId: { S: existingOrgId } } })
@@ -847,7 +1028,8 @@ describe('authMiddleware', () => {
           Item: {
             auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
           },
-        });
+        })
+        .resolves({});
 
       const { before } = authMiddleware({ requireVerifiedEmail: false });
       const event = buildEvent({
@@ -1025,12 +1207,18 @@ describe('authMiddleware', () => {
         }),
       );
 
-      const result = await before(request);
+      const result = (await before(request)) as APIGatewayProxyStructuredResultV2;
 
-      expectErrorResponse(result, 403, {
+      expect(result.statusCode).toBe(403);
+      expect(JSON.parse(result.body as string)).toStrictEqual({
         message: 'Email verification required',
         code: ApiErrorCode.EMAIL_NOT_VERIFIED,
       });
+      // The refresh already spent the caller's refresh token, so the denial
+      // carries its replacement — otherwise a 403 becomes a logout.
+      expect(result.cookies).toEqual(
+        expect.arrayContaining([expect.stringContaining('hs_refresh_token=new-refresh-token')]),
+      );
     });
 
     it('fails closed when the ID token cookie is missing entirely', async () => {

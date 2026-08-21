@@ -122,3 +122,22 @@ function isGuardRejection(err: unknown): boolean {
     err.CancellationReasons?.[0]?.Code === 'ConditionalCheckFailed'
   );
 }
+
+/**
+ * An org's display name, or '' when the profile row is missing or unreadable.
+ *
+ * For callers naming orgs the user is not acting in — the switcher's list — one
+ * unreadable profile should cost that entry its name, not the whole response,
+ * so the read failure is logged and swallowed here rather than raised.
+ */
+export async function resolveOrgName(orgId: string): Promise<string> {
+  try {
+    return (await getOrgProfile(orgId))?.name?.S ?? '';
+  } catch (err) {
+    console.error('[org-profile] Org profile read failed — naming the org empty', {
+      orgId,
+      error: err,
+    });
+    return '';
+  }
+}
