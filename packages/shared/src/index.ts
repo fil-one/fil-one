@@ -32,6 +32,7 @@ export {
   PAID_GRACE_DAYS,
   UNLIMITED,
   getUsageLimits,
+  senderAddress,
 } from './constants.js';
 export type { UsageLimits } from './constants.js';
 export { formatBytes, formatBytesShort } from './formatBytes.js';
@@ -61,6 +62,17 @@ export {
 } from './api/org.js';
 export { ApiErrorCode } from './api/coreInterfaces.js';
 export type { ErrorResponse } from './api/coreInterfaces.js';
+export {
+  DELETION_CODE_LENGTH,
+  DELETION_CODE_TTL_MINUTES,
+  DeletionCodeSchema,
+  DeleteAccountSchema,
+} from './api/account-deletion.js';
+export type {
+  DeleteAccountRequest,
+  RequestAccountDeletionResponse,
+  ConfirmAccountDeletionResponse,
+} from './api/account-deletion.js';
 
 export type {
   Bucket,
@@ -174,6 +186,8 @@ export type {
   CreateRagApiKeyRequest,
   CreateRagApiKeyResponse,
 } from './api/rag-api-keys.js';
+
+export { ACTIVITY_ACTION_LABELS, getActivityActionLabel } from './api/dashboard.js';
 
 export type {
   UsageDataPoint,

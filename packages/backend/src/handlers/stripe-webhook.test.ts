@@ -49,6 +49,17 @@ vi.mock('../lib/stripe-client.js', () => ({
   getWebhookSecret: vi.fn().mockResolvedValue('whsec_test_fake'),
 }));
 
+const mockUpsertContact = vi.fn().mockResolvedValue('updated');
+vi.mock('../lib/hubspot-client.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/hubspot-client.js')>()),
+  upsertContactSubscriptionStatus: (...args: unknown[]) => mockUpsertContact(...args),
+}));
+
+const mockStartDeletion = vi.fn(async (_params: unknown) => undefined);
+vi.mock('../lib/deletion-from-stripe.js', () => ({
+  startDeletionFromStripe: (params: unknown) => mockStartDeletion(params),
+}));
+
 vi.mock('../lib/metrics.js', () => ({
   reportMetric: vi.fn(),
 }));
@@ -224,6 +235,9 @@ describe('stripe-webhook handler', () => {
     mockPaymentMethodsRetrieve.mockReset();
     mockSyncTenantStatusInProvisionedRegions.mockReset();
     mockSyncTenantStatusInProvisionedRegions.mockResolvedValue([]);
+    mockUpsertContact.mockReset();
+    mockUpsertContact.mockResolvedValue('updated');
+    mockStartDeletion.mockReset();
     reportMetricMock.mockReset();
   });
 
@@ -362,6 +376,7 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
+        ConditionExpression: 'attribute_not_exists(deletedAt)',
         UpdateExpression:
           'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now REMOVE gracePeriodEndsAt, canceledAt',
         ExpressionAttributeValues: {
@@ -565,6 +580,7 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
+        ConditionExpression: 'attribute_not_exists(deletedAt)',
         UpdateExpression:
           'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now REMOVE gracePeriodEndsAt, canceledAt',
         ExpressionAttributeValues: {
@@ -647,6 +663,7 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
+        ConditionExpression: 'attribute_not_exists(deletedAt)',
         UpdateExpression:
           'SET paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now',
         ExpressionAttributeValues: {
@@ -657,7 +674,6 @@ describe('stripe-webhook handler', () => {
           ':expYear': { N: String(MOCK_PM_EXP_YEAR) },
           ':now': { S: expect.any(String) },
         },
-        ConditionExpression: 'attribute_exists(pk)',
       });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -785,6 +801,7 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
+        ConditionExpression: 'attribute_not_exists(deletedAt)',
         UpdateExpression:
           'SET subscriptionStatus = :status, canceledAt = :now, gracePeriodEndsAt = :grace, updatedAt = :now',
         ExpressionAttributeValues: {
@@ -826,32 +843,18 @@ describe('stripe-webhook handler', () => {
     });
 
     describe('when the customer is already deleted', () => {
-      it('closes out the billing record instead of granting a grace period', async () => {
+      // The fallback for a customer.deleted event that was never delivered.
+      it('starts the deletion instead of granting a grace period', async () => {
         setupStripeEvent('customer.subscription.deleted', mockSubscription());
         setupDeletedCustomerRetrieve();
         setupAuroraTenantResolution();
 
         const result = await handler(buildWebhookEvent('{}'));
 
-        expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
-          MOCK_ORG_ID,
-          'disabled',
-          WEBHOOK_STATUS_SYNC_RETRY,
+        expect(mockStartDeletion).toHaveBeenCalledWith(
+          expect.objectContaining({ userId: MOCK_USER_ID, caller: 'subscription.deleted' }),
         );
-
-        const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-        expect(updateCalls).toHaveLength(1);
-        const input = updateCalls[0].args[0].input;
-        expect(input.Key).toEqual({
-          pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
-          sk: { S: 'SUBSCRIPTION' },
-        });
-        expect(input.ExpressionAttributeValues![':status']).toEqual({
-          S: SubscriptionStatus.Canceled,
-        });
-        expect(input.UpdateExpression).not.toContain('gracePeriodEndsAt = ');
-        expect(input.UpdateExpression).toContain('REMOVE gracePeriodEndsAt');
-
+        expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
         expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
       });
 
@@ -872,35 +875,22 @@ describe('stripe-webhook handler', () => {
         ).toBe(true);
       });
 
-      it('fails the webhook (500) when the subscription has no metadata.userId', async () => {
+      // Nothing can be resolved without it, but Stripe must not be asked to retry
+      // an event that will never succeed.
+      it('acknowledges when the subscription has no metadata.userId', async () => {
         setupStripeEvent('customer.subscription.deleted', mockSubscription({ metadata: {} }));
         setupDeletedCustomerRetrieve();
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-        const result = await handler(buildWebhookEvent('{}'));
+        try {
+          const result = await handler(buildWebhookEvent('{}'));
 
-        expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-        expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1); // idempotency release
-        expect(result).toEqual({
-          statusCode: 500,
-          body: JSON.stringify({ message: 'Processing error' }),
-        });
-      });
-
-      it('fails the webhook (500) without touching the record when a region fails to disable', async () => {
-        setupStripeEvent('customer.subscription.deleted', mockSubscription());
-        setupDeletedCustomerRetrieve();
-        setupAuroraTenantResolution();
-        mockSyncTenantStatusInProvisionedRegions.mockResolvedValue(
-          regionSyncFailure(new Error('Aurora API error')),
-        );
-
-        const result = await handler(buildWebhookEvent('{}'));
-
-        expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-        expect(result).toEqual({
-          statusCode: 500,
-          body: JSON.stringify({ message: 'Processing error' }),
-        });
+          expect(mockStartDeletion).not.toHaveBeenCalled();
+          expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+          expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+        } finally {
+          error.mockRestore();
+        }
       });
     });
 
@@ -964,45 +954,25 @@ describe('stripe-webhook handler', () => {
   // 5b. customer.deleted
   // -----------------------------------------------------------------------
   describe('customer.deleted', () => {
-    it('disables the customer immediately by setting Canceled status and DISABLING Aurora tenant', async () => {
-      setupStripeEvent('customer.deleted', mockCustomerObject());
-      setupAuroraTenantResolution();
+    // Deleting the customer in Stripe is the standing response to trial abuse, so
+    // terminating the account is its intended meaning.
+    it('starts the full account deletion', async () => {
+      setupStripeEvent(
+        'customer.deleted',
+        mockCustomerObject({ metadata: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID } }),
+      );
 
       const result = await handler(buildWebhookEvent('{}'));
 
-      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
-        MOCK_ORG_ID,
-        'disabled',
-        WEBHOOK_STATUS_SYNC_RETRY,
-      );
-
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-
-      const input = updateCalls[0].args[0].input;
-      expect(input.Key).toEqual({
-        pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
-        sk: { S: 'SUBSCRIPTION' },
+      expect(mockStartDeletion).toHaveBeenCalledWith({
+        userId: MOCK_USER_ID,
+        customerId: MOCK_CUSTOMER_ID,
+        orgId: MOCK_ORG_ID,
+        caller: 'customer.deleted',
       });
-      expect(input.ExpressionAttributeValues![':status']).toEqual({
-        S: SubscriptionStatus.Canceled,
-      });
-
+      // The teardown owns every write from here; the handler makes none.
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-
-    it('does not write a grace period', async () => {
-      setupStripeEvent('customer.deleted', mockCustomerObject());
-      setupAuroraTenantResolution();
-
-      await handler(buildWebhookEvent('{}'));
-
-      const input = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
-      expect(input.UpdateExpression).not.toContain('gracePeriodEndsAt = ');
-      expect(input.UpdateExpression).toContain('REMOVE gracePeriodEndsAt');
-      expect(input.ExpressionAttributeValues![':status']).toEqual({
-        S: SubscriptionStatus.Canceled,
-      });
     });
 
     it('reads userId from the event payload and never calls Stripe customers.retrieve', async () => {
@@ -1014,35 +984,21 @@ describe('stripe-webhook handler', () => {
       expect(mockCustomersRetrieve).not.toHaveBeenCalled();
     });
 
-    it('fails the webhook (500) when customer.deleted has no userId in metadata', async () => {
+    // The old contract answered 500 so Stripe's retries would re-drive a failed
+    // region sync. The record and the sweeper own retries now, so the webhook
+    // always acknowledges — days of Stripe retries would disable the endpoint.
+    it('acknowledges when customer.deleted has no userId in metadata', async () => {
       setupStripeEvent('customer.deleted', mockCustomerObject({ metadata: {} }));
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-      const result = await handler(buildWebhookEvent('{}'));
+      try {
+        const result = await handler(buildWebhookEvent('{}'));
 
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1); // idempotency release
-      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
-      expect(result).toEqual({
-        statusCode: 500,
-        body: JSON.stringify({ message: 'Processing error' }),
-      });
-    });
-
-    it('fails the webhook (500) and releases idempotency when Aurora DISABLE fails', async () => {
-      setupStripeEvent('customer.deleted', mockCustomerObject());
-      setupAuroraTenantResolution();
-      mockSyncTenantStatusInProvisionedRegions.mockResolvedValue(
-        regionSyncFailure(new Error('Aurora API error')),
-      );
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expect(result).toEqual({
-        statusCode: 500,
-        body: JSON.stringify({ message: 'Processing error' }),
-      });
-      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1); // idempotency release
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0); // Aurora throws before the DDB write
+        expect(mockStartDeletion).not.toHaveBeenCalled();
+        expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      } finally {
+        error.mockRestore();
+      }
     });
 
     it('emits a DunningEscalation metric with reason customer_deleted', async () => {
@@ -1061,20 +1017,19 @@ describe('stripe-webhook handler', () => {
       ).toBe(true);
     });
 
-    it('still cancels in DynamoDB when there is no Aurora tenant (no orgId)', async () => {
-      setupStripeEvent('customer.deleted', mockCustomerObject());
-      // do NOT call setupAuroraTenantResolution, so GetItemCommand default returns no orgId
+    // metadata.orgId is written at customer creation; the entry point falls back to
+    // the billing row for customers that predate it.
+    it('passes no orgId through when the customer metadata carries none', async () => {
+      setupStripeEvent(
+        'customer.deleted',
+        mockCustomerObject({ metadata: { userId: MOCK_USER_ID } }),
+      );
 
       const result = await handler(buildWebhookEvent('{}'));
 
-      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
-
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-      expect(updateCalls[0].args[0].input.ExpressionAttributeValues![':status']).toEqual({
-        S: SubscriptionStatus.Canceled,
-      });
-
+      expect(mockStartDeletion).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: MOCK_USER_ID, orgId: undefined }),
+      );
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
   });
@@ -1112,6 +1067,7 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
+        ConditionExpression: 'attribute_not_exists(deletedAt)',
         UpdateExpression:
           'SET subscriptionStatus = :active, lastPaymentAt = :now, updatedAt = :now REMOVE gracePeriodEndsAt, lastPaymentFailedAt, canceledAt',
         ExpressionAttributeValues: {
@@ -1217,6 +1173,7 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
+        ConditionExpression: 'attribute_not_exists(deletedAt)',
         UpdateExpression:
           'SET subscriptionStatus = :status, lastPaymentFailedAt = :failedAt, updatedAt = :now',
         ExpressionAttributeValues: {
@@ -1790,6 +1747,163 @@ describe('stripe-webhook handler', () => {
       await handler(buildWebhookEvent('{}'));
 
       expectNoOrgIdClause();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 11. HubSpot lifecycle status sync (FIL-828)
+  // -----------------------------------------------------------------------
+  describe('HubSpot subscription status sync', () => {
+    it('writes `paying` for an active subscription, keyed on userId not email', async () => {
+      setupStripeEvent('customer.subscription.updated', mockSubscription());
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(mockUpsertContact).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: MOCK_USER_ID, status: 'paying' }),
+      );
+    });
+
+    it('writes `trialing` for a trialing subscription', async () => {
+      setupStripeEvent('customer.subscription.updated', mockSubscription({ status: 'trialing' }));
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(mockUpsertContact).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'trialing' }),
+      );
+    });
+
+    it('writes `payment_failing` on invoice.payment_failed', async () => {
+      setupStripeEvent('invoice.payment_failed', mockInvoice());
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(mockUpsertContact).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'payment_failing' }),
+      );
+    });
+
+    it('writes `paying` on invoice.payment_succeeded', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(mockUpsertContact).toHaveBeenCalledWith(expect.objectContaining({ status: 'paying' }));
+    });
+
+    it('writes `lapsed` when the subscription is deleted into a grace period', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(mockUpsertContact).toHaveBeenCalledWith(expect.objectContaining({ status: 'lapsed' }));
+    });
+
+    it('writes `unknown` for an unmappable Stripe status rather than leaving a stale value', async () => {
+      // The billing record is deliberately not written here, but a contact left
+      // holding `trialing` is how a paying customer gets a deletion warning.
+      setupStripeEvent(
+        'customer.subscription.updated',
+        mockSubscription({ status: 'some_status_stripe_added_later' }),
+      );
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(mockUpsertContact).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: MOCK_USER_ID, status: 'unknown' }),
+      );
+    });
+
+    it('still returns 200 and keeps the idempotency claim when HubSpot throws', async () => {
+      // A marketing CRM outage otherwise makes Stripe replay the DynamoDB write
+      // and the orchestrator tenant sync.
+      mockUpsertContact.mockRejectedValue(new Error('HubSpot 503'));
+      setupStripeEvent('customer.subscription.updated', mockSubscription());
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+    });
+
+    it('re-activates the tenant before writing to HubSpot', async () => {
+      // The CRM write is last on purpose: it shares the route's 10s timeout, and a
+      // Lambda killed mid-flight keeps its idempotency claim, so Stripe's retry is
+      // acknowledged as already processed and nothing repairs the re-activation.
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
+      setupCustomerRetrieve();
+      setupAuroraTenantResolution();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
+        MOCK_ORG_ID,
+        'active',
+        WEBHOOK_STATUS_SYNC_RETRY,
+      );
+      expect(mockSyncTenantStatusInProvisionedRegions.mock.invocationCallOrder[0]).toBeLessThan(
+        mockUpsertContact.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('write-locks the tenant before writing to HubSpot', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+      setupAuroraTenantResolution();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
+        MOCK_ORG_ID,
+        'write-locked',
+        WEBHOOK_STATUS_SYNC_RETRY,
+      );
+      expect(mockSyncTenantStatusInProvisionedRegions.mock.invocationCallOrder[0]).toBeLessThan(
+        mockUpsertContact.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('emits a metric when the live write fails', async () => {
+      mockUpsertContact.mockRejectedValue(new Error('HubSpot 503'));
+      setupStripeEvent('customer.subscription.updated', mockSubscription());
+
+      await handler(buildWebhookEvent('{}'));
+
+      const emitted = reportMetricMock.mock.calls
+        .map(([event]) => event)
+        .filter((e) => (e as { HubSpotLiveWriteFailed?: unknown }).HubSpotLiveWriteFailed === 1);
+      expect(emitted).toHaveLength(1);
+    });
+
+    it('returns 200 when HubSpot reports no matching contact', async () => {
+      mockUpsertContact.mockResolvedValue('unmatched');
+      setupStripeEvent('customer.subscription.updated', mockSubscription());
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('passes the Stripe email through so an unstamped contact can be bootstrapped', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
+      mockCustomersRetrieve.mockResolvedValue({
+        id: MOCK_CUSTOMER_ID,
+        deleted: false,
+        email: 'customer@example.com',
+        metadata: { userId: MOCK_USER_ID },
+      });
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(mockUpsertContact).toHaveBeenCalledWith(
+        expect.objectContaining({ email: 'customer@example.com' }),
+      );
     });
   });
 });

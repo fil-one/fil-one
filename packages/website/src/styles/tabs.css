@@ -6,7 +6,7 @@
   .tab-item {
     @apply relative -mb-px cursor-pointer border-b-2 border-transparent px-4 py-2.5 text-sm font-medium text-zinc-500 transition-colors hover:text-zinc-700;
 
-    &:focus {
+    &:focus-visible {
       @apply brand-outline outline-offset-[-2px];
     }
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import { AppShell } from './AppShell';
+import { AppShell, gracePeriodMessage } from './AppShell';
 
 vi.mock('./SidebarNav', () => ({
   SidebarNav: ({ onClose }: { onClose?: () => void }) => (
@@ -28,7 +28,8 @@ vi.mock('../lib/query-client.js', () => ({
   USAGE_STALE_TIME: 5 * 60_000,
 }));
 
-vi.mock('../lib/time.js', () => ({
+vi.mock(import('../lib/time.js'), async (importOriginal) => ({
+  ...(await importOriginal()),
   daysUntil: vi.fn(() => 5),
   formatDateTime: vi.fn(() => '2026-06-30'),
 }));
@@ -256,5 +257,31 @@ describe('AppShell drawer accessibility', () => {
   it('renders page content', () => {
     renderAppShell();
     expect(screen.getByText('page content')).toBeInTheDocument();
+  });
+});
+
+describe('gracePeriodMessage', () => {
+  it('pluralizes the countdown', () => {
+    expect(gracePeriodMessage(5)).toBe(
+      'Your free trial has expired. 5 days left to upgrade or download your data.',
+    );
+  });
+
+  it('uses the singular unit on the second-to-last day', () => {
+    expect(gracePeriodMessage(1)).toBe(
+      'Your free trial has expired. 1 day left to upgrade or download your data.',
+    );
+  });
+
+  it('warns that the account is disabled today when the countdown reaches zero', () => {
+    expect(gracePeriodMessage(0)).toBe(
+      "Your free trial has expired, and your account will be disabled later today. Upgrade to keep access or download your data before it's removed.",
+    );
+  });
+
+  it('falls back to a complete sentence when the deadline is unknown', () => {
+    expect(gracePeriodMessage(null)).toBe(
+      "Your free trial has expired. Upgrade to keep access, or download your data before it's removed.",
+    );
   });
 });

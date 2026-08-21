@@ -214,6 +214,14 @@ export function getStageFromHostname(hostname: string): Stage {
   return PRODUCTION_HOSTS.has(hostname.toLowerCase()) ? Stage.Production : Stage.Staging;
 }
 
+/**
+ * Product email "from" address. Non-production uses the +staging subaddress so
+ * misdirected mail is identifiable.
+ */
+export function senderAddress(isProduction: boolean): string {
+  return isProduction ? 'no-reply@filone.ai' : 'no-reply+staging@filone.ai';
+}
+
 /** Cookie name for the OAuth state parameter (CSRF protection for login flow). */
 export const OAUTH_STATE_COOKIE = 'hs_oauth_state';
 

@@ -10,6 +10,11 @@ describe('defaultRetry', () => {
     expect(defaultRetry(0, Object.assign(new Error(), { status: 403 }))).toBe(false);
   });
 
+  // The account is gone, so a retry can only fail again.
+  it('does not retry on 410', () => {
+    expect(defaultRetry(0, Object.assign(new Error(), { status: 410 }))).toBe(false);
+  });
+
   it('retries once on a 500', () => {
     expect(defaultRetry(0, Object.assign(new Error(), { status: 500 }))).toBe(true);
   });

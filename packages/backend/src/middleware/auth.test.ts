@@ -105,6 +105,9 @@ describe('authMiddleware', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
+    // The real SDK always resolves an object; without this, a GetItem no test
+    // stubbed (the org-profile fence read) resolves undefined and throws.
+    ddbMock.on(GetItemCommand).resolves({});
     uuidCallCount = 0;
   });
 
@@ -235,6 +238,108 @@ describe('authMiddleware', () => {
         emailVerified: false,
         name: undefined,
         picture: undefined,
+      });
+    });
+
+    it('410s a tombstoned identity instead of resolving it', async () => {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: {
+            pk: { S: `SUB#${MOCK_SUB}` },
+            sk: { S: 'IDENTITY' },
+            deletedAt: { S: '2026-08-12T00:00:00.000Z' },
+          },
+        });
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      const event = buildEvent({
+        cookies: ['hs_access_token=valid-token', 'hs_id_token=id-token'],
+      });
+
+      const result = await before(buildMiddyRequest(event));
+
+      expectErrorResponse(result, 410, {
+        message: 'This account has been deleted.',
+        code: ApiErrorCode.ACCOUNT_DELETED,
+      });
+      // Never re-created as a new signup.
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+    });
+
+    it('410s every member of a deleting org, on the profile fence alone', async () => {
+      const existingOrgId = 'existing-org-uuid';
+
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+
+      // The identity row is untouched at confirm — only the profile is fenced.
+      ddbMock
+        .on(GetItemCommand, { Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } } })
+        .resolves({
+          Item: {
+            pk: { S: `SUB#${MOCK_SUB}` },
+            sk: { S: 'IDENTITY' },
+            userId: { S: 'existing-user-uuid' },
+            orgId: { S: existingOrgId },
+          },
+        });
+
+      ddbMock
+        .on(GetItemCommand, { Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: 'PROFILE' } } })
+        .resolves({
+          Item: {
+            pk: { S: `ORG#${existingOrgId}` },
+            sk: { S: 'PROFILE' },
+            deleting: { BOOL: true },
+          },
+        });
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      const event = buildEvent({
+        cookies: ['hs_access_token=valid-token', 'hs_id_token=id-token'],
+      });
+
+      const result = await before(buildMiddyRequest(event));
+
+      expectErrorResponse(result, 410, {
+        message: 'This account has been deleted.',
+        code: ApiErrorCode.ACCOUNT_DELETED,
+      });
+      expect(mockEnsureTrialEntitlement).not.toHaveBeenCalled();
+    });
+
+    it('410s a tombstone rather than falling back to another token path', async () => {
+      // No ID token cookie, so only the access token is verified. A refresh
+      // token is present, and the tombstone must not be downgraded to a 401
+      // that sends the request down the refresh path.
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } });
+
+      ddbMock.on(GetItemCommand).resolves({
+        Item: {
+          pk: { S: `SUB#${MOCK_SUB}` },
+          sk: { S: 'IDENTITY' },
+          deletedAt: { S: '2026-08-12T00:00:00.000Z' },
+        },
+      });
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      const event = buildEvent({
+        cookies: ['hs_access_token=valid-token', 'hs_refresh_token=refresh-token'],
+      });
+
+      const result = await before(buildMiddyRequest(event));
+
+      expectErrorResponse(result, 410, {
+        message: 'This account has been deleted.',
+        code: ApiErrorCode.ACCOUNT_DELETED,
       });
     });
 
