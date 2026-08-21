@@ -27,8 +27,7 @@ export async function startDeletionFromStripe(params: {
   const { userId, customerId, caller } = params;
 
   try {
-    const orgId =
-      params.orgId ?? (userId ? await resolveOrgIdFromSubscription(userId) : undefined);
+    const orgId = params.orgId ?? (userId ? await resolveOrgIdFromSubscription(userId) : undefined);
     if (!orgId) {
       console.error(`${LOG} cannot resolve the org of a deleted customer`, {
         userId,

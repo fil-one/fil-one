@@ -490,6 +490,21 @@ async function handlePaymentSucceeded(invoice: Stripe.Invoice): Promise<void> {
   // subscription path prefers it: a customer can outlive an org, and the
   // subscription that generated this invoice cannot.
   const orgId = resolveOrgId(invoiceSubscriptionMetadata(invoice), customer.metadata);
+
+  // A success is destructive in the other direction: on the shared org row, a
+  // late invoice from a replaced subscription would mark the org active and
+  // re-enable its tenants while the authoritative subscription is past due.
+  if (
+    await subscriptionSuperseded({
+      source: 'invoice.payment_succeeded',
+      userId,
+      orgId,
+      subscriptionId: invoiceSubscriptionId(invoice),
+    })
+  ) {
+    return;
+  }
+
   const backfill = orgIdBackfill(orgId);
   const updateResult = await updateSubscriptionByUser(
     { userId, orgId },
