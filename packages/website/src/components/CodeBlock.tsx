@@ -27,7 +27,7 @@ export function CodeBlock({ code, language, className }: CodeBlockProps) {
           type="button"
           onClick={() => void copy(code)}
           aria-label={copied ? 'Copied!' : 'Copy code'}
-          className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-zinc-500 transition-colors hover:bg-zinc-200 hover:text-zinc-700 focus:outline-none focus:ring-2 focus:ring-brand-600 focus:ring-offset-1"
+          className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-zinc-500 transition-colors hover:bg-zinc-200 hover:text-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-1"
         >
           <CopyIcon width={14} height={14} />
           <span>{copied ? 'Copied!' : 'Copy'}</span>
