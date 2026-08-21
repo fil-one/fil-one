@@ -251,6 +251,25 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     requires: 'self',
   },
 
+  // ── Account deletion ─────────────────────────────────────────────
+  // Deleting the account destroys the org, so both steps carry `org.delete`
+  // rather than `self`; the FIL-112 stack's isOrgAdmin() gate folded into
+  // this declaration when enforcement landed.
+  {
+    method: 'POST',
+    path: '/api/account/deletion',
+    handler: 'request-account-deletion',
+    category: 'authenticated',
+    requires: 'org.delete',
+  },
+  {
+    method: 'POST',
+    path: '/api/account/deletion/confirm',
+    handler: 'confirm-account-deletion',
+    category: 'authenticated',
+    requires: 'org.delete',
+  },
+
   // ── MFA ──────────────────────────────────────────────────────────
   {
     method: 'POST',

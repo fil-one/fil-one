@@ -7,10 +7,11 @@ const entries = ROUTE_MANIFEST;
 
 describe('ROUTE_MANIFEST', () => {
   it('lists every registered route once', () => {
-    // 38 routes are registered via addRoute in sst.config.ts. The backend's
+    // 40 routes are registered via addRoute in sst.config.ts — the 38 from
+    // before this stack plus the two account-deletion routes. The backend's
     // completeness test walks src/handlers/; this pins the count so a route
     // added to the config without a manifest entry is visible here too.
-    expect(entries).toHaveLength(38);
+    expect(entries).toHaveLength(40);
     const keys = entries.map((route) => `${route.method} ${route.path}`);
     expect(new Set(keys).size).toBe(keys.length);
   });

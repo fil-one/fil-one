@@ -2,7 +2,7 @@ import { GetItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
-import { OrgRole, isOrgRole, permissionsForRole } from '@filone/shared';
+import { OrgRole, isOrgRole } from '@filone/shared';
 import type { OrgMembershipSummary } from '@filone/shared';
 import { getDynamoClient } from './ddb-client.js';
 import { resolveOrgName } from './org-profile.js';
@@ -332,20 +332,4 @@ export async function summarizeMemberships({
       role: row.role,
     })),
   );
-}
-
-/**
- * TRANSITION — the account-deletion stack's role gate, re-read from OrgTable.
- * The UserInfoTable `MEMBER#` row it used to read stops existing when the
- * conversion moves membership here. An absent row resolves as Owner — the same
- * transition default `authMiddleware` applies, repeated here because this gate
- * must authorize pre-conversion accounts too, and it is the read consistency
- * above that keeps a just-revoked role from passing. Deletion authority is
- * `org.delete`, which ties the answer to the matrix instead of a role
- * comparison. Folded into `authorize('org.delete')` when enforcement lands.
- */
-export async function isOrgAdmin(orgId: string, userId: string): Promise<boolean> {
-  const membership = await resolveMembership(orgId, userId);
-  const role = membership?.role ?? OrgRole.Owner;
-  return permissionsForRole(role).includes('org.delete');
 }
