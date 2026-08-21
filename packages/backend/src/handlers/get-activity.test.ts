@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { OrgRole } from '@filone/shared';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
@@ -64,7 +65,7 @@ vi.mock('../middleware/auth.js', () => ({
 }));
 
 import { baseHandler, handler } from './get-activity.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { buildEvent, buildContext, membershipFor } from '../test/lambda-test-utilities.js';
 import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
 // ---------------------------------------------------------------------------
@@ -74,7 +75,7 @@ import { describeRoleEnforcement } from '../test/role-enforcement.js';
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 const AURORA_TENANT_ID = 'aurora-tenant-1';
 
-function keyItem(id: string, keyName: string, createdAt: string) {
+function keyItem(id: string, keyName: string, createdAt: string, createdBy?: string) {
   return marshall({
     pk: `ORG#${USER_INFO.orgId}`,
     sk: `ACCESSKEY#${id}`,
@@ -82,6 +83,7 @@ function keyItem(id: string, keyName: string, createdAt: string) {
     accessKeyId: `AKIA-${id}`,
     createdAt,
     status: 'active',
+    ...(createdBy ? { createdBy } : {}),
   });
 }
 
@@ -509,6 +511,90 @@ describe('get-activity baseHandler', () => {
       // The error is swallowed per-region, so the surrounding phase still succeeds.
       expect(emittedPhases()).toContain('fetchBucketActivities');
     });
+  });
+});
+
+describe('key activity follows the keys pages scope', () => {
+  // The route requirement is only half the gate: this feed carries key
+  // lifecycle entries, and the dashboard must not show a caller keys the keys
+  // page would refuse to list.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ddbMock.reset();
+    mockListBuckets.mockResolvedValue([{ bucketName: 'b1', createdAt: '2026-01-01T00:00:00Z' }]);
+    mockGetAvailableOrchestrators.mockReturnValue([mockOrchestrator]);
+    setTenant(AURORA_TENANT_ID);
+    ddbMock
+      .on(QueryCommand, {
+        ExpressionAttributeValues: {
+          ':pk': { S: `ORG#${USER_INFO.orgId}` },
+          ':skPrefix': { S: 'ACCESSKEY#' },
+        },
+      })
+      .resolves({
+        Items: [
+          keyItem('key-own', 'my-api-key', '2026-01-02T00:00:00Z', USER_INFO.userId),
+          keyItem('key-other', 'their-api-key', '2026-01-03T00:00:00Z', 'user-2'),
+          // Minted before attribution shipped: nobody can claim it.
+          keyItem('key-legacy', 'legacy-api-key', '2026-01-04T00:00:00Z'),
+        ],
+      });
+  });
+
+  async function keyNamesFor(role: OrgRole) {
+    const event = buildEvent({
+      userInfo: {
+        ...USER_INFO,
+        membership: membershipFor(USER_INFO.orgId, USER_INFO.userId, role),
+      },
+    });
+    const result = await baseHandler(event);
+    const activities = JSON.parse(String(result.body)).activities as {
+      resourceType: string;
+      resourceName: string;
+    }[];
+    return activities.filter((a) => a.resourceType === 'key').map((a) => a.resourceName);
+  }
+
+  it.each([OrgRole.Owner, OrgRole.Admin])(
+    'shows %s the whole org, holding keys.manage_all',
+    async (role) => {
+      expect((await keyNamesFor(role)).sort()).toStrictEqual([
+        'legacy-api-key',
+        'my-api-key',
+        'their-api-key',
+      ]);
+    },
+  );
+
+  it('shows a Member only the keys they created', async () => {
+    // `keys.manage_own` and nothing more: the dashboard used to hand every
+    // member the org's key inventory, including keys they cannot revoke.
+    expect(await keyNamesFor(OrgRole.Member)).toStrictEqual(['my-api-key']);
+  });
+
+  it('hides key activity from ReadOnly, who holds no keys.* permission', async () => {
+    expect(await keyNamesFor(OrgRole.ReadOnly)).toStrictEqual([]);
+  });
+
+  it('does not even read the key rows for a caller who may not see them', async () => {
+    await keyNamesFor(OrgRole.ReadOnly);
+
+    // A read nobody may see is a read worth not making.
+    const keyQueries = ddbMock
+      .commandCalls(QueryCommand)
+      .filter(
+        (call) => call.args[0].input.ExpressionAttributeValues?.[':skPrefix']?.S === 'ACCESSKEY#',
+      );
+    expect(keyQueries).toStrictEqual([]);
+  });
+
+  it('does not time a fetch it never made', async () => {
+    // A phase duration for a skipped fetch reports a 0ms DynamoDB query that
+    // never happened, which is a lie the latency dashboard would average in.
+    await keyNamesFor(OrgRole.ReadOnly);
+
+    expect(emittedPhases()).not.toContain('fetchAccessKeyActivities');
   });
 });
 

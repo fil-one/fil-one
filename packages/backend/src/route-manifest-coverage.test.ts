@@ -118,12 +118,38 @@ describe('route manifest coverage', () => {
     expect(ungated).toStrictEqual([]);
   });
 
-  it('leaves the self-service routes without an org-permission gate', () => {
-    // `self` waives the role gate: changing your own password or unenrolling
-    // your own authenticator is not an org action, and gating it on a role
-    // would lock a ReadOnly member out of their own account.
+  it('checks the in-handler routes against the same registry', () => {
+    // A route whose requirement depends on the request body cannot install a
+    // fixed permission, but it must still speak this registry: `authorize`'s
+    // exported check is the one enforcement idiom, and a handler marked
+    // in-handler that calls nothing is a route with no gate at all.
+    const unchecked = byRequirement('in-handler')
+      .filter((route) => !/\brequirePermission\(/.test(handlerSource(route.handler)))
+      .map((route) => route.handler);
+    expect(unchecked).toStrictEqual([]);
+  });
+
+  it('applies the declared cap in the handler on the routes that carry one', () => {
+    // A route can hold a fixed permission in the chain and still narrow it on
+    // the body — create-access-key gates on `keys.create` and then caps the new
+    // key at the creator's own authority. The cap is the shared registry's, so
+    // a route declaring one without calling it is a cap that does not run.
+    const uncapped = ROUTE_MANIFEST.filter((route) => route.capsInHandler)
+      .filter((route) => !/\bexcessKeyPermissions\(/.test(handlerSource(route.handler)))
+      .map((route) => route.handler);
+    expect(uncapped).toStrictEqual([]);
+  });
+
+  it('leaves the self-service routes without an org gate of any kind', () => {
+    // `self` waives the role gate AND the membership gate: changing your own
+    // password or correcting your own email is not an org action, gating it on
+    // a role would lock a ReadOnly member out of their own account, and gating
+    // it on membership would lock out the user whose membership row is the
+    // thing that went wrong.
     const gated = byRequirement('self')
-      .filter((route) => /\bauthorize\(/.test(handlerSource(route.handler)))
+      .filter((route) =>
+        /\b(authorize|requireMembershipMiddleware)\(/.test(handlerSource(route.handler)),
+      )
       .map((route) => route.handler);
     expect(gated).toStrictEqual([]);
   });

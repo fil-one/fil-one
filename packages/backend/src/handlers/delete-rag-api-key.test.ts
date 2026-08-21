@@ -31,17 +31,24 @@ vi.mock('../middleware/subscription-guard.js', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
+import { ApiErrorCode, OrgRole } from '@filone/shared';
 import { baseHandler, handler } from './delete-rag-api-key.js';
 import { RagApiKeyKeys } from '../lib/rag-api-keys.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { buildEvent, buildContext, membershipFor } from '../test/lambda-test-utilities.js';
 import { describeRoleEnforcement } from '../test/role-enforcement.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1', emailVerified: true };
 const TOKEN_HASH = 'b'.repeat(64);
 
-function deleteEvent(keyId?: string): AuthenticatedEvent {
-  const event = buildEvent({ userInfo: USER_INFO, method: 'DELETE' });
+function deleteEvent(keyId?: string, role?: OrgRole): AuthenticatedEvent {
+  const event = buildEvent({
+    userInfo: {
+      ...USER_INFO,
+      ...(role ? { membership: membershipFor(USER_INFO.orgId, USER_INFO.userId, role) } : {}),
+    },
+    method: 'DELETE',
+  });
   if (keyId) event.pathParameters = { keyId };
   return event;
 }
@@ -166,8 +173,61 @@ describe('delete-rag-api-key handler (allowlist gate)', () => {
   });
 });
 
+describe('whose RAG key a caller may revoke', () => {
+  function storedKey(createdBy?: string) {
+    return marshall({
+      pk: 'ORG#org-1',
+      sk: 'RAGKEY#key-1',
+      tokenHash: TOKEN_HASH,
+      ...(createdBy ? { createdBy } : {}),
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ddbMock.reset();
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+  });
+
+  it('lets a Member revoke a key they created', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: storedKey('user-1') });
+
+    expect(await baseHandler(deleteEvent('key-1', OrgRole.Member))).toMatchObject({
+      statusCode: 204,
+    });
+  });
+
+  it("refuses a Member someone else's key", async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: storedKey('user-2') });
+
+    const result = (await baseHandler(deleteEvent('key-1', OrgRole.Member))) as {
+      statusCode: number;
+      body: string;
+    };
+
+    expect(result.statusCode).toBe(403);
+    expect(JSON.parse(result.body).code).toBe(ApiErrorCode.FORBIDDEN_ROLE);
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+  });
+
+  it('refuses a Member an unattributed key, which nobody can claim', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: storedKey() });
+
+    expect(await baseHandler(deleteEvent('key-1', OrgRole.Member))).toMatchObject({
+      statusCode: 403,
+    });
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+  });
+
+  it.each([OrgRole.Owner, OrgRole.Admin])('lets %s revoke any key in the org', async (role) => {
+    ddbMock.on(GetItemCommand).resolves({ Item: storedKey('user-2') });
+
+    expect(await baseHandler(deleteEvent('key-1', role))).toMatchObject({ statusCode: 204 });
+  });
+});
+
 describeRoleEnforcement({
-  permission: 'keys.manage_all',
+  permission: 'keys.manage_own',
   invoke: (membership) =>
     handler(buildEvent({ userInfo: { ...USER_INFO, membership } }), buildContext()),
 });

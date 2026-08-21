@@ -917,6 +917,9 @@ export default $config({
       extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
     });
     addRoute({ method: 'POST', routePath: '/api/me/change-password', handler: 'change-password' });
+
+    // ── Organization route ──────────────────────────────────────────
+    addRoute({ method: 'PATCH', routePath: '/api/org', handler: 'update-org' });
     addRoute({
       method: 'GET',
       routePath: '/api/me/preferences',

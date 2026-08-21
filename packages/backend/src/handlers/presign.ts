@@ -9,6 +9,7 @@ import {
 } from '@filone/shared';
 import type {
   ErrorResponse,
+  Permission,
   PresignOp,
   PresignResponse,
   PresignResponseItem,
@@ -33,7 +34,7 @@ import {
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { requireMembershipMiddleware } from '../middleware/authorize.js';
+import { requireMembershipMiddleware, requirePermission } from '../middleware/authorize.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
 
@@ -41,6 +42,48 @@ const PRESIGN_EXPIRY_SECONDS = 300;
 const MAX_GET_OBJECT_EXPIRY_SECONDS = 604800;
 
 const WRITE_OPS = new Set<string>(['putObject', 'deleteObject']);
+
+/**
+ * The permission each presign operation needs. One route serves all seven, so
+ * the check runs here rather than in the chain — the route manifest marks it
+ * `in-handler` and lists this same mapping.
+ *
+ * `getObjectRetention` reads retention state rather than changing it, which is
+ * the auditor's read and an ordinary `objects.read`. A presign that *mutates*
+ * retention or legal hold is a different matter and none exists: it would be
+ * redeemed at the vendor, where its use cannot be logged, so adding one behind
+ * a general object permission would hand M2 a capability to claw back.
+ */
+const OP_PERMISSIONS: Record<PresignOp['op'], Permission> = {
+  getObject: 'objects.read',
+  headObject: 'objects.read',
+  listObjects: 'objects.read',
+  listObjectVersions: 'objects.read',
+  getObjectRetention: 'objects.read',
+  putObject: 'objects.write',
+  deleteObject: 'objects.delete',
+};
+
+/**
+ * Refuse the whole batch if any operation in it is refused, naming the one that
+ * failed. Whole rather than partial because the caller asked for a set of URLs
+ * and a response holding some of them would be indistinguishable from a set
+ * they are entitled to.
+ */
+function checkPresignPermissions(
+  event: AuthenticatedEvent,
+  ops: PresignOp[],
+): APIGatewayProxyStructuredResultV2 | undefined {
+  for (const op of ops) {
+    const denied = requirePermission(
+      event,
+      OP_PERMISSIONS[op.op],
+      `Your role in this organization does not permit ${op.op}.`,
+    );
+    if (denied) return denied;
+  }
+  return undefined;
+}
 
 async function presignGetObject(
   op: Extract<PresignOp, { op: 'getObject' }>,
@@ -150,6 +193,52 @@ async function presignOp(op: PresignOp, ctx: S3ClientContext): Promise<PresignRe
   }
 }
 
+/**
+ * What the caller's plan permits, as distinct from what their role permits.
+ *
+ * Trial accounts (and users with no billing record yet) cannot mint shareable
+ * links — `getObject` with a custom `expiresIn`; everything else stays
+ * available so a trial user can browse and interact with bucket contents
+ * normally. During a grace period the batch may read but not write: the
+ * subscription guard runs at Read level so viewing keeps working, and it leaves
+ * the resolved status on the event, so this costs no second query.
+ */
+function checkSubscriptionState(
+  event: AuthenticatedEvent,
+  ops: PresignOp[],
+): APIGatewayProxyStructuredResultV2 | undefined {
+  const status = event.requestContext.subscriptionStatus;
+
+  const isTrial = !status || status === SubscriptionStatus.Trialing;
+  const hasShareableUrl = ops.some((op) => op.op === 'getObject' && op.expiresIn !== undefined);
+  if (isTrial && hasShareableUrl) {
+    return new ResponseBuilder()
+      .status(402)
+      .body<ErrorResponse>({
+        message:
+          'Generating shareable links is not available on trial accounts. Please upgrade to a paid plan.',
+        code: ApiErrorCode.TRIAL_PRESIGN_BLOCKED,
+      })
+      .build();
+  }
+
+  const hasWriteOps = ops.some((op) => WRITE_OPS.has(op.op));
+  const isGraceOrPastDue =
+    status === SubscriptionStatus.GracePeriod || status === SubscriptionStatus.PastDue;
+  if (hasWriteOps && isGraceOrPastDue) {
+    return new ResponseBuilder()
+      .status(403)
+      .body<ErrorResponse>({
+        message:
+          'Your account is in a grace period. Read-only access is available. Please reactivate your subscription to make changes.',
+        code: ApiErrorCode.GRACE_PERIOD_WRITE_BLOCKED,
+      })
+      .build();
+  }
+
+  return undefined;
+}
+
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
@@ -185,42 +274,14 @@ export async function baseHandler(
   const ops = parsed.data;
   const { orgId } = getUserInfo(event);
 
-  // Trial accounts (and users with no billing record yet) cannot generate
-  // shareable presigned URLs (getObject with custom expiresIn). All other
-  // presign operations remain available so trial users can browse and interact
-  // with bucket contents normally.
-  const status = event.requestContext.subscriptionStatus;
-  const isTrial = !status || status === SubscriptionStatus.Trialing;
-  const hasShareableUrl = ops.some((op) => op.op === 'getObject' && op.expiresIn !== undefined);
-  if (isTrial && hasShareableUrl) {
-    return new ResponseBuilder()
-      .status(402)
-      .body<ErrorResponse>({
-        message:
-          'Generating shareable links is not available on trial accounts. Please upgrade to a paid plan.',
-        code: ApiErrorCode.TRIAL_PRESIGN_BLOCKED,
-      })
-      .build();
-  }
+  // Authorization first: what the caller's role permits does not depend on
+  // their billing state, and a member denied an operation should hear that
+  // rather than be told to upgrade.
+  const denied = checkPresignPermissions(event, ops);
+  if (denied) return denied;
 
-  // The subscription guard middleware uses Read access level so that listing
-  // and viewing objects still works during a grace period. The middleware stores
-  // the resolved subscription status on the event, so we can check it here
-  // without a second DynamoDB query. If the batch contains write ops
-  // (putObject, deleteObject), block during grace period.
-  const hasWriteOps = ops.some((op) => WRITE_OPS.has(op.op));
-  const isGraceOrPastDue =
-    status === SubscriptionStatus.GracePeriod || status === SubscriptionStatus.PastDue;
-  if (hasWriteOps && isGraceOrPastDue) {
-    return new ResponseBuilder()
-      .status(403)
-      .body<ErrorResponse>({
-        message:
-          'Your account is in a grace period. Read-only access is available. Please reactivate your subscription to make changes.',
-        code: ApiErrorCode.GRACE_PERIOD_WRITE_BLOCKED,
-      })
-      .build();
-  }
+  const blocked = checkSubscriptionState(event, ops);
+  if (blocked) return blocked;
 
   const orchestrator = getOrchestratorForRegion(region);
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
