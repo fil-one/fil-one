@@ -61,7 +61,7 @@ describe('getOrgProfile', () => {
   it('reads consistently only when asked', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: {} });
 
-    await getOrgProfile('org-1', { consistent: true });
+    await getOrgProfile('org-1', { consistentRead: true });
     expect(ddbMock.commandCalls(GetItemCommand)[0]?.args[0].input).toMatchObject({
       ConsistentRead: true,
     });
