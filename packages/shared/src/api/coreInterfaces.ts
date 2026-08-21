@@ -26,6 +26,12 @@ export enum ApiErrorCode {
   DELETION_RATE_LIMITED = 'DELETION_RATE_LIMITED',
   /** The account has been deleted; the session is dead and cannot be revived. */
   ACCOUNT_DELETED = 'ACCOUNT_DELETED',
+  /** The caller's role in the active organization does not carry this permission. */
+  FORBIDDEN_ROLE = 'FORBIDDEN_ROLE',
+  /** The caller is not a member of the organization the request names. */
+  NOT_A_MEMBER = 'NOT_A_MEMBER',
+  /** The invitation was issued to a different email address than the session's. */
+  INVITE_EMAIL_MISMATCH = 'INVITE_EMAIL_MISMATCH',
 }
 
 export interface ErrorResponse {
