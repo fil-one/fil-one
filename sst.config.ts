@@ -1340,14 +1340,6 @@ export default $config({
       // stripePriceId is unused here but getBillingSecrets() reads both keys in
       // one literal, so omitting it throws on the first getStripeClient() call.
       link: [billingTable, hubSpotServiceKey, stripeSecretKey, stripePriceId],
-
-    // ── Owner-count drift checker (cron-based, repairs the counter) ──
-    // The last-Owner invariant is a counter, and a counter with no
-    // reconciliation path eventually lies: this recounts each org's Owners from
-    // the membership rows and repairs a META row that disagrees.
-    const ownerCountDriftChecker = createFn('OwnerCountDriftChecker', {
-      handler: 'packages/backend/src/jobs/owner-count-drift-checker.handler',
-      link: [orgTable],
       timeout: '300 seconds',
       memory: '256 MB',
     });
@@ -1359,6 +1351,18 @@ export default $config({
       // propagation lag documented for ops on the HubSpot property itself.
       schedule: 'cron(30 0/6 * * ? *)',
       function: hubSpotContactSync.arn,
+    });
+
+    // ── Owner-count drift checker (cron-based, repairs the counter) ──
+    // The last-Owner invariant is a counter, and a counter with no
+    // reconciliation path eventually lies: this recounts each org's Owners from
+    // the membership rows and repairs a META row that disagrees.
+    const ownerCountDriftChecker = createFn('OwnerCountDriftChecker', {
+      handler: 'packages/backend/src/jobs/owner-count-drift-checker.handler',
+      link: [orgTable],
+      timeout: '300 seconds',
+      memory: '256 MB',
+    });
 
     new sst.aws.CronV2('OwnerCountDriftCheckerCron', {
       // Daily at 04:00 UTC, away from the billing jobs' windows.
