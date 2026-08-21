@@ -220,6 +220,20 @@ export const OAUTH_STATE_COOKIE = 'hs_oauth_state';
 /** Cookie name for the CSRF double-submit token. */
 export const CSRF_COOKIE_NAME = 'hs_csrf_token';
 
+/**
+ * The request header naming the organization a request operates on.
+ *
+ * A header rather than a path segment because no route is org-prefixed, and a
+ * header rather than a cookie so each request names its org explicitly instead
+ * of inheriting ambient state. The console sends it on every call; the backend
+ * validates it and resolves the caller's membership in that org. Absent, the
+ * active org is the identity row's own — which is what a curl caller gets.
+ *
+ * Header names are case-insensitive over the wire; this is the spelling the
+ * console sends and the CORS allowlist names.
+ */
+export const ORG_ID_HEADER = 'X-Org-Id';
+
 /** Number of bytes in a Gigabyte (1000^3). */
 export const GB_BYTES = 1_000_000_000;
 

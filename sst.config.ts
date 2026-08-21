@@ -332,8 +332,19 @@ export default $config({
         allowOrigins: allowedOrigins,
         allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
         // Authorization carries RAG API key bearer tokens (query endpoint);
-        // origins stay locked to our own domain above.
-        allowHeaders: ['Content-Type', 'X-CSRF-Token', 'X-Requested-With', 'Authorization'],
+        // X-Org-Id names the organization each request operates on. Deployed
+        // stages serve the console and the API from one origin through the
+        // Router, so CORS never applies there — local dev at
+        // https://localhost:5173 is cross-origin, and a preflight that omitted
+        // X-Org-Id would strip the header before it reached the API. Origins
+        // stay locked to our own domain above.
+        allowHeaders: [
+          'Content-Type',
+          'X-CSRF-Token',
+          'X-Requested-With',
+          'Authorization',
+          'X-Org-Id',
+        ],
         allowCredentials: true,
         maxAge: '1 day',
       },
@@ -416,6 +427,11 @@ export default $config({
     const router = new sst.aws.Router('WebsiteRouter', {
       routes: {
         '/*': { bucket: websiteBucket },
+        // CachingDisabled means every /api/* request reaches the origin, so
+        // X-Org-Id needs no place in a cache key. Any future cache policy on
+        // this route must add the header to its key: two orgs' responses to the
+        // same path differ by nothing else, and a shared entry would serve one
+        // org's data to the other.
         '/api/*': {
           url: api.url,
           cachePolicy: AWS_CACHING_DISABLED_POLICY,

@@ -1,11 +1,49 @@
 import { API_URL } from '../env.js';
-import { ApiErrorCode, CSRF_COOKIE_NAME } from '@filone/shared';
+import { ApiErrorCode, CSRF_COOKIE_NAME, ORG_ID_HEADER } from '@filone/shared';
 import type { StepUpRequiredResponse } from '@filone/shared';
+import {
+  clearActiveOrgAfterRefusal,
+  clearActiveOrgOnNavigation,
+  getActiveOrgId,
+  NAVIGATION_GIVE_UP_MS,
+  reconcileActiveOrg,
+  waitWhileSwitching,
+} from './active-org.js';
 import { redirectToStepUp } from './step-up.js';
 import type { PreferencesResponse, UpdatePreferencesRequest } from '@filone/shared';
 
 // Prevents multiple simultaneous 401 responses from each triggering a redirect.
 let isRedirecting = false;
+
+/**
+ * Send the page somewhere, and let the latch down if it never gets there.
+ *
+ * The latch is what keeps a page full of failing requests from firing one
+ * redirect each. It has to come down again, because a navigation can be
+ * refused: the upload page installs a `beforeunload` guard while a transfer is
+ * running, and a user who answers "stay on this page" leaves the document alive
+ * with the latch up. Every later 401 would then skip the redirect and the tab
+ * would sit on an expired session, every panel failing and nothing offering the
+ * way back in.
+ *
+ * `pagehide` fires when the page really is going, so it cancels the release —
+ * the same shape the org-switch latch uses, on the same clock.
+ */
+function redirectTo(href: string): void {
+  isRedirecting = true;
+
+  const release = setTimeout(() => {
+    window.removeEventListener('pagehide', cancel);
+    isRedirecting = false;
+  }, NAVIGATION_GIVE_UP_MS);
+
+  function cancel(): void {
+    clearTimeout(release);
+  }
+
+  window.addEventListener('pagehide', cancel, { once: true });
+  window.location.href = href;
+}
 
 /** Sentinel error subclass thrown when the backend returns step_up_required. */
 export class StepUpRequiredError extends Error {
@@ -57,11 +95,19 @@ function getCsrfToken(): string | undefined {
  */
 export function redirectToLogin(): void {
   if (isRedirecting) return;
-  isRedirecting = true;
-  window.location.href = `${API_URL}/login`;
+  redirectTo(`${API_URL}/login`);
 }
 
+/**
+ * Log out, and drop the org this tab was operating in once the logout
+ * navigation commits.
+ *
+ * `sessionStorage` belongs to the tab, not the session, so a shared machine
+ * needs the clear; it waits for the navigation because the click may not become
+ * one. See `clearActiveOrgOnNavigation`.
+ */
 export function logout(): void {
+  clearActiveOrgOnNavigation();
   window.location.href = `${API_URL}/logout`;
 }
 
@@ -99,10 +145,7 @@ function throwAccountDeleted(status: number, fromSessionProbe: boolean): never {
 function forbidden(body: { message?: string; code?: string }): Error {
   switch (body.code) {
     case ApiErrorCode.EMAIL_NOT_VERIFIED:
-      if (!isRedirecting) {
-        isRedirecting = true;
-        window.location.href = '/verify-email';
-      }
+      if (!isRedirecting) redirectTo('/verify-email');
       return Object.assign(new Error('Email verification required'), { status: 403 });
 
     case ApiErrorCode.NOT_A_MEMBER:
@@ -149,6 +192,13 @@ function forbidden(body: { message?: string; code?: string }): Error {
  */
 // eslint-disable-next-line complexity/complexity
 export async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  // The tab is on its way to another org. Held rather than rejected, for the
+  // reason `getMe` returns instead of throwing on a mismatch: the page is
+  // disappearing, and an error rendered over it would be the last thing the user
+  // sees of the org they just left. A switch that never navigates rolls back
+  // instead, and the request goes ahead below against the restored stash.
+  await waitWhileSwitching();
+
   const method = options.method?.toUpperCase() ?? 'GET';
   const headers = new Headers(options.headers);
   if (!headers.has('Content-Type')) {
@@ -158,6 +208,12 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
     const token = getCsrfToken();
     if (token) headers.set('X-CSRF-Token', token);
   }
+  // Every call names the org it is about. Without the header the server serves
+  // the caller's own org, which is right on a first visit and wrong for anyone
+  // who has switched — so the header goes on here, in the one funnel, rather
+  // than at each call site.
+  const activeOrgId = getActiveOrgId();
+  if (activeOrgId) headers.set(ORG_ID_HEADER, activeOrgId);
 
   const response = await fetch(`${API_URL}/api${path}`, {
     ...options,
@@ -248,12 +304,40 @@ import type {
   UpdateProfileResponse,
 } from '@filone/shared';
 
-export function getMe(options?: { forceRefresh?: boolean; include?: 'mfa' }): Promise<MeResponse> {
+/**
+ * The caller, their role, and the org the server resolved the request in.
+ *
+ * `/me` is the one response that echoes the active org, and this is where that
+ * echo is checked: a mismatch against the tab's stash means every other request
+ * is landing in an org the user did not choose, so the stash is cleared and the
+ * tab reloads. The response is still returned — the reload is already in flight,
+ * and a caller left holding a rejected promise would render an error page over
+ * a page that is about to disappear.
+ *
+ * A refusal carries no echo, and the server degrades `/me` rather than refusing
+ * it for anything the header could be at fault for. What is left is `/me`
+ * failing on its own account, and a stash held through it is worth dropping
+ * once: the alternative is a tab that keeps naming an org nobody will answer for.
+ */
+export async function getMe(options?: {
+  forceRefresh?: boolean;
+  include?: 'mfa';
+}): Promise<MeResponse> {
   const params = new URLSearchParams();
   if (options?.forceRefresh) params.set('forceRefresh', '1');
   if (options?.include) params.set('include', options.include);
   const qs = params.toString();
-  return apiRequest<MeResponse>(`/me${qs ? `?${qs}` : ''}`);
+  let me: MeResponse;
+  try {
+    me = await apiRequest<MeResponse>(`/me${qs ? `?${qs}` : ''}`);
+  } catch (err) {
+    // The status decides: only a refusal the header can be blamed for drops the
+    // stash. A network error carries none at all.
+    clearActiveOrgAfterRefusal((err as { status?: number }).status);
+    throw err;
+  }
+  reconcileActiveOrg(me.orgId);
+  return me;
 }
 
 export function updateProfile(data: UpdateProfileRequest): Promise<UpdateProfileResponse> {
