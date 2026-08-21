@@ -58,7 +58,12 @@ vi.mock('../lib/auth-secrets.js', () => ({
   }),
 }));
 
-const mockEnsureTrialEntitlement = vi.fn().mockResolvedValue(true);
+// The subscription guard is the system's only entitlement claim point: it runs
+// on the first gated request, in the caller's own org, which is the one place
+// that can tell that org from somebody else's (ADR §4/§5). This mock stands so
+// a claim on the login path is caught here instead of reaching Stripe — the
+// tests below require it to stay unused.
+const mockEnsureTrialEntitlement = vi.fn();
 vi.mock('../lib/trial-entitlement.js', () => ({
   ensureTrialEntitlement: (args: unknown) => mockEnsureTrialEntitlement(args),
 }));
@@ -752,7 +757,7 @@ describe('authMiddleware', () => {
       });
     });
 
-    it('creates new user and org with auto-confirmed name and triggers setup + billing trial', async () => {
+    it('creates new user and org with a derived name, deferring tenant setup and claiming nothing', async () => {
       // First call: access token verify; second call: ID token verify
       mockJwtVerify
         .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
@@ -889,15 +894,11 @@ describe('authMiddleware', () => {
         },
       ]);
 
-      // Entitlement claim + trial are delegated to ensureTrialEntitlement
-      // (verified-email gated). Unit-tested separately in trial-entitlement.test.ts.
-      expect(mockEnsureTrialEntitlement).toHaveBeenCalledWith({
-        sub: MOCK_SUB,
-        userId: MOCK_USER_ID,
-        orgId: MOCK_ORG_ID,
-        email: MOCK_EMAIL,
-        emailVerified: false,
-      });
+      // Signup mints the account and stops there. Claiming here would spend an
+      // invitee's entitlement the moment they signed in — the thing the guard's
+      // conditions exist to prevent; an organic signup claims one request later,
+      // on the dashboard's first API call.
+      expect(mockEnsureTrialEntitlement).not.toHaveBeenCalled();
     });
 
     it('names the actor by their email once the claim says it is verified', async () => {
@@ -964,15 +965,21 @@ describe('authMiddleware', () => {
       expect(calls[1].args[0].input.TransactItems).toHaveLength(6);
     });
 
-    it('does not block login when the trial entitlement backfill fails transiently', async () => {
+    it('signs an existing user in without claiming an entitlement', async () => {
+      const existingUserId = 'existing-user-uuid';
+      const existingOrgId = 'existing-org-uuid';
+
       mockJwtVerify
         .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, name: 'Alice Johnson' } });
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
 
-      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
-      ddbMock.on(TransactWriteItemsCommand).resolves({});
-      // Entitlement backfill throws (e.g. Stripe/DynamoDB down) — login must still succeed.
-      mockEnsureTrialEntitlement.mockRejectedValueOnce(new Error('Stripe down'));
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: { userId: { S: existingUserId }, orgId: { S: existingOrgId } },
+        });
 
       const { before } = authMiddleware({ requireVerifiedEmail: false });
       const event = buildEvent({
@@ -986,10 +993,13 @@ describe('authMiddleware', () => {
       expect(result).toBeUndefined();
       expect(getUserInfoFromEvent(event)).toMatchObject({
         sub: MOCK_SUB,
-        userId: MOCK_USER_ID,
-        orgId: MOCK_ORG_ID,
+        userId: existingUserId,
+        orgId: existingOrgId,
       });
-      expect(mockEnsureTrialEntitlement).toHaveBeenCalledOnce();
+      expect(mockEnsureTrialEntitlement).not.toHaveBeenCalled();
+      // Every account a user belongs to reaches the guard on its own first
+      // gated request, so the login path owes none of them a Stripe call.
+      expect(mockFetch).not.toHaveBeenCalled();
     });
 
     it('falls back to email-derived org name when no JWT name claim is present', async () => {

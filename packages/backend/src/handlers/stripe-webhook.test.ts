@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
+  ConditionalCheckFailedException,
   DynamoDBClient,
   DeleteItemCommand,
   GetItemCommand,
@@ -70,6 +71,7 @@ const ddbMock = mockClient(DynamoDBClient);
 
 import { handler } from './stripe-webhook.js';
 import { WEBHOOK_STATUS_SYNC_RETRY } from '../lib/region-helpers.js';
+import { BILLING_IDENTITY_PROJECTION } from '../lib/subscription-store.js';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
@@ -132,6 +134,17 @@ function setupCustomerRetrieve(userId?: string) {
   });
 }
 
+/**
+ * What the stored billing row names, for the guards that compare it against the
+ * event in hand. Keyed on the projection so it does not answer the org-resolution
+ * read, which projects `orgId`.
+ */
+function setupStoredIdentity(identity: { subscriptionId?: string; stripeCustomerId?: string }) {
+  ddbMock
+    .on(GetItemCommand, { ProjectionExpression: BILLING_IDENTITY_PROJECTION })
+    .resolves({ Item: marshall(identity) });
+}
+
 function setupDeletedCustomerRetrieve() {
   mockCustomersRetrieve.mockResolvedValue({
     id: MOCK_CUSTOMER_ID,
@@ -176,6 +189,38 @@ function setupPaymentMethodsRetrieve() {
 const MOCK_ORG_ID = 'test-org-uuid';
 const MOCK_AURORA_TENANT_ID = 'aurora-tenant-123';
 
+// The two keys one subscription lives on while the row moves to its org. Every
+// write lands on the org key first: a read prefers that row, so it must never
+// be the stale half.
+const ORG_KEY = { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'SUBSCRIPTION' } };
+const LEGACY_KEY = { pk: { S: `CUSTOMER#${MOCK_USER_ID}` }, sk: { S: 'SUBSCRIPTION' } };
+
+function updateInputs() {
+  return ddbMock.commandCalls(UpdateItemCommand).map((c) => c.args[0].input);
+}
+
+function updatedKeys() {
+  return updateInputs().map((input) => input.Key);
+}
+
+/** The writes that landed on one key, for a test that cares about one row. */
+function updateInputsFor(key: typeof ORG_KEY) {
+  return updateInputs().filter((input) => input.Key?.pk?.S === key.pk.S);
+}
+
+/** DynamoDB's answer to `attribute_exists(pk)` on an account the backfill has not reached. */
+function noOrgRow() {
+  return new ConditionalCheckFailedException({ message: 'no org row', $metadata: {} });
+}
+
+function setupCustomerRetrieveWithOrg() {
+  mockCustomersRetrieve.mockResolvedValue({
+    id: MOCK_CUSTOMER_ID,
+    deleted: false,
+    metadata: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID },
+  });
+}
+
 // Per-region failure as reported by syncTenantStatusInProvisionedRegions,
 // which never throws.
 function regionSyncFailure(cause: Error) {
@@ -189,6 +234,8 @@ function regionSyncFailure(cause: Error) {
   ];
 }
 
+// The org resolved the second way: nothing in the Stripe metadata says which
+// org this is, so the billing row answers.
 function setupAuroraTenantResolution() {
   ddbMock
     .on(GetItemCommand, {
@@ -376,7 +423,6 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
-        ConditionExpression: 'attribute_not_exists(deletedAt)',
         UpdateExpression:
           'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now REMOVE gracePeriodEndsAt, canceledAt',
         ExpressionAttributeValues: {
@@ -386,6 +432,7 @@ describe('stripe-webhook handler', () => {
           ':periodEnd': { S: new Date(1700000000 * 1000).toISOString() },
           ':now': { S: expect.any(String) },
         },
+        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
       });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -580,7 +627,6 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
-        ConditionExpression: 'attribute_not_exists(deletedAt)',
         UpdateExpression:
           'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now REMOVE gracePeriodEndsAt, canceledAt',
         ExpressionAttributeValues: {
@@ -590,6 +636,7 @@ describe('stripe-webhook handler', () => {
           ':periodEnd': { S: new Date(1700000000 * 1000).toISOString() },
           ':now': { S: expect.any(String) },
         },
+        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
       });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -663,7 +710,6 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
-        ConditionExpression: 'attribute_not_exists(deletedAt)',
         UpdateExpression:
           'SET paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now',
         ExpressionAttributeValues: {
@@ -674,6 +720,7 @@ describe('stripe-webhook handler', () => {
           ':expYear': { N: String(MOCK_PM_EXP_YEAR) },
           ':now': { S: expect.any(String) },
         },
+        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
       });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -782,6 +829,92 @@ describe('stripe-webhook handler', () => {
   // -----------------------------------------------------------------------
   // 5. customer.subscription.deleted
   // -----------------------------------------------------------------------
+  describe('a subscription the account has already replaced', () => {
+    function supersededEmissions(): MetricEvent[] {
+      return reportMetricMock.mock.calls
+        .map(([event]) => event)
+        .filter((e) => (e as { SupersededBillingEvent?: unknown }).SupersededBillingEvent === 1);
+    }
+
+    it('does not put a paying tenant into grace on a late cancellation', async () => {
+      // Stripe retries out of order: a cancellation for the trial subscription
+      // an upgrade replaced can arrive after the replacement is live.
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieveWithOrg();
+      setupStoredIdentity({ subscriptionId: 'sub_the_live_one' });
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+      expect(supersededEmissions()).toHaveLength(1);
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('grants the grace period when the event names the subscription on the row', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieveWithOrg();
+      setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(updateInputs()[0].ExpressionAttributeValues![':status']).toEqual({
+        S: SubscriptionStatus.GracePeriod,
+      });
+      expect(supersededEmissions()).toHaveLength(0);
+    });
+
+    it('does not mark a live subscription past due on a late payment failure', async () => {
+      setupStripeEvent(
+        'invoice.payment_failed',
+        mockInvoice({
+          parent: { subscription_details: { subscription: 'sub_the_old_one' } },
+        }),
+      );
+      setupCustomerRetrieveWithOrg();
+      setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(supersededEmissions()).toHaveLength(1);
+    });
+
+    it('marks past due when the failing invoice names the subscription on the row', async () => {
+      setupStripeEvent(
+        'invoice.payment_failed',
+        mockInvoice({
+          parent: { subscription_details: { subscription: MOCK_SUBSCRIPTION_ID } },
+        }),
+      );
+      setupCustomerRetrieveWithOrg();
+      setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(updateInputs()[0].ExpressionAttributeValues![':status']).toEqual({
+        S: SubscriptionStatus.PastDue,
+      });
+      expect(supersededEmissions()).toHaveLength(0);
+    });
+
+    it('still applies an update arriving under a new subscription id', async () => {
+      // The upsert keeps last-writer-wins: an upgrade legitimately arrives
+      // under an id the row has never seen, and refusing it as superseded would
+      // leave the account on the plan it just left.
+      setupStripeEvent('customer.subscription.updated', mockSubscription());
+      setupCustomerRetrieveWithOrg();
+      setupStoredIdentity({ subscriptionId: 'sub_the_previous_one' });
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(updateInputs()[0].ExpressionAttributeValues![':subId']).toEqual({
+        S: MOCK_SUBSCRIPTION_ID,
+      });
+      expect(supersededEmissions()).toHaveLength(0);
+    });
+  });
+
   describe('customer.subscription.deleted', () => {
     it('sets GracePeriod status with 30-day grace window', async () => {
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
@@ -801,7 +934,6 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
-        ConditionExpression: 'attribute_not_exists(deletedAt)',
         UpdateExpression:
           'SET subscriptionStatus = :status, canceledAt = :now, gracePeriodEndsAt = :grace, updatedAt = :now',
         ExpressionAttributeValues: {
@@ -809,6 +941,7 @@ describe('stripe-webhook handler', () => {
           ':now': { S: expect.any(String) },
           ':grace': { S: expect.any(String) },
         },
+        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
       });
 
       const graceDate = new Date(input.ExpressionAttributeValues![':grace'].S!).getTime();
@@ -839,6 +972,23 @@ describe('stripe-webhook handler', () => {
       const sevenDays = 7 * 24 * 60 * 60 * 1000;
       expect(graceDate).toBeGreaterThanOrEqual(before + sevenDays - 5000);
       expect(graceDate).toBeLessThanOrEqual(after + sevenDays + 5000);
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('grants the grace period on the legacy row when the org twin does not exist yet', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieveWithOrg();
+      ddbMock.on(UpdateItemCommand, { Key: ORG_KEY }).rejects(noOrgRow());
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      // The backfill has not copied this account, so there is no org row to
+      // update — the run carries on rather than failing the webhook.
+      const legacyWrites = updateInputsFor(LEGACY_KEY);
+      expect(legacyWrites).toHaveLength(1);
+      expect(legacyWrites[0].ExpressionAttributeValues![':status']).toEqual({
+        S: SubscriptionStatus.GracePeriod,
+      });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
@@ -932,8 +1082,8 @@ describe('stripe-webhook handler', () => {
 
       const result = await handler(buildWebhookEvent('{}'));
 
-      // DynamoDB subscription update should still have happened
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+      // DynamoDB subscription update should still have happened, on both keys
+      expect(updatedKeys()).toEqual([ORG_KEY, LEGACY_KEY]);
       // Webhook should still return 200
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -1067,13 +1217,13 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
-        ConditionExpression: 'attribute_not_exists(deletedAt)',
         UpdateExpression:
           'SET subscriptionStatus = :active, lastPaymentAt = :now, updatedAt = :now REMOVE gracePeriodEndsAt, lastPaymentFailedAt, canceledAt',
         ExpressionAttributeValues: {
           ':active': { S: SubscriptionStatus.Active },
           ':now': { S: expect.any(String) },
         },
+        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
         ReturnValues: 'ALL_OLD',
       });
       expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
@@ -1148,7 +1298,7 @@ describe('stripe-webhook handler', () => {
 
       const result = await handler(buildWebhookEvent('{}'));
 
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+      expect(updatedKeys()).toEqual([ORG_KEY, LEGACY_KEY]);
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
   });
@@ -1157,6 +1307,19 @@ describe('stripe-webhook handler', () => {
   // 8. invoice.payment_failed
   // -----------------------------------------------------------------------
   describe('invoice.payment_failed', () => {
+    it('dual-writes for a customer whose org only the billing row knows', async () => {
+      // Customers created before the metadata carried an `orgId` used to write
+      // one key here while every other writer wrote two, which left the backfill
+      // chasing a row the app kept changing under it.
+      setupStripeEvent('invoice.payment_failed', mockInvoice());
+      setupCustomerRetrieve();
+      setupAuroraTenantResolution();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(updatedKeys()).toEqual([ORG_KEY, LEGACY_KEY]);
+    });
+
     it('sets PastDue status with lastPaymentFailedAt (no grace period)', async () => {
       setupStripeEvent('invoice.payment_failed', mockInvoice());
       setupCustomerRetrieve();
@@ -1173,7 +1336,6 @@ describe('stripe-webhook handler', () => {
           pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
           sk: { S: 'SUBSCRIPTION' },
         },
-        ConditionExpression: 'attribute_not_exists(deletedAt)',
         UpdateExpression:
           'SET subscriptionStatus = :status, lastPaymentFailedAt = :failedAt, updatedAt = :now',
         ExpressionAttributeValues: {
@@ -1181,6 +1343,7 @@ describe('stripe-webhook handler', () => {
           ':failedAt': { S: expect.any(String) },
           ':now': { S: expect.any(String) },
         },
+        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
       });
 
       // Must NOT set gracePeriodEndsAt — Stripe Smart Retries handle the retry window
@@ -1641,28 +1804,20 @@ describe('stripe-webhook handler', () => {
   // whatever the metadata carries.
   // -----------------------------------------------------------------------
   describe('orgId backfill', () => {
-    function setupCustomerRetrieveWithOrg() {
-      mockCustomersRetrieve.mockResolvedValue({
-        id: MOCK_CUSTOMER_ID,
-        deleted: false,
-        metadata: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID },
-      });
-    }
-
-    function billingUpdateInput() {
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-      return updateCalls[0].args[0].input;
-    }
-
+    // A known org is written to both keys: the org twin is the row the lifecycle
+    // jobs will read once the backfill has run.
     function expectOrgIdBackfilled() {
-      const input = billingUpdateInput();
-      expect(input.UpdateExpression).toContain('orgId = if_not_exists(orgId, :orgId)');
-      expect(input.ExpressionAttributeValues![':orgId']).toEqual({ S: MOCK_ORG_ID });
+      expect(updatedKeys()).toEqual([ORG_KEY, LEGACY_KEY]);
+      for (const input of updateInputs()) {
+        expect(input.UpdateExpression).toContain('orgId = if_not_exists(orgId, :orgId)');
+        expect(input.ExpressionAttributeValues![':orgId']).toEqual({ S: MOCK_ORG_ID });
+      }
     }
 
+    // No org id in hand names no org key, so the legacy row is the whole write.
     function expectNoOrgIdClause() {
-      const input = billingUpdateInput();
+      expect(updatedKeys()).toEqual([LEGACY_KEY]);
+      const input = updateInputs()[0];
       expect(input.UpdateExpression).not.toContain('orgId');
       expect(input.ExpressionAttributeValues![':orgId']).toBeUndefined();
     }

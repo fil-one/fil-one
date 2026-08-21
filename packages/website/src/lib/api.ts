@@ -125,6 +125,18 @@ function forbidden(body: { message?: string; code?: string }): Error {
         { status: 403 },
       );
 
+    // The org's billing, not the caller's: the message the server sends already
+    // names who can set it up, so it is passed through rather than replaced by
+    // the account-holder wording the other billing codes carry.
+    case ApiErrorCode.ORG_BILLING_INACTIVE:
+      return Object.assign(
+        new Error(
+          body.message ??
+            'This organization does not have billing set up. An Owner of the organization can add a payment method.',
+        ),
+        { status: 403 },
+      );
+
     default:
       return Object.assign(new Error(body.message ?? 'Access denied'), { status: 403 });
   }

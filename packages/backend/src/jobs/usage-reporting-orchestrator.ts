@@ -1,17 +1,14 @@
-import { ScanCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
-import { unmarshall } from '@aws-sdk/util-dynamodb';
-import { getDynamoClient } from '../lib/ddb-client.js';
 import { getOrgProfile } from '../lib/org-profile.js';
+import { scanSubscriptions } from '../lib/subscription-store.js';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
-import { Resource } from 'sst';
 import type { UsageReportingWorkerPayload } from './usage-reporting-worker.js';
 
-const dynamo = getDynamoClient();
 const lambda = new LambdaClient({});
 
 interface SubscriptionRecord {
+  pk: string;
   orgId: string;
-  /** From the record pk (CUSTOMER#<userId>); lets the worker close out the record when self-healing. */
+  /** From the row, or from a legacy pk; lets the worker close out the record when self-healing. */
   userId?: string;
   subscriptionId: string;
   stripeCustomerId: string;
@@ -20,35 +17,21 @@ interface SubscriptionRecord {
 }
 
 export async function handler(): Promise<void> {
-  const billingTableName = Resource.BillingTable.name;
   const workerFunctionName = process.env.USAGE_WORKER_FUNCTION_NAME!;
   const reportDate = new Date().toISOString().split('T')[0];
 
   console.log('[usage-orchestrator] Starting usage reporting', { reportDate });
 
-  const records = await scanActiveSubscriptionRecords(billingTableName);
+  const records = await scanActiveSubscriptionRecords();
 
   console.log('[usage-orchestrator] Found subscriptions', { count: records.length });
 
   if (records.length === 0) return;
 
-  const orgSeen = new Map<string, { subscriptionId: string; stripeCustomerId: string }>();
-  let skippedDuplicate = 0;
   let invoked = 0;
   let failed = 0;
 
   for (const record of records) {
-    const existing = orgSeen.get(record.orgId);
-    if (existing) {
-      skippedDuplicate++;
-      logDuplicateConflict(record, existing);
-      continue;
-    }
-    orgSeen.set(record.orgId, {
-      subscriptionId: record.subscriptionId,
-      stripeCustomerId: record.stripeCustomerId,
-    });
-
     // Tenant resolution lives in the worker; the orchestrator passes only the
     // org id (plus billing fields and the org name for Stripe metadata sync).
     const orgName = await resolveOrgName(record.orgId);
@@ -72,84 +55,58 @@ export async function handler(): Promise<void> {
   }
 
   console.log('[usage-orchestrator] Complete', {
-    totalSubscriptions: records.length,
-    uniqueOrgs: orgSeen.size,
+    uniqueOrgs: records.length,
     invoked,
     failed,
-    skippedDuplicate,
   });
 }
 
-async function scanActiveSubscriptionRecords(
-  billingTableName: string,
-): Promise<SubscriptionRecord[]> {
-  const records: SubscriptionRecord[] = [];
-  let lastEvaluatedKey: Record<string, AttributeValue> | undefined;
-
-  do {
-    const result = await dynamo.send(
-      new ScanCommand({
-        TableName: billingTableName,
-        // attribute_not_exists(deletedAt) is redundant against the status a scrub
-        // writes, and deliberately so: either alone keeps a torn-down org out.
-        FilterExpression:
-          'sk = :sk AND subscriptionStatus <> :canceled AND attribute_exists(subscriptionId) ' +
-          'AND attribute_not_exists(deletedAt)',
-        ExpressionAttributeValues: {
-          ':sk': { S: 'SUBSCRIPTION' },
-          ':canceled': { S: 'canceled' },
-        },
-        ...(lastEvaluatedKey ? { ExclusiveStartKey: lastEvaluatedKey } : {}),
-      }),
-    );
-
-    for (const item of result.Items ?? []) {
-      const record = unmarshall(item);
-
-      if (!record.orgId) {
-        console.warn('[usage-orchestrator] Missing orgId, skipping', { pk: record.pk });
-        continue;
-      }
-
+/**
+ * The orgs to meter this run: one record per org, so a Stripe meter is never
+ * fed twice for one tenant. A second row for an org names both subscription ids
+ * in the scan's collision warning, because billing the wrong one is the whole
+ * cost of getting this wrong.
+ */
+async function scanActiveSubscriptionRecords(): Promise<SubscriptionRecord[]> {
+  return scanSubscriptions<SubscriptionRecord>({
+    job: 'usage-orchestrator',
+    // attribute_not_exists(deletedAt) is redundant against the status a scrub
+    // writes, and deliberately so: either alone keeps a torn-down org out.
+    filterExpression:
+      'sk = :sk AND subscriptionStatus <> :canceled AND attribute_exists(subscriptionId) ' +
+      'AND attribute_not_exists(deletedAt)',
+    expressionAttributeValues: {
+      ':sk': { S: 'SUBSCRIPTION' },
+      ':canceled': { S: 'canceled' },
+    },
+    select: (record, owner) => {
       if (!record.currentPeriodStart) {
         console.warn('[usage-orchestrator] Missing currentPeriodStart, skipping', {
-          orgId: record.orgId,
+          orgId: owner.orgId,
         });
-        continue;
+        return undefined;
       }
 
       if (!record.subscriptionStatus) {
         console.warn('[usage-orchestrator] Missing subscriptionStatus, skipping', {
-          orgId: record.orgId,
+          orgId: owner.orgId,
         });
-        continue;
+        return undefined;
       }
 
-      records.push({
-        orgId: record.orgId,
-        userId: extractUserIdFromBillingRecordPK(record.pk),
-        subscriptionId: record.subscriptionId,
-        stripeCustomerId: record.stripeCustomerId,
-        currentPeriodStart: record.currentPeriodStart,
-        subscriptionStatus: record.subscriptionStatus,
-      });
-    }
-
-    lastEvaluatedKey = result.LastEvaluatedKey;
-  } while (lastEvaluatedKey);
-
-  return records;
-}
-
-/** userId from a billing record pk (CUSTOMER#<userId>); undefined for unexpected shapes. */
-function extractUserIdFromBillingRecordPK(pk: unknown): string | undefined {
-  const userId =
-    typeof pk === 'string' && pk.startsWith('CUSTOMER#') ? pk.slice('CUSTOMER#'.length) : '';
-  if (!userId) {
-    console.warn('[usage-orchestrator] Unexpected billing record pk shape', { pk });
-    return undefined;
-  }
-  return userId;
+      return {
+        ...owner,
+        subscriptionId: record.subscriptionId as string,
+        stripeCustomerId: record.stripeCustomerId as string,
+        currentPeriodStart: record.currentPeriodStart as string,
+        subscriptionStatus: record.subscriptionStatus as string,
+      };
+    },
+    describe: (row) => ({
+      subscriptionId: row.subscriptionId,
+      stripeCustomerId: row.stripeCustomerId,
+    }),
+  });
 }
 
 /** Best-effort org name for Stripe metadata sync; `undefined` if the org has no profile/name. */
@@ -178,27 +135,4 @@ async function invokeUsageWorker(
     });
     return false;
   }
-}
-
-function logDuplicateConflict(
-  record: SubscriptionRecord,
-  existing: { subscriptionId: string; stripeCustomerId: string },
-): void {
-  if (
-    existing.subscriptionId === record.subscriptionId &&
-    existing.stripeCustomerId === record.stripeCustomerId
-  ) {
-    return;
-  }
-  console.warn('[usage-orchestrator] Conflicting duplicate for orgId', {
-    orgId: record.orgId,
-    first: {
-      subscriptionId: existing.subscriptionId,
-      stripeCustomerId: existing.stripeCustomerId,
-    },
-    duplicate: {
-      subscriptionId: record.subscriptionId,
-      stripeCustomerId: record.stripeCustomerId,
-    },
-  });
 }

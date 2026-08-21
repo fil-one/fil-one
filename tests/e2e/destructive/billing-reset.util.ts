@@ -1,6 +1,7 @@
 import { Resource } from 'sst';
 import {
   DynamoDBClient,
+  QueryCommand,
   UpdateItemCommand,
   ConditionalCheckFailedException,
 } from '@aws-sdk/client-dynamodb';
@@ -25,6 +26,34 @@ const AWS_REGION = process.env.AWS_REGION ?? 'us-east-2';
 
 function getBillingTableName(): string {
   return (Resource as unknown as Record<string, { name: string }>).BillingTable.name;
+}
+
+function getOrgTableName(): string {
+  return (Resource as unknown as Record<string, { name: string }>).OrgTable.name;
+}
+
+/**
+ * The org the test user belongs to, from their membership rows.
+ *
+ * Resolved rather than configured: the alternative is a fourth secret per role
+ * in the staging workflow, and the answer is already in the table. The user
+ * belongs to exactly one org — these are single-purpose test accounts — so the
+ * first inverse item is the answer.
+ */
+async function resolveOrgId(userId: string): Promise<string | undefined> {
+  const result = await getDynamoClient().send(
+    new QueryCommand({
+      TableName: getOrgTableName(),
+      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :sk)',
+      ExpressionAttributeValues: {
+        ':pk': { S: `USER#${userId}` },
+        ':sk': { S: 'MEMBERSHIP#' },
+      },
+      Limit: 1,
+    }),
+  );
+  const sk = result.Items?.[0]?.sk?.S;
+  return sk?.startsWith('MEMBERSHIP#') ? sk.slice('MEMBERSHIP#'.length) : undefined;
 }
 
 function isoFromNow(daysFromNow: number): string {
@@ -79,6 +108,15 @@ export async function activateSubscription(role: Role, userId: string): Promise<
   await patchSubscription(role, userId, { subscriptionStatus: status, ...extra });
 }
 
+/**
+ * Patch every key the row lives under.
+ *
+ * The application reads the org key and falls back to the user's, so patching
+ * one of them leaves the run at the mercy of whether the backfill has reached
+ * this test account: the suite would set up `past_due` on the legacy row and the
+ * app would keep serving `active` off the org twin. Both are patched, and it is
+ * an error for neither to exist.
+ */
 async function patchSubscription(
   role: Role,
   userId: string,
@@ -98,27 +136,32 @@ async function patchSubscription(
     sets.push(`#k${i} = :v${i}`);
   });
 
-  try {
-    await getDynamoClient().send(
-      new UpdateItemCommand({
-        TableName: getBillingTableName(),
-        Key: {
-          pk: { S: `CUSTOMER#${userId}` },
-          sk: { S: 'SUBSCRIPTION' },
-        },
-        UpdateExpression: `SET ${sets.join(', ')}`,
-        ExpressionAttributeNames: names,
-        ExpressionAttributeValues: values,
-        ConditionExpression: 'attribute_exists(pk)',
-      }),
-    );
-  } catch (err) {
-    if (err instanceof ConditionalCheckFailedException) {
-      throw new Error(
-        `E2E test user ${userId} (role=${role}) has no BillingTable record. ` +
-          `Pre-seed it (orgId, stripeCustomerId, subscriptionId) before running E2E tests.`,
+  const orgId = await resolveOrgId(userId);
+  const keys = [...(orgId ? [`ORG#${orgId}`] : []), `CUSTOMER#${userId}`];
+
+  let patched = 0;
+  for (const pk of keys) {
+    try {
+      await getDynamoClient().send(
+        new UpdateItemCommand({
+          TableName: getBillingTableName(),
+          Key: { pk: { S: pk }, sk: { S: 'SUBSCRIPTION' } },
+          UpdateExpression: `SET ${sets.join(', ')}`,
+          ExpressionAttributeNames: names,
+          ExpressionAttributeValues: values,
+          ConditionExpression: 'attribute_exists(pk)',
+        }),
       );
+      patched += 1;
+    } catch (err) {
+      if (!(err instanceof ConditionalCheckFailedException)) throw err;
     }
-    throw err;
+  }
+
+  if (patched === 0) {
+    throw new Error(
+      `E2E test user ${userId} (role=${role}, org=${orgId ?? 'unresolved'}) has no BillingTable ` +
+        `record on either key. Pre-seed it (orgId, stripeCustomerId, subscriptionId) before running E2E tests.`,
+    );
   }
 }

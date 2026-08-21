@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  ConditionalCheckFailedException,
+  DynamoDBClient,
+  GetItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { OrgRole, SubscriptionStatus } from '@filone/shared';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
@@ -99,12 +104,18 @@ import { handler } from './activate-subscription.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** The two keys the subscription row lives on while it moves to the org. */
+const ORG_KEY = { pk: { S: 'ORG#org-1' }, sk: { S: 'SUBSCRIPTION' } };
+const LEGACY_KEY = { pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } };
+
+/** The org's row — the one a read prefers, so the one an unqualified stub answers with. */
 function buildBillingRecord(overrides?: Record<string, unknown>) {
   const base: Record<string, unknown> = {
-    pk: 'CUSTOMER#user-1',
+    pk: ORG_KEY.pk.S,
     sk: 'SUBSCRIPTION',
     stripeCustomerId: 'cus_test_123',
     orgId: 'org-1',
+    userId: 'user-1',
     subscriptionStatus: SubscriptionStatus.Trialing,
     ...overrides,
   };
@@ -112,6 +123,11 @@ function buildBillingRecord(overrides?: Record<string, unknown>) {
     if (base[key] === undefined) delete base[key];
   }
   return marshall(base);
+}
+
+/** The partition keys the updates landed on, in the order the store wrote them. */
+function updatedKeys() {
+  return ddbMock.commandCalls(UpdateItemCommand).map((call) => call.args[0].input.Key?.pk?.S);
 }
 
 function orgProfileWithTenant(tenantId: string) {
@@ -156,6 +172,9 @@ describe('activate-subscription handler', () => {
     });
     mockSyncTenantStatusInProvisionedRegions.mockResolvedValue([]);
     mockIsOrgDeleting.mockResolvedValue(false);
+    // The billing read asks both keys at once. Absent unless a test says
+    // otherwise, so a row only exists where the test put one.
+    ddbMock.on(GetItemCommand).resolves({});
   });
 
   // A subscription created here is billable and postdates teardown's snapshot
@@ -178,14 +197,15 @@ describe('activate-subscription handler', () => {
   it('updates existing trial subscription when subscriptionId exists', async () => {
     // Record has subscriptionId from billing-trial-setup
     ddbMock
-      .on(GetItemCommand)
-      .resolvesOnce({
+      .on(GetItemCommand, { Key: ORG_KEY })
+      .resolves({
         Item: buildBillingRecord({
           subscriptionId: 'sub_trial_123',
           subscriptionStatus: SubscriptionStatus.Trialing,
         }),
       })
-      .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
+      .on(GetItemCommand, { TableName: 'UserInfoTable' })
+      .resolves(orgProfileWithTenant('aurora-t-1'));
     ddbMock.on(UpdateItemCommand).resolves({});
 
     mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
@@ -205,8 +225,82 @@ describe('activate-subscription handler', () => {
     expect(body.subscription.status).toBe(SubscriptionStatus.Active);
   });
 
+  it("activates the org subscription rather than the one on the caller's legacy row", async () => {
+    // Billing belongs to the org, so a legacy row the caller happens to own
+    // must not decide which Stripe customer gets charged.
+    ddbMock
+      .on(GetItemCommand, { Key: ORG_KEY })
+      .resolves({
+        Item: buildBillingRecord({
+          stripeCustomerId: 'cus_org_1',
+          subscriptionId: 'sub_org_1',
+          subscriptionStatus: SubscriptionStatus.Trialing,
+        }),
+      })
+      .on(GetItemCommand, { Key: LEGACY_KEY })
+      .resolves({
+        Item: buildBillingRecord({
+          pk: LEGACY_KEY.pk.S,
+          stripeCustomerId: 'cus_legacy_9',
+          subscriptionId: 'sub_legacy_9',
+        }),
+      });
+    ddbMock.on(UpdateItemCommand).resolves({});
+
+    mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
+
+    const event = buildEvent({
+      userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+      method: 'POST',
+      rawPath: '/api/billing/activate',
+    });
+    await handler(event, {} as never);
+
+    expect(mockSubscriptionsUpdate).toHaveBeenNthCalledWith(1, 'sub_org_1', {
+      default_payment_method: 'pm_test_789',
+    });
+    expect(mockSetupIntentsList).toHaveBeenCalledWith({ customer: 'cus_org_1', limit: 1 });
+    expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
+  });
+
+  it('activates on the legacy row when the backfill has not created the org row', async () => {
+    // Every account the backfill has not reached: the org row's existence
+    // condition fails, and activation still has to complete.
+    ddbMock
+      .on(GetItemCommand, { Key: ORG_KEY })
+      .resolves({})
+      .on(GetItemCommand, { Key: LEGACY_KEY })
+      .resolves({
+        Item: buildBillingRecord({ pk: LEGACY_KEY.pk.S, subscriptionId: 'sub_trial_123' }),
+      });
+    ddbMock
+      .on(UpdateItemCommand, { Key: ORG_KEY })
+      .rejects(
+        new ConditionalCheckFailedException({
+          message: 'The conditional request failed',
+          $metadata: {},
+        }),
+      )
+      .on(UpdateItemCommand, { Key: LEGACY_KEY })
+      .resolves({});
+
+    mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
+
+    const event = buildEvent({
+      userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+      method: 'POST',
+      rawPath: '/api/billing/activate',
+    });
+    const result = await handler(event, {} as never);
+    const body = JSON.parse((result as { body: string }).body);
+
+    expect(body.subscription.status).toBe(SubscriptionStatus.Active);
+    expect(updatedKeys()).toStrictEqual([ORG_KEY.pk.S, LEGACY_KEY.pk.S]);
+    expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith('org-1', 'active');
+  });
+
   it('unlocks every provisioned region on activation', async () => {
-    ddbMock.on(GetItemCommand).resolvesOnce({
+    ddbMock.on(GetItemCommand, { Key: ORG_KEY }).resolves({
       Item: buildBillingRecord({
         subscriptionId: 'sub_trial_123',
         subscriptionStatus: SubscriptionStatus.Trialing,
@@ -230,14 +324,15 @@ describe('activate-subscription handler', () => {
     // in a single call caused Stripe's missing_payment_method:'cancel' behavior
     // to fire before the payment method was fully attached, canceling the subscription.
     ddbMock
-      .on(GetItemCommand)
-      .resolvesOnce({
+      .on(GetItemCommand, { Key: ORG_KEY })
+      .resolves({
         Item: buildBillingRecord({
           subscriptionId: 'sub_trial_123',
           subscriptionStatus: SubscriptionStatus.Trialing,
         }),
       })
-      .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
+      .on(GetItemCommand, { TableName: 'UserInfoTable' })
+      .resolves(orgProfileWithTenant('aurora-t-1'));
     ddbMock.on(UpdateItemCommand).resolves({});
 
     mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
@@ -264,9 +359,10 @@ describe('activate-subscription handler', () => {
   it('creates new subscription when no subscriptionId exists (legacy path)', async () => {
     // Record without subscriptionId (legacy)
     ddbMock
-      .on(GetItemCommand)
-      .resolvesOnce({ Item: buildBillingRecord() })
-      .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
+      .on(GetItemCommand, { Key: ORG_KEY })
+      .resolves({ Item: buildBillingRecord() })
+      .on(GetItemCommand, { TableName: 'UserInfoTable' })
+      .resolves(orgProfileWithTenant('aurora-t-1'));
     ddbMock.on(UpdateItemCommand).resolves({});
 
     mockSubscriptionsCreate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
@@ -296,14 +392,15 @@ describe('activate-subscription handler', () => {
     // Record retains the stale subscriptionId from the canceled Stripe subscription;
     // the webhook clears it later via customer.subscription.created.
     ddbMock
-      .on(GetItemCommand)
-      .resolvesOnce({
+      .on(GetItemCommand, { Key: ORG_KEY })
+      .resolves({
         Item: buildBillingRecord({
           subscriptionId: 'sub_canceled_old',
           subscriptionStatus: SubscriptionStatus.GracePeriod,
         }),
       })
-      .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
+      .on(GetItemCommand, { TableName: 'UserInfoTable' })
+      .resolves(orgProfileWithTenant('aurora-t-1'));
     ddbMock.on(UpdateItemCommand).resolves({});
 
     mockSubscriptionsCreate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
@@ -331,14 +428,15 @@ describe('activate-subscription handler', () => {
 
   it('creates a new subscription when reactivating a fully canceled subscription (Canceled)', async () => {
     ddbMock
-      .on(GetItemCommand)
-      .resolvesOnce({
+      .on(GetItemCommand, { Key: ORG_KEY })
+      .resolves({
         Item: buildBillingRecord({
           subscriptionId: 'sub_canceled_old',
           subscriptionStatus: SubscriptionStatus.Canceled,
         }),
       })
-      .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
+      .on(GetItemCommand, { TableName: 'UserInfoTable' })
+      .resolves(orgProfileWithTenant('aurora-t-1'));
     ddbMock.on(UpdateItemCommand).resolves({});
 
     mockSubscriptionsCreate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
@@ -366,9 +464,10 @@ describe('activate-subscription handler', () => {
 
   it('removes trialEndsAt when updating trial subscription (trial_end: now)', async () => {
     ddbMock
-      .on(GetItemCommand)
-      .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) })
-      .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
+      .on(GetItemCommand, { Key: ORG_KEY })
+      .resolves({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) })
+      .on(GetItemCommand, { TableName: 'UserInfoTable' })
+      .resolves(orgProfileWithTenant('aurora-t-1'));
     ddbMock.on(UpdateItemCommand).resolves({});
 
     mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
@@ -380,18 +479,20 @@ describe('activate-subscription handler', () => {
     });
     await handler(event, {} as never);
 
-    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(updateCalls).toHaveLength(1); // billing update only
-    const updateExpr = updateCalls[0].args[0].input.UpdateExpression as string;
+    // The billing update only, landing on both keys with the org row first.
+    expect(updatedKeys()).toStrictEqual([ORG_KEY.pk.S, LEGACY_KEY.pk.S]);
     // trial_end: 'now' makes Stripe return active, so trialEndsAt should be removed
-    expect(updateExpr).toContain('REMOVE trialEndsAt');
+    for (const call of ddbMock.commandCalls(UpdateItemCommand)) {
+      expect(call.args[0].input.UpdateExpression as string).toContain('REMOVE trialEndsAt');
+    }
   });
 
   it('removes trialEndsAt when subscription is active', async () => {
     ddbMock
-      .on(GetItemCommand)
-      .resolvesOnce({ Item: buildBillingRecord() })
-      .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
+      .on(GetItemCommand, { Key: ORG_KEY })
+      .resolves({ Item: buildBillingRecord() })
+      .on(GetItemCommand, { TableName: 'UserInfoTable' })
+      .resolves(orgProfileWithTenant('aurora-t-1'));
     ddbMock.on(UpdateItemCommand).resolves({});
 
     mockSubscriptionsCreate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
@@ -403,16 +504,17 @@ describe('activate-subscription handler', () => {
     });
     await handler(event, {} as never);
 
-    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(updateCalls).toHaveLength(1); // billing update only
-    const updateExpr = updateCalls[0].args[0].input.UpdateExpression as string;
-    expect(updateExpr).toContain('REMOVE trialEndsAt');
+    // The billing update only, landing on both keys with the org row first.
+    expect(updatedKeys()).toStrictEqual([ORG_KEY.pk.S, LEGACY_KEY.pk.S]);
+    for (const call of ddbMock.commandCalls(UpdateItemCommand)) {
+      expect(call.args[0].input.UpdateExpression as string).toContain('REMOVE trialEndsAt');
+    }
   });
 
   it('returns 402 when subscription status is incomplete after activation (3DS pending)', async () => {
     ddbMock
-      .on(GetItemCommand)
-      .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) });
+      .on(GetItemCommand, { Key: ORG_KEY })
+      .resolves({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) });
     ddbMock.on(UpdateItemCommand).resolves({});
 
     mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'incomplete' }));
@@ -437,8 +539,8 @@ describe('activate-subscription handler', () => {
 
   it('returns 402 when subscription status is unpaid after activation', async () => {
     ddbMock
-      .on(GetItemCommand)
-      .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) });
+      .on(GetItemCommand, { Key: ORG_KEY })
+      .resolves({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) });
     ddbMock.on(UpdateItemCommand).resolves({});
 
     mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'unpaid' }));
@@ -457,8 +559,8 @@ describe('activate-subscription handler', () => {
 
   it('returns 500 when updateTenantStatus fails', async () => {
     ddbMock
-      .on(GetItemCommand)
-      .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) });
+      .on(GetItemCommand, { Key: ORG_KEY })
+      .resolves({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) });
     ddbMock.on(UpdateItemCommand).resolves({});
     mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
     mockSyncTenantStatusInProvisionedRegions.mockResolvedValue([
@@ -483,15 +585,16 @@ describe('activate-subscription handler', () => {
 
   it('reactivates a canceled subscription using the saved payment method (GracePeriod)', async () => {
     ddbMock
-      .on(GetItemCommand)
-      .resolvesOnce({
+      .on(GetItemCommand, { Key: ORG_KEY })
+      .resolves({
         Item: buildBillingRecord({
           subscriptionStatus: SubscriptionStatus.GracePeriod,
           subscriptionId: 'sub_canceled_old',
           paymentMethodId: 'pm_saved_1',
         }),
       })
-      .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
+      .on(GetItemCommand, { TableName: 'UserInfoTable' })
+      .resolves(orgProfileWithTenant('aurora-t-1'));
     ddbMock.on(UpdateItemCommand).resolves({});
 
     mockSubscriptionsCreate.mockResolvedValue(
@@ -522,15 +625,16 @@ describe('activate-subscription handler', () => {
 
   it('reactivates a canceled subscription using the saved payment method (Canceled)', async () => {
     ddbMock
-      .on(GetItemCommand)
-      .resolvesOnce({
+      .on(GetItemCommand, { Key: ORG_KEY })
+      .resolves({
         Item: buildBillingRecord({
           subscriptionStatus: SubscriptionStatus.Canceled,
           subscriptionId: 'sub_canceled_old',
           paymentMethodId: 'pm_saved_1',
         }),
       })
-      .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
+      .on(GetItemCommand, { TableName: 'UserInfoTable' })
+      .resolves(orgProfileWithTenant('aurora-t-1'));
     ddbMock.on(UpdateItemCommand).resolves({});
 
     mockSubscriptionsCreate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
@@ -550,7 +654,7 @@ describe('activate-subscription handler', () => {
   });
 
   it('rejects useSavedPaymentMethod when subscription is active', async () => {
-    ddbMock.on(GetItemCommand).resolvesOnce({
+    ddbMock.on(GetItemCommand, { Key: ORG_KEY }).resolves({
       Item: buildBillingRecord({
         subscriptionStatus: SubscriptionStatus.Active,
         paymentMethodId: 'pm_saved_1',
@@ -571,7 +675,7 @@ describe('activate-subscription handler', () => {
   });
 
   it('rejects useSavedPaymentMethod when subscription is trialing', async () => {
-    ddbMock.on(GetItemCommand).resolvesOnce({
+    ddbMock.on(GetItemCommand, { Key: ORG_KEY }).resolves({
       Item: buildBillingRecord({
         subscriptionStatus: SubscriptionStatus.Trialing,
         paymentMethodId: 'pm_saved_1',
@@ -591,7 +695,7 @@ describe('activate-subscription handler', () => {
   });
 
   it('rejects useSavedPaymentMethod when no saved payment method exists', async () => {
-    ddbMock.on(GetItemCommand).resolvesOnce({
+    ddbMock.on(GetItemCommand, { Key: ORG_KEY }).resolves({
       Item: buildBillingRecord({
         subscriptionStatus: SubscriptionStatus.Canceled,
         // paymentMethodId intentionally omitted
@@ -613,7 +717,7 @@ describe('activate-subscription handler', () => {
   });
 
   it('returns 402 for useSavedPaymentMethod when subscription is incomplete', async () => {
-    ddbMock.on(GetItemCommand).resolvesOnce({
+    ddbMock.on(GetItemCommand, { Key: ORG_KEY }).resolves({
       Item: buildBillingRecord({
         subscriptionStatus: SubscriptionStatus.Canceled,
         paymentMethodId: 'pm_saved_1',
@@ -640,14 +744,15 @@ describe('activate-subscription handler', () => {
   describe('promotion code', () => {
     it('applies the discount in its own update between PM-attach and trial-end (trial→paid)', async () => {
       ddbMock
-        .on(GetItemCommand)
-        .resolvesOnce({
+        .on(GetItemCommand, { Key: ORG_KEY })
+        .resolves({
           Item: buildBillingRecord({
             subscriptionId: 'sub_trial_123',
             subscriptionStatus: SubscriptionStatus.Trialing,
           }),
         })
-        .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
+        .on(GetItemCommand, { TableName: 'UserInfoTable' })
+        .resolves(orgProfileWithTenant('aurora-t-1'));
       ddbMock.on(UpdateItemCommand).resolves({});
 
       mockPromotionCodesList.mockResolvedValue({ data: [{ id: 'promo_xxx' }] });
@@ -682,9 +787,10 @@ describe('activate-subscription handler', () => {
 
     it('includes discounts in subscriptions.create on the fresh-create path', async () => {
       ddbMock
-        .on(GetItemCommand)
-        .resolvesOnce({ Item: buildBillingRecord() })
-        .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
+        .on(GetItemCommand, { Key: ORG_KEY })
+        .resolves({ Item: buildBillingRecord() })
+        .on(GetItemCommand, { TableName: 'UserInfoTable' })
+        .resolves(orgProfileWithTenant('aurora-t-1'));
       ddbMock.on(UpdateItemCommand).resolves({});
 
       mockPromotionCodesList.mockResolvedValue({ data: [{ id: 'promo_xxx' }] });
@@ -703,22 +809,23 @@ describe('activate-subscription handler', () => {
         customer: 'cus_test_123',
         items: [{ price: 'price_test_fake' }],
         default_payment_method: 'pm_test_789',
-        discounts: [{ promotion_code: 'promo_xxx' }],
         metadata: { userId: 'user-1', orgId: 'org-1' },
+        discounts: [{ promotion_code: 'promo_xxx' }],
         expand: ['latest_invoice.payment_intent', 'default_payment_method'],
       });
     });
 
     it('includes discounts in subscriptions.create when reactivating a canceled subscription', async () => {
       ddbMock
-        .on(GetItemCommand)
-        .resolvesOnce({
+        .on(GetItemCommand, { Key: ORG_KEY })
+        .resolves({
           Item: buildBillingRecord({
             subscriptionId: 'sub_canceled_old',
             subscriptionStatus: SubscriptionStatus.Canceled,
           }),
         })
-        .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
+        .on(GetItemCommand, { TableName: 'UserInfoTable' })
+        .resolves(orgProfileWithTenant('aurora-t-1'));
       ddbMock.on(UpdateItemCommand).resolves({});
 
       mockPromotionCodesList.mockResolvedValue({ data: [{ id: 'promo_xxx' }] });
@@ -737,15 +844,15 @@ describe('activate-subscription handler', () => {
         customer: 'cus_test_123',
         items: [{ price: 'price_test_fake' }],
         default_payment_method: 'pm_test_789',
-        discounts: [{ promotion_code: 'promo_xxx' }],
         metadata: { userId: 'user-1', orgId: 'org-1' },
+        discounts: [{ promotion_code: 'promo_xxx' }],
         expand: ['latest_invoice.payment_intent', 'default_payment_method'],
       });
       expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
     });
 
     it('returns 400 with INVALID_PROMOTION_CODE when Stripe has no active code matching', async () => {
-      ddbMock.on(GetItemCommand).resolvesOnce({
+      ddbMock.on(GetItemCommand, { Key: ORG_KEY }).resolves({
         Item: buildBillingRecord({
           subscriptionId: 'sub_trial_123',
           subscriptionStatus: SubscriptionStatus.Trialing,
@@ -791,14 +898,15 @@ describe('activate-subscription handler', () => {
 
     it('does not call promotionCodes.list and does not add a discount-apply update when no promo code is sent', async () => {
       ddbMock
-        .on(GetItemCommand)
-        .resolvesOnce({
+        .on(GetItemCommand, { Key: ORG_KEY })
+        .resolves({
           Item: buildBillingRecord({
             subscriptionId: 'sub_trial_123',
             subscriptionStatus: SubscriptionStatus.Trialing,
           }),
         })
-        .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
+        .on(GetItemCommand, { TableName: 'UserInfoTable' })
+        .resolves(orgProfileWithTenant('aurora-t-1'));
       ddbMock.on(UpdateItemCommand).resolves({});
 
       mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
@@ -816,15 +924,16 @@ describe('activate-subscription handler', () => {
 
     it('applies discounts on the saved-payment-method reactivation create', async () => {
       ddbMock
-        .on(GetItemCommand)
-        .resolvesOnce({
+        .on(GetItemCommand, { Key: ORG_KEY })
+        .resolves({
           Item: buildBillingRecord({
             subscriptionStatus: SubscriptionStatus.Canceled,
             subscriptionId: 'sub_canceled_old',
             paymentMethodId: 'pm_saved_1',
           }),
         })
-        .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
+        .on(GetItemCommand, { TableName: 'UserInfoTable' })
+        .resolves(orgProfileWithTenant('aurora-t-1'));
       ddbMock.on(UpdateItemCommand).resolves({});
 
       mockPromotionCodesList.mockResolvedValue({ data: [{ id: 'promo_xxx' }] });
@@ -844,8 +953,8 @@ describe('activate-subscription handler', () => {
         customer: 'cus_test_123',
         items: [{ price: 'price_test_fake' }],
         default_payment_method: 'pm_saved_1',
-        discounts: [{ promotion_code: 'promo_xxx' }],
         metadata: { userId: 'user-1', orgId: 'org-1' },
+        discounts: [{ promotion_code: 'promo_xxx' }],
         expand: ['latest_invoice.payment_intent', 'default_payment_method'],
       });
     });
