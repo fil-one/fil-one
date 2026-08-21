@@ -27,7 +27,7 @@ High Level Data Flow: https://miro.com/app/board/uXjVGBRbr7E=/?focusWidget=34587
 - Not discussed in depth here:
   - See EncryptionKeyManagement.md for thoughts on ways to encrypt user data without egress through AWS.
   - See S3Considerations.md for thoughts on ways to enable S3 SDK and CLI for Filecoin storage.
-  - See Authentication.md for Auth portal/services to consider
+  - See Authentication.md for the historical bake-off of Auth portals/services (current state: AuthOverview.md)
   - See StripeIntegrationConsiderations.md for stripe specific info.
 
 ### Unknowns + Open questions

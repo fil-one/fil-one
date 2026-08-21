@@ -50,6 +50,7 @@ function me(role: OrgRole): MeResponse {
     connectionType: 'auth0',
     mfaEnrollments: [],
     ragAccess: true,
+    orgsBeta: true,
     userId: 'user-1',
     role,
     permissions: ROLE_PERMISSIONS[role],

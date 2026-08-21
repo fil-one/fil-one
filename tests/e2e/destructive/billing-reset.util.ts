@@ -1,6 +1,7 @@
 import { Resource } from 'sst';
 import {
   DynamoDBClient,
+  GetItemCommand,
   QueryCommand,
   UpdateItemCommand,
   ConditionalCheckFailedException,
@@ -32,15 +33,44 @@ function getOrgTableName(): string {
   return (Resource as unknown as Record<string, { name: string }>).OrgTable.name;
 }
 
+function getUserInfoTableName(): string {
+  return (Resource as unknown as Record<string, { name: string }>).UserInfoTable.name;
+}
+
 /**
- * The org the test user belongs to, from their membership rows.
+ * The org whose subscription is this test user's own.
  *
  * Resolved rather than configured: the alternative is a fourth secret per role
- * in the staging workflow, and the answer is already in the table. The user
- * belongs to exactly one org — these are single-purpose test accounts — so the
- * first inverse item is the answer.
+ * in the staging workflow, and the answer is already in the table. It is the org
+ * signup created for them, which the `USER#{userId}/PROFILE` row records
+ * (packages/backend/src/lib/account-creation.ts) and which the server itself
+ * falls back to when a request names no org.
+ *
+ * Their own rather than "the first org they belong to", because the members
+ * specs put these accounts in a second organization for the length of a test.
+ * A run that started while one of those memberships existed would otherwise
+ * re-seed somebody else's BillingTable row about half the time, or fail the
+ * whole suite at setup because that org has no row to patch. The membership
+ * query is kept as the fallback for an account whose profile row predates the
+ * attribute.
  */
 async function resolveOrgId(userId: string): Promise<string | undefined> {
+  const { Item } = await getDynamoClient().send(
+    new GetItemCommand({
+      TableName: getUserInfoTableName(),
+      Key: { pk: { S: `USER#${userId}` }, sk: { S: 'PROFILE' } },
+      ConsistentRead: true,
+    }),
+  );
+  if (Item?.orgId?.S) return Item.orgId.S;
+
+  console.warn(
+    `[billing-reset] No orgId on USER#${userId}/PROFILE — falling back to the first membership`,
+  );
+  return await firstMembershipOrgId(userId);
+}
+
+async function firstMembershipOrgId(userId: string): Promise<string | undefined> {
   const result = await getDynamoClient().send(
     new QueryCommand({
       TableName: getOrgTableName(),

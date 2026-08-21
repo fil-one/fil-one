@@ -84,6 +84,80 @@ aws iam list-roles --query 'length(Roles)' --output text
 | `REGION` | `us-east-2`                   | AWS region for regional resources        |
 | `REPO`   | auto-detected from git remote | GitHub `owner/repo` for PR state lookups |
 
+## The organizations beta flag
+
+`orgs-beta.ts` switches one organization, or one person, into the organizations
+beta. The flag decides two things: whether `POST /api/org/invitations` will
+create an invitation, and whether the console shows a members surface at all.
+
+```bash
+node bin/orgs-beta.ts list staging
+node bin/orgs-beta.ts grant staging 4f1c2a80-9b3e-4a51-8d77-6b0c2f9a1e34   # dry run
+node bin/orgs-beta.ts grant staging 4f1c2a80-9b3e-4a51-8d77-6b0c2f9a1e34 --execute
+node bin/orgs-beta.ts revoke staging someone@example.com --execute
+node bin/orgs-beta.ts check staging someone@example.com                    # exit 0 granted, 2 not
+```
+
+**Revoking an org with members needs `--force-members`.** The console offers the
+members surface to a caller who belongs to more than one organization, or one
+whose organization holds this flag. An Owner who belongs to no other org is
+therefore the case that breaks: revoking their org's row leaves every member in
+place and takes away the roster, the role picker, removal and transfer, while
+the API keeps serving all four. So a revoke against an org with more than one
+member prints the count and stops until `--force-members` says it was meant.
+
+**Where the flag lives.** `UserInfoTable`, sort key `ORGS_BETA`, under either of
+two partition keys:
+
+| Key                            | Grants                                        |
+| ------------------------------ | --------------------------------------------- |
+| `ORG#{orgId}`                  | every member of that organization             |
+| `ALLOWLIST#{lowercased-email}` | that person, in whichever org they are active |
+
+The org row is the one an enterprise beta wants: FilOne learns an employee's
+address only at their first login, so the members cannot be enumerated in
+advance.
+
+**Presence is the grant.** The rows carry no attributes and none are read.
+Granting twice is the same as granting once, and revoking a row that was never
+written is not an error.
+
+**Either row grants.** Revoking an org does not revoke the people inside it who
+hold their own allowlist row, and revoking an address does not revoke their
+org's row. `list` shows both kinds, and `revoke` and `check` name the direction
+they did not read, because neither can answer whether a person is in the beta:
+the gate ORs the two rows and resolves the org from the request.
+
+**Invitations already sent stay acceptable.** Accepting one reads no flag
+(`accept-invitation.ts`), so a revoke removes the console path to withdrawing an
+invitation rather than the invitation. `revoke` lists what is still redeemable —
+the org's pending rows for an `ORG#` target, and the rows naming that address
+for an `ALLOWLIST#` one — so the operator sees what they left behind.
+
+**Reads are consistent.** `hasOrgsBetaAccess` reads both rows with
+`ConsistentRead`, because granting the flag is a manual step somebody performs
+and then immediately tries. What the script writes is what the next request
+sees. The console is the lag that remains: it caches `GET /me` for ten minutes,
+so a customer watching for the change may need to reload.
+
+**Grants and revokes are dry runs by default.** Both print the row they would
+write or delete and stop until `--execute` is passed. `--dry-run` beats
+`--execute` when both are given, as it does in the migration scripts, and any
+other `--` argument stops the run rather than being ignored. `list` and `check`
+only read.
+
+Targets are told apart by shape: anything containing `@` is an email, anything
+else must be an organization UUID. The script refuses a target that is neither
+before it touches AWS. A UUID also has to name an organization that exists:
+`grant` and `check` read its `ORG#{orgId}/PROFILE` row first and exit 1 when
+there is none, because `GET /me` reports `orgId` beside `userId` and both are
+UUIDs — an id taken from the wrong field would otherwise be written as a grant
+that reads back in `list` and grants nothing.
+
+Like `rag-access.ts`, this talks to AWS directly with your ambient credentials
+rather than through `sst shell`, which cannot evaluate pulumi providers against
+production. Set `AWS_PROFILE` first.
+
 ## Other Scripts
 
 | Script                         | Purpose                                                                                                                                                    |
@@ -92,6 +166,8 @@ aws iam list-roles --query 'length(Roles)' --output text
 | `revert-org-conversion.ts`     | Undo `convert-orgs-to-orgtable.ts`                                                                                                                         |
 | `backfill-billing-to-org.ts`   | Copy each BillingTable subscription row to its org key, and `--verify` the result (runbook: [docs/BillingRekeyRunbook.md](../docs/BillingRekeyRunbook.md)) |
 | `revert-billing-backfill.ts`   | Undo `backfill-billing-to-org.ts` — deletes only the org rows it wrote                                                                                     |
+| `orgs-beta.ts`                 | Grant, revoke, list, and check the organizations beta flag (see above)                                                                                     |
+| `rag-access.ts`                | Enable, disable, or check RAG access for one email                                                                                                         |
 | `extend-trial.ts`              | Reset a non-production test account back to a fresh `trialing` state, across Stripe, BillingTable, Aurora, and FTH                                         |
 | `tail-logs.sh`                 | Tail CloudWatch logs for a Lambda function                                                                                                                 |
 | `tail-tenant-setup-logs.sh`    | Tail logs for the Aurora tenant setup Lambda                                                                                                               |
@@ -107,6 +183,7 @@ aws iam list-roles --query 'length(Roles)' --output text
 | ------------------- | ------------------------------------------------------------------------------------------ |
 | `args.ts`           | `--stage` (required, no default), `--execute`/`--dry-run`, usage and help                  |
 | `stage.ts`          | Table names from `sst state export`, the resolved-name stage assertion, the region mapping |
+| `sst-state.ts`      | One deployed table and its region from `sst state export`, for the flag scripts            |
 | `dynamo.ts`         | Paging a Scan to the end, decoding rows, and retrying a cancelled transaction              |
 | `run-lock.ts`       | The single lock row that keeps a migration and its revert off the same table at once       |
 | `billing-rekey.ts`  | What to do with each subscription row, and the exact items that carry it out               |

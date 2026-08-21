@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
-import type { MemberSummary } from '@filone/shared';
+import type { MemberSummary, MeResponse } from '@filone/shared';
 
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
 import { queryKeys } from '../lib/query-client.js';
@@ -60,10 +60,14 @@ const PLAIN: MemberSummary = {
   joinedAt: '2026-03-01T00:00:00Z',
 };
 
-function renderPage(role = OrgRole.Owner, members: MemberSummary[] = [OWNER, ADMIN, PLAIN]) {
+function renderPage(
+  role = OrgRole.Owner,
+  members: MemberSummary[] = [OWNER, ADMIN, PLAIN],
+  me: Partial<MeResponse> = {},
+) {
   mockListMembers.mockResolvedValue({ members });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  seedPermissions(client, role);
+  seedPermissions(client, role, me);
   return {
     client,
     ...render(
@@ -129,6 +133,29 @@ describe('MembersPage', () => {
     expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Remove/ })).not.toBeInTheDocument();
+  });
+
+  it('offers the invitation form when the caller may invite and the org is in the beta', async () => {
+    renderPage(OrgRole.Owner);
+
+    expect(await screen.findByTestId('invitations-section')).toBeInTheDocument();
+  });
+
+  it('withholds the invitation form in an organization outside the beta', async () => {
+    renderPage(OrgRole.Owner, [OWNER, ADMIN, PLAIN], { orgsBeta: false });
+
+    // The roster stays: a caller who belongs to a second org reaches this page
+    // in every one of them, and it is creating an invitation that the org's
+    // flag decides. Offering the form here would collect one 403 per attempt.
+    expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
+    expect(screen.queryByTestId('invitations-section')).not.toBeInTheDocument();
+  });
+
+  it('withholds the invitation form from a role that cannot manage members', async () => {
+    renderPage(OrgRole.Member);
+
+    expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
+    expect(screen.queryByTestId('invitations-section')).not.toBeInTheDocument();
   });
 
   it('lets an Admin manage members below them and not the Owner', async () => {

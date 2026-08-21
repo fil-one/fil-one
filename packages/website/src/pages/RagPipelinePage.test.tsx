@@ -57,6 +57,7 @@ const ME: MeResponse = {
   name: 'User',
   mfaEnrollments: [],
   ragAccess: true,
+  orgsBeta: true,
 };
 
 const BUCKETS: ListBucketsResponse = {

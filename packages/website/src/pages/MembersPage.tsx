@@ -483,10 +483,13 @@ export function MembersPage() {
           pendingUserIds={pending.ids}
         />
 
-        {/* The invitations endpoint is `members.manage` rather than
-            `members.read`, so for anybody else this section is a request the
-            server refuses. It arrives a moment after the roster, which is what
-            gating fail-closed on `/me` costs. */}
+        {/* Both halves of what creating an invitation costs: the endpoint is
+            `members.manage` rather than `members.read`, and the org has to be
+            in the beta. A caller in more than one org reaches this page in
+            every one of them, so without the second half an Owner would be
+            offered a form their own org answers with a 403. It arrives a
+            moment after the roster, which is what gating fail-closed on `/me`
+            costs. */}
         {scope.mayInvite && <MembersInvitations />}
       </div>
 

@@ -21,6 +21,7 @@ import { DOCS_URL } from '@filone/shared';
 import type { Permission } from '@filone/shared';
 import { logout } from '../lib/api.js';
 import { usePermissions } from '../lib/use-permissions.js';
+import { useMembersSurface } from '../lib/use-members-surface.js';
 import { useSidebarData } from './use-sidebar-data.js';
 
 import { OrgSwitcher } from './OrgSwitcher.js';
@@ -47,6 +48,12 @@ type NavItem = {
   testId: string;
   /** What the destination needs. Omitted, every member sees the entry. */
   permission?: Permission;
+  /**
+   * Whether the entry belongs to the members surface, which a solo org outside
+   * the organizations beta does not have. A permission cannot express it: all
+   * four roles hold `members.read`.
+   */
+  membersSurface?: boolean;
 };
 
 type NavGroup = {
@@ -160,7 +167,8 @@ function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps
 // Billing carries a permission; Settings is every member's own account. Members
 // is declared with the permission it needs even though all four roles hold it,
 // so the entry stays hidden while `/me` is in flight rather than appearing for
-// a caller whose role turns out not to reach it.
+// a caller whose role turns out not to reach it. `members.read` is not what
+// decides whether the entry exists at all — see `membersSurface`.
 const utilityNavItems: NavItem[] = [
   {
     path: '/members',
@@ -168,6 +176,7 @@ const utilityNavItems: NavItem[] = [
     label: 'Members',
     testId: 'nav-members',
     permission: 'members.read',
+    membersSurface: true,
   },
   {
     path: '/billing',
@@ -181,10 +190,12 @@ const utilityNavItems: NavItem[] = [
 
 function UtilityNavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps) {
   const { has } = usePermissions();
+  const membersSurface = useMembersSurface();
   return (
     <div className="p-2 flex flex-col gap-0.5">
       {utilityNavItems
         .filter((item) => !item.permission || has(item.permission))
+        .filter((item) => !item.membersSurface || membersSurface.visible)
         .map(({ path, icon: Icon, label, testId }) => {
           const isActive = Boolean(matchRoute({ to: path }));
           const link = (

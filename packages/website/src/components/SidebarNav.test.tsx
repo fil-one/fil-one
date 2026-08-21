@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole } from '@filone/shared';
+import type { MeResponse } from '@filone/shared';
 
 import { SidebarNav } from './SidebarNav';
 import { seedPermissions } from '../lib/test-permissions.js';
@@ -63,11 +64,11 @@ vi.mock('../lib/api.js', () => ({ logout: vi.fn(), getMe: vi.fn() }));
 // Mirrors how AppShell mounts the sidebar twice: the visible desktop sidebar
 // plus the mobile drawer copy. The drawer copy must not duplicate the
 // page-unique e2e selectors, or Playwright strict-mode locators break.
-function renderBothSidebars(role = OrgRole.Owner) {
+function renderBothSidebars(role = OrgRole.Owner, overrides: Partial<MeResponse> = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   // The Billing entry is gated on `billing.view`, so the role has to be known
   // before the nav renders.
-  seedPermissions(client, role);
+  seedPermissions(client, role, overrides);
   return render(
     <QueryClientProvider client={client}>
       <SidebarNav collapsed={false} onToggle={() => {}} showTestIds={true} />
@@ -92,8 +93,18 @@ const UNIQUE_TESTIDS = [
   'nav-buckets',
   'nav-api-keys',
   'nav-billing',
+  'nav-members',
   'nav-settings',
   'user-profile',
+];
+
+/** One membership, which is what a solo org has. */
+const SOLO = [{ orgId: 'org-1', orgName: 'Acme', role: OrgRole.Owner }];
+
+/** Two, which is the other way to have a members surface. */
+const TWO_ORGS = [
+  { orgId: 'org-1', orgName: 'Acme', role: OrgRole.Owner },
+  { orgId: 'org-2', orgName: 'Globex', role: OrgRole.Member },
 ];
 
 describe('SidebarNav e2e selector uniqueness (desktop + drawer mounted)', () => {
@@ -157,6 +168,60 @@ describe('SidebarNav — the Billing entry', () => {
 
     expect(container.querySelectorAll('[data-testid="nav-billing"]')).toHaveLength(0);
     // Settings is every member's own account and stays.
+    expect(container.querySelectorAll('[data-testid="nav-settings"]')).toHaveLength(1);
+  });
+});
+
+describe('SidebarNav — the Members entry', () => {
+  function membersEntries(role: OrgRole, overrides: Partial<MeResponse>) {
+    // Both mounts at once: the entry is declared in one array, so a gate that
+    // only reached the desktop copy would leave the drawer offering the link.
+    const { container } = renderBothSidebars(role, overrides);
+    return container.querySelectorAll('[data-testid="nav-members"]');
+  }
+
+  it('renders for a solo org in the beta, so somebody can send the first invite', () => {
+    expect(membersEntries(OrgRole.Owner, { memberships: SOLO, orgsBeta: true })).toHaveLength(1);
+  });
+
+  it('renders for a caller in more than one org, beta or not', () => {
+    expect(membersEntries(OrgRole.Member, { memberships: TWO_ORGS, orgsBeta: false })).toHaveLength(
+      1,
+    );
+  });
+
+  it('renders when both conditions hold', () => {
+    expect(membersEntries(OrgRole.Owner, { memberships: TWO_ORGS, orgsBeta: true })).toHaveLength(
+      1,
+    );
+  });
+
+  it('is absent for a solo org outside the beta, on both mounts', () => {
+    // The whole point of the gate: an account that has never had a second
+    // member sees no members surface anywhere, deploy or no deploy.
+    expect(membersEntries(OrgRole.Owner, { memberships: SOLO, orgsBeta: false })).toHaveLength(0);
+  });
+
+  it('is absent while /me has not answered', () => {
+    // Nothing seeded: the entry must not appear and then withdraw.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container } = render(
+      <QueryClientProvider client={client}>
+        <SidebarNav collapsed={false} onToggle={() => {}} showTestIds={true} />
+      </QueryClientProvider>,
+    );
+
+    expect(container.querySelectorAll('[data-testid="nav-members"]')).toHaveLength(0);
+  });
+
+  it('leaves the other utility entries alone when it hides', () => {
+    const { container } = renderBothSidebars(OrgRole.Owner, {
+      memberships: SOLO,
+      orgsBeta: false,
+    });
+
+    expect(container.querySelectorAll('[data-testid="nav-members"]')).toHaveLength(0);
+    expect(container.querySelectorAll('[data-testid="nav-billing"]')).toHaveLength(1);
     expect(container.querySelectorAll('[data-testid="nav-settings"]')).toHaveLength(1);
   });
 });
