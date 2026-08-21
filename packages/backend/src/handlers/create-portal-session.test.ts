@@ -1,6 +1,7 @@
-import { vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { marshall } from '@aws-sdk/util-dynamodb';
 
 vi.mock('sst', () => ({
   Resource: {
@@ -9,8 +10,9 @@ vi.mock('sst', () => ({
   },
 }));
 
+const mockSessionsCreate = vi.fn();
 vi.mock('../lib/stripe-client.js', () => ({
-  getStripeClient: () => ({ billingPortal: { sessions: { create: vi.fn() } } }),
+  getStripeClient: () => ({ billingPortal: { sessions: { create: mockSessionsCreate } } }),
   getBillingSecrets: () => ({ STRIPE_SECRET_KEY: 'sk_test_fake' }),
 }));
 
@@ -22,17 +24,84 @@ vi.mock('../middleware/auth.js', () => ({
   authMiddleware: () => ({ before: () => undefined }),
 }));
 
-mockClient(DynamoDBClient);
+vi.mock('../middleware/csrf.js', () => ({
+  csrfMiddleware: () => ({ before: async () => {} }),
+}));
+
+const ddbMock = mockClient(DynamoDBClient);
 
 import { handler } from './create-portal-session.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
 import { describeRoleEnforcement } from '../test/role-enforcement.js';
+import { OrgRole } from '@filone/shared';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
+const ORG_KEY = { pk: { S: 'ORG#org-1' }, sk: { S: 'SUBSCRIPTION' } };
+
+function portalEvent() {
+  return buildEvent({
+    userInfo: {
+      ...USER_INFO,
+      membership: { orgId: 'org-1', userId: 'user-1', role: OrgRole.Owner },
+    },
+    method: 'POST',
+    rawPath: '/api/billing/portal-session',
+  });
+}
+
+function subscriptionRow(attributes: Record<string, unknown> = {}) {
+  return {
+    Item: marshall({ pk: ORG_KEY.pk.S, sk: 'SUBSCRIPTION', orgId: 'org-1', ...attributes }),
+  };
+}
+
+describe('create-portal-session', () => {
+  beforeEach(() => {
+    ddbMock.reset();
+    vi.clearAllMocks();
+    process.env.WEBSITE_URL = 'https://app.example.com';
+  });
+
+  it('returns the portal URL for the org’s stored Stripe customer', async () => {
+    ddbMock.on(GetItemCommand).resolves(subscriptionRow({ stripeCustomerId: 'cus_org_1' }));
+    mockSessionsCreate.mockResolvedValue({ url: 'https://billing.stripe.com/session/abc' });
+
+    const result = await handler(portalEvent(), buildContext());
+
+    expect(ddbMock.commandCalls(GetItemCommand)[0].args[0].input.Key).toStrictEqual(ORG_KEY);
+    expect(mockSessionsCreate).toHaveBeenCalledWith({
+      customer: 'cus_org_1',
+      return_url: 'https://app.example.com/billing?portal_return=true',
+    });
+    expect(result).toMatchObject({ statusCode: 200 });
+    expect(JSON.parse(String((result as { body: string }).body))).toStrictEqual({
+      url: 'https://billing.stripe.com/session/abc',
+    });
+  });
+
+  it('refuses when the org has no billing record', async () => {
+    ddbMock.on(GetItemCommand).resolves({});
+
+    const result = await handler(portalEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 400 });
+    expect(mockSessionsCreate).not.toHaveBeenCalled();
+  });
+
+  it('refuses when the record names no Stripe customer', async () => {
+    // A record can exist without one — the webhook upserts status before the
+    // customer mapping is written. There is nothing to open a portal on.
+    ddbMock.on(GetItemCommand).resolves(subscriptionRow({ subscriptionStatus: 'active' }));
+
+    const result = await handler(portalEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 400 });
+    expect(mockSessionsCreate).not.toHaveBeenCalled();
+  });
+});
 
 // The Stripe portal is where a subscription is changed or cancelled, so the
-// route is Owner-only. The rest of the handler's behavior is covered by the
-// billing suite; what this file owns is that nobody else can open the portal.
+// route is Owner-only.
 describeRoleEnforcement({
   permission: 'billing.manage',
   invoke: (membership) =>

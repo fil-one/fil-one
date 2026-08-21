@@ -2,10 +2,13 @@ import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import type { CreateSetupIntentResponse } from '@filone/shared';
+import { ApiErrorCode } from '@filone/shared';
+import type { CreateSetupIntentResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getStripeClient } from '../lib/stripe-client.js';
+import { emitTrialClaimBlockedByLegacyRow } from '../lib/stripe-webhook-metrics.js';
 import {
+  legacyRowExists,
   readSubscription,
   updateSubscription,
   writeSubscription,
@@ -28,12 +31,11 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   // one, and an eventually-consistent miss on a record written seconds ago
   // (a trial claim, or a second click on the same button) creates a second
   // Stripe customer for the same org.
-  const existing = await readSubscription(orgId, userId, { consistentRead: true });
+  const record = await readSubscription(orgId, { consistentRead: true });
 
   let stripeCustomerId: string;
 
-  if (existing) {
-    const { record } = existing;
+  if (record) {
     if (record.stripeCustomerId) {
       stripeCustomerId = record.stripeCustomerId;
     } else {
@@ -58,6 +60,28 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
       );
     }
   } else {
+    // No org record — but that is only "first time" if the backfill has reached
+    // this account. A pre-re-key `CUSTOMER#` row still standing means it has
+    // not, and this org already has a Stripe customer nothing reading the org
+    // key can see. Minting here would give it a second one, and
+    // activate-subscription would then put a second live subscription beside
+    // the one still billing. Same refusal, metric and log as the trial claim's,
+    // and it dies with the runbook's dated cleanup like that one.
+    if (await legacyRowExists(userId)) {
+      emitTrialClaimBlockedByLegacyRow();
+      console.error(
+        '[create-setup-intent] Refusing to mint a Stripe customer: a pre-re-key CUSTOMER# row still exists',
+        { userId, orgId },
+      );
+      return new ResponseBuilder()
+        .status(503)
+        .body<ErrorResponse>({
+          message: 'Billing is temporarily unavailable for this account. Please try again shortly.',
+          code: ApiErrorCode.SUBSCRIPTION_INACTIVE,
+        })
+        .build();
+    }
+
     // First time — create the Stripe customer and persist only the customer
     // mapping. Trial entitlement is granted only by ensureTrialEntitlement.
     const customer = await stripe.customers.create({
@@ -69,9 +93,8 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     stripeCustomerId = customer.id;
 
     try {
-      // Both keys are born together here: the record does not exist yet, so the
-      // org row is whole from its first write rather than a partial twin that
-      // would shadow a complete legacy row.
+      // The org's record does not exist yet, so this is its first write and it
+      // carries the whole mapping — nothing reads a half-written one into being.
       await writeSubscription(
         { orgId, userId },
         {

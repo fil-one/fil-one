@@ -1,39 +1,21 @@
-// The BillingTable subscription row, read and written through one module while
-// it moves from the user to the organization (IAM M1, ADR §5).
+// The BillingTable subscription row, read and written through one module (IAM
+// M1, ADR §5).
 //
-// The row is keyed `CUSTOMER#{userId}/SUBSCRIPTION` today and
-// `ORG#{orgId}/SUBSCRIPTION` afterwards. A copy-then-flip is not safe: Stripe
-// webhooks mutate these rows continuously, so a twin copied today is stale
-// tomorrow. This module is phase 1 of the four-phase transition — every read
-// prefers the org key and falls back to the legacy one, and every write lands
-// on both keys — so the backfill (phase 2) has a moving target it can catch up
-// with, and the flip (phase 3) deletes code rather than data.
+// The row is keyed `ORG#{orgId}/SUBSCRIPTION`. One org, one subscription is an
+// invariant rather than a warning log: membership in an org means riding that
+// org's billing, so a second member is served by the same row as the first, and
+// ownership transfer changes role attributes and nothing here.
 //
-// TWO RULES HOLD THE PHASE TOGETHER.
-//
-// 1. An update only ever touches a row that already exists. Every write-shaped
-//    call carries `attribute_exists(pk)` on both keys unless its caller says it
-//    is creating the record (`createsOrgRow`, or `writeSubscription`, which
-//    puts a whole record). A partial org twin would shadow a complete legacy
-//    row and report a subscription with no status — an account locked out by
-//    its own migration — and a partial legacy row invents a `CUSTOMER#` address
-//    for a user who never had one.
-//
-// 2. A read prefers the org row, so the org row must never be stale. If a write
-//    cannot land there for any reason other than the row not existing yet, the
-//    run stops before the legacy row moves. "Not existing yet" is every account
-//    the backfill has not copied, and it is the one silent failure here.
-//
-// A writer that creates the org row also stamps `orgId` and `userId` on it.
-// Both are free on the legacy key — one is a scan-time attribute, the other is
-// in the partition key — and every lifecycle job needs them once the pk stops
-// carrying a user id.
+// The legacy `CUSTOMER#{userId}` rows are dead. Nothing reads or writes them,
+// and the rows themselves are deleted in the runbook's dated cleanup step — see
+// docs/BillingRekeyRunbook.md. The key builder keeps `legacyPk` because that
+// step, its verification, and the scan-time invariant check still have to
+// recognize one that is still standing.
 
 import {
   GetItemCommand,
   PutItemCommand,
   ScanCommand,
-  TransactWriteItemsCommand,
   UpdateItemCommand,
   type AttributeValue,
   type ReturnValue,
@@ -44,7 +26,7 @@ import { getDynamoClient } from './ddb-client.js';
 import type { SubscriptionRecord } from './dynamo-records.js';
 
 /**
- * BillingTable subscription keys, both eras.
+ * BillingTable subscription keys.
  *
  * `ORG#{orgId}` is the same partition the usage reports already live in
  * (`USAGE_REPORT#` items); the shapes coexist under different sort keys.
@@ -52,6 +34,11 @@ import type { SubscriptionRecord } from './dynamo-records.js';
 export const SubscriptionKeys = {
   orgPk: (orgId: string): string => `ORG#${orgId}`,
   orgPkPrefix: (): string => 'ORG#',
+  /**
+   * The pre-re-key address. Nothing reads or writes it any more; it is here for
+   * the cleanup step that deletes those rows and for the scan filters that have
+   * to recognize one if it is still standing.
+   */
   legacyPk: (userId: string): string => `CUSTOMER#${userId}`,
   legacyPkPrefix: (): string => 'CUSTOMER#',
   sk: (): string => 'SUBSCRIPTION',
@@ -61,28 +48,29 @@ export const SubscriptionKeys = {
     const userId = pk.startsWith(prefix) ? pk.slice(prefix.length) : undefined;
     return userId && !userId.includes('#') ? userId : undefined;
   },
-  /** Whether a scanned row is already keyed to its org. */
+  /** Whether a scanned row is keyed to its org. */
   isOrgPk: (pk: string): boolean => pk.startsWith(SubscriptionKeys.orgPkPrefix()),
 } as const;
 
-/** Which key a row was read from — the fact a caller needs when it writes back. */
-export type SubscriptionKeyKind = 'org' | 'legacy';
-
-export interface StoredSubscription {
-  record: SubscriptionRecord;
-  /** `legacy` means the org twin does not exist yet, so the backfill has not reached this account. */
-  key: SubscriptionKeyKind;
-}
-
 export interface SubscriptionOwner {
   orgId: string;
-  userId: string;
+  /**
+   * The member who owns the Stripe customer. No longer part of any key — it is
+   * stamped on the row, because the paths that close out a deleted Stripe
+   * customer need a user id and the partition key no longer carries one.
+   *
+   * Optional, because a webhook can name an org and not a user, and stamping
+   * `''` on the row would be worse than leaving the attribute alone: every
+   * lifecycle job reads it, and an empty string is a user id that matches
+   * nothing while looking like an answer.
+   */
+  userId?: string;
 }
 
 interface ReadOptions {
   /**
-   * Read both keys consistently. The guard needs it — a trial written moments
-   * earlier must not read as absent — and it costs a second RCU per key.
+   * Read consistently. The guard needs it — a trial written moments earlier must
+   * not read as absent — and it costs a second RCU.
    */
   consistentRead?: boolean;
   /** Narrow the read the way the caller's `ProjectionExpression` would. */
@@ -92,54 +80,24 @@ interface ReadOptions {
 const dynamo = getDynamoClient();
 
 /**
- * The org's subscription row: the org key first, the caller's legacy key as a
- * fallback.
+ * The org's subscription row — one point read, on the only key it has.
  *
- * Both reads are issued at once. Roughly fifteen gated handlers sit behind this
- * function on every request, and a serial second hop put the fallback's latency
- * on accounts that do not need it. Phase 3 deletes the fallback; until then it
- * costs a parallel RCU rather than a round trip.
- *
- * The fallback is what lets a member of an org whose row has not moved yet keep
- * working — but only for their own org. A legacy row naming a different org is
- * not this org's subscription, and answering with it would let a member of one
- * org spend another org's entitlement once invitations make two orgs reachable
- * by one user. A row with no `orgId` at all predates the attribute and is still
- * served: that cohort is this user's own row by construction.
+ * It takes no user id. Which member is asking does not change the answer, and a
+ * parameter nothing reads would suggest otherwise; the writers take the owner
+ * because they stamp it on the row.
  */
 export async function readSubscription(
   orgId: string,
-  userId: string,
   options: ReadOptions = {},
-): Promise<StoredSubscription | undefined> {
-  const [orgRow, legacyRow] = await Promise.all([
-    getRow(SubscriptionKeys.orgPk(orgId), options),
-    getRow(SubscriptionKeys.legacyPk(userId), options),
-  ]);
-  if (orgRow) return { record: orgRow, key: 'org' };
-  if (!legacyRow) return undefined;
-
-  if (legacyRow.orgId && legacyRow.orgId !== orgId) {
-    console.warn('[subscription-store] Legacy row names another org, not serving it', {
-      userId,
-      requestedOrgId: orgId,
-      rowOrgId: legacyRow.orgId,
-    });
-    return undefined;
-  }
-  return { record: legacyRow, key: 'legacy' };
-}
-
-async function getRow(
-  pk: string,
-  { consistentRead, projectionExpression }: ReadOptions,
 ): Promise<SubscriptionRecord | undefined> {
   const { Item } = await dynamo.send(
     new GetItemCommand({
       TableName: Resource.BillingTable.name,
-      Key: { pk: { S: pk }, sk: { S: SubscriptionKeys.sk() } },
-      ...(consistentRead ? { ConsistentRead: true } : {}),
-      ...(projectionExpression ? { ProjectionExpression: projectionExpression } : {}),
+      Key: { pk: { S: SubscriptionKeys.orgPk(orgId) }, sk: { S: SubscriptionKeys.sk() } },
+      ...(options.consistentRead ? { ConsistentRead: true } : {}),
+      ...(options.projectionExpression
+        ? { ProjectionExpression: options.projectionExpression }
+        : {}),
     }),
   );
   return Item ? (unmarshall(Item) as SubscriptionRecord) : undefined;
@@ -148,64 +106,47 @@ async function getRow(
 /** The attributes a writer reads to check the row still names the objects its event is about. */
 export const BILLING_IDENTITY_PROJECTION = 'stripeCustomerId, subscriptionId';
 
-/** What the stored row names as its Stripe objects. */
-export interface StoredBillingIdentity {
-  stripeCustomerId?: string;
-  /** The Stripe subscription id, as `SubscriptionRecord` spells it. */
-  subscriptionId?: string;
-}
-
 /**
- * The Stripe objects the stored row names, for a writer deciding whether the
- * event in its hand still describes them.
+ * Whether a pre-re-key `CUSTOMER#` row is still standing for this user.
  *
- * The org row when the org is known and the caller's legacy row otherwise —
- * the same pair `updateSubscriptionByUser` writes, so the identity checked is
- * the identity of the row about to change. Undefined means no row exists, which
- * is not the same as a row that names nothing.
+ * Nothing reads those rows any more, so this asks one question only: has the
+ * backfill missed this account? The trial claim needs to know before it mints a
+ * second Stripe customer for an org that already has one. It disappears with the
+ * runbook's dated cleanup step, which is what makes the question meaningless.
  */
-export async function readStoredBillingIdentity({
-  orgId,
-  userId,
-}: {
-  orgId?: string | undefined;
-  userId: string;
-}): Promise<StoredBillingIdentity | undefined> {
-  const options: ReadOptions = { projectionExpression: BILLING_IDENTITY_PROJECTION };
-  const [orgRow, legacyRow] = await Promise.all([
-    orgId ? getRow(SubscriptionKeys.orgPk(orgId), options) : undefined,
-    getRow(SubscriptionKeys.legacyPk(userId), options),
-  ]);
-  return orgRow ?? legacyRow;
+export async function legacyRowExists(userId: string): Promise<boolean> {
+  const { Item } = await dynamo.send(
+    new GetItemCommand({
+      TableName: Resource.BillingTable.name,
+      Key: { pk: { S: SubscriptionKeys.legacyPk(userId) }, sk: { S: SubscriptionKeys.sk() } },
+      ProjectionExpression: 'pk',
+      ConsistentRead: true,
+    }),
+  );
+  return Item !== undefined;
 }
 
-/** The attributes every row carries about who it belongs to, on both keys. */
+/** The attributes every row carries about who it belongs to. */
 export function ownerAttributes({
   orgId,
   userId,
 }: SubscriptionOwner): Record<string, AttributeValue> {
-  return { orgId: { S: orgId }, userId: { S: userId } };
+  return { orgId: { S: orgId }, ...(userId ? { userId: { S: userId } } : {}) };
 }
 
 export interface SubscriptionUpdate {
   UpdateExpression: string;
   ExpressionAttributeValues?: Record<string, AttributeValue>;
   ExpressionAttributeNames?: Record<string, string>;
-  /**
-   * Applied to both keys. Each key's copy is ANDed with its own existence
-   * condition, so a write this condition forbids can never reach the row every
-   * read prefers — the org row must not be mutated by something the legacy row
-   * would have refused.
-   */
   ConditionExpression?: string;
   ReturnValues?: ReturnValue;
   /**
-   * The caller writes a whole record and may bring it into existence on either
-   * key. Such a caller MUST set `orgId` and `userId` in its own expression — see
+   * The caller writes a whole record and may bring it into existence. Such a
+   * caller MUST set `orgId` and `userId` in its own expression — see
    * {@link ownerAttributes}. Everything else updates a row that is already there
    * and never creates one.
    */
-  createsOrgRow?: boolean;
+  createsRow?: boolean;
   /**
    * A row that is not there is a reported outcome, not an error. For the
    * close-out paths, whose whole job is to cancel whatever is left of an account
@@ -218,7 +159,7 @@ export interface SubscriptionUpdate {
    *
    * The profile fence cannot stop Stripe, which holds no session and retries
    * its callbacks for days, so the rows those callbacks write carry their own
-   * fence: `attribute_not_exists(deletedAt)`, ANDed onto both keys' conditions.
+   * fence: `attribute_not_exists(deletedAt)`, ANDed onto the row's condition.
    * One clause, sound only because the teardown retains the row — a condition
    * on a missing item reads every attribute as absent, and it is the
    * `attribute_exists(pk)` this module already applies that keeps the fence
@@ -233,112 +174,65 @@ export interface SubscriptionUpdate {
 }
 
 export interface SubscriptionWriteResult {
-  /**
-   * `ReturnValues` attributes from the authoritative row: the org twin when it
-   * exists, the legacy row otherwise. A caller reading the prior status must
-   * read the row the guard would have read, not the copy.
-   */
+  /** `ReturnValues` attributes from the row, for a caller reading the prior status. */
   previous?: Record<string, AttributeValue>;
-  /** False before the backfill has reached this account, when there is no org row to update. */
-  orgRowWritten: boolean;
-  /**
-   * False when the legacy row was not there. Only `tolerateMissingRow` gets to
-   * see this as false — everyone else's missing legacy row throws.
-   */
-  legacyRowWritten: boolean;
+  /** False only for a caller that tolerates a missing row; everyone else's throws. */
+  written: boolean;
   /** The write was refused whole by `guardAgainstScrub` (or the caller's own condition beside it). */
   refused?: boolean;
 }
 
 /**
- * Apply one update to both keys.
+ * Apply one update to the org's row.
  *
- * The org row goes first. A read prefers it, so it must never be the stale
- * half: if this write cannot land there the run stops before the legacy row
- * moves, and the retry finds both rows where it left them. The one failure
- * that is not an error is the org row not existing — that is every account the
- * backfill has not copied yet, and it is silent by design.
+ * An update asserts the row exists. Without that a `SET` on a key with no row
+ * creates one, and what it creates is whatever attributes this one expression
+ * happened to name — a subscription with a status and no customer, or a customer
+ * and no status. Before the re-key the legacy row absorbed that; now this key is
+ * the only one anyone reads, so a phantom row IS the account's billing state.
+ * The writers that legitimately create a record say so with `createsRow`.
  */
 export async function updateSubscription(
   owner: SubscriptionOwner,
   update: SubscriptionUpdate,
 ): Promise<SubscriptionWriteResult> {
-  const tableName = Resource.BillingTable.name;
   const {
+    ConditionExpression: callerCondition,
     ReturnValues,
-    createsOrgRow,
-    guardAgainstScrub,
+    createsRow,
     tolerateMissingRow,
-    UpdateExpression,
-    ExpressionAttributeValues,
-    ExpressionAttributeNames,
+    guardAgainstScrub,
+    ...expression
   } = update;
-  const ConditionExpression = withScrubFence(update);
-  const shared = {
-    TableName: tableName,
-    UpdateExpression,
-    ...(ExpressionAttributeValues ? { ExpressionAttributeValues } : {}),
-    ...(ExpressionAttributeNames ? { ExpressionAttributeNames } : {}),
-    ...(ReturnValues ? { ReturnValues } : {}),
-  };
+  const ConditionExpression = withScrubFence(callerCondition, guardAgainstScrub);
 
-  let orgResult;
   try {
-    orgResult = await dynamo.send(
+    const result = await dynamo.send(
       new UpdateItemCommand({
-        ...shared,
+        TableName: Resource.BillingTable.name,
         Key: { pk: { S: SubscriptionKeys.orgPk(owner.orgId) }, sk: { S: SubscriptionKeys.sk() } },
-        ...rowCondition(ConditionExpression, createsOrgRow),
+        ...expression,
+        ...rowCondition(ConditionExpression, createsRow),
+        ...(ReturnValues ? { ReturnValues } : {}),
       }),
     );
+    return { previous: result.Attributes, written: true };
   } catch (err) {
-    // Only the bare existence guard is silent, and only because "no org twin
-    // yet" is every account the backfill has not reached. A caller condition
-    // the org row failed is a fact about the record, not about the migration:
-    // the legacy row may satisfy the same condition and diverge from the row
-    // every read prefers, so it is raised rather than assumed symmetrical.
-    // Under `guardAgainstScrub`, every conditional failure on this key defers
-    // to the legacy write, whose classification answers for both.
-    if (guardAgainstScrub && isConditionalCheckFailure(err)) {
-      // The legacy write decides the outcome.
-    } else if (!isMissingRow(err, ConditionExpression, createsOrgRow)) {
-      throw err;
-    }
-  }
-
-  let legacyResult;
-  try {
-    legacyResult = await dynamo.send(
-      new UpdateItemCommand({
-        ...shared,
-        Key: {
-          pk: { S: SubscriptionKeys.legacyPk(owner.userId) },
-          sk: { S: SubscriptionKeys.sk() },
-        },
-        ...rowCondition(ConditionExpression, createsOrgRow),
-      }),
-    );
-  } catch (err) {
-    const refusal = scrubRefusal(err, update, owner);
+    const refusal = scrubRefusal(err, guardAgainstScrub, owner);
     if (refusal) return refusal;
-    if (!tolerateMissingRow || !isMissingRow(err, ConditionExpression, createsOrgRow)) throw err;
+    if (!tolerateMissingRow || !isMissingRow(err, ConditionExpression, createsRow)) throw err;
+    return { written: false };
   }
-
-  return {
-    previous: orgResult?.Attributes ?? legacyResult?.Attributes,
-    orgRowWritten: orgResult !== undefined,
-    legacyRowWritten: legacyResult !== undefined,
-  };
 }
 
 /** The caller's condition, ANDed with the scrub fence when one is asked for. */
-function withScrubFence({
-  ConditionExpression,
-  guardAgainstScrub,
-}: SubscriptionUpdate): string | undefined {
-  if (!guardAgainstScrub) return ConditionExpression;
-  return ConditionExpression
-    ? `(${ConditionExpression}) AND attribute_not_exists(deletedAt)`
+function withScrubFence(
+  callerCondition: string | undefined,
+  guardAgainstScrub: SubscriptionUpdate['guardAgainstScrub'],
+): string | undefined {
+  if (!guardAgainstScrub) return callerCondition;
+  return callerCondition
+    ? `(${callerCondition}) AND attribute_not_exists(deletedAt)`
     : 'attribute_not_exists(deletedAt)';
 }
 
@@ -349,7 +243,7 @@ function withScrubFence({
  */
 function scrubRefusal(
   err: unknown,
-  { guardAgainstScrub }: SubscriptionUpdate,
+  guardAgainstScrub: SubscriptionUpdate['guardAgainstScrub'],
   owner: { orgId?: string; userId?: string },
 ): SubscriptionWriteResult | undefined {
   if (!guardAgainstScrub || !isConditionalCheckFailure(err)) return undefined;
@@ -357,75 +251,13 @@ function scrubRefusal(
     caller: guardAgainstScrub.caller,
     ...owner,
   });
-  return { orgRowWritten: false, legacyRowWritten: false, refused: true };
+  return { written: false, refused: true };
 }
 
 /**
- * Update whichever keys the caller can name.
- *
- * Both, and it is {@link updateSubscription}. Only one, and this is the phase's
- * honest answer for the two callers that may hold one id and not the other: a
- * Stripe object created before the metadata carried an `orgId` names no org
- * (the cohort every lifecycle job already skips, left for the backfill's manual
- * disposition list rather than given an org we invented), and a scanned org row
- * predating this module's `userId` attribute names no user.
- */
-export async function updateSubscriptionByUser(
-  { orgId, userId }: { orgId?: string; userId?: string },
-  update: SubscriptionUpdate,
-): Promise<SubscriptionWriteResult> {
-  if (orgId && userId) return updateSubscription({ orgId, userId }, update);
-
-  const pk = orgId ? SubscriptionKeys.orgPk(orgId) : userId && SubscriptionKeys.legacyPk(userId);
-  if (!pk) throw new Error('A subscription update names neither an org nor a user');
-
-  const { tolerateMissingRow, createsOrgRow } = update;
-  const ConditionExpression = withScrubFence(update);
-  let result;
-  try {
-    // The same condition policy as the two-key path. One key is fewer
-    // writes, not weaker rules: an unconditional upsert here would mint the
-    // partial row rule 1 exists to prevent, on whichever key the caller
-    // happened to name.
-    result = await dynamo.send(singleKeyUpdateCommand(pk, update, ConditionExpression));
-  } catch (err) {
-    const refusal = scrubRefusal(err, update, { orgId, userId });
-    if (refusal) return refusal;
-    if (!tolerateMissingRow || !isMissingRow(err, ConditionExpression, createsOrgRow)) throw err;
-  }
-  const written = result !== undefined;
-  return {
-    previous: result?.Attributes,
-    orgRowWritten: Boolean(orgId) && written,
-    legacyRowWritten: !orgId && written,
-  };
-}
-
-/** The one-key write, with the caller's condition already fenced. */
-function singleKeyUpdateCommand(
-  pk: string,
-  { ReturnValues, createsOrgRow, ...expression }: SubscriptionUpdate,
-  ConditionExpression: string | undefined,
-): UpdateItemCommand {
-  return new UpdateItemCommand({
-    TableName: Resource.BillingTable.name,
-    Key: { pk: { S: pk }, sk: { S: SubscriptionKeys.sk() } },
-    UpdateExpression: expression.UpdateExpression,
-    ...(expression.ExpressionAttributeValues
-      ? { ExpressionAttributeValues: expression.ExpressionAttributeValues }
-      : {}),
-    ...(expression.ExpressionAttributeNames
-      ? { ExpressionAttributeNames: expression.ExpressionAttributeNames }
-      : {}),
-    ...rowCondition(ConditionExpression, createsOrgRow),
-    ...(ReturnValues ? { ReturnValues } : {}),
-  });
-}
-
-/**
- * A row's condition: its own existence, ANDed with whatever the caller requires
- * of the record. A writer that creates the record asserts neither — it is
- * bringing the record into being.
+ * The row's condition: its own existence, ANDed with whatever the caller
+ * requires of the record. A writer that creates the record asserts neither — it
+ * is bringing the record into being.
  */
 function rowCondition(
   callerCondition: string | undefined,
@@ -441,8 +273,7 @@ function rowCondition(
 
 /**
  * Whether a failed write failed because the row is not there, as opposed to
- * because the caller's own condition was not met. Only the first is ever
- * treated as an outcome rather than an error.
+ * because the caller's own condition was not met.
  */
 function isMissingRow(
   err: unknown,
@@ -452,108 +283,95 @@ function isMissingRow(
   return isConditionalCheckFailure(err) && !creates && !callerCondition;
 }
 
+/** A billing write that named no org. */
+export class MissingOrgIdError extends Error {
+  constructor(userId: string | undefined) {
+    super(
+      `[subscription-store] A billing write names no orgId (userId=${userId ?? 'unknown'}); ` +
+        'the row is keyed by org and there is nothing to write it under',
+    );
+    this.name = 'MissingOrgIdError';
+  }
+}
+
+/**
+ * Update the row for an org that may not be known.
+ *
+ * The Stripe webhook is the caller. A customer or subscription created before
+ * the metadata carried an `orgId` names no org and cannot be written at all —
+ * there is no key to write it under, and inventing one would put a subscription
+ * on somebody else's partition. Those rows were enumerated and dispositioned by
+ * name before the re-key (docs/BillingRekeyRunbook.md), so reaching this branch
+ * means a Stripe object nobody has seen yet.
+ *
+ * It throws rather than logging and returning. The caller is a webhook handler:
+ * a throw becomes a 500, which releases the idempotency claim and lets Stripe
+ * retry — so once somebody repairs the object's metadata, the retries converge on
+ * their own. Returning success would consume the event, and the status change it
+ * carried would be gone with it.
+ */
+export async function updateSubscriptionByUser(
+  { orgId, userId }: { orgId?: string; userId?: string },
+  update: SubscriptionUpdate,
+): Promise<SubscriptionWriteResult> {
+  if (!orgId) throw new MissingOrgIdError(userId);
+  return updateSubscription({ orgId, ...(userId ? { userId } : {}) }, update);
+}
+
 export interface SubscriptionPut {
-  /** The record's attributes, without `pk`/`sk` — this module supplies both keys. */
+  /** The record's attributes, without `pk`/`sk` — this module supplies the key. */
   item: Record<string, AttributeValue>;
   ConditionExpression?: string;
 }
 
 /**
- * Create the record on both keys.
- *
- * Used where a record does not exist yet, so both keys are born together and
- * the org row is whole from its first write.
- *
- * The org PUT is transactional with a check on the legacy key, because a
- * caller's "no record" read can be true of the org key and false of the legacy
- * one: an account the backfill has not copied has a complete legacy row and no
- * twin, and a bare PUT would drop a status-less org row in front of it. Every
- * read prefers the org row, so that row reports a subscription with no status
- * and the account is locked out by its own migration. If the legacy row is
- * there, the transaction is refused and the org key is left for the backfill.
- *
- * The legacy PUT follows with its own condition, and its failure is the
- * caller's to interpret — today's behavior.
+ * Create the org's record, where one does not exist yet. The one write that is
+ * allowed to bring a row into being without saying `createsRow`: putting a whole
+ * record is what it does.
  */
 export async function writeSubscription(
   owner: SubscriptionOwner,
   { item, ConditionExpression }: SubscriptionPut,
 ): Promise<void> {
-  const tableName = Resource.BillingTable.name;
-  const attributes = { ...ownerAttributes(owner), ...item, sk: { S: SubscriptionKeys.sk() } };
-  const legacyKey = {
-    pk: { S: SubscriptionKeys.legacyPk(owner.userId) },
-    sk: { S: SubscriptionKeys.sk() },
-  };
-
-  try {
-    await dynamo.send(
-      new TransactWriteItemsCommand({
-        TransactItems: [
-          {
-            Put: {
-              TableName: tableName,
-              Item: { ...attributes, pk: { S: SubscriptionKeys.orgPk(owner.orgId) } },
-              ...(ConditionExpression ? { ConditionExpression } : {}),
-            },
-          },
-          {
-            ConditionCheck: {
-              TableName: tableName,
-              Key: legacyKey,
-              ConditionExpression: 'attribute_not_exists(pk)',
-            },
-          },
-        ],
-      }),
-    );
-  } catch (err) {
-    if (!isConditionalCheckFailure(err)) throw err;
-  }
-
   await dynamo.send(
     new PutItemCommand({
-      TableName: tableName,
-      Item: { ...attributes, pk: { S: SubscriptionKeys.legacyPk(owner.userId) } },
+      TableName: Resource.BillingTable.name,
+      Item: {
+        ...ownerAttributes(owner),
+        ...item,
+        pk: { S: SubscriptionKeys.orgPk(owner.orgId) },
+        sk: { S: SubscriptionKeys.sk() },
+      },
       ...(ConditionExpression ? { ConditionExpression } : {}),
     }),
   );
 }
 
-/**
- * Whether a write failed its condition. A transaction reports the same thing
- * one level down, in the cancellation reasons, so both shapes answer here — the
- * callers care that the row refused the write, not which command carried it.
- */
 export function isConditionalCheckFailure(err: unknown): boolean {
-  const error = err as { name?: string; CancellationReasons?: { Code?: string }[] } | null;
-  if (error?.name === 'ConditionalCheckFailedException') return true;
-  return (
-    error?.name === 'TransactionCanceledException' &&
-    (error.CancellationReasons ?? []).some((reason) => reason.Code === 'ConditionalCheckFailed')
-  );
+  return (err as { name?: string } | null)?.name === 'ConditionalCheckFailedException';
 }
 
 // ---------------------------------------------------------------------------
-// What the scan-driven jobs see while both keys exist
+// What the scan-driven jobs read off a row
 // ---------------------------------------------------------------------------
 
-/** The two fields every scanning job needs off a subscription row, whichever key it came from. */
+/** The two fields every scanning job needs off a subscription row. */
 export interface ScannedSubscription {
   pk: string;
   orgId: string;
-  /** From the row when it carries one, else from a legacy pk. Absent on an un-backfilled org row. */
+  /** The member who owns the Stripe customer, from the row's own attribute. */
   userId?: string;
+  /** Read here so a same-kind collision can name what each row would bill. */
+  subscriptionId?: string;
 }
 
 /**
  * Who a scanned row belongs to, or undefined when it cannot say.
  *
- * `orgId` has been written on every row since the webhook started backfilling
- * it, and the jobs already skip the rows that predate it. The user id comes
- * from the row's own attribute first and the legacy key second, so a job keeps
- * working across the re-key without parsing an org id out of a pk and calling
- * it a user.
+ * Both facts are read from the row: `orgId` has been written on every row since
+ * the webhook started backfilling it, and `userId` since the re-key. Neither is
+ * parsed out of the partition key — a job that did that would read an org id and
+ * call it a user the moment it met an org row, which is now every row.
  */
 export function scannedSubscription(
   record: Record<string, unknown>,
@@ -562,24 +380,100 @@ export function scannedSubscription(
   const orgId = typeof record.orgId === 'string' && record.orgId ? record.orgId : undefined;
   if (!pk || !orgId) return undefined;
 
-  const userId =
-    (typeof record.userId === 'string' && record.userId ? record.userId : undefined) ??
-    SubscriptionKeys.parseLegacyPk(pk);
-  return { pk, orgId, ...(userId ? { userId } : {}) };
+  const userId = typeof record.userId === 'string' && record.userId ? record.userId : undefined;
+  const subscriptionId =
+    typeof record.subscriptionId === 'string' && record.subscriptionId
+      ? record.subscriptionId
+      : undefined;
+  return {
+    pk,
+    orgId,
+    ...(userId ? { userId } : {}),
+    ...(subscriptionId ? { subscriptionId } : {}),
+  };
 }
 
 /**
- * Drop each legacy row whose org twin is in the same scan.
+ * Assert one row per org, and say so loudly when it does not hold.
  *
- * Dual-writing means most accounts appear twice for the length of this phase,
- * and a job that acted on both would disable a tenant twice and count one org
- * as two. The org row wins because it is the one every read prefers.
+ * One org, one subscription is the invariant the re-key bought. Two rows for one
+ * org is one of two different things, and they do not deserve the same alarm:
+ *
+ * - An `ORG#` row beside a `CUSTOMER#` row of the same org is the expected state
+ *   between the flip and the dated cleanup step. Nothing writes the legacy row
+ *   any more, so it is a frozen leftover — logged at WARN, naming it as one.
+ *   That branch is a backstop for a direct caller: `scanSubscriptions` drops
+ *   non-org rows in `scannableOwner`, so a job run reports its leftovers as
+ *   `Not an org row, skipping` and never reaches this line. The check stays
+ *   because this function is exported, and a caller handing it unfiltered rows
+ *   would otherwise silently drop one of them.
+ * - Two rows of the SAME kind is the real violation: two live subscriptions for
+ *   one org, which the backfill's collision resolution was supposed to have
+ *   settled. Logged at ERROR with both `subscriptionId`s, because which of them
+ *   Stripe is billing is the first thing anyone will ask.
+ *
+ * Which row survives is not left to scan order. An `ORG#` row wins over a
+ * `CUSTOMER#` row of the same org, because it is the row every read finds and
+ * the only one a writer can address: keeping the legacy one would meter its
+ * `subscriptionId` to Stripe from the usage orchestrator, and bill the org on a
+ * subscription nothing else in the system can see. Between two rows of the same
+ * kind there is nothing to choose, so the first stands.
+ *
+ * The cleanup step's precondition is written against this: zero same-kind ERROR
+ * lines across a full run of all three jobs. Leftover WARNs are expected and do
+ * not block it (docs/BillingRekeyRunbook.md).
  */
-export function preferOrgRows<T extends ScannedSubscription>(rows: readonly T[]): T[] {
-  const orgIdsWithOrgRow = new Set(
-    rows.filter((row) => SubscriptionKeys.isOrgPk(row.pk)).map((row) => row.orgId),
-  );
-  return rows.filter((row) => SubscriptionKeys.isOrgPk(row.pk) || !orgIdsWithOrgRow.has(row.orgId));
+export function assertOneRowPerOrg<T extends ScannedSubscription>(
+  rows: readonly T[],
+  job: string,
+): T[] {
+  const byOrg = new Map<string, T>();
+
+  for (const row of rows) {
+    const held = byOrg.get(row.orgId);
+    if (!held) {
+      byOrg.set(row.orgId, row);
+      continue;
+    }
+
+    const [survivor, extra] = preferOrgKeyed(held, row);
+    byOrg.set(row.orgId, survivor);
+    reportExtraRow(job, survivor, extra);
+  }
+
+  return [...byOrg.values()];
+}
+
+function reportExtraRow<T extends ScannedSubscription>(job: string, survivor: T, extra: T): void {
+  const detail = {
+    orgId: survivor.orgId,
+    processing: survivor.pk,
+    ignored: extra.pk,
+  };
+
+  if (SubscriptionKeys.isOrgPk(survivor.pk) !== SubscriptionKeys.isOrgPk(extra.pk)) {
+    console.warn(`[${job}] Leftover CUSTOMER# row beside its org row`, {
+      ...detail,
+      hint: 'expected between the flip and the dated cleanup step; nothing writes it any more',
+    });
+    return;
+  }
+
+  console.error(`[${job}] INVARIANT VIOLATED: two subscription rows for one org`, {
+    ...detail,
+    processingSubscriptionId: survivor.subscriptionId ?? '(none)',
+    ignoredSubscriptionId: extra.subscriptionId ?? '(none)',
+    hint: 'two live subscriptions for one org — check which one Stripe is billing',
+  });
+}
+
+/**
+ * The org-keyed row first, or the incumbent when neither or both are org-keyed:
+ * between two rows of the same kind there is nothing to choose.
+ */
+function preferOrgKeyed<T extends ScannedSubscription>(held: T, next: T): [T, T] {
+  if (!SubscriptionKeys.isOrgPk(held.pk) && SubscriptionKeys.isOrgPk(next.pk)) return [next, held];
+  return [held, next];
 }
 
 export interface SubscriptionScanOptions<T extends ScannedSubscription> {
@@ -589,29 +483,54 @@ export interface SubscriptionScanOptions<T extends ScannedSubscription> {
   expressionAttributeValues: Record<string, AttributeValue>;
   /** Row to candidate, or undefined for a row this job has its own reason to skip. */
   select: (record: Record<string, unknown>, owner: ScannedSubscription) => T | undefined;
-  /**
-   * Which of two rows for one org this job would rather act on, once the
-   * org/legacy pair has already been resolved. Default: the one scanned first.
-   */
-  prefer?: (held: T, next: T) => T;
-  /** What to print about each side of a collision, beyond its key. */
-  describe?: (row: T) => Record<string, unknown>;
 }
 
 /**
  * The scan every SUBSCRIPTION-status job runs: page the table, read the owner
  * off each row, keep one row per org.
  *
- * Three jobs used to carry their own copy of this — three paginations, three
- * skip logs, and three different answers to "two rows name one org", one of
- * which was decided by whatever order DynamoDB returned the pages in. One org
- * is one tenant to disable, one usage report, and one drift probe, so which row
- * a job acts on is a correctness question and it is answered here.
+ * NON-ORG ROWS ARE EXCLUDED HERE, not later. Between the flip and the cleanup
+ * step the `CUSTOMER#` rows are still standing and still carry whatever status
+ * they were frozen at, so a job that scanned them would act on state nothing has
+ * updated since: the grace-period enforcer would disable a paying tenant whose
+ * legacy row still says `grace_period`, and the usage orchestrator would meter
+ * usage to a superseded `subscriptionId`. Dropping them at the scan means a
+ * legacy row arriving ALONE for an org — the cohort the backfill missed — is
+ * skipped rather than acted on, which is the safe half of that trade.
  */
-export async function scanSubscriptions<T extends ScannedSubscription>(
-  options: SubscriptionScanOptions<T>,
-): Promise<T[]> {
-  const { job, filterExpression, expressionAttributeValues, select } = options;
+/** The owner of a row this job may act on, or undefined with the reason logged. */
+function scannableOwner(
+  record: Record<string, unknown>,
+  job: string,
+): ScannedSubscription | undefined {
+  const owner = scannedSubscription(record);
+  if (!owner) {
+    console.warn(`[${job}] Missing orgId, skipping`, { pk: record.pk });
+    return undefined;
+  }
+  if (!SubscriptionKeys.isOrgPk(owner.pk)) {
+    console.warn(`[${job}] Not an org row, skipping`, {
+      pk: owner.pk,
+      orgId: owner.orgId,
+      hint: 'a CUSTOMER# row the dated cleanup step has not removed yet',
+    });
+    return undefined;
+  }
+  if (!owner.userId) {
+    // Every writer stamps it and the backfill copied it, so a row without one
+    // predates both — and the close-out paths need it now that the key does not
+    // carry it.
+    console.warn(`[${job}] Subscription row with no userId`, { pk: owner.pk });
+  }
+  return owner;
+}
+
+export async function scanSubscriptions<T extends ScannedSubscription>({
+  job,
+  filterExpression,
+  expressionAttributeValues,
+  select,
+}: SubscriptionScanOptions<T>): Promise<T[]> {
   const selected: T[] = [];
   let lastEvaluatedKey: Record<string, AttributeValue> | undefined;
 
@@ -627,17 +546,8 @@ export async function scanSubscriptions<T extends ScannedSubscription>(
 
     for (const item of result.Items ?? []) {
       const record = unmarshall(item);
-      const owner = scannedSubscription(record);
-      if (!owner) {
-        console.warn(`[${job}] Missing orgId, skipping`, { pk: record.pk });
-        continue;
-      }
-      if (!owner.userId) {
-        // The backfill stamps `userId` on every row it copies and every writer
-        // sets it, so a row without one predates both. The close-out paths need
-        // it, and after the flip there is no pk left to recover it from.
-        console.warn(`[${job}] Subscription row with no userId`, { pk: owner.pk });
-      }
+      const owner = scannableOwner(record, job);
+      if (!owner) continue;
       const candidate = select(record, owner);
       if (candidate) selected.push(candidate);
     }
@@ -645,42 +555,5 @@ export async function scanSubscriptions<T extends ScannedSubscription>(
     lastEvaluatedKey = result.LastEvaluatedKey;
   } while (lastEvaluatedKey);
 
-  return dedupeByOrg(preferOrgRows(selected), options);
-}
-
-/**
- * One row per org, and a warning for every row that loses.
- *
- * `preferOrgRows` has already resolved the dual-write's twins, so what arrives
- * here is two rows of the same kind for one org — re-subscription history left
- * some orgs with two legacy rows. That is the collision the backfill halts on
- * and a human resolves, so it is named loudly rather than dropped quietly, with
- * whatever each job can say about how the two differ.
- */
-function dedupeByOrg<T extends ScannedSubscription>(
-  rows: readonly T[],
-  { job, prefer, describe }: Pick<SubscriptionScanOptions<T>, 'job' | 'prefer' | 'describe'>,
-): T[] {
-  const byOrg = new Map<string, T>();
-
-  for (const row of rows) {
-    const held = byOrg.get(row.orgId);
-    if (!held) {
-      byOrg.set(row.orgId, row);
-      continue;
-    }
-    const survivor = prefer ? prefer(held, row) : held;
-    const ignored = survivor === held ? row : held;
-    byOrg.set(row.orgId, survivor);
-    console.warn(`[${job}] Second subscription row for one org, skipped`, {
-      orgId: row.orgId,
-      processing: survivor.pk,
-      skipped: ignored.pk,
-      ...(describe
-        ? { processingDetail: describe(survivor), skippedDetail: describe(ignored) }
-        : {}),
-    });
-  }
-
-  return [...byOrg.values()];
+  return assertOneRowPerOrg(selected, job);
 }

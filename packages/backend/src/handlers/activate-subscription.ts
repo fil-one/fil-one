@@ -51,9 +51,9 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   // in the teardown snapshot, so nothing would cancel it.
   if (await isOrgDeleting(orgId, { consistent: true })) return accountDeletedResponse();
 
-  // 2. Get the org's billing record — the caller's own is only the fallback,
-  // so activating billing acts on the org's Stripe customer, not a second one.
-  const record = (await readSubscription(orgId, userId))?.record;
+  // 2. Get the org's billing record, so activating billing acts on the org's
+  // Stripe customer rather than one belonging to whoever clicked.
+  const record = await readSubscription(orgId);
   const stripeCustomerId = record?.stripeCustomerId;
 
   if (!record) {
@@ -203,8 +203,7 @@ async function createOrUpdateSubscription({
   // The metadata is what every webhook writer resolves the org from. A
   // subscription created without it arrives at the webhook naming no org, and
   // that subscription's whole lifecycle — status changes, payment failures,
-  // cancellation — falls back to a billing-row lookup or, once the re-key
-  // finishes, to nothing at all.
+  // cancellation — cannot be written at all.
   return stripe.subscriptions.create({
     customer: record.stripeCustomerId!,
     items: [{ price: secrets.STRIPE_PRICE_ID }],

@@ -13,6 +13,8 @@
 
 import { listMemberships } from './org-membership.js';
 import type { SubscriptionRecord } from './dynamo-records.js';
+import { emitTrialClaimBlockedByLegacyRow } from './stripe-webhook-metrics.js';
+import { legacyRowExists } from './subscription-store.js';
 import { ensureTrialEntitlement } from './trial-entitlement.js';
 import type { UserInfo } from './user-context.js';
 
@@ -24,7 +26,9 @@ export type TrialClaimOutcome =
   /** Somebody else's org, or one of several — the claim is not spendable here. */
   | 'not-own-org'
   /** Eligible to claim, but the entitlement is already spent (or the email is unverified). */
-  | 'not-entitled';
+  | 'not-entitled'
+  /** A pre-re-key `CUSTOMER#` row is still standing: this org already has billing. */
+  | 'legacy-row';
 
 /**
  * Whether the trial claim is still open for a stored record.
@@ -60,7 +64,34 @@ export function isTrialClaimable(record: SubscriptionRecord | undefined): boolea
 export async function claimTrialIfEligible(userInfo: UserInfo): Promise<TrialClaimOutcome> {
   const { sub, userId, orgId, email, emailVerified, apiKeySession } = userInfo;
   if (apiKeySession) return 'api-key-session';
+
   if (!(await isSoloPersonalOrg(userInfo))) return 'not-own-org';
+
+  // Here rather than at a call site, and immediately before the mint. The claim
+  // mints a Stripe customer and a subscription; if a pre-re-key `CUSTOMER#` row
+  // is still standing for this user, the backfill missed their account and this
+  // org already has billing that nothing reading the org key can see. Minting
+  // would give one account two Stripe customers, two subscriptions and two
+  // meters, which no later run can undo. Any route that can reach this function
+  // can reach that outcome, so the refusal cannot live in one of them — and
+  // every path that mints runs through this line, because the mint is the next
+  // one.
+  //
+  // The row is the user's, so it says nothing about an org they were invited
+  // to: refusing before the ownership test answered "billing is unavailable" —
+  // a 503, the on-call's signal — for a member simply opening a second org, and
+  // the runbook's cleanup precondition reads that denial rate.
+  //
+  // A dead check once the runbook's dated cleanup has deleted those rows, and
+  // it goes with them.
+  if (await legacyRowExists(userId)) {
+    emitTrialClaimBlockedByLegacyRow();
+    console.error(
+      '[trial-claim] Refusing to mint a trial: a pre-re-key CUSTOMER# row still exists',
+      { userId, orgId },
+    );
+    return 'legacy-row';
+  }
 
   const entitled = await ensureTrialEntitlement({
     sub,

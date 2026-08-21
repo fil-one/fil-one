@@ -46,11 +46,13 @@ import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 
+/** The org's row — the only row a read can land on. */
 function subscriptionItem(overrides: Record<string, unknown> = {}) {
   return {
     Item: marshall({
-      pk: `CUSTOMER#${USER_INFO.userId}`,
+      pk: `ORG#${USER_INFO.orgId}`,
       sk: 'SUBSCRIPTION',
+      orgId: USER_INFO.orgId,
       ...overrides,
     }),
   };
