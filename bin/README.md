@@ -185,6 +185,7 @@ production. Set `AWS_PROFILE` first.
 | ------------------- | ------------------------------------------------------------------------------------------ |
 | `args.ts`           | `--stage` (required, no default), `--execute`/`--dry-run`, usage and help                  |
 | `stage.ts`          | Table names from `sst state export`, the resolved-name stage assertion, the region mapping |
+| `sst-state.ts`      | One deployed table and its region from `sst state export`, for the flag scripts            |
 | `dynamo.ts`         | Paging a Scan to the end, decoding rows, and retrying a cancelled transaction              |
 | `run-lock.ts`       | The single lock row that keeps a migration and its revert off the same table at once       |
 | `billing-rekey.ts`  | What to do with each subscription row, and the exact items that carry it out               |
