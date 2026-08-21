@@ -291,6 +291,8 @@ describe('gracePeriodMessage', () => {
     expect(gracePeriodMessage(null)).toBe(
       "Your free trial has expired. Upgrade to keep access, or download your data before it's removed.",
     );
+  });
+});
 
 describe('AppShell mobile user menu', () => {
   const ORG_A = '11111111-1111-1111-1111-111111111111';
