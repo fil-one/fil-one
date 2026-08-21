@@ -207,7 +207,11 @@ describe('createBillingTrial', () => {
     await createBillingTrial({ userId: 'user-1', orgId: 'org-1', email: 'test@example.com' });
 
     expect(mockCustomersCreate).toHaveBeenCalledOnce();
-    const getCalls = ddbMock.commandCalls(GetItemCommand);
+    // The deletion fence reads the org profile beside this; the existence
+    // check itself reads exactly one billing key.
+    const getCalls = ddbMock
+      .commandCalls(GetItemCommand)
+      .filter((call) => call.args[0].input.TableName === 'BillingTable');
     expect(getCalls).toHaveLength(1);
     expect(getCalls[0].args[0].input.Key).toStrictEqual({
       pk: { S: 'ORG#org-1' },
