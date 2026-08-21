@@ -899,6 +899,26 @@ describe('stripe-webhook handler', () => {
       expect(supersededEmissions()).toHaveLength(1);
     });
 
+    it('does not reactivate the org on a successful invoice from a replaced subscription', async () => {
+      // The other direction of the same refusal: on the shared org row, a late
+      // success for historical subscription A would mark the org active and
+      // re-enable tenants the authoritative past-due subscription locked.
+      setupStripeEvent(
+        'invoice.payment_succeeded',
+        mockInvoice({
+          parent: { subscription_details: { subscription: 'sub_the_old_one' } },
+        }),
+      );
+      setupCustomerRetrieve();
+      setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+      expect(supersededEmissions()).toHaveLength(1);
+    });
+
     it('marks past due when the failing invoice names the subscription on the row', async () => {
       setupStripeEvent(
         'invoice.payment_failed',

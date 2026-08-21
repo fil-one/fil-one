@@ -86,9 +86,6 @@ if (!cli.flag(REQUIRED_ACKNOWLEDGEMENT)) {
   process.exit();
 }
 
-ensureSstShell(cli.stage, import.meta.filename, cli.argv);
-
-import { Resource } from 'sst';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { decodeRow, scanAll, text, transactWithRetry } from './lib/dynamo.ts';
 import { acquireRunLock, BILLING_REKEY_LOCK_PK, forceUnlock } from './lib/run-lock.ts';
