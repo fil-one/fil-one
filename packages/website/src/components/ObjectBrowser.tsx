@@ -98,7 +98,8 @@ function VersionActions({
   groupKey: string;
   downloading: string | null;
   onDownload: (key: string, versionId?: string) => void;
-  onRequestDelete: (key: string, versionId: string) => void;
+  /** Absent for a role without `objects.delete` — the control is not rendered. */
+  onRequestDelete?: (key: string, versionId: string) => void;
   label: string;
 }) {
   return (
@@ -117,15 +118,17 @@ function VersionActions({
             onClick={() => onDownload(groupKey, version.versionId)}
           />
         ))}
-      <IconButton
-        icon={TrashIcon}
-        aria-label={`Delete ${label}`}
-        size="md"
-        // Same IconButton as the others, but the hover keeps a danger cue since
-        // this deletes directly (twMerge lets it win over the base zinc hover).
-        className="hover:text-red-600"
-        onClick={() => onRequestDelete(groupKey, version.versionId)}
-      />
+      {onRequestDelete && (
+        <IconButton
+          icon={TrashIcon}
+          aria-label={`Delete ${label}`}
+          size="md"
+          // Same IconButton as the others, but the hover keeps a danger cue since
+          // this deletes directly (twMerge lets it win over the base zinc hover).
+          className="hover:text-red-600"
+          onClick={() => onRequestDelete(groupKey, version.versionId)}
+        />
+      )}
     </div>
   );
 }
@@ -148,7 +151,7 @@ function VersionSubRow({
   displayName: string;
   downloading: string | null;
   onDownload: (key: string, versionId?: string) => void;
-  onRequestDelete: (key: string, versionId: string) => void;
+  onRequestDelete?: (key: string, versionId: string) => void;
   onNavigate: (key: string, versionId: string) => void;
 }) {
   return (
@@ -215,7 +218,7 @@ function LatestVersionRow({
   onToggleExpand: (key: string) => void;
   downloading: string | null;
   onDownload: (key: string, versionId?: string) => void;
-  onRequestDelete: (key: string, versionId: string) => void;
+  onRequestDelete?: (key: string, versionId: string) => void;
   onNavigate: (key: string, versionId: string) => void;
 }) {
   const hasMultipleVersions = versioningEnabled && group.versionCount > 1;
@@ -347,7 +350,10 @@ export type ObjectBrowserProps = {
   onPrefixChange: (prefix: string) => void;
   onDownload: (key: string, versionId?: string) => void;
   downloading: string | null;
-  onDelete: (key: string, versionId?: string) => Promise<void>;
+  /** Absent for a role without `objects.delete` — every row drops the control. */
+  onDelete?: (key: string, versionId?: string) => Promise<void>;
+  /** Whether to offer the upload route. False for a role without `objects.write`. */
+  canUpload?: boolean;
 };
 
 export function ObjectBrowser({
@@ -360,6 +366,7 @@ export function ObjectBrowser({
   onDownload,
   downloading,
   onDelete,
+  canUpload = true,
 }: ObjectBrowserProps) {
   const navigate = useNavigate();
   const [confirmDelete, setConfirmDelete] = useState<{
@@ -377,9 +384,9 @@ export function ObjectBrowser({
     });
   }
 
-  function requestDelete(key: string, versionId: string) {
-    setConfirmDelete({ key, versionId });
-  }
+  const requestDelete = onDelete
+    ? (key: string, versionId: string) => setConfirmDelete({ key, versionId })
+    : undefined;
 
   if (versions.length === 0) {
     return (
@@ -387,23 +394,29 @@ export function ObjectBrowser({
         <EmptyStateCard
           icon={CloudArrowUpIcon}
           title="No objects yet"
-          description="Upload your first object to this bucket"
+          description={
+            canUpload
+              ? 'Upload your first object to this bucket'
+              : 'Objects uploaded to this bucket appear here'
+          }
         >
           {/* Text-only: the cloud tile directly above already speaks "upload",
               so a glyph on the button here would just repeat it. */}
-          <Button
-            id="object-browser-upload-button"
-            variant="primary"
-            onClick={() =>
-              void navigate({
-                to: '/buckets/$bucketName/upload',
-                params: { bucketName },
-                search: { region },
-              })
-            }
-          >
-            Upload object
-          </Button>
+          {canUpload && (
+            <Button
+              id="object-browser-upload-button"
+              variant="primary"
+              onClick={() =>
+                void navigate({
+                  to: '/buckets/$bucketName/upload',
+                  params: { bucketName },
+                  search: { region },
+                })
+              }
+            >
+              Upload object
+            </Button>
+          )}
         </EmptyStateCard>
       </div>
     );
@@ -526,7 +539,7 @@ export function ObjectBrowser({
         open={confirmDelete !== null}
         onClose={() => setConfirmDelete(null)}
         onConfirm={() => {
-          if (!confirmDelete) return Promise.resolve();
+          if (!confirmDelete || !onDelete) return Promise.resolve();
           return onDelete(confirmDelete.key, confirmDelete.versionId);
         }}
         title="Delete object"

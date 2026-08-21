@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { OrgRole, ROLE_PERMISSIONS } from '@filone/shared';
+import { seedPermissions } from '../lib/test-permissions.js';
 import { PlanId, SubscriptionStatus } from '@filone/shared';
 import type { BillingInfo } from '@filone/shared';
 
@@ -22,11 +24,16 @@ vi.mock('../components/Toast', () => ({
 const mockGetBilling = vi.fn();
 const mockGetUsage = vi.fn();
 const mockGetInvoices = vi.fn();
+const mockGetMe = vi.fn();
 vi.mock('../lib/api.js', () => ({
   apiRequest: vi.fn(),
   getBilling: (...args: unknown[]) => mockGetBilling(...args),
   getUsage: (...args: unknown[]) => mockGetUsage(...args),
   getInvoices: (...args: unknown[]) => mockGetInvoices(...args),
+  // `usePermissions` reads `/me`, and every gate on this page goes through it.
+  // The mock was missing it, so any refetch of the seeded cache called
+  // `undefined` and errored the query — which used to render the denial copy.
+  getMe: (...args: unknown[]) => mockGetMe(...args),
   activateSubscription: vi.fn(),
 }));
 
@@ -65,8 +72,20 @@ function payAsYouGoBilling(): BillingInfo {
   };
 }
 
-function renderPage() {
+function renderPage(role = OrgRole.Owner) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // The page is gated on `billing.view` and its controls on `billing.manage`.
+  seedPermissions(client, role);
+  mockGetMe.mockResolvedValue({
+    orgId: 'org-1',
+    orgName: 'Acme',
+    emailVerified: true,
+    mfaEnrollments: [],
+    ragAccess: true,
+    userId: 'user-1',
+    role,
+    permissions: ROLE_PERMISSIONS[role],
+  });
   return render(
     <QueryClientProvider client={client}>
       <BillingPage />
@@ -142,5 +161,37 @@ describe('BillingPage — current usage meters', () => {
 
     await screen.findByText('Storage used');
     expect(screen.getByRole('progressbar', { name: 'Storage usage' })).toBeInTheDocument();
+  });
+});
+
+describe('BillingPage — permissions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetUsage.mockResolvedValue(USAGE);
+    mockGetInvoices.mockResolvedValue({ invoices: [] });
+    mockGetBilling.mockResolvedValue(trialingBilling());
+  });
+
+  it('tells a Member the page is not theirs, without fetching anything', async () => {
+    renderPage(OrgRole.Member);
+
+    expect(await screen.findByText(/Billing is managed by your organization/)).toBeInTheDocument();
+    expect(mockGetBilling).not.toHaveBeenCalled();
+  });
+
+  it('shows an Admin the plan but not the controls that change it', async () => {
+    // `billing.view` reads usage and invoices; `billing.manage` is Owner's.
+    const { container } = renderPage(OrgRole.Admin);
+
+    await screen.findByText('Free trial');
+    expect(container.querySelector('#billing-plan-cta-button')).toBeNull();
+    expect(container.querySelector('#billing-upgrade-button')).toBeNull();
+  });
+
+  it('shows an Owner the controls', async () => {
+    const { container } = renderPage(OrgRole.Owner);
+
+    await screen.findByText('Free trial');
+    expect(container.querySelector('#billing-plan-cta-button')).not.toBeNull();
   });
 });

@@ -1,10 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { OrgRole } from '@filone/shared';
+import { seedPermissions } from '../lib/test-permissions.js';
 import { S3Region } from '@filone/shared';
 import type { RagApiKey } from '@filone/shared';
 
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
+import { queryKeys } from '../lib/query-client.js';
 import { RagApiKeysTab } from './RagPipelineKeysTab.js';
 import type { RagBucket } from '../lib/rag-bucket-api.js';
 
@@ -28,12 +31,23 @@ vi.mock('../lib/rag-api-keys-api.js', () => ({
 
 const TOKEN = 'sk_rag_0123456789abcdefghijklmnopqrstuvwxyzABCDEF';
 
+// `seedPermissions` writes userId 'user-1', so this key is the caller's own —
+// which is what a Member's `keys.manage_own` reaches.
 const KEY: RagApiKey = {
   id: 'key-1',
   keyName: 'ci key',
   keyPrefix: 'sk_rag_AbC12',
   bucketScope: 'all',
   createdAt: '2026-07-01T00:00:00Z',
+  createdBy: 'user-1',
+};
+
+/** A key somebody else minted: visible to `keys.manage_all`, not revocable below it. */
+const OTHERS_KEY: RagApiKey = {
+  ...KEY,
+  id: 'key-2',
+  keyName: 'someone elses key',
+  createdBy: 'user-2',
 };
 
 function bucket(over: Partial<RagBucket> = {}): RagBucket {
@@ -47,15 +61,19 @@ function bucket(over: Partial<RagBucket> = {}): RagBucket {
   };
 }
 
-function renderTab(buckets: RagBucket[] = [bucket()]) {
+function renderTab(buckets: RagBucket[] = [bucket()], role = OrgRole.Owner) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  // Key controls are gated on `keys.*`, so the caller's role has to be known
+  // before the tab renders.
+  seedPermissions(client, role);
+  const view = render(
     <QueryClientProvider client={client}>
       <ToastProvider>
         <RagApiKeysTab buckets={buckets} />
       </ToastProvider>
     </QueryClientProvider>,
   );
+  return { ...view, client };
 }
 
 // ---------------------------------------------------------------------------
@@ -189,5 +207,77 @@ describe('RagApiKeysTab', () => {
 
     expect(await screen.findByText('quota exceeded')).toBeInTheDocument();
     expect(screen.queryByTestId('rag-key-token')).not.toBeInTheDocument();
+  });
+});
+
+describe('RagApiKeysTab — permissions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockList.mockResolvedValue({ keys: [] });
+  });
+
+  it('offers key creation to a Member', async () => {
+    renderTab([bucket()], OrgRole.Member);
+
+    expect(await screen.findByRole('button', { name: 'Create API key' })).toBeInTheDocument();
+  });
+
+  it('hides key creation from ReadOnly', async () => {
+    renderTab([bucket()], OrgRole.ReadOnly);
+
+    await screen.findByText('No API keys yet');
+    expect(screen.queryByRole('button', { name: 'Create API key' })).not.toBeInTheDocument();
+  });
+
+  it('does not request the list for a role without keys.manage_own', async () => {
+    // ReadOnly's request would 403. The empty state is the honest render, and
+    // the invitation to create one goes with the button it has lost.
+    renderTab([bucket()], OrgRole.ReadOnly);
+
+    await screen.findByTestId('rag-api-keys-empty');
+    expect(mockList).not.toHaveBeenCalled();
+    expect(screen.getByText('Keys for the Query API appear here.')).toBeInTheDocument();
+  });
+
+  it('lets a Member revoke their own key and not a colleague’s', async () => {
+    mockList.mockResolvedValue({ keys: [KEY, OTHERS_KEY] });
+
+    renderTab([bucket()], OrgRole.Member);
+
+    expect(
+      await screen.findByRole('button', { name: 'Delete API key ci key' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Delete API key someone elses key' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('drops the key list when the caller loses keys.manage_own mid-session', async () => {
+    // Disabling a query does not evict what it already fetched, and a mounted
+    // tab is a live observer, so the names and prefixes would stay on screen
+    // until a reload.
+    mockList.mockResolvedValue({ keys: [KEY] });
+    const { client } = renderTab([bucket()], OrgRole.Member);
+    expect(await screen.findByText('ci key')).toBeInTheDocument();
+
+    // What a /me refetch after a demotion does.
+    act(() => seedPermissions(client, OrgRole.ReadOnly));
+
+    await waitFor(() => expect(screen.queryByText('ci key')).not.toBeInTheDocument());
+    // The cached response is still there — the read is what changed.
+    expect(client.getQueryData(queryKeys.ragApiKeys)).toBeDefined();
+  });
+
+  it('gives an Admin the action on every key', async () => {
+    mockList.mockResolvedValue({ keys: [KEY, OTHERS_KEY] });
+
+    renderTab([bucket()], OrgRole.Admin);
+
+    expect(
+      await screen.findByRole('button', { name: 'Delete API key ci key' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Delete API key someone elses key' }),
+    ).toBeInTheDocument();
   });
 });

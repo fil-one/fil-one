@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { OrgRole } from '@filone/shared';
+import { seedPermissions } from '../lib/test-permissions.js';
 import {
   createMemoryHistory,
   createRootRoute,
@@ -42,7 +44,6 @@ vi.mock('../lib/rag-api-keys-api.js', async (importOriginal) => ({
 
 import { RagPipelinePage, enablementPollInterval } from './RagPipelinePage.js';
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
-import { queryKeys } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -104,7 +105,8 @@ const ENABLEMENT: Record<string, BucketRagEnablementResponse> = {
 
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  client.setQueryData(queryKeys.me, ME);
+  // The page's own /me fixture, plus the permissions its gated controls read.
+  seedPermissions(client, OrgRole.Owner, ME);
 
   const rootRoute = createRootRoute({ component: () => <RagPipelinePage /> });
   const objectsRoute = createRoute({
@@ -397,7 +399,9 @@ describe('RagPipelinePage — API Keys tab', () => {
 describe('RagPipelinePage — access gate', () => {
   it('renders a not-available state when the user lacks RAG access', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    client.setQueryData(queryKeys.me, { ...ME, ragAccess: false });
+    // One write, not two: the seed and this line target the same cache key, so
+    // the seed was overwritten before anything read it.
+    seedPermissions(client, OrgRole.Owner, { ...ME, ragAccess: false });
 
     const rootRoute = createRootRoute({ component: () => <RagPipelinePage /> });
     const router = createRouter({

@@ -14,6 +14,36 @@ export class StepUpRequiredError extends Error {
   }
 }
 
+/**
+ * The caller's role does not carry what the request needed.
+ *
+ * A subclass rather than a decorated Error because this is the one 403 a
+ * component may want to act on: the UI hides what will be refused, so seeing
+ * this means the two disagreed — a role changed under an open tab, or a control
+ * was left ungated. Either way the fix is to reload `/me`, not to retry.
+ */
+export class ForbiddenRoleError extends Error {
+  readonly status = 403;
+  readonly code = ApiErrorCode.FORBIDDEN_ROLE;
+  constructor(message?: string) {
+    super(message ?? 'Your role in this organization does not permit this action.');
+  }
+}
+
+/**
+ * The caller is not a member of the org they are operating in — the membership
+ * was revoked, or the conversion never wrote their row. Distinct from
+ * {@link ForbiddenRoleError} because the states have different fixes: one is
+ * "ask an Owner for a higher role", the other is "you are not in this org".
+ */
+export class NotAMemberError extends Error {
+  readonly status = 403;
+  readonly code = ApiErrorCode.NOT_A_MEMBER;
+  constructor(message?: string) {
+    super(message ?? 'You are not a member of this organization.');
+  }
+}
+
 function getCsrfToken(): string | undefined {
   return document.cookie
     .split('; ')
@@ -59,6 +89,45 @@ function throwAccountDeleted(status: number, fromSessionProbe: boolean): never {
     status,
     code: ApiErrorCode.ACCOUNT_DELETED,
   });
+}
+
+/**
+ * The error a 403 becomes. Every denial the API can send is named here so a
+ * caller renders intent rather than a generic toast, and the two role codes get
+ * types a component can branch on.
+ */
+function forbidden(body: { message?: string; code?: string }): Error {
+  switch (body.code) {
+    case ApiErrorCode.EMAIL_NOT_VERIFIED:
+      if (!isRedirecting) {
+        isRedirecting = true;
+        window.location.href = '/verify-email';
+      }
+      return Object.assign(new Error('Email verification required'), { status: 403 });
+
+    case ApiErrorCode.NOT_A_MEMBER:
+      return new NotAMemberError(body.message);
+
+    case ApiErrorCode.FORBIDDEN_ROLE:
+      return new ForbiddenRoleError(body.message);
+
+    case ApiErrorCode.GRACE_PERIOD_WRITE_BLOCKED:
+      return Object.assign(
+        new Error(
+          'Your account is in a grace period. Read-only access is available. Please reactivate your subscription to make changes.',
+        ),
+        { status: 403 },
+      );
+
+    case ApiErrorCode.SUBSCRIPTION_CANCELED:
+      return Object.assign(
+        new Error('Your subscription has been canceled. Please reactivate to regain access.'),
+        { status: 403 },
+      );
+
+    default:
+      return Object.assign(new Error(body.message ?? 'Access denied'), { status: 403 });
+  }
 }
 
 /**
@@ -124,28 +193,7 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
 
   if (response.status === 403) {
     const body = (await response.json().catch(() => ({}))) as { message?: string; code?: string };
-    if (body.code === ApiErrorCode.EMAIL_NOT_VERIFIED) {
-      if (!isRedirecting) {
-        isRedirecting = true;
-        window.location.href = '/verify-email';
-      }
-      throw Object.assign(new Error('Email verification required'), { status: 403 });
-    }
-    if (body.code === ApiErrorCode.GRACE_PERIOD_WRITE_BLOCKED) {
-      throw Object.assign(
-        new Error(
-          'Your account is in a grace period. Read-only access is available. Please reactivate your subscription to make changes.',
-        ),
-        { status: 403 },
-      );
-    }
-    if (body.code === ApiErrorCode.SUBSCRIPTION_CANCELED) {
-      throw Object.assign(
-        new Error('Your subscription has been canceled. Please reactivate to regain access.'),
-        { status: 403 },
-      );
-    }
-    throw Object.assign(new Error(body.message ?? 'Access denied'), { status: 403 });
+    throw forbidden(body);
   }
 
   if (!response.ok) {

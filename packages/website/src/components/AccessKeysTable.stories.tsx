@@ -122,3 +122,22 @@ export const WithDeleteAction: Story = {
     onDelete: () => Promise.resolve(),
   },
 };
+
+/**
+ * What a role that cannot revoke keys sees: the same table with no actions
+ * column, because the page passed no `onDelete`.
+ */
+export const WithoutKeyManagement: Story = {
+  args: {
+    keys: mockKeys,
+    showBuckets: true,
+    showPermissions: true,
+  },
+};
+
+/** The empty state for a role that cannot mint keys either. */
+export const EmptyWithoutKeyCreation: Story = {
+  args: {
+    keys: [],
+  },
+};

@@ -10,7 +10,12 @@ import {
   TrashIcon,
 } from '@phosphor-icons/react/dist/ssr';
 
-import type { CreateRagApiKeyResponse, RagApiKey, RagKeyBucketRef } from '@filone/shared';
+import type {
+  CreateRagApiKeyResponse,
+  ListRagApiKeysResponse,
+  RagApiKey,
+  RagKeyBucketRef,
+} from '@filone/shared';
 import { KEY_NAME_MAX_LENGTH, KEY_NAME_PATTERN } from '@filone/shared';
 
 import { Alert } from '../components/Alert.js';
@@ -31,6 +36,8 @@ import { useToast } from '../components/Toast/index.js';
 import { createRagApiKey, deleteRagApiKey, listRagApiKeys } from '../lib/rag-api-keys-api.js';
 import { bucketKey, type RagBucket } from '../lib/rag-bucket-api.js';
 import { queryKeys } from '../lib/query-client.js';
+import { useHasPermission } from '../lib/use-permissions.js';
+import { useKeyActionScope } from '../lib/use-key-scope.js';
 import { ApiReference } from './RagPipelineTabs.js';
 import { formatDate } from '../lib/time.js';
 
@@ -300,25 +307,119 @@ function RagKeyCreatedModal({
 }
 
 // ---------------------------------------------------------------------------
+// Keys table
+// ---------------------------------------------------------------------------
+
+function RagKeysTable({
+  keys,
+  showActions,
+  mayRevoke,
+  onRequestDelete,
+}: {
+  keys: RagApiKey[];
+  /** Whether any row carries the action — the header follows the cells. */
+  showActions: boolean;
+  mayRevoke: (key: RagApiKey) => boolean;
+  onRequestDelete: (key: RagApiKey) => void;
+}) {
+  return (
+    <Table data-testid="rag-api-keys-table">
+      <Table.Header>
+        <Table.Row>
+          <Table.Head>Name</Table.Head>
+          {/* "Key" implied this was the key, truncated, which contradicts the
+              shown-once warning at creation. It is a 12-char display prefix
+              (RAG_KEY_DISPLAY_PREFIX_LENGTH), of which only 5 characters are
+              the secret; the backend keeps a SHA-256 hash and never the token. */}
+          <Table.Head>Prefix</Table.Head>
+          <Table.Head>Scope</Table.Head>
+          <Table.Head>Created</Table.Head>
+          <Table.Head>Last used</Table.Head>
+          {/* Same predicate as the cells below: a column of empty cells is
+              whitespace with a screen-reader label attached to nothing. */}
+          {showActions && <Table.Head aria-label="Actions" />}
+        </Table.Row>
+      </Table.Header>
+      <Table.Body>
+        {keys.map((k) => (
+          <Table.Row key={k.id}>
+            <Table.Cell className="text-sm font-medium text-zinc-900">{k.keyName}</Table.Cell>
+            <Table.Cell>
+              <span className="font-mono text-xs text-zinc-600">{k.keyPrefix}…</span>
+            </Table.Cell>
+            <Table.Cell>
+              <ScopeCell apiKey={k} />
+            </Table.Cell>
+            <Table.Cell className="text-sm text-zinc-500">{formatDate(k.createdAt)}</Table.Cell>
+            <Table.Cell className="text-sm text-zinc-500">
+              {k.lastUsedAt ? formatDate(k.lastUsedAt) : 'Never'}
+            </Table.Cell>
+            {showActions && (
+              <Table.Cell className="text-right">
+                {mayRevoke(k) && (
+                  <IconButton
+                    icon={TrashIcon}
+                    aria-label={`Delete API key ${k.keyName}`}
+                    onClick={() => onRequestDelete(k)}
+                  />
+                )}
+              </Table.Cell>
+            )}
+          </Table.Row>
+        ))}
+      </Table.Body>
+    </Table>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // RagApiKeysTab
 // ---------------------------------------------------------------------------
+
+/**
+ * The keys to render, read through the permission that gated the fetch.
+ *
+ * react-query keeps serving a disabled query's cached answer, and a mounted tab
+ * is a live observer so nothing collects it. Gating only `enabled` leaves the
+ * names, prefixes and scopes on screen after a mid-session downgrade; reading
+ * through `mayList` makes them go with the permission.
+ */
+function visibleKeys(mayList: boolean, data: ListRagApiKeysResponse | undefined): RagApiKey[] {
+  return mayList ? (data?.keys ?? []) : [];
+}
 
 export function RagApiKeysTab({ buckets }: { buckets: RagBucket[] }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const mayCreate = useHasPermission('keys.create');
   const [createOpen, setCreateOpen] = useState(false);
   const [createdKey, setCreatedKey] = useState<CreateRagApiKeyResponse | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<RagApiKey | null>(null);
 
-  const { data, isPending, isError, error } = useQuery({
+  // Listing is `keys.manage_own`, and the server returns only the caller's own
+  // keys unless they hold `keys.manage_all`. ReadOnly holds neither, so the
+  // request is not made rather than made and refused.
+  const { mayList, mayRevoke, mayRevokeAny } = useKeyActionScope();
+
+  const {
+    data,
+    isPending: queryPending,
+    isError,
+    error,
+  } = useQuery({
     queryKey: queryKeys.ragApiKeys,
     queryFn: () => listRagApiKeys(),
+    enabled: mayList,
   });
-  const keys = data?.keys ?? [];
+  const keys = visibleKeys(mayList, data);
+  // A disabled query never leaves `pending`, so the answer for a role that
+  // cannot list is "no keys to show", not "still loading".
+  const isPending = mayList && queryPending;
   // The empty state carries its own Create button, so the header one would be a
   // second identical primary action on the same screen. Header yields until
   // there is a list to add to.
   const showEmptyState = !isPending && !isError && keys.length === 0;
+  const showActions = mayRevokeAny(keys);
 
   const deleteMutation = useMutation({
     mutationFn: (keyId: string) => deleteRagApiKey(keyId),
@@ -344,7 +445,7 @@ export function RagApiKeysTab({ buckets }: { buckets: RagBucket[] }) {
         >
           API Keys
         </Heading>
-        {!showEmptyState && (
+        {!showEmptyState && mayCreate && (
           <Button
             variant="primary"
             size="sm"
@@ -372,57 +473,29 @@ export function RagApiKeysTab({ buckets }: { buckets: RagBucket[] }) {
           <IconBox icon={KeyIcon} color="grey" size="md" />
           <div>
             <p className="text-sm font-medium text-zinc-900">No API keys yet</p>
+            {/* The invitation goes with the button: telling a ReadOnly member to
+                create a key, with nothing to click, is a dead end. */}
             <p className="mt-1 text-xs text-zinc-500">
-              Create a key to query your indexed buckets from your app or agent.
+              {mayCreate
+                ? 'Create a key to query your indexed buckets from your app or agent.'
+                : 'Keys for the Query API appear here.'}
             </p>
           </div>
-          <Button variant="primary" size="sm" icon={PlusIcon} onClick={() => setCreateOpen(true)}>
-            Create API key
-          </Button>
+          {mayCreate && (
+            <Button variant="primary" size="sm" icon={PlusIcon} onClick={() => setCreateOpen(true)}>
+              Create API key
+            </Button>
+          )}
         </div>
       )}
 
       {!isPending && !isError && keys.length > 0 && (
-        <Table data-testid="rag-api-keys-table">
-          <Table.Header>
-            <Table.Row>
-              <Table.Head>Name</Table.Head>
-              {/* "Key" implied this was the key, truncated, which contradicts the
-                  shown-once warning at creation. It is a 12-char display prefix
-                  (RAG_KEY_DISPLAY_PREFIX_LENGTH), of which only 5 characters are
-                  the secret; the backend keeps a SHA-256 hash and never the token. */}
-              <Table.Head>Prefix</Table.Head>
-              <Table.Head>Scope</Table.Head>
-              <Table.Head>Created</Table.Head>
-              <Table.Head>Last used</Table.Head>
-              <Table.Head aria-label="Actions" />
-            </Table.Row>
-          </Table.Header>
-          <Table.Body>
-            {keys.map((k) => (
-              <Table.Row key={k.id}>
-                <Table.Cell className="text-sm font-medium text-zinc-900">{k.keyName}</Table.Cell>
-                <Table.Cell>
-                  <span className="font-mono text-xs text-zinc-600">{k.keyPrefix}…</span>
-                </Table.Cell>
-                <Table.Cell>
-                  <ScopeCell apiKey={k} />
-                </Table.Cell>
-                <Table.Cell className="text-sm text-zinc-500">{formatDate(k.createdAt)}</Table.Cell>
-                <Table.Cell className="text-sm text-zinc-500">
-                  {k.lastUsedAt ? formatDate(k.lastUsedAt) : 'Never'}
-                </Table.Cell>
-                <Table.Cell className="text-right">
-                  <IconButton
-                    icon={TrashIcon}
-                    aria-label={`Delete API key ${k.keyName}`}
-                    onClick={() => setDeleteTarget(k)}
-                  />
-                </Table.Cell>
-              </Table.Row>
-            ))}
-          </Table.Body>
-        </Table>
+        <RagKeysTable
+          keys={keys}
+          showActions={showActions}
+          mayRevoke={mayRevoke}
+          onRequestDelete={setDeleteTarget}
+        />
       )}
 
       <CreateRagKeyModal
