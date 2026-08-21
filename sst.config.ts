@@ -791,6 +791,14 @@ export default $config({
       handler: 'packages/backend/src/jobs/bulk-delete-dlq-watchdog.handler',
       link: [bulkDeleteTable],
       timeout: '30 seconds',
+      // Subscribed by ARN, so SST does not manage the role: the consume actions
+      // the SQS event source mapping needs must be granted explicitly.
+      permissions: [
+        {
+          actions: ['sqs:ReceiveMessage', 'sqs:DeleteMessage', 'sqs:GetQueueAttributes'],
+          resources: [bulkDeleteDlq.arn],
+        },
+      ],
     });
     bulkDeleteDlq.subscribe(bulkDeleteDlqWatchdog.arn);
 
