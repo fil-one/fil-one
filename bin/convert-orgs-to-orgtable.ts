@@ -24,9 +24,11 @@
 // in both modes. Pass --execute to apply it.
 //
 // --stage is required and has no default: the target account is a decision, not
-// something to inherit from whatever the shell was last used for. The run
-// re-execs itself under `sst shell --stage <name>`, then asserts the resolved
-// table names carry `filone-<stage>-` before reading anything.
+// something to inherit from whatever the shell was last used for. The run reads
+// the physical table names out of `sst state export --stage <name>` (`sst
+// shell` cannot evaluate providers against production), then asserts they carry
+// `filone-<stage>-` before reading anything. AWS calls use your ambient
+// credentials.
 //
 //   ./bin/convert-orgs-to-orgtable.ts --stage staging
 //   ./bin/convert-orgs-to-orgtable.ts --stage staging --execute
@@ -62,7 +64,6 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import { parseCli } from './lib/args.ts';
-import { ensureSstShell } from './lib/stage.ts';
 
 const cli = parseCli({
   script: './bin/convert-orgs-to-orgtable.ts',
@@ -77,14 +78,11 @@ const cli = parseCli({
   ],
 });
 
-ensureSstShell(cli.stage, import.meta.filename, cli.argv);
-
-import { Resource } from 'sst';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 import { DeleteItemCommand, DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { decodeRow, scanAll, text, transactWithRetry } from './lib/dynamo.ts';
 import { acquireRunLock, forceUnlock } from './lib/run-lock.ts';
-import { assertStageResources, awsRegionForStage } from './lib/stage.ts';
+import { assertStageResources, awsRegionForStage, resolveStageTables } from './lib/stage.ts';
 import {
   buildConversionTransactItems,
   classifyOrg,
@@ -105,8 +103,10 @@ import { formatVerifyReport, parseAcceptedAnomalies, verifyConversion } from './
 /** Pause between orgs that write, so a few thousand transactions stay polite to a shared table. */
 const WRITE_DELAY_MS = 50;
 
-const userInfoTable = Resource.UserInfoTable.name;
-const orgTable = Resource.OrgTable.name;
+const { UserInfoTable: userInfoTable, OrgTable: orgTable } = resolveStageTables(cli.stage, {
+  UserInfoTable: '::UserInfoTableTable',
+  OrgTable: '::OrgTableTable',
+});
 
 assertStageResources(cli.stage, { UserInfoTable: userInfoTable, OrgTable: orgTable });
 
