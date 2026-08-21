@@ -22,7 +22,13 @@ import { IconBox } from '../components/IconBox';
 import { ProgressBar } from '../components/ProgressBar';
 import { formatBytes } from '@filone/shared';
 
-import { PlanId, SubscriptionStatus, TB_BYTES, getUsageLimits } from '@filone/shared';
+import {
+  getActivityActionLabel,
+  PlanId,
+  SubscriptionStatus,
+  TB_BYTES,
+  getUsageLimits,
+} from '@filone/shared';
 import type { RecentActivity } from '@filone/shared';
 
 import { getUsage, getBilling, getActivity } from '../lib/api.js';
@@ -460,7 +466,7 @@ export function DashboardPage() {
                     </Badge>
                   </div>
                   <p className="mt-0.5 text-[11px] text-zinc-500">
-                    {activity.action.replace('.', ' ')}
+                    {getActivityActionLabel(activity.action)}
                   </p>
                 </div>
                 <span className="w-14 shrink-0 text-right text-[11px] text-zinc-500">
