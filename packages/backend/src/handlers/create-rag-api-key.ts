@@ -2,10 +2,11 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { CreateRagApiKeySchema } from '@filone/shared';
+import { CreateRagApiKeySchema, auditKeyIdSuffix } from '@filone/shared';
 import type { CreateRagApiKeyResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
-import { sendDeletionGuardedWrite } from '../lib/org-profile.js';
+import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.js';
+import { OrgDeletingError, isGuardRejection, orgNotDeletingCheck } from '../lib/org-profile.js';
 import {
   RagApiKeyKeys,
   generateRagKeyToken,
@@ -67,42 +68,65 @@ export async function baseHandler(
   const createdAt = new Date().toISOString();
 
   // Both rows or neither: the ORG record (listing/ownership) and the hash
-  // LOOKUP row (bearer-auth entry point) must never diverge. Guarded because
-  // the key is a live credential — neither row exists yet, so the deletion
-  // fence has to ride along as a separate check.
-  await sendDeletionGuardedWrite(orgId, [
-    {
-      Put: {
-        TableName: Resource.UserInfoTable.name,
-        Item: marshall({
-          pk: RagApiKeyKeys.orgPk(orgId),
-          sk: RagApiKeyKeys.orgSk(keyId),
-          keyName,
-          keyPrefix,
-          tokenHash,
-          bucketScope,
-          ...(buckets ? { buckets } : {}),
-          createdBy: userId,
-          ...(creatorEmail ? { creatorEmail } : {}),
-          createdAt,
-        }),
-        ConditionExpression: 'attribute_not_exists(pk)',
-      },
-    },
-    {
-      Put: {
-        TableName: Resource.UserInfoTable.name,
-        Item: marshall({
-          pk: RagApiKeyKeys.lookupPk(tokenHash),
-          sk: RagApiKeyKeys.lookupSk(),
-          orgId,
-          keyId,
-          createdAt,
-        }),
-        ConditionExpression: 'attribute_not_exists(pk)',
-      },
-    },
-  ]);
+  // LOOKUP row (bearer-auth entry point) must never diverge. The event joins
+  // them — a RAG key is minted here rather than at a storage vendor, so the
+  // whole mutation is one transaction and needs no intent/completion pair. The
+  // deletion fence rides the same transaction as item 0: the key is a live
+  // credential and neither row exists yet, so only a condition on the profile
+  // row can refuse a deleting org.
+  try {
+    await commitAudited({
+      items: [
+        orgNotDeletingCheck(orgId),
+        {
+          Put: {
+            TableName: Resource.UserInfoTable.name,
+            Item: marshall({
+              pk: RagApiKeyKeys.orgPk(orgId),
+              sk: RagApiKeyKeys.orgSk(keyId),
+              keyName,
+              keyPrefix,
+              tokenHash,
+              bucketScope,
+              ...(buckets ? { buckets } : {}),
+              createdBy: userId,
+              ...(creatorEmail ? { creatorEmail } : {}),
+              createdAt,
+            }),
+            ConditionExpression: 'attribute_not_exists(pk)',
+          },
+        },
+        {
+          Put: {
+            TableName: Resource.UserInfoTable.name,
+            Item: marshall({
+              pk: RagApiKeyKeys.lookupPk(tokenHash),
+              sk: RagApiKeyKeys.lookupSk(),
+              orgId,
+              keyId,
+              createdAt,
+            }),
+            ConditionExpression: 'attribute_not_exists(pk)',
+          },
+        },
+      ],
+      event: auditEvent({
+        type: 'key.created',
+        actor: userActor({ userId, email: creatorEmail }),
+        orgId,
+        // The display prefix in both halves, which is what the console lists a
+        // RAG key by, so an operator reading the event can find the key it names
+        // and the subject and the details name it the same way. Twelve characters
+        // of a fifty-character token: the prefix plus five, not the credential.
+        // The internal `keyId` is a UUID the console never shows.
+        subject: AuditSubjects.key('rag', keyPrefix),
+        details: { keyKind: 'rag', keyName, keyIdSuffix: auditKeyIdSuffix('rag', keyPrefix) },
+      }),
+    });
+  } catch (err) {
+    if (isGuardRejection(err)) throw new OrgDeletingError(orgId);
+    throw err;
+  }
 
   return new ResponseBuilder()
     .status(201)
