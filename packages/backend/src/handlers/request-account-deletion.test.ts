@@ -5,14 +5,10 @@ vi.mock('sst', () => ({
   Resource: { UserInfoTable: { name: 'UserInfoTable' } },
 }));
 
-const mockIsOrgAdmin = vi.fn(async () => true);
-vi.mock('../lib/org-membership.js', () => ({
-  isOrgAdmin: () => mockIsOrgAdmin(),
-}));
-
 const mockIsOrgDeleting = vi.fn(async (_orgId: string, _o?: { consistent?: boolean }) => false);
 const mockGetOrgProfile = vi.fn(async () => ({ name: { S: 'Acme Corp' } }));
-vi.mock('../lib/org-profile.js', () => ({
+vi.mock('../lib/org-profile.js', async () => ({
+  ...(await vi.importActual<typeof import('../lib/org-profile.js')>('../lib/org-profile.js')),
   isOrgDeleting: (...args: Parameters<typeof mockIsOrgDeleting>) => mockIsOrgDeleting(...args),
   getOrgProfile: () => mockGetOrgProfile(),
 }));
@@ -27,8 +23,16 @@ vi.mock('../lib/deletion-email.js', () => ({
   sendDeletionCodeEmail: (args: unknown) => mockSendEmail(args),
 }));
 
-import { baseHandler } from './request-account-deletion.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+vi.mock('../middleware/auth.js', () => ({
+  // Every gate downstream of the auth middleware returns its denials through
+  // this helper, so the partial mock has to carry it.
+  withRefreshedCookies: (_request: unknown, response: unknown) => response,
+  authMiddleware: () => ({ before: () => undefined }),
+}));
+
+import { baseHandler, handler } from './request-account-deletion.js';
+import { buildContext, buildEvent } from '../test/lambda-test-utilities.js';
+import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
 const USER_INFO = {
   userId: 'user-1',
@@ -50,7 +54,6 @@ describe('request-account-deletion', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.ACCOUNT_DELETION_ENABLED = 'true';
-    mockIsOrgAdmin.mockResolvedValue(true);
     mockIsOrgDeleting.mockResolvedValue(false);
     mockGetOrgProfile.mockResolvedValue({ name: { S: 'Acme Corp' } });
     mockCreateChallenge.mockResolvedValue(CREATED);
@@ -88,16 +91,6 @@ describe('request-account-deletion', () => {
     const result = await baseHandler(event());
 
     expect(result.body).not.toContain('123456');
-  });
-
-  it('403s a non-admin without issuing anything', async () => {
-    mockIsOrgAdmin.mockResolvedValue(false);
-
-    const result = await baseHandler(event());
-
-    expect(result.statusCode).toBe(403);
-    expect(mockCreateChallenge).not.toHaveBeenCalled();
-    expect(mockSendEmail).not.toHaveBeenCalled();
   });
 
   // Issuing another code would imply the deletion can still be stopped.
@@ -145,4 +138,10 @@ describe('request-account-deletion', () => {
     expect(JSON.parse(result.body!).code).toBe(ApiErrorCode.EMAIL_NOT_VERIFIED);
     expect(mockCreateChallenge).not.toHaveBeenCalled();
   });
+});
+
+describeRoleEnforcement({
+  permission: 'org.delete',
+  invoke: (membership) =>
+    handler(buildEvent({ userInfo: { ...USER_INFO, membership }, method: 'POST' }), buildContext()),
 });

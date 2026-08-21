@@ -18,11 +18,11 @@ import {
   type ConfirmResult,
 } from '../lib/deletion-confirm-transaction.js';
 import { getOrgProfile } from '../lib/org-profile.js';
-import { isOrgAdmin } from '../lib/org-membership.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { authorize } from '../middleware/authorize.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { requireMfaIfEnrolled } from '../middleware/require-mfa.js';
@@ -43,12 +43,6 @@ export async function baseHandler(
   if (!parsed.ok) return badRequest(parsed.message);
 
   const { orgId, userId } = getUserInfo(event);
-  if (!(await isOrgAdmin(orgId, userId))) {
-    return new ResponseBuilder()
-      .status(403)
-      .body<ErrorResponse>({ message: 'Only an organization admin can delete the organization.' })
-      .build();
-  }
 
   const orgProfile = await getOrgProfile(orgId, { consistent: true });
   if (orgProfile?.name?.S !== parsed.data.orgName) {
@@ -144,6 +138,9 @@ function badRequest(message: string): APIGatewayProxyStructuredResultV2 {
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
+  // Before the MFA gate: a role the matrix refuses is denied outright, not
+  // sent on a step-up round trip it would fail anyway.
+  .use(authorize('org.delete'))
   .use(requireMfaIfEnrolled())
   .use(csrfMiddleware())
   .use(errorHandlerMiddleware());
