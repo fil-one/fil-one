@@ -101,8 +101,8 @@ aws iam list-roles --query 'length(Roles)' --output text
 
 ### Shared helpers (`bin/lib/`)
 
-| Module      | What it holds                                                                             |
-| ----------- | ----------------------------------------------------------------------------------------- |
-| `args.ts`   | `--stage` (required, no default), `--execute`/`--dry-run`, usage and help                 |
-| `stage.ts`  | The `sst shell --stage` re-exec, the resolved-resource-name assertion, the region mapping |
-| `dynamo.ts` | Paging a Scan to the end, decoding rows, and retrying a cancelled transaction             |
+| Module      | What it holds                                                                              |
+| ----------- | ------------------------------------------------------------------------------------------ |
+| `args.ts`   | `--stage` (required, no default), `--execute`/`--dry-run`, usage and help                  |
+| `stage.ts`  | Table names from `sst state export`, the resolved-name stage assertion, the region mapping |
+| `dynamo.ts` | Paging a Scan to the end, decoding rows, and retrying a cancelled transaction              |

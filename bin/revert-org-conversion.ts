@@ -27,9 +27,10 @@
 //
 // DRY RUN BY DEFAULT. Pass --execute to apply.
 //
-// --stage is required and has no default. The run re-execs itself under
-// `sst shell --stage <name>`, then asserts the resolved table names carry
-// `filone-<stage>-` before reading anything.
+// --stage is required and has no default. The run reads the physical table
+// names out of `sst state export --stage <name>` (`sst shell` cannot evaluate
+// providers against production), then asserts they carry `filone-<stage>-`
+// before reading anything. AWS calls use your ambient credentials.
 //
 //   ./bin/revert-org-conversion.ts --stage staging
 //   ./bin/revert-org-conversion.ts --stage staging --execute
@@ -51,7 +52,6 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import { parseCli } from './lib/args.ts';
-import { ensureSstShell } from './lib/stage.ts';
 
 const cli = parseCli({
   script: './bin/revert-org-conversion.ts',
@@ -59,13 +59,10 @@ const cli = parseCli({
   help: ['--force-unlock  Drop the run lock a crashed --execute run left behind.'],
 });
 
-ensureSstShell(cli.stage, import.meta.filename, cli.argv);
-
-import { Resource } from 'sst';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { decodeRow, scanAll, text, transactWithRetry } from './lib/dynamo.ts';
 import { acquireRunLock, forceUnlock } from './lib/run-lock.ts';
-import { assertStageResources, awsRegionForStage } from './lib/stage.ts';
+import { assertStageResources, awsRegionForStage, resolveStageTables } from './lib/stage.ts';
 import {
   buildRevertTransactItems,
   CONVERSION_SOURCE,
@@ -81,8 +78,10 @@ import type { ConvertedMembership } from './lib/org-conversion.ts';
 /** Pause between transactions, matching the conversion's pacing. */
 const WRITE_DELAY_MS = 50;
 
-const userInfoTable = Resource.UserInfoTable.name;
-const orgTable = Resource.OrgTable.name;
+const { UserInfoTable: userInfoTable, OrgTable: orgTable } = resolveStageTables(cli.stage, {
+  UserInfoTable: '::UserInfoTableTable',
+  OrgTable: '::OrgTableTable',
+});
 
 assertStageResources(cli.stage, { UserInfoTable: userInfoTable, OrgTable: orgTable });
 

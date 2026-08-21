@@ -1,34 +1,59 @@
 // Which stage a script is about to rewrite, and how it proves it.
 //
 // The stage comes from `--stage` alone. `.sst/stage` is not consulted: it holds
-// whatever `sst dev` last wrote, it is absent on a fresh clone, and
-// `sst shell --stage X` does not update it — so a script that read it would
-// reject every documented staging run and silently target somebody's personal
-// stack on a bare invocation.
+// whatever `sst dev` last wrote, it is absent on a fresh clone, and it would
+// silently target somebody's personal stack on a bare invocation.
 //
-// The flag is not trusted either. `ensureSstShell` forwards it to
-// `sst shell --stage <name>`, and `assertStageResources` then asserts that the
-// resource names SST resolved carry `filone-<stage>-`, which is the only
-// evidence in the process that the credentials and tables belong to the stage
-// the banner is about to name. Same guard as bin/reset-region-provisioning.ts.
+// The flag is not trusted either. `resolveStageTables` reads the physical
+// table names out of `sst state export --stage <name>`, and
+// `assertStageResources` then asserts those names carry `filone-<stage>-`,
+// which is the only evidence in the process that the state and tables belong
+// to the stage the banner is about to name. Same guard as
+// bin/reset-region-provisioning.ts.
 
 import { execFileSync } from 'node:child_process';
 
 /**
- * Re-exec this script under `sst shell --stage <stage>` when SST resources are
- * not in the environment, then exit. The `--` keeps `sst shell` from parsing
- * our own flags as its own, and `pnpm exec` (not `pnpx`) runs the workspace's
- * own sst instead of downloading a fresh copy.
+ * Physical DynamoDB table names for a stage, read from `sst state export`.
+ *
+ * Not `sst shell`: the shell cannot evaluate pulumi providers against
+ * production, so a `Resource.*` binding only works on stages a dev machine can
+ * fully resolve. Exported state is data, and works everywhere — the same
+ * pattern as bin/rag-access.ts and bin/aurora-preview-url.ts. AWS calls then
+ * use the caller's ambient credentials.
+ *
+ * `tables` maps a label to its state URN suffix — SST names a table component's
+ * pulumi resource `<LogicalName>Table`, so `UserInfoTable` is found by
+ * `::UserInfoTableTable`.
  */
-export function ensureSstShell(stage: string, scriptPath: string, argv: readonly string[]): void {
-  if (process.env.SST_RESOURCE_App) return;
+export function resolveStageTables<K extends string>(
+  stage: string,
+  tables: Record<K, string>,
+): Record<K, string> {
+  const json = execFileSync('pnpm', ['exec', 'sst', 'state', 'export', '--stage', stage], {
+    encoding: 'utf8',
+    maxBuffer: 256 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'inherit'],
+  });
+  const resources: Array<{ type: string; urn: string; outputs?: { name?: string } }> =
+    JSON.parse(json).latest?.resources ?? [];
 
-  execFileSync(
-    'pnpm',
-    ['exec', 'sst', 'shell', '--stage', stage, '--', 'node', scriptPath, ...argv],
-    { stdio: 'inherit' },
-  );
-  process.exit(0);
+  const resolved = {} as Record<K, string>;
+  for (const [label, urnSuffix] of Object.entries(tables) as [K, string][]) {
+    const table = resources.find(
+      (resource) =>
+        resource.type === 'aws:dynamodb/table:Table' && resource.urn.endsWith(urnSuffix),
+    );
+    if (!table?.outputs?.name) {
+      console.error(
+        `No ${label} (urn suffix "${urnSuffix}") in the exported state for stage "${stage}". ` +
+          'Is the stage deployed, and does it contain the table?',
+      );
+      process.exit(1);
+    }
+    resolved[label] = table.outputs.name;
+  }
+  return resolved;
 }
 
 /**

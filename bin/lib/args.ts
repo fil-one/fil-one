@@ -1,6 +1,5 @@
 // Command-line parsing shared by the org-conversion scripts: the flags both of
-// them take, the usage block, and the argv tail that ./stage.ts forwards
-// through the `sst shell` re-exec.
+// them take and the usage block.
 //
 // `--stage` is required and has no default. A script that targets whichever
 // stage happens to be lying around writes to the wrong account exactly once.
@@ -26,8 +25,6 @@ export interface Cli {
   flag(name: string): boolean;
   /** The value given to one of the spec's extra options, if it was passed. */
   option(name: string): string | undefined;
-  /** The arguments to forward when re-execing under `sst shell`. */
-  argv: readonly string[];
 }
 
 /** Accepted by every script here, so a caller's muscle memory works on all of them. */
@@ -55,7 +52,6 @@ export function parseCli(spec: CliSpec): Cli {
     execute: passed.has('--execute') && !passed.has('--dry-run'),
     flag: (name: string) => passed.has(name),
     option: (name: string) => values.get(name),
-    argv,
   };
 }
 

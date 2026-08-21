@@ -40,8 +40,9 @@ signup that lands mid-run keeps the rows its own transaction wrote.
    absent `OrgTable` row as Owner until this run is verified; merging
    enforcement first locks out every unconverted account.
 3. Run from the repository root.
-4. Have the stage's AWS credentials. The script re-execs itself under
-   `sst shell --stage <name>`, which supplies them.
+4. Have the stage's AWS credentials in your environment (`AWS_PROFILE`). The
+   script talks to DynamoDB directly with them; nothing is routed through
+   `sst shell`, which cannot evaluate providers against production.
 
 **Run one script at a time.** The conversion and the revert move the same rows
 in opposite directions, so an `--execute` run of either takes a lock row
@@ -55,8 +56,8 @@ outright, drop the lock it left behind:
 
 ## Naming the stage
 
-`--stage <name>` is required and has no default. The script forwards it to
-`sst shell --stage <name>`, then asserts that the table names SST resolved carry
+`--stage <name>` is required and has no default. The script reads the physical
+table names out of `sst state export --stage <name>`, then asserts they carry
 `filone-<stage>-` before it reads anything — the flag alone is not trusted.
 Staging is AWS account 654654381893, production 811430801166.
 
@@ -238,20 +239,14 @@ FAIL  Every anomaly has been dispositioned
 VERIFY: FAIL (1 checks)
 ```
 
-Spot-check one org from `convert.log` if you want the raw rows:
+Spot-check one org from `convert.log` if you want the raw rows. The run banner
+prints the physical `OrgTable` name; query it directly:
 
 ```sh
-pnpm exec sst shell --stage production -- node --input-type=module -e '
-  import { DynamoDBClient, QueryCommand } from "@aws-sdk/client-dynamodb";
-  import { Resource } from "sst";
-  const ddb = new DynamoDBClient({ region: "us-east-2" });
-  const { Items } = await ddb.send(new QueryCommand({
-    TableName: Resource.OrgTable.name,
-    KeyConditionExpression: "pk = :pk",
-    ExpressionAttributeValues: { ":pk": { S: "ORG#<orgId>" } },
-  }));
-  console.log(JSON.stringify(Items, null, 2));
-'
+aws dynamodb query --region us-east-2 \
+  --table-name "<OrgTable name from the run banner>" \
+  --key-condition-expression 'pk = :pk' \
+  --expression-attribute-values '{":pk":{"S":"ORG#<orgId>"}}'
 ```
 
 The query returns `MEMBER#{userId}` with `role: owner`, `source: conversion`,
