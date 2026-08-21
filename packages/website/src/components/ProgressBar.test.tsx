@@ -21,4 +21,9 @@ describe('ProgressBar', () => {
     render(<ProgressBar value={-10} />);
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0');
   });
+
+  it('omits aria-valuenow when indeterminate', () => {
+    render(<ProgressBar indeterminate label="Working" />);
+    expect(screen.getByRole('progressbar')).not.toHaveAttribute('aria-valuenow');
+  });
 });

@@ -39,6 +39,13 @@ export const Small: Story = {
   },
 };
 
+export const Indeterminate: Story = {
+  args: {
+    indeterminate: true,
+    label: 'Working',
+  },
+};
+
 export const AllVariants: Story = {
   render: () => (
     <div className="flex w-80 flex-col gap-4">

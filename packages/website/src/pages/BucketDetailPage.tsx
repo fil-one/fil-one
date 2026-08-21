@@ -12,6 +12,7 @@ import { Spinner } from '../components/Spinner';
 import { AddBucketKeyModal } from '../components/AddBucketKeyModal';
 import { BucketPropertyCards } from '../components/BucketPropertiesCard';
 import { ObjectBrowser, countObjects } from '../components/ObjectBrowser';
+import { EmptyBucketAction } from '../components/EmptyBucketAction';
 import { BucketAccessTab } from '../components/BucketAccessTab';
 import type { S3ObjectVersion, S3Region } from '@filone/shared';
 import { getS3Endpoint, formatBytes } from '@filone/shared';
@@ -40,13 +41,25 @@ function formatStorage(bytesUsed: number | undefined): string {
   return formatBytes(bytesUsed);
 }
 
-// Analytics has the full-bucket count; the listing is a single page (max 1000
-// entries) so counting it undercounts large buckets. Fall back to the listing
-// count only while analytics is loading (or if it fails).
+/**
+ * Object count for the tab label.
+ *
+ * A complete listing is the better source: it is exact, current, and counts the
+ * same things the table and its selection do. Analytics cannot match it on
+ * either front. It comes from `getBucketUsageMetrics` at a one-day interval, so
+ * it is the most recent daily sample rather than a live count and lags anything
+ * uploaded or deleted since, and being a usage metric it does not count keys
+ * whose current version is a delete marker, which the listing does.
+ *
+ * Analytics is still right for a truncated listing, where the browser genuinely
+ * cannot know the total, so it is used only there.
+ */
 function displayObjectCount(
   analytics: BucketAnalyticsResponse | undefined,
   versions: S3ObjectVersion[],
+  listingTruncated: boolean,
 ): number {
+  if (!listingTruncated) return countObjects(versions);
   return analytics?.objectCount ?? countObjects(versions);
 }
 
@@ -92,6 +105,98 @@ function removeVersionFromListing(
     ...old,
     versions: old.versions.filter((v) => !(v.key === key && v.versionId === versionId)),
   };
+}
+
+/**
+ * Unpack the objects query into the two values the browser needs. `isTruncated`
+ * matters: the listing is a single page, so anything past it is not loaded and
+ * selection cannot reach it.
+ */
+function readListing(objectsData: ListObjectVersionsResponse | undefined): {
+  versions: S3ObjectVersion[];
+  isTruncated: boolean;
+} {
+  return {
+    versions: objectsData?.versions ?? [],
+    isTruncated: objectsData?.isTruncated ?? false,
+  };
+}
+
+function BucketOverview({
+  bucket,
+  region,
+  bytesUsed,
+}: {
+  bucket: Bucket | null;
+  region: S3Region;
+  bytesUsed: number | undefined;
+}) {
+  if (!bucket) return null;
+
+  return (
+    <>
+      <p className="mb-6 text-sm">
+        <span className="text-zinc-700">{region}</span>
+        <span className="mx-2 text-zinc-400">&bull;</span>
+        <span className="text-xs text-zinc-500">{formatStorage(bytesUsed)} used</span>
+        <span className="mx-2 text-zinc-400">&bull;</span>
+        <span className="text-xs text-zinc-500">Created {formatDateTime(bucket.createdAt)}</span>
+      </p>
+      {/* Responsive rather than a fixed three columns: at 375px three columns
+          crushed the cards, and with four of them the fourth was orphaned at a
+          third of the width on a row of its own. */}
+      <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <BucketPropertyCards bucket={bucket} />
+      </div>
+    </>
+  );
+}
+
+/**
+ * The page's four reads, grouped so the component body stays about layout. The
+ * objects query is gated on bucket metadata because the versioning flag decides
+ * which listing operation to use.
+ */
+function useBucketQueries(bucketName: string, region: S3Region) {
+  const bucketQuery = useQuery({
+    queryKey: queryKeys.bucket(bucketName, region),
+    queryFn: () => {
+      const params = new URLSearchParams({ region });
+      return apiRequest<GetBucketResponse>(
+        `/buckets/${encodeURIComponent(bucketName)}?${params.toString()}`,
+      );
+    },
+  });
+  const bucket = bucketQuery.data?.bucket ?? null;
+
+  const objectsQuery = useQuery({
+    queryKey: queryKeys.objects(bucketName, region),
+    enabled: bucketQuery.data !== undefined,
+    queryFn: () => fetchObjectListing(region, bucketName, bucket),
+  });
+
+  const analyticsQuery = useQuery({
+    queryKey: queryKeys.bucketAnalytics(bucketName, region),
+    queryFn: () => {
+      const params = new URLSearchParams({ region });
+      return apiRequest<BucketAnalyticsResponse>(
+        `/buckets/${encodeURIComponent(bucketName)}/analytics?${params.toString()}`,
+      );
+    },
+  });
+
+  // Access keys are region-scoped, so the region is part of the filter: a key
+  // from another region, even one scoped to all buckets, cannot operate on this
+  // bucket.
+  const accessKeysQuery = useQuery({
+    queryKey: queryKeys.bucketAccessKeys(bucketName, region),
+    queryFn: () => {
+      const params = new URLSearchParams({ bucket: bucketName, region });
+      return apiRequest<ListAccessKeysResponse>(`/access-keys?${params.toString()}`);
+    },
+  });
+
+  return { bucket, bucketQuery, objectsQuery, analyticsQuery, accessKeysQuery };
 }
 
 function BucketErrorState({
@@ -141,60 +246,20 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     [navigate, bucketName, region],
   );
 
-  // Bucket metadata
-  const {
-    data: bucketData,
-    isError: bucketIsError,
-    error: bucketError,
-  } = useQuery({
-    queryKey: queryKeys.bucket(bucketName, region),
-    queryFn: () => {
-      const params = new URLSearchParams({ region });
-      return apiRequest<GetBucketResponse>(
-        `/buckets/${encodeURIComponent(bucketName)}?${params.toString()}`,
-      );
-    },
-  });
-  const bucket = bucketData?.bucket ?? null;
-
-  // Objects. Gated on the bucket metadata so the versioning state is known
-  // before choosing the listing op.
-  const {
-    data: objectsData,
-    isPending: objectsLoading,
-    isError: objectsIsError,
-    error: objectsError,
-  } = useQuery({
-    queryKey: queryKeys.objects(bucketName, region),
-    enabled: bucketData !== undefined,
-    queryFn: () => fetchObjectListing(region, bucketName, bucket),
-  });
-  const versions = objectsData?.versions ?? [];
-
-  // Bucket analytics (object count + storage)
-  const { data: analyticsData } = useQuery({
-    queryKey: queryKeys.bucketAnalytics(bucketName, region),
-    queryFn: () => {
-      const params = new URLSearchParams({ region });
-      return apiRequest<BucketAnalyticsResponse>(
-        `/buckets/${encodeURIComponent(bucketName)}/analytics?${params.toString()}`,
-      );
-    },
-  });
-
-  // Access keys scoped to this bucket. Access keys are region-scoped, so the
-  // region is part of the filter: a key from another region — even one scoped to
-  // all buckets — cannot operate on this bucket.
-  const { data: accessKeysData, isPending: accessKeysLoading } = useQuery({
-    queryKey: queryKeys.bucketAccessKeys(bucketName, region),
-    queryFn: () => {
-      const params = new URLSearchParams({ bucket: bucketName, region });
-      return apiRequest<ListAccessKeysResponse>(`/access-keys?${params.toString()}`);
-    },
-  });
-  const accessKeys = accessKeysData?.keys ?? [];
+  const { bucket, bucketQuery, objectsQuery, analyticsQuery, accessKeysQuery } = useBucketQueries(
+    bucketName,
+    region,
+  );
+  const { versions, isTruncated } = readListing(objectsQuery.data);
+  const analyticsData = analyticsQuery.data;
+  const accessKeys = accessKeysQuery.data?.keys ?? [];
 
   const [addKeyOpen, setAddKeyOpen] = useState(false);
+
+  const refreshAfterBulkDelete = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.bucketAnalytics(bucketName, region) });
+  }, [queryClient, bucketName, region]);
 
   const invalidateObjectsCache = useCallback(
     (key: string, versionId?: string) => {
@@ -225,17 +290,17 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
 
   // The objects query is gated on bucket metadata, so a metadata failure must be
   // surfaced here — otherwise the disabled objects query stays pending forever.
-  if (bucketIsError) {
+  if (bucketQuery.isError) {
     return (
       <BucketErrorState
         bucketName={bucketName}
-        error={bucketError}
+        error={bucketQuery.error}
         fallback="Failed to load bucket"
       />
     );
   }
 
-  if (objectsLoading) {
+  if (objectsQuery.isPending) {
     return (
       <div className="flex items-center justify-center p-16">
         <Spinner ariaLabel="Loading objects" size={32} />
@@ -243,11 +308,11 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     );
   }
 
-  if (objectsIsError) {
+  if (objectsQuery.isError) {
     return (
       <BucketErrorState
         bucketName={bucketName}
-        error={objectsError}
+        error={objectsQuery.error}
         fallback="Failed to load objects"
       />
     );
@@ -261,59 +326,48 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
         <Heading tag="h1" size="xl">
           {bucketName}
         </Heading>
-        {/* Hidden while the bucket is empty: the empty state carries the sole
-            upload CTA then, so two identical primary actions never compete. Once
-            objects exist the empty state is gone and this is the only one. The
-            cloud glyph leads the label, echoing that empty state's icon. */}
+        {/* Both hidden while the bucket is empty: the empty state carries the
+            sole upload CTA then, so two identical primary actions never compete,
+            and there is nothing to empty. The cloud glyph leads the label,
+            echoing that empty state's icon. */}
         {versions.length > 0 && (
-          <Button
-            id="upload-object-button"
-            variant="primary"
-            size="sm"
-            icon={CloudArrowUpIcon}
-            iconSize={18}
-            iconPosition="left"
-            onClick={() =>
-              void navigate({
-                to: '/buckets/$bucketName/upload',
-                params: { bucketName },
-                search: { region },
-              })
-            }
-          >
-            Upload object
-          </Button>
+          <div className="flex items-center gap-2">
+            <EmptyBucketAction
+              bucketName={bucketName}
+              region={region}
+              totalObjectCount={analyticsData?.objectCount}
+              onFinished={refreshAfterBulkDelete}
+            />
+            <Button
+              id="upload-object-button"
+              variant="primary"
+              size="sm"
+              icon={CloudArrowUpIcon}
+              iconSize={18}
+              iconPosition="left"
+              onClick={() =>
+                void navigate({
+                  to: '/buckets/$bucketName/upload',
+                  params: { bucketName },
+                  search: { region },
+                })
+              }
+            >
+              Upload object
+            </Button>
+          </div>
         )}
       </div>
 
-      {bucket && (
-        <p className="mb-6 text-sm">
-          <span className="text-zinc-700">{region}</span>
-          <span className="mx-2 text-zinc-400">&bull;</span>
-          <span className="text-xs text-zinc-500">
-            {formatStorage(analyticsData?.bytesUsed)} used
-          </span>
-          <span className="mx-2 text-zinc-400">&bull;</span>
-          <span className="text-xs text-zinc-500">Created {formatDateTime(bucket.createdAt)}</span>
-        </p>
-      )}
-
-      {bucket && (
-        // Responsive rather than a fixed three columns: at 375px three columns
-        // crushed the cards, and with four of them the fourth was orphaned at a
-        // third of the width on a row of its own.
-        <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <BucketPropertyCards bucket={bucket} />
-        </div>
-      )}
+      <BucketOverview bucket={bucket} region={region} bytesUsed={analyticsData?.bytesUsed} />
 
       <Tabs>
         <TabList>
           <Tab testId="bucket-objects-tab">
-            Objects ({displayObjectCount(analyticsData, versions).toLocaleString()})
+            Objects ({displayObjectCount(analyticsData, versions, isTruncated).toLocaleString()})
           </Tab>
           <Tab testId="bucket-keys-tab">
-            API Keys{!accessKeysLoading && ` (${accessKeys.length.toLocaleString()})`}
+            API Keys{!accessKeysQuery.isPending && ` (${accessKeys.length.toLocaleString()})`}
           </Tab>
         </TabList>
 
@@ -329,6 +383,9 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               onDownload={objectActions.downloadObject}
               downloading={objectActions.downloading}
               onDelete={objectActions.deleteObject}
+              onBulkDelete={objectActions.deleteObjects}
+              listingTruncated={isTruncated}
+              totalObjectCount={analyticsData?.objectCount}
             />
           </TabPanel>
 
@@ -338,7 +395,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               s3Endpoint={s3Endpoint}
               region={region}
               accessKeys={accessKeys}
-              accessKeysLoading={accessKeysLoading}
+              accessKeysLoading={accessKeysQuery.isPending}
               onCreateOpen={() => setAddKeyOpen(true)}
             />
           </TabPanel>
