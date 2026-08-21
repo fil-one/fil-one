@@ -8,6 +8,18 @@ export const ME_STALE_TIME = 10 * 60_000;
 // redundant refetches on remount/refocus, never delays user-triggered updates.
 export const USAGE_STALE_TIME = 5 * 60_000;
 
+// Tuning for the list pages a user returns to often (buckets, access keys).
+//
+// gcTime well past the default 5 min keeps a list a user already loaded this
+// session in cache, so returning to it paints instantly instead of showing a
+// cold spinner (the "5-minute cliff"). Keeping data longer is never a freshness
+// cost: a remount past staleTime still refetches. A short staleTime then trims
+// redundant background refetches on rapid back-and-forth. Both are safe against
+// the user's own edits because the mutations invalidate their query keys, which
+// overrides staleTime and forces an immediate refetch.
+export const LIST_STALE_TIME = 30_000;
+export const LIST_GC_TIME = 30 * 60_000;
+
 // 410 included: the account is gone, so a retry can only fail again. apiRequest
 // throwing is not enough on its own — only this set stops the retry.
 const NO_RETRY_STATUSES = new Set([401, 403, 410]);
