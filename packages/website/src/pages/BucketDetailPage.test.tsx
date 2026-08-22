@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole, S3Region } from '@filone/shared';
 
@@ -8,11 +8,16 @@ import { queryKeys } from '../lib/query-client.js';
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
 
 // ---------------------------------------------------------------------------
-// Mocks — the network boundary, the router, and the panels this file is not
-// about (the object browser drags in presigning and S3 XML parsing).
+// Mocks — the network boundary, the router, and the two modules the object
+// browser reaches the network through (presigning and S3 XML parsing). The
+// browser itself renders for real: which of its controls a role gets is what
+// half of this file is about.
 // ---------------------------------------------------------------------------
 
 const mockApiRequest = vi.fn();
+
+/** The single object the listing returns; hoisted so a mock factory can name it. */
+const { OBJECT_KEY } = vi.hoisted(() => ({ OBJECT_KEY: 'README.md' }));
 
 vi.mock('../lib/api.js', () => ({
   apiRequest: (...a: unknown[]) => mockApiRequest(...a),
@@ -25,14 +30,10 @@ vi.mock('@tanstack/react-router', () => ({
   ),
 }));
 
-vi.mock('../components/ObjectBrowser', () => ({
-  ObjectBrowser: () => null,
-  countObjects: () => 0,
-}));
-
 vi.mock('../lib/use-object-actions.js', () => ({
   useObjectActions: () => ({
     deleteObject: vi.fn(),
+    deleteObjects: vi.fn(),
     downloadObject: vi.fn(),
     deleting: null,
     downloading: null,
@@ -47,7 +48,12 @@ vi.mock('../lib/aurora-s3.js', () => ({
   executePresignedUrl: () =>
     Promise.resolve({ text: () => Promise.resolve('<ListBucketResult/>') }),
   parseListObjectVersionsResponse: () => ({ versions: [], isTruncated: false }),
-  parseListObjectsResponse: () => ({ objects: [], isTruncated: false }),
+  // One object, so the table renders a row with its per-row controls and the
+  // header actions the empty bucket would otherwise hide from everybody.
+  parseListObjectsResponse: () => ({
+    objects: [{ key: OBJECT_KEY, sizeBytes: 12, lastModified: '2026-01-01T00:00:00Z' }],
+    isTruncated: false,
+  }),
 }));
 
 import { BucketDetailPage } from './BucketDetailPage.js';
@@ -134,5 +140,42 @@ describe('BucketDetailPage — the API keys tab', () => {
     await waitFor(() => expect(screen.queryByTestId('bucket-keys-tab')).not.toBeInTheDocument());
     // The cached response is still there — the read is what changed.
     expect(client.getQueryData(queryKeys.bucketAccessKeys(BUCKET, REGION))).toBeDefined();
+  });
+});
+
+describe('BucketDetailPage — the object controls', () => {
+  it('gives an Owner upload, row delete, and both routes to a bulk delete', async () => {
+    renderPage(OrgRole.Owner);
+
+    expect(await screen.findByTestId('object-row')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Upload object' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: `Delete ${OBJECT_KEY}` })).toBeInTheDocument();
+    // The server-side job, which empties the whole bucket rather than a selection.
+    expect(screen.getByRole('button', { name: 'Empty bucket' })).toBeInTheDocument();
+
+    // Selecting a row is the only way to the bulk bar, so it stands in for both.
+    fireEvent.click(screen.getByRole('checkbox', { name: `Select ${OBJECT_KEY}` }));
+
+    expect(await screen.findByText('1 selected')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+  });
+
+  it('offers no upload to a role without objects.write', async () => {
+    renderPage(OrgRole.ReadOnly);
+
+    expect(await screen.findByTestId('object-row')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Upload object' })).not.toBeInTheDocument();
+  });
+
+  // Row delete, selection, and the empty-bucket job are one permission, so a
+  // role without it gets none of the three rather than a checkbox that leads to
+  // a 403.
+  it('offers no delete of any kind to a role without objects.delete', async () => {
+    renderPage(OrgRole.ReadOnly);
+
+    expect(await screen.findByTestId('object-row')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: `Delete ${OBJECT_KEY}` })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Empty bucket' })).not.toBeInTheDocument();
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
   });
 });

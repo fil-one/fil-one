@@ -28,6 +28,8 @@ import type {
 import { apiRequest } from '../lib/api.js';
 import { formatDateTime } from '../lib/time.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
+import { useHasPermission } from '../lib/use-permissions.js';
+import { useKeyActionScope } from '../lib/use-key-scope.js';
 import { queryKeys } from '../lib/query-client.js';
 import { batchPresign } from '../lib/use-presign.js';
 import {
@@ -157,7 +159,7 @@ function BucketOverview({
  * objects query is gated on bucket metadata because the versioning flag decides
  * which listing operation to use.
  */
-function useBucketQueries(bucketName: string, region: S3Region) {
+function useBucketQueries(bucketName: string, region: S3Region, mayListKeys: boolean) {
   const bucketQuery = useQuery({
     queryKey: queryKeys.bucket(bucketName, region),
     queryFn: () => {
@@ -187,16 +189,32 @@ function useBucketQueries(bucketName: string, region: S3Region) {
 
   // Access keys are region-scoped, so the region is part of the filter: a key
   // from another region, even one scoped to all buckets, cannot operate on this
-  // bucket.
+  // bucket. The server narrows the list to the caller's own keys unless they
+  // hold `keys.manage_all`; without `keys.manage_own` it refuses the request, so
+  // it is not made.
   const accessKeysQuery = useQuery({
     queryKey: queryKeys.bucketAccessKeys(bucketName, region),
+    enabled: mayListKeys,
     queryFn: () => {
       const params = new URLSearchParams({ bucket: bucketName, region });
       return apiRequest<ListAccessKeysResponse>(`/access-keys?${params.toString()}`);
     },
   });
 
-  return { bucket, bucketQuery, objectsQuery, analyticsQuery, accessKeysQuery };
+  return {
+    bucket,
+    bucketQuery,
+    objectsQuery,
+    analyticsQuery,
+    accessKeysQuery,
+    // Read through the permission, not just `enabled`: react-query keeps
+    // serving a disabled query's cached rows, so a mid-session downgrade would
+    // leave the key metadata in the tab and its count until the page reloaded.
+    accessKeys: mayListKeys ? (accessKeysQuery.data?.keys ?? []) : [],
+    // A disabled query stays pending forever, which would spin the tab's
+    // spinner for a role that is never going to get an answer.
+    accessKeysLoading: mayListKeys && accessKeysQuery.isPending,
+  };
 }
 
 function BucketErrorState({
@@ -233,6 +251,9 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const currentPrefix = prefix ?? '';
+  const mayUpload = useHasPermission('objects.write');
+  const mayDelete = useHasPermission('objects.delete');
+  const { mayList: mayListKeys } = useKeyActionScope();
 
   const setCurrentPrefix = useCallback(
     (newPrefix: string) => {
@@ -246,13 +267,17 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     [navigate, bucketName, region],
   );
 
-  const { bucket, bucketQuery, objectsQuery, analyticsQuery, accessKeysQuery } = useBucketQueries(
-    bucketName,
-    region,
-  );
+  const {
+    bucket,
+    bucketQuery,
+    objectsQuery,
+    analyticsQuery,
+    accessKeysQuery,
+    accessKeys,
+    accessKeysLoading,
+  } = useBucketQueries(bucketName, region, mayListKeys);
   const { versions, isTruncated } = readListing(objectsQuery.data);
   const analyticsData = analyticsQuery.data;
-  const accessKeys = accessKeysQuery.data?.keys ?? [];
 
   const [addKeyOpen, setAddKeyOpen] = useState(false);
 
@@ -328,33 +353,40 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
         </Heading>
         {/* Both hidden while the bucket is empty: the empty state carries the
             sole upload CTA then, so two identical primary actions never compete,
-            and there is nothing to empty. The cloud glyph leads the label,
-            echoing that empty state's icon. */}
-        {versions.length > 0 && (
+            and there is nothing to empty. Each also goes with its permission:
+            emptying the bucket is a bulk `objects.delete`, uploading is
+            `objects.write`, and a role holding neither gets no action bar at
+            all. The cloud glyph leads the label, echoing that empty state's
+            icon. */}
+        {versions.length > 0 && (mayDelete || mayUpload) && (
           <div className="flex items-center gap-2">
-            <EmptyBucketAction
-              bucketName={bucketName}
-              region={region}
-              totalObjectCount={analyticsData?.objectCount}
-              onFinished={refreshAfterBulkDelete}
-            />
-            <Button
-              id="upload-object-button"
-              variant="primary"
-              size="sm"
-              icon={CloudArrowUpIcon}
-              iconSize={18}
-              iconPosition="left"
-              onClick={() =>
-                void navigate({
-                  to: '/buckets/$bucketName/upload',
-                  params: { bucketName },
-                  search: { region },
-                })
-              }
-            >
-              Upload object
-            </Button>
+            {mayDelete && (
+              <EmptyBucketAction
+                bucketName={bucketName}
+                region={region}
+                totalObjectCount={analyticsData?.objectCount}
+                onFinished={refreshAfterBulkDelete}
+              />
+            )}
+            {mayUpload && (
+              <Button
+                id="upload-object-button"
+                variant="primary"
+                size="sm"
+                icon={CloudArrowUpIcon}
+                iconSize={18}
+                iconPosition="left"
+                onClick={() =>
+                  void navigate({
+                    to: '/buckets/$bucketName/upload',
+                    params: { bucketName },
+                    search: { region },
+                  })
+                }
+              >
+                Upload object
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -366,9 +398,14 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
           <Tab testId="bucket-objects-tab">
             Objects ({displayObjectCount(analyticsData, versions, isTruncated).toLocaleString()})
           </Tab>
-          <Tab testId="bucket-keys-tab">
-            API Keys{!accessKeysQuery.isPending && ` (${accessKeys.length.toLocaleString()})`}
-          </Tab>
+          {/* Absent, not empty, for a role that cannot list keys: an "API Keys
+              (0)" tab reads as an org with no keys rather than a view this
+              caller does not get. */}
+          {mayListKeys && (
+            <Tab testId="bucket-keys-tab">
+              API Keys{!accessKeysLoading && ` (${accessKeys.length.toLocaleString()})`}
+            </Tab>
+          )}
         </TabList>
 
         <TabPanels>
@@ -382,23 +419,28 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               onPrefixChange={setCurrentPrefix}
               onDownload={objectActions.downloadObject}
               downloading={objectActions.downloading}
-              onDelete={objectActions.deleteObject}
-              onBulkDelete={objectActions.deleteObjects}
+              canUpload={mayUpload}
+              onDelete={mayDelete ? objectActions.deleteObject : undefined}
+              onBulkDelete={mayDelete ? objectActions.deleteObjects : undefined}
               listingTruncated={isTruncated}
               totalObjectCount={analyticsData?.objectCount}
             />
           </TabPanel>
 
-          <TabPanel>
-            <BucketAccessTab
-              bucketName={bucketName}
-              s3Endpoint={s3Endpoint}
-              region={region}
-              accessKeys={accessKeys}
-              accessKeysLoading={accessKeysQuery.isPending}
-              onCreateOpen={() => setAddKeyOpen(true)}
-            />
-          </TabPanel>
+          {mayListKeys && (
+            <TabPanel>
+              <BucketAccessTab
+                bucketName={bucketName}
+                s3Endpoint={s3Endpoint}
+                region={region}
+                accessKeys={accessKeys}
+                accessKeysLoading={accessKeysLoading}
+                accessKeysError={accessKeysQuery.isError}
+                accessKeysErrorMessage={accessKeysQuery.error?.message}
+                onCreateOpen={() => setAddKeyOpen(true)}
+              />
+            </TabPanel>
+          )}
         </TabPanels>
       </Tabs>
 
