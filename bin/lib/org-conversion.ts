@@ -7,8 +7,9 @@
 // the procedure is docs/OrgConversionRunbook.md.
 //
 // KEY BUILDERS ARE MIRRORED, NOT IMPORTED. The canonical definitions live in
-// packages/backend/src/lib/org-membership.ts (`OrgKeys`) and the role values in
-// packages/shared/src/api/org.ts (`OrgRole`). Scripts in bin/ run as
+// packages/backend/src/lib/org-membership.ts (`OrgKeys`), the role values in
+// packages/shared/src/api/org.ts (`OrgRole`), and the deletion guard in
+// packages/backend/src/lib/org-profile.ts (`orgNotDeletingCheck`). Scripts in bin/ run as
 // `node ./bin/<script>.ts` under Node's type stripping, which resolves neither
 // the backend's `./x.js` specifiers (no .js -> .ts fallback) nor the `OrgRole`
 // enum (not erasable syntax), so a bin script cannot import from either package
@@ -345,13 +346,71 @@ function anomaly(orgId: string, reason: AnomalyReason, detail: string): AnomalyP
 }
 
 /**
- * The OrgTable items one org's conversion writes, as a single transaction.
+ * The guard against converting an org account deletion has taken over, as the
+ * two transaction items that enforce it — a mirror of `orgNotDeletingCheck` in
+ * packages/backend/src/lib/org-profile.ts, widened by the DELETION record the
+ * same way `classifyOrg` reads both signals.
  *
- * Every item is conditional on its own absence, which is what makes the write
- * safe to repeat and safe to race: a re-run and a signup that happened after the
- * write path deployed both lose the condition rather than overwriting a live
- * membership. The transaction is all-or-nothing, so an org is never left with a
- * canonical row and no inverse item.
+ * The scan decides which orgs are being deleted; a deletion that starts between
+ * the scan and the write would go unnoticed without these, and converting an org
+ * mid-teardown puts back the membership teardown just removed.
+ *
+ * A ConditionCheck on a missing item reads every attribute as absent, so
+ * `attribute_not_exists(deleting)` alone would pass for an org that has no
+ * profile row: `attribute_exists(pk)` refuses that case instead.
+ *
+ * Items 0 and 1 of every conversion transaction, since CancellationReasons is
+ * positional and {@link deletionGuardFailed} reads those two indexes.
+ */
+export function orgNotDeletingChecks(
+  orgId: string,
+  userInfoTableName: string,
+): TransactWriteItem[] {
+  return [
+    {
+      ConditionCheck: {
+        TableName: userInfoTableName,
+        Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: UserInfoKeys.profileSk() } },
+        ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
+      },
+    },
+    {
+      ConditionCheck: {
+        TableName: userInfoTableName,
+        Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: UserInfoKeys.deletionSk() } },
+        ConditionExpression: 'attribute_not_exists(pk)',
+      },
+    },
+  ];
+}
+
+/** The items {@link orgNotDeletingChecks} contributes, at indexes 0 and 1. */
+export const DELETION_GUARD_ITEMS = 2;
+
+const CONDITION_FAILED_CANCELLATION = 'ConditionalCheckFailed';
+
+/**
+ * Whether a cancelled conversion was the deletion guard's doing, from the
+ * positional cancellation codes. A failure anywhere else is a transaction that
+ * lost for its own reasons and is reported as a conflict.
+ */
+export function deletionGuardFailed(codes: readonly string[]): boolean {
+  return codes
+    .slice(0, DELETION_GUARD_ITEMS)
+    .some((code) => code === CONDITION_FAILED_CANCELLATION);
+}
+
+/**
+ * The items one org's conversion writes, as a single transaction.
+ *
+ * The deletion guard leads, so an org whose teardown started after the scan
+ * takes the whole transaction down instead of being converted underneath it.
+ *
+ * Every written item is conditional on its own absence, which is what makes the
+ * write safe to repeat and safe to race: a re-run and a signup that happened
+ * after the write path deployed both lose the condition rather than overwriting
+ * a live membership. The transaction is all-or-nothing, so an org is never left
+ * with a canonical row and no inverse item.
  *
  * The META item is written only for an org that has none. A cancelled condition
  * cancels the whole transaction, so including a `attribute_not_exists` Put for
@@ -362,12 +421,14 @@ function anomaly(orgId: string, reason: AnomalyReason, detail: string): AnomalyP
  */
 export function buildConversionTransactItems(
   plan: ConvertPlan,
-  orgTableName: string,
+  tables: { orgTable: string; userInfoTable: string },
 ): TransactWriteItem[] {
   const { orgId, userId, joinedAt, metaExists } = plan;
+  const orgTableName = tables.orgTable;
   const joined: Record<string, AttributeValue> = { joinedAt: { S: joinedAt } };
 
   const items: TransactWriteItem[] = [
+    ...orgNotDeletingChecks(orgId, tables.userInfoTable),
     {
       Put: {
         TableName: orgTableName,

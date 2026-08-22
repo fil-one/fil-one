@@ -31,14 +31,32 @@ export interface DeletionMember {
    * belongs to another org, keeps all of that and loses only their rows in this
    * org.
    *
-   * Decided once in `resolveDeletionTargets`, so the Auth0 step and the scrub act
-   * on the same answer rather than each running their own census.
+   * The census runs once per pass, in `resolveDeletionTargets`, so the Auth0 step
+   * and the scrub act on the same answer rather than each running their own. It
+   * is not a permanent verdict: a later pass reads the memberships as they stand
+   * then and may decide the other way — a membership created or removed between
+   * passes changes the answer, and a pass that cannot decode a membership row
+   * keeps the account. Every step this flag gates is therefore safe to skip on
+   * one pass and take on the next.
    *
    * Billing is not gated on this flag. Both the Stripe teardown and the billing
    * scrub still act on every member, because the billing row is keyed by user
    * today and is re-keyed to the org by its own change.
    */
   deleteIdentity: boolean;
+  /**
+   * Where a surviving member's account moves. Their identity row and user
+   * profile name this org as their home, and every request is fenced on that
+   * orgId before any header can override it, so a member left naming a deleted
+   * org can never log in again.
+   *
+   * Set only for a member whose account outlives the org (`deleteIdentity` is
+   * false) and who has another membership to move to: the one they joined
+   * earliest, and the smallest org id among those they joined at the same
+   * moment. Chosen here so both rows move to the same org and a re-driven pass
+   * makes the same choice.
+   */
+  homeOrgId?: string;
 }
 
 /**

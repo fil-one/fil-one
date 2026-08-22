@@ -27,8 +27,8 @@ function memberRow(userId: string, extra: Record<string, unknown> = {}) {
   return marshall({ pk: `ORG#${ORG}`, sk: `MEMBER#${userId}`, ...extra });
 }
 
-function inverseItem(userId: string, orgId: string) {
-  return marshall({ pk: `USER#${userId}`, sk: `MEMBERSHIP#${orgId}`, role: 'owner', joinedAt: '' });
+function inverseItem(userId: string, orgId: string, joinedAt = '') {
+  return marshall({ pk: `USER#${userId}`, sk: `MEMBERSHIP#${orgId}`, role: 'owner', joinedAt });
 }
 
 /**
@@ -222,6 +222,52 @@ describe('resolveDeletionTargets', () => {
       expect(members[0]!.deleteIdentity).toBe(true);
     });
 
+    // listMemberships drops a row it cannot decode, and a dropped row is exactly
+    // what makes a member of two orgs read as a member of one.
+    it('keeps the account of a member whose membership row will not decode', async () => {
+      stubMembers({
+        orgTable: [memberRow('user-1', { source: 'signup' })],
+        memberships: {
+          'user-1': [
+            inverseItem('user-1', ORG),
+            marshall({ pk: 'USER#user-1', sk: 'MEMBERSHIP#', role: 'owner', joinedAt: '' }),
+          ],
+        },
+      });
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      try {
+        const { members } = await resolveDeletionTargets(ORG);
+        expect(members[0]!.deleteIdentity).toBe(false);
+        expect(error).toHaveBeenCalledWith(
+          expect.stringContaining('undecodable membership rows'),
+          expect.objectContaining({ userId: 'user-1', undecodable: 1 }),
+        );
+      } finally {
+        error.mockRestore();
+      }
+    });
+
+    it('keeps the account of a member whose membership row carries an unknown role', async () => {
+      stubMembers({
+        orgTable: [memberRow('user-1', { source: 'signup' })],
+        memberships: {
+          'user-1': [
+            inverseItem('user-1', ORG),
+            marshall({ pk: 'USER#user-1', sk: `MEMBERSHIP#${OTHER_ORG}`, role: 'wizard' }),
+          ],
+        },
+      });
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      try {
+        const { members } = await resolveDeletionTargets(ORG);
+        expect(members[0]!.deleteIdentity).toBe(false);
+      } finally {
+        error.mockRestore();
+      }
+    });
+
     it('logs the census for every member', async () => {
       stubMembers({
         orgTable: [memberRow('user-1', { source: 'invitation' })],
@@ -243,6 +289,68 @@ describe('resolveDeletionTargets', () => {
       } finally {
         log.mockRestore();
       }
+    });
+  });
+
+  describe("a surviving member's next org", () => {
+    const THIRD_ORG = 'org-3';
+
+    it('is the membership they joined earliest', async () => {
+      stubMembers({
+        orgTable: [memberRow('user-1', { source: 'signup' })],
+        memberships: {
+          'user-1': [
+            inverseItem('user-1', ORG, '2026-01-01T00:00:00.000Z'),
+            inverseItem('user-1', THIRD_ORG, '2026-03-01T00:00:00.000Z'),
+            inverseItem('user-1', OTHER_ORG, '2026-02-01T00:00:00.000Z'),
+          ],
+        },
+      });
+
+      const { members } = await resolveDeletionTargets(ORG);
+
+      expect(members[0]!.homeOrgId).toBe(OTHER_ORG);
+    });
+
+    it('breaks a tie on the smallest org id', async () => {
+      stubMembers({
+        orgTable: [memberRow('user-1', { source: 'signup' })],
+        memberships: {
+          'user-1': [
+            inverseItem('user-1', THIRD_ORG, '2026-02-01T00:00:00.000Z'),
+            inverseItem('user-1', OTHER_ORG, '2026-02-01T00:00:00.000Z'),
+          ],
+        },
+      });
+
+      const { members } = await resolveDeletionTargets(ORG);
+
+      expect(members[0]!.homeOrgId).toBe(OTHER_ORG);
+    });
+
+    // Their rows go with the account, so there is nothing to re-point.
+    it('is unset for a member whose account this deletion ends', async () => {
+      stubMembers({
+        orgTable: [memberRow('user-1', { source: 'signup' })],
+        memberships: { 'user-1': [inverseItem('user-1', ORG)] },
+      });
+
+      const { members } = await resolveDeletionTargets(ORG);
+
+      expect(members[0]!.homeOrgId).toBeUndefined();
+    });
+
+    // Invited into the org they are losing, and a member of nothing else.
+    it('is unset for a survivor with nowhere to go', async () => {
+      stubMembers({
+        orgTable: [memberRow('user-1', { source: 'invitation' })],
+        memberships: { 'user-1': [inverseItem('user-1', ORG)] },
+      });
+
+      const { members } = await resolveDeletionTargets(ORG);
+
+      expect(members[0]!).toMatchObject({ deleteIdentity: false });
+      expect(members[0]!.homeOrgId).toBeUndefined();
     });
   });
 

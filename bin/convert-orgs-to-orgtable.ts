@@ -87,6 +87,7 @@ import {
   buildConversionTransactItems,
   classifyOrg,
   CONVERTED_ROLE,
+  deletionGuardFailed,
   formatPlanReport,
   legacyMemberKey,
   OrgKeys,
@@ -357,18 +358,23 @@ async function hasOrgTableMembership(orgId: string, userId: string): Promise<boo
   return Item !== undefined;
 }
 
-type ApplyOutcome = 'converted' | 'raced' | 'conflict';
+type ApplyOutcome = 'converted' | 'raced' | 'conflict' | 'deleting';
 
 /**
  * Apply one org's conversion.
  *
- * A cancelled transaction is read for what it says. A failed condition is
- * either a previous run or a signup that beat us to the org: neither is an
- * error and neither may be overwritten, so the row is re-read consistently — if
- * the membership this plan would have written is there, the org is done and its
- * legacy row is cleaned up; if it is not, the org is left alone and reported.
- * Throttling and transaction conflicts are retried; anything else stops the run
- * rather than being filed as an org that needs a human.
+ * A cancelled transaction is read for what it says. The deletion guard leads the
+ * transaction, so a teardown that started after the scan reports at index 0 or 1
+ * and the org is skipped at write time, the same disposition the scan gives one
+ * that was already being deleted.
+ *
+ * Any other failed condition is either a previous run or a signup that beat us
+ * to the org: neither is an error and neither may be overwritten, so the row is
+ * re-read consistently — if the membership this plan would have written is
+ * there, the org is done and its legacy row is cleaned up; if it is not, the org
+ * is left alone and reported. Throttling and transaction conflicts are retried;
+ * anything else stops the run rather than being filed as an org that needs a
+ * human.
  */
 async function applyConversion(plan: ConvertPlan): Promise<ApplyOutcome> {
   const { orgId, userId } = plan;
@@ -376,9 +382,11 @@ async function applyConversion(plan: ConvertPlan): Promise<ApplyOutcome> {
 
   const conditionFailed = await transactWithRetry(
     dynamo,
-    buildConversionTransactItems(plan, orgTable),
+    buildConversionTransactItems(plan, { orgTable, userInfoTable }),
     row,
   );
+
+  if (conditionFailed && deletionGuardFailed(conditionFailed)) return 'deleting';
 
   if (conditionFailed && !(await hasOrgTableMembership(orgId, userId))) {
     console.log(
@@ -433,6 +441,7 @@ if (verify) {
   const outcomes = {
     converted: 0,
     skippedDeleting: 0,
+    skippedDeletingAtWrite: 0,
     repaired: 0,
     alreadyConverted: 0,
     raced: 0,
@@ -508,6 +517,11 @@ if (verify) {
         console.log(
           `  ${plan.origin === 'member-row' ? 'CONVERTED' : 'REPAIRED'} ${describe(plan)}`,
         );
+      } else if (outcome === 'deleting') {
+        outcomes.skippedDeletingAtWrite++;
+        console.log(
+          `  SKIPPED ${OrgKeys.orgPk(plan.orgId)} being deleted — a teardown started after the scan`,
+        );
       } else if (outcome === 'raced') {
         outcomes.raced++;
         if (plan.legacyRow) outcomes.legacyDeleted++;
@@ -535,11 +549,16 @@ if (verify) {
     console.log(`Conflicts — transaction (manual review):     ${outcomes.transactionConflict}`);
     console.log(`Conflicts — stale legacy row kept:           ${outcomes.legacyDeleteConflict}`);
     console.log(`Skipped (being deleted):                    ${outcomes.skippedDeleting}`);
+    console.log(`Skipped (deletion started after the scan):   ${outcomes.skippedDeletingAtWrite}`);
     console.log(`Anomalies (untouched):                       ${outcomes.anomalies}`);
     console.log('');
     console.log(
-      `Convert + Repair (${planned.writes}) = Converted + Repaired + Raced + transaction conflicts (${
-        outcomes.converted + outcomes.repaired + outcomes.raced + outcomes.transactionConflict
+      `Convert + Repair (${planned.writes}) = Converted + Repaired + Raced + write-time deletion skips + transaction conflicts (${
+        outcomes.converted +
+        outcomes.repaired +
+        outcomes.raced +
+        outcomes.skippedDeletingAtWrite +
+        outcomes.transactionConflict
       }).`,
     );
     console.log(

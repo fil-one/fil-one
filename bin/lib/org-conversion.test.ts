@@ -11,6 +11,7 @@ import { OrgKeys as BackendOrgKeys } from '@filone/backend/src/lib/org-membershi
 import { classifyCancellation } from './dynamo.ts';
 import {
   buildConversionTransactItems,
+  deletionGuardFailed,
   buildRevertTransactItems,
   classifyOrg,
   CONVERSION_SOURCE,
@@ -45,6 +46,7 @@ const JOINED_AT = '2026-01-01T00:00:00.000Z';
 const CREATED_AT = '2025-11-02T12:00:00.000Z';
 const ORG_TABLE = 'OrgTable';
 const USER_INFO_TABLE = 'UserInfoTable';
+const TABLES = { orgTable: ORG_TABLE, userInfoTable: USER_INFO_TABLE };
 
 const knownUsers = new Set([USER_ID, OTHER_USER_ID]);
 
@@ -325,8 +327,13 @@ describe('classifyOrg', () => {
 });
 
 describe('buildConversionTransactItems', () => {
+  /** The items that write, with the deletion guard's ConditionChecks removed. */
+  function writesOf(items: TransactWriteItem[]): TransactWriteItem[] {
+    return items.filter((item) => item.Put !== undefined);
+  }
+
   it('writes the membership, its inverse item, and the owner count in one transaction', () => {
-    expect(buildConversionTransactItems(convertPlan(), ORG_TABLE)).toEqual([
+    expect(writesOf(buildConversionTransactItems(convertPlan(), TABLES))).toEqual([
       {
         Put: {
           TableName: ORG_TABLE,
@@ -366,14 +373,43 @@ describe('buildConversionTransactItems', () => {
     ]);
   });
 
+  // Account deletion resolves an org's members from the rows this transaction
+  // writes, and the scan that classified the org is minutes old by now.
+  it('leads with the deletion guard, on the org profile and the DELETION record', () => {
+    const items = buildConversionTransactItems(convertPlan(), TABLES);
+
+    expect(items.slice(0, 2)).toEqual([
+      {
+        ConditionCheck: {
+          TableName: USER_INFO_TABLE,
+          Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'PROFILE' } },
+          ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
+        },
+      },
+      {
+        ConditionCheck: {
+          TableName: USER_INFO_TABLE,
+          Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } },
+          ConditionExpression: 'attribute_not_exists(pk)',
+        },
+      },
+    ]);
+  });
+
+  it('guards an org with no META item too', () => {
+    const items = buildConversionTransactItems(convertPlan({ metaExists: true }), TABLES);
+
+    expect(items.filter((item) => item.ConditionCheck !== undefined)).toHaveLength(2);
+  });
+
   it('converts the legacy admin value to owner', () => {
-    const [membership] = buildConversionTransactItems(convertPlan(), ORG_TABLE);
+    const [membership] = writesOf(buildConversionTransactItems(convertPlan(), TABLES));
 
     expect(putOf(membership).Item?.role).toEqual({ S: 'owner' });
   });
 
-  it('makes every item conditional on its own absence, so a re-run cannot overwrite', () => {
-    const items = buildConversionTransactItems(convertPlan(), ORG_TABLE);
+  it('makes every written item conditional on its own absence, so a re-run cannot overwrite', () => {
+    const items = writesOf(buildConversionTransactItems(convertPlan(), TABLES));
 
     expect(items).toHaveLength(3);
     for (const item of items) {
@@ -387,7 +423,7 @@ describe('buildConversionTransactItems', () => {
     // An `attribute_not_exists` Put for a row that exists cancels the whole
     // transaction, so including it would fail the two membership writes beside
     // it — which is the state every reverted org is in.
-    const items = buildConversionTransactItems(convertPlan({ metaExists: true }), ORG_TABLE);
+    const items = writesOf(buildConversionTransactItems(convertPlan({ metaExists: true }), TABLES));
 
     expect(items).toHaveLength(2);
     const sortKeys = items.map((item) => putOf(item).Item?.sk?.S);
@@ -395,9 +431,11 @@ describe('buildConversionTransactItems', () => {
   });
 
   it('always writes joinedAt, since the inverse item requires it', () => {
-    const items = buildConversionTransactItems(
-      convertPlan({ joinedAt: UNKNOWN_JOINED_AT, origin: 'org-profile', legacyRow: false }),
-      ORG_TABLE,
+    const items = writesOf(
+      buildConversionTransactItems(
+        convertPlan({ joinedAt: UNKNOWN_JOINED_AT, origin: 'org-profile', legacyRow: false }),
+        TABLES,
+      ),
     );
 
     expect(putOf(items[0]).Item?.joinedAt).toEqual({ S: UNKNOWN_JOINED_AT });
@@ -516,6 +554,9 @@ describe('the conversion round trip', () => {
   ): boolean {
     if (!expression) return true;
     if (expression === 'attribute_not_exists(pk)') return existing === undefined;
+    if (expression === 'attribute_exists(pk) AND attribute_not_exists(deleting)') {
+      return existing !== undefined && existing.deleting === undefined;
+    }
     if (expression === 'attribute_exists(pk) AND #source = :conversion AND #role = :owner') {
       return (
         existing !== undefined &&
@@ -531,11 +572,11 @@ describe('the conversion round trip', () => {
   /** Applies a transaction, all-or-nothing. Returns false when a condition lost. */
   function transact(items: readonly TransactWriteItem[], tables: Record<string, Table>): boolean {
     for (const item of items) {
-      const write = item.Put ?? item.Delete;
+      const write = item.Put ?? item.Delete ?? item.ConditionCheck;
       const table = tables[write?.TableName ?? ''];
       if (!table) throw new Error(`unknown table: ${write?.TableName}`);
 
-      const key = rowKey(item.Put?.Item ?? item.Delete?.Key ?? {});
+      const key = rowKey(item.Put?.Item ?? item.Delete?.Key ?? item.ConditionCheck?.Key ?? {});
       if (
         !conditionHolds(
           table.get(key),
@@ -582,8 +623,26 @@ describe('the conversion round trip', () => {
     };
   }
 
+  /** The org profile row every conversion's deletion guard reads. */
+  function seedOrgProfile(
+    tables: Record<string, Table>,
+    extra: Record<string, AttributeValue> = {},
+  ) {
+    seedRow(tables[USER_INFO_TABLE]!, {
+      pk: { S: OrgKeys.orgPk(ORG_ID) },
+      sk: { S: 'PROFILE' },
+      createdBy: { S: USER_ID },
+      ...extra,
+    });
+  }
+
+  function seedRow(table: Table, row: Record<string, AttributeValue>) {
+    table.set(rowKey(row), row);
+  }
+
   it('converts, reverts, and converts the same org again', () => {
     const tables: Record<string, Table> = { [ORG_TABLE]: new Map(), [USER_INFO_TABLE]: new Map() };
+    seedOrgProfile(tables);
     tables[USER_INFO_TABLE]!.set(`${OrgKeys.orgPk(ORG_ID)} ${OrgKeys.memberSk(USER_ID)}`, {
       pk: { S: OrgKeys.orgPk(ORG_ID) },
       sk: { S: OrgKeys.memberSk(USER_ID) },
@@ -594,9 +653,7 @@ describe('the conversion round trip', () => {
     // Convert.
     const first = classifyOrg(readState(tables), knownUsers);
     expect(first).toMatchObject({ kind: 'convert', metaExists: false });
-    expect(transact(buildConversionTransactItems(first as ConvertPlan, ORG_TABLE), tables)).toBe(
-      true,
-    );
+    expect(transact(buildConversionTransactItems(first as ConvertPlan, TABLES), tables)).toBe(true);
     tables[USER_INFO_TABLE]!.delete(`${OrgKeys.orgPk(ORG_ID)} ${OrgKeys.memberSk(USER_ID)}`);
 
     expect(classifyOrg(readState(tables), knownUsers)).toMatchObject({
@@ -622,8 +679,8 @@ describe('the conversion round trip', () => {
     expect(second).toMatchObject({ kind: 'convert', origin: 'member-row', metaExists: true });
 
     // And the second conversion lands: no META Put to cancel the transaction.
-    const items = buildConversionTransactItems(second as ConvertPlan, ORG_TABLE);
-    expect(items).toHaveLength(2);
+    const items = buildConversionTransactItems(second as ConvertPlan, TABLES);
+    expect(items.filter((item) => item.Put !== undefined)).toHaveLength(2);
     expect(transact(items, tables)).toBe(true);
 
     expect(tables[ORG_TABLE]!.get(`${OrgKeys.orgPk(ORG_ID)} ${OrgKeys.memberSk(USER_ID)}`)).toEqual(
@@ -645,22 +702,66 @@ describe('the conversion round trip', () => {
     // META item for an org that has one takes the membership writes down with
     // it.
     const tables: Record<string, Table> = { [ORG_TABLE]: new Map(), [USER_INFO_TABLE]: new Map() };
+    seedOrgProfile(tables);
     tables[ORG_TABLE]!.set(`${OrgKeys.orgPk(ORG_ID)} META`, {
       pk: { S: OrgKeys.orgPk(ORG_ID) },
       sk: { S: 'META' },
       ownerCount: { N: '1' },
     });
 
-    const withMetaPut = buildConversionTransactItems(convertPlan({ metaExists: false }), ORG_TABLE);
+    const withMetaPut = buildConversionTransactItems(convertPlan({ metaExists: false }), TABLES);
     expect(transact(withMetaPut, tables)).toBe(false);
     expect(tables[ORG_TABLE]!.size).toBe(1);
 
-    const withoutMetaPut = buildConversionTransactItems(
-      convertPlan({ metaExists: true }),
-      ORG_TABLE,
-    );
+    const withoutMetaPut = buildConversionTransactItems(convertPlan({ metaExists: true }), TABLES);
     expect(transact(withoutMetaPut, tables)).toBe(true);
     expect(tables[ORG_TABLE]!.size).toBe(3);
+  });
+
+  // The scan classified this org as convertible; the teardown started after it.
+  it('cancels the conversion of an org whose deletion started after the scan', () => {
+    const tables: Record<string, Table> = { [ORG_TABLE]: new Map(), [USER_INFO_TABLE]: new Map() };
+    seedOrgProfile(tables, { deleting: { BOOL: true } });
+
+    expect(transact(buildConversionTransactItems(convertPlan(), TABLES), tables)).toBe(false);
+    expect(tables[ORG_TABLE]!.size).toBe(0);
+  });
+
+  it('cancels the conversion of an org that has a DELETION record', () => {
+    const tables: Record<string, Table> = { [ORG_TABLE]: new Map(), [USER_INFO_TABLE]: new Map() };
+    seedOrgProfile(tables);
+    seedRow(tables[USER_INFO_TABLE]!, {
+      pk: { S: OrgKeys.orgPk(ORG_ID) },
+      sk: { S: 'DELETION' },
+      status: { S: 'PENDING' },
+    });
+
+    expect(transact(buildConversionTransactItems(convertPlan(), TABLES), tables)).toBe(false);
+    expect(tables[ORG_TABLE]!.size).toBe(0);
+  });
+
+  it('cancels the conversion of an org with no profile row at all', () => {
+    const tables: Record<string, Table> = { [ORG_TABLE]: new Map(), [USER_INFO_TABLE]: new Map() };
+
+    expect(transact(buildConversionTransactItems(convertPlan(), TABLES), tables)).toBe(false);
+    expect(tables[ORG_TABLE]!.size).toBe(0);
+  });
+});
+
+describe('deletionGuardFailed', () => {
+  // CancellationReasons is positional, and the guard is items 0 and 1.
+  it('reads a failure at either guard index as a deletion', () => {
+    expect(deletionGuardFailed(['ConditionalCheckFailed', 'None', 'None'])).toBe(true);
+    expect(deletionGuardFailed(['None', 'ConditionalCheckFailed', 'None'])).toBe(true);
+  });
+
+  it('leaves a failure on one of the writes to the conflict path', () => {
+    expect(deletionGuardFailed(['None', 'None', 'ConditionalCheckFailed'])).toBe(false);
+    expect(deletionGuardFailed(['None', 'None', 'None', 'ConditionalCheckFailed'])).toBe(false);
+  });
+
+  it('reads an empty reason list as no deletion', () => {
+    expect(deletionGuardFailed([])).toBe(false);
   });
 });
 

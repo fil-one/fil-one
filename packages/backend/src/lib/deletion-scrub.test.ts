@@ -43,6 +43,7 @@ import { scrubOrgRecords } from './deletion-scrub.js';
 import type { DeletionMember } from './deletion-record.js';
 
 const ORG = 'org-1';
+const OTHER_ORG = 'org-2';
 const MEMBERS: DeletionMember[] = [{ userId: 'user-1', sub: 'auth0|one', deleteIdentity: true }];
 
 /** Every key passed to DeleteItem, in call order, as `table:pk/sk`. */
@@ -66,6 +67,28 @@ function scrubbedKeys(): string[] {
 function scrubOf(key: string) {
   return ddbMock.commandCalls(UpdateItemCommand).find((c) => updateKey(c.args[0].input) === key)!
     .args[0].input;
+}
+
+/** Every UpdateItem that moves a row's orgId, as `pk/sk -> orgId`. */
+function repoints(): string[] {
+  return ddbMock
+    .commandCalls(UpdateItemCommand)
+    .filter((call) => call.args[0].input.UpdateExpression === 'SET orgId = :home')
+    .map((call) => {
+      const { Key, ExpressionAttributeValues } = call.args[0].input;
+      return `${Key!.pk!.S}/${Key!.sk!.S} -> ${ExpressionAttributeValues![':home']!.S}`;
+    });
+}
+
+/** Every command the scrub sent, in order, with its name and its input. */
+function callOrder(): { name: string; input: Record<string, unknown> }[] {
+  return ddbMock.calls().map((call) => {
+    const command = call.args[0] as unknown as {
+      constructor: { name: string };
+      input: Record<string, unknown>;
+    };
+    return { name: command.constructor.name, input: command.input };
+  });
 }
 
 function orgRow(sk: string, extra: Record<string, unknown> = {}) {
@@ -324,6 +347,27 @@ describe('scrubOrgRecords', () => {
       expect(deletedKeys()).toContain(`OrgTable:USER#user-1/MEMBERSHIP#${ORG}`);
     });
 
+    // Every step that reads a member has to be able to run again on a re-drive,
+    // and these rows are what a re-drive resolves those members from.
+    it('destroys them after the last member-independent step', async () => {
+      stubOrgTable([orgTableRow('MEMBER#user-1'), orgTableRow('META')]);
+
+      await scrubOrgRecords(ORG, MEMBERS);
+
+      const calls = callOrder();
+      const profileScrubbed = calls.findIndex(
+        (c) =>
+          c.name === 'UpdateItemCommand' &&
+          (c.input.Key as Record<string, { S: string }>).sk?.S === 'PROFILE' &&
+          (c.input.Key as Record<string, { S: string }>).pk?.S === `ORG#${ORG}`,
+      );
+      const firstDestroyed = calls.findIndex(
+        (c) => c.name === 'DeleteItemCommand' && c.input.TableName === 'OrgTable',
+      );
+      expect(profileScrubbed).toBeGreaterThanOrEqual(0);
+      expect(firstDestroyed).toBeGreaterThan(profileScrubbed);
+    });
+
     it('reads the partition consistently, and by pk alone', async () => {
       await scrubOrgRecords(ORG, MEMBERS);
 
@@ -347,7 +391,8 @@ describe('scrubOrgRecords', () => {
       );
     });
 
-    it('leaves an invitation that stores no token hash to its own TTL', async () => {
+    // No TTL on OrgTable and no expiry sweep: the lookup row simply stays.
+    it('leaves the lookup row in place when an invitation stores no token hash', async () => {
       stubOrgTable([orgTableRow('INVITE#invite-1')]);
 
       await scrubOrgRecords(ORG, MEMBERS);
@@ -377,6 +422,75 @@ describe('scrubOrgRecords', () => {
 
       expect(scrubbedKeys()).toContain(`UserInfoTable:ORG#${ORG}/MEMBER#user-1`);
       expect(deletedKeys()).toContain(`OrgTable:USER#user-1/MEMBERSHIP#${ORG}`);
+    });
+
+    // Both rows name the org auth fences every request on, before any X-Org-Id
+    // is read. Left naming this one, the survivor is refused forever.
+    it('re-points the survivor at the org they still belong to', async () => {
+      await scrubOrgRecords(ORG, [
+        { userId: 'user-1', sub: 'auth0|one', deleteIdentity: false, homeOrgId: OTHER_ORG },
+        ...KEPT.slice(1),
+      ]);
+
+      expect(repoints()).toEqual([
+        `SUB#auth0|one/IDENTITY -> ${OTHER_ORG}`,
+        `USER#user-1/PROFILE -> ${OTHER_ORG}`,
+      ]);
+    });
+
+    it('conditions the move on the row still naming the deleting org', async () => {
+      await scrubOrgRecords(ORG, [
+        { userId: 'user-1', sub: 'auth0|one', deleteIdentity: false, homeOrgId: OTHER_ORG },
+      ]);
+
+      const move = ddbMock
+        .commandCalls(UpdateItemCommand)
+        .find((call) => call.args[0].input.UpdateExpression === 'SET orgId = :home')!.args[0].input;
+      expect(move.ConditionExpression).toBe('attribute_exists(pk) AND orgId = :deleting');
+      expect(move.ExpressionAttributeValues![':deleting']).toEqual({ S: ORG });
+    });
+
+    // The second pass finds rows that already moved, so the condition loses.
+    it('is a no-op on a re-drive', async () => {
+      ddbMock
+        .on(UpdateItemCommand, { UpdateExpression: 'SET orgId = :home' })
+        .rejects(new ConditionalCheckFailedException({ $metadata: {}, message: 'moved' }));
+
+      await expect(
+        scrubOrgRecords(ORG, [
+          { userId: 'user-1', sub: 'auth0|one', deleteIdentity: false, homeOrgId: OTHER_ORG },
+        ]),
+      ).resolves.toBeUndefined();
+      expect(scrubbedKeys()).toContain(`UserInfoTable:ORG#${ORG}/MEMBER#user-1`);
+    });
+
+    // Nowhere to send them: the account survives, pointing at a deleted org.
+    it('leaves the rows alone when the member has no other org', async () => {
+      await scrubOrgRecords(ORG, KEPT);
+
+      expect(repoints()).toEqual([]);
+    });
+
+    it('leaves the rows of a member whose account is ending alone', async () => {
+      await scrubOrgRecords(ORG, MEMBERS);
+
+      expect(repoints()).toEqual([]);
+    });
+
+    // The membership rows are what a re-drive resolves its members from, so the
+    // move has to land before they are destroyed.
+    it('moves the survivor before the membership rows are destroyed', async () => {
+      await scrubOrgRecords(ORG, [
+        { userId: 'user-1', sub: 'auth0|one', deleteIdentity: false, homeOrgId: OTHER_ORG },
+      ]);
+
+      const calls = callOrder();
+      const moved = calls.findIndex((c) => c.input.UpdateExpression === 'SET orgId = :home');
+      const destroyed = calls.findIndex(
+        (c) => c.name === 'DeleteItemCommand' && c.input.TableName === 'OrgTable',
+      );
+      expect(moved).toBeGreaterThanOrEqual(0);
+      expect(destroyed).toBeGreaterThan(moved);
     });
   });
 

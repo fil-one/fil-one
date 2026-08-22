@@ -12,6 +12,7 @@ import { stubMembershipList } from '../test/lambda-test-utilities.js';
 import {
   OrgKeys,
   listMemberships,
+  listMembershipRows,
   resolveMembership,
   summarizeMemberships,
 } from './org-membership.js';
@@ -266,6 +267,53 @@ describe('listMemberships', () => {
     ddbMock.on(QueryCommand).resolves({});
 
     expect(await listMemberships(USER_ID)).toStrictEqual([]);
+  });
+});
+
+// Account deletion ends an account when it reads no other membership, so a row
+// dropped on the way out is the difference between a kept login and a deleted
+// one. listMembershipRows reports the drops it makes; listMemberships does not.
+describe('listMembershipRows', () => {
+  beforeEach(() => {
+    ddbMock.reset();
+  });
+
+  it('counts a row it could not decode', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        {
+          pk: { S: OrgKeys.userPk(USER_ID) },
+          sk: { S: OrgKeys.membershipSk(ORG_ID) },
+          role: { S: OrgRole.Owner },
+          joinedAt: { S: JOINED_AT },
+        },
+        { sk: { S: 'MEMBERSHIP#' }, role: { S: OrgRole.Owner } },
+        {
+          pk: { S: OrgKeys.userPk(USER_ID) },
+          sk: { S: OrgKeys.membershipSk(OTHER_ORG_ID) },
+          role: { S: 'wizard' },
+        },
+      ],
+    });
+
+    const listing = await listMembershipRows(USER_ID);
+
+    expect(listing.memberships.map((membership) => membership.orgId)).toStrictEqual([ORG_ID]);
+    expect(listing.undecodable).toBe(2);
+    consoleError.mockRestore();
+  });
+
+  it('counts none when every row decodes', async () => {
+    stubMembershipList(ddbMock, {
+      userId: USER_ID,
+      orgs: [{ orgId: ORG_ID, role: OrgRole.Owner, joinedAt: JOINED_AT }],
+    });
+
+    expect(await listMembershipRows(USER_ID)).toStrictEqual({
+      memberships: [{ orgId: ORG_ID, role: OrgRole.Owner, joinedAt: JOINED_AT }],
+      undecodable: 0,
+    });
   });
 });
 

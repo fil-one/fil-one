@@ -3,14 +3,23 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.js';
 import type { DeletionMember } from './deletion-record.js';
-import { listMemberships, OrgKeys, type OrgMembershipSource } from './org-membership.js';
+import {
+  listMembershipRows,
+  OrgKeys,
+  type OrgMembershipRecord,
+  type OrgMembershipSource,
+} from './org-membership.js';
 import { getProvisionedRegions } from './region-helpers.js';
 
 const LOG = '[deletion-targets]';
 
 /**
- * Everything teardown needs, resolved at the start of each pass. The scrub retains
- * every row read here, so a re-drive resolves the same answer.
+ * Everything teardown needs, resolved at the start of each pass.
+ *
+ * The membership rows this reads are destroyed last, after every step that
+ * depends on a member has run, so a pass that dies partway through leaves the
+ * rows a re-drive resolves the same members from. The UserInfoTable rows are
+ * retained outright.
  *
  * Reads are strongly consistent throughout: a member or tenant missed here is
  * never torn down, and nothing later can notice the omission.
@@ -145,7 +154,7 @@ async function queryAll(params: {
 
 async function resolveMember(orgId: string, row: MemberRow): Promise<DeletionMember | undefined> {
   const dynamo = getDynamoClient();
-  const [profile, billing, memberships] = await Promise.all([
+  const [profile, billing, listing] = await Promise.all([
     dynamo.send(
       new GetItemCommand({
         TableName: Resource.UserInfoTable.name,
@@ -164,7 +173,7 @@ async function resolveMember(orgId: string, row: MemberRow): Promise<DeletionMem
         ConsistentRead: true,
       }),
     ),
-    listMemberships(row.userId),
+    listMembershipRows(row.userId),
   ]);
 
   const sub = profile.Item?.sub?.S;
@@ -175,14 +184,32 @@ async function resolveMember(orgId: string, row: MemberRow): Promise<DeletionMem
     return undefined;
   }
 
-  const otherOrgIds = memberships.map((m) => m.orgId).filter((id) => id !== orgId);
+  const others = listing.memberships.filter((m) => m.orgId !== orgId);
+  const deleteIdentity = censusMember(orgId, row, others, listing.undecodable);
+  const homeOrgId = deleteIdentity ? undefined : chooseHomeOrg(others);
   const stripeCustomerId = billing.Item?.stripeCustomerId?.S;
   return {
     userId: row.userId,
     sub,
     ...(stripeCustomerId ? { stripeCustomerId } : {}),
-    deleteIdentity: censusMember(orgId, row, otherOrgIds),
+    ...(homeOrgId ? { homeOrgId } : {}),
+    deleteIdentity,
   };
+}
+
+/**
+ * Where a surviving member's account moves: the membership they joined earliest,
+ * and the smallest org id among those they joined at the same moment.
+ *
+ * A membership written before `joinedAt` existed carries none and decodes as the
+ * empty string, which sorts first: the oldest rows win, which is what the
+ * ordering is for. The org id breaks every remaining tie, so a re-driven pass
+ * picks the same org.
+ */
+function chooseHomeOrg(others: OrgMembershipRecord[]): string | undefined {
+  return [...others].sort(
+    (a, b) => a.joinedAt.localeCompare(b.joinedAt) || a.orgId.localeCompare(b.orgId),
+  )[0]?.orgId;
 }
 
 const INVITED: OrgMembershipSource = 'invitation';
@@ -200,13 +227,33 @@ const INVITED: OrgMembershipSource = 'invitation';
  * recorded source, so both conditions hold and the account is torn down as it
  * was before this change.
  *
+ * An inverse item that cannot be decoded is a third condition, and it fails
+ * closed: a row with a malformed sort key or an unrecognized role is dropped
+ * from the list, and a dropped row is exactly what would make a member of two
+ * orgs read as a member of one. Keeping the account costs a login nobody wanted;
+ * the other way round destroys it.
+ *
  * Logged per member, because it is the decision that separates a deleted account
  * from a kept one and nothing else records it.
  */
-function censusMember(orgId: string, row: MemberRow, otherOrgIds: string[]): boolean {
+function censusMember(
+  orgId: string,
+  row: MemberRow,
+  others: OrgMembershipRecord[],
+  undecodable: number,
+): boolean {
+  const otherOrgIds = others.map((m) => m.orgId);
   const soleMembership = otherOrgIds.length === 0;
   const personalOrg = row.source !== INVITED;
-  const deleteIdentity = soleMembership && personalOrg;
+  const deleteIdentity = soleMembership && personalOrg && undecodable === 0;
+
+  if (undecodable > 0) {
+    console.error(`${LOG} undecodable membership rows; keeping the account`, {
+      orgId,
+      userId: row.userId,
+      undecodable,
+    });
+  }
 
   console.log(`${LOG} membership census`, {
     orgId,
