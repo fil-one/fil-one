@@ -133,6 +133,8 @@ export interface SubscriptionRecord {
   subscriptionId?: string;
   trialEndsAt?: string;
   gracePeriodEndsAt?: string;
+  /** The billing period the meter reports against; written with the period end. */
+  currentPeriodStart?: string;
   currentPeriodEnd?: string;
   canceledAt?: string;
   lastPaymentFailedAt?: string;

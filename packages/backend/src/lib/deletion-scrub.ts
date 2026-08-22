@@ -20,6 +20,7 @@ import { RAGKeys } from './dynamo-records.js';
 import { OrgKeys } from './org-membership.js';
 import type { DeletionMember } from './deletion-record.js';
 import { RagApiKeyKeys } from './rag-api-keys.js';
+import { SubscriptionKeys } from './subscription-store.js';
 
 type Item = Record<string, AttributeValue>;
 type Cursor = Record<string, AttributeValue> | undefined;
@@ -54,7 +55,7 @@ export async function scrubOrgRecords(orgId: string, members: DeletionMember[]):
   await purgeRagState(orgId);
   await destroyOrgCredentials(orgRows);
 
-  await scrubBilling(members);
+  await scrubBilling(orgId, members);
   await scrubMembers(orgId, members);
 
   // It holds the tenant ids a resumed pass reads, and a failed pass leaves the
@@ -163,20 +164,31 @@ async function purgeRagBucket(
  * disagree: the Stripe cancel has already succeeded by the time the scrub runs,
  * and the stamp refuses every webhook that arrives afterwards.
  *
+ * The org's row carries the fence, because it is the row every reader and writer
+ * addresses. A member's pre-re-key `CUSTOMER#` row is stamped as well where one
+ * is still standing, which keeps the old fence closed until the runbook's dated
+ * cleanup step deletes those rows; a row that is already gone makes its own
+ * stamp a no-op.
+ *
  * `stripeCustomerId` and `subscriptionId` are system identifiers and stay.
  */
-async function scrubBilling(members: DeletionMember[]): Promise<void> {
+async function scrubBilling(orgId: string, members: DeletionMember[]): Promise<void> {
+  await scrubSubscriptionRow(SubscriptionKeys.orgPk(orgId));
   for (const { userId } of members) {
-    await scrubRow({
-      tableName: Resource.BillingTable.name,
-      key: { pk: `CUSTOMER#${userId}`, sk: 'SUBSCRIPTION' },
-      set: 'subscriptionStatus = :canceled, updatedAt = :now',
-      remove:
-        'paymentMethodId, paymentMethodLast4, paymentMethodBrand, ' +
-        'paymentMethodExpMonth, paymentMethodExpYear, gracePeriodEndsAt',
-      values: { ':canceled': SubscriptionStatus.Canceled },
-    });
+    await scrubSubscriptionRow(SubscriptionKeys.legacyPk(userId));
   }
+}
+
+async function scrubSubscriptionRow(pk: string): Promise<void> {
+  await scrubRow({
+    tableName: Resource.BillingTable.name,
+    key: { pk, sk: SubscriptionKeys.sk() },
+    set: 'subscriptionStatus = :canceled, updatedAt = :now',
+    remove:
+      'paymentMethodId, paymentMethodLast4, paymentMethodBrand, ' +
+      'paymentMethodExpMonth, paymentMethodExpYear, gracePeriodEndsAt',
+    values: { ':canceled': SubscriptionStatus.Canceled },
+  });
 }
 
 /**

@@ -1,14 +1,17 @@
-import { GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { Resource } from 'sst';
 import type Stripe from 'stripe';
-import { getDynamoClient } from './ddb-client.js';
-import type { DeletionMember } from './deletion-record.js';
 import { reportOrgUsage } from './org-usage-report.js';
 import { syncTenantStatusInProvisionedRegions } from './region-helpers.js';
 import { getStripeClient, isStripeResourceMissing } from './stripe-client.js';
+import { readSubscription } from './subscription-store.js';
+import type { SubscriptionRecord } from './dynamo-records.js';
+
+const LOG = '[deletion-stripe]';
 
 /** Statuses with nothing left to cancel or invoice. */
 const SETTLED_STATUSES = new Set<Stripe.Subscription.Status>(['canceled', 'incomplete_expired']);
+
+/** What the teardown reads off the org's row: the customer, and the period to bill. */
+const TEARDOWN_PROJECTION = 'stripeCustomerId, subscriptionId, currentPeriodStart';
 
 /**
  * Disables the tenants, bills what is owed, collects it once, then deletes the
@@ -16,30 +19,51 @@ const SETTLED_STATUSES = new Set<Stripe.Subscription.Status>(['canceled', 'incom
  * card details and prevents any further operations", taking email and metadata
  * with it — so there is no field-clearing or detach step.
  *
+ * One customer per org, read off the org's subscription row. Membership means
+ * riding the org's billing, so the members have no Stripe objects of their own
+ * to cancel and the pass deletes one customer however many members there are.
+ *
  * The disable comes first so the meter is not moving underneath the figure the
  * customer is billed for. A request already in flight when it lands can still add
  * its last writes, and that residue goes unbilled; it is bounded by a request
  * timeout measured in seconds.
  *
  * Every step treats a missing or already-deleted customer as success, because a
- * deletion triggered by the customer's deletion in Stripe finds it already gone.
+ * deletion triggered by the customer's deletion in Stripe finds it already gone,
+ * and so does every re-drive after the first.
  */
-export async function tearDownStripe(orgId: string, members: DeletionMember[]): Promise<void> {
+export async function tearDownStripe(orgId: string): Promise<void> {
   await syncTenantStatusInProvisionedRegions(orgId, 'disabled');
 
-  for (const { userId, stripeCustomerId } of members) {
-    // Absent is legal — an org that never onboarded.
-    if (stripeCustomerId) await tearDownCustomer(orgId, userId, stripeCustomerId);
+  // Consistent: the row may have been written moments earlier, and a stale read
+  // that missed the customer would leave a live subscription behind.
+  const subscription = await readSubscription(orgId, {
+    consistentRead: true,
+    projectionExpression: TEARDOWN_PROJECTION,
+  });
+
+  const customerId = subscription?.stripeCustomerId;
+  if (!customerId) {
+    // Legal: an org that never onboarded has no customer, and neither has an
+    // org whose row is missing entirely. Both make the pass a no-op here.
+    console.log(`${LOG} no Stripe customer on the org row, nothing to tear down`, { orgId });
+    return;
   }
+
+  await tearDownCustomer(orgId, customerId, subscription);
 }
 
-async function tearDownCustomer(orgId: string, userId: string, customerId: string): Promise<void> {
+async function tearDownCustomer(
+  orgId: string,
+  customerId: string,
+  subscription: SubscriptionRecord,
+): Promise<void> {
   const stripe = getStripeClient();
 
   const subscriptions = await cancellableSubscriptions(customerId);
 
   // Before the cancel: a meter event after cancellation lands on no invoice.
-  await reportOutstandingUsage(orgId, userId, customerId);
+  await reportOutstandingUsage(orgId, customerId, subscription);
 
   // customers.del cancels subscriptions too, but silently and without an
   // invoice — this explicit cancel is what makes the usage billable.
@@ -70,28 +94,19 @@ async function tearDownCustomer(orgId: string, userId: string, customerId: strin
  */
 async function reportOutstandingUsage(
   orgId: string,
-  userId: string,
   stripeCustomerId: string,
+  subscription: SubscriptionRecord,
 ): Promise<void> {
   const meterEventName = process.env.STRIPE_METER_EVENT_NAME;
   if (!meterEventName) throw new Error('STRIPE_METER_EVENT_NAME env var is not set');
 
-  try {
-    const { Item } = await getDynamoClient().send(
-      new GetItemCommand({
-        TableName: Resource.BillingTable.name,
-        Key: { pk: { S: `CUSTOMER#${userId}` }, sk: { S: 'SUBSCRIPTION' } },
-        ProjectionExpression: 'subscriptionId, currentPeriodStart',
-        ConsistentRead: true,
-      }),
-    );
-    const subscriptionId = Item?.subscriptionId?.S;
-    const currentPeriodStart = Item?.currentPeriodStart?.S;
-    if (!subscriptionId || !currentPeriodStart) {
-      console.warn('[deletion-stripe] no billing period to report', { orgId, stripeCustomerId });
-      return;
-    }
+  const { subscriptionId, currentPeriodStart } = subscription;
+  if (!subscriptionId || !currentPeriodStart) {
+    console.warn(`${LOG} no billing period to report`, { orgId, stripeCustomerId });
+    return;
+  }
 
+  try {
     await reportOrgUsage({
       orgId,
       subscriptionId,
@@ -101,7 +116,7 @@ async function reportOutstandingUsage(
       meterEventName,
     });
   } catch (err) {
-    console.error('[deletion-stripe] final usage report failed; continuing to cancel', {
+    console.error(`${LOG} final usage report failed; continuing to cancel`, {
       orgId,
       stripeCustomerId,
       error: err,
@@ -148,7 +163,7 @@ async function collectFinalInvoices(
       await collectInvoice(draft.id!, paymentMethod);
     }
   } catch (err) {
-    console.error('[deletion-stripe] final invoice collection failed; continuing to delete', {
+    console.error(`${LOG} final invoice collection failed; continuing to delete`, {
       customerId,
       error: err,
     });
