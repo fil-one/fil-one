@@ -132,16 +132,25 @@ async function deleteTenants(orgId: string, tenantIds: Record<string, string>): 
 }
 
 /**
- * Three actions per member, in a fixed order: read the email, revoke the grant it
- * keys, then delete the user. The allowlist row cannot be deleted afterwards —
- * Auth0 is the only place that address is stored.
+ * Three actions per member whose account this deletion ends, in a fixed order:
+ * read the email, revoke the grant it keys, then delete the user. The allowlist
+ * row cannot be deleted afterwards — Auth0 is the only place that address is
+ * stored.
  *
  * A 404 on the lookup skips the row for that member, which is safe because the
  * in-step ordering means the user is only gone once a previous pass finished the
  * removal. Deleting an already-deleted user likewise 404s and counts as success.
+ *
+ * A member with another membership, or one who was invited into this org, keeps
+ * their login and their RAG grant: the org is going away, their account is not.
+ * `resolveDeletionTargets` decides that per member and records it here.
  */
 async function tearDownAuth0(members: DeletionMember[]): Promise<void> {
-  for (const { sub } of members) {
+  for (const { sub, deleteIdentity } of members) {
+    if (!deleteIdentity) {
+      console.log(`${LOG} member belongs elsewhere, account kept`, { sub });
+      continue;
+    }
     const email = await getAuth0UserEmail(sub);
     if (email) await revokeRagAllowlist(email);
     await deleteAuth0User(sub);

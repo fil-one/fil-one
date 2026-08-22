@@ -21,6 +21,7 @@
 import { membershipPairKey, OrgKeys, summarizePlans } from './org-conversion.ts';
 import type {
   AnomalyPlan,
+  DeletingPlan,
   MembershipPair,
   OrgPlan,
   OrgState,
@@ -69,6 +70,8 @@ export function verifyConversion(
   const counts = summarizePlans(plans);
   const planByOrg = new Map(plans.map((plan) => [plan.orgId, plan]));
 
+  const { deleting, liveStates } = withoutDeletedOrgs(states, plans);
+
   const convertible = plans.filter(
     (plan) => plan.kind === 'convert' && plan.origin === 'member-row',
   );
@@ -79,15 +82,15 @@ export function verifyConversion(
     (plan) => plan.kind === 'already-converted' && plan.legacyRowPending,
   );
 
-  const withLegacyRows = states.filter((state) => state.legacyMembers.length > 0);
+  const withLegacyRows = liveStates.filter((state) => state.legacyMembers.length > 0);
   const legacyOnNonAnomaly = withLegacyRows.filter(
     (state) => planByOrg.get(state.orgId)?.kind !== 'anomaly',
   );
 
-  const memberWithoutMeta = states.filter(
+  const memberWithoutMeta = liveStates.filter(
     (state) => state.orgTableMemberUserIds.length > 0 && !state.hasMeta,
   );
-  const metaWithoutMember = states.filter(
+  const metaWithoutMember = liveStates.filter(
     (state) => state.hasMeta && state.orgTableMemberUserIds.length === 0,
   );
   const unexplainedMeta = metaWithoutMember.filter((state) => {
@@ -117,7 +120,7 @@ export function verifyConversion(
     {
       name: 'Every remaining legacy MEMBER# row belongs to an anomaly',
       pass: legacyOnNonAnomaly.length === 0,
-      detail: `${scan.legacyMemberRows} legacy MEMBER# rows remain, on ${withLegacyRows.length} orgs; ${legacyOnNonAnomaly.length} of those orgs are not anomalies`,
+      detail: `${scan.legacyMemberRows} legacy MEMBER# rows remain, on ${withLegacyRows.length} live orgs; ${legacyOnNonAnomaly.length} of those orgs are not anomalies`,
       offenders: withLegacyRows.map((state) =>
         describeLegacyRow(state, planByOrg.get(state.orgId)),
       ),
@@ -135,8 +138,41 @@ export function verifyConversion(
       detail: `${metaWithoutMember.length} orgs hold META with no membership; ${unexplainedMeta.length} are not classified as membership-removed`,
       offenders: unexplainedMeta.map((state) => OrgKeys.orgPk(state.orgId)),
     },
+    deletingCheck(deleting),
     anomalyCheck(plans, counts, acceptedAnomalies),
   ];
+}
+
+/**
+ * The orgs account deletion owns, held apart from the rest.
+ *
+ * Their rows are mid-teardown by definition — a legacy row still standing, a
+ * META whose membership is already gone — so every check is asked about the live
+ * orgs only. Holding a half-deleted org to the shape of a converted one would
+ * fail the gate for work that is proceeding correctly.
+ */
+function withoutDeletedOrgs(
+  states: readonly OrgState[],
+  plans: readonly OrgPlan[],
+): { deleting: DeletingPlan[]; liveStates: OrgState[] } {
+  const deleting = plans.filter((plan): plan is DeletingPlan => plan.kind === 'deleting');
+  const deletingOrgIds = new Set(deleting.map((plan) => plan.orgId));
+  return { deleting, liveStates: states.filter((state) => !deletingOrgIds.has(state.orgId)) };
+}
+
+/**
+ * The orgs the conversion skipped because account deletion owns them. It always
+ * passes: a deleted org needs no membership, and enforcement locks nobody out of
+ * one. The names are printed so the record on the enforcement PR says which orgs
+ * were left unconverted and why, rather than leaving the count unexplained.
+ */
+function deletingCheck(deleting: readonly DeletingPlan[]): VerifyCheck {
+  return {
+    name: 'Orgs being deleted are skipped',
+    pass: true,
+    detail: `${deleting.length} orgs are being deleted; the conversion left them alone`,
+    offenders: deleting.map((plan) => `${OrgKeys.orgPk(plan.orgId)} — ${plan.detail}`),
+  };
 }
 
 /**

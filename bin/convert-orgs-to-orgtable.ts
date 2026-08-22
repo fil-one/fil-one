@@ -144,6 +144,7 @@ const scan: ScanResult = {
   legacyMemberRows: 0,
   userProfiles: 0,
   unparsedRows: 0,
+  deletionRecords: 0,
   orgTableMemberRows: 0,
   orgTableInverseRows: 0,
   orgTableMetaRows: 0,
@@ -163,6 +164,8 @@ function orgState(orgId: string): OrgState {
     legacyMembers: [],
     orgTableMemberUserIds: [],
     hasMeta: false,
+    deleting: false,
+    hasDeletionRecord: false,
   };
   orgs.set(orgId, created);
   return created;
@@ -176,6 +179,7 @@ interface UserInfoRow {
   joinedAt: string;
   createdBy: string;
   createdAt: string;
+  deleting: boolean;
 }
 
 /** The OrgTable attributes the conversion projects. */
@@ -194,19 +198,22 @@ async function scanUserInfoTable(): Promise<void> {
   const items = scanAll(dynamo, {
     TableName: userInfoTable,
     FilterExpression:
-      '(begins_with(pk, :orgPrefix) AND (sk = :profile OR begins_with(sk, :memberPrefix)))' +
+      '(begins_with(pk, :orgPrefix) AND (sk = :profile OR sk = :deletion' +
+      ' OR begins_with(sk, :memberPrefix)))' +
       ' OR (begins_with(pk, :userPrefix) AND sk = :profile)',
     // No `email`: the oldest membership rows still carry one, but the project
     // stopped storing it deliberately (commit 4f02a70, "removing stored email
     // entirely to resolve issues when email is changed"), so it is not carried
     // into OrgTable and goes with the deleted row.
-    ProjectionExpression: 'pk, sk, #role, joinedAt, createdBy, createdAt',
-    ExpressionAttributeNames: { '#role': 'role' },
+    ProjectionExpression: 'pk, sk, #role, joinedAt, createdBy, createdAt, #deleting',
+    // `role` is a DynamoDB reserved word; `deleting` is aliased for the same reason.
+    ExpressionAttributeNames: { '#role': 'role', '#deleting': 'deleting' },
     ExpressionAttributeValues: {
       ':orgPrefix': { S: OrgKeys.orgPkPrefix() },
       ':userPrefix': { S: OrgKeys.userPkPrefix() },
       ':profile': { S: UserInfoKeys.profileSk() },
       ':memberPrefix': { S: OrgKeys.memberSkPrefix() },
+      ':deletion': { S: UserInfoKeys.deletionSk() },
     },
   });
 
@@ -238,10 +245,18 @@ function collectUserInfoRow(item: Record<string, AttributeValue>): void {
     scan.orgProfiles++;
     const createdBy = text(row.createdBy);
     const createdAt = text(row.createdAt);
-    orgState(orgId).profile = {
+    const state = orgState(orgId);
+    state.profile = {
       ...(createdBy ? { createdBy } : {}),
       ...(createdAt ? { createdAt } : {}),
     };
+    state.deleting = row.deleting === true;
+    return;
+  }
+
+  if (sk === UserInfoKeys.deletionSk()) {
+    scan.deletionRecords++;
+    orgState(orgId).hasDeletionRecord = true;
     return;
   }
 
@@ -417,6 +432,7 @@ if (verify) {
 
   const outcomes = {
     converted: 0,
+    skippedDeleting: 0,
     repaired: 0,
     alreadyConverted: 0,
     raced: 0,
@@ -441,6 +457,13 @@ if (verify) {
     for (const plan of plans) {
       if (plan.kind === 'anomaly') {
         outcomes.anomalies++;
+        continue;
+      }
+
+      if (plan.kind === 'deleting') {
+        outcomes.skippedDeleting++;
+        const prefix = execute ? '  ' : '  [dry-run] ';
+        console.log(`${prefix}SKIPPED ${OrgKeys.orgPk(plan.orgId)} being deleted — ${plan.detail}`);
         continue;
       }
 
@@ -511,6 +534,7 @@ if (verify) {
     console.log(`Legacy MEMBER# rows deleted:                 ${outcomes.legacyDeleted}`);
     console.log(`Conflicts — transaction (manual review):     ${outcomes.transactionConflict}`);
     console.log(`Conflicts — stale legacy row kept:           ${outcomes.legacyDeleteConflict}`);
+    console.log(`Skipped (being deleted):                    ${outcomes.skippedDeleting}`);
     console.log(`Anomalies (untouched):                       ${outcomes.anomalies}`);
     console.log('');
     console.log(

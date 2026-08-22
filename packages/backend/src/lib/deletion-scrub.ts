@@ -17,6 +17,7 @@ import {
 } from '../jobs/rag-indexer-manifest.js';
 import { getDynamoClient } from './ddb-client.js';
 import { RAGKeys } from './dynamo-records.js';
+import { OrgKeys } from './org-membership.js';
 import type { DeletionMember } from './deletion-record.js';
 import { RagApiKeyKeys } from './rag-api-keys.js';
 
@@ -39,6 +40,10 @@ type Cursor = Record<string, AttributeValue> | undefined;
  * rekeyed to a hash by its own migration. `WEBHOOK#{eventId}` carries no org
  * attribute and expires on its own TTL. `ALLOWLIST#{email}` is deleted in the
  * Auth0 step, which is the only place its key can still be resolved.
+ *
+ * The OrgTable rows are destroyed rather than retained. They describe an org
+ * that no longer exists, and leaving a membership behind would leave the member
+ * able to act in it.
  */
 export async function scrubOrgRecords(orgId: string, members: DeletionMember[]): Promise<void> {
   const orgRows = await readOrgPartition(orgId);
@@ -51,6 +56,7 @@ export async function scrubOrgRecords(orgId: string, members: DeletionMember[]):
 
   await scrubBilling(members);
   await scrubMembers(orgId, members);
+  await destroyOrgTableRows(orgId, members);
 
   // Last: it holds the tenant ids a resumed pass reads, and a failed pass leaves
   // the most context for troubleshooting behind it.
@@ -195,12 +201,98 @@ async function destroyOrgCredentials(orgRows: Item[]): Promise<void> {
  * fresh ids and then cancels its own transaction against the still-present key —
  * a 500 on every login instead of a clean refusal. The user profile keeps `sub`,
  * the audit correlation key, which outlives the Auth0 user.
+ *
+ * The first two rows are the member's account, so they are stamped only for a
+ * member whose account this deletion ends (`deleteIdentity`). A member who was
+ * invited here, or who belongs to another org, still logs in tomorrow, and a
+ * `deletedAt` on their identity row would say otherwise. The legacy membership
+ * row is stamped either way: it belongs to this org.
  */
 async function scrubMembers(orgId: string, members: DeletionMember[]): Promise<void> {
-  for (const { userId, sub } of members) {
-    await scrubRow({ key: { pk: `SUB#${sub}`, sk: 'IDENTITY' } });
-    await scrubRow({ key: { pk: `USER#${userId}`, sk: 'PROFILE' } });
+  for (const { userId, sub, deleteIdentity } of members) {
+    if (deleteIdentity) {
+      await scrubRow({ key: { pk: `SUB#${sub}`, sk: 'IDENTITY' } });
+      await scrubRow({ key: { pk: `USER#${userId}`, sk: 'PROFILE' } });
+    }
     await scrubRow({ key: { pk: `ORG#${orgId}`, sk: `MEMBER#${userId}` } });
+  }
+}
+
+/**
+ * The invite token lookup, `INVITETOKEN#{sha256(token)}` / `LOOKUP`. Its key
+ * builders arrive with invitations; the shape is mirrored here so an invitation
+ * outstanding on the day an org is deleted takes its lookup row with it.
+ */
+const INVITE_SK_PREFIX = 'INVITE#';
+const inviteTokenLookupKey = (tokenHash: string): Record<string, string> => ({
+  pk: `INVITETOKEN#${tokenHash}`,
+  sk: 'LOOKUP',
+});
+
+/**
+ * Everything the org owns in OrgTable: the membership rows, the `META` counter,
+ * any invitation rows, and each member's `USER#{userId}/MEMBERSHIP#{orgId}`
+ * inverse item.
+ *
+ * The membership rows go last. Teardown resolves its member list from them, so a
+ * pass that dies partway through leaves the rows a re-drive reads to resolve the
+ * same members again — the same reason the UserInfoTable `MEMBER#` rows are
+ * retained rather than destroyed.
+ */
+async function destroyOrgTableRows(orgId: string, members: DeletionMember[]): Promise<void> {
+  const orgTable = Resource.OrgTable.name;
+  const rows = await readOrgTablePartition(orgId);
+  const memberRows = rows.filter(isMemberRow);
+
+  // Before the invitation rows that name them, for the same reason the RAG
+  // lookups go first: the lookup key derives from the row's `tokenHash`.
+  await deleteInviteTokenLookups(rows);
+
+  for (const row of rows.filter((candidate) => !isMemberRow(candidate))) {
+    await deleteItem(orgTable, { pk: row.pk!, sk: row.sk! });
+  }
+
+  const userIds = new Set([
+    ...memberRows.map((row) => row.sk!.S!.slice(OrgKeys.memberSkPrefix().length)),
+    ...members.map((member) => member.userId),
+  ]);
+  for (const userId of userIds) {
+    await deleteRow(orgTable, { pk: OrgKeys.userPk(userId), sk: OrgKeys.membershipSk(orgId) });
+  }
+
+  for (const row of memberRows) {
+    await deleteItem(orgTable, { pk: row.pk!, sk: row.sk! });
+  }
+}
+
+function isMemberRow(row: Item): boolean {
+  return row.sk?.S?.startsWith(OrgKeys.memberSkPrefix()) === true;
+}
+
+/**
+ * Enumerated by pk rather than by known sks, so a row shape added later is
+ * destroyed with the rest instead of outliving the org silently.
+ */
+async function readOrgTablePartition(orgId: string): Promise<Item[]> {
+  return collectPages((cursor) =>
+    getDynamoClient().send(
+      new QueryCommand({
+        TableName: Resource.OrgTable.name,
+        KeyConditionExpression: 'pk = :pk',
+        ExpressionAttributeValues: marshall({ ':pk': OrgKeys.orgPk(orgId) }),
+        ConsistentRead: true,
+        ...(cursor ? { ExclusiveStartKey: cursor } : {}),
+      }),
+    ),
+  );
+}
+
+async function deleteInviteTokenLookups(orgRows: Item[]): Promise<void> {
+  for (const row of orgRows) {
+    if (!row.sk?.S?.startsWith(INVITE_SK_PREFIX)) continue;
+    const tokenHash = row.tokenHash?.S;
+    if (!tokenHash) continue;
+    await deleteRow(Resource.OrgTable.name, inviteTokenLookupKey(tokenHash));
   }
 }
 

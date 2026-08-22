@@ -22,7 +22,7 @@ const mockGetAuth0UserEmail = vi.fn(async (sub: string) => {
 });
 const mockDeleteTenant = vi.fn(async (tenantId: string) => void order.push(`tenant:${tenantId}`));
 const mockResolveTargets = vi.fn(async () => ({
-  members: [{ userId: 'user-1', sub: 'auth0|one' }],
+  members: [{ userId: 'user-1', sub: 'auth0|one', deleteIdentity: true }],
   tenantIds: { fth: '42' } as Record<string, string>,
 }));
 
@@ -75,7 +75,7 @@ describe('account-deletion-worker', () => {
     ddbMock.on(GetItemCommand).resolves({ Item: record() });
     ddbMock.on(UpdateItemCommand).resolves({});
     mockResolveTargets.mockResolvedValue({
-      members: [{ userId: 'user-1', sub: 'auth0|one' }],
+      members: [{ userId: 'user-1', sub: 'auth0|one', deleteIdentity: true }],
       tenantIds: { fth: '42' },
     });
     mockGetAvailableOrchestrators.mockReturnValue([orchestrator('fth')]);
@@ -107,6 +107,46 @@ describe('account-deletion-worker', () => {
 
       expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
       expect(mockDeleteAuth0User).toHaveBeenCalledWith('auth0|one');
+    });
+  });
+
+  describe('a member whose account outlives the org', () => {
+    beforeEach(() => {
+      mockResolveTargets.mockResolvedValue({
+        members: [
+          { userId: 'user-1', sub: 'auth0|one', deleteIdentity: false },
+          { userId: 'user-2', sub: 'auth0|two', deleteIdentity: true },
+        ],
+        tenantIds: {},
+      });
+    });
+
+    // They belong to another org, or were invited into this one. The org is going
+    // away; their login is not.
+    it('leaves their Auth0 user and their allowlist row alone', async () => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      try {
+        await handler({ orgId: ORG });
+
+        expect(mockDeleteAuth0User).toHaveBeenCalledTimes(1);
+        expect(mockDeleteAuth0User).toHaveBeenCalledWith('auth0|two');
+        expect(mockGetAuth0UserEmail).not.toHaveBeenCalledWith('auth0|one');
+        expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1);
+      } finally {
+        log.mockRestore();
+      }
+    });
+
+    it('still runs the rest of the teardown', async () => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      try {
+        await handler({ orgId: ORG });
+        expect(order).toContain('scrub');
+      } finally {
+        log.mockRestore();
+      }
     });
   });
 
@@ -180,7 +220,7 @@ describe('account-deletion-worker', () => {
 
     it('skips a tenant whose orchestrator is not registered on this stage', async () => {
       mockResolveTargets.mockResolvedValue({
-        members: [{ userId: 'user-1', sub: 'auth0|one' }],
+        members: [{ userId: 'user-1', sub: 'auth0|one', deleteIdentity: true }],
         tenantIds: { forge: 'forge-t-1' },
       });
       mockGetAvailableOrchestrators.mockReturnValue([orchestrator('fth')]);

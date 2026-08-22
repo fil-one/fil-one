@@ -55,6 +55,8 @@ function state(overrides: Partial<OrgState> = {}): OrgState {
     legacyMembers: [],
     orgTableMemberUserIds: [],
     hasMeta: false,
+    deleting: false,
+    hasDeletionRecord: false,
     ...overrides,
   };
 }
@@ -575,6 +577,8 @@ describe('the conversion round trip', () => {
       legacyMembers,
       orgTableMemberUserIds,
       hasMeta: orgTable.has(`${OrgKeys.orgPk(ORG_ID)} META`),
+      deleting: false,
+      hasDeletionRecord: false,
     };
   }
 
@@ -660,6 +664,85 @@ describe('the conversion round trip', () => {
   });
 });
 
+describe('an org being deleted', () => {
+  // Account deletion resolves an org's members from both tables and deletes the
+  // rows itself. Converting one mid-teardown races it, and writing a membership
+  // into a deleted org puts back what teardown removed.
+  it('is skipped when the profile carries the deletion fence', () => {
+    const plan = classifyOrg(
+      state({ deleting: true, legacyMembers: [legacyMember()] }),
+      knownUsers,
+    );
+
+    expect(plan).toEqual({
+      kind: 'deleting',
+      orgId: ORG_ID,
+      detail: 'PROFILE.deleting=true',
+    });
+  });
+
+  it('is skipped when a DELETION record exists', () => {
+    const plan = classifyOrg(
+      state({ hasDeletionRecord: true, legacyMembers: [legacyMember()] }),
+      knownUsers,
+    );
+
+    expect(plan).toEqual({
+      kind: 'deleting',
+      orgId: ORG_ID,
+      detail: 'a DELETION record exists',
+    });
+  });
+
+  it('names both signals when both are there', () => {
+    const plan = classifyOrg(state({ deleting: true, hasDeletionRecord: true }), knownUsers);
+
+    expect(plan).toMatchObject({
+      kind: 'deleting',
+      detail: 'PROFILE.deleting=true with a DELETION record',
+    });
+  });
+
+  // The classification that would otherwise apply never runs: a half-torn-down
+  // org has exactly the row shapes the anomaly reasons describe.
+  it('is skipped ahead of every anomaly', () => {
+    const plan = classifyOrg(
+      state({
+        deleting: true,
+        profile: undefined,
+        legacyMembers: [legacyMember({ userId: 'nobody' }), legacyMember()],
+      }),
+      knownUsers,
+    );
+
+    expect(plan.kind).toBe('deleting');
+  });
+
+  it('is counted and reported as skipped, not as an anomaly', () => {
+    const plans: OrgPlan[] = [
+      { kind: 'deleting', orgId: 'org-x', detail: 'PROFILE.deleting=true' },
+    ];
+
+    expect(summarizePlans(plans)).toMatchObject({ orgs: 1, deleting: 1, anomalies: 0 });
+    expect(
+      formatPlanReport(
+        {
+          userInfoRows: 3,
+          orgProfiles: 1,
+          legacyMemberRows: 1,
+          userProfiles: 1,
+          unparsedRows: 0,
+          deletionRecords: 1,
+          orgTableMemberRows: 0,
+          orgTableInverseRows: 0,
+          orgTableMetaRows: 0,
+        },
+        plans,
+      ),
+    ).toMatch(/ {2}Being deleted \(skipped\): +1\n/);
+  });
+});
+
 describe('the plan report', () => {
   const scan: ScanCounts = {
     userInfoRows: 40,
@@ -667,6 +750,7 @@ describe('the plan report', () => {
     legacyMemberRows: 2,
     userProfiles: 5,
     unparsedRows: 0,
+    deletionRecords: 0,
     orgTableMemberRows: 2,
     orgTableInverseRows: 2,
     orgTableMetaRows: 2,
@@ -691,6 +775,7 @@ describe('the plan report', () => {
       convertFromMemberRow: 1,
       repairFromProfile: 1,
       alreadyConverted: 2,
+      deleting: 0,
       legacyRowsPendingDelete: 1,
       metaToWrite: 2,
       anomalies: 1,
@@ -744,6 +829,8 @@ describe('verifyConversion', () => {
     legacyMembers: [],
     orgTableMemberUserIds: [USER_ID],
     hasMeta: true,
+    deleting: false,
+    hasDeletionRecord: false,
   });
 
   /** Both OrgTable items every converted membership has, as the scan collects them. */
@@ -772,6 +859,7 @@ describe('verifyConversion', () => {
       legacyMemberRows: states.reduce((total, one) => total + one.legacyMembers.length, 0),
       userProfiles: 0,
       unparsedRows: 0,
+      deletionRecords: states.filter((one) => one.hasDeletionRecord).length,
       orgTableMemberRows: states.filter((one) => one.orgTableMemberUserIds.length > 0).length,
       orgTableInverseRows: states.filter((one) => one.orgTableMemberUserIds.length > 0).length,
       orgTableMetaRows: states.filter((one) => one.hasMeta).length,
@@ -786,6 +874,44 @@ describe('verifyConversion', () => {
     legacyMembers: [{ userId: USER_ID, role: 'member' }],
     orgTableMemberUserIds: [],
     hasMeta: false,
+    deleting: false,
+    hasDeletionRecord: false,
+  });
+
+  const beingDeleted = (orgId: string): OrgState => ({
+    orgId,
+    profile: { createdBy: USER_ID, createdAt: CREATED_AT },
+    legacyMembers: [{ userId: USER_ID, role: LEGACY_ROLE }],
+    orgTableMemberUserIds: [],
+    hasMeta: true,
+    deleting: true,
+    hasDeletionRecord: true,
+  });
+
+  // Its rows are mid-teardown: a legacy row still standing, a META whose
+  // membership is already gone. Holding that to the shape of a converted org
+  // would fail the gate for work that is proceeding correctly.
+  it('passes a stage holding an org being deleted', () => {
+    const checks = verify([converted('org-a'), beingDeleted('org-z')]);
+
+    expect(checks.every((check) => check.pass)).toBe(true);
+    expect(formatVerifyReport(checks)).toContain('VERIFY: PASS');
+  });
+
+  it('names the skipped orgs so the count is explained', () => {
+    const report = formatVerifyReport(verify([converted('org-a'), beingDeleted('org-z')]));
+
+    expect(report).toContain('PASS  Orgs being deleted are skipped');
+    expect(report).toContain('1 orgs are being deleted');
+    expect(report).toContain('ORG#org-z — PROFILE.deleting=true with a DELETION record');
+  });
+
+  it('does not count a deleted org as an anomaly', () => {
+    const checks = verify([beingDeleted('org-z')]);
+    const anomalies = checks.find((check) => check.name.startsWith('Every anomaly'))!;
+
+    expect(anomalies.pass).toBe(true);
+    expect(anomalies.offenders).toEqual([]);
   });
 
   it('passes a fully converted stage', () => {
@@ -847,6 +973,8 @@ describe('verifyConversion', () => {
       legacyMembers: [legacyMember()],
       orgTableMemberUserIds: [],
       hasMeta: false,
+      deleting: false,
+      hasDeletionRecord: false,
     };
 
     const checks = verify([pending]);
@@ -933,6 +1061,8 @@ describe('verifyConversion', () => {
       legacyMembers: [],
       orgTableMemberUserIds: [],
       hasMeta: true,
+      deleting: false,
+      hasDeletionRecord: false,
     };
 
     // A removed membership is still an anomaly, so it needs the same explicit

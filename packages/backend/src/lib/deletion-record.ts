@@ -23,6 +23,22 @@ export interface DeletionMember {
   sub: string;
   /** Absent is legal, and means there is no Stripe work for this member. */
   stripeCustomerId?: string;
+  /**
+   * Whether deleting this org also ends this person's account: their Auth0 user
+   * goes, their identity row is tombstoned, their profile is stamped and their
+   * allowlist row is revoked. True only when this org is the member's sole
+   * membership and their own personal org; a member who was invited here, or who
+   * belongs to another org, keeps all of that and loses only their rows in this
+   * org.
+   *
+   * Decided once in `resolveDeletionTargets`, so the Auth0 step and the scrub act
+   * on the same answer rather than each running their own census.
+   *
+   * Billing is not gated on this flag. Both the Stripe teardown and the billing
+   * scrub still act on every member, because the billing row is keyed by user
+   * today and is re-keyed to the org by its own change.
+   */
+  deleteIdentity: boolean;
 }
 
 /**

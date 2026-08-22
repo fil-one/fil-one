@@ -77,7 +77,7 @@ DRY-RUN — Converting org membership into OrgTable (stage="production", region=
   UserInfoTable: filone-production-UserInfoTableTable
   OrgTable:      filone-production-OrgTableTable
 
-Matched in UserInfoTable: 4128 rows — 812 org profiles, 786 legacy MEMBER# rows, 809 user profiles
+Matched in UserInfoTable: 4128 rows — 812 org profiles, 786 legacy MEMBER# rows, 809 user profiles, 3 DELETION records
 Matched in OrgTable: 74 MEMBER# rows, 74 MEMBERSHIP# inverse items, 74 META rows
 
 Orgs scanned: 812
@@ -85,6 +85,7 @@ Orgs scanned: 812
   Repair (no membership row; from PROFILE.createdBy): 24
   Already converted (skipped):                        74
     of which a legacy MEMBER# row remains to delete:  2
+  Being deleted (skipped):                            3
   Anomalies (manual disposition):                     2
 
 Anomalies — dispose of these before executing:
@@ -95,8 +96,19 @@ Writes 736 orgs (1472 OrgTable items, of which 736 META counters) and deletes 71
 
   [dry-run] CONVERT ORG#0a1b… MEMBER#7f8e… admin->owner joinedAt=2026-02-11T09:12:44.301Z source=conversion META=new
   [dry-run] REPAIR ORG#0c2d… MEMBER#3e4f… granted owner from PROFILE.createdBy joinedAt=2025-11-02T12:00:00.000Z source=conversion META=new
+  [dry-run] SKIPPED ORG#5a6b… being deleted — PROFILE.deleting=true with a DELETION record
   …
 ```
+
+**Orgs being deleted are skipped, in both modes.** An org whose
+`ORG#{orgId}/PROFILE` carries `deleting: true`, or that has an
+`ORG#{orgId}/DELETION` record, belongs to account deletion: the teardown worker
+resolves its members from both tables and deletes their rows itself. Converting
+one races that teardown, and writing a membership into an org being deleted puts
+back the row teardown exists to remove. The skip comes before every other
+classification, so a half-torn-down org is never reported as an anomaly for the
+row shapes teardown left behind. `--verify` counts these orgs and names them
+rather than flagging them as unconverted.
 
 Every line names the user the membership goes to, including the repair cohort —
 that membership is invented from `PROFILE.createdBy`, and the log is the only
@@ -166,6 +178,7 @@ Raced (a concurrent write got there first):  0
 Legacy MEMBER# rows deleted:                 714
 Conflicts — transaction (manual review):     0
 Conflicts — stale legacy row kept:           0
+Skipped (being deleted):                    3
 Anomalies (untouched):                       2
 
 Convert + Repair (736) = Converted + Repaired + Raced + transaction conflicts (736).
@@ -207,7 +220,7 @@ PASS  No org is still repairable
 PASS  No converted org still holds its legacy row
         0 converted orgs have a legacy MEMBER# row left to delete
 PASS  Every remaining legacy MEMBER# row belongs to an anomaly
-        2 legacy MEMBER# rows remain, on 2 orgs; 0 of those orgs are not anomalies
+        5 legacy MEMBER# rows remain, on 2 live orgs; 0 of those orgs are not anomalies
           ORG#8f3c… MEMBER#a1b2… — unexpected-role
           ORG#1a2b… MEMBER#c4d5… — unknown-user
 PASS  Membership rows and inverse items agree
@@ -216,6 +229,9 @@ PASS  Every org with a membership has its META counter
         812 META rows for 810 memberships; 0 memberships have none
 PASS  Every META without a membership is a removed membership
         2 orgs hold META with no membership; 0 are not classified as membership-removed
+PASS  Orgs being deleted are skipped
+        3 orgs are being deleted; the conversion left them alone
+          ORG#5a6b… — PROFILE.deleting=true with a DELETION record
 PASS  Every anomaly has been dispositioned
         2 anomalies of 812 orgs; 810 converted; 2 accepted, 0 undispositioned
         accepted by --accept-anomalies (2):

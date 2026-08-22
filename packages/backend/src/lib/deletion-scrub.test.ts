@@ -17,6 +17,7 @@ vi.mock('sst', () => ({
     BillingTable: { name: 'BillingTable' },
     RagIndexerTable: { name: 'RagIndexerTable' },
     RagVectorBucket: { name: 'rag-vectors' },
+    OrgTable: { name: 'OrgTable' },
   },
 }));
 
@@ -42,7 +43,7 @@ import { scrubOrgRecords } from './deletion-scrub.js';
 import type { DeletionMember } from './deletion-record.js';
 
 const ORG = 'org-1';
-const MEMBERS: DeletionMember[] = [{ userId: 'user-1', sub: 'auth0|one' }];
+const MEMBERS: DeletionMember[] = [{ userId: 'user-1', sub: 'auth0|one', deleteIdentity: true }];
 
 /** Every key passed to DeleteItem, in call order, as `table:pk/sk`. */
 function deletedKeys(): string[] {
@@ -88,7 +89,7 @@ describe('scrubOrgRecords', () => {
   });
 
   it('destroys credentials and keeps every row that describes the org', async () => {
-    ddbMock.on(QueryCommand).resolves({
+    ddbMock.on(QueryCommand, { TableName: 'UserInfoTable' }).resolves({
       Items: [
         orgRow('DELETION'),
         orgRow('PROFILE'),
@@ -104,6 +105,10 @@ describe('scrubOrgRecords', () => {
       'UserInfoTable:RAGKEYHASH#hash-1/LOOKUP',
       `UserInfoTable:ORG#${ORG}/ACCESSKEY#ak-1`,
       `UserInfoTable:ORG#${ORG}/RAGKEY#key-1`,
+      // The member's inverse item, from the member list rather than the OrgTable
+      // partition: it is the row that would otherwise leave them holding a
+      // membership in an org that is gone.
+      `OrgTable:USER#user-1/MEMBERSHIP#${ORG}`,
     ]);
     const kept = scrubbedKeys();
     expect(kept).toContain(`UserInfoTable:ORG#${ORG}/MEMBER#user-1`);
@@ -125,7 +130,7 @@ describe('scrubOrgRecords', () => {
   // A lookup pk derives from the tokenHash on the RAGKEY# row, so deleting the
   // partition first would leave rows nothing can ever find again.
   it('deletes RAG key lookup rows before the partition that names them', async () => {
-    ddbMock.on(QueryCommand).resolves({
+    ddbMock.on(QueryCommand, { TableName: 'UserInfoTable' }).resolves({
       Items: [orgRow('RAGKEY#key-1', { tokenHash: 'hash-1' }), orgRow('MEMBER#user-1')],
     });
 
@@ -150,8 +155,8 @@ describe('scrubOrgRecords', () => {
 
   it('stamps every row that survives, and deletes none of them', async () => {
     await scrubOrgRecords(ORG, [
-      { userId: 'user-1', sub: 'auth0|one' },
-      { userId: 'user-2', sub: 'auth0|two' },
+      { userId: 'user-1', sub: 'auth0|one', deleteIdentity: true },
+      { userId: 'user-2', sub: 'auth0|two', deleteIdentity: true },
     ]);
 
     expect(scrubbedKeys()).toEqual([
@@ -165,7 +170,7 @@ describe('scrubOrgRecords', () => {
       `UserInfoTable:ORG#${ORG}/MEMBER#user-2`,
       `UserInfoTable:ORG#${ORG}/PROFILE`,
     ]);
-    expect(deletedKeys()).toEqual([]);
+    expect(deletedKeys().filter((key) => key.startsWith('UserInfoTable:'))).toEqual([]);
   });
 
   // The worker writes `canceled` itself, after the Stripe cancel has succeeded, so
@@ -269,6 +274,112 @@ describe('scrubOrgRecords', () => {
     });
   });
 
+  describe('the OrgTable rows', () => {
+    function orgTableRow(sk: string, extra: Record<string, unknown> = {}) {
+      return marshall({ pk: `ORG#${ORG}`, sk, ...extra });
+    }
+
+    function stubOrgTable(items: ReturnType<typeof orgTableRow>[]) {
+      ddbMock.on(QueryCommand, { TableName: 'OrgTable' }).resolves({ Items: items });
+    }
+
+    // Nothing else removes them, and a membership left behind leaves its member
+    // able to act in an org that no longer exists.
+    it('destroys every row the org owns, and the members last', async () => {
+      stubOrgTable([
+        orgTableRow('META'),
+        orgTableRow('MEMBER#user-1'),
+        orgTableRow('INVITE#invite-1', { tokenHash: 'invite-hash' }),
+        orgTableRow('RESERVATION#acme'),
+      ]);
+
+      await scrubOrgRecords(ORG, MEMBERS);
+
+      expect(deletedKeys().filter((key) => key.startsWith('OrgTable:'))).toEqual([
+        'OrgTable:INVITETOKEN#invite-hash/LOOKUP',
+        `OrgTable:ORG#${ORG}/META`,
+        `OrgTable:ORG#${ORG}/INVITE#invite-1`,
+        `OrgTable:ORG#${ORG}/RESERVATION#acme`,
+        `OrgTable:USER#user-1/MEMBERSHIP#${ORG}`,
+        `OrgTable:ORG#${ORG}/MEMBER#user-1`,
+      ]);
+    });
+
+    // Membership rows are what a re-driven pass resolves its members from, so a
+    // pass that dies before them still knows who to tear down.
+    it('deletes the membership row after everything it addresses', async () => {
+      stubOrgTable([orgTableRow('MEMBER#user-1'), orgTableRow('META')]);
+
+      await scrubOrgRecords(ORG, MEMBERS);
+
+      const keys = deletedKeys();
+      expect(keys.at(-1)).toBe(`OrgTable:ORG#${ORG}/MEMBER#user-1`);
+    });
+
+    it('deletes the inverse item of a member the OrgTable partition does not name', async () => {
+      stubOrgTable([]);
+
+      await scrubOrgRecords(ORG, MEMBERS);
+
+      expect(deletedKeys()).toContain(`OrgTable:USER#user-1/MEMBERSHIP#${ORG}`);
+    });
+
+    it('reads the partition consistently, and by pk alone', async () => {
+      await scrubOrgRecords(ORG, MEMBERS);
+
+      const query = ddbMock
+        .commandCalls(QueryCommand)
+        .find((c) => c.args[0].input.TableName === 'OrgTable')!.args[0].input;
+      expect(query.KeyConditionExpression).toBe('pk = :pk');
+      expect(query.ConsistentRead).toBe(true);
+    });
+
+    // The lookup pk derives from the tokenHash on the invitation row, the same
+    // ordering the RAG key lookups need.
+    it('deletes an invite token lookup before the invitation that names it', async () => {
+      stubOrgTable([orgTableRow('INVITE#invite-1', { tokenHash: 'invite-hash' })]);
+
+      await scrubOrgRecords(ORG, MEMBERS);
+
+      const keys = deletedKeys();
+      expect(keys.indexOf('OrgTable:INVITETOKEN#invite-hash/LOOKUP')).toBeLessThan(
+        keys.indexOf(`OrgTable:ORG#${ORG}/INVITE#invite-1`),
+      );
+    });
+
+    it('leaves an invitation that stores no token hash to its own TTL', async () => {
+      stubOrgTable([orgTableRow('INVITE#invite-1')]);
+
+      await scrubOrgRecords(ORG, MEMBERS);
+
+      expect(deletedKeys().some((key) => key.includes('INVITETOKEN#'))).toBe(false);
+    });
+  });
+
+  describe('a member whose account outlives the org', () => {
+    const KEPT: DeletionMember[] = [
+      { userId: 'user-1', sub: 'auth0|one', deleteIdentity: false },
+      { userId: 'user-2', sub: 'auth0|two', deleteIdentity: true },
+    ];
+
+    it('keeps their identity and profile rows unstamped', async () => {
+      await scrubOrgRecords(ORG, KEPT);
+
+      const kept = scrubbedKeys();
+      expect(kept).not.toContain('UserInfoTable:SUB#auth0|one/IDENTITY');
+      expect(kept).not.toContain('UserInfoTable:USER#user-1/PROFILE');
+      expect(kept).toContain('UserInfoTable:SUB#auth0|two/IDENTITY');
+      expect(kept).toContain('UserInfoTable:USER#user-2/PROFILE');
+    });
+
+    it('still stamps their membership row and deletes their OrgTable rows', async () => {
+      await scrubOrgRecords(ORG, KEPT);
+
+      expect(scrubbedKeys()).toContain(`UserInfoTable:ORG#${ORG}/MEMBER#user-1`);
+      expect(deletedKeys()).toContain(`OrgTable:USER#user-1/MEMBERSHIP#${ORG}`);
+    });
+  });
+
   it('pages the org partition, threading the cursor back through', async () => {
     const cursor = marshall({ pk: `ORG#${ORG}`, sk: 'ACCESSKEY#ak-1' });
     ddbMock
@@ -295,7 +406,8 @@ describe('scrubOrgRecords', () => {
 
     await expect(scrubOrgRecords(ORG, MEMBERS)).resolves.toBeUndefined();
 
-    expect(deletedKeys()).toEqual([]);
+    // Only the inverse item, and deleting a row that is already gone is a no-op.
+    expect(deletedKeys()).toEqual([`OrgTable:USER#user-1/MEMBERSHIP#${ORG}`]);
     for (const call of ddbMock.commandCalls(UpdateItemCommand)) {
       expect(call.args[0].input.UpdateExpression).toContain('if_not_exists(deletedAt, :now)');
     }
