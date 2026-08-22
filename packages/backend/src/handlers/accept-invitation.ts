@@ -19,7 +19,7 @@ import {
   ownerCountItem,
 } from '../lib/membership-changes.js';
 import { resolveMembership } from '../lib/org-membership.js';
-import { resolveOrgName } from '../lib/org-profile.js';
+import { isGuardRejection, orgNotDeletingCheck, resolveOrgName } from '../lib/org-profile.js';
 import { parseJsonBody } from '../lib/parse-json-body.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -46,6 +46,8 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
  *
  * Everything else lands in one transaction:
  *
+ * - a `ConditionCheck` that the org is not being deleted, the same profile
+ *   fence every guarded writer carries, as item 0,
  * - the membership row and its inverse item,
  * - the invitation marked accepted, conditional on it still being pending,
  * - the token lookup deleted, which is what makes the token single-use,
@@ -79,7 +81,15 @@ export async function baseHandler(
 
   try {
     await commitAudited({
-      items: [...items, ...retireInvitationItems(invitation, 'accepted')],
+      // The fence is item 0, where `isGuardRejection` reads it, and it rides
+      // both shapes of the transaction. An org resolving its teardown targets
+      // must gain no member, and an invitation into it is no longer usable even
+      // for somebody who is already inside.
+      items: [
+        orgNotDeletingCheck(invitation.orgId),
+        ...items,
+        ...retireInvitationItems(invitation, 'accepted'),
+      ],
       event: acceptedEvent({
         invitation,
         userId,
@@ -88,7 +98,7 @@ export async function baseHandler(
       }),
     });
   } catch (err) {
-    return await acceptFailureResponse(err, [...labels, 'invitation', 'token'], {
+    return await acceptFailureResponse(err, ['org', ...labels, 'invitation', 'token'], {
       invitation,
       userId,
       verifiedEmail,
@@ -187,6 +197,11 @@ async function acceptFailureResponse(
   labels: string[],
   { invitation, userId, verifiedEmail }: AcceptContext,
 ): Promise<APIGatewayProxyStructuredResultV2> {
+  // The deletion fence, read at its own index. The answer is the one a revoked
+  // invitation gets, and it says nothing about the org: a stale link should not
+  // report that somebody's organization is being torn down.
+  if (isGuardRejection(err)) return notFoundResponse();
+
   const failed = cancelledLabels(err, labels);
   if (failed.length === 0) throw err;
 

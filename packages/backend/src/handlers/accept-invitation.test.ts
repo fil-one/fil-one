@@ -263,8 +263,9 @@ describe('POST /api/invitations/accept handler', () => {
     await handler(acceptEvent(), buildContext());
 
     const items = transactItems();
-    // membership, inverse, inviter check, invitation status, token delete, event.
-    expect(items).toHaveLength(6);
+    // deletion fence, membership, inverse, inviter check, invitation status,
+    // token delete, event.
+    expect(items).toHaveLength(7);
 
     const membership = items.find(
       (item) => item.Put?.Item?.sk?.S === OrgKeys.memberSk(USER_ID),
@@ -310,7 +311,9 @@ describe('POST /api/invitations/accept handler', () => {
   it('checks the inviter still holds a role that could have issued the invitation', async () => {
     await handler(acceptEvent(), buildContext());
 
-    const check = transactItems().find((item) => item.ConditionCheck)!.ConditionCheck!;
+    const check = transactItems().find(
+      (item) => item.ConditionCheck?.Key?.sk?.S === OrgKeys.memberSk(INVITER_ID),
+    )!.ConditionCheck!;
     expect(check).toMatchObject({
       Key: {
         pk: { S: OrgKeys.orgPk(INVITING_ORG_ID) },
@@ -319,6 +322,50 @@ describe('POST /api/invitations/accept handler', () => {
       ConditionExpression: 'attribute_exists(pk) AND #role IN (:role0, :role1)',
       ExpressionAttributeValues: { ':role0': { S: OrgRole.Owner }, ':role1': { S: OrgRole.Admin } },
     });
+  });
+
+  it('fences the transaction on the org not being deleted, as item 0', async () => {
+    // Item 0 because DynamoDB reports cancellations positionally and the shared
+    // helper that recognises this refusal reads that index.
+    await handler(acceptEvent(), buildContext());
+
+    expect(transactItems()[0].ConditionCheck).toMatchObject({
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: `ORG#${INVITING_ORG_ID}` }, sk: { S: 'PROFILE' } },
+      ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
+    });
+  });
+
+  it('carries the fence even when the caller is already a member', async () => {
+    stubMembershipInInvitingOrg(OrgRole.Admin);
+
+    await handler(acceptEvent(), buildContext());
+
+    expect(transactItems()[0].ConditionCheck?.Key?.sk?.S).toBe('PROFILE');
+  });
+
+  it('answers not-found when the org is being deleted', async () => {
+    // A membership must not be born into a teardown that has already resolved
+    // its targets, and the answer is the one a revoked invitation gets: a stale
+    // link learns nothing about the org behind it.
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(0, 7));
+
+    const result = await handler(acceptEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 404 });
+    expect(body(result).code).toBe(ApiErrorCode.INVITE_NOT_FOUND);
+    // No second transaction: the refusal is final, not the membership race.
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
+  });
+
+  it('answers not-found when a deleting org refuses an already-member accept', async () => {
+    stubMembershipInInvitingOrg(OrgRole.Admin);
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(0, 4));
+
+    const result = await handler(acceptEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 404 });
+    expect(body(result).code).toBe(ApiErrorCode.INVITE_NOT_FOUND);
   });
 
   it('records the acceptance beside the write, carrying no token', async () => {
@@ -440,7 +487,8 @@ describe('POST /api/invitations/accept handler', () => {
     // for.
     expect(body(result)).toMatchObject({ alreadyMember: true, role: OrgRole.Admin });
     const items = transactItems();
-    expect(items).toHaveLength(3);
+    // The fence, the invitation status, the token delete, and the event.
+    expect(items).toHaveLength(4);
     expect(items.some((item) => item.Put?.Item?.sk?.S === OrgKeys.memberSk(USER_ID))).toBe(false);
   });
 
@@ -475,7 +523,7 @@ describe('POST /api/invitations/accept handler', () => {
   it('answers success when the membership appeared while the request was in flight', async () => {
     // Two clicks on the same link. The create-only condition loses, and the
     // loser must not be told their invitation failed.
-    ddbMock.on(TransactWriteItemsCommand).rejectsOnce(cancelledAt(0, 6)).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).rejectsOnce(cancelledAt(1, 7)).resolves({});
     ddbMock
       .on(GetItemCommand, {
         TableName: 'OrgTable',
@@ -500,7 +548,7 @@ describe('POST /api/invitations/accept handler', () => {
   it('still retires the invitation when the join lost that race', async () => {
     // The whole transaction cancelled, so nothing marked the invitation — and a
     // link the caller has already used would stay live for a fortnight.
-    ddbMock.on(TransactWriteItemsCommand).rejectsOnce(cancelledAt(0, 6)).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).rejectsOnce(cancelledAt(1, 7)).resolves({});
     ddbMock
       .on(GetItemCommand, {
         TableName: 'OrgTable',
@@ -537,7 +585,7 @@ describe('POST /api/invitations/accept handler', () => {
     // A revoke that won the race cancels the second transaction too. The caller
     // is a member of the org, which is what they asked for; the bookkeeping
     // failure is logged rather than answered.
-    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(0, 6));
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(1, 7));
     ddbMock
       .on(GetItemCommand, {
         TableName: 'OrgTable',
@@ -560,7 +608,7 @@ describe('POST /api/invitations/accept handler', () => {
   });
 
   it('refuses when the inviter no longer holds the authority they invited with', async () => {
-    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(2, 6));
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(3, 7));
 
     const result = await handler(acceptEvent(), buildContext());
 
@@ -571,7 +619,7 @@ describe('POST /api/invitations/accept handler', () => {
   });
 
   it('answers not-found when the invitation was revoked mid-flight', async () => {
-    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(3, 6));
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(4, 7));
 
     const result = await handler(acceptEvent(), buildContext());
 
@@ -581,7 +629,7 @@ describe('POST /api/invitations/accept handler', () => {
 
   it('refuses an Owner invitation into an org whose counter is missing', async () => {
     stubInvitation({ role: OrgRole.Owner });
-    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(3, 7));
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(4, 8));
 
     const result = await handler(acceptEvent(), buildContext());
 
