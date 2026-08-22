@@ -53,7 +53,7 @@ export async function handler(event: AccountDeletionWorkerPayload): Promise<void
   // it destroys the rows the earlier steps read, and a failed pass leaves the most
   // context for troubleshooting behind it.
   await tearDownAuth0(members);
-  await tearDownStripe(orgId);
+  await tearDownStripe(orgId, members);
   await deleteTenants(orgId, tenantIds);
   await scrubOrgRecords(orgId, members);
 
