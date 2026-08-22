@@ -165,16 +165,22 @@ async function purgeRagBucket(
  * and the stamp refuses every webhook that arrives afterwards.
  *
  * The org's row carries the fence, because it is the row every reader and writer
- * addresses. A member's pre-re-key `CUSTOMER#` row is stamped as well where one
- * is still standing, which keeps the old fence closed until the runbook's dated
- * cleanup step deletes those rows; a row that is already gone makes its own
- * stamp a no-op.
+ * addresses, and it is stamped for every deletion.
+ *
+ * A member's pre-re-key `CUSTOMER#` row is stamped only when this deletion also
+ * ends their account. The legacy row is keyed by user, so it belongs to the
+ * member's own personal org; an invited member keeps that org and its billing,
+ * and stamping their row here would fence a subscription this deletion has no
+ * claim on. Where the row is stamped it keeps the old fence closed until the
+ * runbook's dated cleanup step deletes those rows; a row that is already gone
+ * makes its own stamp a no-op.
  *
  * `stripeCustomerId` and `subscriptionId` are system identifiers and stay.
  */
 async function scrubBilling(orgId: string, members: DeletionMember[]): Promise<void> {
   await scrubSubscriptionRow(SubscriptionKeys.orgPk(orgId));
-  for (const { userId } of members) {
+  for (const { userId, deleteIdentity } of members) {
+    if (!deleteIdentity) continue;
     await scrubSubscriptionRow(SubscriptionKeys.legacyPk(userId));
   }
 }
