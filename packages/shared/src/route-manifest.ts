@@ -133,6 +133,26 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     category: 'authenticated',
     requires: 'in-handler',
   },
+  // Bulk deletion empties a bucket of every object and version, so starting a
+  // job is the most destructive object write there is and takes
+  // `objects.delete`. Reading a job's progress takes the same permission: the
+  // job row is polled by the caller who started the deletion, nothing else
+  // links to it, and a role that cannot delete has no reason to watch a
+  // deletion run.
+  {
+    method: 'POST',
+    path: '/api/buckets/{name}/bulk-delete',
+    handler: 'create-bulk-delete-job',
+    category: 'authenticated',
+    requires: 'objects.delete',
+  },
+  {
+    method: 'GET',
+    path: '/api/bulk-delete-jobs/{jobId}',
+    handler: 'get-bulk-delete-job',
+    category: 'authenticated',
+    requires: 'objects.delete',
+  },
 
   // ── Keys ─────────────────────────────────────────────────────────
   // Listing and revoking are `keys.manage_all`, because no handler can yet tell
