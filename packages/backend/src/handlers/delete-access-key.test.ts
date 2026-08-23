@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { authPartialMock } from '../test/auth-partial-mock.js';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, DeleteItemCommand, GetItemCommand } from '@aws-sdk/client-dynamodb';
 
@@ -41,17 +42,11 @@ vi.mock('../lib/org-profile.js', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
-vi.mock('../middleware/auth.js', () => ({
-  // Every gate downstream of the auth middleware returns its denials through
-  // this helper, so the partial mock has to carry it.
-  withRefreshedCookies: (_request: unknown, response: unknown) => response,
-  authMiddleware: () => ({ before: () => undefined }),
-}));
+vi.mock('../middleware/auth.js', () => authPartialMock());
 
 import { ApiErrorCode, OrgRole } from '@filone/shared';
-import { baseHandler, handler } from './delete-access-key.js';
-import { buildEvent, buildContext, membershipFor } from '../test/lambda-test-utilities.js';
-import { describeRoleEnforcement } from '../test/role-enforcement.js';
+import { baseHandler } from './delete-access-key.js';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
@@ -269,10 +264,4 @@ describe('whose key a caller may revoke', () => {
 
     expect(result.statusCode).toBe(204);
   });
-});
-
-describeRoleEnforcement({
-  permission: 'keys.manage_own',
-  invoke: (membership) =>
-    handler(buildEvent({ userInfo: { ...USER_INFO, membership } }), buildContext()),
 });

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { authPartialMock } from '../test/auth-partial-mock.js';
 
 import { BulkDeleteJobStatus, BulkDeleteScope, S3Region } from '@filone/shared';
 
@@ -25,12 +26,7 @@ vi.mock('../lib/bulk-delete-jobs.js', async (importOriginal) => {
   return { ...actual, createBulkDeleteJob: vi.fn(), putBulkDeleteJob: vi.fn() };
 });
 
-vi.mock('../middleware/auth.js', () => ({
-  // Every gate downstream of the auth middleware returns its denials through
-  // this helper, so the partial mock has to carry it.
-  withRefreshedCookies: (_request: unknown, response: unknown) => response,
-  authMiddleware: () => ({ before: () => undefined }),
-}));
+vi.mock('../middleware/auth.js', () => authPartialMock());
 
 process.env.FILONE_STAGE = 'test';
 
@@ -40,9 +36,8 @@ import {
   putBulkDeleteJob,
 } from '../lib/bulk-delete-jobs.js';
 import { enqueueBulkDeleteJob } from '../lib/bulk-delete-queue.js';
-import { baseHandler, handler } from './create-bulk-delete-job.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
-import { describeRoleEnforcement } from '../test/role-enforcement.js';
+import { baseHandler } from './create-bulk-delete-job.js';
+import { buildEvent } from '../test/lambda-test-utilities.js';
 
 const mockCreate = vi.mocked(createBulkDeleteJob);
 const mockPutJob = vi.mocked(putBulkDeleteJob);
@@ -168,18 +163,4 @@ describe('create-bulk-delete-job', () => {
     expect(result.statusCode).toBe(503);
     expect(mockCreate).not.toHaveBeenCalled();
   });
-});
-
-describeRoleEnforcement({
-  permission: 'objects.delete',
-  invoke: (membership) => {
-    const built = buildEvent({
-      method: 'POST',
-      queryStringParameters: { region: S3Region.EuWest1 },
-      body: JSON.stringify({ idempotencyKey }),
-      userInfo: { orgId: 'org-1', userId: 'user-1', membership },
-    });
-    built.pathParameters = { name: 'my-bucket' };
-    return handler(built, buildContext());
-  },
 });

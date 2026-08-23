@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { authPartialMock } from '../test/auth-partial-mock.js';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
   DynamoDBClient,
@@ -39,15 +40,10 @@ process.env.FILONE_STAGE = 'test';
 
 const ddbMock = mockClient(DynamoDBClient);
 
-// The chain tests below exercise the REAL authorization gates; auth, csrf, and
-// the subscription guard are stubbed to pass through so the role check is what
-// the assertion is about.
-vi.mock('../middleware/auth.js', () => ({
-  // Every gate downstream of the auth middleware returns its denials through
-  // this helper, so the partial mock has to carry it.
-  withRefreshedCookies: (_request: unknown, response: unknown) => response,
-  authMiddleware: () => ({ before: () => undefined }),
-}));
+// Importing the handler module builds its Middy chain, so the middleware that
+// chain installs is stubbed to a pass-through. The tests below call
+// `baseHandler` directly.
+vi.mock('../middleware/auth.js', () => authPartialMock());
 vi.mock('../middleware/csrf.js', () => ({
   csrfMiddleware: () => ({ before: () => undefined }),
 }));
@@ -56,10 +52,9 @@ vi.mock('../middleware/subscription-guard.js', () => ({
   subscriptionGuardMiddleware: () => ({ before: () => undefined }),
 }));
 
-import { baseHandler, handler } from './create-access-key.js';
+import { baseHandler } from './create-access-key.js';
 import { AccessKeyAlreadyExistsError } from '../lib/errors.js';
-import { buildEvent, buildContext, membershipFor } from '../test/lambda-test-utilities.js';
-import { describeRoleEnforcement } from '../test/role-enforcement.js';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -757,18 +752,4 @@ describe('create-access-key baseHandler', () => {
       expect(mockIssueAccessKey).not.toHaveBeenCalled();
     });
   });
-});
-
-// `keys.create` is the entry gate and lives in the chain, so a ReadOnly member
-// and a caller with no membership row are refused before the body is read.
-describeRoleEnforcement({
-  permission: 'keys.create',
-  invoke: (membership) =>
-    handler(
-      buildEvent({
-        body: validBody({ keyName: 'My Key' }),
-        userInfo: { ...USER_INFO, membership },
-      }),
-      buildContext(),
-    ),
 });

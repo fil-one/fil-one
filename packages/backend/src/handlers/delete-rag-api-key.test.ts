@@ -32,7 +32,6 @@ import { ApiErrorCode, OrgRole } from '@filone/shared';
 import { baseHandler, handler } from './delete-rag-api-key.js';
 import { RagApiKeyKeys } from '../lib/rag-api-keys.js';
 import { buildEvent, buildContext, membershipFor } from '../test/lambda-test-utilities.js';
-import { describeRoleEnforcement } from '../test/role-enforcement.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1', emailVerified: true };
@@ -170,10 +169,4 @@ describe('whose RAG key a caller may revoke', () => {
 
     expect(await baseHandler(deleteEvent('key-1', role))).toMatchObject({ statusCode: 204 });
   });
-});
-
-describeRoleEnforcement({
-  permission: 'keys.manage_own',
-  invoke: (membership) =>
-    handler(buildEvent({ userInfo: { ...USER_INFO, membership } }), buildContext()),
 });

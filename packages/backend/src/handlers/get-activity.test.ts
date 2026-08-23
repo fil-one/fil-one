@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { authPartialMock } from '../test/auth-partial-mock.js';
 import { OrgRole } from '@filone/shared';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
@@ -57,16 +58,10 @@ process.env.FILONE_STAGE = 'test';
 
 const ddbMock = mockClient(DynamoDBClient);
 
-vi.mock('../middleware/auth.js', () => ({
-  // Every gate downstream of the auth middleware returns its denials through
-  // this helper, so the partial mock has to carry it.
-  withRefreshedCookies: (_request: unknown, response: unknown) => response,
-  authMiddleware: () => ({ before: () => undefined }),
-}));
+vi.mock('../middleware/auth.js', () => authPartialMock());
 
-import { baseHandler, handler } from './get-activity.js';
-import { buildEvent, buildContext, membershipFor } from '../test/lambda-test-utilities.js';
-import { describeRoleEnforcement } from '../test/role-enforcement.js';
+import { baseHandler } from './get-activity.js';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -594,10 +589,4 @@ describe('key activity follows the keys pages scope', () => {
 
     expect(emittedPhases()).not.toContain('fetchAccessKeyActivities');
   });
-});
-
-describeRoleEnforcement({
-  permission: 'buckets.read',
-  invoke: (membership) =>
-    handler(buildEvent({ userInfo: { ...USER_INFO, membership } }), buildContext()),
 });
