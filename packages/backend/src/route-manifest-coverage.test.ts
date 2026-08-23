@@ -1,9 +1,19 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { ROUTE_MANIFEST } from '@filone/shared';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { APIGatewayProxyResultV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
+import { ApiErrorCode, OrgRole, ROUTE_MANIFEST, roleHasPermission } from '@filone/shared';
 import type { Permission, RouteManifestEntry } from '@filone/shared';
+import type { OrgMembership } from './lib/org-membership.js';
+import { sstResourceMock } from './test/sst-resource-mock.js';
+import { authPartialMock } from './test/auth-partial-mock.js';
+import {
+  buildContext,
+  buildEvent,
+  membershipFor,
+  NO_MEMBERSHIP,
+} from './test/lambda-test-utilities.js';
 
 /**
  * The manifest's completeness check, which only the backend can make: the
@@ -14,18 +24,51 @@ import type { Permission, RouteManifestEntry } from '@filone/shared';
  *
  * Both halves matter. The first is coverage — every handler module is named by
  * the manifest and every manifest entry names a real module. The second is
- * enforcement — a route the manifest gates on a permission actually installs
- * `authorize` for that permission, and a route marked `self` installs no
- * org-permission gate at all.
- *
- * The enforcement half reads the handler's source rather than importing it:
- * every handler module builds its DynamoDB client and reads SST resources at
- * import time, so importing all of them here would test the mocking setup
- * rather than the chains. The repository formats with oxfmt, so the call it
- * looks for has one spelling.
+ * enforcement — every route the manifest gates on a permission refuses the
+ * roles that do not hold it, proved by running the route's own Middy chain.
  */
 
 const HANDLERS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'handlers');
+
+// The service-orchestrator registry builds its API clients as it is imported and
+// reads their base URLs from the environment, so a handler that reaches storage
+// needs these set before the first import. No request is ever sent: the gate
+// refuses the caller first, and an unreachable host would be a 500 rather than
+// the 403 every case here asserts.
+process.env.FILONE_STAGE ??= 'test';
+process.env.FTH_MANAGEMENT_API_URL ??= 'https://fth.test.invalid';
+
+const ORG_ID = 'org-1';
+const USER_ID = 'user-1';
+
+// Two mocks stand between the chains and the world. The `sst` one answers the
+// resource reads a handler module makes while it is being imported; the auth
+// one stands in for the middleware that would have resolved a cookie session,
+// so the caller arrives on the event instead. Nothing else is mocked — see the
+// derived suite below.
+//
+// This suite imports every gated handler, so it reaches resources no single
+// handler test does: the argument covers what the shared list leaves out. The
+// values are never read, only their presence — a handler that reads one at
+// import time throws on `undefined` before any test runs.
+vi.mock('sst', () =>
+  sstResourceMock({
+    BillingTable: { name: 'BillingTable' },
+    BulkDeleteQueue: { url: 'https://sqs.test.invalid/bulk-delete' },
+    BulkDeleteTable: { name: 'BulkDeleteTable' },
+    DeletionChallengeTable: { name: 'DeletionChallengeTable' },
+    DeletionCodeHmacKey: { value: 'test-deletion-hmac-key' },
+    ForgeManagementApiToken: { value: 'test-forge-token' },
+    FthManagementApiToken: { value: 'test-fth-token' },
+    RagIndexerTable: { name: 'RagIndexerTable' },
+    RagVectorBucket: { name: 'RagVectorBucket' },
+    SendGridApiKey: { value: 'test-sendgrid-key' },
+    StripePriceId: { value: 'price_test_fake' },
+    StripePublishableKey: { value: 'pk_test_fake' },
+    StripeSecretKey: { value: 'sk_test_fake' },
+  }),
+);
+vi.mock('./middleware/auth.js', () => authPartialMock());
 
 function handlerModules(): string[] {
   return readdirSync(HANDLERS_DIR)
@@ -41,11 +84,6 @@ function handlerSource(handler: string): string {
 /** A manifest value inside a regexp: `buckets.read` must not match `bucketsxread`. */
 function literal(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/** `authorize('buckets.read')`, however the formatter spaces it. */
-function installsAuthorize(source: string, permission: Permission): boolean {
-  return new RegExp(`authorize\\(\\s*['"]${literal(permission)}['"]\\s*\\)`).test(source);
 }
 
 /**
@@ -82,27 +120,18 @@ const permissionGated: { handler: string; permission: Permission }[] = ROUTE_MAN
 describe('route manifest coverage', () => {
   it('names every handler module in packages/backend/src/handlers', () => {
     const declared = ROUTE_MANIFEST.map((route) => route.handler).sort();
+    const modules = handlerModules();
     // Fails in both directions on purpose: a handler with no entry is an
     // ungated route, and an entry with no handler is a stale declaration that
     // would make the checks below vacuously pass.
-    expect(declared).toStrictEqual(handlerModules());
-  });
-
-  it('installs authorize with the declared permission on every gated route', () => {
-    const missing = permissionGated
-      .filter((route) => !installsAuthorize(handlerSource(route.handler), route.permission))
-      .map((route) => `${route.handler} (${route.permission})`);
-    expect(missing).toStrictEqual([]);
-  });
-
-  it('runs the authorization gate before the billing read on every gated route', () => {
-    // Order, not just presence: a non-member must get an authorization error
-    // rather than a billing error, and must not cost a BillingTable read to be
-    // refused. `.use()` order is chain order, so source order is the check.
-    const outOfOrder = permissionGated
-      .filter((route) => !gateRunsFirst(handlerSource(route.handler), 'authorize('))
-      .map((route) => route.handler);
-    expect(outOfOrder).toStrictEqual([]);
+    const undeclared = modules.filter((module) => !declared.includes(module));
+    const stale = declared.filter((handler) => !modules.includes(handler));
+    expect(
+      undeclared.map(
+        (module) => `add a manifest entry for ${module}, or move shared code out of src/handlers/`,
+      ),
+    ).toStrictEqual([]);
+    expect(stale).toStrictEqual([]);
   });
 
   it('gates the in-handler routes on membership, ahead of the billing read', () => {
@@ -148,4 +177,76 @@ describe('route manifest coverage', () => {
       .map((route) => route.handler);
     expect(missing).toStrictEqual([]);
   });
+});
+
+/**
+ * Enforcement, derived from the manifest rather than described twice: every
+ * route declaring a permission owes the same denials, so the suite is generated
+ * from the declarations instead of listed. A route added to the manifest is
+ * covered the moment it is declared.
+ *
+ * The chain runs for real. Each case invokes the handler module's exported
+ * Middy chain with a caller in a role the capability matrix refuses, and with a
+ * caller who has no membership row at all, and reads the status and error code
+ * off the response.
+ *
+ * Nothing billing-related is mocked, and that is the point: `authorize` runs
+ * ahead of `subscriptionGuardMiddleware`, so a refused caller never reaches the
+ * BillingTable read. A chain that installed the gate too late would answer 500
+ * from the unreachable table rather than 403, which is how this suite carries
+ * the ordering guarantee as well as the gate.
+ *
+ * The refused roles come from the registry rather than a list, so a change to
+ * the capability matrix shows up here instead of quietly narrowing the test. A
+ * permission every role holds (`buckets.read`) has no refused roles and leaves
+ * only the absent-row case, which is the honest thing for it to assert.
+ */
+describe('enforcement derived from the manifest', () => {
+  beforeEach(() => {
+    // The absent-row branch writes an EMF metric to stdout and logs the denial;
+    // neither belongs in the test output.
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  for (const { handler, permission } of permissionGated) {
+    describe(`${handler} (${permission})`, () => {
+      const denial = async (
+        membership: OrgMembership | typeof NO_MEMBERSHIP,
+      ): Promise<APIGatewayProxyStructuredResultV2> => {
+        // `.ts`, against the repo's usual `.js` specifiers: a dynamic import
+        // with a variable in it compiles to a glob over the literal part of the
+        // pattern, and `./handlers/*.js` matches nothing on disk.
+        const module = (await import(`./handlers/${handler}.ts`)) as {
+          handler: (event: unknown, context: unknown) => Promise<APIGatewayProxyResultV2>;
+        };
+        const event = buildEvent({ userInfo: { userId: USER_ID, orgId: ORG_ID, membership } });
+        // Every route here answers with a ResponseBuilder, so the union's string
+        // arm never occurs; middy's declared return type carries it anyway.
+        return (await module.handler(event, buildContext())) as APIGatewayProxyStructuredResultV2;
+      };
+
+      const refused = Object.values(OrgRole).filter((role) => !roleHasPermission(role, permission));
+
+      if (refused.length > 0) {
+        it.each(refused)('refuses %s', async (role) => {
+          const result = await denial(membershipFor(ORG_ID, USER_ID, role));
+
+          expect(result.statusCode).toBe(403);
+          expect(JSON.parse(result.body ?? '{}').code).toBe(ApiErrorCode.FORBIDDEN_ROLE);
+        });
+      }
+
+      it('refuses a caller with no membership row', async () => {
+        const result = await denial(NO_MEMBERSHIP);
+
+        expect(result.statusCode).toBe(403);
+        expect(JSON.parse(result.body ?? '{}').code).toBe(ApiErrorCode.NOT_A_MEMBER);
+      });
+    });
+  }
 });
