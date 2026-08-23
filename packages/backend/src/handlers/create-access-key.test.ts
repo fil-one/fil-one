@@ -6,16 +6,13 @@ import {
   PutItemCommand,
   QueryCommand,
 } from '@aws-sdk/client-dynamodb';
+import { sstResourceMock } from '../test/sst-resource-mock.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('sst', () => ({
-  Resource: {
-    UserInfoTable: { name: 'UserInfoTable' },
-  },
-}));
+vi.mock('sst', () => sstResourceMock());
 
 const mockEnsureTenantReady = vi.fn();
 const mockIssueAccessKey = vi.fn();

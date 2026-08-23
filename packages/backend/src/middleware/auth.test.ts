@@ -15,6 +15,7 @@ import {
 import { ApiErrorCode, OrgRole, Stage } from '@filone/shared';
 import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../lib/org-setup-status.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
+import { sstResourceMock } from '../test/sst-resource-mock.js';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
 import { expectErrorResponse } from '../test/assert-helpers.js';
 
@@ -39,14 +40,7 @@ vi.spyOn(crypto, 'randomUUID').mockImplementation(
   () => MOCK_UUIDS[uuidCallCount++] as `${string}-${string}-${string}-${string}-${string}`,
 );
 
-vi.mock('sst', () => ({
-  Resource: {
-    UserInfoTable: { name: 'UserInfoTable' },
-    Auth0ClientId: { value: 'test-client-id' },
-    Auth0ClientSecret: { value: 'test-client-secret' },
-    AuroraBackofficeToken: { value: 'test-aurora-token' },
-  },
-}));
+vi.mock('sst', () => sstResourceMock());
 
 vi.mock('../lib/auth-secrets.js', () => ({
   getAuthSecrets: () => ({
