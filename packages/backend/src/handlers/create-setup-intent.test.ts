@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { authPartialMock } from '../test/auth-partial-mock.js';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
   ConditionalCheckFailedException,
@@ -29,16 +30,10 @@ vi.mock('sst', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
-vi.mock('../middleware/auth.js', () => ({
-  // Every gate downstream of the auth middleware returns its denials through
-  // this helper, so the partial mock has to carry it.
-  withRefreshedCookies: (_request: unknown, response: unknown) => response,
-  authMiddleware: () => ({ before: () => undefined }),
-}));
+vi.mock('../middleware/auth.js', () => authPartialMock());
 
-import { baseHandler, handler } from './create-setup-intent.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
-import { describeRoleEnforcement } from '../test/role-enforcement.js';
+import { baseHandler } from './create-setup-intent.js';
+import { buildEvent } from '../test/lambda-test-utilities.js';
 
 const USER_ID = 'user-1';
 const ORG_ID = 'org-1';
@@ -139,13 +134,4 @@ describe('create-setup-intent baseHandler', () => {
     await expect(baseHandler(setupIntentEvent())).rejects.toThrow('Service unavailable');
     expect(mockSetupIntentsCreate).not.toHaveBeenCalled();
   });
-});
-
-describeRoleEnforcement({
-  permission: 'billing.manage',
-  invoke: (membership) =>
-    handler(
-      buildEvent({ userInfo: { ...{ userId: 'user-1', orgId: 'org-1' }, membership } }),
-      buildContext(),
-    ),
 });

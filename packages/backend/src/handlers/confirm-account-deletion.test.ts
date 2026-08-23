@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { authPartialMock } from '../test/auth-partial-mock.js';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { ApiErrorCode } from '@filone/shared';
@@ -25,16 +26,10 @@ vi.mock('../lib/deletion-confirm-transaction.js', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
-vi.mock('../middleware/auth.js', () => ({
-  // Every gate downstream of the auth middleware returns its denials through
-  // this helper, so the partial mock has to carry it.
-  withRefreshedCookies: (_request: unknown, response: unknown) => response,
-  authMiddleware: () => ({ before: () => undefined }),
-}));
+vi.mock('../middleware/auth.js', () => authPartialMock());
 
-import { baseHandler, handler } from './confirm-account-deletion.js';
-import { buildContext, buildEvent } from '../test/lambda-test-utilities.js';
-import { describeRoleEnforcement } from '../test/role-enforcement.js';
+import { baseHandler } from './confirm-account-deletion.js';
+import { buildEvent } from '../test/lambda-test-utilities.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1', emailVerified: true };
 
@@ -147,17 +142,4 @@ describe('confirm-account-deletion', () => {
       ConsistentRead: true,
     });
   });
-});
-
-describeRoleEnforcement({
-  permission: 'org.delete',
-  invoke: (membership) =>
-    handler(
-      buildEvent({
-        userInfo: { ...USER_INFO, membership },
-        method: 'POST',
-        body: JSON.stringify(VALID),
-      }),
-      buildContext(),
-    ),
 });

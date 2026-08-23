@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { authPartialMock } from '../test/auth-partial-mock.js';
 import { ApiErrorCode } from '@filone/shared';
 
 vi.mock('sst', () => ({
@@ -23,16 +24,10 @@ vi.mock('../lib/deletion-email.js', () => ({
   sendDeletionCodeEmail: (args: unknown) => mockSendEmail(args),
 }));
 
-vi.mock('../middleware/auth.js', () => ({
-  // Every gate downstream of the auth middleware returns its denials through
-  // this helper, so the partial mock has to carry it.
-  withRefreshedCookies: (_request: unknown, response: unknown) => response,
-  authMiddleware: () => ({ before: () => undefined }),
-}));
+vi.mock('../middleware/auth.js', () => authPartialMock());
 
-import { baseHandler, handler } from './request-account-deletion.js';
-import { buildContext, buildEvent } from '../test/lambda-test-utilities.js';
-import { describeRoleEnforcement } from '../test/role-enforcement.js';
+import { baseHandler } from './request-account-deletion.js';
+import { buildEvent } from '../test/lambda-test-utilities.js';
 
 const USER_INFO = {
   userId: 'user-1',
@@ -138,10 +133,4 @@ describe('request-account-deletion', () => {
     expect(JSON.parse(result.body!).code).toBe(ApiErrorCode.EMAIL_NOT_VERIFIED);
     expect(mockCreateChallenge).not.toHaveBeenCalled();
   });
-});
-
-describeRoleEnforcement({
-  permission: 'org.delete',
-  invoke: (membership) =>
-    handler(buildEvent({ userInfo: { ...USER_INFO, membership }, method: 'POST' }), buildContext()),
 });

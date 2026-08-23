@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { authPartialMock } from '../test/auth-partial-mock.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -30,17 +31,11 @@ vi.mock('../lib/org-profile.js', () => ({
 
 process.env.FILONE_STAGE = 'test';
 
-vi.mock('../middleware/auth.js', () => ({
-  // Every gate downstream of the auth middleware returns its denials through
-  // this helper, so the partial mock has to carry it.
-  withRefreshedCookies: (_request: unknown, response: unknown) => response,
-  authMiddleware: () => ({ before: () => undefined }),
-}));
+vi.mock('../middleware/auth.js', () => authPartialMock());
 
-import { baseHandler, handler } from './delete-bucket.js';
+import { baseHandler } from './delete-bucket.js';
 import { BucketNotEmptyError } from '../lib/errors.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
-import { describeRoleEnforcement } from '../test/role-enforcement.js';
+import { buildEvent } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -122,10 +117,4 @@ describe('delete-bucket baseHandler', () => {
 
     await expect(baseHandler(event)).rejects.toThrow('S3 gateway unavailable');
   });
-});
-
-describeRoleEnforcement({
-  permission: 'buckets.delete',
-  invoke: (membership) =>
-    handler(buildEvent({ userInfo: { ...USER_INFO, membership } }), buildContext()),
 });

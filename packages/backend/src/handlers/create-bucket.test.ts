@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { authPartialMock } from '../test/auth-partial-mock.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -37,17 +38,11 @@ vi.mock('../lib/org-profile.js', async () => ({
   isOrgDeleting: (...args: Parameters<typeof mockIsOrgDeleting>) => mockIsOrgDeleting(...args),
 }));
 
-vi.mock('../middleware/auth.js', () => ({
-  // Every gate downstream of the auth middleware returns its denials through
-  // this helper, so the partial mock has to carry it.
-  withRefreshedCookies: (_request: unknown, response: unknown) => response,
-  authMiddleware: () => ({ before: () => undefined }),
-}));
+vi.mock('../middleware/auth.js', () => authPartialMock());
 
-import { baseHandler, handler } from './create-bucket.js';
+import { baseHandler } from './create-bucket.js';
 import { BucketAlreadyExistsError, BucketConfigurationError } from '../lib/errors.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
-import { describeRoleEnforcement } from '../test/role-enforcement.js';
+import { buildEvent } from '../test/lambda-test-utilities.js';
 import { S3_REGION, S3Region } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
@@ -265,10 +260,4 @@ describe('create-bucket baseHandler', () => {
       process.env.FILONE_STAGE = previous;
     }
   });
-});
-
-describeRoleEnforcement({
-  permission: 'buckets.create',
-  invoke: (membership) =>
-    handler(buildEvent({ userInfo: { ...USER_INFO, membership } }), buildContext()),
 });

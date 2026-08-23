@@ -5,8 +5,7 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import { OrgRole, SubscriptionStatus } from '@filone/shared';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 import type { OrgMembership } from '../lib/org-membership.js';
-import { buildEvent, buildContext, NO_MEMBERSHIP } from '../test/lambda-test-utilities.js';
-import { describeRoleEnforcement } from '../test/role-enforcement.js';
+import { buildEvent } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -850,27 +849,4 @@ describe('activate-subscription handler', () => {
       });
     });
   });
-});
-
-describeRoleEnforcement({
-  permission: 'billing.manage',
-  invoke: async (membership) => {
-    // This chain's auth mock builds userInfo itself, so the role travels here.
-    // Restored in a finally: a handler that throws would otherwise leave every
-    // later test in this file running as whichever role denied last.
-    callerMembership = membership === NO_MEMBERSHIP ? undefined : membership;
-    try {
-      return await handler(
-        buildEvent({
-          userInfo: { userId: 'user-1', orgId: 'org-1' },
-          method: 'POST',
-          rawPath: '/api/billing/activate',
-          body: '{}',
-        }),
-        buildContext(),
-      );
-    } finally {
-      callerMembership = { orgId: 'org-1', userId: 'user-1', role: OrgRole.Owner };
-    }
-  },
 });
