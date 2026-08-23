@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Created:** 2026-08-14
-**Implementation:** The PRs stacked above this ADR's own PR (#596) ship it: #597–#610 plus the close-out #617, with #626 and #627 carrying the deletion integration, under stack #628. File paths below name modules as they exist at the top of that stack.
+**Implementation:** The PRs stacked above this ADR's own PR (#596) ship it: #597–#610 plus the close-out #617, with #626 and #627 carrying the deletion integration and #629 the handler-test-helper split, under stack #630. File paths below name modules as they exist at the top of that stack.
 
 ## Context
 
@@ -143,7 +143,7 @@ An authenticated route's requirement is a permission, or `self`, or `in-handler`
 - `in-handler` is the requirement a route cannot state because it depends on the body. `POST /api/presign` serves several operations through one route, so its permission check runs in-handler against the same registry, branching read/write/delete per requested operation next to the existing trial checks (`handlers/presign.ts:195-210`); a batch containing any denied operation is rejected whole, with the denial code naming the operation. Mutating retention and legal-hold presign operations are privileged from M1 — none exist in the presign vocabulary today, and adding one behind a general permission would hand M2 a capability to claw back, since a presigned URL is redeemed at the vendor and its use cannot be audit-logged per FIL-1019. `getObjectRetention` is a read of retention state, which the PRD's auditor path grants, and maps to `objects.read`.
 - `invite-token` marks the single route whose caller is by definition not yet a member of the org it acts on: accepting an invitation, authorized by the token in the body plus a session whose verified email is the invited address, both checked in the handler. Accepting cannot be `self`, because `self` is for routes that touch no org state, and accepting creates a membership.
 
-Completeness is machine-checked, in the spirit of orgauthaudit's registry and route CI checks: a manifest in `packages/shared` lists every route with its category and requirement, and a backend test walks `src/handlers/` and fails on any handler absent from the manifest. Each handler's colocated test pins its denial behavior (ReadOnly gets 403 on a write route, and so on).
+Completeness is machine-checked, in the spirit of orgauthaudit's registry and route CI checks: a manifest in `packages/shared` lists every route with its category and requirement, and `sst.config.ts` registers the API's routes by iterating it, so a route with no manifest entry does not deploy. A backend test walks `src/handlers/` and fails on any handler absent from the manifest, and a compliance suite derived from the manifest drives every gated route once per denied role and pins the 403 — enforcement tests a new route gets by declaring itself.
 
 `MeResponse` gains `userId`, `role`, and `permissions: Permission[]`, following the `ragAccess` precedent of shipping a server-computed decision to the SPA. The console gates rendering on it fail-closed, copying `use-rag-access.ts:16-23` plus the pending/error guard from `BucketIntelligencePage.tsx:29-37`, with a `RequirePermission` wrapper for destructive surfaces. Server-side checks remain the enforcement; the UI only hides what will not work.
 
