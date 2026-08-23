@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { authPartialMock } from '../test/auth-partial-mock.js';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
   DynamoDBClient,
@@ -17,9 +18,7 @@ vi.mock('sst', () => ({
 // Full-chain gate tests exercise the REAL ragAccessMiddleware (allowlist check
 // against DynamoDB); auth/csrf/subscription are covered by their own suites and
 // stubbed to pass-through here so the allowlist gate can be tested in isolation.
-vi.mock('../middleware/auth.js', () => ({
-  authMiddleware: () => ({ before: () => undefined }),
-}));
+vi.mock('../middleware/auth.js', () => authPartialMock());
 vi.mock('../middleware/csrf.js', () => ({
   csrfMiddleware: () => ({ before: () => undefined }),
 }));
