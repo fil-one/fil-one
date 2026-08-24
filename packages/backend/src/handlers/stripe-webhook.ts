@@ -10,7 +10,7 @@ import {
 } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { resolveOrgId } from '../lib/billing-org-lookup.js';
+import { resolveOrgId, resolveOrgIdFromSubscription } from '../lib/billing-org-lookup.js';
 import { startDeletionFromStripe } from '../lib/deletion-from-stripe.js';
 import {
   assertRegionSyncSucceeded,
@@ -204,15 +204,33 @@ async function handleCustomerUpdated(customer: Stripe.Customer): Promise<void> {
     return;
   }
 
+  // Nothing stamped `metadata.orgId` onto customers created before the metadata
+  // existed, and the re-key made no Stripe calls — so the daily usage worker's
+  // metadata writes generate `customer.updated` for those customers forever.
+  // Asking the billing row is the same fallback `customer.deleted` already
+  // takes: the legacy `CUSTOMER#{userId}` row carries the orgId the backfill
+  // keyed its copy by.
+  const orgId = resolveOrgId(customer.metadata) ?? (await resolveOrgIdFromSubscription(userId));
+  if (!orgId) {
+    // Not a throw. The rows with no `orgId` were enumerated and dispositioned
+    // by name before the re-key (docs/BillingRekeyRunbook.md), so no retry
+    // converges on an answer — Stripe would redeliver this for three days and
+    // then disable the endpoint over a card that no row can record.
+    console.error('[stripe-webhook] customer.updated resolves to no org; payment method dropped', {
+      customerId: customer.id,
+      userId,
+    });
+    return;
+  }
+
   const stripe = getStripeClient();
   const pm =
     typeof defaultPm === 'string' ? await stripe.paymentMethods.retrieve(defaultPm) : defaultPm;
-  const orgId = resolveOrgId(customer.metadata);
   await updatePaymentMethod({ userId, orgId }, pm);
 }
 
 async function updatePaymentMethod(
-  owner: { userId: string; orgId?: string },
+  owner: { userId: string; orgId: string },
   pm: Stripe.PaymentMethod,
 ): Promise<void> {
   // A missing row is swallowed here rather than failing the webhook. The store

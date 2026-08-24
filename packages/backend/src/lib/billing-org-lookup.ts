@@ -23,11 +23,13 @@ export function orgIdFromStripeMetadata(
 /**
  * The org behind a Stripe customer, read off its legacy billing record.
  *
- * The account-deletion trigger's fallback for customers that predate metadata,
- * and the one read still keyed by user: its caller holds a deleted Stripe
- * customer with no usable org id, so there is no org key to read with. Dead
- * once the re-key's dated cleanup deletes the legacy rows — by then the
- * pre-metadata cohort has been dispositioned by name (docs/BillingRekeyRunbook.md).
+ * The fallback for customers that predate `metadata.orgId`, and the one read
+ * still keyed by user: its callers hold a Stripe customer with no usable org
+ * id, so there is no org key to read with. `customer.deleted` and
+ * `customer.updated` both take it — the re-key stamped no metadata on Stripe,
+ * so nothing but the row answers for that cohort. Dead once the re-key's dated
+ * cleanup deletes the legacy rows, by which point the cohort has been
+ * dispositioned by name (docs/BillingRekeyRunbook.md).
  */
 export async function resolveOrgIdFromSubscription(userId: string): Promise<string | undefined> {
   const { Item } = await getDynamoClient().send(
