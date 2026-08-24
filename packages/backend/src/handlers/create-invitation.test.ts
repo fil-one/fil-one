@@ -4,6 +4,7 @@ import {
   DynamoDBClient,
   GetItemCommand,
   QueryCommand,
+  TransactionCanceledException,
   TransactWriteItemsCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
@@ -178,6 +179,17 @@ function transactItems() {
   return calls[0].args[0].input.TransactItems ?? [];
 }
 
+/** The cancellation DynamoDB sends when one item's condition fails. */
+function cancelledAt(index: number, itemCount: number) {
+  return new TransactionCanceledException({
+    message: 'cancelled',
+    $metadata: {},
+    CancellationReasons: Array.from({ length: itemCount }, (_unused, position) => ({
+      Code: position === index ? 'ConditionalCheckFailed' : 'None',
+    })),
+  });
+}
+
 function body(result: unknown) {
   return JSON.parse((result as { body: string }).body);
 }
@@ -264,7 +276,8 @@ describe('POST /api/org/invitations handler', () => {
     await handler(inviteEvent(), buildContext());
 
     const items = transactItems();
-    expect(items).toHaveLength(3);
+    // The fence, the invitation's two rows, the event.
+    expect(items).toHaveLength(4);
 
     const invitation = items.find((item) => item.Put?.Item?.sk?.S?.startsWith('INVITE#'))!.Put!;
     expect(invitation).toMatchObject({
@@ -433,15 +446,15 @@ describe('POST /api/org/invitations handler', () => {
 
     expect(result).toMatchObject({ statusCode: 201 });
     const items = transactItems();
-    // The replaced pair, the new pair, the event.
-    expect(items).toHaveLength(5);
-    expect(items[0].Update).toMatchObject({
+    // The fence, the replaced pair, the new pair, the event.
+    expect(items).toHaveLength(6);
+    expect(items[1].Update).toMatchObject({
       Key: { pk: { S: OrgKeys.orgPk(ORG_ID) }, sk: { S: OrgKeys.inviteSk('earlier') } },
       ConditionExpression: '#status = :pending',
       ExpressionAttributeValues: { ':status': { S: 'revoked' }, ':pending': { S: 'pending' } },
     });
     // Its token stops working the moment the new one starts.
-    expect(items[1].Delete).toMatchObject({
+    expect(items[2].Delete).toMatchObject({
       Key: { pk: { S: OrgKeys.inviteTokenPk('c'.repeat(64)) }, sk: { S: 'LOOKUP' } },
     });
     expect(unmarshall(auditItemIn(items)).details).toMatchObject({ replacedInvitations: 1 });
@@ -455,7 +468,7 @@ describe('POST /api/org/invitations handler', () => {
     await handler(inviteEvent(), buildContext());
 
     const items = transactItems();
-    expect(items).toHaveLength(3);
+    expect(items).toHaveLength(4);
     expect(JSON.stringify(items)).not.toContain('someone-else');
   });
 
@@ -510,6 +523,30 @@ describe('POST /api/org/invitations handler', () => {
       UpdateExpression: 'SET lastSendFailed = :true',
     });
     expect(stamp.Key!.sk.S).toBe(OrgKeys.inviteSk(body(result).invitation.inviteId));
+  });
+
+  it('fences the transaction on the org not being deleted, as item 0', async () => {
+    // Item 0 because DynamoDB reports cancellations positionally and the shared
+    // helper that recognises this refusal reads that index.
+    await handler(inviteEvent(), buildContext());
+
+    expect(transactItems()[0].ConditionCheck).toMatchObject({
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'PROFILE' } },
+      ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
+    });
+  });
+
+  it('answers account-deleted when the org is being torn down', async () => {
+    // A create landing after teardown enumerated its targets leaves an
+    // invitation row, a token lookup and the invitee's address behind for good,
+    // and no retry helps — so it is not the collision answer.
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(0, 4));
+
+    const result = await handler(inviteEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 410 });
+    expect(body(result).code).toBe(ApiErrorCode.ACCOUNT_DELETED);
   });
 
   it.each([

@@ -26,7 +26,12 @@ import {
   revokeDeferred,
 } from '../lib/invitations.js';
 import type { InvitationRecord } from '../lib/invitations.js';
-import { resolveOrgName } from '../lib/org-profile.js';
+import {
+  OrgDeletingError,
+  isGuardRejection,
+  orgNotDeletingCheck,
+  resolveOrgName,
+} from '../lib/org-profile.js';
 import { hasOrgsBetaAccess } from '../lib/orgs-beta.js';
 import { parseJsonBody } from '../lib/parse-json-body.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
@@ -56,8 +61,11 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
  *   that already has one takes no new slot at all.
  *
  * Then one transaction writes the invitation, its token lookup, any live
- * invitation to the same address it replaces, and the audit event; only after it
- * lands is the email sent. That order is deliberate: the row is the invitation,
+ * invitation to the same address it replaces, and the audit event, behind the
+ * same org-deletion fence as item 0 that acceptance carries — an org resolving
+ * its teardown targets must not gain an invitation row, a token lookup, and the
+ * invitee's address after the enumeration that would have destroyed them. Only
+ * after the transaction lands is the email sent. That order is deliberate: the row is the invitation,
  * the email is its announcement, and a send that fails leaves a usable
  * invitation the response reports honestly rather than a rolled-back one.
  *
@@ -99,15 +107,17 @@ export async function baseHandler(
 
   const token = newInviteToken();
   const invitation = newInvitation({ orgId, email, emailNorm, role, invitedBy: userId, token });
-  // Two items for the new invitation; the rest of the transaction's room goes to
-  // the rows it supersedes. `later` is empty for any org the cap has ever
-  // bounded — one address holds one live invitation — and exists so that rows
-  // written before replacement existed cannot fail an invite.
-  const { now, later } = planRevocations(superseded, 2);
+  // The fence and the two rows the new invitation is; the rest of the
+  // transaction's room goes to the rows it supersedes. `later` is empty for any
+  // org the cap has ever bounded — one address holds one live invitation — and
+  // exists so that rows written before replacement existed cannot fail an
+  // invite.
+  const { now, later } = planRevocations(superseded, INVITATION_TRANSACTION_ITEMS);
 
   try {
     await commitAudited({
       items: [
+        orgNotDeletingCheck(orgId),
         ...now.flatMap((replaced) => retireInvitationItems(replaced, 'revoked')),
         ...invitationRows(invitation),
       ],
@@ -126,6 +136,9 @@ export async function baseHandler(
       }),
     });
   } catch (err) {
+    // The fence, at its own index, where the org is going away and no remedy
+    // exists — so it is the one cancellation that is not "try again".
+    if (isGuardRejection(err)) throw new OrgDeletingError(orgId);
     // The new rows are create-only on freshly minted keys, so they cannot lose;
     // a replaced row's condition can, when an accept or a revoke landed while
     // this request was in flight. Either way the caller's remedy is the same
@@ -160,6 +173,9 @@ export async function baseHandler(
     })
     .build();
 }
+
+/** The fence and the new invitation's two rows — what the sweep sits behind. */
+const INVITATION_TRANSACTION_ITEMS = 3;
 
 function newInvitation({
   orgId,
