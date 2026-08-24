@@ -311,6 +311,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "UpdateOrg": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "UpdatePreferences": {
       "name": string
       "type": "sst.aws.Function"
