@@ -20,9 +20,30 @@
 export function authPartialMock(): {
   withRefreshedCookies: (request: unknown, response: unknown) => unknown;
   authMiddleware: () => { before: () => undefined };
+  getVerifiedIdTokenClaims: () => IdTokenClaims;
 } {
   return {
     withRefreshedCookies: (_request: unknown, response: unknown) => response,
     authMiddleware: () => ({ before: () => undefined }),
+    // The same empty claims the real export hands back when no valid id_token
+    // cookie was present. `amr: []` fails the step-up gate closed, so a chain
+    // carrying `requireMfa()` answers its 401 rather than throwing on an
+    // export the stub forgot.
+    getVerifiedIdTokenClaims: () => ({
+      email: null,
+      emailVerified: false,
+      name: null,
+      picture: null,
+      amr: [],
+    }),
   };
+}
+
+/** Mirrors `IdTokenClaims` in ../middleware/auth.js, which this file cannot import. */
+interface IdTokenClaims {
+  email: string | null;
+  emailVerified: boolean;
+  name: string | null;
+  picture: string | null;
+  amr: string[];
 }
