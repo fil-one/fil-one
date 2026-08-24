@@ -322,6 +322,13 @@ function copyPlan(
  * whose `subscriptionId` is live in Stripe wins, and this script cannot ask
  * Stripe, so it halts and an operator names the winner on `--resolve-collisions`
  * after checking. Returns undefined when that decision has not been made.
+ *
+ * The disagreement is asked about BEFORE the operator's list is read. A
+ * resolution answers a collision, and a list carried over from an earlier run
+ * can name an org that no longer has one — the losing row deleted, its
+ * subscription corrected. Read first, it would pick a claimant the rule would
+ * not, and `rekeyedFrom` then makes every later verification compare the org
+ * against that same row.
  */
 function chooseSource(
   state: OrgBillingState,
@@ -334,14 +341,20 @@ function chooseSource(
 
   if (legacyRows.length === 1) return legacyRows[0];
 
+  if (!disagreeOnSubscription(legacyRows)) return [...legacyRows].sort(byUpdatedAtDescending)[0];
+
   const chosen = resolved.get(orgId);
-  if (chosen) return legacyRows.find((row) => parseLegacyPk(row.pk) === chosen);
+  return chosen ? legacyRows.find((row) => parseLegacyPk(row.pk) === chosen) : undefined;
+}
 
+/**
+ * Whether an org's claimants describe different Stripe subscriptions — the only
+ * thing `--resolve-collisions` decides. A row naming no subscription at all
+ * agrees with nothing, so it disagrees with every other claimant.
+ */
+function disagreeOnSubscription(legacyRows: readonly SubscriptionRow[]): boolean {
   const subscriptionIds = legacyRows.map((row) => row.subscriptionId ?? '');
-  if (subscriptionIds.some((id) => id === '')) return undefined;
-  if (new Set(subscriptionIds).size > 1) return undefined;
-
-  return [...legacyRows].sort(byUpdatedAtDescending)[0];
+  return subscriptionIds.some((id) => id === '') || new Set(subscriptionIds).size > 1;
 }
 
 /** Newest first; a row with no `updatedAt` sorts last, being the least likely to be current. */
@@ -773,6 +786,13 @@ export function validateResolvedCollisions(
       problems.push(
         `${BillingKeys.orgPk(orgId)}=${BillingKeys.legacyPk(userId)} — that row does not claim this org; ` +
           `its claimants are ${claimants}`,
+      );
+      continue;
+    }
+    if (!disagreeOnSubscription(state.legacyRows)) {
+      problems.push(
+        `${BillingKeys.orgPk(orgId)}=${BillingKeys.legacyPk(userId)} — this org's rows no longer name ` +
+          'different subscriptions, so there is nothing to resolve. Drop the entry and re-run',
       );
     }
   }

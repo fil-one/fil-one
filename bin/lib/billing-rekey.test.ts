@@ -346,6 +346,19 @@ describe('classifyOrgBilling', () => {
       });
     });
 
+    it('ignores a resolution for an org whose rows no longer disagree', () => {
+      // A list carried over from an earlier run, after the collision was
+      // corrected. Honouring it copies the row the rule would not have chosen,
+      // and rekeyedFrom then makes every later --verify compare against it.
+      const resolved = new Map([[ORG_ID, USER_ID]]);
+
+      expect(classifyOrgBilling(state({ legacyRows: [first, second] }), resolved)).toMatchObject({
+        kind: 'copy',
+        userId: OTHER_USER_ID,
+        supersedes: [first.pk],
+      });
+    });
+
     it('reads the recorded winner back rather than re-deriving it', () => {
       // rekeyedFrom IS the resolution: an operator checked Stripe and named this
       // row. Re-deriving would halt on the same collision every run, and would
@@ -690,7 +703,10 @@ describe('parseResolvedCollisions', () => {
 
 describe('validateResolvedCollisions', () => {
   it('accepts a resolution naming a row that claims the org', () => {
-    const rows = [legacyRow(), legacyRow({ pk: BillingKeys.legacyPk(OTHER_USER_ID) })];
+    const rows = [
+      legacyRow(),
+      legacyRow({ pk: BillingKeys.legacyPk(OTHER_USER_ID), subscriptionId: 'sub_2' }),
+    ];
     const states = [state({ legacyRows: rows })];
 
     expect(validateResolvedCollisions(new Map([[ORG_ID, USER_ID]]), states)).toEqual([]);
@@ -705,6 +721,16 @@ describe('validateResolvedCollisions', () => {
 
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain('no scanned row names that org');
+  });
+
+  it('names a resolution for an org whose rows agree about the subscription', () => {
+    const twin = legacyRow({ pk: BillingKeys.legacyPk(OTHER_USER_ID), updatedAt: NEWER });
+    const problems = validateResolvedCollisions(new Map([[ORG_ID, USER_ID]]), [
+      state({ legacyRows: [legacyRow(), twin] }),
+    ]);
+
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('nothing to resolve');
   });
 
   it('names a resolution whose row does not claim the org', () => {

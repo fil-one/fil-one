@@ -181,6 +181,13 @@ Each entry is one decision about one org, so the list is enumerated by hand —
 there is no "resolve all". Re-run the dry run with the flag until the anomaly list
 is empty.
 
+The list is checked against the table before anything runs: an entry naming a row
+nothing scanned, a row that does not claim the org, or an org whose rows no longer
+name different subscriptions stops the run and is named. That last one is a list
+carried over from a run whose collision has since been corrected — the resolution
+would pick a row the rule would not, and the org's `rekeyedFrom` would then make
+every later `--verify` compare against it. Drop the entry and re-run.
+
 ## Execute
 
 ```sh
