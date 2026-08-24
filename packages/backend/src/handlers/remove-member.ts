@@ -55,10 +55,11 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
  * the authority they invited with.
  *
  * Finding those needs the member's address, which the membership row does not
- * carry — it is in the `USER#{userId}/PROFILE` row, and that read is best-effort
- * like every other profile read here. A removal whose profile read fails or
- * whose row has learned no address still removes the member, sweeps what they
- * issued, and logs that the addressed-to sweep could not run.
+ * carry — it is in the `USER#{userId}/PROFILE` row, written by the two paths
+ * that learn a verified one, and that read is best-effort like every other
+ * profile read here. A removal whose profile read fails or whose row predates
+ * those writers still removes the member, sweeps what they issued, and logs that
+ * the addressed-to sweep could not run.
  *
  * Keys are untouched in M1. A departing member's access keys keep working until
  * somebody revokes them, which the console names in the confirmation dialog; the
@@ -124,9 +125,13 @@ export async function baseHandler(
  * The removed member's address, lowercased, or undefined when we do not hold
  * one.
  *
- * Undefined narrows the sweep to the invitations they issued, and says so: the
- * invitation their old link belongs to stays live until it expires, and an
- * operator reading this line is the only person who can revoke it by hand.
+ * Held because the two paths that learn a verified address write it: account
+ * creation and invitation acceptance (`lib/user-profile.ts`). So undefined is
+ * now the rare answer — a row written before either did, or a read that failed
+ * — rather than the only one, and it is worth a log line each time. It narrows
+ * the sweep to the invitations the member issued: the invitation their old link
+ * belongs to stays live until it expires, and an operator reading this line is
+ * the only person who can revoke it by hand.
  */
 async function removedMemberAddress(userId: string): Promise<string | undefined> {
   const email = (await readUserProfile(userId))?.email;

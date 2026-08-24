@@ -24,6 +24,7 @@ import { parseJsonBody } from '../lib/parse-json-body.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
+import { rememberVerifiedEmail } from '../lib/user-profile.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
@@ -55,6 +56,11 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
  * - a `ConditionCheck` that the INVITER still holds a role admitting that
  *   invitation, so an invitation cannot outlive its issuer's authority,
  * - and the audit event.
+ *
+ * After it lands, the accepter's verified address is stamped on their
+ * `USER#{userId}/PROFILE` row. That is the row a removal reads to find the
+ * invitations addressed TO the member it is removing, and acceptance is one of
+ * only two moments the control plane learns a verified address.
  */
 export async function baseHandler(
   event: AuthenticatedEvent,
@@ -104,6 +110,8 @@ export async function baseHandler(
       verifiedEmail,
     });
   }
+
+  await rememberVerifiedEmail(userId, verifiedEmail);
 
   return await acceptedResponse({
     invitation,
@@ -212,6 +220,7 @@ async function acceptFailureResponse(
       // idempotent answer has to carry the retirement it promised, or a link the
       // caller has already used stays live for a fortnight.
       await retireAfterRace({ invitation, userId, verifiedEmail });
+      if (verifiedEmail) await rememberVerifiedEmail(userId, verifiedEmail);
       return await acceptedResponse({ invitation, role: existing.role, alreadyMember: true });
     }
   }

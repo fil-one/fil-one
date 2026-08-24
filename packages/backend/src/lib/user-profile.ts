@@ -1,4 +1,4 @@
-import { GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.js';
 
@@ -10,6 +10,16 @@ import { getDynamoClient } from './ddb-client.js';
  * did. So every caller here treats both fields as optional and treats a failed
  * read as "we do not know", never as "there is none" — the difference matters,
  * because one of those callers uses the address to decide what to revoke.
+ *
+ * The address is written by the paths that learn a VERIFIED one: account
+ * creation, a login whose stamp marker has gone stale, and accepting an
+ * invitation ({@link rememberVerifiedEmail}). Nothing writes an unverified
+ * claim here — the address decides which invitations a removal retires, and an
+ * address somebody typed is an address somebody chose.
+ *
+ * The name has no such gate: creation and login stamp whatever display name
+ * the ID token carries. The roster shows it and nothing else reads it, so a
+ * claimed name risks nothing; it is display, never identity.
  */
 export interface UserProfile {
   email?: string;
@@ -39,5 +49,40 @@ export async function readUserProfile(userId: string): Promise<UserProfile | und
   } catch (err) {
     console.error('[user-profile] Profile read failed', { userId, error: err });
     return undefined;
+  }
+}
+
+/**
+ * Record the address a session proved it holds.
+ *
+ * Removal sweeps the invitations addressed TO the member it removes, and it
+ * finds them by the address on this row: a removed member holding a live
+ * invitation to themselves otherwise redeems it and walks back in at whatever
+ * role that link carries. Acceptance is one of the two moments the control
+ * plane learns a verified address, and until it writes one the sweep cannot run
+ * for anybody who joined by invitation.
+ *
+ * Conditioned on the row existing, so a login racing a deletion cannot upsert a
+ * profile holding nothing but an address — the deletion census reads this row
+ * for the member's `sub` and fails closed on one it cannot decode.
+ *
+ * Best-effort, and outside the transaction that admitted the member: the
+ * acceptance has already landed, the caller IS a member, and failing their
+ * request over a field that only a later removal reads would answer failure for
+ * a request that succeeded. The log line is what says the sweep will be narrow.
+ */
+export async function rememberVerifiedEmail(userId: string, email: string): Promise<void> {
+  try {
+    await getDynamoClient().send(
+      new UpdateItemCommand({
+        TableName: Resource.UserInfoTable.name,
+        Key: { pk: { S: `USER#${userId}` }, sk: { S: 'PROFILE' } },
+        UpdateExpression: 'SET email = :email',
+        ConditionExpression: 'attribute_exists(pk)',
+        ExpressionAttributeValues: { ':email': { S: email } },
+      }),
+    );
+  } catch (err) {
+    console.error('[user-profile] Could not record the member’s address', { userId, error: err });
   }
 }

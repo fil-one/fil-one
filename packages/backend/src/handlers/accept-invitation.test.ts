@@ -5,6 +5,7 @@ import {
   GetItemCommand,
   TransactionCanceledException,
   TransactWriteItemsCommand,
+  UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
@@ -155,6 +156,11 @@ function transactItems() {
   return calls[0].args[0].input.TransactItems ?? [];
 }
 
+/** The profile stamps the acceptance made, in the order it made them. */
+function profileStamps() {
+  return ddbMock.commandCalls(UpdateItemCommand).map((call) => call.args[0].input);
+}
+
 function auditedEvent() {
   return unmarshall(auditItemIn(transactItems()));
 }
@@ -243,6 +249,7 @@ describe('POST /api/invitations/accept handler', () => {
 
     stubSession();
     ddbMock.on(TransactWriteItemsCommand).resolves({});
+    ddbMock.on(UpdateItemCommand).resolves({});
     stubInvitation();
     stubMembershipInInvitingOrg(undefined);
   });
@@ -366,6 +373,70 @@ describe('POST /api/invitations/accept handler', () => {
 
     expect(result).toMatchObject({ statusCode: 404 });
     expect(body(result).code).toBe(ApiErrorCode.INVITE_NOT_FOUND);
+  });
+
+  it('stamps the accepter’s verified address on their profile row', async () => {
+    // Removal sweeps the invitations addressed TO the member it removes and
+    // finds them by this field. Until acceptance writes one, a removed member
+    // holding a live invitation to themselves redeems it and walks back in at
+    // whatever role that link carries.
+    await handler(acceptEvent(), buildContext());
+
+    expect(profileStamps()).toEqual([
+      {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `USER#${USER_ID}` }, sk: { S: 'PROFILE' } },
+        UpdateExpression: 'SET email = :email',
+        ConditionExpression: 'attribute_exists(pk)',
+        ExpressionAttributeValues: { ':email': { S: EMAIL } },
+      },
+    ]);
+  });
+
+  it('stamps it on the idempotent path too, where the join lost its race', async () => {
+    // Two clicks on the same link: the membership landed under the other one,
+    // and this request still ends with a member whose address we now know.
+    ddbMock.on(TransactWriteItemsCommand).rejectsOnce(cancelledAt(1, 7)).resolves({});
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'OrgTable',
+        Key: { pk: { S: OrgKeys.orgPk(INVITING_ORG_ID) }, sk: { S: OrgKeys.memberSk(USER_ID) } },
+      })
+      .resolvesOnce({})
+      .resolves({
+        Item: {
+          pk: { S: OrgKeys.orgPk(INVITING_ORG_ID) },
+          sk: { S: OrgKeys.memberSk(USER_ID) },
+          role: { S: OrgRole.Member },
+          joinedAt: { S: CREATED_AT },
+        },
+      });
+
+    const result = await handler(acceptEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 200 });
+    expect(profileStamps()).toHaveLength(1);
+  });
+
+  it('stamps nothing when the acceptance was refused', async () => {
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(0, 7));
+
+    const result = await handler(acceptEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 404 });
+    expect(profileStamps()).toHaveLength(0);
+  });
+
+  it('answers success when the profile stamp fails', async () => {
+    // The membership landed and the caller is a member, which is what they
+    // asked for. A field only a later removal reads must not turn that into a
+    // failure — the log line is what says the sweep will be narrow.
+    ddbMock.on(UpdateItemCommand).rejects(new Error('ProvisionedThroughputExceededException'));
+
+    const result = await handler(acceptEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 200 });
+    expect(console.error).toHaveBeenCalled();
   });
 
   it('records the acceptance beside the write, carrying no token', async () => {
