@@ -360,6 +360,16 @@ export async function deleteInvitationsFor({
  * last run left. Keeping the condition would turn the residues a killed run
  * leaves into a permanently red `beforeAll` rather than one the next seed
  * repairs.
+ *
+ * One residue it cannot state its way out of: the seeded member already holding
+ * the Owner seat, which is what a killed `transfer.spec.ts` leaves. Writing the
+ * non-Owner role over it takes the org's last Owner away while `ownerCount`
+ * still says one, and the retried transfer then finds no Owner-only controls to
+ * drive. So the seat goes back to `invitedBy` first and the counter is recounted
+ * after — a repair the same shape as the spec's own teardown, run at the front
+ * of the next run instead of the end of the killed one. Without `invitedBy`
+ * there is nobody to hand the seat to, and this throws rather than leaving the
+ * org ownerless.
  */
 export async function seedMembership({
   orgId,
@@ -374,6 +384,8 @@ export async function seedMembership({
 }): Promise<void> {
   const joinedAt = new Date().toISOString();
   const table = tableName('OrgTable');
+
+  const seatRestored = await restoreOwnerSeatBefore({ orgId, userId, invitedBy });
 
   await getDynamoClient().send(
     new TransactWriteItemsCommand({
@@ -405,6 +417,50 @@ export async function seedMembership({
       ],
     }),
   );
+
+  // Only when this seed moved the owner set. A seed onto a non-Owner row leaves
+  // the owner count exactly where it was, and recounting it would spend a query
+  // per `beforeAll` to write back the number already there.
+  if (seatRestored) await repairOwnerCount(orgId);
+}
+
+/**
+ * Put the Owner seat back on the member who granted it, when the seat is on the
+ * row about to be seeded.
+ *
+ * Answers whether it moved anything, which is what tells {@link seedMembership}
+ * the counter needs recounting. Reads consistently: the whole point is the state
+ * a killed run committed, however recently.
+ */
+async function restoreOwnerSeatBefore({
+  orgId,
+  userId,
+  invitedBy,
+}: {
+  orgId: string;
+  userId: string;
+  invitedBy?: string;
+}): Promise<boolean> {
+  const { Item } = await getDynamoClient().send(
+    new GetItemCommand({
+      TableName: tableName('OrgTable'),
+      Key: { pk: { S: orgPk(orgId) }, sk: { S: memberSk(userId) } },
+      ConsistentRead: true,
+    }),
+  );
+
+  if (Item?.role?.S !== 'owner') return false;
+
+  if (!invitedBy) {
+    throw new Error(
+      `E2E user ${userId} holds the Owner seat in org ${orgId}, and seeding them a lesser role ` +
+        `would leave the organization without an Owner. Pass invitedBy so the seat can go back ` +
+        `to them, or clear the residue by hand.`,
+    );
+  }
+
+  await setMembershipRole({ orgId, userId: invitedBy, role: 'owner' });
+  return true;
 }
 
 /**
