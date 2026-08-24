@@ -30,6 +30,8 @@ import type {
   OrgBillingState,
   SubscriptionRow,
 } from './billing-rekey.ts';
+import { dispositionOrgless, orglessToken, parseAcceptedOrgless } from './billing-orgless.ts';
+import type { OrglessAcceptance } from './billing-orgless.ts';
 import { dispositionReread, rereadOrgState } from './billing-reread.ts';
 import { buildBackfillScanInput, buildRevertScanInput } from './billing-scan.ts';
 import { formatBillingVerifyReport, verifyBillingRekey } from './billing-verify.ts';
@@ -131,6 +133,16 @@ function applicationRow(overrides: Record<string, string> = {}): SubscriptionRow
 
 function attributes(values: Record<string, string>): Record<string, AttributeValue> {
   return Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { S: value }]));
+}
+
+/** A legacy row with no `orgId` — the class --verify cannot pass on its own. */
+function orglessRow(overrides: Partial<SubscriptionRow> = {}): SubscriptionRow {
+  return legacyRow({ pk: BillingKeys.legacyPk('orphan-1'), orgId: undefined, ...overrides });
+}
+
+/** The acceptance an operator would paste back after inspecting `row`. */
+function accept(row: SubscriptionRow): Map<string, OrglessAcceptance> {
+  return parseAcceptedOrgless(orglessToken(row)).accepted;
 }
 
 function state(overrides: Partial<OrgBillingState> = {}): OrgBillingState {
@@ -698,6 +710,57 @@ describe('parseResolvedCollisions', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Dispositioning a row with no orgId
+// ---------------------------------------------------------------------------
+
+describe('parseAcceptedOrgless', () => {
+  it('reads the token the report prints, prefixed or bare', () => {
+    const row = orglessRow();
+    const { accepted, malformed } = parseAcceptedOrgless(
+      `${orglessToken(row)}, orphan-2@${NEWER}@sub_2`,
+    );
+
+    expect(malformed).toEqual([]);
+    expect(accepted.get(row.pk)).toStrictEqual({
+      pk: row.pk,
+      updatedAt: UPDATED_AT,
+      subscriptionId: 'sub_1',
+    });
+    expect(accepted.get(BillingKeys.legacyPk('orphan-2'))).toMatchObject({
+      subscriptionId: 'sub_2',
+    });
+  });
+
+  it('refuses a key with no state, rather than reading it as an acceptance', () => {
+    const { accepted, malformed } = parseAcceptedOrgless(BillingKeys.legacyPk('orphan-1'));
+
+    expect(accepted.size).toBe(0);
+    expect(malformed[0]).toContain('expected');
+  });
+
+  it('names a row accepted twice in two states', () => {
+    const row = orglessRow();
+    const { malformed } = parseAcceptedOrgless(
+      `${orglessToken(row)},${orglessToken(orglessRow({ updatedAt: NEWER }))}`,
+    );
+
+    expect(malformed[0]).toContain('named twice');
+  });
+
+  it('writes and reads back the row that carries neither attribute', () => {
+    const bare = orglessRow({ updatedAt: undefined, subscriptionId: undefined });
+    const { accepted, malformed } = parseAcceptedOrgless(orglessToken(bare));
+
+    expect(malformed).toEqual([]);
+    expect(dispositionOrgless([bare], accepted)).toMatchObject({
+      accepted: [orglessToken(bare)],
+      undispositioned: [],
+      moved: [],
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Verification
 // ---------------------------------------------------------------------------
 
@@ -747,8 +810,8 @@ describe('validateResolvedCollisions', () => {
 describe('verifyBillingRekey', () => {
   function checksFor(
     states: OrgBillingState[],
-    orglessRows: string[] = [],
-    accepted: Set<string> = new Set(),
+    orglessRows: SubscriptionRow[] = [],
+    accepted: Map<string, OrglessAcceptance> = new Map(),
   ) {
     const plans: BillingPlan[] = states.map((s) => classifyOrgBilling(s));
     const scan: BillingScanCounts = {
@@ -888,18 +951,35 @@ describe('verifyBillingRekey', () => {
   });
 
   it('fails a legacy row with no orgId until it is named', () => {
-    const orgless = [BillingKeys.legacyPk('orphan-1')];
-    const before = checksFor([], orgless);
+    const orphan = orglessRow();
+    const before = checksFor([], [orphan]);
     expect(before.named('Every legacy row with no orgId').pass).toBe(false);
+    expect(before.named('Every legacy row with no orgId').offenders).toEqual([
+      orglessToken(orphan),
+    ]);
 
-    const after = checksFor([], orgless, new Set(orgless));
+    const after = checksFor([], [orphan], accept(orphan));
     const check = after.named('Every legacy row with no orgId');
     expect(check.pass).toBe(true);
-    expect(check.accepted).toEqual(orgless);
+    expect(check.accepted).toEqual([orglessToken(orphan)]);
+  });
+
+  it('fails a row that took a write after it was accepted', () => {
+    // The disposition is "nothing is behind this row", answered by looking the
+    // customer up in Stripe. Activation and the webhook write these rows through
+    // the legacy key alone, so the answer expires and nothing else here notices.
+    const orphan = orglessRow();
+    const paying = orglessRow({ updatedAt: NEWER, subscriptionId: 'sub_9' });
+
+    const { named } = checksFor([], [paying], accept(orphan));
+    const check = named('Every legacy row with no orgId');
+    expect(check.pass).toBe(false);
+    expect(check.offenders[0]).toContain('accepted as');
+    expect(check.offenders[0]).toContain('sub_9');
   });
 
   it('echoes an acceptance that no longer matches a row', () => {
-    const { named } = checksFor([], [], new Set([BillingKeys.legacyPk('gone')]));
+    const { named } = checksFor([], [], accept(orglessRow()));
 
     expect(named('Every legacy row with no orgId').accepted?.[0]).toContain(
       'no longer a row without an orgId',
@@ -964,12 +1044,16 @@ describe('formatBillingPlanReport', () => {
     expect(report).toContain('Every CUSTOMER# row stays until the dated cleanup step');
   });
 
-  it('enumerates the rows with no orgId for manual disposition', () => {
-    const orgless = [BillingKeys.legacyPk('orphan-1'), BillingKeys.legacyPk('orphan-2')];
-    const report = formatBillingPlanReport({ ...EMPTY_SCAN, orglessRows: 2 }, [], orgless);
+  it('enumerates the rows with no orgId as the tokens an acceptance pastes back', () => {
+    const rows = [orglessRow(), orglessRow({ pk: BillingKeys.legacyPk('orphan-2') })];
+    const report = formatBillingPlanReport(
+      { ...EMPTY_SCAN, orglessRows: 2 },
+      [],
+      rows.map(orglessToken),
+    );
 
     expect(report).toContain('Legacy rows with no orgId (2)');
-    for (const pk of orgless) expect(report).toContain(pk);
+    for (const row of rows) expect(report).toContain(orglessToken(row));
   });
 
   it('lists an anomaly with the reason it is one', () => {

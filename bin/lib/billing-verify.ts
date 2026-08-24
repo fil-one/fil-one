@@ -28,6 +28,8 @@ import {
   type OrgBillingState,
   type SubscriptionRow,
 } from './billing-rekey.ts';
+import { dispositionOrgless } from './billing-orgless.ts';
+import type { OrglessAcceptance, OrglessDispositions } from './billing-orgless.ts';
 
 /** How many rows a passing check enumerates before it summarizes the rest. */
 const LISTED_OFFENDERS = 50;
@@ -56,9 +58,9 @@ export interface BillingVerifyInput {
   plans: readonly BillingPlan[];
   scan: BillingScanCounts;
   /** Legacy rows with no `orgId`, which no org state can hold. */
-  orglessRows: readonly string[];
-  /** The ones an operator has dispositioned by name. */
-  acceptedOrgless?: ReadonlySet<string>;
+  orglessRows: readonly SubscriptionRow[];
+  /** The ones an operator has dispositioned, each bound to the state they read. */
+  acceptedOrgless?: ReadonlyMap<string, OrglessAcceptance>;
   /** Rows whose key parsed as neither shape, named. */
   unparsedRows?: readonly string[];
   /** Rows whose `orgId` attribute cannot be half of a key, named. */
@@ -70,7 +72,7 @@ export function verifyBillingRekey({
   plans,
   scan,
   orglessRows,
-  acceptedOrgless = new Set<string>(),
+  acceptedOrgless = new Map<string, OrglessAcceptance>(),
   unparsedRows = [],
   unkeyableOrgIds = [],
 }: BillingVerifyInput): BillingVerifyCheck[] {
@@ -86,9 +88,7 @@ export function verifyBillingRekey({
     (state) => state.orgRow && state.orgRow.orgId !== state.orgId,
   );
 
-  const undispositionedOrgless = orglessRows.filter((pk) => !acceptedOrgless.has(pk));
-  const acceptedRows = orglessRows.filter((pk) => acceptedOrgless.has(pk));
-  const staleAcceptances = [...acceptedOrgless].filter((pk) => !orglessRows.includes(pk));
+  const orgless = dispositionOrgless(orglessRows, acceptedOrgless);
 
   return [
     {
@@ -141,7 +141,7 @@ export function verifyBillingRekey({
         (plan) => `${BillingKeys.orgPk(plan.orgId)} [${plan.reason}] ${plan.detail}`,
       ),
     },
-    orglessCheck(scan, undispositionedOrgless, acceptedRows, staleAcceptances),
+    orglessCheck(scan, orgless),
   ];
 }
 
@@ -165,18 +165,21 @@ export function findUnkeyableOrgIds(rows: readonly SubscriptionRow[]): string[] 
  * all. Passing requires an operator to have named each row after looking at it,
  * and every acceptance is carried into the report so a PASS says what was signed
  * off.
+ *
+ * A row that moved since it was accepted fails as loudly as one nobody named.
+ * The acceptance says "nothing is behind this row"; an `updatedAt` or a
+ * subscription that changed afterwards is the row saying otherwise, and the two
+ * writers that produce it — billing activation and the Stripe webhook — write a
+ * row with no `orgId` through the legacy key alone, so nothing else here notices.
  */
-function orglessCheck(
-  scan: BillingScanCounts,
-  undispositioned: readonly string[],
-  accepted: readonly string[],
-  stale: readonly string[],
-): BillingVerifyCheck {
+function orglessCheck(scan: BillingScanCounts, orgless: OrglessDispositions): BillingVerifyCheck {
+  const { undispositioned, accepted, moved, stale } = orgless;
+
   return {
     name: 'Every legacy row with no orgId has been dispositioned',
-    pass: undispositioned.length === 0,
-    detail: `${scan.orglessRows} legacy rows carry no orgId; ${accepted.length} accepted, ${undispositioned.length} undispositioned`,
-    offenders: [...undispositioned],
+    pass: undispositioned.length === 0 && moved.length === 0,
+    detail: `${scan.orglessRows} legacy rows carry no orgId; ${accepted.length} accepted, ${undispositioned.length} undispositioned, ${moved.length} changed since they were accepted`,
+    offenders: [...undispositioned, ...moved],
     accepted: [...accepted, ...stale.map((pk) => `${pk} — no longer a row without an orgId`)],
   };
 }

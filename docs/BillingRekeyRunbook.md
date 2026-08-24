@@ -249,7 +249,7 @@ backoff and then stops the run; it is never counted as a race.
 
 ```sh
 ./bin/backfill-billing-to-org.ts --stage production --verify \
-  --accept-orgless CUSTOMER#8f3c…,CUSTOMER#1a2b…,CUSTOMER#c4d5… \
+  --accept-orgless CUSTOMER#8f3c…@2026-06-02T11:04:07.881Z@sub_1M4x…,CUSTOMER#1a2b…@2026-01-19T09:12:44.002Z@- \
   2>&1 | tee billing-verify.log
 ```
 
@@ -269,11 +269,11 @@ PASS  Every org row’s orgId attribute matches its key
 PASS  No org is claimed by two subscriptions
         0 orgs are anomalies of 810 scanned
 PASS  Every legacy row with no orgId has been dispositioned
-        3 legacy rows carry no orgId; 3 accepted, 0 undispositioned
+        3 legacy rows carry no orgId; 3 accepted, 0 undispositioned, 0 changed since they were accepted
         accepted by --accept-orgless (3):
-          CUSTOMER#8f3c…
-          CUSTOMER#1a2b…
-          CUSTOMER#c4d5…
+          CUSTOMER#8f3c…@2026-06-02T11:04:07.881Z@sub_1M4x…
+          CUSTOMER#1a2b…@2026-01-19T09:12:44.002Z@-
+          CUSTOMER#c4d5…@2026-03-30T22:41:10.517Z@-
 
 VERIFY: PASS
 ```
@@ -294,13 +294,18 @@ Without the `--accept-orgless` flag the same stage reports:
 
 ```
 FAIL  Every legacy row with no orgId has been dispositioned
-        3 legacy rows carry no orgId; 0 accepted, 3 undispositioned
-          CUSTOMER#8f3c…
-          CUSTOMER#1a2b…
-          CUSTOMER#c4d5…
+        3 legacy rows carry no orgId; 0 accepted, 3 undispositioned, 0 changed since they were accepted
+          CUSTOMER#8f3c…@2026-06-02T11:04:07.881Z@sub_1M4x…
+          CUSTOMER#1a2b…@2026-01-19T09:12:44.002Z@-
+          CUSTOMER#c4d5…@2026-03-30T22:41:10.517Z@-
 
 VERIFY: FAIL (1 checks)
 ```
+
+Each offender is the token `--accept-orgless` takes back:
+`CUSTOMER#{userId}@{updatedAt}@{subscriptionId}`, with `-` for an attribute the
+row does not carry. Copy the line; do not retype the key on its own, which the
+run refuses.
 
 ### Dispositioning a row with no orgId
 
@@ -324,7 +329,12 @@ Per row:
    to make the row stop being one.
 3. Only if the customer is **gone from Stripe, or has no live subscription**, is
    the row residue: nothing is being billed and no tenant reads it. Record what
-   you saw and name it on `--accept-orgless`.
+   you saw and name it on `--accept-orgless`, using the token from the report so
+   the acceptance carries the `updatedAt` and subscription you inspected. If the
+   row takes a write afterwards — activation and the Stripe webhook write these
+   rows through the legacy key, without producing an org twin — the acceptance
+   stops matching and verification fails it again, which is the point: the
+   customer you checked now has billing state, and the flip would take it away.
 4. Never guess an org. A row copied to the wrong `ORG#` partition gives that org
    somebody else's subscription.
 

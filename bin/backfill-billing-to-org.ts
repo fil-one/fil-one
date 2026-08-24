@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 // Usage: ./bin/backfill-billing-to-org.ts --stage <name> [--execute] [--verify]
-//        [--resolve-collisions <orgId=userId,…>] [--accept-orgless <CUSTOMER#…,…>]
+//        [--resolve-collisions <orgId=userId,…>]
+//        [--accept-orgless <CUSTOMER#…@updatedAt@subscriptionId,…>]
 //        [--force-unlock]
 //
 // Copies each BillingTable subscription row from `CUSTOMER#{userId}/SUBSCRIPTION`
@@ -61,7 +62,10 @@
 // --verify re-derives the classification and prints PASS/FAIL per check — the
 // gate the flip PR merges on. It writes no subscription row. Legacy rows with no
 // `orgId` fail it until each is named on --accept-orgless, because the flip is
-// what makes them unreachable.
+// what makes them unreachable. An acceptance names the row AND the state the
+// operator inspected — those rows keep taking webhook and activation writes
+// through the legacy key, so one accepted as residue can be a paying account by
+// the time the gate runs.
 //
 // An --execute AND a --verify run hold a lock row in BillingTable so this script
 // and its revert can never run at once. --force-unlock drops a lock a crashed run
@@ -91,9 +95,10 @@ const cli = parseCli({
     '--resolve-collisions <orgId=userId,…>',
     '                For an org whose legacy rows name different subscriptions:',
     '                the row that is live in Stripe. Check the dashboard first.',
-    '--accept-orgless <CUSTOMER#…,…>',
+    '--accept-orgless <CUSTOMER#…@updatedAt@subscriptionId,…>',
     '                With --verify: the legacy rows with no orgId an operator has',
-    '                dispositioned. Rows not named here fail verification.',
+    '                dispositioned, as the report prints them. Rows not named here,',
+    '                and rows that changed since, fail verification.',
     '--force-unlock  Drop the run lock a crashed --execute run left behind.',
   ],
 });
@@ -123,6 +128,7 @@ import type {
   OrgBillingState,
   SubscriptionRow,
 } from './lib/billing-rekey.ts';
+import { orglessToken, parseAcceptedOrgless } from './lib/billing-orgless.ts';
 import { dispositionReread, rereadOrgState } from './lib/billing-reread.ts';
 import { buildBackfillScanInput } from './lib/billing-scan.ts';
 import {
@@ -146,7 +152,9 @@ const dynamo = new DynamoDBClient({ region: awsRegion });
 const verify = cli.flag('--verify');
 const execute = cli.execute && !verify;
 const resolved = parseResolvedCollisions(cli.option('--resolve-collisions'));
-const acceptedOrgless = parseAcceptedOrgless(cli.option('--accept-orgless'));
+const { accepted: acceptedOrgless, malformed: malformedAcceptances } = parseAcceptedOrgless(
+  cli.option('--accept-orgless'),
+);
 
 const scan: BillingScanCounts = {
   subscriptionRows: 0,
@@ -159,7 +167,7 @@ const scan: BillingScanCounts = {
 
 const orgs = new Map<string, OrgBillingState>();
 /** Legacy rows with no `orgId` — there is no org to file them under. */
-const orglessRows: string[] = [];
+const orglessRows: SubscriptionRow[] = [];
 /** Legacy rows whose `orgId` cannot form a key — an org to copy to that does not exist. */
 const unkeyableRows: SubscriptionRow[] = [];
 /** Keys that parse as neither shape. Named, because a counted row is a row nobody looks at. */
@@ -234,7 +242,7 @@ function collectRow(item: Record<string, AttributeValue>): void {
   scan.legacyRows++;
   if (!row.orgId) {
     scan.orglessRows++;
-    orglessRows.push(pk);
+    orglessRows.push(row);
     return;
   }
 
@@ -344,19 +352,6 @@ function describe(plan: CopyPlan): string {
   return `${BillingKeys.orgPk(plan.orgId)} <- ${plan.source.pk} ${source}${superseded}`;
 }
 
-function parseAcceptedOrgless(value: string | undefined): Set<string> {
-  const entries = (value ?? '')
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0)
-    .map((entry) =>
-      entry.startsWith(BillingKeys.legacyPkPrefix())
-        ? entry
-        : `${BillingKeys.legacyPkPrefix()}${entry}`,
-    );
-  return new Set(entries);
-}
-
 /**
  * The run, in one function so every exit is a `return`.
  *
@@ -369,8 +364,20 @@ async function main(): Promise<void> {
   // A disposition is a statement about what --verify may pass, and nothing else
   // reads it. Accepting it on a run that cannot act on it would let an operator
   // believe rows had been signed off when no check ever saw the list.
-  if (acceptedOrgless.size > 0 && !verify) {
+  if ((acceptedOrgless.size > 0 || malformedAcceptances.length > 0) && !verify) {
     console.error('--accept-orgless applies to --verify only. Nothing was read or written.');
+    process.exitCode = 1;
+    return;
+  }
+
+  // An acceptance names a row AND the state it was in, so an entry carrying no
+  // state is not a shorter way of saying the same thing — it is a row signed off
+  // without a record of what was signed off. Refusing the whole list keeps a
+  // half-read one from producing a PASS.
+  if (malformedAcceptances.length > 0) {
+    console.error('--accept-orgless entries this run cannot read:');
+    for (const problem of malformedAcceptances) console.error(`  ${problem}`);
+    console.error('Nothing was verified.');
     process.exitCode = 1;
     return;
   }
@@ -442,7 +449,7 @@ async function run(): Promise<void> {
     return;
   }
 
-  console.log(formatBillingPlanReport(scan, plans, orglessRows));
+  console.log(formatBillingPlanReport(scan, plans, orglessRows.map(orglessToken)));
   for (const line of formatAppliedResolutions(resolved, plans)) console.log(line);
   console.log('');
 
@@ -464,7 +471,7 @@ function reportVerification(
   states: readonly OrgBillingState[],
   plans: readonly BillingPlan[],
 ): void {
-  console.log(formatBillingPlanReport(scan, plans, orglessRows));
+  console.log(formatBillingPlanReport(scan, plans, orglessRows.map(orglessToken)));
   for (const line of formatAppliedResolutions(resolved, plans)) console.log(line);
   console.log('');
   const checks = verifyBillingRekey({

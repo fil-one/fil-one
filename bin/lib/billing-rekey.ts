@@ -654,7 +654,7 @@ export function summarizeBillingPlans(plans: readonly BillingPlan[]): BillingPla
 export function formatBillingPlanReport(
   scan: BillingScanCounts,
   plans: readonly BillingPlan[],
-  orglessRows: readonly string[],
+  orglessTokens: readonly string[],
 ): string {
   const counts = summarizeBillingPlans(plans);
   const writes = counts.firstCopies + counts.deltas;
@@ -673,7 +673,7 @@ export function formatBillingPlanReport(
       ['  Anomalies (manual disposition)', counts.anomalies],
     ]),
     '',
-    ...formatOrglessRows(scan, orglessRows),
+    ...formatOrglessRows(scan, orglessTokens),
     ...formatBillingAnomalies(plans),
     `Writes ${writes} org rows and deletes nothing. Every CUSTOMER# row stays until the dated cleanup step.`,
   ].join('\n');
@@ -686,19 +686,21 @@ function alignedCounts(rows: readonly (readonly [string, number])[]): string[] {
 }
 
 /**
- * The rows with no `orgId`, enumerated in full.
+ * The rows with no `orgId`, enumerated in full, as the tokens `--accept-orgless`
+ * takes back ({@link orglessToken}).
  *
  * There is no org to key them to and nothing to infer one from, so the backfill
  * never touches them. Every lifecycle job already skips them, which is why they
  * have gone unnoticed; the list is here because the flip is what makes that
- * permanent.
+ * permanent. Each line carries the state the operator is dispositioning, which is
+ * what an acceptance has to name.
  */
-function formatOrglessRows(scan: BillingScanCounts, orglessRows: readonly string[]): string[] {
+function formatOrglessRows(scan: BillingScanCounts, orglessTokens: readonly string[]): string[] {
   if (scan.orglessRows === 0) return ['Legacy rows with no orgId: none.', ''];
 
   return [
     `Legacy rows with no orgId (${scan.orglessRows}) — never copied, for manual disposition:`,
-    ...orglessRows.map((pk) => `  ${pk}`),
+    ...orglessTokens.map((token) => `  ${token}`),
     '',
   ];
 }
