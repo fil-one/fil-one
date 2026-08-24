@@ -1,10 +1,11 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type { ListBucketsResponse } from '@filone/shared';
-import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.js';
-import { getOrgProfile } from '../lib/org-profile.js';
+import type { ErrorResponse, ListBucketsResponse, S3Region } from '@filone/shared';
+import { listBucketsUnavailableMessage } from '@filone/shared';
+import { getProvisionedRegions } from '../lib/region-helpers.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
+import type { BucketSummary } from '../lib/service-orchestrator.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -16,54 +17,53 @@ export async function baseHandler(
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const { orgId } = getUserInfo(event);
 
-  const orchestrators = getAvailableOrchestrators();
-  const orgProfile = await getOrgProfile(orgId);
-  // `allSettled` rather than `all` so every failing leg can be named in the logs and carried in
-  // the rethrown error: `all` discards which orchestrator rejected, which leaves a 500 here
-  // indistinguishable between regions. We wait for every leg to settle, log each failure, then
-  // rethrow them together as one AggregateError in registry order. The request still fails as
-  // a whole.
+  const regions = await getProvisionedRegions(orgId);
+
+  // Fail open (FIL-1049): one region's ListBuckets 403 used to collapse the whole request into a
+  // generic 500, hiding the healthy regions' buckets. Return what answered, name what did not.
   const settled = await Promise.allSettled(
-    orchestrators.map(async (orchestrator) => {
-      const tenantId = orchestrator.isTenantReady(orgProfile);
-      if (!tenantId) return [];
-      return orchestrator.listBuckets(tenantId);
-    }),
+    regions.map(({ orchestrator, tenantId }) => orchestrator.listBuckets(tenantId)),
   );
 
-  // Pair each rejection with the orchestrator that produced it, in registry order, so the
-  // logging and the rethrow below both work off that one collection.
-  const failures = settled.flatMap((result, index) =>
-    result.status === 'rejected'
-      ? { orchestrator: orchestrators[index], reason: result.reason }
-      : [],
-  );
-
-  if (failures.length > 0) {
-    for (const { orchestrator, reason } of failures) {
-      console.error('[list-buckets] Orchestrator listBuckets failed', {
-        orgId,
-        orchestratorId: orchestrator.id,
-        region: orchestrator.region,
-        error: reason,
-      });
+  const buckets: BucketSummary[] = [];
+  const unavailableRegions: S3Region[] = [];
+  settled.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      buckets.push(...result.value);
+      return;
     }
-    // Name every failing leg in the top-level message too: AggregateError hides the nested
-    // `errors` from most log formatters, so without this a 500 says nothing about the cause.
-    const legs = failures.map(
-      ({ orchestrator, reason }) =>
-        `${orchestrator.id} (${orchestrator.region}): ${reason instanceof Error ? reason.message : String(reason)}`,
-    );
-    throw new AggregateError(
-      failures.map(({ reason }) => reason),
-      `One or more orchestrators failed to list buckets:\n${legs.join('\n')}`,
-    );
+    const { orchestrator, tenantId } = regions[index];
+    // The reason stays here: it carries orchestrator internals that must not reach the browser,
+    // and an S3 AccessDenied string means nothing to a user. The client learns only the region.
+    console.error('[list-buckets] Orchestrator listBuckets failed', {
+      orgId,
+      orchestratorId: orchestrator.id,
+      region: orchestrator.region,
+      tenantId,
+      error: result.reason,
+    });
+    unavailableRegions.push(orchestrator.region);
+  });
+
+  // Every provisioned region is down: an empty 200 renders as "No buckets yet" over a real
+  // outage. Returned rather than thrown so the message survives, since the error-handler
+  // middleware replaces any throw with the generic 500. The `> 0` guard keeps an org with no
+  // provisioned regions on the 200 path.
+  if (unavailableRegions.length > 0 && unavailableRegions.length === regions.length) {
+    return new ResponseBuilder()
+      .status(503)
+      .body<ErrorResponse>({ message: listBucketsUnavailableMessage(unavailableRegions) })
+      .build();
   }
 
-  const buckets = settled
-    .flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
-    .sort((a, b) => a.bucketName.localeCompare(b.bucketName));
-  return new ResponseBuilder().status(200).body<ListBucketsResponse>({ buckets }).build();
+  buckets.sort((a, b) => a.bucketName.localeCompare(b.bucketName));
+  return new ResponseBuilder()
+    .status(200)
+    .body<ListBucketsResponse>({
+      buckets,
+      ...(unavailableRegions.length > 0 && { unavailableRegions }),
+    })
+    .build();
 }
 
 export const handler = middy(baseHandler)

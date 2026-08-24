@@ -18,8 +18,12 @@ function renderWith(props: {
   selectedBuckets?: string[];
   pinnedBucket?: string;
   buckets?: Bucket[];
+  unavailableRegions?: S3Region[];
 }) {
-  const data: ListBucketsResponse = { buckets: props.buckets ?? defaultBuckets };
+  const data: ListBucketsResponse = {
+    buckets: props.buckets ?? defaultBuckets,
+    ...(props.unavailableRegions && { unavailableRegions: props.unavailableRegions }),
+  };
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(queryKeys.buckets, data);
   return render(
@@ -83,5 +87,45 @@ describe('AccessKeyBucketScopeFields region filtering', () => {
     });
     expect(screen.getByText('No buckets found.')).toBeInTheDocument();
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  });
+});
+
+describe('AccessKeyBucketScopeFields degraded regions', () => {
+  const DEGRADED = 'Cannot list buckets in the us-east-1 region. Please try again later.';
+
+  it('warns when the selected region could not be listed', () => {
+    renderWith({ region: S3Region.UsEast1, unavailableRegions: [S3Region.UsEast1] });
+    expect(screen.getByText(DEGRADED)).toBeInTheDocument();
+  });
+
+  it('still lists the buckets the region did return', () => {
+    renderWith({ region: S3Region.UsEast1, unavailableRegions: [S3Region.UsEast1] });
+    expect(screen.getByRole('checkbox', { name: 'us-a' })).toBeInTheDocument();
+  });
+
+  it('replaces "No buckets found." with the warning when nothing came back', () => {
+    renderWith({
+      region: S3Region.UsEast1,
+      buckets: [],
+      unavailableRegions: [S3Region.UsEast1],
+    });
+    expect(screen.getByText(DEGRADED)).toBeInTheDocument();
+    expect(screen.queryByText('No buckets found.')).not.toBeInTheDocument();
+  });
+
+  it('stays quiet when a region other than the selected one is degraded', () => {
+    renderWith({ region: S3Region.UsEast1, unavailableRegions: [S3Region.EuWest1] });
+    expect(screen.queryByText(/Cannot list buckets/)).not.toBeInTheDocument();
+  });
+
+  // A degraded region must not silently unscope a key that is mid-edit.
+  it('keeps an already-selected bucket checked while its region is degraded', () => {
+    renderWith({
+      region: S3Region.UsEast1,
+      buckets: [],
+      selectedBuckets: ['us-a'],
+      unavailableRegions: [S3Region.UsEast1],
+    });
+    expect(screen.getByRole('checkbox', { name: 'us-a' })).toBeChecked();
   });
 });

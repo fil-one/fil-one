@@ -93,6 +93,7 @@ export {
   RETENTION_MAX_DAYS,
   RETENTION_MAX_YEARS,
   CreateBucketSchema,
+  listBucketsUnavailableMessage,
 } from './api/buckets.js';
 
 export type { RetentionMode, RetentionDurationType } from './api/buckets.js';
