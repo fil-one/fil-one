@@ -268,6 +268,10 @@ gate, so validate the expected `owner` on both rows.
 
 ## Backend correctness
 
+### Give the HubSpot scanner the shared subscription scan
+
+`jobs/hubspot-contact-sync.ts` keeps a private `scanSubscriptions` instead of the one in `subscription-store.ts`, so it alone skips `scannableOwner` filtering and `assertOneRowPerOrg`, and a leftover `CUSTOMER#` row can still overwrite webhook-current HubSpot status until the dated cleanup removes it. Converge on the shared scan.
+
 ### get-me leaks an unhandled rejection when the org-profile read fails
 
 `activeOrgProfile` is consumed twice — once by `Promise.all`, once by a `.then()` chain handed to `summarizeMemberships` — and when the read rejects, the second consumer is never awaited. Harmless in Lambda today, but it fails any vitest run that exercises the failure and it is one refactor away from a real unhandled rejection. Award the promise a single owner.
