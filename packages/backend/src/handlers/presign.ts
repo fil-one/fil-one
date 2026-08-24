@@ -34,6 +34,7 @@ import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { requireMembershipMiddleware } from '../middleware/authorize.js';
+import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
 
@@ -245,5 +246,6 @@ export const handler = middy(baseHandler)
   // it; membership does not, so it is settled here — before the billing read,
   // and inside the metric that says whether the conversion missed a cohort.
   .use(requireMembershipMiddleware())
+  .use(csrfMiddleware())
   .use(subscriptionGuardMiddleware(AccessLevel.Read))
   .use(errorHandlerMiddleware());

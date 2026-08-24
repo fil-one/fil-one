@@ -3,6 +3,7 @@ import type { APIGatewayProxyResultV2, APIGatewayProxyStructuredResultV2 } from 
 import { marshall } from '@aws-sdk/util-dynamodb';
 import {
   ApiErrorCode,
+  CSRF_COOKIE_NAME,
   OrgRole,
   ROUTE_MANIFEST,
   roleHasPermission,
@@ -54,6 +55,18 @@ const USER_ID = 'user-1';
 const OUTSIDER_EMAIL = 'outsider@example.com';
 /** The refusal `ragAccessMiddleware` writes, verbatim. */
 const RAG_REFUSAL = 'You do not have access to this feature.';
+/** The refusal `csrfMiddleware` writes, verbatim. */
+const CSRF_REFUSAL = 'CSRF validation failed';
+/** Matched between cookie and header on every request that carries one. */
+const CSRF_TOKEN = 'csrf-token-value';
+
+/**
+ * The `amr` the stubbed auth middleware reports, which is what the step-up gate
+ * reads. Empty by default, so the gate fails closed exactly as it does on a
+ * session that never satisfied a challenge; the suite that needs to reach past
+ * it fills it.
+ */
+const verifiedAmr: string[] = [];
 
 // The `sst` mock answers the resource reads a handler module makes while it is
 // being imported, and the auth one stands in for the middleware that would have
@@ -80,7 +93,16 @@ vi.mock('sst', () =>
     StripeSecretKey: { value: 'sk_test_fake' },
   }),
 );
-vi.mock('./middleware/auth.js', () => authPartialMock());
+vi.mock('./middleware/auth.js', () => ({
+  ...authPartialMock(),
+  getVerifiedIdTokenClaims: () => ({
+    email: null,
+    emailVerified: false,
+    name: null,
+    picture: null,
+    amr: verifiedAmr,
+  }),
+}));
 
 type DynamoRead = { TableName?: string; Key?: { pk?: { S: string }; sk?: { S: string } } };
 
@@ -125,25 +147,40 @@ type LambdaModule = {
 };
 
 /**
- * Run one route's real chain for a caller with this membership.
+ * Run one route's real chain, driven with the method the manifest declares so a
+ * POST route is exercised as a POST. The request carries a matching CSRF token
+ * unless a case is about the request that carries none.
  *
  * `.ts`, against the repo's usual `.js` specifiers: a dynamic import with a
  * variable in it compiles to a glob over the literal part of the pattern, and
  * `./handlers/*.js` matches nothing on disk.
  */
 async function invokeRoute(
-  handler: string,
-  membership: OrgMembership | typeof NO_MEMBERSHIP,
-  email?: string,
+  route: RouteManifestEntry,
+  {
+    membership,
+    email,
+    csrf = true,
+  }: { membership: OrgMembership | typeof NO_MEMBERSHIP; email?: string; csrf?: boolean },
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const module = (await import(`./handlers/${handler}.ts`)) as LambdaModule;
+  const module = (await import(`./handlers/${route.handler}.ts`)) as LambdaModule;
   const event = buildEvent({
+    method: route.method,
     userInfo: { userId: USER_ID, orgId: ORG_ID, membership, ...(email ? { email } : {}) },
+    ...(csrf ? { cookies: [`${CSRF_COOKIE_NAME}=${CSRF_TOKEN}`] } : {}),
   });
+  if (csrf) event.headers['x-csrf-token'] = CSRF_TOKEN;
   // Every route here answers with a ResponseBuilder, so the union's string arm
   // never occurs; middy's declared return type carries it anyway.
   return (await module.handler(event, buildContext())) as APIGatewayProxyStructuredResultV2;
 }
+
+/** The caller every case that is not about roles arrives as. */
+const owner = () => membershipFor(ORG_ID, USER_ID, OrgRole.Owner);
+
+/** A manifest entry paired with its handler name, for `it.each` titles. */
+const named = (routes: readonly RouteManifestEntry[]) =>
+  routes.map((route) => [route.handler, route] as const);
 
 /** The error body a response carries, or an empty one when it carries none. */
 function errorBody(result: APIGatewayProxyStructuredResultV2): {
@@ -175,13 +212,12 @@ const byRequirement = (requires: RouteManifestEntry['requires']) =>
  * itself, so a test can never assert against a requirement the manifest does
  * not declare.
  */
-const permissionGated: { handler: string; permission: Permission }[] = ROUTE_MANIFEST.filter(
-  (route) => route.category === 'authenticated',
-).flatMap((route) =>
-  route.requires === undefined || route.requires === 'self' || route.requires === 'in-handler'
-    ? []
-    : [{ handler: route.handler, permission: route.requires }],
-);
+const permissionGated: { route: RouteManifestEntry; permission: Permission }[] =
+  ROUTE_MANIFEST.filter((route) => route.category === 'authenticated').flatMap((route) =>
+    route.requires === undefined || route.requires === 'self' || route.requires === 'in-handler'
+      ? []
+      : [{ route, permission: route.requires }],
+  );
 
 /** Every role the capability matrix refuses this permission to. */
 const rolesRefused = (permission: Permission) =>
@@ -218,13 +254,15 @@ function quietDenialOutput(): void {
 describe('enforcement derived from the manifest', () => {
   quietDenialOutput();
 
-  for (const { handler, permission } of permissionGated) {
-    describe(`${handler} (${permission})`, () => {
+  for (const { route, permission } of permissionGated) {
+    describe(`${route.handler} (${permission})`, () => {
       const refused = rolesRefused(permission);
 
       if (refused.length > 0) {
         it.each(refused)('refuses %s', async (role) => {
-          const result = await invokeRoute(handler, membershipFor(ORG_ID, USER_ID, role));
+          const result = await invokeRoute(route, {
+            membership: membershipFor(ORG_ID, USER_ID, role),
+          });
 
           expect(result.statusCode).toBe(403);
           expect(errorCode(result)).toBe(ApiErrorCode.FORBIDDEN_ROLE);
@@ -232,7 +270,7 @@ describe('enforcement derived from the manifest', () => {
       }
 
       it('refuses a caller with no membership row', async () => {
-        const result = await invokeRoute(handler, NO_MEMBERSHIP);
+        const result = await invokeRoute(route, { membership: NO_MEMBERSHIP });
 
         expect(result.statusCode).toBe(403);
         expect(errorCode(result)).toBe(ApiErrorCode.NOT_A_MEMBER);
@@ -254,14 +292,15 @@ describe('enforcement derived from the manifest', () => {
 describe('routes whose permission depends on the body', () => {
   quietDenialOutput();
 
-  const inHandler = byRequirement('in-handler').map((route) => route.handler);
+  it.each(named(byRequirement('in-handler')))(
+    '%s refuses a caller with no membership row',
+    async (_handler, route) => {
+      const result = await invokeRoute(route, { membership: NO_MEMBERSHIP });
 
-  it.each(inHandler)('%s refuses a caller with no membership row', async (handler) => {
-    const result = await invokeRoute(handler, NO_MEMBERSHIP);
-
-    expect(result.statusCode).toBe(403);
-    expect(errorCode(result)).toBe(ApiErrorCode.NOT_A_MEMBER);
-  });
+      expect(result.statusCode).toBe(403);
+      expect(errorCode(result)).toBe(ApiErrorCode.NOT_A_MEMBER);
+    },
+  );
 });
 
 /**
@@ -280,7 +319,9 @@ describe('the cookie caller on a bearer route', () => {
 
       if (refused.length > 0) {
         it.each(refused)('refuses %s', async (role) => {
-          const result = await invokeRoute(route.handler, membershipFor(ORG_ID, USER_ID, role));
+          const result = await invokeRoute(route, {
+            membership: membershipFor(ORG_ID, USER_ID, role),
+          });
 
           expect(result.statusCode).toBe(403);
           expect(errorCode(result)).toBe(ApiErrorCode.FORBIDDEN_ROLE);
@@ -288,13 +329,51 @@ describe('the cookie caller on a bearer route', () => {
       }
 
       it('refuses a caller with no membership row', async () => {
-        const result = await invokeRoute(route.handler, NO_MEMBERSHIP);
+        const result = await invokeRoute(route, { membership: NO_MEMBERSHIP });
 
         expect(result.statusCode).toBe(403);
         expect(errorCode(result)).toBe(ApiErrorCode.NOT_A_MEMBER);
       });
     });
   }
+});
+
+/**
+ * A cookie is sent by the browser whether or not the page asking for it is
+ * ours, so every route that changes something behind a cookie session takes a
+ * CSRF token as well, and refuses the request that arrives without one. The
+ * rest of this file supplies the token; this is the one rule that leaves it
+ * out.
+ *
+ * The scope is the cookie session. The Stripe webhook authenticates by the
+ * provider's request signature and the RAG query route by its bearer token;
+ * neither is a credential a browser attaches on its own, and neither route
+ * carries the middleware.
+ */
+describe('every mutating session route refuses a request with no CSRF token', () => {
+  quietDenialOutput();
+
+  // The step-up gate sits ahead of the CSRF one on the MFA routes, so the
+  // caller arrives holding a strong-auth session. What the request is missing
+  // is the token and nothing else.
+  beforeEach(() => {
+    verifiedAmr.push('mfa');
+  });
+
+  afterEach(() => {
+    verifiedAmr.length = 0;
+  });
+
+  const mutating = ROUTE_MANIFEST.filter(
+    (route) => route.category === 'authenticated' && route.method !== 'GET',
+  );
+
+  it.each(named(mutating))('%s', async (_handler, route) => {
+    const result = await invokeRoute(route, { membership: owner(), csrf: false });
+
+    expect(result.statusCode).toBe(403);
+    expect(errorBody(result).message).toBe(CSRF_REFUSAL);
+  });
 });
 
 /**
@@ -312,14 +391,11 @@ describe('the cookie caller on a bearer route', () => {
 describe('the RAG allowlist gates the routes the manifest marks', () => {
   quietDenialOutput();
 
-  const owner = () => membershipFor(ORG_ID, USER_ID, OrgRole.Owner);
-  const gated = ROUTE_MANIFEST.filter((route) => route.ragAllowlisted).map(
-    (route) => route.handler,
-  );
+  const gated = ROUTE_MANIFEST.filter((route) => route.ragAllowlisted);
   const ungated = ROUTE_MANIFEST.filter(
     (route) =>
       !route.ragAllowlisted && (route.category === 'authenticated' || route.category === 'bearer'),
-  ).map((route) => route.handler);
+  );
 
   // The RAG gate runs after the subscription guard on every chain that carries
   // it, so the request only reaches the gate once the guard has a record to
@@ -343,10 +419,10 @@ describe('the RAG allowlist gates the routes the manifest marks', () => {
     );
   }
 
-  it.each(gated)(
+  it.each(named(gated))(
     '%s refuses a caller who is neither foundation nor allowlisted',
-    async (handler) => {
-      const result = await invokeRoute(handler, owner(), OUTSIDER_EMAIL);
+    async (_handler, route) => {
+      const result = await invokeRoute(route, { membership: owner(), email: OUTSIDER_EMAIL });
 
       expect(result.statusCode).toBe(403);
       expect(errorBody(result).message).toBe(RAG_REFUSAL);
@@ -356,16 +432,16 @@ describe('the RAG allowlist gates the routes the manifest marks', () => {
   // What the allowlisted caller then gets is the route's own business, and the
   // route's own tests say what it is. The claim here is only that the gate is
   // no longer what stops them.
-  it.each(gated)('%s lets an allowlisted caller past the gate', async (handler) => {
+  it.each(named(gated))('%s lets an allowlisted caller past the gate', async (_handler, route) => {
     allowlist(OUTSIDER_EMAIL);
 
-    const result = await invokeRoute(handler, owner(), OUTSIDER_EMAIL);
+    const result = await invokeRoute(route, { membership: owner(), email: OUTSIDER_EMAIL });
 
     expect(ragRefused(result)).toBe(false);
   });
 
-  it.each(ungated)('%s is not behind the gate', async (handler) => {
-    const result = await invokeRoute(handler, owner(), OUTSIDER_EMAIL);
+  it.each(named(ungated))('%s is not behind the gate', async (_handler, route) => {
+    const result = await invokeRoute(route, { membership: owner(), email: OUTSIDER_EMAIL });
 
     expect(ragRefused(result)).toBe(false);
   });
@@ -392,12 +468,13 @@ describe('self-service routes serve a caller with no membership row', () => {
     ApiErrorCode.FORBIDDEN_ROLE,
     ApiErrorCode.NOT_A_MEMBER,
   ];
-  const selfRoutes = byRequirement('self').map((route) => route.handler);
+  it.each(named(byRequirement('self')))(
+    '%s does not refuse them on the org gate',
+    async (_handler, route) => {
+      const result = await invokeRoute(route, { membership: NO_MEMBERSHIP });
 
-  it.each(selfRoutes)('%s does not refuse them on the org gate', async (handler) => {
-    const result = await invokeRoute(handler, NO_MEMBERSHIP);
-
-    const answer = result.statusCode === 403 ? errorCode(result) : `HTTP ${result.statusCode}`;
-    expect(orgDenials).not.toContain(answer);
-  });
+      const answer = result.statusCode === 403 ? errorCode(result) : `HTTP ${result.statusCode}`;
+      expect(orgDenials).not.toContain(answer);
+    },
+  );
 });
