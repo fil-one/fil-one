@@ -30,6 +30,7 @@ import type {
   OrgBillingState,
   SubscriptionRow,
 } from './billing-rekey.ts';
+import { dispositionReread } from './billing-reread.ts';
 import { buildBackfillScanInput, buildRevertScanInput } from './billing-scan.ts';
 import { formatBillingVerifyReport, verifyBillingRekey } from './billing-verify.ts';
 
@@ -571,6 +572,43 @@ describe('unkeyableOrgAnomalies', () => {
 
   it('leaves the rows this migration can key alone', () => {
     expect(unkeyableOrgAnomalies([legacyRow(), legacyRow({ orgId: undefined })])).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The second read, right before the write
+// ---------------------------------------------------------------------------
+
+describe('dispositionReread', () => {
+  it('reports an org that no longer needs a copy as skipped, with its origin', () => {
+    const source = legacyRow();
+    const plan = classifyOrgBilling(state({ legacyRows: [source], orgRow: copiedRow(source) }));
+
+    expect(dispositionReread(plan)).toStrictEqual({
+      outcome: 'skipped',
+      message: `${BillingKeys.orgPk(ORG_ID)} — no longer needs a copy (backfill)`,
+    });
+  });
+
+  it('names an org that became an anomaly since the scan as one, not as a skip', () => {
+    // A run that counts this as an ordinary skip ends with exit 0 and zero
+    // anomalies reported, for an org nothing copied and nothing will.
+    const rival = legacyRow({
+      pk: BillingKeys.legacyPk(OTHER_USER_ID),
+      subscriptionId: 'sub_2',
+    });
+    const plan = classifyOrgBilling(state({ legacyRows: [legacyRow(), rival] }));
+
+    const disposition = dispositionReread(plan);
+    expect(disposition.outcome).toBe('anomaly');
+    expect(disposition).toMatchObject({ reason: 'collision' });
+    expect((disposition as { message: string }).message).toContain('sub_2');
+  });
+
+  it('hands a copy back for the write', () => {
+    const plan = classifyOrgBilling(state({ legacyRows: [legacyRow()] }));
+
+    expect(dispositionReread(plan)).toStrictEqual({ outcome: 'copy', plan });
   });
 });
 

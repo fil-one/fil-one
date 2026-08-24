@@ -123,6 +123,7 @@ import type {
   OrgBillingState,
   SubscriptionRow,
 } from './lib/billing-rekey.ts';
+import { dispositionReread } from './lib/billing-reread.ts';
 import { buildBackfillScanInput } from './lib/billing-scan.ts';
 import {
   findUnkeyableOrgIds,
@@ -504,6 +505,8 @@ interface Outcomes {
   raced: number;
   /** Planned, then found not to need a copy when re-read. */
   skippedSince: number;
+  /** Planned, then found to be an anomaly when re-read. Nobody wrote it and nobody will. */
+  anomaliesSince: number;
   /** Never planned: in sync when the table was scanned. */
   alreadyCopied: number;
   anomalies: number;
@@ -518,6 +521,7 @@ async function copyEachOrg(
     recopied: 0,
     raced: 0,
     skippedSince: 0,
+    anomaliesSince: 0,
     alreadyCopied: 0,
     anomalies: 0,
   };
@@ -544,30 +548,39 @@ async function copyEachOrg(
  * The scan is minutes old by now and Stripe has been writing all along, so the
  * org is re-read and re-classified before the write. An org that stopped needing
  * a copy in the meantime is reported as such rather than copied from a stale
- * read.
+ * read, and an org that became an ANOMALY in the meantime is reported as one —
+ * counted apart and carried into the exit status, because a run that files it
+ * under "skipped" ends successfully having found nothing.
  */
 async function copyOneOrg(
   plan: CopyPlan,
   stateByOrg: ReadonlyMap<string, OrgBillingState>,
   outcomes: Outcomes,
 ): Promise<void> {
-  const fresh = classifyOrgBilling(await rereadOrg(stateByOrg.get(plan.orgId)!), resolved);
-  if (fresh.kind !== 'copy') {
+  const fresh = dispositionReread(
+    classifyOrgBilling(await rereadOrg(stateByOrg.get(plan.orgId)!), resolved),
+  );
+
+  if (fresh.outcome === 'anomaly') {
+    outcomes.anomaliesSince++;
+    console.error(`  ANOMALY ${fresh.message}`);
+    return;
+  }
+  if (fresh.outcome === 'skipped') {
     outcomes.skippedSince++;
-    console.log(
-      `  SKIPPED ${BillingKeys.orgPk(plan.orgId)} — no longer needs a copy (${fresh.kind === 'anomaly' ? fresh.reason : fresh.origin})`,
-    );
+    console.log(`  SKIPPED ${fresh.message}`);
     return;
   }
 
-  const outcome = await applyCopy(fresh, new Date().toISOString());
+  const copy = fresh.plan;
+  const outcome = await applyCopy(copy, new Date().toISOString());
   if (outcome === 'raced') {
     outcomes.raced++;
     return;
   }
-  if (fresh.reason === 'first-copy') outcomes.copied++;
+  if (copy.reason === 'first-copy') outcomes.copied++;
   else outcomes.recopied++;
-  console.log(`  ${fresh.reason === 'first-copy' ? 'COPIED' : 'RE-COPIED'} ${describe(fresh)}`);
+  console.log(`  ${copy.reason === 'first-copy' ? 'COPIED' : 'RE-COPIED'} ${describe(copy)}`);
 }
 
 function printSummary(plans: readonly BillingPlan[], outcomes: Outcomes): void {
@@ -585,13 +598,15 @@ function printSummary(plans: readonly BillingPlan[], outcomes: Outcomes): void {
   console.log(`Copied (first time):                         ${outcomes.copied}`);
   console.log(`Re-copied (the legacy row was newer):        ${outcomes.recopied}`);
   console.log(`Skipped (no longer needed a copy):           ${outcomes.skippedSince}`);
+  console.log(`Became anomalies since the scan (untouched): ${outcomes.anomaliesSince}`);
   console.log(`Raced (the rows moved; next run retries):    ${outcomes.raced}`);
   console.log(`Already in sync at scan time (not planned):  ${outcomes.alreadyCopied}`);
   console.log(`Anomalies (untouched):                       ${outcomes.anomalies}`);
   console.log(`Legacy CUSTOMER# rows deleted:               0 (by design)`);
   console.log('');
   console.log(
-    `Planned copies ${planned} = ${written} written + ${outcomes.skippedSince} skipped-since + ${outcomes.raced} raced.`,
+    `Planned copies ${planned} = ${written} written + ${outcomes.skippedSince} skipped-since + ` +
+      `${outcomes.anomaliesSince} anomalies-since + ${outcomes.raced} raced.`,
   );
   console.log('');
   console.log('Now run --verify against the same stage and record its result — the flip PR');
@@ -600,6 +615,14 @@ function printSummary(plans: readonly BillingPlan[], outcomes: Outcomes): void {
   if (outcomes.raced > 0) {
     console.log('');
     console.log('Rows raced. Re-run --execute until that count is zero, then verify.');
+    process.exitCode = 1;
+  }
+  if (outcomes.anomaliesSince > 0) {
+    console.log('');
+    console.log(
+      'Orgs became anomalies while this run worked. They were not copied and no later run',
+    );
+    console.log('will copy them until each is dispositioned. See the ANOMALY lines above.');
     process.exitCode = 1;
   }
   console.log('Done.');

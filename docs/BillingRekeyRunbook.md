@@ -194,18 +194,19 @@ changed — capture both streams (`2>&1`) and keep `billing-backfill.log`.
 
 The run prints the same plan first, then one line per org after its write, then a
 tally. Each per-org line carries the outcome that actually happened: `COPIED`,
-`RE-COPIED`, `SKIPPED`, `RACED`, `RETRY`, or `FAILED`.
+`RE-COPIED`, `SKIPPED`, `ANOMALY`, `RACED`, `RETRY`, or `FAILED`.
 
 ```
 Copied (first time):                         740
 Re-copied (the legacy row was newer):        33
 Skipped (no longer needed a copy):           0
+Became anomalies since the scan (untouched): 0
 Raced (the rows moved; next run retries):    2
 Already in sync at scan time (not planned):  91
 Anomalies (untouched):                       0
 Legacy CUSTOMER# rows deleted:               0 (by design)
 
-Planned copies 775 = 773 written + 0 skipped-since + 2 raced.
+Planned copies 775 = 773 written + 0 skipped-since + 0 anomalies-since + 2 raced.
 ```
 
 Every org is re-read consistently and re-classified immediately before its write,
@@ -213,9 +214,16 @@ so the log line names the source `updatedAt` the write actually carried rather
 than what the scan saw minutes earlier.
 
 The closing line is an identity: every org the plan contained ends in exactly one
-of written, skipped-since, or raced. Orgs already in sync when the table was
-scanned were never planned, so they are reported separately rather than folded
-into the skipped count.
+of written, skipped-since, anomalies-since, or raced. Orgs already in sync when the
+table was scanned were never planned, so they are reported separately rather than
+folded into the skipped count.
+
+`ANOMALY` counts orgs the re-read found in a state nothing may copy — a second row
+claiming the org appeared while the run worked, or the row it planned to copy now
+names a different org. Those orgs were not written and no later run writes them
+until somebody dispositions them, so **the script exits non-zero when any org
+became an anomaly**: act on the `ANOMALY` lines the same way as on the dry run's
+anomaly list, then re-run.
 
 `RACED` counts orgs whose transaction was cancelled by a condition — a Stripe
 webhook moved the legacy row, or another writer created the org row first. Nothing
