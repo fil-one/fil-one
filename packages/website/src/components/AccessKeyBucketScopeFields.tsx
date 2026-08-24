@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { SpinnerIcon } from '@phosphor-icons/react/dist/ssr';
 import type { AccessKeyBucketScope, ListBucketsResponse, S3Region } from '@filone/shared';
+import { listBucketsUnavailableMessage } from '@filone/shared';
 
 import { apiRequest } from '../lib/api.js';
 import { Checkbox } from './Checkbox.js';
@@ -40,6 +41,14 @@ export function AccessKeyBucketScopeFields({
     .filter((b) => !region || b.region === region)
     .map((b) => b.bucketName);
   const loading = isPending && bucketScope === 'specific';
+  // Only the selected region matters: buckets from other regions are filtered out above.
+  const regionUnavailable = (data?.unavailableRegions ?? []).includes(region);
+  const ready = !loading && !isError;
+  // Pinned and already-selected buckets stay listed whatever the region returned, so a
+  // degraded region cannot drop a key's scope mid-edit.
+  const visibleBuckets = [
+    ...new Set([...(pinnedBucket ? [pinnedBucket] : []), ...selectedBuckets, ...buckets]),
+  ];
 
   function toggleBucket(name: string) {
     if (selectedBuckets.includes(name)) {
@@ -82,34 +91,30 @@ export function AccessKeyBucketScopeFields({
             <p className="text-sm text-red-600">{error?.message ?? 'Failed to load buckets'}</p>
           )}
 
-          {!loading &&
-            !isError &&
-            buckets.length === 0 &&
-            selectedBuckets.length === 0 &&
-            !pinnedBucket && <p className="text-sm text-zinc-500">No buckets found.</p>}
+          {/* Warn rather than gate: the checklist below still renders, so a degraded region
+              leaves an in-progress key's scope intact. */}
+          {ready && regionUnavailable && (
+            <p className="text-sm text-amber-700">{listBucketsUnavailableMessage([region])}</p>
+          )}
 
-          {!loading &&
-            !isError &&
-            (buckets.length > 0 || selectedBuckets.length > 0 || pinnedBucket) && (
-              <div className="flex flex-col space-y-1.5">
-                {[
-                  ...new Set([
-                    ...(pinnedBucket ? [pinnedBucket] : []),
-                    ...selectedBuckets,
-                    ...buckets,
-                  ]),
-                ].map((name) => (
-                  <label key={name} className="flex cursor-pointer items-center gap-2.5 py-1">
-                    <Checkbox
-                      aria-label={name}
-                      checked={selectedBuckets.includes(name)}
-                      onChange={() => toggleBucket(name)}
-                    />
-                    <span className="text-xs font-normal text-zinc-900">{name}</span>
-                  </label>
-                ))}
-              </div>
-            )}
+          {ready && !regionUnavailable && visibleBuckets.length === 0 && (
+            <p className="text-sm text-zinc-500">No buckets found.</p>
+          )}
+
+          {ready && visibleBuckets.length > 0 && (
+            <div className="flex flex-col space-y-1.5">
+              {visibleBuckets.map((name) => (
+                <label key={name} className="flex cursor-pointer items-center gap-2.5 py-1">
+                  <Checkbox
+                    aria-label={name}
+                    checked={selectedBuckets.includes(name)}
+                    onChange={() => toggleBucket(name)}
+                  />
+                  <span className="text-xs font-normal text-zinc-900">{name}</span>
+                </label>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
