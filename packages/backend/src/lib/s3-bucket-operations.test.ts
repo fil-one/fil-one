@@ -18,6 +18,7 @@ import {
   createBucket,
   getBucketObjectLock,
   getBucketVersioning,
+  getBucketVersioningStatus,
   getObjectBytes,
   listBuckets,
   listObjects,
@@ -392,6 +393,26 @@ describe('s3 bucket operations', () => {
       s3Mock.on(GetBucketVersioningCommand).resolves({});
 
       expect(await getBucketVersioning(s3, 'my-bucket')).toBe(false);
+    });
+  });
+
+  describe('getBucketVersioningStatus', () => {
+    it('returns Enabled', async () => {
+      s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
+
+      expect(await getBucketVersioningStatus(s3, 'my-bucket')).toBe('Enabled');
+    });
+
+    it('returns Suspended', async () => {
+      s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Suspended' });
+
+      expect(await getBucketVersioningStatus(s3, 'my-bucket')).toBe('Suspended');
+    });
+
+    it('returns Never when Status is undefined', async () => {
+      s3Mock.on(GetBucketVersioningCommand).resolves({});
+
+      expect(await getBucketVersioningStatus(s3, 'my-bucket')).toBe('Never');
     });
   });
 

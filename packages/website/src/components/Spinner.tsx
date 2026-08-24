@@ -1,8 +1,21 @@
+import clsx from 'clsx';
+
 type SpinnerProps = {
   size?: number;
+  /**
+   * Colour of the arc, as a text-colour class. Defaults to brand blue, which is
+   * right on a page or a card but wrong inside a coloured control, where the
+   * spinner should take the control's own foreground (`text-current`).
+   */
+  colorClassName?: string;
 } & ({ message: string; ariaLabel?: string } | { message?: never; ariaLabel: string });
 
-export function Spinner({ message, ariaLabel, size = 52 }: SpinnerProps) {
+export function Spinner({
+  message,
+  ariaLabel,
+  size = 52,
+  colorClassName = 'text-brand-600',
+}: SpinnerProps) {
   const accessibleLabel = ariaLabel || message;
   const strokeWidth = Math.max(2, size * 0.07);
   const radius = (size - strokeWidth) / 2;
@@ -16,7 +29,7 @@ export function Spinner({ message, ariaLabel, size = 52 }: SpinnerProps) {
         height={size}
         viewBox={`0 0 ${size} ${size}`}
         aria-label={accessibleLabel}
-        className="animate-spin text-brand-600"
+        className={clsx('animate-spin', colorClassName)}
         style={{ animationDuration: '0.8s', animationTimingFunction: 'linear' }}
       >
         {/* Track */}

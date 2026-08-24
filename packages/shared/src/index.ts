@@ -93,6 +93,7 @@ export {
   RETENTION_MAX_DAYS,
   RETENTION_MAX_YEARS,
   CreateBucketSchema,
+  listBucketsUnavailableMessage,
 } from './api/buckets.js';
 
 export type { RetentionMode, RetentionDurationType } from './api/buckets.js';
@@ -117,6 +118,23 @@ export type {
 } from './api/presign.js';
 
 export { PresignOpSchema, PresignRequestSchema } from './api/presign.js';
+
+export type {
+  BulkDeleteFailure,
+  BulkDeleteJob,
+  CreateBulkDeleteJobRequest,
+  CreateBulkDeleteJobResponse,
+  GetBulkDeleteJobResponse,
+} from './api/bulk-delete.js';
+
+export {
+  BulkDeleteJobStatus,
+  BulkDeleteScope,
+  CreateBulkDeleteJobSchema,
+  MAX_REPORTED_BULK_DELETE_FAILURES,
+  TERMINAL_BULK_DELETE_STATUSES,
+  isTerminalBulkDeleteStatus,
+} from './api/bulk-delete.js';
 
 export {
   QueryBucketSchema,

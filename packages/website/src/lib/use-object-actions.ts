@@ -10,9 +10,16 @@ export type UseObjectActionsOptions = {
   onDeleted?: (key: string, versionId?: string) => void;
 };
 
+/** A single object (or a specific version of one) targeted by a delete. */
+export type ObjectDeleteTarget = { key: string; versionId?: string };
+
+/** The presign endpoint accepts at most 10 operations per request. */
+const PRESIGN_BATCH_SIZE = 10;
+
 export function useObjectActions({ bucketName, region, onDeleted }: UseObjectActionsOptions) {
   const { toast } = useToast();
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
 
   const deleteObject = useCallback(
@@ -30,6 +37,59 @@ export function useObjectActions({ bucketName, region, onDeleted }: UseObjectAct
         toast.error(err instanceof Error ? err.message : 'Failed to delete object');
       } finally {
         setDeleting(null);
+      }
+    },
+    [bucketName, region, toast, onDeleted],
+  );
+
+  /**
+   * Delete several objects (or versions) in one go. Presign requests are capped
+   * at 10 ops each, so targets are chunked; every chunk is attempted even if an
+   * earlier one fails, and the toast reports the partial outcome.
+   */
+  const deleteObjects = useCallback(
+    async (targets: ObjectDeleteTarget[]) => {
+      if (targets.length === 0) return;
+      setBulkDeleting(true);
+      let deleted = 0;
+      try {
+        for (let i = 0; i < targets.length; i += PRESIGN_BATCH_SIZE) {
+          const chunk = targets.slice(i, i + PRESIGN_BATCH_SIZE);
+          try {
+            const { items } = await batchPresign(
+              region,
+              chunk.map((target) => ({
+                op: 'deleteObject' as const,
+                bucket: bucketName,
+                key: target.key,
+                ...(target.versionId && { versionId: target.versionId }),
+              })),
+            );
+            const results = await Promise.allSettled(
+              items.map((item) => executePresignedUrl(item.url, item.method)),
+            );
+            results.forEach((result, idx) => {
+              if (result.status === 'rejected') {
+                console.error('Failed to delete object:', chunk[idx].key, result.reason);
+                return;
+              }
+              deleted += 1;
+              onDeleted?.(chunk[idx].key, chunk[idx].versionId);
+            });
+          } catch (err) {
+            console.error('Failed to delete objects:', err);
+          }
+        }
+      } finally {
+        setBulkDeleting(false);
+      }
+
+      if (deleted === targets.length) {
+        toast.success(`${deleted} ${deleted === 1 ? 'object' : 'objects'} deleted`);
+      } else if (deleted === 0) {
+        toast.error('Failed to delete objects');
+      } else {
+        toast.error(`Deleted ${deleted} of ${targets.length} objects`);
       }
     },
     [bucketName, region, toast, onDeleted],
@@ -87,9 +147,11 @@ export function useObjectActions({ bucketName, region, onDeleted }: UseObjectAct
 
   return {
     deleteObject,
+    deleteObjects,
     downloadObject,
     generatePresignedUrl,
     deleting,
+    bulkDeleting,
     downloading,
     generatingUrl,
   };

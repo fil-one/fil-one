@@ -270,6 +270,41 @@ export const VersioningDisabled: Story = {
   ),
 };
 
+/** Passing onBulkDelete turns on the checkbox column and the selection toolbar. */
+export const Selectable: Story = {
+  render: () => (
+    <ObjectBrowserHarness
+      bucketName="my-bucket"
+      region={S3Region.EuWest1}
+      versions={sampleVersions}
+      currentPrefix=""
+      onDownload={() => {}}
+      downloading={null}
+      onBulkDelete={() => Promise.resolve()}
+    />
+  ),
+};
+
+/**
+ * A bucket larger than one listing page. Selection can only cover what loaded,
+ * so the browser says so instead of letting "select all" imply the whole bucket.
+ */
+export const TruncatedListing: Story = {
+  render: () => (
+    <ObjectBrowserHarness
+      bucketName="my-bucket"
+      region={S3Region.EuWest1}
+      versions={sampleVersions}
+      currentPrefix=""
+      onDownload={() => {}}
+      downloading={null}
+      onBulkDelete={() => Promise.resolve()}
+      listingTruncated
+      totalObjectCount={20_000}
+    />
+  ),
+};
+
 export const DeleteMarker: Story = {
   render: () => (
     <ObjectBrowserHarness

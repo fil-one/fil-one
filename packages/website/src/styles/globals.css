@@ -72,6 +72,10 @@
   --color-card-background: theme('colors.white');
   --color-card-background-hover: theme('colors.zinc.50');
   --color-card-heading-hover: theme('colors.brand.800');
+
+  /* Tinted background marking a table row as selected or current. Kept low
+     enough that row text and badges keep their contrast on top of it. */
+  --color-row-selected: theme('colors.brand.50 / 40%');
 }
 
 .dark-section {
@@ -91,4 +95,6 @@
   --color-card-background: theme('colors.zinc.900');
   --color-card-background-hover: theme('colors.zinc.800');
   --color-card-heading-hover: theme('colors.brand.500');
+
+  --color-row-selected: theme('colors.brand.950 / 60%');
 }
