@@ -127,6 +127,11 @@ describe('PATCH /api/org handler', () => {
           userId: { S: MOCK_USER_ID },
           orgId: { S: MOCK_ORG_ID },
           emailEntitlementClaimed: { BOOL: true },
+          // A returning caller, whose profile already holds the address this
+          // session proves. Without the marker the login path stamps it on the
+          // way in, and the updates this suite counts would not all be the
+          // rename's.
+          profileEmail: { S: MOCK_EMAIL },
         },
       });
 
