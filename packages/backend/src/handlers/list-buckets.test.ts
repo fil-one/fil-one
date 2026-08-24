@@ -53,25 +53,26 @@ import { S3_REGION, S3Region } from '@filone/shared';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 
-// Mirrors the message baseHandler builds: the static summary, then one `id (region): reason`
-// leg per line in registry order, so a 500 in the logs names both the region and the cause.
-const aggregateMessage = (...legs: string[]): string =>
-  `One or more orchestrators failed to list buckets:\n${legs.join('\n')}`;
+// A degraded region answers with `unavailableRegions` (partial 200) or, when no live region
+// answers at all, a 503 carrying this sentence. Mirrors listBucketsUnavailableMessage.
+const unavailableMessage = (...regions: string[]): string => {
+  const names =
+    regions.length > 1
+      ? `${regions.slice(0, -1).join(', ')} and ${regions[regions.length - 1]}`
+      : regions[0];
+  return `Cannot list buckets in the ${names} region${
+    regions.length > 1 ? 's' : ''
+  }. Please try again later.`;
+};
 
-// Returns the parts of the rejection under test as a plain object, so each test can compare
-// the whole shape in one assertion. `errors` is non-enumerable on AggregateError, which keeps
-// it invisible to matchers like `toMatchObject`.
-async function captureAggregateError(
-  promise: Promise<unknown>,
-): Promise<{ name: string; message: string; errors: unknown[] }> {
-  try {
-    await promise;
-  } catch (error) {
-    const aggregate = error as AggregateError;
-    return { name: aggregate.name, message: aggregate.message, errors: aggregate.errors };
-  }
-  throw new Error('Expected the handler to reject, but it resolved');
-}
+const bucket = (bucketName: string, region: S3Region, createdAt: string) => ({
+  bucketName,
+  region,
+  createdAt,
+  isPublic: false,
+  versioning: false,
+  encrypted: true,
+});
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -180,18 +181,17 @@ describe('list-buckets baseHandler (single-region)', () => {
     expect(availableOrchestrators).toHaveBeenCalledWith();
   });
 
-  it('wraps the orchestrator error in an AggregateError', async () => {
-    const auroraError = new Error('Failed to list buckets from Aurora for tenant aurora-t-1');
-    aurora.listBuckets.mockRejectedValue(auroraError);
+  it('returns 503 naming the region when the only provisioned region fails', async () => {
+    aurora.listBuckets.mockRejectedValue(
+      new Error('Failed to list buckets from Aurora for tenant aurora-t-1'),
+    );
 
     const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
 
-    expect(await captureAggregateError(baseHandler(event))).toStrictEqual({
-      name: 'AggregateError',
-      message: aggregateMessage(
-        'aurora (eu-west-1): Failed to list buckets from Aurora for tenant aurora-t-1',
-      ),
-      errors: [auroraError],
+    expect(result.statusCode).toBe(503);
+    expect(JSON.parse(result.body as string)).toStrictEqual({
+      message: unavailableMessage('eu-west-1'),
     });
   });
 
@@ -355,49 +355,53 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
     expect(fth.listBuckets).not.toHaveBeenCalled();
   });
 
-  it('aggregates the failure when a single orchestrator throws', async () => {
-    const fthError = new Error('FTH listBuckets blew up');
-    aurora.listBuckets.mockResolvedValue([]);
-    fth.listBuckets.mockRejectedValue(fthError);
+  it("returns the healthy region's buckets and names the failed region", async () => {
+    const auroraBucket = bucket('aurora-bucket', S3Region.EuWest1, '2026-01-01T00:00:00.000Z');
+    aurora.listBuckets.mockResolvedValue([auroraBucket]);
+    fth.listBuckets.mockRejectedValue(new Error('FTH listBuckets blew up'));
 
     const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
 
-    expect(await captureAggregateError(baseHandler(event))).toStrictEqual({
-      name: 'AggregateError',
-      message: aggregateMessage('fth (us-east-1): FTH listBuckets blew up'),
-      errors: [fthError],
+    expect(result.statusCode).toBe(200);
+    expect(JSON.parse(result.body as string)).toStrictEqual({
+      buckets: [auroraBucket],
+      unavailableRegions: [S3Region.UsEast1],
     });
   });
 
-  it('aggregates the failures of every leg in registry order', async () => {
-    const auroraError = new Error('Aurora listBuckets blew up');
-    const fthError = new Error('FTH listBuckets blew up');
-    aurora.listBuckets.mockRejectedValue(auroraError);
-    fth.listBuckets.mockRejectedValue(fthError);
+  it('returns 503 naming every region in registry order when all of them fail', async () => {
+    aurora.listBuckets.mockRejectedValue(new Error('Aurora listBuckets blew up'));
+    fth.listBuckets.mockRejectedValue(new Error('FTH listBuckets blew up'));
 
     const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
 
-    expect(await captureAggregateError(baseHandler(event))).toStrictEqual({
-      name: 'AggregateError',
-      message: aggregateMessage(
-        'aurora (eu-west-1): Aurora listBuckets blew up',
-        'fth (us-east-1): FTH listBuckets blew up',
-      ),
-      errors: [auroraError, fthError],
+    expect(result.statusCode).toBe(503);
+    expect(JSON.parse(result.body as string)).toStrictEqual({
+      message: unavailableMessage('eu-west-1', 'us-east-1'),
     });
   });
 
-  it('falls back to string conversion for a leg that rejects with a non-Error', async () => {
+  it('keeps a non-Error rejection reason out of the response body', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     aurora.listBuckets.mockResolvedValue([]);
     fth.listBuckets.mockRejectedValue('socket hang up');
 
     const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
 
-    expect(await captureAggregateError(baseHandler(event))).toStrictEqual({
-      name: 'AggregateError',
-      message: aggregateMessage('fth (us-east-1): socket hang up'),
-      errors: ['socket hang up'],
+    expect(result.statusCode).toBe(200);
+    expect(result.body).not.toContain('socket hang up');
+    expect(JSON.parse(result.body as string)).toStrictEqual({
+      buckets: [],
+      unavailableRegions: [S3Region.UsEast1],
     });
+    expect(consoleError).toHaveBeenCalledWith(
+      '[list-buckets] Orchestrator listBuckets failed',
+      expect.objectContaining({ error: 'socket hang up' }),
+    );
+    consoleError.mockRestore();
   });
 
   it('logs the orchestrator id and region of every failing leg', async () => {
@@ -407,12 +411,13 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
     fth.listBuckets.mockRejectedValue(new Error('FTH listBuckets blew up'));
 
     const event = buildEvent({ userInfo: USER_INFO });
-    await expect(baseHandler(event)).rejects.toThrow(AggregateError);
+    await baseHandler(event);
 
     expect(consoleError).toHaveBeenCalledWith('[list-buckets] Orchestrator listBuckets failed', {
       orgId: 'org-1',
       orchestratorId: 'aurora',
       region: 'eu-west-1',
+      tenantId: 'aurora-t-1',
       error: auroraError,
     });
     expect(consoleError).toHaveBeenCalledWith(
@@ -433,5 +438,49 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
     expect(result.statusCode).toBe(200);
     expect(consoleError).not.toHaveBeenCalled();
     consoleError.mockRestore();
+  });
+
+  it('omits unavailableRegions when every orchestrator succeeds', async () => {
+    aurora.listBuckets.mockResolvedValue([]);
+    fth.listBuckets.mockResolvedValue([]);
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(JSON.parse(result.body as string)).not.toHaveProperty('unavailableRegions');
+  });
+
+  it("still sorts the surviving region's buckets when another region fails", async () => {
+    aurora.listBuckets.mockResolvedValue([
+      bucket('zebra-bucket', S3Region.EuWest1, '2026-01-01T00:00:00.000Z'),
+      bucket('alpha-bucket', S3Region.EuWest1, '2026-01-02T00:00:00.000Z'),
+    ]);
+    fth.listBuckets.mockRejectedValue(new Error('FTH listBuckets blew up'));
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    const body = JSON.parse(result.body as string);
+    expect(body.buckets.map((b: { bucketName: string }) => b.bucketName)).toStrictEqual([
+      'alpha-bucket',
+      'zebra-bucket',
+    ]);
+    expect(body.unavailableRegions).toStrictEqual([S3Region.UsEast1]);
+  });
+
+  // The regression FIL-1049 turns on: without filtering unprovisioned regions out first, a
+  // not-ready aurora would count as a healthy leg and this would answer 200 with no buckets.
+  it('returns 503 when the only provisioned region fails and the other is not ready', async () => {
+    aurora.isTenantReady.mockReturnValue(null);
+    fth.listBuckets.mockRejectedValue(new Error('FTH listBuckets blew up'));
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(503);
+    expect(JSON.parse(result.body as string)).toStrictEqual({
+      message: unavailableMessage('us-east-1'),
+    });
+    expect(aurora.listBuckets).not.toHaveBeenCalled();
   });
 });

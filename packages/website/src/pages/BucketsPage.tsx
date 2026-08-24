@@ -17,7 +17,13 @@ import { useToast } from '../components/Toast';
 import { EmptyStateCard } from '../components/EmptyStateCard';
 
 import type { ListBucketsResponse, S3Region } from '@filone/shared';
-import { ApiErrorCode, DOCS_URL, S3_REGION, getRegionLabel } from '@filone/shared';
+import {
+  ApiErrorCode,
+  DOCS_URL,
+  S3_REGION,
+  getRegionLabel,
+  listBucketsUnavailableMessage,
+} from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
 import { formatDate } from '../lib/time.js';
 import { queryKeys } from '../lib/query-client.js';
@@ -45,14 +51,19 @@ export function BucketsPage() {
     queryFn: () => apiRequest<ListBucketsResponse>('/buckets'),
   });
   const buckets = data?.buckets ?? [];
+  const unavailableRegions = data?.unavailableRegions ?? [];
+  // "No buckets yet" would be a lie while a region is down. The banner explains the gap.
+  const showEmptyState = buckets.length === 0 && unavailableRegions.length === 0;
 
   const deleteBucketMutation = useMutation({
     mutationFn: (bucketName: string) =>
       apiRequest(`/buckets/${encodeURIComponent(bucketName)}`, { method: 'DELETE' }),
     onSuccess: (_, bucketName) => {
-      // Optimistically remove from cache, then confirm with a background refetch
+      // Optimistically remove from cache, then confirm with a background refetch. Spread `old`:
+      // this updater owns `buckets` only, and rebuilding the object would drop
+      // `unavailableRegions`, making the degraded-regions banner vanish on any delete.
       queryClient.setQueryData<ListBucketsResponse>(queryKeys.buckets, (old) =>
-        old ? { buckets: old.buckets.filter((b) => b.bucketName !== bucketName) } : old,
+        old ? { ...old, buckets: old.buckets.filter((b) => b.bucketName !== bucketName) } : old,
       );
       void queryClient.invalidateQueries({ queryKey: queryKeys.buckets });
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
@@ -120,8 +131,20 @@ export function BucketsPage() {
         </Button>
       }
     >
+      {/* Amber suits a response that succeeded: red is the whole-page failure branch, and
+          reusing it would make a partial list look like no list at all. */}
+      {unavailableRegions.length > 0 && (
+        <div className="mb-4">
+          <Alert
+            variant="amber"
+            title={listBucketsUnavailableMessage(unavailableRegions)}
+            description="Buckets in the other regions are listed below."
+          />
+        </div>
+      )}
+
       {/* Content: empty state or table */}
-      {buckets.length === 0 ? (
+      {showEmptyState && (
         <EmptyStateCard
           icon={DatabaseIcon}
           title="No buckets yet"
@@ -136,7 +159,8 @@ export function BucketsPage() {
             Create bucket
           </Button>
         </EmptyStateCard>
-      ) : (
+      )}
+      {buckets.length > 0 && (
         <Table>
           <Table.Header>
             <Table.Row>

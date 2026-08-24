@@ -45,7 +45,20 @@ async function listRegionsWithBucket(page: Page): Promise<Set<Region>> {
     );
   }
 
-  const { buckets } = (await response.json()) as { buckets: Array<{ region: string }> };
+  const { buckets, unavailableRegions } = (await response.json()) as {
+    buckets: Array<{ region: string }>;
+    unavailableRegions?: string[];
+  };
+
+  // A partial 200 (FIL-1049) hides a down region's buckets, which reads here as "that region
+  // is empty" and makes the seeder pile up duplicates. Same reason as the !ok() check above.
+  if (unavailableRegions?.length) {
+    throw new Error(
+      `GET /api/buckets could not list ${unavailableRegions.join(', ')}, so we cannot tell ` +
+        `whether this account has buckets there. Check the ListBuckets logs for the stage.`,
+    );
+  }
+
   // Regions the account has buckets in but this suite does not know about are
   // irrelevant for seeding, so drop them instead of widening the type.
   return new Set(buckets.map((bucket) => bucket.region).filter(isRegion));
