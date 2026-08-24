@@ -537,7 +537,13 @@ describe('POST /api/org/invitations handler', () => {
 
     expect(body(result).emailSent).toBe(false);
     expect(body(result).invitation.lastSendFailed).toBe(true);
-    const stamp = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
+    // Selected rather than indexed: the login path stamps the caller's verified
+    // address on their profile row on the way in, so this handler's write is not
+    // reliably the request's first update.
+    const stamp = ddbMock
+      .commandCalls(UpdateItemCommand)
+      .map((call) => call.args[0].input)
+      .find((input) => input.TableName === 'OrgTable')!;
     expect(stamp).toMatchObject({
       TableName: 'OrgTable',
       UpdateExpression: 'SET lastSendFailed = :true',

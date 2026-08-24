@@ -171,8 +171,16 @@ function stubAccepterProfile(orgId: string) {
 }
 
 /** The profile stamps the acceptance made, in the order it made them. */
+/**
+ * The acceptance's own stamp, not every update the request made. The login path
+ * stamps the same address on its way in whenever the identity row's marker is
+ * stale, and that write is about the session rather than the acceptance.
+ */
 function profileStamps() {
-  return ddbMock.commandCalls(UpdateItemCommand).map((call) => call.args[0].input);
+  return ddbMock
+    .commandCalls(UpdateItemCommand)
+    .map((call) => call.args[0].input)
+    .filter((input) => input.UpdateExpression === 'SET email = :email');
 }
 
 function auditedEvent() {
