@@ -13,7 +13,7 @@ import { authorize } from '../middleware/authorize.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
-async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
+export async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { orgId } = getUserInfo(event);
   // Follows the hostname the user is actually on, so a session started from a
   // demo alias returns there instead of jumping to the canonical host. Stripe

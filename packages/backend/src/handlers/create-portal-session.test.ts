@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { authPartialMock } from '../test/auth-partial-mock.js';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
+
+// baseHandler is tested directly, so the chain's auth and csrf middleware play
+// no part here.
 
 vi.mock('sst', () => ({
   Resource: {
@@ -17,28 +19,17 @@ vi.mock('../lib/stripe-client.js', () => ({
   getBillingSecrets: () => ({ STRIPE_SECRET_KEY: 'sk_test_fake' }),
 }));
 
-// Pass-through auth so the chain under test starts at `authorize`.
-vi.mock('../middleware/auth.js', () => authPartialMock());
-
-vi.mock('../middleware/csrf.js', () => ({
-  csrfMiddleware: () => ({ before: async () => {} }),
-}));
-
 const ddbMock = mockClient(DynamoDBClient);
 
-import { handler } from './create-portal-session.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
-import { OrgRole } from '@filone/shared';
+import { baseHandler } from './create-portal-session.js';
+import { buildEvent } from '../test/lambda-test-utilities.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 const ORG_KEY = { pk: { S: 'ORG#org-1' }, sk: { S: 'SUBSCRIPTION' } };
 
 function portalEvent() {
   return buildEvent({
-    userInfo: {
-      ...USER_INFO,
-      membership: { orgId: 'org-1', userId: 'user-1', role: OrgRole.Owner },
-    },
+    userInfo: USER_INFO,
     method: 'POST',
     rawPath: '/api/billing/portal-session',
   });
@@ -61,7 +52,7 @@ describe('create-portal-session', () => {
     ddbMock.on(GetItemCommand).resolves(subscriptionRow({ stripeCustomerId: 'cus_org_1' }));
     mockSessionsCreate.mockResolvedValue({ url: 'https://billing.stripe.com/session/abc' });
 
-    const result = await handler(portalEvent(), buildContext());
+    const result = await baseHandler(portalEvent());
 
     expect(ddbMock.commandCalls(GetItemCommand)[0].args[0].input.Key).toStrictEqual(ORG_KEY);
     expect(mockSessionsCreate).toHaveBeenCalledWith({
@@ -77,7 +68,7 @@ describe('create-portal-session', () => {
   it('refuses when the org has no billing record', async () => {
     ddbMock.on(GetItemCommand).resolves({});
 
-    const result = await handler(portalEvent(), buildContext());
+    const result = await baseHandler(portalEvent());
 
     expect(result).toMatchObject({ statusCode: 400 });
     expect(mockSessionsCreate).not.toHaveBeenCalled();
@@ -88,7 +79,7 @@ describe('create-portal-session', () => {
     // customer mapping is written. There is nothing to open a portal on.
     ddbMock.on(GetItemCommand).resolves(subscriptionRow({ subscriptionStatus: 'active' }));
 
-    const result = await handler(portalEvent(), buildContext());
+    const result = await baseHandler(portalEvent());
 
     expect(result).toMatchObject({ statusCode: 400 });
     expect(mockSessionsCreate).not.toHaveBeenCalled();
