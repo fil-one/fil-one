@@ -68,7 +68,9 @@ async function resolveMember(userId: string): Promise<DeletionMember | undefined
       new GetItemCommand({
         TableName: Resource.UserInfoTable.name,
         Key: marshall({ pk: `USER#${userId}`, sk: 'PROFILE' }),
-        ProjectionExpression: 'sub',
+        // `sub` is a DynamoDB reserved word, hence #sub.
+        ProjectionExpression: '#sub',
+        ExpressionAttributeNames: { '#sub': 'sub' },
         ConsistentRead: true,
       }),
     ),
