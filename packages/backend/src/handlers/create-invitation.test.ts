@@ -160,6 +160,26 @@ function stubInvitationRows(items: Record<string, { S: string }>[]) {
     .resolves({ Items: items });
 }
 
+/** The invitation the address claim currently names, if any. */
+function stubAddressClaim(inviteId: string) {
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'OrgTable',
+      Key: {
+        pk: { S: OrgKeys.orgPk(ORG_ID) },
+        sk: { S: OrgKeys.inviteAddrSk('invitee@example.com') },
+      },
+    })
+    .resolves({ Item: { inviteId: { S: inviteId } } });
+}
+
+/** The claim item out of the transaction, whatever else is in it. */
+function claimItem() {
+  return transactItems().find(
+    (item) => item.Put?.Item?.sk?.S === OrgKeys.inviteAddrSk('invitee@example.com'),
+  )!.Put!;
+}
+
 /** `count` invitations to addresses nobody is inviting again. */
 function stubPendingInvitations(count: number, status = 'pending') {
   stubInvitationRows(
@@ -276,8 +296,8 @@ describe('POST /api/org/invitations handler', () => {
     await handler(inviteEvent(), buildContext());
 
     const items = transactItems();
-    // The fence, the invitation's two rows, the event.
-    expect(items).toHaveLength(4);
+    // The fence, the address claim, the invitation's two rows, the event.
+    expect(items).toHaveLength(5);
 
     const invitation = items.find((item) => item.Put?.Item?.sk?.S?.startsWith('INVITE#'))!.Put!;
     expect(invitation).toMatchObject({
@@ -446,15 +466,15 @@ describe('POST /api/org/invitations handler', () => {
 
     expect(result).toMatchObject({ statusCode: 201 });
     const items = transactItems();
-    // The fence, the replaced pair, the new pair, the event.
-    expect(items).toHaveLength(6);
-    expect(items[1].Update).toMatchObject({
+    // The fence, the claim, the replaced pair, the new pair, the event.
+    expect(items).toHaveLength(7);
+    expect(items[2].Update).toMatchObject({
       Key: { pk: { S: OrgKeys.orgPk(ORG_ID) }, sk: { S: OrgKeys.inviteSk('earlier') } },
       ConditionExpression: '#status = :pending',
       ExpressionAttributeValues: { ':status': { S: 'revoked' }, ':pending': { S: 'pending' } },
     });
     // Its token stops working the moment the new one starts.
-    expect(items[2].Delete).toMatchObject({
+    expect(items[3].Delete).toMatchObject({
       Key: { pk: { S: OrgKeys.inviteTokenPk('c'.repeat(64)) }, sk: { S: 'LOOKUP' } },
     });
     expect(unmarshall(auditItemIn(items)).details).toMatchObject({ replacedInvitations: 1 });
@@ -468,7 +488,7 @@ describe('POST /api/org/invitations handler', () => {
     await handler(inviteEvent(), buildContext());
 
     const items = transactItems();
-    expect(items).toHaveLength(4);
+    expect(items).toHaveLength(5);
     expect(JSON.stringify(items)).not.toContain('someone-else');
   });
 
@@ -523,6 +543,65 @@ describe('POST /api/org/invitations handler', () => {
       UpdateExpression: 'SET lastSendFailed = :true',
     });
     expect(stamp.Key!.sk.S).toBe(OrgKeys.inviteSk(body(result).invitation.inviteId));
+  });
+
+  it('claims the address, so two first invitations to it cannot both land', async () => {
+    // Nothing else in two concurrent first invitations names a shared item: the
+    // cap comes off a read, and both pairs of rows are create-only on ids each
+    // request minted. Without this the recipient gets two working tokens and can
+    // redeem the higher of two roles.
+    const result = await handler(inviteEvent(), buildContext());
+
+    expect(claimItem()).toMatchObject({
+      TableName: 'OrgTable',
+      Item: {
+        pk: { S: OrgKeys.orgPk(ORG_ID) },
+        inviteId: { S: body(result).invitation.inviteId },
+      },
+      ConditionExpression: 'attribute_not_exists(pk)',
+    });
+  });
+
+  it('swaps the claim off the invitation the address already holds', async () => {
+    // The claim outlives the invitation that made it — an invitation expires
+    // with no writer at all — so re-inviting conditions on what the row says
+    // now rather than on its absence.
+    stubAddressClaim('earlier');
+    stubInvitationRows([invitationRow({ inviteId: 'earlier', emailNorm: 'invitee@example.com' })]);
+
+    const result = await handler(inviteEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 201 });
+    expect(claimItem()).toMatchObject({
+      ConditionExpression: 'inviteId = :claimed',
+      ExpressionAttributeValues: { ':claimed': { S: 'earlier' } },
+    });
+    expect(claimItem().Item!.inviteId!.S).toBe(body(result).invitation.inviteId);
+  });
+
+  it('re-invites an address whose invitation expired with the claim still on it', async () => {
+    // Expiry is a read-time comparison, not a TTL, so no transaction ever
+    // released the address. A create-only claim would refuse this forever.
+    stubAddressClaim('expired');
+    stubInvitationRows([]);
+
+    const result = await handler(inviteEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 201 });
+    expect(claimItem().ExpressionAttributeValues).toMatchObject({
+      ':claimed': { S: 'expired' },
+    });
+  });
+
+  it('answers a collision when another invitation claimed the address first', async () => {
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(1, 5));
+
+    const result = await handler(inviteEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 409 });
+    // Not the cap's code: the remedy is the same request again, against the
+    // invitation that now holds the address.
+    expect(body(result).code).toBeUndefined();
   });
 
   it('fences the transaction on the org not being deleted, as item 0', async () => {

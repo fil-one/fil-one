@@ -14,6 +14,7 @@ import { sendInvitationEmail } from '../lib/invite-mailer.js';
 import {
   hashInviteToken,
   invitationRows,
+  inviteAddressClaimItem,
   invitationSummary,
   invitationsTo,
   inviteExpiresAt,
@@ -22,6 +23,7 @@ import {
   newInviteToken,
   normalizeInviteEmail,
   planRevocations,
+  readInviteAddressClaim,
   retireInvitationItems,
   revokeDeferred,
 } from '../lib/invitations.js';
@@ -73,7 +75,9 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
  * what makes it one. A failed send, a lost link, a mistyped role: invite the
  * address again and the old row is revoked and its token deleted in the same
  * transaction that writes the new one. An address never accumulates live
- * invitations, so it never accumulates working tokens.
+ * invitations, so it never accumulates working tokens — and the address claim
+ * (`lib/invitations.ts`) is what holds that true for two FIRST invitations,
+ * which have no row between them to collide on.
  *
  * The token exists in the email and in this response's absence: it is generated
  * here, hashed into the row, put in the accept URL's FRAGMENT — which reaches
@@ -97,7 +101,14 @@ export async function baseHandler(
   if (!(await hasOrgsBetaAccess({ verifiedEmail: inviterEmail, orgId }))) return betaOnlyResponse();
 
   const emailNorm = normalizeInviteEmail(email);
-  const usable = await listUsableInvitations(orgId);
+  // The claim is read beside the cap's list because both are inputs to the same
+  // transaction: the list says whether this invitation replaces one, the claim
+  // says what the address currently holds and is what the write is conditioned
+  // on.
+  const [usable, claimedInviteId] = await Promise.all([
+    listUsableInvitations(orgId),
+    readInviteAddressClaim(orgId, emailNorm),
+  ]);
   // Replaced rather than counted: this address already occupies whatever slot it
   // is going to occupy, so re-inviting cannot be how an org reaches the cap.
   const superseded = invitationsTo(usable, emailNorm);
@@ -107,8 +118,8 @@ export async function baseHandler(
 
   const token = newInviteToken();
   const invitation = newInvitation({ orgId, email, emailNorm, role, invitedBy: userId, token });
-  // The fence and the two rows the new invitation is; the rest of the
-  // transaction's room goes to the rows it supersedes. `later` is empty for any
+  // The fence, the address claim and the two rows the new invitation is; the
+  // rest of the transaction's room goes to the rows it supersedes. `later` is empty for any
   // org the cap has ever bounded — one address holds one live invitation — and
   // exists so that rows written before replacement existed cannot fail an
   // invite.
@@ -118,6 +129,7 @@ export async function baseHandler(
     await commitAudited({
       items: [
         orgNotDeletingCheck(orgId),
+        inviteAddressClaimItem({ record: invitation, claimedInviteId }),
         ...now.flatMap((replaced) => retireInvitationItems(replaced, 'revoked')),
         ...invitationRows(invitation),
       ],
@@ -140,9 +152,10 @@ export async function baseHandler(
     // exists — so it is the one cancellation that is not "try again".
     if (isGuardRejection(err)) throw new OrgDeletingError(orgId);
     // The new rows are create-only on freshly minted keys, so they cannot lose;
-    // a replaced row's condition can, when an accept or a revoke landed while
-    // this request was in flight. Either way the caller's remedy is the same
-    // one request: invite again against the state that now exists.
+    // the address claim's condition can, when another invitation to the same
+    // address landed while this request was in flight, and so can a replaced
+    // row's, when an accept or a revoke did. Either way the caller's remedy is
+    // the same one request: invite again against the state that now exists.
     if (err instanceof TransactionCanceledException) return collisionResponse();
     throw err;
   }
@@ -174,8 +187,11 @@ export async function baseHandler(
     .build();
 }
 
-/** The fence and the new invitation's two rows — what the sweep sits behind. */
-const INVITATION_TRANSACTION_ITEMS = 3;
+/**
+ * The fence, the address claim, and the new invitation's two rows — what the
+ * sweep of superseded invitations sits behind.
+ */
+const INVITATION_TRANSACTION_ITEMS = 4;
 
 function newInvitation({
   orgId,

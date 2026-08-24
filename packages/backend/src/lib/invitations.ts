@@ -46,6 +46,13 @@ import { OrgKeys } from './org-membership.js';
  * mistyped are all fixed by inviting again, and none of them leaves a second
  * usable token or occupies a second slot under the cap.
  *
+ * Revoking the row it replaces cannot serialize two FIRST invitations to an
+ * address, though: there is nothing to revoke, both transactions write only
+ * create-only keys on freshly minted ids, and both land — two working tokens,
+ * possibly at two different roles. The address claim
+ * (`ORG#{orgId}` / `INVITEADDR#{emailNorm}`, {@link inviteAddressClaimItem}) is
+ * the item they collide on.
+ *
  * The record is transport-independent on purpose: nothing here mentions the
  * mailer. An SSO-era switch to Auth0-delivered invitations replaces the send and
  * the token and leaves this lifecycle — including the inviter re-check and the
@@ -454,6 +461,84 @@ export function invitationRows(record: InvitationRecord): TransactWriteItem[] {
       },
     },
   ];
+}
+
+/**
+ * The one item every invitation to an address writes: a compare-and-swap on the
+ * invitation that currently holds it.
+ *
+ * Two concurrent first invitations to one address otherwise both commit. The
+ * cap is computed from a read, the rows they write are create-only on ids each
+ * request minted itself, and the retirement that makes re-inviting safe has
+ * nothing to retire — so nothing in either transaction names an item the other
+ * one touches. This row does, and DynamoDB serializes the two.
+ *
+ * Compare-and-swap rather than create-only, because the claim outlives the
+ * invitation that made it. An invitation expires with no transaction at all —
+ * expiry is a read-time comparison, by design, so no writer is there to release
+ * the address — and revoked and accepted invitations are retired by
+ * transactions this row must not join: replacing a live invitation would then
+ * mean deleting and putting the same item in one transaction, which DynamoDB
+ * refuses outright. So the claim is never released. The caller reads what it
+ * holds ({@link readInviteAddressClaim}) and conditions on that reading, which
+ * admits every legitimate re-invitation — expired, revoked, accepted, replaced —
+ * and refuses only an invitation that raced another one to the same address.
+ *
+ * The row is destroyed with the rest of the org's partition at teardown, which
+ * enumerates by pk rather than by known sort keys.
+ */
+export function inviteAddressClaimItem({
+  record,
+  claimedInviteId,
+  now = new Date(),
+}: {
+  record: InvitationRecord;
+  /** The invitation the claim named when it was read; undefined for none. */
+  claimedInviteId?: string;
+  now?: Date;
+}): TransactWriteItem {
+  return {
+    Put: {
+      TableName: Resource.OrgTable.name,
+      Item: {
+        pk: { S: OrgKeys.orgPk(record.orgId) },
+        sk: { S: OrgKeys.inviteAddrSk(record.emailNorm) },
+        inviteId: { S: record.inviteId },
+        claimedAt: { S: now.toISOString() },
+      },
+      ...(claimedInviteId === undefined
+        ? { ConditionExpression: 'attribute_not_exists(pk)' }
+        : {
+            ConditionExpression: 'inviteId = :claimed',
+            ExpressionAttributeValues: { ':claimed': { S: claimedInviteId } },
+          }),
+    },
+  };
+}
+
+/**
+ * Which invitation currently holds an address, or undefined when none ever has.
+ *
+ * Consistent, because it is the value the claim's condition is written against:
+ * a replica that has not caught up with a claim written moments ago would have
+ * the caller condition on its absence and lose the write it was meant to win.
+ */
+export async function readInviteAddressClaim(
+  orgId: string,
+  emailNorm: string,
+): Promise<string | undefined> {
+  const { Item } = await getDynamoClient().send(
+    new GetItemCommand({
+      TableName: Resource.OrgTable.name,
+      Key: {
+        pk: { S: OrgKeys.orgPk(orgId) },
+        sk: { S: OrgKeys.inviteAddrSk(emailNorm) },
+      },
+      ProjectionExpression: 'inviteId',
+      ConsistentRead: true,
+    }),
+  );
+  return Item?.inviteId?.S;
 }
 
 /**

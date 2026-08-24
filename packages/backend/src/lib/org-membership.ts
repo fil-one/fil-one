@@ -31,6 +31,9 @@ import { resolveOrgName } from './org-profile.js';
  *   accept link, written and deleted in the same transaction as the row it
  *   points at. Only the hash is ever stored; the token itself exists in the
  *   email and nowhere else. The lifecycle lives in `lib/invitations.ts`.
+ * - `ORG#{orgId}` / `INVITEADDR#{emailNorm}` — the one item every invitation to
+ *   an address writes, so two of them cannot both land. It names the invitation
+ *   that currently holds the address and nothing else.
  *
  * The org profile row stays in UserInfoTable (`ORG#{orgId}/PROFILE`), so the
  * transactions that change an org's name and its membership span both tables.
@@ -44,6 +47,14 @@ const membershipSkPrefix = (): string => 'MEMBERSHIP#';
 
 /** The invitation sort-key prefix, shared by the builder and the parser. */
 const inviteSkPrefix = (): string => 'INVITE#';
+
+/**
+ * The address-claim sort-key prefix. Deliberately not under
+ * {@link inviteSkPrefix}: the invitation Query is `begins_with(sk, 'INVITE#')`,
+ * and a claim row swept into that list would be read as an invitation whose
+ * every field is missing.
+ */
+const inviteAddrSkPrefix = (): string => 'INVITEADDR#';
 
 export const OrgKeys = {
   orgPk: (orgId: string): string => `ORG#${orgId}`,
@@ -88,6 +99,13 @@ export const OrgKeys = {
     const inviteId = sk.startsWith(prefix) ? sk.slice(prefix.length) : undefined;
     return inviteId && !inviteId.includes('#') ? inviteId : undefined;
   },
+  /**
+   * The address an invitation was sent to, lowercased, as a key. Built and
+   * compared only — never parsed back — so an address containing `#` addresses
+   * its own row rather than an ambiguous one.
+   */
+  inviteAddrSk: (emailNorm: string): string => `${inviteAddrSkPrefix()}${emailNorm}`,
+  inviteAddrSkPrefix,
   /**
    * The token lookup, keyed by the token's SHA-256 and never by the token. The
    * hash is what arrives from an accept request, so the digest is the address:
