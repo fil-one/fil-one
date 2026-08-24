@@ -23,6 +23,7 @@ const ddbMock = mockClient(DynamoDBClient);
 import {
   AUDIT_DETAIL_MAX_STRING_LENGTH,
   AuditAppendError,
+  AuditCompletionConflictError,
   AuditKeys,
   AuditSubjects,
   ProhibitedAuditContentError,
@@ -896,6 +897,45 @@ describe('twoPhaseAudit', () => {
     const calls = ddbMock.commandCalls(TransactWriteItemsCommand);
     expect(calls).toHaveLength(2);
     expect(calls[1].args[0].input.TransactItems).toStrictEqual([KEY_ROW]);
+  });
+
+  it('says what the intent said, whatever the caller did with the payload after', async () => {
+    const params = mintParams();
+    const correlation = await twoPhaseAudit(params);
+
+    // The caller keeps its own object; the completion is built from the copy the
+    // intent recorded.
+    params.details.keyName = 'not-what-was-asked-for';
+    await correlation.complete({ outcome: 'succeeded', details: { keyIdSuffix: 'AMPL' } });
+
+    expect(itemOf(1).details).toMatchObject({
+      M: expect.objectContaining({ keyName: { S: 'ci' } }),
+    });
+  });
+
+  it('refuses a completion that redefines a field the intent recorded', async () => {
+    const correlation = await twoPhaseAudit(mintParams());
+
+    // Two records under one correlation id disagreeing about which operation
+    // they describe leaves a reader no way to tell which half to believe.
+    await expect(
+      correlation.complete({ outcome: 'succeeded', details: { keyName: 'something-else' } }),
+    ).rejects.toThrow(AuditCompletionConflictError);
+    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(1);
+  });
+
+  it('takes a completion that restates a recorded field with the value it has', async () => {
+    const correlation = await twoPhaseAudit(mintParams());
+
+    // A caller passing back what it read is not a contradiction.
+    await correlation.complete({
+      outcome: 'succeeded',
+      details: { keyKind: 's3', keyIdSuffix: 'AMPL' },
+    });
+
+    expect(itemOf(1).details).toMatchObject({
+      M: expect.objectContaining({ keyKind: { S: 's3' }, keyIdSuffix: { S: 'AMPL' } }),
+    });
   });
 
   it('fails a mint whose completion transaction the audit item cancelled', async () => {

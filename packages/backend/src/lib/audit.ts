@@ -156,6 +156,23 @@ export class AuditAppendError extends Error {
 }
 
 /**
+ * Thrown when a completion contradicts the intent it closes.
+ *
+ * A developer error, like a prohibited field name: the two halves share one
+ * correlation id, and a reader who finds them disagreeing about what the
+ * operation was has no way to tell which half to believe.
+ */
+export class AuditCompletionConflictError extends Error {
+  readonly field: string;
+
+  constructor(field: string) {
+    super(`Audit completion may not redefine "${field}", which its intent already recorded`);
+    this.name = 'AuditCompletionConflictError';
+    this.field = field;
+  }
+}
+
+/**
  * Longest string an event payload may carry. Long enough for an org name or an
  * email, short enough that a credential, a signed URL, or a pasted blob does
  * not fit — a backstop, not the credential check, which is by shape.
@@ -619,9 +636,11 @@ export interface AuditCorrelation<T extends TwoPhaseAuditEventType> {
    * flow has a local write to make, and goes on its own when it does not — a
    * request that returns 409 or 400 still closes its intent.
    *
-   * `details` are merged over the intent's, so the completion carries what only
-   * the vendor could supply (the key id, the timestamp it stamped) without the
-   * caller restating the rest.
+   * `details` are merged over the snapshot the intent recorded, so the
+   * completion carries what only the vendor could supply (the key id, the
+   * timestamp it stamped) without the caller restating the rest. Adding a field
+   * is what the completion is for; a field the intent already recorded is
+   * invariant and redefining it throws.
    */
   complete(args: {
     outcome: AuditOutcome;
@@ -676,6 +695,10 @@ export async function twoPhaseAudit<T extends TwoPhaseAuditEventType>({
     phase: 'intent',
     correlationId,
   } as PhasedAuditEventInput<T>) as TwoPhaseAuditEvent;
+  // The sanitized copy the intent recorded, not the caller's object: `details`
+  // stays theirs to mutate after this returns, and the completion must say what
+  // the intent said regardless.
+  const intentDetails = intent.details as AuditEventDetails[T];
 
   try {
     await appendAuditEvent(intent);
@@ -696,7 +719,7 @@ export async function twoPhaseAudit<T extends TwoPhaseAuditEventType>({
         actor,
         orgId,
         subject,
-        details: { ...details, ...completionDetails },
+        details: completedDetails<T>(intentDetails, completionDetails),
         phase: 'completion',
         correlationId,
         outcome,
@@ -723,6 +746,56 @@ export async function twoPhaseAudit<T extends TwoPhaseAuditEventType>({
       }
     },
   };
+}
+
+/**
+ * The completion's payload: what the intent recorded, plus what the vendor
+ * supplied.
+ *
+ * `Partial<AuditEventDetails[T]>` would otherwise let a completion restate
+ * `keyKind` or `keyName` as something else, and the pair filed under one
+ * correlation id would disagree about which operation it describes. Restating a
+ * field with the value it already has is allowed — that is a caller passing
+ * back what it read, not a contradiction.
+ */
+function completedDetails<T extends TwoPhaseAuditEventType>(
+  intentDetails: AuditEventDetails[T],
+  completionDetails: Partial<AuditEventDetails[T]> | undefined,
+): AuditEventDetails[T] {
+  if (!completionDetails) return intentDetails;
+
+  const recordable = recordableDetails<T>(completionDetails as AuditEventDetails[T]);
+  const recorded = intentDetails as AuditDetailRecord;
+  for (const [field, value] of Object.entries(recordable as AuditDetailRecord)) {
+    if (recorded[field] !== undefined && !sameDetailValue(recorded[field], value)) {
+      throw new AuditCompletionConflictError(field);
+    }
+  }
+
+  return { ...intentDetails, ...recordable };
+}
+
+/** Structural equality over what a payload may hold: scalars, arrays, records. */
+function sameDetailValue(
+  a: AuditDetailValue | undefined,
+  b: AuditDetailValue | undefined,
+): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((entry, index) => sameDetailValue(entry, b[index]))
+    );
+  }
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
+
+  const fields = Object.keys(a);
+  return (
+    fields.length === Object.keys(b).length &&
+    fields.every((field) => sameDetailValue(a[field], (b as AuditDetailRecord)[field]))
+  );
 }
 
 function errorReason(err: unknown): string {
