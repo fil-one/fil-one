@@ -22,7 +22,7 @@ import {
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { resolveAuth0Domain } from '../lib/auth0-domain.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { createNewUserAndOrg } from '../lib/account-creation.js';
+import { createNewUserAndOrg, stampVerifiedEmail } from '../lib/account-creation.js';
 import { resolveMembership } from '../lib/org-membership.js';
 import type { OrgMembership } from '../lib/org-membership.js';
 import { deriveOrgName } from '../lib/suggest-org-name.js';
@@ -384,6 +384,16 @@ async function resolveUserAndOrg(
     if (result.Item.emailEntitlementClaimed?.BOOL !== true) {
       await ensureTrialEntitlementBestEffort({ sub, userId, orgId, email, emailVerified });
     }
+    // The profile's address is the org paths' only copy of it, and accounts
+    // created before it was stamped have none. Gated on the marker this row
+    // already carries, so a profile that is current costs no write.
+    await stampVerifiedEmail({
+      sub,
+      userId,
+      email,
+      emailVerified,
+      stampedEmail: result.Item.profileEmail?.S,
+    });
     return { userId, orgId, email };
   }
 
@@ -392,7 +402,13 @@ async function resolveUserAndOrg(
   const orgId = crypto.randomUUID();
   const orgName = deriveOrgName(name ?? undefined, email ?? undefined);
 
-  const membership = await createNewUserAndOrg({ sub, userId, orgId, orgName });
+  const membership = await createNewUserAndOrg({
+    sub,
+    userId,
+    orgId,
+    orgName,
+    email: emailVerified && email ? email : undefined,
+  });
 
   // Tenant setup is deferred until the user creates their first bucket or access
   // key — see docs/architectural-decisions/2026-05-13-synchronous-tenant-setup-on-first-resource.md.

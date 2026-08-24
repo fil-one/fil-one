@@ -11,6 +11,7 @@ import {
   DynamoDBClient,
   GetItemCommand,
   TransactWriteItemsCommand,
+  UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { ApiErrorCode, OrgRole, Stage } from '@filone/shared';
 import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../lib/org-setup-status.js';
@@ -1282,6 +1283,154 @@ describe('authMiddleware', () => {
         code: ApiErrorCode.EMAIL_NOT_VERIFIED,
       });
       expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
+    });
+  });
+
+  describe('verified email on the user profile', () => {
+    const existingUserId = 'stamp-user-uuid';
+    const existingOrgId = 'stamp-org-uuid';
+
+    function mockExistingUser(identity: Record<string, unknown> = {}) {
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: {
+            userId: { S: existingUserId },
+            orgId: { S: existingOrgId },
+            emailEntitlementClaimed: { BOOL: true },
+            ...identity,
+          },
+        });
+      ddbMock.on(UpdateItemCommand).resolves({});
+    }
+
+    function verifiedLogin() {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: true } });
+      return buildMiddyRequest(
+        buildEvent({
+          cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+        }),
+      );
+    }
+
+    it('stamps the verified email at signup', async () => {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: true } });
+      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+      ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+      const { before } = authMiddleware();
+      await before(
+        buildMiddyRequest(
+          buildEvent({
+            cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+          }),
+        ),
+      );
+
+      const items = ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems;
+      expect(items?.[0].Put?.Item?.profileEmail).toStrictEqual({ S: MOCK_EMAIL });
+      expect(items?.[1].Put?.Item?.email).toStrictEqual({ S: MOCK_EMAIL });
+      // The stamp rides the account transaction, so it costs no extra write.
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    });
+
+    it('leaves the address off an unverified signup', async () => {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: false } });
+      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+      ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      await before(
+        buildMiddyRequest(
+          buildEvent({
+            cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+          }),
+        ),
+      );
+
+      const items = ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems;
+      expect(items?.[0].Put?.Item?.profileEmail).toBeUndefined();
+      expect(items?.[1].Put?.Item?.email).toBeUndefined();
+    });
+
+    it('backfills a profile that was created before the address was stamped', async () => {
+      mockExistingUser();
+
+      const { before } = authMiddleware();
+      const result = await before(verifiedLogin());
+
+      expect(result).toBeUndefined();
+      const updates = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updates).toHaveLength(2);
+      // Profile first: a marker ahead of the row it claims would stop the repair.
+      expect(updates[0].args[0].input.Key).toStrictEqual({
+        pk: { S: `USER#${existingUserId}` },
+        sk: { S: 'PROFILE' },
+      });
+      expect(updates[0].args[0].input.ExpressionAttributeValues).toStrictEqual({
+        ':email': { S: MOCK_EMAIL },
+      });
+      expect(updates[1].args[0].input.Key).toStrictEqual({
+        pk: { S: `SUB#${MOCK_SUB}` },
+        sk: { S: 'IDENTITY' },
+      });
+    });
+
+    it('writes nothing when the profile already holds the current address', async () => {
+      mockExistingUser({ profileEmail: { S: MOCK_EMAIL } });
+
+      const { before } = authMiddleware();
+      await before(verifiedLogin());
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    });
+
+    it('re-stamps after the address changes', async () => {
+      mockExistingUser({ profileEmail: { S: 'old@example.com' } });
+
+      const { before } = authMiddleware();
+      await before(verifiedLogin());
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(2);
+    });
+
+    it('does not stamp an unverified address on an existing account', async () => {
+      mockExistingUser();
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: false } });
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      await before(
+        buildMiddyRequest(
+          buildEvent({
+            cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+          }),
+        ),
+      );
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    });
+
+    it('does not block the request when the stamp fails', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockExistingUser();
+      ddbMock.on(UpdateItemCommand).rejects(new Error('DynamoDB unavailable'));
+
+      const { before } = authMiddleware();
+      const result = await before(verifiedLogin());
+
+      expect(result).toBeUndefined();
+      expect(consoleError).toHaveBeenCalled();
+      consoleError.mockRestore();
     });
   });
 
