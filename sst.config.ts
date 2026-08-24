@@ -1114,15 +1114,15 @@ export default $config({
     };
 
     const manifestHandlers = new Set(ROUTE_MANIFEST.map((route) => route.handler));
-    const strayExtras = Object.keys(ROUTE_INFRA_CONFIGS).filter(
+    const strayHandlers = Object.keys(ROUTE_INFRA_CONFIGS).filter(
       (handler) => !manifestHandlers.has(handler),
     );
-    if (strayExtras.length > 0) {
+    if (strayHandlers.length > 0) {
       // A key naming no route silently drops that route's IAM grants and
       // environment, which fails at runtime rather than at deploy time. Fail here
       // instead.
       throw new Error(
-        `ROUTE_INFRA_CONFIGS names handlers with no route manifest entry: ${strayExtras.join(', ')}`,
+        `ROUTE_INFRA_CONFIGS names handlers with no route manifest entry: ${strayHandlers.join(', ')}`,
       );
     }
 

@@ -454,12 +454,11 @@ describe('the RAG allowlist gates the routes the manifest marks', () => {
  * on membership would lock out the one user whose membership row is the thing
  * that went wrong.
  *
- * The two reads run all the way through and answer 200: a caller with no
- * membership row still gets their own profile and their own preferences. The
- * rest answer on their own terms — a step-up demand on the MFA routes, a
- * complaint about the body these cases do not trouble to fill in on the
- * writes — and none of that is pinned. The single pin is that the answer is
- * not an org denial, which is the one answer a self route must never give.
+ * Each route answers on its own terms: the reads run all the way through, the
+ * MFA routes demand a step-up, and the writes complain about a body these
+ * cases do not trouble to fill in. None of that is pinned, and the case does
+ * not claim any of it. The single pin is that the answer is not an org denial,
+ * which is the one answer a self route must never give.
  */
 describe('self-service routes serve a caller with no membership row', () => {
   quietDenialOutput();
