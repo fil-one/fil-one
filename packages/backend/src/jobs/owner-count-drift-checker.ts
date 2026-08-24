@@ -13,6 +13,7 @@ import { getDynamoClient } from '../lib/ddb-client.js';
 import { reportMetric } from '../lib/metrics.js';
 import { OWNER_SET_REV_ATTRIBUTE } from '../lib/membership-changes.js';
 import { OrgKeys } from '../lib/org-membership.js';
+import { isOrgDeletedOrDeleting } from '../lib/org-profile.js';
 
 /**
  * Recounts every org's Owners and repairs a diverged `ownerCount`.
@@ -44,6 +45,12 @@ import { OrgKeys } from '../lib/org-membership.js';
  * guard and lets the last Owner be removed. So every repair recounts the org's
  * own partition with a ConsistentRead Query first, and writes what THAT says,
  * conditioned on the counter it read a moment earlier.
+ *
+ * An org being torn down is left alone before either of those runs. `destroyOrgTableRows`
+ * deletes the META row before the member rows, so a recount inside that window
+ * sees members and no counter and would PUT a fresh META row into a partition
+ * the scrub has already enumerated — a row nothing revisits, describing an org
+ * that no longer exists.
  */
 
 const dynamo = getDynamoClient();
@@ -80,6 +87,8 @@ interface RunStats {
   repaired: number;
   /** Repairs that lost their condition to a concurrent membership change. */
   skipped: number;
+  /** Orgs left alone because they are being deleted, or already are. */
+  deleting: number;
   repairFailed: number;
   /** Orgs the recount found no Owner in. */
   noOwner: number;
@@ -94,6 +103,7 @@ export async function handler(): Promise<void> {
     drifted: 0,
     repaired: 0,
     skipped: 0,
+    deleting: 0,
     repairFailed: 0,
     noOwner: 0,
   };
@@ -329,6 +339,28 @@ async function reconcileOrg(orgId: string, scanned: OrgTally, stats: RunStats): 
   // set, which is the shape of an org that is fine. Everything else is
   // re-examined properly before a word is said about it.
   if (scanned.hasMeta && scanned.storedOwnerCount === scanned.owners && scanned.owners > 0) return;
+
+  // Before the recount, not just before the repair: the recount is what would
+  // read a half-destroyed partition, and its answer is the only thing the repair
+  // knows. Read consistently, and a row that is gone counts as deleted — a
+  // scheduled job's candidate list outlives the rows it was built from.
+  try {
+    if (await isOrgDeletedOrDeleting(orgId)) {
+      stats.deleting += 1;
+      console.log('[owner-count-drift-checker] org is being deleted — left alone', { orgId });
+      return;
+    }
+  } catch (error) {
+    stats.repairFailed += 1;
+    console.error(
+      '[owner-count-drift-checker] deletion fence unreadable — org left for the next run',
+      {
+        orgId,
+        error,
+      },
+    );
+    return;
+  }
 
   let tally: OrgTally;
   try {

@@ -88,6 +88,20 @@ function isMetaRow(item: Record<string, unknown>): boolean {
   return (item as { sk?: { S?: string } }).sk?.S === 'META';
 }
 
+/**
+ * The org profile row the deletion fence reads. Live unless a test says
+ * otherwise: the row is retained through teardown and beyond, so its absence
+ * means an org this job must not touch.
+ */
+function stubOrgProfile(orgId: string, attributes: Record<string, unknown> = {}) {
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+    })
+    .resolves({ Item: marshall({ pk: `ORG#${orgId}`, sk: 'PROFILE', ...attributes }) as never });
+}
+
 /** The counter read the recount takes before it pages anything. */
 function stubOrgMeta(orgId: string, meta: Record<string, unknown> | undefined) {
   ddbMock
@@ -127,6 +141,8 @@ describe('owner-count-drift-checker', () => {
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     // An org with no META row, until a test stubs one.
     ddbMock.on(GetItemCommand).resolves({});
+    stubOrgProfile(ORG_ID);
+    stubOrgProfile(OTHER_ORG_ID);
   });
 
   afterEach(() => {
@@ -193,8 +209,11 @@ describe('owner-count-drift-checker', () => {
     });
     // And the counter it conditions on comes from its own read of the META row,
     // taken before the pages rather than off whichever one it landed on.
-    expect(ddbMock.commandCalls(GetItemCommand)[0].args[0].input).toMatchObject({
-      TableName: 'OrgTable',
+    const metaRead = ddbMock
+      .commandCalls(GetItemCommand)
+      .map((call) => call.args[0].input)
+      .find((input) => input.TableName === 'OrgTable')!;
+    expect(metaRead).toMatchObject({
       Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'META' } },
       ConsistentRead: true,
     });
@@ -324,6 +343,59 @@ describe('owner-count-drift-checker', () => {
 
     expect(updateInputs()).toHaveLength(0);
     expect(logsMatching(errorSpy, 'recount failed — org left for the next run')).toHaveLength(1);
+    expect(emission(stdoutSpy)).toMatchObject({ OwnerCountRepairFailed: 1 });
+  });
+
+  it('leaves a deleting org alone rather than putting its META row back', async () => {
+    // The scrub deletes the META row before the member rows, so a recount inside
+    // that window sees members and no counter — exactly the shape that mints a
+    // fresh META row, in a partition the teardown has already enumerated.
+    const rows = [memberRow(ORG_ID, 'user-1')];
+    ddbMock.on(ScanCommand).resolves({ Items: rows });
+    stubPartition(ORG_ID, rows);
+    stubOrgProfile(ORG_ID, { deleting: true });
+
+    await handler();
+
+    expect(putInputs()).toHaveLength(0);
+    expect(updateInputs()).toHaveLength(0);
+    // Not even the recount: its answer is the only thing a repair knows.
+    expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(0);
+    expect(logsMatching(logSpy, 'org is being deleted — left alone')).toHaveLength(1);
+  });
+
+  it('treats a missing org profile as deleted', async () => {
+    // The profile row is retained through teardown and beyond, so its absence is
+    // an org whose rows this run outlived rather than a live one.
+    const rows = [metaRow(ORG_ID, 3), memberRow(ORG_ID, 'user-1')];
+    ddbMock.on(ScanCommand).resolves({ Items: rows });
+    stubPartition(ORG_ID, rows);
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'PROFILE' } },
+      })
+      .resolves({});
+
+    await handler();
+
+    expect(updateInputs()).toHaveLength(0);
+  });
+
+  it('leaves an org for the next run when its deletion fence cannot be read', async () => {
+    const rows = [metaRow(ORG_ID, 3), memberRow(ORG_ID, 'user-1')];
+    ddbMock.on(ScanCommand).resolves({ Items: rows });
+    stubPartition(ORG_ID, rows);
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'PROFILE' } },
+      })
+      .rejects(new Error('ProvisionedThroughputExceededException'));
+
+    await handler();
+
+    expect(updateInputs()).toHaveLength(0);
     expect(emission(stdoutSpy)).toMatchObject({ OwnerCountRepairFailed: 1 });
   });
 
