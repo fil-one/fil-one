@@ -24,28 +24,43 @@ import { getDynamoClient } from './ddb-client.js';
 export interface UserProfile {
   email?: string;
   name?: string;
+  /**
+   * The org the account logs in to, which `authMiddleware` reads off the
+   * identity row and fences on. The deletion scrub moves both rows together
+   * (`repointHomeOrg`), so this copy answers the same question without a second
+   * key to resolve.
+   */
+  orgId?: string;
 }
 
 /**
  * One member's profile fields, or undefined when the row cannot be read.
  *
  * Swallowing the read error is deliberate and the callers differ on what it
- * costs them: the roster renders that member unnamed, while a removal loses the
- * address it would have swept invitations by and says so in its own log. Neither
- * is a reason to fail a request whose authoritative row — the membership — has
- * already been read.
+ * costs them: the roster renders that member unnamed, a removal loses the
+ * address it would have swept invitations by and says so in its own log, and an
+ * acceptance carries one fence rather than two. None is a reason to fail a
+ * request whose authoritative row — the membership — has already been read.
+ *
+ * `consistentRead` is for the caller whose answer gates a write: a fence that
+ * has just been raised on the org this row names must not be missed by a
+ * replica that has not caught up.
  */
-export async function readUserProfile(userId: string): Promise<UserProfile | undefined> {
+export async function readUserProfile(
+  userId: string,
+  options: { consistentRead?: boolean } = {},
+): Promise<UserProfile | undefined> {
   try {
     const { Item } = await getDynamoClient().send(
       new GetItemCommand({
         TableName: Resource.UserInfoTable.name,
         Key: { pk: { S: `USER#${userId}` }, sk: { S: 'PROFILE' } },
-        ProjectionExpression: 'email, #name',
+        ProjectionExpression: 'email, #name, orgId',
         ExpressionAttributeNames: { '#name': 'name' },
+        ...(options.consistentRead ? { ConsistentRead: true } : {}),
       }),
     );
-    return { email: Item?.email?.S, name: Item?.name?.S };
+    return { email: Item?.email?.S, name: Item?.name?.S, orgId: Item?.orgId?.S };
   } catch (err) {
     console.error('[user-profile] Profile read failed', { userId, error: err });
     return undefined;

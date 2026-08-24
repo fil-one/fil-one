@@ -156,6 +156,20 @@ function transactItems() {
   return calls[0].args[0].input.TransactItems ?? [];
 }
 
+/**
+ * The accepter's own profile row, which names the org their session logs in to.
+ * Absent unless a test writes one, so the tests that count the transaction's
+ * items describe an account whose row predates the field.
+ */
+function stubAccepterProfile(orgId: string) {
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: `USER#${USER_ID}` }, sk: { S: 'PROFILE' } },
+    })
+    .resolves({ Item: { orgId: { S: orgId } } });
+}
+
 /** The profile stamps the acceptance made, in the order it made them. */
 function profileStamps() {
   return ddbMock.commandCalls(UpdateItemCommand).map((call) => call.args[0].input);
@@ -341,6 +355,47 @@ describe('POST /api/invitations/accept handler', () => {
       Key: { pk: { S: `ORG#${INVITING_ORG_ID}` }, sk: { S: 'PROFILE' } },
       ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
     });
+  });
+
+  it('fences the accepter’s own org as well, at its own index', async () => {
+    // The census reads a sole member and deletes their Auth0 identity; this
+    // request writes a membership in another org a moment later, and the result
+    // is a valid membership whose user cannot sign in. authMiddleware checks the
+    // same thing on an eventually consistent read, which is the window this
+    // closes.
+    stubAccepterProfile(PERSONAL_ORG_ID);
+
+    await handler(acceptEvent(), buildContext());
+
+    expect(transactItems()[1].ConditionCheck).toMatchObject({
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: `ORG#${PERSONAL_ORG_ID}` }, sk: { S: 'PROFILE' } },
+      ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
+    });
+  });
+
+  it('carries one fence when the accepter already belongs to the inviting org', async () => {
+    // DynamoDB refuses two operations on one item, so the second fence is only
+    // ever a different org.
+    stubAccepterProfile(INVITING_ORG_ID);
+
+    await handler(acceptEvent(), buildContext());
+
+    expect(
+      transactItems().filter((item) => item.ConditionCheck?.Key?.sk?.S === 'PROFILE'),
+    ).toHaveLength(1);
+  });
+
+  it('answers account-deleted when the accepter’s own org is being torn down', async () => {
+    stubAccepterProfile(PERSONAL_ORG_ID);
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(1, 8));
+
+    const result = await handler(acceptEvent(), buildContext());
+
+    // Their account, not the invitation: the answer their next request gets
+    // once the session fence's read catches up.
+    expect(result).toMatchObject({ statusCode: 410 });
+    expect(body(result).code).toBe(ApiErrorCode.ACCOUNT_DELETED);
   });
 
   it('carries the fence even when the caller is already a member', async () => {

@@ -19,12 +19,17 @@ import {
   ownerCountItem,
 } from '../lib/membership-changes.js';
 import { resolveMembership } from '../lib/org-membership.js';
-import { isGuardRejection, orgNotDeletingCheck, resolveOrgName } from '../lib/org-profile.js';
+import {
+  OrgDeletingError,
+  isGuardRejection,
+  orgNotDeletingCheck,
+  resolveOrgName,
+} from '../lib/org-profile.js';
 import { parseJsonBody } from '../lib/parse-json-body.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
-import { rememberVerifiedEmail } from '../lib/user-profile.js';
+import { readUserProfile, rememberVerifiedEmail } from '../lib/user-profile.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
@@ -49,6 +54,8 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
  *
  * - a `ConditionCheck` that the org is not being deleted, the same profile
  *   fence every guarded writer carries, as item 0,
+ * - the same fence on the ACCEPTER's own org, when it is a different one: their
+ *   deletion is what would end their identity while this membership is written,
  * - the membership row and its inverse item,
  * - the invitation marked accepted, conditional on it still being pending,
  * - the token lookup deleted, which is what makes the token single-use,
@@ -81,7 +88,10 @@ export async function baseHandler(
     return emailMismatchResponse();
   }
 
-  const existing = await resolveMembership(invitation.orgId, userId);
+  const [existing, accepterOrgId] = await Promise.all([
+    resolveMembership(invitation.orgId, userId),
+    accepterOrgFence(userId, invitation.orgId),
+  ]);
   const items = existing ? [] : joinItems(invitation, userId);
   const labels = existing ? [] : joinLabels(invitation);
 
@@ -93,6 +103,7 @@ export async function baseHandler(
       // for somebody who is already inside.
       items: [
         orgNotDeletingCheck(invitation.orgId),
+        ...(accepterOrgId ? [orgNotDeletingCheck(accepterOrgId)] : []),
         ...items,
         ...retireInvitationItems(invitation, 'accepted'),
       ],
@@ -104,11 +115,11 @@ export async function baseHandler(
       }),
     });
   } catch (err) {
-    return await acceptFailureResponse(err, ['org', ...labels, 'invitation', 'token'], {
-      invitation,
-      userId,
-      verifiedEmail,
-    });
+    return await acceptFailureResponse(
+      err,
+      ['org', ...(accepterOrgId ? ['accepterOrg'] : []), ...labels, 'invitation', 'token'],
+      { invitation, userId, verifiedEmail, accepterOrgId },
+    );
   }
 
   await rememberVerifiedEmail(userId, verifiedEmail);
@@ -203,7 +214,7 @@ function acceptedEvent({
 async function acceptFailureResponse(
   err: unknown,
   labels: string[],
-  { invitation, userId, verifiedEmail }: AcceptContext,
+  { invitation, userId, verifiedEmail, accepterOrgId }: AcceptContext,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   // The deletion fence, read at its own index. The answer is the one a revoked
   // invitation gets, and it says nothing about the org: a stale link should not
@@ -212,6 +223,11 @@ async function acceptFailureResponse(
 
   const failed = cancelledLabels(err, labels);
   if (failed.length === 0) throw err;
+
+  // The accepter's own org is going away, so the answer is about their account
+  // rather than about the invitation: the same one their next request would get
+  // once the session fence's read catches up.
+  if (failed.includes('accepterOrg')) throw new OrgDeletingError(accepterOrgId!);
 
   if (failed.includes('membership')) {
     const existing = await resolveMembership(invitation.orgId, userId);
@@ -246,6 +262,37 @@ interface AcceptContext {
   invitation: InvitationRecord;
   userId: string;
   verifiedEmail?: string;
+  /** The accepter's own org, when the transaction fenced it. */
+  accepterOrgId?: string;
+}
+
+/**
+ * The accepter's own org, when it is one this transaction has to fence.
+ *
+ * `authMiddleware` refuses every request whose identity row names a deleting
+ * org, which is the same check — but it is an eventually consistent read, and
+ * the window it misses is the one that matters here. The deletion census reads
+ * the accepter as a sole member and deletes their Auth0 identity; this request
+ * commits a membership in another org a moment later; the result is a valid
+ * membership whose user cannot sign in, and nothing repairs it.
+ *
+ * The org the census can end an account from is the org the identity row names:
+ * `censusMember` deletes an identity only for a member whose sole membership is
+ * not an invitation, and the home org moves only to an org the member still
+ * belongs to (`repointHomeOrg`). The profile row carries the same value, moved
+ * by the same repair, and this handler already holds the userId that addresses
+ * it.
+ *
+ * Undefined when it is the inviting org — DynamoDB refuses two operations on one
+ * item — and when the row cannot be read, which costs this transaction the
+ * second fence and leaves it exactly as it was before.
+ */
+async function accepterOrgFence(
+  userId: string,
+  invitingOrgId: string,
+): Promise<string | undefined> {
+  const orgId = (await readUserProfile(userId, { consistentRead: true }))?.orgId;
+  return orgId && orgId !== invitingOrgId ? orgId : undefined;
 }
 
 /**
