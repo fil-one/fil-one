@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { authPartialMock } from '../test/auth-partial-mock.js';
 
 import { BulkDeleteJobStatus, BulkDeleteScope, S3Region } from '@filone/shared';
 
@@ -16,8 +15,6 @@ vi.mock('../lib/bulk-delete-jobs.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/bulk-delete-jobs.js')>();
   return { ...actual, getBulkDeleteJob: vi.fn() };
 });
-
-vi.mock('../middleware/auth.js', () => authPartialMock());
 
 process.env.FILONE_STAGE = 'test';
 

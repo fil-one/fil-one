@@ -407,39 +407,43 @@ const presignRequest = (op: Record<string, unknown>): RouteRequest => ({
  * permission in the manifest, so what it enforces is only visible by sending a
  * body and reading the answer.
  */
-const IN_HANDLER_PROBES: { handler: string; asks: string; permission: Permission; request: RouteRequest }[] =
-  [
-    ...PRESIGN_OPERATIONS.map(({ op, permission }) => ({
-      handler: 'presign',
-      asks: String(op.op),
-      permission,
-      request: presignRequest(op),
-    })),
-    {
-      handler: 'set-bucket-rag-enablement',
-      asks: 'indexing on',
-      permission: 'buckets.create',
-      request: { body: JSON.stringify({ enabled: true }), pathParameters: { name: BUCKET } },
+const IN_HANDLER_PROBES: {
+  handler: string;
+  asks: string;
+  permission: Permission;
+  request: RouteRequest;
+}[] = [
+  ...PRESIGN_OPERATIONS.map(({ op, permission }) => ({
+    handler: 'presign',
+    asks: String(op.op),
+    permission,
+    request: presignRequest(op),
+  })),
+  {
+    handler: 'set-bucket-rag-enablement',
+    asks: 'indexing on',
+    permission: 'buckets.create',
+    request: { body: JSON.stringify({ enabled: true }), pathParameters: { name: BUCKET } },
+  },
+  {
+    handler: 'set-bucket-rag-enablement',
+    asks: 'indexing off',
+    permission: 'buckets.delete',
+    request: { body: JSON.stringify({ enabled: false }), pathParameters: { name: BUCKET } },
+  },
+  {
+    handler: 'create-access-key',
+    asks: 'a new key',
+    permission: 'keys.create',
+    request: {
+      body: JSON.stringify({
+        keyName: 'a key',
+        permissions: ['read'],
+        region: 'eu-west-1',
+      }),
     },
-    {
-      handler: 'set-bucket-rag-enablement',
-      asks: 'indexing off',
-      permission: 'buckets.delete',
-      request: { body: JSON.stringify({ enabled: false }), pathParameters: { name: BUCKET } },
-    },
-    {
-      handler: 'create-access-key',
-      asks: 'a new key',
-      permission: 'keys.create',
-      request: {
-        body: JSON.stringify({
-          keyName: 'a key',
-          permissions: ['read'],
-          region: 'eu-west-1',
-        }),
-      },
-    },
-  ];
+  },
+];
 
 /**
  * What each in-handler route enforces, read off its answers.
@@ -467,8 +471,9 @@ describe('what the in-handler routes enforce', () => {
   });
 
   it('probes every operation the presign schema accepts', () => {
-    const covered = PRESIGN_OPERATIONS.map(({ op }) => op.op).sort();
-    const accepted = PresignOpSchema.options.map((option) => option.shape.op.value).sort();
+    const byName = (a: string, b: string) => a.localeCompare(b);
+    const covered = PRESIGN_OPERATIONS.map(({ op }) => String(op.op)).sort(byName);
+    const accepted = PresignOpSchema.options.map((option) => option.shape.op.value).sort(byName);
     expect(covered).toStrictEqual(accepted);
   });
 

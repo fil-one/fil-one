@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { authPartialMock } from '../test/auth-partial-mock.js';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, DeleteItemCommand, GetItemCommand } from '@aws-sdk/client-dynamodb';
 
@@ -41,8 +40,6 @@ vi.mock('../lib/org-profile.js', () => ({
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
-
-vi.mock('../middleware/auth.js', () => authPartialMock());
 
 import { ApiErrorCode, OrgRole } from '@filone/shared';
 import { baseHandler } from './delete-access-key.js';

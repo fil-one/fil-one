@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { authPartialMock } from '../test/auth-partial-mock.js';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
   DynamoDBClient,
@@ -43,7 +42,6 @@ const ddbMock = mockClient(DynamoDBClient);
 // Importing the handler module builds its Middy chain, so the middleware that
 // chain installs is stubbed to a pass-through. The tests below call
 // `baseHandler` directly.
-vi.mock('../middleware/auth.js', () => authPartialMock());
 vi.mock('../middleware/csrf.js', () => ({
   csrfMiddleware: () => ({ before: () => undefined }),
 }));

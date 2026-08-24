@@ -29,9 +29,9 @@ vi.mock('../middleware/subscription-guard.js', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 import { ApiErrorCode, OrgRole } from '@filone/shared';
-import { baseHandler, handler } from './delete-rag-api-key.js';
+import { baseHandler } from './delete-rag-api-key.js';
 import { RagApiKeyKeys } from '../lib/rag-api-keys.js';
-import { buildEvent, buildContext, membershipFor } from '../test/lambda-test-utilities.js';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1', emailVerified: true };

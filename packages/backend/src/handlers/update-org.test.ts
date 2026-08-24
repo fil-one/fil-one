@@ -39,10 +39,8 @@ import {
   buildEvent,
   buildContext,
   NO_MEMBERSHIP,
-  stubAbsentMembershipRead,
   stubMembershipRead,
 } from '../test/lambda-test-utilities.js';
-import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -244,21 +242,5 @@ describe('PATCH /api/org handler', () => {
     const result = await handler(renameEvent('not-json{'), buildContext());
 
     expect(result).toMatchObject({ statusCode: 400 });
-  });
-
-  describeRoleEnforcement({
-    permission: 'org.rename',
-    orgId: MOCK_ORG_ID,
-    userId: MOCK_USER_ID,
-    invoke: (membership) => {
-      // The real chain runs, so the role comes from the OrgTable row rather
-      // than from the event.
-      if (membership === NO_MEMBERSHIP) {
-        stubAbsentMembershipRead(ddbMock, { orgId: MOCK_ORG_ID, userId: MOCK_USER_ID });
-      } else {
-        callerHolds(membership.role);
-      }
-      return handler(renameEvent({ name: 'New Corp' }), buildContext());
-    },
   });
 });
