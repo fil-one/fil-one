@@ -39,10 +39,8 @@ import {
   buildEvent,
   buildContext,
   NO_MEMBERSHIP,
-  stubAbsentMembershipRead,
   stubMembershipRead,
 } from '../test/lambda-test-utilities.js';
-import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
 const MOCK_SUB = 'auth0|admin';
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
@@ -246,19 +244,5 @@ describe('DELETE /api/org/invitations/{inviteId} handler', () => {
     const result = await handler(revokeEvent(null), buildContext());
 
     expect(result).toMatchObject({ statusCode: 400 });
-  });
-
-  describeRoleEnforcement({
-    permission: 'members.manage',
-    orgId: ORG_ID,
-    userId: USER_ID,
-    invoke: (membership) => {
-      if (membership === NO_MEMBERSHIP) {
-        stubAbsentMembershipRead(ddbMock, { orgId: ORG_ID, userId: USER_ID });
-      } else {
-        stubMembershipRead(ddbMock, { orgId: ORG_ID, userId: USER_ID, role: membership.role });
-      }
-      return handler(revokeEvent(), buildContext());
-    },
   });
 });

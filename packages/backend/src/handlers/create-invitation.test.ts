@@ -68,10 +68,8 @@ import {
   buildEvent,
   buildContext,
   NO_MEMBERSHIP,
-  stubAbsentMembershipRead,
   stubMembershipRead,
 } from '../test/lambda-test-utilities.js';
-import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -524,19 +522,5 @@ describe('POST /api/org/invitations handler', () => {
 
     expect(result).toMatchObject({ statusCode: 400 });
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
-  });
-
-  describeRoleEnforcement({
-    permission: 'members.manage',
-    orgId: ORG_ID,
-    userId: USER_ID,
-    invoke: (membership) => {
-      if (membership === NO_MEMBERSHIP) {
-        stubAbsentMembershipRead(ddbMock, { orgId: ORG_ID, userId: USER_ID });
-      } else {
-        callerHolds(membership.role);
-      }
-      return handler(inviteEvent(), buildContext());
-    },
   });
 });

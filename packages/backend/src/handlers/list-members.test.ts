@@ -32,10 +32,8 @@ import {
   buildEvent,
   buildContext,
   NO_MEMBERSHIP,
-  stubAbsentMembershipRead,
   stubMembershipRead,
 } from '../test/lambda-test-utilities.js';
-import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
 const MOCK_SUB = 'auth0|member';
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
@@ -224,19 +222,5 @@ describe('GET /api/org/members handler', () => {
     expect(result).toMatchObject({ statusCode: 200 });
     expect(members(result)).toHaveLength(2);
     expect(console.error).toHaveBeenCalled();
-  });
-
-  describeRoleEnforcement({
-    permission: 'members.read',
-    orgId: ORG_ID,
-    userId: USER_ID,
-    invoke: (membership) => {
-      if (membership === NO_MEMBERSHIP) {
-        stubAbsentMembershipRead(ddbMock, { orgId: ORG_ID, userId: USER_ID });
-      } else {
-        stubMembershipRead(ddbMock, { orgId: ORG_ID, userId: USER_ID, role: membership.role });
-      }
-      return handler(listEvent(), buildContext());
-    },
   });
 });

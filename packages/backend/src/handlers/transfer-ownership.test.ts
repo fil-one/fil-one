@@ -48,7 +48,6 @@ import {
   stubAbsentMembershipRead,
   stubMembershipRead,
 } from '../test/lambda-test-utilities.js';
-import { describeRoleEnforcement } from '../test/role-enforcement.js';
 
 const MOCK_SUB = 'auth0|owner';
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
@@ -401,21 +400,5 @@ describe('POST /api/org/transfer handler', () => {
       expect(result).toMatchObject({ statusCode: 200 });
       expect(console.error).toHaveBeenCalled();
     });
-  });
-
-  describeRoleEnforcement({
-    permission: 'org.transfer',
-    orgId: ORG_ID,
-    userId: USER_ID,
-    invoke: (membership) => {
-      // The step-up is satisfied in this fixture, so the role is what denies.
-      withMfa();
-      if (membership === NO_MEMBERSHIP) {
-        stubAbsentMembershipRead(ddbMock, { orgId: ORG_ID, userId: USER_ID });
-      } else {
-        callerHolds(membership.role);
-      }
-      return handler(transferEvent(), buildContext());
-    },
   });
 });

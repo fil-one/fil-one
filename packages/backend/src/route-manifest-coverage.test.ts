@@ -72,6 +72,13 @@ const CSRF_TOKEN = 'csrf-token-value';
  * it fills it.
  */
 const verifiedAmr: string[] = [];
+
+/**
+ * The `auth_time` the stubbed claims report. Null by default, which is a session
+ * that never says when it authenticated, so the step-up gate fails closed the
+ * same way; the suite that needs to reach past it names a moment ago.
+ */
+let verifiedAuthTime: number | null = null;
 /**
  * A foundation address, which the RAG feature flag admits without a lookup, and
  * the caller every case that is not about that flag arrives as.
@@ -111,6 +118,7 @@ vi.mock('./middleware/auth.js', () => ({
     name: null,
     picture: null,
     amr: verifiedAmr,
+    authTime: verifiedAuthTime,
   }),
 }));
 
@@ -572,7 +580,7 @@ describe('what the in-handler routes enforce', () => {
  * refusal precisely when the creator's role does not hold what that permission
  * requires.
  */
-describe('the cap the key route applies on top of keys.create', () => {
+describe('the caps routes apply on top of their declared permission', () => {
   quietDenialOutput();
   withActiveSubscription();
 
@@ -580,8 +588,16 @@ describe('the cap the key route applies on top of keys.create', () => {
     (route) => route.handler,
   );
 
-  it('is declared on the key route and nowhere else', () => {
-    expect(capped).toStrictEqual(['create-access-key']);
+  it('names every route that declares a cap', () => {
+    // A roster rather than a count, so a route that starts declaring a cap
+    // arrives here and has to be given cases rather than passing on a number.
+    expect(capped).toStrictEqual([
+      'create-access-key',
+      'update-member-role',
+      'remove-member',
+      'create-invitation',
+      'revoke-invitation',
+    ]);
   });
 
   /**
@@ -655,6 +671,52 @@ describe('the cap the key route applies on top of keys.create', () => {
       expect(result.body).toContain(keyPermission);
     },
   );
+
+  /**
+   * The other cap in this stack is a ceiling on who the caller may reach.
+   * `members.manage` opens the member and invitation routes; reaching an Owner
+   * takes `owners.manage` on top, which an Admin does not hold. Inviting is the
+   * one of those routes that names the target's role in the body, so it is the
+   * one whose ceiling can be read off a response without a stored target.
+   *
+   * The member routes read their target's current role from its row, and their
+   * ceiling belongs to their own handler tests.
+   */
+  describe('inviting reaches no further than the caller does', () => {
+    const invite = (role: string): RouteRequest => ({
+      body: JSON.stringify({ email: 'invitee@example.com', role }),
+    });
+
+    it.each(Object.values(OrgRole).filter((role) => roleHasPermission(role, 'members.manage')))(
+      '%s may invite an Admin',
+      async (role) => {
+        const result = await invokeRoute(routeFor('create-invitation'), {
+          membership: membershipFor(ORG_ID, USER_ID, role),
+          request: invite(OrgRole.Admin),
+        });
+
+        expect(errorCode(result)).not.toBe(ApiErrorCode.FORBIDDEN_ROLE);
+      },
+    );
+
+    it.each(Object.values(OrgRole).filter((role) => roleHasPermission(role, 'members.manage')))(
+      '%s invites an Owner only with owners.manage',
+      async (role) => {
+        const result = await invokeRoute(routeFor('create-invitation'), {
+          membership: membershipFor(ORG_ID, USER_ID, role),
+          request: invite(OrgRole.Owner),
+        });
+
+        if (roleHasPermission(role, 'owners.manage')) {
+          expect(errorCode(result)).not.toBe(ApiErrorCode.FORBIDDEN_ROLE);
+          return;
+        }
+
+        expect(result.statusCode).toBe(403);
+        expect(errorCode(result)).toBe(ApiErrorCode.FORBIDDEN_ROLE);
+      },
+    );
+  });
 });
 
 /**
@@ -751,14 +813,16 @@ describe('every mutating session route refuses a request with no CSRF token', ()
   quietDenialOutput();
 
   // The step-up gate sits ahead of the CSRF one on the MFA routes, so the
-  // caller arrives holding a strong-auth session. What the request is missing
-  // is the token and nothing else.
+  // caller arrives holding a strong-auth session, authenticated moments ago.
+  // What the request is missing is the token and nothing else.
   beforeEach(() => {
     verifiedAmr.push('mfa');
+    verifiedAuthTime = Date.now() / 1000;
   });
 
   afterEach(() => {
     verifiedAmr.length = 0;
+    verifiedAuthTime = null;
   });
 
   const mutating = ROUTE_MANIFEST.filter(
