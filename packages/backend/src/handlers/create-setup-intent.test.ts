@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { authPartialMock } from '../test/auth-partial-mock.js';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
   ConditionalCheckFailedException,
@@ -29,8 +28,6 @@ vi.mock('sst', () => ({
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
-
-vi.mock('../middleware/auth.js', () => authPartialMock());
 
 import { baseHandler } from './create-setup-intent.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';

@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { authPartialMock } from '../test/auth-partial-mock.js';
 import { ApiErrorCode } from '@filone/shared';
 
 vi.mock('sst', () => ({
@@ -23,8 +22,6 @@ const mockSendEmail = vi.fn(async (_args: unknown) => undefined);
 vi.mock('../lib/deletion-email.js', () => ({
   sendDeletionCodeEmail: (args: unknown) => mockSendEmail(args),
 }));
-
-vi.mock('../middleware/auth.js', () => authPartialMock());
 
 import { baseHandler } from './request-account-deletion.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';

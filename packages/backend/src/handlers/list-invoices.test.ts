@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { authPartialMock } from '../test/auth-partial-mock.js';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
@@ -29,8 +28,6 @@ vi.mock('../lib/stripe-client.js', () => ({
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
-
-vi.mock('../middleware/auth.js', () => authPartialMock());
 
 import { baseHandler } from './list-invoices.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';

@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { authPartialMock } from '../test/auth-partial-mock.js';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { ApiErrorCode } from '@filone/shared';
@@ -25,8 +24,6 @@ vi.mock('../lib/deletion-confirm-transaction.js', () => ({
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
-
-vi.mock('../middleware/auth.js', () => authPartialMock());
 
 import { baseHandler } from './confirm-account-deletion.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';

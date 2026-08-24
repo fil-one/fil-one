@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { authPartialMock } from '../test/auth-partial-mock.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -30,8 +29,6 @@ vi.mock('../lib/org-profile.js', () => ({
 }));
 
 process.env.FILONE_STAGE = 'test';
-
-vi.mock('../middleware/auth.js', () => authPartialMock());
 
 import { baseHandler } from './delete-bucket.js';
 import { BucketNotEmptyError } from '../lib/errors.js';

@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { authPartialMock } from '../test/auth-partial-mock.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -37,8 +36,6 @@ vi.mock('../lib/org-profile.js', async () => ({
   ...(await vi.importActual<typeof import('../lib/org-profile.js')>('../lib/org-profile.js')),
   isOrgDeleting: (...args: Parameters<typeof mockIsOrgDeleting>) => mockIsOrgDeleting(...args),
 }));
-
-vi.mock('../middleware/auth.js', () => authPartialMock());
 
 import { baseHandler } from './create-bucket.js';
 import { BucketAlreadyExistsError, BucketConfigurationError } from '../lib/errors.js';

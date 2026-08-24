@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { authPartialMock } from '../test/auth-partial-mock.js';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 
@@ -25,8 +24,6 @@ vi.mock('../lib/org-profile.js', () => ({
 process.env.FILONE_STAGE = 'test';
 
 const ddbMock = mockClient(DynamoDBClient);
-
-vi.mock('../middleware/auth.js', () => authPartialMock());
 
 import { baseHandler } from './get-usage.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
