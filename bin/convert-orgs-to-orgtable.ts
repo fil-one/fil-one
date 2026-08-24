@@ -407,126 +407,131 @@ const plans: OrgPlan[] = states
 if (verify) {
   const checks = verifyConversion(states, plans, scan, acceptedAnomalies);
   console.log(formatVerifyReport(checks));
-  process.exit(checks.some((check) => !check.pass) ? 1 : 0);
-}
+  // Not `process.exit`: the offender lists are unbounded and stdout is async,
+  // so exiting here can truncate the report the runbook tees to a file — the
+  // `VERIFY: FAIL` line included. Set the code and let the process end.
+  if (checks.some((check) => !check.pass)) process.exitCode = 1;
+} else {
+  console.log(formatPlanReport(scan, plans));
+  console.log('');
 
-console.log(formatPlanReport(scan, plans));
-console.log('');
+  const outcomes = {
+    converted: 0,
+    repaired: 0,
+    alreadyConverted: 0,
+    raced: 0,
+    legacyDeleted: 0,
+    staleLegacyDeleted: 0,
+    transactionConflict: 0,
+    legacyDeleteConflict: 0,
+    anomalies: 0,
+  };
 
-const outcomes = {
-  converted: 0,
-  repaired: 0,
-  alreadyConverted: 0,
-  raced: 0,
-  legacyDeleted: 0,
-  staleLegacyDeleted: 0,
-  transactionConflict: 0,
-  legacyDeleteConflict: 0,
-  anomalies: 0,
-};
+  // Held for the whole write phase: the revert moves the same rows the other way,
+  // and one landing between this run's OrgTable transaction and its legacy-row
+  // delete would leave an org with neither membership.
+  const lock = execute
+    ? await acquireRunLock(dynamo, orgTable, {
+        script: 'convert-orgs-to-orgtable.ts',
+        stage: cli.stage,
+      })
+    : undefined;
 
-// Held for the whole write phase: the revert moves the same rows the other way,
-// and one landing between this run's OrgTable transaction and its legacy-row
-// delete would leave an org with neither membership.
-const lock = execute
-  ? await acquireRunLock(dynamo, orgTable, {
-      script: 'convert-orgs-to-orgtable.ts',
-      stage: cli.stage,
-    })
-  : undefined;
-
-try {
-  for (const plan of plans) {
-    if (plan.kind === 'anomaly') {
-      outcomes.anomalies++;
-      continue;
-    }
-
-    if (plan.kind === 'already-converted') {
-      outcomes.alreadyConverted++;
-      if (!plan.legacyRowPending) continue;
-
-      const row = `${OrgKeys.orgPk(plan.orgId)} ${OrgKeys.memberSk(plan.userId)}`;
-      if (!execute) {
-        console.log(`  [dry-run] SKIPPED ${row} already in OrgTable — deleting its legacy row`);
+  try {
+    for (const plan of plans) {
+      if (plan.kind === 'anomaly') {
+        outcomes.anomalies++;
         continue;
       }
 
-      // The scan is minutes old by the time this runs, and a legacy row may
-      // only be deleted while the OrgTable row that replaced it exists, so the
-      // replacement is re-read consistently rather than trusted from the scan.
-      if (await hasOrgTableMembership(plan.orgId, plan.userId)) {
-        await deleteLegacyRow(plan.orgId, plan.userId);
-        outcomes.legacyDeleted++;
-        outcomes.staleLegacyDeleted++;
-        console.log(`  SKIPPED ${row} already in OrgTable — legacy row deleted`);
+      if (plan.kind === 'already-converted') {
+        outcomes.alreadyConverted++;
+        if (!plan.legacyRowPending) continue;
+
+        const row = `${OrgKeys.orgPk(plan.orgId)} ${OrgKeys.memberSk(plan.userId)}`;
+        if (!execute) {
+          console.log(`  [dry-run] SKIPPED ${row} already in OrgTable — deleting its legacy row`);
+          continue;
+        }
+
+        // The scan is minutes old by the time this runs, and a legacy row may
+        // only be deleted while the OrgTable row that replaced it exists, so the
+        // replacement is re-read consistently rather than trusted from the scan.
+        if (await hasOrgTableMembership(plan.orgId, plan.userId)) {
+          await deleteLegacyRow(plan.orgId, plan.userId);
+          outcomes.legacyDeleted++;
+          outcomes.staleLegacyDeleted++;
+          console.log(`  SKIPPED ${row} already in OrgTable — legacy row deleted`);
+        } else {
+          outcomes.legacyDeleteConflict++;
+          console.log(`  CONFLICT ${row} — the OrgTable membership is gone; legacy row kept`);
+        }
+        await sleep(WRITE_DELAY_MS);
+        continue;
+      }
+
+      if (!execute) {
+        console.log(
+          `  [dry-run] ${plan.origin === 'member-row' ? 'CONVERT' : 'REPAIR'} ${describe(plan)}`,
+        );
+        continue;
+      }
+
+      const outcome = await applyConversion(plan);
+      if (outcome === 'converted') {
+        if (plan.origin === 'member-row') outcomes.converted++;
+        else outcomes.repaired++;
+        if (plan.legacyRow) outcomes.legacyDeleted++;
+        console.log(
+          `  ${plan.origin === 'member-row' ? 'CONVERTED' : 'REPAIRED'} ${describe(plan)}`,
+        );
+      } else if (outcome === 'raced') {
+        outcomes.raced++;
+        if (plan.legacyRow) outcomes.legacyDeleted++;
+        console.log(
+          `  RACED ${OrgKeys.orgPk(plan.orgId)} ${OrgKeys.memberSk(plan.userId)} — a concurrent write created the membership first${plan.legacyRow ? '; legacy row deleted' : ''}`,
+        );
       } else {
-        outcomes.legacyDeleteConflict++;
-        console.log(`  CONFLICT ${row} — the OrgTable membership is gone; legacy row kept`);
+        outcomes.transactionConflict++;
       }
       await sleep(WRITE_DELAY_MS);
-      continue;
     }
-
-    if (!execute) {
-      console.log(
-        `  [dry-run] ${plan.origin === 'member-row' ? 'CONVERT' : 'REPAIR'} ${describe(plan)}`,
-      );
-      continue;
-    }
-
-    const outcome = await applyConversion(plan);
-    if (outcome === 'converted') {
-      if (plan.origin === 'member-row') outcomes.converted++;
-      else outcomes.repaired++;
-      if (plan.legacyRow) outcomes.legacyDeleted++;
-      console.log(`  ${plan.origin === 'member-row' ? 'CONVERTED' : 'REPAIRED'} ${describe(plan)}`);
-    } else if (outcome === 'raced') {
-      outcomes.raced++;
-      if (plan.legacyRow) outcomes.legacyDeleted++;
-      console.log(
-        `  RACED ${OrgKeys.orgPk(plan.orgId)} ${OrgKeys.memberSk(plan.userId)} — a concurrent write created the membership first${plan.legacyRow ? '; legacy row deleted' : ''}`,
-      );
-    } else {
-      outcomes.transactionConflict++;
-    }
-    await sleep(WRITE_DELAY_MS);
+  } finally {
+    await lock?.release();
   }
-} finally {
-  await lock?.release();
-}
 
-const planned = summarize();
+  const planned = summarize();
 
-console.log('');
-if (execute) {
-  console.log(`Converted (from legacy MEMBER# rows):        ${outcomes.converted}`);
-  console.log(`Repaired (from PROFILE.createdBy):           ${outcomes.repaired}`);
-  console.log(`Already converted before this run:           ${outcomes.alreadyConverted}`);
-  console.log(`Raced (a concurrent write got there first):  ${outcomes.raced}`);
-  console.log(`Legacy MEMBER# rows deleted:                 ${outcomes.legacyDeleted}`);
-  console.log(`Conflicts — transaction (manual review):     ${outcomes.transactionConflict}`);
-  console.log(`Conflicts — stale legacy row kept:           ${outcomes.legacyDeleteConflict}`);
-  console.log(`Anomalies (untouched):                       ${outcomes.anomalies}`);
   console.log('');
-  console.log(
-    `Convert + Repair (${planned.writes}) = Converted + Repaired + Raced + transaction conflicts (${
-      outcomes.converted + outcomes.repaired + outcomes.raced + outcomes.transactionConflict
-    }).`,
-  );
-  console.log(
-    `Stale legacy rows in the plan (${planned.staleLegacyRows}) = deleted (${outcomes.staleLegacyDeleted}) + stale-row conflicts (${outcomes.legacyDeleteConflict}).`,
-  );
-  console.log('');
-  console.log('Now run --verify against the same stage and record its result — the enforcement');
-  console.log('PR merges on a PASS, and any anomaly left standing has to be named on');
-  console.log('--accept-anomalies to get one. See docs/OrgConversionRunbook.md.');
-  if (outcomes.transactionConflict > 0 || outcomes.legacyDeleteConflict > 0) process.exitCode = 1;
-} else {
-  console.log('Dry run only — nothing was written.');
-  console.log('Disposition every anomaly above, then re-run with --execute.');
+  if (execute) {
+    console.log(`Converted (from legacy MEMBER# rows):        ${outcomes.converted}`);
+    console.log(`Repaired (from PROFILE.createdBy):           ${outcomes.repaired}`);
+    console.log(`Already converted before this run:           ${outcomes.alreadyConverted}`);
+    console.log(`Raced (a concurrent write got there first):  ${outcomes.raced}`);
+    console.log(`Legacy MEMBER# rows deleted:                 ${outcomes.legacyDeleted}`);
+    console.log(`Conflicts — transaction (manual review):     ${outcomes.transactionConflict}`);
+    console.log(`Conflicts — stale legacy row kept:           ${outcomes.legacyDeleteConflict}`);
+    console.log(`Anomalies (untouched):                       ${outcomes.anomalies}`);
+    console.log('');
+    console.log(
+      `Convert + Repair (${planned.writes}) = Converted + Repaired + Raced + transaction conflicts (${
+        outcomes.converted + outcomes.repaired + outcomes.raced + outcomes.transactionConflict
+      }).`,
+    );
+    console.log(
+      `Stale legacy rows in the plan (${planned.staleLegacyRows}) = deleted (${outcomes.staleLegacyDeleted}) + stale-row conflicts (${outcomes.legacyDeleteConflict}).`,
+    );
+    console.log('');
+    console.log('Now run --verify against the same stage and record its result — the enforcement');
+    console.log('PR merges on a PASS, and any anomaly left standing has to be named on');
+    console.log('--accept-anomalies to get one. See docs/OrgConversionRunbook.md.');
+    if (outcomes.transactionConflict > 0 || outcomes.legacyDeleteConflict > 0) process.exitCode = 1;
+  } else {
+    console.log('Dry run only — nothing was written.');
+    console.log('Disposition every anomaly above, then re-run with --execute.');
+  }
+  console.log('Done.');
 }
-console.log('Done.');
 
 function summarize(): { writes: number; staleLegacyRows: number } {
   let writes = 0;
