@@ -303,8 +303,13 @@ async function destroyOrgTableRows(orgId: string, members: DeletionMember[]): Pr
     await deleteItem(orgTable, { pk: row.pk!, sk: row.sk! });
   }
 
+  // Parsed the way the census parses it, not sliced: a `MEMBER#` row with no id
+  // after the prefix would otherwise yield an empty user id and send a delete at
+  // `USER#`, a partition this org does not own.
   const userIds = new Set([
-    ...memberRows.map((row) => row.sk!.S!.slice(OrgKeys.memberSkPrefix().length)),
+    ...memberRows
+      .map((row) => OrgKeys.parseMemberSk(row.sk?.S))
+      .filter((userId): userId is string => userId !== undefined),
     ...members.map((member) => member.userId),
   ]);
   for (const userId of userIds) {

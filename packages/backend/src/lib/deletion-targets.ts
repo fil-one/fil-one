@@ -89,7 +89,7 @@ async function listOrgTableMembers(orgId: string): Promise<MemberRow[]> {
 
   const rows: MemberRow[] = [];
   for (const item of items) {
-    const userId = parseMemberSk(item.sk?.S);
+    const userId = OrgKeys.parseMemberSk(item.sk?.S);
     if (!userId) continue;
     const source = item.source?.S;
     rows.push({ userId, ...(source ? { source } : {}) });
@@ -108,18 +108,10 @@ async function listLegacyMembers(orgId: string): Promise<string[]> {
 
   const userIds: string[] = [];
   for (const item of items) {
-    const userId = parseMemberSk(item.sk?.S);
+    const userId = OrgKeys.parseMemberSk(item.sk?.S);
     if (userId) userIds.push(userId);
   }
   return userIds;
-}
-
-/** Org and user ids are UUIDs and contain no `#`, so the split is unambiguous. */
-function parseMemberSk(sk: string | undefined): string | undefined {
-  const prefix = OrgKeys.memberSkPrefix();
-  if (!sk?.startsWith(prefix)) return undefined;
-  const userId = sk.slice(prefix.length);
-  return userId && !userId.includes('#') ? userId : undefined;
 }
 
 async function queryAll(params: {

@@ -37,6 +37,19 @@ export const OrgKeys = {
   orgPk: (orgId: string): string => `ORG#${orgId}`,
   memberSk: (userId: string): string => `MEMBER#${userId}`,
   memberSkPrefix: (): string => 'MEMBER#',
+  /**
+   * Inverse of {@link memberSk}. User ids are UUIDs and contain no `#`, so the
+   * split is unambiguous; returns undefined for any other shape, `MEMBER#` with
+   * nothing after it included — an empty user id addresses `USER#`, a partition
+   * belonging to nobody. Every reader of this key shape parses it here so the
+   * census and the teardown cannot disagree about what a member row is.
+   */
+  parseMemberSk: (sk: string | undefined): string | undefined => {
+    const prefix = 'MEMBER#';
+    if (!sk?.startsWith(prefix)) return undefined;
+    const userId = sk.slice(prefix.length);
+    return userId && !userId.includes('#') ? userId : undefined;
+  },
   orgMetaSk: (): string => 'META',
   userPk: (userId: string): string => `USER#${userId}`,
   membershipSk: (orgId: string): string => `MEMBERSHIP#${orgId}`,

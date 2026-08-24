@@ -339,6 +339,19 @@ describe('scrubOrgRecords', () => {
       expect(keys.at(-1)).toBe(`OrgTable:ORG#${ORG}/MEMBER#user-1`);
     });
 
+    // The census parses this key rather than slicing it, and the two readers of
+    // the same key shape have to agree — an empty id addresses `USER#`, which
+    // belongs to nobody.
+    it('derives no inverse item from a member row with no user id', async () => {
+      stubOrgTable([orgTableRow('MEMBER#'), orgTableRow('MEMBER#user-1')]);
+
+      await scrubOrgRecords(ORG, MEMBERS);
+
+      expect(deletedKeys()).not.toContain(`OrgTable:USER#/MEMBERSHIP#${ORG}`);
+      // The malformed row is still the org's, and still goes.
+      expect(deletedKeys()).toContain(`OrgTable:ORG#${ORG}/MEMBER#`);
+    });
+
     it('deletes the inverse item of a member the OrgTable partition does not name', async () => {
       stubOrgTable([]);
 
