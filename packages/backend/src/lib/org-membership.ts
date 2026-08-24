@@ -246,9 +246,13 @@ function toMembershipRecord(
 /**
  * Every org the caller belongs to, named for the org switcher.
  *
- * The active org is always in the list. Its inverse item may not exist yet
- * during the conversion window, and a response whose `role` named an org its
- * `memberships` did not contain would contradict itself.
+ * The active org is always in the list, carrying the role the request was
+ * authorized under. Its inverse item may not exist yet during the conversion
+ * window, and a response whose `role` named an org its `memberships` did not
+ * contain would contradict itself. The inverse item may also be a request
+ * behind the canonical row the middleware read — a role change committing
+ * between the two reads would otherwise have `role` and `memberships` name
+ * two different roles for the org the caller is operating in.
  *
  * The active org's name is the read the caller is already making, passed in
  * rather than repeated; every other org costs one profile GetItem, which stays
@@ -268,10 +272,15 @@ export async function summarizeMemberships({
   activeOrgName: Promise<string>;
 }): Promise<OrgMembershipSummary[]> {
   const memberships = await listMemberships(userId);
-  const rows =
-    activeRole && !memberships.some((membership) => membership.orgId === activeOrgId)
-      ? [{ orgId: activeOrgId, role: activeRole, joinedAt: '' }, ...memberships]
-      : memberships;
+  let rows = memberships;
+  if (activeRole) {
+    const active = memberships.find((membership) => membership.orgId === activeOrgId);
+    rows = active
+      ? memberships.map((membership) =>
+          membership === active ? { ...membership, role: activeRole } : membership,
+        )
+      : [{ orgId: activeOrgId, role: activeRole, joinedAt: '' }, ...memberships];
+  }
 
   return Promise.all(
     rows.map(async (row) => ({

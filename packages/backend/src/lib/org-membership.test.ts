@@ -314,6 +314,31 @@ describe('summarizeMemberships', () => {
     ]);
   });
 
+  it('reports the active org with the role the request was authorized under', async () => {
+    // The inverse item still carries the role a concurrent change has already
+    // replaced on the canonical row the middleware read.
+    stubMembershipList(ddbMock, {
+      userId: USER_ID,
+      orgs: [
+        { orgId: ORG_ID, role: OrgRole.Owner },
+        { orgId: OTHER_ORG_ID, role: OrgRole.Member },
+      ],
+    });
+    stubOrgProfile(OTHER_ORG_ID, 'Second Corp');
+
+    const summaries = await summarizeMemberships({
+      userId: USER_ID,
+      activeOrgId: ORG_ID,
+      activeRole: OrgRole.Member,
+      activeOrgName: Promise.resolve('Example Corp'),
+    });
+
+    expect(summaries).toStrictEqual([
+      { orgId: ORG_ID, orgName: 'Example Corp', role: OrgRole.Member },
+      { orgId: OTHER_ORG_ID, orgName: 'Second Corp', role: OrgRole.Member },
+    ]);
+  });
+
   it('leaves an org unnamed when its profile cannot be read', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     stubMembershipList(ddbMock, {
