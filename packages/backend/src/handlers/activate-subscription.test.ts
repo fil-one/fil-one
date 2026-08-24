@@ -2,9 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
-import { OrgRole, SubscriptionStatus } from '@filone/shared';
+import { SubscriptionStatus } from '@filone/shared';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
-import type { OrgMembership } from '../lib/org-membership.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
@@ -60,39 +59,9 @@ vi.mock('../lib/stripe-client.js', () => ({
   }),
 }));
 
-// Must mock auth/csrf middleware to pass through. The membership is what
-// `authorize` reads next, so the role the caller holds is a variable: every
-// test but the enforcement block runs as the Owner, which is the only role
-// `billing.manage` reaches.
-let callerMembership: OrgMembership | undefined = {
-  orgId: 'org-1',
-  userId: 'user-1',
-  role: OrgRole.Owner,
-};
-
-vi.mock('../middleware/auth.js', () => ({
-  // Every gate downstream of the auth middleware returns its denials through
-  // this helper, so the partial mock has to carry it.
-  withRefreshedCookies: (_request: unknown, response: unknown) => response,
-  authMiddleware: () => ({
-    before: async (request: { event: { requestContext: { userInfo: unknown } } }) => {
-      request.event.requestContext.userInfo = {
-        userId: 'user-1',
-        email: 'test@example.com',
-        orgId: 'org-1',
-        membership: callerMembership,
-      };
-    },
-  }),
-}));
-
-vi.mock('../middleware/csrf.js', () => ({
-  csrfMiddleware: () => ({ before: async () => {} }),
-}));
-
 const ddbMock = mockClient(DynamoDBClient);
 
-import { handler } from './activate-subscription.js';
+import { baseHandler } from './activate-subscription.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -141,7 +110,7 @@ function mockSubscriptionResponse(overrides?: Record<string, unknown>) {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('activate-subscription handler', () => {
+describe('activate-subscription baseHandler', () => {
   beforeEach(() => {
     ddbMock.reset();
     mockSetupIntentsList.mockReset();
@@ -167,7 +136,7 @@ describe('activate-subscription handler', () => {
       body: JSON.stringify({}),
     });
 
-    const result = await handler(event, {} as never);
+    const result = await baseHandler(event);
 
     expect((result as { statusCode: number }).statusCode).toBe(410);
     expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
@@ -194,7 +163,7 @@ describe('activate-subscription handler', () => {
       method: 'POST',
       rawPath: '/api/billing/activate',
     });
-    const result = await handler(event, {} as never);
+    const result = await baseHandler(event);
     const body = JSON.parse((result as { body: string }).body);
 
     // Should call update twice (attach PM, then end trial), NOT create
@@ -219,7 +188,7 @@ describe('activate-subscription handler', () => {
       method: 'POST',
       rawPath: '/api/billing/activate',
     });
-    await handler(event, {} as never);
+    await baseHandler(event);
 
     expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith('org-1', 'active');
   });
@@ -246,7 +215,7 @@ describe('activate-subscription handler', () => {
       method: 'POST',
       rawPath: '/api/billing/activate',
     });
-    await handler(event, {} as never);
+    await baseHandler(event);
 
     // Step 1: Attach payment method only
     expect(mockSubscriptionsUpdate).toHaveBeenNthCalledWith(1, 'sub_trial_123', {
@@ -275,7 +244,7 @@ describe('activate-subscription handler', () => {
       method: 'POST',
       rawPath: '/api/billing/activate',
     });
-    const result = await handler(event, {} as never);
+    const result = await baseHandler(event);
     const body = JSON.parse((result as { body: string }).body);
 
     // Should call create, NOT update
@@ -312,7 +281,7 @@ describe('activate-subscription handler', () => {
       method: 'POST',
       rawPath: '/api/billing/activate',
     });
-    const result = await handler(event, {} as never);
+    const result = await baseHandler(event);
     const body = JSON.parse((result as { body: string }).body);
 
     expect(mockSubscriptionsCreate).toHaveBeenCalledTimes(1);
@@ -347,7 +316,7 @@ describe('activate-subscription handler', () => {
       method: 'POST',
       rawPath: '/api/billing/activate',
     });
-    const result = await handler(event, {} as never);
+    const result = await baseHandler(event);
     const body = JSON.parse((result as { body: string }).body);
 
     expect(mockSubscriptionsCreate).toHaveBeenCalledTimes(1);
@@ -377,7 +346,7 @@ describe('activate-subscription handler', () => {
       method: 'POST',
       rawPath: '/api/billing/activate',
     });
-    await handler(event, {} as never);
+    await baseHandler(event);
 
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
     expect(updateCalls).toHaveLength(1); // billing update only
@@ -400,7 +369,7 @@ describe('activate-subscription handler', () => {
       method: 'POST',
       rawPath: '/api/billing/activate',
     });
-    await handler(event, {} as never);
+    await baseHandler(event);
 
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
     expect(updateCalls).toHaveLength(1); // billing update only
@@ -421,7 +390,7 @@ describe('activate-subscription handler', () => {
       method: 'POST',
       rawPath: '/api/billing/activate',
     });
-    const result = await handler(event, {} as never);
+    const result = await baseHandler(event);
     const body = JSON.parse((result as { body: string }).body);
 
     expect((result as { statusCode: number }).statusCode).toBe(402);
@@ -447,14 +416,17 @@ describe('activate-subscription handler', () => {
       method: 'POST',
       rawPath: '/api/billing/activate',
     });
-    const result = await handler(event, {} as never);
+    const result = await baseHandler(event);
 
     expect((result as { statusCode: number }).statusCode).toBe(402);
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
   });
 
-  it('returns 500 when updateTenantStatus fails', async () => {
+  // Turning the throw into a 500 is errorHandlerMiddleware's job, and its own
+  // suite says so. What the handler owes is that a region left locked is not
+  // reported to the caller as an activated subscription.
+  it('propagates a failed tenant-status sync instead of answering success', async () => {
     ddbMock
       .on(GetItemCommand)
       .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) });
@@ -474,8 +446,7 @@ describe('activate-subscription handler', () => {
       method: 'POST',
       rawPath: '/api/billing/activate',
     });
-    const result = await handler(event, {} as never);
-    expect((result as { statusCode: number }).statusCode).toBe(500);
+    await expect(baseHandler(event)).rejects.toThrow('tenant status sync failed');
   });
 
   // ── useSavedPaymentMethod path ────────────────────────────────────
@@ -503,7 +474,7 @@ describe('activate-subscription handler', () => {
       rawPath: '/api/billing/activate',
       body: JSON.stringify({ useSavedPaymentMethod: true }),
     });
-    const result = await handler(event, {} as never);
+    const result = await baseHandler(event);
     const body = JSON.parse((result as { body: string }).body);
 
     expect(mockSetupIntentsList).not.toHaveBeenCalled();
@@ -540,7 +511,7 @@ describe('activate-subscription handler', () => {
       rawPath: '/api/billing/activate',
       body: JSON.stringify({ useSavedPaymentMethod: true }),
     });
-    const result = await handler(event, {} as never);
+    const result = await baseHandler(event);
     const body = JSON.parse((result as { body: string }).body);
 
     expect(mockSetupIntentsList).not.toHaveBeenCalled();
@@ -562,7 +533,7 @@ describe('activate-subscription handler', () => {
       rawPath: '/api/billing/activate',
       body: JSON.stringify({ useSavedPaymentMethod: true }),
     });
-    const result = await handler(event, {} as never);
+    const result = await baseHandler(event);
 
     expect((result as { statusCode: number }).statusCode).toBe(400);
     expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
@@ -583,7 +554,7 @@ describe('activate-subscription handler', () => {
       rawPath: '/api/billing/activate',
       body: JSON.stringify({ useSavedPaymentMethod: true }),
     });
-    const result = await handler(event, {} as never);
+    const result = await baseHandler(event);
 
     expect((result as { statusCode: number }).statusCode).toBe(400);
     expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
@@ -603,7 +574,7 @@ describe('activate-subscription handler', () => {
       rawPath: '/api/billing/activate',
       body: JSON.stringify({ useSavedPaymentMethod: true }),
     });
-    const result = await handler(event, {} as never);
+    const result = await baseHandler(event);
     const body = JSON.parse((result as { body: string }).body);
 
     expect((result as { statusCode: number }).statusCode).toBe(400);
@@ -627,7 +598,7 @@ describe('activate-subscription handler', () => {
       rawPath: '/api/billing/activate',
       body: JSON.stringify({ useSavedPaymentMethod: true }),
     });
-    const result = await handler(event, {} as never);
+    const result = await baseHandler(event);
 
     expect((result as { statusCode: number }).statusCode).toBe(402);
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
@@ -658,7 +629,7 @@ describe('activate-subscription handler', () => {
         rawPath: '/api/billing/activate',
         body: JSON.stringify({ promotionCode: 'WELCOME20' }),
       });
-      await handler(event, {} as never);
+      await baseHandler(event);
 
       expect(mockPromotionCodesList).toHaveBeenCalledWith({
         code: 'WELCOME20',
@@ -695,7 +666,7 @@ describe('activate-subscription handler', () => {
         rawPath: '/api/billing/activate',
         body: JSON.stringify({ promotionCode: 'WELCOME20' }),
       });
-      await handler(event, {} as never);
+      await baseHandler(event);
 
       expect(mockSubscriptionsCreate).toHaveBeenCalledTimes(1);
       expect(mockSubscriptionsCreate).toHaveBeenCalledWith({
@@ -729,7 +700,7 @@ describe('activate-subscription handler', () => {
         rawPath: '/api/billing/activate',
         body: JSON.stringify({ promotionCode: 'WELCOME20' }),
       });
-      await handler(event, {} as never);
+      await baseHandler(event);
 
       expect(mockSubscriptionsCreate).toHaveBeenCalledTimes(1);
       expect(mockSubscriptionsCreate).toHaveBeenCalledWith({
@@ -760,7 +731,7 @@ describe('activate-subscription handler', () => {
         rawPath: '/api/billing/activate',
         body: JSON.stringify({ promotionCode: 'BOGUS123' }),
       });
-      const result = await handler(event, {} as never);
+      const result = await baseHandler(event);
       const body = JSON.parse((result as { body: string }).body);
 
       expect((result as { statusCode: number }).statusCode).toBe(400);
@@ -778,7 +749,7 @@ describe('activate-subscription handler', () => {
         rawPath: '/api/billing/activate',
         body: JSON.stringify({ promotionCode: 'ab' }),
       });
-      const result = await handler(event, {} as never);
+      const result = await baseHandler(event);
       const body = JSON.parse((result as { body: string }).body);
 
       expect((result as { statusCode: number }).statusCode).toBe(400);
@@ -807,7 +778,7 @@ describe('activate-subscription handler', () => {
         method: 'POST',
         rawPath: '/api/billing/activate',
       });
-      await handler(event, {} as never);
+      await baseHandler(event);
 
       expect(mockPromotionCodesList).not.toHaveBeenCalled();
       expect(mockSubscriptionsUpdate).toHaveBeenCalledTimes(2);
@@ -835,7 +806,7 @@ describe('activate-subscription handler', () => {
         rawPath: '/api/billing/activate',
         body: JSON.stringify({ useSavedPaymentMethod: true, promotionCode: 'WELCOME20' }),
       });
-      await handler(event, {} as never);
+      await baseHandler(event);
 
       expect(mockSetupIntentsList).not.toHaveBeenCalled();
       expect(mockSubscriptionsCreate).toHaveBeenCalledTimes(1);

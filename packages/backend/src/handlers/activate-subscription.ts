@@ -28,7 +28,7 @@ const dynamo = getDynamoClient();
 
 type PaymentMethodResolution = string | APIGatewayProxyResultV2;
 
-async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
+export async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { userId, orgId } = getUserInfo(event);
   const stripe = getStripeClient();
   const secrets = getBillingSecrets();
