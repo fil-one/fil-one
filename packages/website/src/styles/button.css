@@ -50,7 +50,7 @@
           @apply bg-brand-500;
         }
 
-        &:focus {
+        &:focus-visible {
           @apply bg-brand-500 outline-2 outline-offset-2 outline-brand-400;
         }
       }
@@ -68,7 +68,7 @@
           @apply bg-red-500;
         }
 
-        &:focus {
+        &:focus-visible {
           @apply bg-red-500 outline-2 outline-offset-2 outline-red-400;
         }
       }
@@ -86,7 +86,7 @@
           @apply bg-amber-600;
         }
 
-        &:focus {
+        &:focus-visible {
           @apply bg-amber-600 outline-2 outline-offset-2 outline-amber-400;
         }
       }
@@ -99,13 +99,13 @@
     &.button--ghost {
       @apply border border-zinc-200 bg-white text-zinc-700;
 
-      &:focus {
-        @apply outline-2 outline-offset-0;
+      &:focus-visible {
+        @apply outline-2 outline-offset-0 outline-brand-600;
       }
 
       &:not(:disabled) {
         &:hover,
-        &:focus {
+        &:focus-visible {
           @apply bg-zinc-50;
         }
       }
@@ -124,7 +124,7 @@
 
       &:not(:disabled) {
         &:hover,
-        &:focus {
+        &:focus-visible {
           @apply rounded-md bg-zinc-100 text-zinc-950;
 
           .button-custom-icon {
@@ -156,8 +156,8 @@
         @apply bg-brand-500;
       }
 
-      & .split-button__main:not(:disabled):focus,
-      & .split-button__caret:not(:disabled):focus {
+      & .split-button__main:not(:disabled):focus-visible,
+      & .split-button__caret:not(:disabled):focus-visible {
         @apply bg-brand-500 outline-2 outline-offset-2 outline-brand-400;
       }
 
@@ -172,6 +172,13 @@
       & .split-button__main:not(:disabled):hover,
       & .split-button__caret:not(:disabled):hover {
         @apply bg-zinc-50;
+      }
+
+      /* The caret sets outline-none in its base rule, so without this the ghost
+         variant gives keyboard users no focus ring at all. */
+      & .split-button__main:not(:disabled):focus-visible,
+      & .split-button__caret:not(:disabled):focus-visible {
+        @apply bg-zinc-50 outline-2 outline-offset-0 outline-brand-600;
       }
 
       & .split-button__divider {

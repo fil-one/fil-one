@@ -128,6 +128,18 @@ export default $config({
       ttl: 'ttl',
     });
 
+    // User-initiated bulk deletions (BULKDELETE#{orgId} / JOB#{jobId}). Kept
+    // separate from UserInfoTable because a running job rewrites its row on
+    // every listing page, and finished jobs expire on their own via TTL.
+    const bulkDeleteTable = new sst.aws.Dynamo('BulkDeleteTable', {
+      fields: {
+        pk: 'string',
+        sk: 'string',
+      },
+      primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
+      ttl: 'ttl',
+    });
+
     // Short-lived account-deletion codes. Its own table so TTL is not enabled
     // on UserInfoTable (a stray `ttl` there would hard-delete account data),
     // and so only the deletion routes are granted the credential.
@@ -287,11 +299,8 @@ export default $config({
     });
 
     const stageForEndpoints = isProduction ? Stage.Production : Stage.Staging;
-    // The browser hits the S3 endpoint of every region directly — list-objects,
-    // uploads, downloads, etc. — so each one needs to be in `connect-src` or the
-    // browser blocks the request with a CSP violation before it ever leaves.
-    // CSP is a single static document header that cannot vary per user, so it
-    // must list every regional S3 endpoint any user could reach.
+    // The browser hits every region's S3 endpoint directly, and CSP is one static
+    // header that can't vary per user — so `connect-src` must list them all.
     const s3GatewayUrls = Object.values(S3Region)
       .map((r) => getS3Endpoint(r, stageForEndpoints))
       .join(' ');
@@ -501,6 +510,7 @@ export default $config({
     const allResources = [
       billingTable,
       userInfoTable,
+      bulkDeleteTable,
       userFilesBucket,
       ragVectorBucket,
       auth0ClientId,
@@ -602,7 +612,7 @@ export default $config({
       handler: string;
       extraEnv?: Record<string, $util.Input<string>>;
       permissions?: sst.aws.FunctionPermissionArgs[];
-      extraLink?: (typeof allResources)[number][];
+      extraLink?: ((typeof allResources)[number] | sst.aws.Function | sst.aws.Queue)[];
       provisionedConcurrency?: number;
       memory?: sst.aws.FunctionArgs['memory'];
       timeout?: sst.aws.FunctionArgs['timeout'];
@@ -723,6 +733,84 @@ export default $config({
           resources: [auroraApiKeySsmArn, ...orchestratorS3KeySsmArns],
         },
       ],
+    });
+
+    // ── Bulk object deletion (API → FIFO queue → worker, resumed via SQS) ──
+    // Empties a bucket, or a prefix within one, by walking the listing and
+    // deleting page by page. A bucket can hold far more objects than one
+    // invocation can process, so the worker checkpoints its listing cursor and
+    // queues itself a continuation message; it needs the full Lambda timeout.
+    // DeleteBucket requires an empty bucket, so this is the step that makes
+    // deleting a non-trivial bucket possible at all. See
+    // docs/architectural-decisions/2026-08-server-side-bulk-object-deletion.md.
+    // Messages that fail every delivery land in the DLQ rather than
+    // disappearing, so a stalled deletion is visible instead of being inferred
+    // from a job row that stopped moving.
+    const bulkDeleteDlq = new sst.aws.Queue('BulkDeleteDlq', { fifo: true });
+
+    // FIFO so the message group (the job id) admits one in-flight message per
+    // job: a redelivery can never run alongside the invocation it is replacing
+    // and corrupt the shared cursor. Content-based deduplication stays off
+    // because a job's continuation messages are byte-identical; the worker
+    // supplies its own ids. See packages/backend/src/lib/bulk-delete-queue.ts.
+    const bulkDeleteQueue = new sst.aws.Queue('BulkDeleteQueue', {
+      fifo: true,
+      // Must outlast the worker's own timeout, or SQS would redeliver a message
+      // to a second worker while the first is still deleting.
+      visibilityTimeout: '16 minutes',
+      // Matches MAX_BULK_DELETE_DELIVERY_ATTEMPTS in bulk-delete-queue.ts: the
+      // worker uses that number to tell a retry from the final attempt.
+      dlq: { queue: bulkDeleteDlq.arn, retry: 3 },
+    });
+
+    const bulkDeleteWorker = createFn('BulkDeleteWorker', {
+      handler: 'packages/backend/src/jobs/bulk-delete-worker.handler',
+      // Linking the queue covers both directions: consuming its messages and
+      // enqueueing the continuation for a job too large for one invocation.
+      link: [bulkDeleteTable, userInfoTable, bulkDeleteQueue, ...managementApiTokens],
+      environment: orchestratorEnv,
+      timeout: '900 seconds',
+      memory: '512 MB',
+      permissions: s3DataPlanePermissions,
+    });
+    // Subscribed by ARN so the worker keeps the logging and defaults createFn
+    // applies. One message at a time: a job owns the whole invocation's time
+    // budget, and a partial batch failure would replay siblings needlessly.
+    bulkDeleteQueue.subscribe(bulkDeleteWorker.arn, { batch: { size: 1 } });
+
+    // A message only reaches the DLQ once the worker's own retries are spent.
+    // The worker fails the job itself before its last delivery rethrows, but
+    // that path never runs on a hard kill (Lambda timeout, OOM, process
+    // termination) — the job row is left non-terminal with nothing left to move
+    // it, and the client would poll it forever. This watchdog closes that gap:
+    // any job whose message lands here without a terminal status gets failed.
+    const bulkDeleteDlqWatchdog = createFn('BulkDeleteDlqWatchdog', {
+      handler: 'packages/backend/src/jobs/bulk-delete-dlq-watchdog.handler',
+      link: [bulkDeleteTable],
+      timeout: '30 seconds',
+      // Subscribed by ARN, so SST does not manage the role: the consume actions
+      // the SQS event source mapping needs must be granted explicitly.
+      permissions: [
+        {
+          actions: ['sqs:ReceiveMessage', 'sqs:DeleteMessage', 'sqs:GetQueueAttributes'],
+          resources: [bulkDeleteDlq.arn],
+        },
+      ],
+    });
+    bulkDeleteDlq.subscribe(bulkDeleteDlqWatchdog.arn);
+
+    addRoute({
+      method: 'POST',
+      routePath: '/api/buckets/{name}/bulk-delete',
+      handler: 'create-bulk-delete-job',
+      extraEnv: { ...fthEnv, ...forgeEnv },
+      // Linking the queue grants the send; the handler only enqueues the job.
+      extraLink: [bulkDeleteQueue],
+    });
+    addRoute({
+      method: 'GET',
+      routePath: '/api/bulk-delete-jobs/{jobId}',
+      handler: 'get-bulk-delete-job',
     });
     addRoute({
       method: 'GET',
