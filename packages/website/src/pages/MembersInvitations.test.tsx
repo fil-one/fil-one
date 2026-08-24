@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
-import type { InvitationSummary } from '@filone/shared';
+import type { InvitationSummary, MeResponse } from '@filone/shared';
 
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
 import { seedPermissions } from '../lib/test-permissions.js';
@@ -41,10 +41,14 @@ function invitation(over: Partial<InvitationSummary> = {}): InvitationSummary {
   };
 }
 
-function renderSection(role = OrgRole.Owner, invitations: InvitationSummary[] = []) {
+function renderSection(
+  role = OrgRole.Owner,
+  invitations: InvitationSummary[] = [],
+  me: Partial<MeResponse> = {},
+) {
   mockList.mockResolvedValue({ invitations });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  seedPermissions(client, role);
+  seedPermissions(client, role, me);
   return {
     client,
     ...render(
@@ -78,6 +82,22 @@ describe('MembersInvitations', () => {
   it('says nothing is outstanding when nothing is', async () => {
     renderSection();
     expect(await screen.findByTestId('invitations-empty')).toBeInTheDocument();
+  });
+
+  it('withdraws the form outside the beta and keeps the list that revokes', async () => {
+    renderSection(OrgRole.Owner, [invitation({ email: 'waiting@example.com' })], {
+      orgsBeta: false,
+    });
+
+    // `accept-invitation` carries no beta gate, so the tokens this org already
+    // issued stay redeemable after the flag goes. The form is the only half the
+    // flag decides; the revoke button is the only way to withdraw a live token.
+    expect(await screen.findAllByTestId('invitation-row')).toHaveLength(1);
+    expect(
+      screen.getByRole('button', { name: 'Revoke invitation for waiting@example.com' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText('Email address')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Send invitation' })).not.toBeInTheDocument();
   });
 
   it('tells an expired invitation from one nobody received', async () => {

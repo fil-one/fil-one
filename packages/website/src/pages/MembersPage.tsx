@@ -510,14 +510,15 @@ export function MembersPage() {
           pendingUserIds={pending.ids}
         />
 
-        {/* Both halves of what creating an invitation costs: the endpoint is
-            `members.manage` rather than `members.read`, and the org has to be
-            in the beta. A caller in more than one org reaches this page in
-            every one of them, so without the second half an Owner would be
-            offered a form their own org answers with a 403. It arrives a
-            moment after the roster, which is what gating fail-closed on `/me`
+        {/* The section is `members.manage`, which is what the list and the
+            revoke endpoints ask. The beta flag gates only the form inside it:
+            revoking the flag stops new invitations, and the tokens already
+            issued stay redeemable — `accept-invitation` is never flagged — so
+            the pending list and its revoke buttons have to survive the revoke
+            or the only way to withdraw them goes with it. It arrives a moment
+            after the roster, which is what gating fail-closed on `/me`
             costs. */}
-        {scope.mayInvite && <MembersInvitations />}
+        {scope.mayManage && <MembersInvitations />}
       </div>
 
       <MemberDialogs

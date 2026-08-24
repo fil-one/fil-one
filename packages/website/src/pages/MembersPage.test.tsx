@@ -141,16 +141,6 @@ describe('MembersPage', () => {
     expect(await screen.findByTestId('invitations-section')).toBeInTheDocument();
   });
 
-  it('withholds the invitation form in an organization outside the beta', async () => {
-    renderPage(OrgRole.Owner, [OWNER, ADMIN, PLAIN], { orgsBeta: false });
-
-    // The roster stays: a caller who belongs to a second org reaches this page
-    // in every one of them, and it is creating an invitation that the org's
-    // flag decides. Offering the form here would collect one 403 per attempt.
-    expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
-    expect(screen.queryByTestId('invitations-section')).not.toBeInTheDocument();
-  });
-
   it('withholds the invitation form from a role that cannot manage members', async () => {
     renderPage(OrgRole.Member);
 
@@ -421,6 +411,45 @@ describe('MembersPage — a removal the roster is stale for', () => {
       await screen.findByText(/role changed while the removal was in flight/),
     ).toBeInTheDocument();
     await waitFor(() => expect(mockListMembers).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe('MembersPage — the invitations section outside the beta', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.history.replaceState(null, '', '/members');
+  });
+
+  it('withholds the invitation form in an organization outside the beta and keeps the pending list', async () => {
+    mockListInvitations.mockResolvedValue({
+      invitations: [
+        {
+          inviteId: 'inv-1',
+          email: 'waiting@example.com',
+          role: OrgRole.Member,
+          invitedBy: 'user-1',
+          createdAt: '2026-08-01T00:00:00Z',
+          expiresAt: '2026-08-15T00:00:00Z',
+          status: 'pending',
+          expired: false,
+        },
+      ],
+    });
+    renderPage(OrgRole.Owner, [OWNER, ADMIN, PLAIN], { orgsBeta: false });
+
+    // The roster stays: a caller who belongs to a second org reaches this page
+    // in every one of them, and it is creating an invitation that the org's
+    // flag decides. Offering the form here would collect one 403 per attempt.
+    expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Email address')).not.toBeInTheDocument();
+
+    // The list and its revoke buttons stay on `members.manage`. Tokens issued
+    // before the flag was revoked are still redeemable, so taking this away
+    // would leave no way to withdraw them.
+    expect(await screen.findByTestId('invitations-section')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Revoke invitation for waiting@example.com' }),
+    ).toBeInTheDocument();
   });
 });
 

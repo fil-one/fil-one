@@ -96,6 +96,11 @@ export function useMemberActionScope(): {
    * one org reaches the members page in every one of them, so an Owner of a
    * personal org outside the beta would otherwise be offered a form whose only
    * possible answer is a 403.
+   *
+   * This gates the form and nothing else. Listing and revoking are `mayManage`,
+   * because `accept-invitation` carries no beta gate: an org dropped from the
+   * beta still has redeemable tokens, and revoke is the only way to withdraw
+   * them.
    */
   mayInvite: boolean;
   /** Whether the caller may transfer the Owner seat. */
