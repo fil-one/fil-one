@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ApiErrorCode } from '@filone/shared';
 import {
   defaultRetry,
+  isAccountDeleted,
   isRoleDenial,
   queryClient,
   queryKeys,
@@ -66,6 +67,60 @@ describe('isRoleDenial', () => {
     ).toBe(false);
     expect(isRoleDenial(new Error('Failed to fetch'))).toBe(false);
     expect(isRoleDenial(undefined)).toBe(false);
+  });
+});
+
+describe('isAccountDeleted', () => {
+  it('names a deleted account', () => {
+    expect(
+      isAccountDeleted(Object.assign(new Error(), { code: ApiErrorCode.ACCOUNT_DELETED })),
+    ).toBe(true);
+  });
+
+  it('leaves every other failure alone', () => {
+    expect(isAccountDeleted(Object.assign(new Error(), { status: 410 }))).toBe(false);
+    expect(isAccountDeleted(new Error('Failed to fetch'))).toBe(false);
+    expect(isAccountDeleted(undefined)).toBe(false);
+  });
+});
+
+describe('re-reading /me after a request says the session ended', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    queryClient.clear();
+  });
+
+  function failWith(queryKey: readonly unknown[], error: unknown): Promise<unknown> {
+    return queryClient
+      .fetchQuery({ queryKey, queryFn: () => Promise.reject(error), retry: false })
+      .catch(() => undefined);
+  }
+
+  it('re-reads /me when an ordinary request reports a deleted account', async () => {
+    // `api.ts` navigates only when the session probe reports the deletion, and
+    // `/me` is cached for ten minutes — so an org another Owner has started
+    // deleting would take every panel down under a console that keeps rendering.
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue();
+
+    await failWith(
+      ['buckets'],
+      Object.assign(new Error(), { status: 410, code: ApiErrorCode.ACCOUNT_DELETED }),
+    );
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['me'] });
+  });
+
+  it('leaves a deletion reported by /me itself alone', async () => {
+    // Invalidating the query that just failed would refetch it, fail again and
+    // loop. That response has already sent the tab to /account-deleted.
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue();
+
+    await failWith(
+      ['me'],
+      Object.assign(new Error(), { status: 410, code: ApiErrorCode.ACCOUNT_DELETED }),
+    );
+
+    expect(invalidate).not.toHaveBeenCalled();
   });
 });
 
