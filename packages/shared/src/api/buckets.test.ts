@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { CreateBucketSchema } from './buckets.js';
+import { CreateBucketSchema, listBucketsUnavailableMessage } from './buckets.js';
+import { S3Region } from '../constants.js';
 
 const validRetention = (
   overrides: Partial<{
@@ -202,5 +203,28 @@ describe('CreateBucketSchema', () => {
       });
       expect(result.success).toBe(false);
     });
+  });
+});
+
+describe('listBucketsUnavailableMessage', () => {
+  it('names a single region in the singular', () => {
+    expect(listBucketsUnavailableMessage([S3Region.UsEast1])).toBe(
+      'Cannot list buckets in the us-east-1 region. Please try again later.',
+    );
+  });
+
+  it('joins two regions with "and" and pluralises', () => {
+    expect(listBucketsUnavailableMessage([S3Region.EuWest1, S3Region.UsEast1])).toBe(
+      'Cannot list buckets in the eu-west-1 and us-east-1 regions. Please try again later.',
+    );
+  });
+
+  it('comma-separates all but the last of three regions', () => {
+    expect(
+      listBucketsUnavailableMessage([S3Region.EuWest1, S3Region.UsEast1, S3Region.EuCentral3]),
+    ).toBe(
+      'Cannot list buckets in the eu-west-1, us-east-1 and eu-central-3 regions. ' +
+        'Please try again later.',
+    );
   });
 });

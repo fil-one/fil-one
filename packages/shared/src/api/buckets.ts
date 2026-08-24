@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { S3Region } from '../constants.js';
 
 export const BUCKET_NAME_MIN_LENGTH = 3;
 export const BUCKET_NAME_MAX_LENGTH = 63;
@@ -75,6 +76,28 @@ export interface Bucket {
 
 export interface ListBucketsResponse {
   buckets: Bucket[];
+  /**
+   * Regions whose listing failed, in registry order. `buckets` holds only what the healthy
+   * regions returned. Omitted (never `[]`) when every region answers, so a healthy response is
+   * byte-identical to what clients received before. Regions only: the orchestrator error stays
+   * in the logs, where it cannot leak S3 or tenant internals to the browser.
+   */
+  unavailableRegions?: S3Region[];
+}
+
+/**
+ * The single sentence naming the regions that could not be listed. Shared because the backend
+ * puts it in the all-regions-down 503 body and the console puts it in the partial-result
+ * banner; two copies of this string would drift.
+ */
+export function listBucketsUnavailableMessage(regions: readonly S3Region[]): string {
+  const names =
+    regions.length > 1
+      ? `${regions.slice(0, -1).join(', ')} and ${regions[regions.length - 1]}`
+      : regions[0];
+  return `Cannot list buckets in the ${names} region${
+    regions.length > 1 ? 's' : ''
+  }. Please try again later.`;
 }
 
 export const BUCKET_SORT_KEYS = ['bucketName', 'region', 'createdAt'] as const;

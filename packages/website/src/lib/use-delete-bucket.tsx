@@ -53,9 +53,11 @@ export function useDeleteBucket() {
     mutationFn: (bucketName: string) =>
       apiRequest(`/buckets/${encodeURIComponent(bucketName)}`, { method: 'DELETE' }),
     onSuccess: (_, bucketName) => {
-      // Optimistically remove from cache, then confirm with a background refetch
+      // Optimistically remove from cache, then confirm with a background refetch. Spread `old`:
+      // this updater owns `buckets` only, and rebuilding the object would drop
+      // `unavailableRegions`, making the degraded-regions banner vanish on any delete.
       queryClient.setQueryData<ListBucketsResponse>(queryKeys.buckets, (old) =>
-        old ? { buckets: old.buckets.filter((b) => b.bucketName !== bucketName) } : old,
+        old ? { ...old, buckets: old.buckets.filter((b) => b.bucketName !== bucketName) } : old,
       );
       void queryClient.invalidateQueries({ queryKey: queryKeys.buckets });
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });

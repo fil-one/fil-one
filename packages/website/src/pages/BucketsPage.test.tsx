@@ -53,6 +53,13 @@ function mockApiResponses(deleteError?: Error) {
   });
 }
 
+const DEGRADED: ListBucketsResponse = {
+  ...BUCKETS,
+  unavailableRegions: [S3Region.UsEast1],
+};
+
+const DEGRADED_MESSAGE = 'Cannot list buckets in the us-east-1 region. Please try again later.';
+
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -139,5 +146,45 @@ describe('BucketsPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Delete bucket' }));
 
     expect(await screen.findByText('Tenant setup is not complete')).toBeInTheDocument();
+  });
+});
+
+describe('BucketsPage degraded regions', () => {
+  it("banners the failed region and still lists the healthy region's buckets", async () => {
+    mockApiRequest.mockResolvedValue(DEGRADED);
+    renderPage();
+
+    expect(await screen.findByText(DEGRADED_MESSAGE)).toBeInTheDocument();
+    expect(screen.getByText('my-bucket')).toBeInTheDocument();
+  });
+
+  it('shows the banner instead of the empty state when no buckets came back', async () => {
+    mockApiRequest.mockResolvedValue({ buckets: [], unavailableRegions: [S3Region.UsEast1] });
+    renderPage();
+
+    expect(await screen.findByText(DEGRADED_MESSAGE)).toBeInTheDocument();
+    expect(screen.queryByText('No buckets yet')).not.toBeInTheDocument();
+  });
+
+  it('shows no banner on a healthy response', async () => {
+    mockApiRequest.mockResolvedValue(BUCKETS);
+    renderPage();
+
+    await screen.findByText('my-bucket');
+    expect(screen.queryByText(/Cannot list buckets/)).not.toBeInTheDocument();
+  });
+
+  it('still shows the empty state when a healthy response has no buckets', async () => {
+    mockApiRequest.mockResolvedValue({ buckets: [] });
+    renderPage();
+
+    expect(await screen.findByText('No buckets yet')).toBeInTheDocument();
+  });
+
+  it('surfaces the 503 message when every region is down', async () => {
+    mockApiRequest.mockRejectedValue(Object.assign(new Error(DEGRADED_MESSAGE), { status: 503 }));
+    renderPage();
+
+    expect(await screen.findByText(DEGRADED_MESSAGE)).toBeInTheDocument();
   });
 });

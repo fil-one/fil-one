@@ -40,6 +40,9 @@ export function useBucketsListing(filters: BucketFilters, sort: BucketSort) {
     gcTime: LIST_GC_TIME,
   });
   const baseBuckets = baseData?.buckets ?? [];
+  // Read off the always-fetched baseline (not the debounced/refined query) so the
+  // degraded-regions banner doesn't flicker as a search or sort is applied.
+  const unavailableRegions = baseData?.unavailableRegions ?? [];
   const showControls = shouldShowBucketControls(baseBuckets.length);
   const regions = bucketRegions(baseBuckets);
 
@@ -61,5 +64,14 @@ export function useBucketsListing(filters: BucketFilters, sort: BucketSort) {
   // is still in flight, rather than flashing an empty table.
   const buckets = refining ? (refinedData?.buckets ?? baseBuckets) : baseBuckets;
 
-  return { buckets, baseBuckets, showControls, regions, isPending, isError, error };
+  return {
+    buckets,
+    baseBuckets,
+    showControls,
+    regions,
+    unavailableRegions,
+    isPending,
+    isError,
+    error,
+  };
 }

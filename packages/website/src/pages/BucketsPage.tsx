@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { PlusIcon, DatabaseIcon } from '@phosphor-icons/react/dist/ssr';
 
+import { listBucketsUnavailableMessage } from '@filone/shared';
+
 import { PageLayout } from '../components/PageLayout.js';
 import { Alert } from '../components/Alert';
 import { Button } from '../components/Button';
@@ -9,7 +11,6 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { EmptyStateCard } from '../components/EmptyStateCard';
 import { BucketsTable } from '../components/BucketsTable';
 import { TableSkeleton, type SkeletonColumn } from '../components/Table/TableSkeleton';
-
 import { useBucketsListing } from '../lib/use-buckets-listing.js';
 import { useDeleteBucket } from '../lib/use-delete-bucket.js';
 import { DEFAULT_BUCKET_SORT, EMPTY_BUCKET_FILTERS } from '../lib/bucket-table.js';
@@ -32,8 +33,18 @@ export function BucketsPage() {
 
   const [filters, setFilters] = useState(EMPTY_BUCKET_FILTERS);
   const [sort, setSort] = useState(DEFAULT_BUCKET_SORT);
-  const { buckets, baseBuckets, showControls, regions, isPending, isError, error } =
-    useBucketsListing(filters, sort);
+  const {
+    buckets,
+    baseBuckets,
+    showControls,
+    regions,
+    unavailableRegions,
+    isPending,
+    isError,
+    error,
+  } = useBucketsListing(filters, sort);
+  // "No buckets yet" would be a lie while a region is down. The banner explains the gap.
+  const showEmptyState = baseBuckets.length === 0 && unavailableRegions.length === 0;
 
   const { pendingBucketName, requestDelete, cancelDelete, confirmDelete } = useDeleteBucket();
 
@@ -77,7 +88,19 @@ export function BucketsPage() {
       description="Organize and manage your storage containers"
       action={createAction}
     >
-      {baseBuckets.length === 0 ? (
+      {/* Amber suits a response that succeeded: red is the whole-page failure branch, and
+          reusing it would make a partial list look like no list at all. */}
+      {unavailableRegions.length > 0 && (
+        <div className="mb-4">
+          <Alert
+            variant="amber"
+            title={listBucketsUnavailableMessage(unavailableRegions)}
+            description="Buckets in the other regions are listed below."
+          />
+        </div>
+      )}
+
+      {showEmptyState ? (
         <EmptyStateCard
           icon={DatabaseIcon}
           title="No buckets yet"
