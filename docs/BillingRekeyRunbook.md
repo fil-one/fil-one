@@ -67,7 +67,10 @@ that state, and reconciling it is a decision for a person.
 **Run one script at a time.** The backfill and the revert move the same rows in
 opposite directions, so an `--execute` run of either takes a lock row
 (`BILLING_REKEY#LOCK` / `LOCK`) in `BillingTable` and holds it for the whole write
-phase. A second run stops and names the one already running. The org conversion
+phase. `--verify` takes the same lock for the whole scan: it is the flip gate, and
+a verification reading one org's two rows on either side of a running revert
+assembles a twin that no longer exists and passes it. A second run stops and names
+the one already running. The org conversion
 holds a separate lock in `OrgTable`, so the two migrations never queue behind each
 other. If a run is killed outright, drop the lock it left behind:
 
@@ -230,8 +233,8 @@ backoff and then stops the run; it is never counted as a race.
 ```
 
 `--verify` re-reads the table, re-derives the same classification the backfill
-uses, and prints one line per check. It writes nothing and exits non-zero on any
-`FAIL`.
+uses, and prints one line per check. It writes no subscription row — only the run
+lock, so a revert cannot run underneath it — and exits non-zero on any `FAIL`.
 
 ```
 PASS  No org still has a row to copy

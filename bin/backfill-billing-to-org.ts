@@ -59,12 +59,13 @@
 //     --resolve-collisions ORG#8f3c…=CUSTOMER#a1b2…
 //
 // --verify re-derives the classification and prints PASS/FAIL per check — the
-// gate the flip PR merges on. It writes nothing. Legacy rows with no `orgId` fail
-// it until each is named on --accept-orgless, because the flip is what makes them
-// unreachable.
+// gate the flip PR merges on. It writes no subscription row. Legacy rows with no
+// `orgId` fail it until each is named on --accept-orgless, because the flip is
+// what makes them unreachable.
 //
-// An --execute run holds a lock row in BillingTable so this script and its revert
-// can never run at once. --force-unlock drops a lock a crashed run left behind.
+// An --execute AND a --verify run hold a lock row in BillingTable so this script
+// and its revert can never run at once. --force-unlock drops a lock a crashed run
+// left behind.
 //
 // There is no DynamoDB PITR/backup, so the per-org log is the only audit trail —
 // capture the whole run when running for real:
@@ -85,7 +86,8 @@ const cli = parseCli({
   options: ['--resolve-collisions', '--accept-orgless'],
   runbook: RUNBOOK,
   help: [
-    '--verify        Re-check the table and print PASS/FAIL. Writes nothing.',
+    '--verify        Re-check the table and print PASS/FAIL. Takes the run lock;',
+    '                writes no subscription row.',
     '--resolve-collisions <orgId=userId,…>',
     '                For an org whose legacy rows name different subscriptions:',
     '                the row that is live in Stripe. Check the dashboard first.',
@@ -380,13 +382,21 @@ async function main(): Promise<void> {
   // starts while this run is scanning deletes rows the plan already contains,
   // and the plan an operator then approves describes a table that no longer
   // exists. Holding it across the read makes the plan and the writes agree.
-  const lock = execute
-    ? await acquireRunLock(dynamo, billingTable, {
-        script: 'backfill-billing-to-org.ts',
-        stage: cli.stage,
-        lockPk: BILLING_REKEY_LOCK_PK,
-      })
-    : undefined;
+  //
+  // --verify takes it too, though it writes no subscription row. It is the flip
+  // gate, and a verification that overlaps a revert reads each org's two rows a
+  // fraction of a second apart: the org copy before the revert deletes it, the
+  // legacy row after, which assembles a faithful twin out of a pair that no
+  // longer exists and prints PASS for an account whose org row is gone. A false
+  // PASS is the one failure of this script that costs more than stopping does.
+  const lock =
+    execute || verify
+      ? await acquireRunLock(dynamo, billingTable, {
+          script: 'backfill-billing-to-org.ts',
+          stage: cli.stage,
+          lockPk: BILLING_REKEY_LOCK_PK,
+        })
+      : undefined;
 
   try {
     await run();
