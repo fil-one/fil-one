@@ -13,7 +13,7 @@ vi.mock('sst', () => ({
 
 const mockGetProvisionedRegions = vi.fn(async () => [] as unknown[]);
 vi.mock('./region-helpers.js', () => ({
-  getProvisionedRegions: () => mockGetProvisionedRegions(),
+  getProvisionedRegions: (...args: unknown[]) => mockGetProvisionedRegions(...(args as [])),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
@@ -158,6 +158,22 @@ describe('resolveDeletionTargets', () => {
     });
   });
 
+  // The tenant ids teardown deletes come from the provisioned regions, keyed by
+  // orchestrator. A stale read here would orphan a live tenant permanently, so the
+  // lookup is consistent.
+  it('maps every provisioned region to its tenant id', async () => {
+    stubMembers({ orgTable: [memberRow('user-1')] });
+    mockGetProvisionedRegions.mockResolvedValue([
+      { orchestrator: { id: 'fth' }, tenantId: '42' },
+      { orchestrator: { id: 'ord' }, tenantId: '43' },
+    ]);
+
+    const { tenantIds } = await resolveDeletionTargets(ORG);
+
+    expect(tenantIds).toEqual({ fth: '42', ord: '43' });
+    expect(mockGetProvisionedRegions).toHaveBeenCalledWith(ORG, { consistent: true });
+  });
+
   describe('the sole-membership census', () => {
     it('tears down the account of a sole member of their own org', async () => {
       stubMembers({
@@ -285,9 +301,56 @@ describe('resolveDeletionTargets', () => {
           source: 'invitation',
           otherOrgIds: [OTHER_ORG],
           deleteIdentity: false,
+          keptReasons: ['OTHER_MEMBERSHIPS', 'INVITED_MEMBER'],
         });
       } finally {
         log.mockRestore();
+      }
+    });
+
+    // Three conditions reach the same kept account and the teardown has to tell
+    // them apart: one is an ordinary multi-org member, one was only ever invited
+    // here, and one is a census that could not read a row and failed closed.
+    it('carries every reason an account was kept', async () => {
+      stubMembers({
+        orgTable: [memberRow('user-1', { source: 'invitation' })],
+        memberships: { 'user-1': [inverseItem('user-1', ORG)] },
+      });
+
+      const { members } = await resolveDeletionTargets(ORG);
+
+      expect(members[0]!.keptReasons).toStrictEqual(['INVITED_MEMBER']);
+    });
+
+    it('records no reasons for an account that ends with the org', async () => {
+      stubMembers({
+        orgTable: [memberRow('user-1', { source: 'signup' })],
+        memberships: { 'user-1': [inverseItem('user-1', ORG)] },
+      });
+
+      const { members } = await resolveDeletionTargets(ORG);
+
+      expect(members[0]!.deleteIdentity).toBe(true);
+      expect(members[0]!.keptReasons).toBeUndefined();
+    });
+
+    it('names the undecodable census separately from a second membership', async () => {
+      stubMembers({
+        orgTable: [memberRow('user-1', { source: 'signup' })],
+        memberships: {
+          'user-1': [
+            inverseItem('user-1', ORG),
+            marshall({ pk: 'USER#user-1', sk: `MEMBERSHIP#${OTHER_ORG}`, role: 'wizard' }),
+          ],
+        },
+      });
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      try {
+        const { members } = await resolveDeletionTargets(ORG);
+        expect(members[0]!.keptReasons).toStrictEqual(['UNDECODABLE_MEMBERSHIPS']);
+      } finally {
+        error.mockRestore();
       }
     });
   });

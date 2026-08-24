@@ -141,14 +141,18 @@ async function deleteTenants(orgId: string, tenantIds: Record<string, string>): 
  * in-step ordering means the user is only gone once a previous pass finished the
  * removal. Deleting an already-deleted user likewise 404s and counts as success.
  *
- * A member with another membership, or one who was invited into this org, keeps
- * their login and their RAG grant: the org is going away, their account is not.
- * `resolveDeletionTargets` decides that per member and records it here.
+ * A member with another membership, one who was invited into this org, and one
+ * whose memberships the census could not read all keep their login and their RAG
+ * grant: the org is going away, their account is not. `resolveDeletionTargets`
+ * decides that per member, and the reasons it decided on are logged here.
  */
 async function tearDownAuth0(members: DeletionMember[]): Promise<void> {
-  for (const { sub, deleteIdentity } of members) {
+  for (const { sub, deleteIdentity, keptReasons } of members) {
     if (!deleteIdentity) {
-      console.log(`${LOG} member belongs elsewhere, account kept`, { sub });
+      // The census's own reasons, not one of them: an account is also kept when
+      // the member was only ever invited here, and when a membership row could
+      // not be decoded and the census failed closed.
+      console.log(`${LOG} account kept`, { sub, keptReasons });
       continue;
     }
     const email = await getAuth0UserEmail(sub);

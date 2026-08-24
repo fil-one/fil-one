@@ -16,6 +16,20 @@ export const DELETION_TRIGGER = {
 } as const;
 export type DeletionTrigger = (typeof DELETION_TRIGGER)[keyof typeof DELETION_TRIGGER];
 
+/**
+ * Why this org's deletion leaves a member's account standing. Three conditions
+ * reach the same `deleteIdentity: false`, and they are not the same event: one
+ * is an ordinary multi-org member, one is somebody who was only ever invited
+ * here, and one is a census that could not read a membership row and failed
+ * closed. The teardown log names which.
+ */
+export const DELETION_KEEP_REASON = {
+  otherMemberships: 'OTHER_MEMBERSHIPS',
+  invitedMember: 'INVITED_MEMBER',
+  undecodableMemberships: 'UNDECODABLE_MEMBERSHIPS',
+} as const;
+export type DeletionKeepReason = (typeof DELETION_KEEP_REASON)[keyof typeof DELETION_KEEP_REASON];
+
 /** What teardown needs to know about one member, resolved per pass. */
 export interface DeletionMember {
   userId: string;
@@ -57,6 +71,13 @@ export interface DeletionMember {
    * makes the same choice.
    */
   homeOrgId?: string;
+  /**
+   * Every census condition that kept this account, in the order they are
+   * tested. Empty when `deleteIdentity` is true. More than one can hold at
+   * once, and the teardown log prints them all — collapsing them to the first
+   * would report an invited member as an ordinary multi-org one.
+   */
+  keptReasons?: DeletionKeepReason[];
 }
 
 /**

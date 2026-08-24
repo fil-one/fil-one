@@ -2,6 +2,7 @@ import { GetItemCommand, QueryCommand, type AttributeValue } from '@aws-sdk/clie
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.js';
+import { DELETION_KEEP_REASON, type DeletionKeepReason } from './deletion-record.js';
 import type { DeletionMember } from './deletion-record.js';
 import {
   listMembershipRows,
@@ -177,7 +178,8 @@ async function resolveMember(orgId: string, row: MemberRow): Promise<DeletionMem
   }
 
   const others = listing.memberships.filter((m) => m.orgId !== orgId);
-  const deleteIdentity = censusMember(orgId, row, others, listing.undecodable);
+  const keptReasons = censusMember(orgId, row, others, listing.undecodable);
+  const deleteIdentity = keptReasons.length === 0;
   const homeOrgId = deleteIdentity ? undefined : chooseHomeOrg(others);
   const stripeCustomerId = billing.Item?.stripeCustomerId?.S;
   return {
@@ -186,6 +188,7 @@ async function resolveMember(orgId: string, row: MemberRow): Promise<DeletionMem
     ...(stripeCustomerId ? { stripeCustomerId } : {}),
     ...(homeOrgId ? { homeOrgId } : {}),
     deleteIdentity,
+    ...(deleteIdentity ? {} : { keptReasons }),
   };
 }
 
@@ -207,7 +210,8 @@ function chooseHomeOrg(others: OrgMembershipRecord[]): string | undefined {
 const INVITED: OrgMembershipSource = 'invitation';
 
 /**
- * Whether this org's deletion ends the member's account.
+ * Every reason this org's deletion does not end the member's account — empty
+ * when it does.
  *
  * Two conditions, both required. The org must be the member's only one, because
  * an account with another membership still has somewhere to log in to. And the
@@ -233,11 +237,12 @@ function censusMember(
   row: MemberRow,
   others: OrgMembershipRecord[],
   undecodable: number,
-): boolean {
+): DeletionKeepReason[] {
   const otherOrgIds = others.map((m) => m.orgId);
-  const soleMembership = otherOrgIds.length === 0;
-  const personalOrg = row.source !== INVITED;
-  const deleteIdentity = soleMembership && personalOrg && undecodable === 0;
+  const keptReasons: DeletionKeepReason[] = [];
+  if (otherOrgIds.length > 0) keptReasons.push(DELETION_KEEP_REASON.otherMemberships);
+  if (row.source === INVITED) keptReasons.push(DELETION_KEEP_REASON.invitedMember);
+  if (undecodable > 0) keptReasons.push(DELETION_KEEP_REASON.undecodableMemberships);
 
   if (undecodable > 0) {
     console.error(`${LOG} undecodable membership rows; keeping the account`, {
@@ -252,8 +257,9 @@ function censusMember(
     userId: row.userId,
     source: row.source ?? 'none recorded',
     otherOrgIds,
-    deleteIdentity,
+    deleteIdentity: keptReasons.length === 0,
+    keptReasons,
   });
 
-  return deleteIdentity;
+  return keptReasons;
 }

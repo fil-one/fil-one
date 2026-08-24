@@ -7,6 +7,7 @@ import {
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
+import type { DeletionMember } from '../lib/deletion-record.js';
 
 vi.mock('sst', () => ({
   Resource: { UserInfoTable: { name: 'UserInfoTable' } },
@@ -22,7 +23,7 @@ const mockGetAuth0UserEmail = vi.fn(async (sub: string) => {
 });
 const mockDeleteTenant = vi.fn(async (tenantId: string) => void order.push(`tenant:${tenantId}`));
 const mockResolveTargets = vi.fn(async () => ({
-  members: [{ userId: 'user-1', sub: 'auth0|one', deleteIdentity: true }],
+  members: [{ userId: 'user-1', sub: 'auth0|one', deleteIdentity: true }] as DeletionMember[],
   tenantIds: { fth: '42' } as Record<string, string>,
 }));
 
@@ -114,7 +115,12 @@ describe('account-deletion-worker', () => {
     beforeEach(() => {
       mockResolveTargets.mockResolvedValue({
         members: [
-          { userId: 'user-1', sub: 'auth0|one', deleteIdentity: false },
+          {
+            userId: 'user-1',
+            sub: 'auth0|one',
+            deleteIdentity: false,
+            keptReasons: ['INVITED_MEMBER'],
+          },
           { userId: 'user-2', sub: 'auth0|two', deleteIdentity: true },
         ],
         tenantIds: {},
@@ -133,6 +139,23 @@ describe('account-deletion-worker', () => {
         expect(mockDeleteAuth0User).toHaveBeenCalledWith('auth0|two');
         expect(mockGetAuth0UserEmail).not.toHaveBeenCalledWith('auth0|one');
         expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1);
+      } finally {
+        log.mockRestore();
+      }
+    });
+
+    // Three census conditions reach the same kept account, so the line has to
+    // name which one it was rather than assert the most common cause.
+    it('logs the census reasons the account was kept for', async () => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      try {
+        await handler({ orgId: ORG });
+
+        expect(log).toHaveBeenCalledWith(expect.stringContaining('account kept'), {
+          sub: 'auth0|one',
+          keptReasons: ['INVITED_MEMBER'],
+        });
       } finally {
         log.mockRestore();
       }
