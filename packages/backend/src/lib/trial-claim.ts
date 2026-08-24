@@ -14,7 +14,7 @@
 import { listMemberships } from './org-membership.js';
 import type { SubscriptionRecord } from './dynamo-records.js';
 import { emitTrialClaimBlockedByLegacyRow } from './stripe-webhook-metrics.js';
-import { legacyRowExists } from './subscription-store.js';
+import { legacyRowExists, readSubscription } from './subscription-store.js';
 import { ensureTrialEntitlement } from './trial-entitlement.js';
 import type { UserInfo } from './user-context.js';
 
@@ -27,7 +27,7 @@ export type TrialClaimOutcome =
   | 'not-own-org'
   /** Eligible to claim, but the entitlement is already spent (or the email is unverified). */
   | 'not-entitled'
-  /** A pre-re-key `CUSTOMER#` row is still standing: this org already has billing. */
+  /** The backfill missed this account: billing stands on the user's pre-re-key row and not on the org's. */
   | 'legacy-row';
 
 /**
@@ -84,13 +84,27 @@ export async function claimTrialIfEligible(userInfo: UserInfo): Promise<TrialCla
   //
   // A dead check once the runbook's dated cleanup has deleted those rows, and
   // it goes with them.
+  //
+  // A standing `CUSTOMER#` row on its own does not say the backfill missed the
+  // account: the flip gate requires the twin, so during the dual-write window
+  // the common case is a row on both keys. The refusal is about billing this
+  // org has that nothing reading the org key can see, so it asks the org key
+  // and refuses only when the answer is nothing. Otherwise the org row is what
+  // the claim reads anyway — `createBillingTrial` upgrades it in place and
+  // reuses its `stripeCustomerId`, so no second Stripe customer can be minted.
   if (await legacyRowExists(userId)) {
-    emitTrialClaimBlockedByLegacyRow();
-    console.error(
-      '[trial-claim] Refusing to mint a trial: a pre-re-key CUSTOMER# row still exists',
-      { userId, orgId },
-    );
-    return 'legacy-row';
+    const orgRow = await readSubscription(orgId, {
+      consistentRead: true,
+      projectionExpression: 'pk',
+    });
+    if (!orgRow) {
+      emitTrialClaimBlockedByLegacyRow();
+      console.error(
+        '[trial-claim] Refusing to mint a trial: a pre-re-key CUSTOMER# row exists and the org row does not',
+        { userId, orgId },
+      );
+      return 'legacy-row';
+    }
   }
 
   const entitled = await ensureTrialEntitlement({

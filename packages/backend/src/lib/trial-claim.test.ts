@@ -36,6 +36,7 @@ const mockEmitBlocked = vi.mocked(emitTrialClaimBlockedByLegacyRow);
 const USER_ID = 'user-1';
 const ORG_ID = 'org-1';
 const LEGACY_KEY = { pk: { S: `CUSTOMER#${USER_ID}` }, sk: { S: 'SUBSCRIPTION' } };
+const ORG_KEY = { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'SUBSCRIPTION' } };
 
 function soloOwner(overrides: Partial<UserInfo> = {}): UserInfo {
   return {
@@ -68,7 +69,7 @@ describe('claimTrialIfEligible', () => {
     expect(mockEnsureTrialEntitlement).toHaveBeenCalledOnce();
   });
 
-  it('refuses before minting anything while a pre-re-key CUSTOMER# row stands', async () => {
+  it('refuses before minting anything when the legacy row stands and the org row does not', async () => {
     // The refusal lives here rather than at a call site: every route that can
     // reach this function can reach a second Stripe customer, and the second
     // one is not something a later run can undo.
@@ -80,6 +81,40 @@ describe('claimTrialIfEligible', () => {
     expect(mockEnsureTrialEntitlement).not.toHaveBeenCalled();
     expect(mockEmitBlocked).toHaveBeenCalledOnce();
     errorSpy.mockRestore();
+  });
+
+  it('claims when the org row stands beside the legacy row, the dual-write twin', async () => {
+    // The flip gate requires the twin, so a row on both keys is the normal
+    // state, not a missed backfill. Refusing it answered 503 on the billing
+    // dashboard and the subscription guard for every account that opened and
+    // abandoned the payment modal during dual-write.
+    ddbMock.on(GetItemCommand, { Key: LEGACY_KEY }).resolves({ Item: LEGACY_KEY });
+    ddbMock.on(GetItemCommand, { Key: ORG_KEY }).resolves({ Item: ORG_KEY });
+
+    await expect(claimTrialIfEligible(soloOwner())).resolves.toBe('claimed');
+
+    expect(mockEmitBlocked).not.toHaveBeenCalled();
+    expect(mockEnsureTrialEntitlement).toHaveBeenCalledOnce();
+  });
+
+  it('reads the org row consistently before refusing', async () => {
+    ddbMock.on(GetItemCommand, { Key: LEGACY_KEY }).resolves({ Item: LEGACY_KEY });
+    ddbMock.on(GetItemCommand, { Key: ORG_KEY }).resolves({ Item: ORG_KEY });
+
+    await claimTrialIfEligible(soloOwner());
+
+    const orgRead = ddbMock
+      .commandCalls(GetItemCommand)
+      .map((call) => call.args[0].input)
+      .find((input) => input.Key?.pk?.S === `ORG#${ORG_ID}`);
+    expect(orgRead?.ConsistentRead).toBe(true);
+  });
+
+  it('does not read the org row when no legacy row stands', async () => {
+    await claimTrialIfEligible(soloOwner());
+
+    const keys = ddbMock.commandCalls(GetItemCommand).map((call) => call.args[0].input.Key);
+    expect(keys).toStrictEqual([LEGACY_KEY]);
   });
 
   it('answers not-own-org for an invited member whose own org has a legacy row', async () => {
