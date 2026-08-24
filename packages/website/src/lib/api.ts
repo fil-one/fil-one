@@ -28,20 +28,43 @@ let isRedirecting = false;
  *
  * `pagehide` fires when the page really is going, so it cancels the release —
  * the same shape the org-switch latch uses, on the same clock.
+ *
+ * `pagehide` also fires on the way into the back/forward cache, and what comes
+ * back out of it is this same document: the latch is up and the release is
+ * already cancelled, so the tab would skip every later redirect until a manual
+ * reload. The restored page keeps its content — nothing about it is scoped to
+ * the trip that was made, unlike the org-switch latch, whose stash names an org
+ * the user has left — and only the latch comes down, so the first 401 the
+ * restored page earns sends it to login.
  */
 function redirectTo(href: string): void {
   isRedirecting = true;
 
   const release = setTimeout(() => {
-    window.removeEventListener('pagehide', cancel);
+    stopListening();
     isRedirecting = false;
   }, NAVIGATION_GIVE_UP_MS);
 
-  function cancel(): void {
-    clearTimeout(release);
+  function stopListening(): void {
+    window.removeEventListener('pagehide', cancel);
+    window.removeEventListener('pageshow', restore);
   }
 
-  window.addEventListener('pagehide', cancel, { once: true });
+  // Only its own listener: the restore below is the other half of a bfcache
+  // round trip, which starts with the `pagehide` this handles.
+  function cancel(): void {
+    clearTimeout(release);
+    window.removeEventListener('pagehide', cancel);
+  }
+
+  function restore(event: PageTransitionEvent): void {
+    if (!event.persisted || !isRedirecting) return;
+    stopListening();
+    isRedirecting = false;
+  }
+
+  window.addEventListener('pagehide', cancel);
+  window.addEventListener('pageshow', restore);
   window.location.href = href;
 }
 

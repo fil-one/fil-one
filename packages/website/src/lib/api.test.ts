@@ -290,8 +290,10 @@ describe('the redirect that answers an expired session', () => {
     sessionStorage.clear();
     vi.useFakeTimers();
     vi.stubGlobal('fetch', vi.fn());
-    // Only `href` is read on these paths, so the stub carries nothing else.
-    vi.stubGlobal('location', { hostname: 'localhost', href: '' });
+    // `href` is what these paths read; `reload` is there because an earlier
+    // case's org-switch latch can still be listening for `pageshow` on the
+    // window these dispatch on.
+    vi.stubGlobal('location', { hostname: 'localhost', href: '', reload: vi.fn() });
   });
 
   afterEach(() => {
@@ -352,6 +354,37 @@ describe('the redirect that answers an expired session', () => {
 
     // The login page is on its way. A second redirect would race the load it is
     // already making.
+    expect(location.href).toBe('');
+  });
+
+  it('redirects again for a page that comes back out of the back/forward cache', async () => {
+    // `pagehide` fires on the way into the cache and cancels the release, and
+    // what comes back out is this same document with the latch still up. Every
+    // later 401 would be swallowed until a manual reload.
+    const { api } = await freshApi();
+    alwaysRespond(unauthorized);
+    await expect(api.apiRequest('/buckets')).rejects.toThrow();
+
+    window.dispatchEvent(new Event('pagehide'));
+    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+    location.href = '';
+    await expect(api.apiRequest('/buckets')).rejects.toThrow();
+
+    expect(location.href).toContain('/login');
+  });
+
+  it('keeps holding the latch for a load that is not a restore', async () => {
+    const { api } = await freshApi();
+    alwaysRespond(unauthorized);
+    await expect(api.apiRequest('/buckets')).rejects.toThrow();
+
+    window.dispatchEvent(new Event('pagehide'));
+    // A `pageshow` without `persisted` belongs to a fresh document; this one is
+    // still on its way to the login page.
+    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: false }));
+    location.href = '';
+    await expect(api.apiRequest('/buckets')).rejects.toThrow();
+
     expect(location.href).toBe('');
   });
 
