@@ -123,7 +123,7 @@ import type {
   OrgBillingState,
   SubscriptionRow,
 } from './lib/billing-rekey.ts';
-import { dispositionReread } from './lib/billing-reread.ts';
+import { dispositionReread, rereadOrgState } from './lib/billing-reread.ts';
 import { buildBackfillScanInput } from './lib/billing-scan.ts';
 import {
   findUnkeyableOrgIds,
@@ -256,19 +256,27 @@ function collectRow(item: Record<string, AttributeValue>): void {
  *
  * The transaction's own conditions are what make the write safe; this read is
  * what makes the LOG honest — the line printed for an org names the source
- * `updatedAt` the write actually carried.
+ * `updatedAt` the write actually carried. A row whose `orgId` moved in the
+ * meantime is held out by {@link rereadOrgState} and named here, because the
+ * condition on the write asserts `updatedAt` and not which org the row claims.
  */
 async function rereadOrg(state: OrgBillingState): Promise<OrgBillingState> {
-  const reread: OrgBillingState = { orgId: state.orgId, legacyRows: [] };
+  const fresh: SubscriptionRow[] = [];
 
   for (const row of state.legacyRows) {
-    const fresh = await readRow(row.pk);
-    if (fresh) reread.legacyRows.push(fresh);
+    const row2 = await readRow(row.pk);
+    if (row2) fresh.push(row2);
   }
   const orgRow = await readRow(BillingKeys.orgPk(state.orgId));
-  if (orgRow) reread.orgRow = orgRow;
 
-  return reread;
+  const reread = rereadOrgState(state.orgId, fresh, orgRow);
+  for (const row of reread.refiled) {
+    console.log(
+      `  REFILED ${row.pk} — now names ${row.orgId ? BillingKeys.orgPk(row.orgId) : 'no org'}, not ${BillingKeys.orgPk(state.orgId)}; left for the next run`,
+    );
+  }
+
+  return reread.state;
 }
 
 async function readRow(pk: string): Promise<SubscriptionRow | undefined> {

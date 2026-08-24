@@ -11,7 +11,54 @@
 // ./billing-scan.ts is one.
 
 import { BillingKeys } from './billing-rekey.ts';
-import type { BillingAnomalyReason, BillingPlan, CopyPlan } from './billing-rekey.ts';
+import type {
+  BillingAnomalyReason,
+  BillingPlan,
+  CopyPlan,
+  OrgBillingState,
+  SubscriptionRow,
+} from './billing-rekey.ts';
+
+/** One row the re-read found filed under a different org than the scan did. */
+export interface RefiledRow {
+  pk: string;
+  /** The org it names now, or undefined if the attribute is gone. */
+  orgId: string | undefined;
+}
+
+export interface RereadState {
+  state: OrgBillingState;
+  refiled: RefiledRow[];
+}
+
+/**
+ * One org's rows as the second read found them, with the rows that are no longer
+ * this org's held out.
+ *
+ * A row's `orgId` is what files it under an org, and an operator correcting a
+ * mis-stamped attribute between the scan and the write is the case this
+ * migration's own runbook asks for. Carrying such a row into this org's
+ * classification would copy org B's subscription to `ORG#A` — the classification
+ * takes the org from the state it is handed, not from the row — and the copy the
+ * flip then serves gives A somebody else's billing. Held out, the row is left
+ * for the next run, which scans it under the org it names now.
+ */
+export function rereadOrgState(
+  orgId: string,
+  legacyRows: readonly SubscriptionRow[],
+  orgRow?: SubscriptionRow,
+): RereadState {
+  const state: OrgBillingState = { orgId, legacyRows: [] };
+  const refiled: RefiledRow[] = [];
+
+  for (const row of legacyRows) {
+    if (row.orgId === orgId) state.legacyRows.push(row);
+    else refiled.push({ pk: row.pk, orgId: row.orgId });
+  }
+  if (orgRow) state.orgRow = orgRow;
+
+  return { state, refiled };
+}
 
 /**
  * What the re-read classification means for the org the run was about to copy.

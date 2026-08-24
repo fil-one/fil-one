@@ -194,7 +194,7 @@ changed — capture both streams (`2>&1`) and keep `billing-backfill.log`.
 
 The run prints the same plan first, then one line per org after its write, then a
 tally. Each per-org line carries the outcome that actually happened: `COPIED`,
-`RE-COPIED`, `SKIPPED`, `ANOMALY`, `RACED`, `RETRY`, or `FAILED`.
+`RE-COPIED`, `SKIPPED`, `ANOMALY`, `REFILED`, `RACED`, `RETRY`, or `FAILED`.
 
 ```
 Copied (first time):                         740
@@ -224,6 +224,12 @@ names a different org. Those orgs were not written and no later run writes them
 until somebody dispositions them, so **the script exits non-zero when any org
 became an anomaly**: act on the `ANOMALY` lines the same way as on the dry run's
 anomaly list, then re-run.
+
+`REFILED` names a row whose `orgId` changed between the scan and the write —
+usually the disposition of a row with no `orgId`, applied while the run was
+working. The row is left out of this org's write and picked up by the next run
+under the org it names now; the write's condition asserts `updatedAt` alone, so
+copying it here would have given this org that row's subscription.
 
 `RACED` counts orgs whose transaction was cancelled by a condition — a Stripe
 webhook moved the legacy row, or another writer created the org row first. Nothing

@@ -30,13 +30,14 @@ import type {
   OrgBillingState,
   SubscriptionRow,
 } from './billing-rekey.ts';
-import { dispositionReread } from './billing-reread.ts';
+import { dispositionReread, rereadOrgState } from './billing-reread.ts';
 import { buildBackfillScanInput, buildRevertScanInput } from './billing-scan.ts';
 import { formatBillingVerifyReport, verifyBillingRekey } from './billing-verify.ts';
 
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
 const USER_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const OTHER_USER_ID = '99999999-8888-7777-6666-555555555555';
+const OTHER_ORG_ID = '66666666-7777-8888-9999-000000000000';
 const UPDATED_AT = '2026-08-01T12:00:00.000Z';
 const NEWER = '2026-08-09T12:00:00.000Z';
 const NOW = '2026-08-15T09:00:00.000Z';
@@ -578,6 +579,39 @@ describe('unkeyableOrgAnomalies', () => {
 // ---------------------------------------------------------------------------
 // The second read, right before the write
 // ---------------------------------------------------------------------------
+
+describe('rereadOrgState', () => {
+  it('keeps the rows that still name this org', () => {
+    const source = legacyRow();
+    const copy = copiedRow(source);
+
+    const reread = rereadOrgState(ORG_ID, [source], copy);
+
+    expect(reread.refiled).toEqual([]);
+    expect(reread.state).toStrictEqual({ orgId: ORG_ID, legacyRows: [source], orgRow: copy });
+  });
+
+  it('holds out a row whose orgId moved between the scan and the write', () => {
+    // The write's condition asserts updatedAt, not which org the row claims, so
+    // a row corrected from this org to another would be copied to ORG#this
+    // anyway — giving this org somebody else's subscription after the flip.
+    const moved = legacyRow({ orgId: OTHER_ORG_ID });
+
+    const reread = rereadOrgState(ORG_ID, [moved]);
+
+    expect(reread.state.legacyRows).toEqual([]);
+    expect(reread.refiled).toEqual([{ pk: moved.pk, orgId: OTHER_ORG_ID }]);
+  });
+
+  it('holds out a row whose orgId is gone, and says so', () => {
+    const stripped = legacyRow({ orgId: undefined });
+
+    const reread = rereadOrgState(ORG_ID, [legacyRow(), stripped]);
+
+    expect(reread.state.legacyRows.map((row) => row.pk)).toEqual([legacyRow().pk]);
+    expect(reread.refiled).toEqual([{ pk: stripped.pk, orgId: undefined }]);
+  });
+});
 
 describe('dispositionReread', () => {
   it('reports an org that no longer needs a copy as skipped, with its origin', () => {
