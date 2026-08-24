@@ -209,12 +209,28 @@ function forbidden(body: { message?: string; code?: string }): Error {
 }
 
 /**
+ * The org a request ended up naming, filled in by `apiRequest`.
+ *
+ * The header goes on inside `apiRequest`, after the switch latch has been
+ * waited out, so a caller that reads the stash itself can read an org the
+ * request did not carry. `/me` checks its echo against the org it was sent
+ * under, and this is how it learns which one that was.
+ */
+export interface SentOrg {
+  orgId: string | null;
+}
+
+/**
  * Wrapper around fetch for all Fil.one API calls.
  * - Always sends HttpOnly auth cookies via credentials: 'include'
  * - Redirects to Auth0 login on 401
  */
 // eslint-disable-next-line complexity/complexity
-export async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function apiRequest<T>(
+  path: string,
+  options: RequestInit = {},
+  sentOrg?: SentOrg,
+): Promise<T> {
   // The tab is on its way to another org. Held rather than rejected, for the
   // reason `getMe` returns instead of throwing on a mismatch: the page is
   // disappearing, and an error rendered over it would be the last thing the user
@@ -237,6 +253,7 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   // than at each call site.
   const activeOrgId = getActiveOrgId();
   if (activeOrgId) headers.set(ORG_ID_HEADER, activeOrgId);
+  if (sentOrg) sentOrg.orgId = activeOrgId;
 
   const response = await fetch(`${API_URL}/api${path}`, {
     ...options,
@@ -350,16 +367,19 @@ export async function getMe(options?: {
   if (options?.forceRefresh) params.set('forceRefresh', '1');
   if (options?.include) params.set('include', options.include);
   const qs = params.toString();
+  // Which org the request actually named: the stash can move between here and
+  // the reconcile below, and an echo is only about the org it was asked for.
+  const sentOrg: SentOrg = { orgId: null };
   let me: MeResponse;
   try {
-    me = await apiRequest<MeResponse>(`/me${qs ? `?${qs}` : ''}`);
+    me = await apiRequest<MeResponse>(`/me${qs ? `?${qs}` : ''}`, undefined, sentOrg);
   } catch (err) {
     // The status decides: only a refusal the header can be blamed for drops the
     // stash. A network error carries none at all.
     clearActiveOrgAfterRefusal((err as { status?: number }).status);
     throw err;
   }
-  reconcileActiveOrg(me.orgId);
+  reconcileActiveOrg(me.orgId, sentOrg.orgId);
   return me;
 }
 

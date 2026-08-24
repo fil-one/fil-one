@@ -77,7 +77,7 @@ describe('the active org stash', () => {
     it('does nothing when the two agree', () => {
       setActiveOrgId(ORG_A);
 
-      expect(reconcileActiveOrg(ORG_A)).toBe(false);
+      expect(reconcileActiveOrg(ORG_A, ORG_A)).toBe(false);
       expect(getActiveOrgId()).toBe(ORG_A);
       expect(reload).not.toHaveBeenCalled();
     });
@@ -88,7 +88,7 @@ describe('the active org stash', () => {
 
       // The stash names an org the caller was removed from, or a proxy dropped
       // the header: every request this tab makes is landing in the wrong org.
-      expect(reconcileActiveOrg(ORG_B)).toBe(true);
+      expect(reconcileActiveOrg(ORG_B, ORG_A)).toBe(true);
       expect(getActiveOrgId()).toBeNull();
       expect(reload).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalled();
@@ -97,7 +97,7 @@ describe('the active org stash', () => {
     it('leaves a notice for the load that follows', () => {
       vi.spyOn(console, 'warn').mockImplementation(() => {});
       setActiveOrgId(ORG_A);
-      reconcileActiveOrg(ORG_B);
+      reconcileActiveOrg(ORG_B, ORG_A);
 
       // Otherwise a header a proxy keeps stripping turns every switcher click
       // into a reload that lands back where it started, indistinguishable from
@@ -109,7 +109,7 @@ describe('the active org stash', () => {
 
     it('leaves no notice when nothing was reconciled', () => {
       setActiveOrgId(ORG_A);
-      reconcileActiveOrg(ORG_A);
+      reconcileActiveOrg(ORG_A, ORG_A);
 
       expect(takeReconcileNotice()).toBe(false);
     });
@@ -117,23 +117,35 @@ describe('the active org stash', () => {
     it('cannot loop, because the reload sends no header', () => {
       vi.spyOn(console, 'warn').mockImplementation(() => {});
       setActiveOrgId(ORG_A);
-      reconcileActiveOrg(ORG_B);
+      reconcileActiveOrg(ORG_B, ORG_A);
 
       // The next load has no stash, so the server answers under the caller's own
       // org and there is nothing left to mismatch.
-      expect(reconcileActiveOrg(ORG_B)).toBe(false);
+      expect(reconcileActiveOrg(ORG_B, null)).toBe(false);
       expect(reload).toHaveBeenCalledTimes(1);
     });
 
+    it('ignores an echo for the org the tab has since left', () => {
+      setActiveOrgId(ORG_A);
+      // `/me` went out under ORG_A and the switcher stashed ORG_B while it was
+      // in flight. Read against the new stash, an honest echo looks like a
+      // refusal, and clearing would undo the switch the user just made.
+      setActiveOrgId(ORG_B);
+
+      expect(reconcileActiveOrg(ORG_A, ORG_A)).toBe(false);
+      expect(getActiveOrgId()).toBe(ORG_B);
+      expect(reload).not.toHaveBeenCalled();
+    });
+
     it('does nothing when the tab asked for no org', () => {
-      expect(reconcileActiveOrg(ORG_B)).toBe(false);
+      expect(reconcileActiveOrg(ORG_B, null)).toBe(false);
       expect(reload).not.toHaveBeenCalled();
     });
 
     it('does nothing when the response named no org', () => {
       setActiveOrgId(ORG_A);
 
-      expect(reconcileActiveOrg(undefined)).toBe(false);
+      expect(reconcileActiveOrg(undefined, ORG_A)).toBe(false);
       expect(getActiveOrgId()).toBe(ORG_A);
       expect(reload).not.toHaveBeenCalled();
     });
@@ -303,7 +315,7 @@ describe('a switch whose navigation never happens', () => {
     const stash = await import('./active-org.js');
     stash.setActiveOrgId(ORG_A);
 
-    expect(stash.reconcileActiveOrg(ORG_B)).toBe(true);
+    expect(stash.reconcileActiveOrg(ORG_B, ORG_A)).toBe(true);
     await vi.runAllTimersAsync();
 
     expect(stash.getActiveOrgId()).toBeNull();

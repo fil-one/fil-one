@@ -225,10 +225,24 @@ export function switchToOrg(orgId: string): void {
  * Only `/me` carries the echo, so this belongs at that call rather than in
  * `apiRequest`.
  *
+ * The comparison is against the org the request was *sent* under, not whatever
+ * the stash holds when the answer lands. A `/me` for org A can still be in
+ * flight when the switcher stashes org B: read against the new stash, A's
+ * honest echo looks like a refusal, and the recovery would clear the stash and
+ * reload — undoing the switch the user just made. It happens whenever the
+ * switch's own navigation is cancelled, which the latch below already exists
+ * for.
+ *
+ * @param resolvedOrgId the org `/me` says it served.
+ * @param requestedOrgId the org that request named, `null` for no header.
  * @returns whether a reload was triggered.
  */
-export function reconcileActiveOrg(resolvedOrgId: string | undefined): boolean {
+export function reconcileActiveOrg(
+  resolvedOrgId: string | undefined,
+  requestedOrgId: string | null,
+): boolean {
   const stashed = getActiveOrgId();
+  if (stashed !== requestedOrgId) return false;
   if (!stashed || !resolvedOrgId || stashed === resolvedOrgId) return false;
 
   console.warn('[active-org] The server resolved a different org than this tab asked for', {

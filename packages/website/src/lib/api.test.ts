@@ -140,6 +140,29 @@ describe('apiRequest — the active org header', () => {
       expect(reload).not.toHaveBeenCalled();
     });
 
+    it('leaves a stash the user changed while /me was in flight', async () => {
+      setActiveOrgId(ORG_A);
+      vi.mocked(fetch).mockImplementation(() => {
+        // The switcher stashed the new org after this request went out under
+        // ORG_A — an upload's `beforeunload` prompt can then cancel the
+        // navigation and leave the tab here.
+        setActiveOrgId(ORG_B);
+        return Promise.resolve(
+          new Response(JSON.stringify({ orgId: ORG_A, orgName: 'Acme' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+      });
+
+      await getMe();
+
+      // The echo answers for the org it was asked about, so it says nothing
+      // about the one the tab is switching to.
+      expect(sessionStorage.getItem('filone:activeOrgId')).toBe(ORG_B);
+      expect(reload).not.toHaveBeenCalled();
+    });
+
     it('clears the stash and reloads when the server resolved another org', async () => {
       vi.spyOn(console, 'warn').mockImplementation(() => {});
       setActiveOrgId(ORG_A);
