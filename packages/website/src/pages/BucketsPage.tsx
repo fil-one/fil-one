@@ -6,13 +6,22 @@ import { PageLayout } from '../components/PageLayout.js';
 import { Alert } from '../components/Alert';
 import { Button } from '../components/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { Spinner } from '../components/Spinner';
 import { EmptyStateCard } from '../components/EmptyStateCard';
 import { BucketsTable } from '../components/BucketsTable';
+import { TableSkeleton, type SkeletonColumn } from '../components/Table/TableSkeleton';
 
 import { useBucketsListing } from '../lib/use-buckets-listing.js';
 import { useDeleteBucket } from '../lib/use-delete-bucket.js';
 import { DEFAULT_BUCKET_SORT, EMPTY_BUCKET_FILTERS } from '../lib/bucket-table.js';
+
+// Mirrors BucketsTable's columns (labels and breakpoints) so the loading
+// placeholder drops the same columns at the same widths as the real table.
+const SKELETON_COLUMNS: SkeletonColumn[] = [
+  { label: 'Name' },
+  { label: 'Region', className: 'hidden sm:table-cell' },
+  { label: 'Created', className: 'hidden sm:table-cell' },
+  {},
+];
 
 // ---------------------------------------------------------------------------
 // Component
@@ -28,11 +37,29 @@ export function BucketsPage() {
 
   const { pendingBucketName, requestDelete, cancelDelete, confirmDelete } = useDeleteBucket();
 
+  // Shared across every state so navigating to Buckets never blanks the header
+  // or takes the Create action away while the list loads.
+  const createAction = (
+    <Button
+      id="buckets-create-button"
+      variant="ghost"
+      size="sm"
+      icon={PlusIcon}
+      onClick={() => navigate({ to: '/buckets/create' })}
+    >
+      Create bucket
+    </Button>
+  );
+
   if (isPending) {
     return (
-      <div className="flex items-center justify-center p-16">
-        <Spinner ariaLabel="Loading buckets" size={32} />
-      </div>
+      <PageLayout
+        title="Buckets"
+        description="Organize and manage your storage containers"
+        action={createAction}
+      >
+        <TableSkeleton columns={SKELETON_COLUMNS} aria-label="Loading buckets" />
+      </PageLayout>
     );
   }
 
@@ -48,17 +75,7 @@ export function BucketsPage() {
     <PageLayout
       title="Buckets"
       description="Organize and manage your storage containers"
-      action={
-        <Button
-          id="buckets-create-button"
-          variant="ghost"
-          size="sm"
-          icon={PlusIcon}
-          onClick={() => navigate({ to: '/buckets/create' })}
-        >
-          Create bucket
-        </Button>
-      }
+      action={createAction}
     >
       {baseBuckets.length === 0 ? (
         <EmptyStateCard
