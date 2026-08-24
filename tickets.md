@@ -251,6 +251,10 @@ gate, so validate the expected `owner` on both rows.
 
 ## Backend correctness
 
+### get-me leaks an unhandled rejection when the org-profile read fails
+
+`activeOrgProfile` is consumed twice — once by `Promise.all`, once by a `.then()` chain handed to `summarizeMemberships` — and when the read rejects, the second consumer is never awaited. Harmless in Lambda today, but it fails any vitest run that exercises the failure and it is one refactor away from a real unhandled rejection. Award the promise a single owner.
+
 ### Page the RAG key query before filtering by creator
 
 `packages/backend/src/handlers/list-rag-api-keys.ts:43` filters the first Query
