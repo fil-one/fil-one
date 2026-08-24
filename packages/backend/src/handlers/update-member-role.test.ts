@@ -201,8 +201,8 @@ describe('PATCH /api/org/members/{userId} handler', () => {
     });
 
     const items = transactItems();
-    // canonical, inverse, event — the owner set did not move.
-    expect(items).toHaveLength(3);
+    // fence, canonical, inverse, event — the owner set did not move.
+    expect(items).toHaveLength(4);
     const canonical = items.find(
       (item) => item.Update?.Key?.sk?.S === OrgKeys.memberSk(TARGET_ID),
     )!.Update!;
@@ -255,7 +255,7 @@ describe('PATCH /api/org/members/{userId} handler', () => {
 
   it('refuses to demote the last Owner', async () => {
     targetHolds(OrgRole.Owner);
-    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(2, 4));
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(3, 5));
 
     const result = await handler(roleEvent(OrgRole.Admin), buildContext());
 
@@ -269,7 +269,7 @@ describe('PATCH /api/org/members/{userId} handler', () => {
     // remedy is support and the drift checker, not promoting somebody.
     targetHolds(OrgRole.Owner);
     stubOwnerCount(undefined);
-    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(2, 4));
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(3, 5));
 
     const result = await handler(roleEvent(OrgRole.Admin), buildContext());
 
@@ -288,6 +288,7 @@ describe('PATCH /api/org/members/{userId} handler', () => {
         message: 'cancelled',
         $metadata: {},
         CancellationReasons: [
+          { Code: 'None' },
           { Code: 'None' },
           { Code: 'None' },
           { Code: 'TransactionConflict' },
@@ -375,11 +376,36 @@ describe('PATCH /api/org/members/{userId} handler', () => {
   });
 
   it('loses cleanly to a role change that landed first', async () => {
-    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(0, 3));
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(1, 4));
 
     const result = await handler(roleEvent(OrgRole.Admin), buildContext());
 
     expect(result).toMatchObject({ statusCode: 409 });
+  });
+
+  it('fences the transaction on the org not being deleted, as item 0', async () => {
+    // The inverse item's update is unconditional so it repairs a copy that had
+    // drifted, which also means it RECREATES one the teardown has already
+    // deleted — the scrub takes the inverse items before the canonical rows.
+    // Conditioning the inverse on the canonical row is not available: DynamoDB
+    // permits one operation per item per transaction and the canonical row
+    // already carries the Update.
+    await handler(roleEvent(OrgRole.Admin), buildContext());
+
+    expect(transactItems()[0].ConditionCheck).toMatchObject({
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'PROFILE' } },
+      ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
+    });
+  });
+
+  it('answers account-deleted when the org is being torn down', async () => {
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(0, 4));
+
+    const result = await handler(roleEvent(OrgRole.Admin), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 410 });
+    expect(body(result).code).toBe(ApiErrorCode.ACCOUNT_DELETED);
   });
 
   it.each([

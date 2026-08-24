@@ -24,6 +24,7 @@ import {
   roleChangeItems,
 } from '../lib/membership-changes.js';
 import { readOwnerCount, resolveMembership } from '../lib/org-membership.js';
+import { OrgDeletingError, isGuardRejection, orgNotDeletingCheck } from '../lib/org-profile.js';
 import { parseJsonBody } from '../lib/parse-json-body.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -41,9 +42,12 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
  * neither demote an Owner nor promote anyone to Owner, and either attempt is a
  * 403 rather than a partial change.
  *
- * One transaction carries all of it: both membership rows, the `ownerCount`
- * delta when the owner set moves, the pending invitations the member may no
- * longer issue, and the audit event. The last-Owner guard is the decrement's own
+ * One transaction carries all of it, behind the org-deletion fence as item 0:
+ * both membership rows, the `ownerCount` delta when the owner set moves, the
+ * pending invitations the member may no longer issue, and the audit event. The
+ * fence is what stops the inverse item's deliberately unconditional update from
+ * recreating a membership row a teardown has already walked past
+ * (`lib/membership-changes.ts`). The last-Owner guard is the decrement's own
  * condition, which is why a PATCH cannot demote the last Owner — nothing here
  * checks for it, the counter does.
  *
@@ -85,7 +89,9 @@ export async function baseHandler(
     (invitation) => !canManageTargetRole(role, invitation.role),
   );
   const delta = ownerCountDeltaFor(target.role, role);
-  const { now, later } = planRevocations(doomed, delta === 'unchanged' ? 2 : 3);
+  // The fence and both membership rows, plus the counter when the owner set
+  // moves.
+  const { now, later } = planRevocations(doomed, delta === 'unchanged' ? 3 : 4);
 
   try {
     await commitAudited({
@@ -127,6 +133,7 @@ function changeItems({
   const delta = ownerCountDeltaFor(fromRole, toRole);
 
   return [
+    orgNotDeletingCheck(orgId),
     ...roleChangeItems({ orgId, userId: targetUserId, fromRole, toRole }),
     ...(delta === 'unchanged' ? [] : [ownerCountItem(orgId, delta)]),
     ...now.flatMap((invitation) => retireInvitationItems(invitation, 'revoked')),
@@ -145,6 +152,7 @@ function changeLabels({
   revocations: number;
 }): string[] {
   return [
+    'org',
     'membership',
     'inverse',
     ...(delta === 'unchanged' ? [] : ['ownerCount']),
@@ -160,6 +168,10 @@ async function changeFailureResponse(
     revocations: number;
   },
 ): Promise<APIGatewayProxyStructuredResultV2> {
+  // The fence, at its own index. A role change into an org being torn down has
+  // no remedy, so it leaves through the shared error rather than a 409.
+  if (isGuardRejection(err)) throw new OrgDeletingError(context.orgId);
+
   const failed = cancelledLabels(err, changeLabels(context));
   if (failed.length === 0) throw err;
 

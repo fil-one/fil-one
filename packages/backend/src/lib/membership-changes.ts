@@ -96,6 +96,17 @@ export function membershipRows({
  * handler says so. The inverse item's update is not conditional on a role — it is
  * a denormalized copy, and an update that also repairs a copy that had drifted is
  * the outcome we want.
+ *
+ * That repair is why the inverse carries no condition of its own, and why every
+ * caller carries the org-deletion fence instead. `deletion-scrub.ts` deletes the
+ * inverse items before the canonical member rows, so a change landing in that
+ * gap passes the canonical row's condition and an unconditional Update RECREATES
+ * an inverse item the scrub has already walked past — a membership in a torn-down
+ * org, showing in `/me` and counted by the deletion census, that nothing revisits.
+ * Conditioning the inverse on the canonical row is not open to us: DynamoDB
+ * permits one operation per item per transaction, and the canonical row already
+ * holds the Update. The fence is a different item and refuses the whole
+ * transaction, which keeps the drift repair and closes the gap.
  */
 export function roleChangeItems({
   orgId,

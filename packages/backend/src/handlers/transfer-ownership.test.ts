@@ -8,7 +8,7 @@ import {
   TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
-import { OrgRole } from '@filone/shared';
+import { ApiErrorCode, OrgRole } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.js';
 import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.js';
 
@@ -161,6 +161,17 @@ function body(result: unknown) {
   return JSON.parse((result as { body: string }).body);
 }
 
+/** The cancellation DynamoDB sends when one item's condition fails. */
+function cancelledAt(index: number, itemCount: number) {
+  return new TransactionCanceledException({
+    message: 'cancelled',
+    $metadata: {},
+    CancellationReasons: Array.from({ length: itemCount }, (_unused, position) => ({
+      Code: position === index ? 'ConditionalCheckFailed' : 'None',
+    })),
+  });
+}
+
 describe('POST /api/org/transfer handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -200,8 +211,9 @@ describe('POST /api/org/transfer handler', () => {
     expect(body(result)).toStrictEqual({ userId: TARGET_ID, previousOwnerUserId: USER_ID });
 
     const items = transactItems();
-    // Two rows each for the promotion and the demotion, the counter, the event.
-    expect(items).toHaveLength(6);
+    // The fence, two rows each for the promotion and the demotion, the counter,
+    // the event.
+    expect(items).toHaveLength(7);
     expect(
       items.find((item) => item.Update?.Key?.sk?.S === OrgKeys.memberSk(TARGET_ID))!.Update,
     ).toMatchObject({
@@ -309,24 +321,33 @@ describe('POST /api/org/transfer handler', () => {
   });
 
   it('loses cleanly when the roles moved under it', async () => {
-    ddbMock.on(TransactWriteItemsCommand).rejects(
-      new TransactionCanceledException({
-        message: 'cancelled',
-        $metadata: {},
-        CancellationReasons: [
-          { Code: 'ConditionalCheckFailed' },
-          { Code: 'None' },
-          { Code: 'None' },
-          { Code: 'None' },
-          { Code: 'None' },
-          { Code: 'None' },
-        ],
-      }),
-    );
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(1, 7));
 
     const result = await handler(transferEvent(), buildContext());
 
     expect(result).toMatchObject({ statusCode: 409 });
+  });
+
+  it('fences the transaction on the org not being deleted, as item 0', async () => {
+    // Both role changes write an inverse item unconditionally, so a transfer
+    // landing after the scrub deleted those items would recreate two of them in
+    // a partition the teardown has already walked past.
+    await handler(transferEvent(), buildContext());
+
+    expect(transactItems()[0].ConditionCheck).toMatchObject({
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'PROFILE' } },
+      ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
+    });
+  });
+
+  it('answers account-deleted when the org is being torn down', async () => {
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(0, 7));
+
+    const result = await handler(transferEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 410 });
+    expect(body(result).code).toBe(ApiErrorCode.ACCOUNT_DELETED);
   });
 
   it('returns 400 for a body naming nobody', async () => {

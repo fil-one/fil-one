@@ -12,6 +12,7 @@ import {
 } from '../lib/invitations.js';
 import { cancelledLabels, ownerCountItem, roleChangeItems } from '../lib/membership-changes.js';
 import { resolveMembership } from '../lib/org-membership.js';
+import { OrgDeletingError, isGuardRejection, orgNotDeletingCheck } from '../lib/org-profile.js';
 import { parseJsonBody } from '../lib/parse-json-body.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -31,6 +32,10 @@ import { requireMfaIfEnrolled } from '../middleware/require-mfa.js';
  * `requireMfaIfEnrolled` rather than `requireMfa`, because a user with nothing
  * enrolled would otherwise be denied outright rather than prompted — the gate
  * asks for a recent authentication, which everyone can produce.
+ *
+ * The transaction opens with the org-deletion fence, which is what stops the
+ * inverse items' deliberately unconditional updates from recreating memberships
+ * a teardown has already walked past (`lib/membership-changes.ts`).
  *
  * The promotion and the demotion are one transaction, and the owner count moves
  * by nothing: the org has exactly one Owner before and after. The net-zero update
@@ -78,6 +83,7 @@ export async function baseHandler(
   try {
     await commitAudited({
       items: [
+        orgNotDeletingCheck(orgId),
         ...roleChangeItems({
           orgId,
           userId: targetUserId,
@@ -109,7 +115,7 @@ export async function baseHandler(
       }),
     });
   } catch (err) {
-    return transferFailureResponse(err, now.length);
+    return transferFailureResponse(err, orgId, now.length);
   }
 
   await revokeDeferred(later);
@@ -120,14 +126,22 @@ export async function baseHandler(
     .build();
 }
 
-/** Both role changes and the counter — what the sweep's revocations sit behind. */
-const TRANSFER_ITEMS = 5;
+/**
+ * The fence, both role changes and the counter — what the sweep's revocations
+ * sit behind.
+ */
+const TRANSFER_ITEMS = 6;
 
 function transferFailureResponse(
   err: unknown,
+  orgId: string,
   revocations: number,
 ): APIGatewayProxyStructuredResultV2 {
+  // The fence, at its own index: the org is being torn down and no retry helps.
+  if (isGuardRejection(err)) throw new OrgDeletingError(orgId);
+
   const failed = cancelledLabels(err, [
+    'org',
     'promotion',
     'promotionInverse',
     'demotion',
