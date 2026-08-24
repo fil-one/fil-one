@@ -18,6 +18,8 @@ import {
   isBucketQueryable,
   type RagBucket,
 } from '../lib/rag-bucket-api.js';
+import { usePermissions } from '../lib/use-permissions.js';
+import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
 import { timeAgo } from '../lib/time.js';
 
 export { bucketKey } from '../lib/rag-bucket-api.js';
@@ -244,7 +246,13 @@ export function BucketsTab({
   togglingBucket: string | null;
   onConfirmToggle: (bucket: RagBucket) => void;
 }) {
-  const [confirm, setConfirm] = useState<RagBucket | null>(null);
+  const { has } = usePermissions();
+  // The confirmation asks what the row's own control asked: turning indexing
+  // off discards the index and sits with `buckets.delete`, turning it on is a
+  // configuration write and sits with `buckets.create`.
+  const [confirm, setConfirm] = usePermittedDialog<RagBucket | null>(null, (bucket) =>
+    bucket === null ? true : has(bucket.enabled ? 'buckets.delete' : 'buckets.create'),
+  );
   const [activeDrawer, setActiveDrawer] = useState<string | null>(null);
   const activeBucket = buckets.find((b) => bucketKey(b) === activeDrawer) ?? null;
 

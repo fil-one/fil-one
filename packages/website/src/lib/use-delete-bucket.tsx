@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import type { ListBucketsResponse } from '@filone/shared';
@@ -8,6 +7,8 @@ import { Link as ExternalLink } from '../components/Link';
 import { useToast } from '../components/Toast';
 import { apiRequest } from './api.js';
 import { queryKeys } from './query-client.js';
+import { useHasPermission } from './use-permissions.js';
+import { usePermittedDialog } from './use-permitted-dialog.js';
 
 // Linked from the "bucket is not empty" toast, next to the thing it explains —
 // the docs page covers emptying a bucket with the S3 CLI.
@@ -47,7 +48,13 @@ function reportDeleteError(err: unknown, bucketName: string, toast: Toast) {
 export function useDeleteBucket() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [pendingBucketName, setPendingBucketName] = useState<string | null>(null);
+  // The confirmation goes with the Delete control it was opened from: a dialog
+  // left on screen after a demotion still confirms the request the hidden
+  // control exists to avoid.
+  const [pendingBucketName, setPendingBucketName] = usePermittedDialog<string | null>(
+    null,
+    useHasPermission('buckets.delete'),
+  );
 
   const mutation = useMutation({
     mutationFn: (bucketName: string) =>

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole, S3Region } from '@filone/shared';
 
@@ -38,21 +38,26 @@ function renderTab(buckets: RagBucket[], role = OrgRole.Owner) {
   // Index / Stop-indexing are gated on the bucket permissions, so the caller's
   // role has to be in the cache before the rows render.
   seedPermissions(client, role);
-  return render(
-    <QueryClientProvider client={client}>
-      {/* The drawer's code snippet copies to the clipboard through a toast. */}
-      <ToastProvider>
-        <BucketsTab
-          buckets={buckets}
-          isLoading={false}
-          isError={false}
-          errorMessage={undefined}
-          togglingBucket={null}
-          onConfirmToggle={() => undefined}
-        />
-      </ToastProvider>
-    </QueryClientProvider>,
-  );
+  // The client comes back so a test can re-seed it mid-render, which is what a
+  // role change under an open confirmation looks like.
+  return {
+    client,
+    ...render(
+      <QueryClientProvider client={client}>
+        {/* The drawer's code snippet copies to the clipboard through a toast. */}
+        <ToastProvider>
+          <BucketsTab
+            buckets={buckets}
+            isLoading={false}
+            isError={false}
+            errorMessage={undefined}
+            togglingBucket={null}
+            onConfirmToggle={() => undefined}
+          />
+        </ToastProvider>
+      </QueryClientProvider>,
+    ),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -246,6 +251,23 @@ describe('BucketsTab — permissions', () => {
       expect(screen.queryByTestId('bucket-drawer-stop')).not.toBeInTheDocument();
     },
   );
+
+  // Hiding the kebab decides only what can be started. The confirmation is
+  // state the caller chose before the demotion, and its Stop indexing button
+  // would still discard the index the hidden control exists to protect.
+  it('closes an open stop-indexing confirmation when the caller loses buckets.delete', async () => {
+    const { client } = renderTab([bucket({ enabled: true })], OrgRole.Admin);
+    fireEvent.click(screen.getByTestId('bucket-action-menu-trigger'));
+    fireEvent.click(await screen.findByTestId('bucket-action-menu-disable'));
+    expect(await screen.findByTestId('toggle-confirm-submit')).toBeInTheDocument();
+
+    // What a /me refetch after a demotion does.
+    act(() => seedPermissions(client, OrgRole.Member));
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('toggle-confirm-submit')).not.toBeInTheDocument(),
+    );
+  });
 
   it('offers stop indexing inside the drawer to an Admin', async () => {
     renderTab([bucket({ enabled: true })], OrgRole.Admin);

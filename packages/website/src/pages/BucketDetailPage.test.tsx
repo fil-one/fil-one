@@ -40,6 +40,14 @@ vi.mock('../lib/use-object-actions.js', () => ({
   }),
 }));
 
+// The Add key modal reports whether the page asked it to open, which is what
+// the permission gate on its state decides. Its own body is a form this file is
+// not about.
+vi.mock('../components/AddBucketKeyModal', () => ({
+  AddBucketKeyModal: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="add-bucket-key-modal" /> : null,
+}));
+
 vi.mock('../lib/use-presign.js', () => ({
   batchPresign: () => Promise.resolve({ items: [{ url: 'https://s3.test/list', method: 'GET' }] }),
 }));
@@ -125,6 +133,25 @@ describe('BucketDetailPage — the API keys tab', () => {
     expect(screen.queryByTestId('bucket-keys-tab')).not.toBeInTheDocument();
     const paths = mockApiRequest.mock.calls.map((call) => String(call[0]));
     expect(paths.filter((path) => path.startsWith('/access-keys'))).toHaveLength(0);
+  });
+
+  // The modal is a sibling of the tabs, so removing the tab leaves it on
+  // screen: an open Add key form is state the caller chose before the
+  // demotion, and its submit is the `keys.create` request the hidden Add key
+  // button exists to avoid.
+  it('closes an open Add key modal when the caller loses keys.create', async () => {
+    const { client } = renderPage(OrgRole.Owner);
+
+    fireEvent.click(await screen.findByTestId('bucket-keys-tab'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add key' }));
+    expect(await screen.findByTestId('add-bucket-key-modal')).toBeInTheDocument();
+
+    // What a /me refetch after a demotion does.
+    act(() => seedPermissions(client, OrgRole.ReadOnly));
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('add-bucket-key-modal')).not.toBeInTheDocument(),
+    );
   });
 
   it('drops the tab and its rows when the caller loses keys.manage_own mid-session', async () => {

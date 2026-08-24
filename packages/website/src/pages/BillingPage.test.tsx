@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole, ROLE_PERMISSIONS } from '@filone/shared';
 import { seedPermissions } from '../lib/test-permissions.js';
@@ -7,11 +7,15 @@ import { PlanId, SubscriptionStatus } from '@filone/shared';
 import type { BillingInfo } from '@filone/shared';
 
 // Stub the dialogs — they pull in Stripe.js and are not what these tests target.
+// They report whether the page asked them to open, which is what the permission
+// gate on the dialog state decides.
 vi.mock('../components/billing/ChoosePlanDialog.js', () => ({
-  ChoosePlanDialog: () => null,
+  ChoosePlanDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="choose-plan-dialog" /> : null,
 }));
 vi.mock('../components/billing/AddPaymentDialog.js', () => ({
-  AddPaymentDialog: () => null,
+  AddPaymentDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="add-payment-dialog" /> : null,
 }));
 vi.mock('../components/billing/ContactSalesDialog.js', () => ({
   ContactSalesDialog: () => null,
@@ -86,11 +90,16 @@ function renderPage(role = OrgRole.Owner) {
     role,
     permissions: ROLE_PERMISSIONS[role],
   });
-  return render(
-    <QueryClientProvider client={client}>
-      <BillingPage />
-    </QueryClientProvider>,
-  );
+  // The client comes back so a test can re-seed it mid-render, which is what a
+  // role change under an open dialog looks like.
+  return {
+    client,
+    ...render(
+      <QueryClientProvider client={client}>
+        <BillingPage />
+      </QueryClientProvider>,
+    ),
+  };
 }
 
 describe('BillingPage — inactive subscription', () => {
@@ -186,6 +195,23 @@ describe('BillingPage — permissions', () => {
     await screen.findByText('Free trial');
     expect(container.querySelector('#billing-plan-cta-button')).toBeNull();
     expect(container.querySelector('#billing-upgrade-button')).toBeNull();
+  });
+
+  // Hiding the CTA decides only what can be started. An open plan dialog is
+  // state the caller chose before the demotion, and the payment dialog behind
+  // it can confirm a SetupIntent Stripe has already issued against an
+  // `activateSubscription` that then answers 403.
+  it('closes an open plan dialog when the caller loses billing.manage', async () => {
+    const { container, client } = renderPage(OrgRole.Owner);
+
+    await screen.findByText('Free trial');
+    fireEvent.click(container.querySelector('#billing-plan-cta-button')!);
+    expect(await screen.findByTestId('choose-plan-dialog')).toBeInTheDocument();
+
+    // What a /me refetch after a demotion does.
+    act(() => seedPermissions(client, OrgRole.Admin));
+
+    await waitFor(() => expect(screen.queryByTestId('choose-plan-dialog')).not.toBeInTheDocument());
   });
 
   it('shows an Owner the controls', async () => {

@@ -31,6 +31,7 @@ import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { Overline } from '../components/Overline';
 import { RequirePermission } from '../components/RequirePermission';
 import { useHasPermission } from '../lib/use-permissions.js';
+import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -138,9 +139,11 @@ function BillingDetails() {
     invoicesPending && !!billing && hasInvoiceHistory(billing.subscription.status);
   const invoicesError = isInvoicesError ? 'Unable to load invoices. Please try again later.' : null;
 
-  // Modal states
-  const [planOpen, setPlanOpen] = useState(false);
-  const [paymentOpen, setPaymentOpen] = useState(false);
+  // Modal states. The two that write billing close with `billing.manage`: the
+  // payment dialog is the sharp one, since confirming it hands Stripe a
+  // SetupIntent that `activateSubscription` then refuses.
+  const [planOpen, setPlanOpen] = usePermittedDialog(false, mayManage);
+  const [paymentOpen, setPaymentOpen] = usePermittedDialog(false, mayManage);
   const [clientSecret, setClientSecret] = useState('');
   const [stripePublishableKey, setStripePublishableKey] = useState('');
   const [contactSalesOpen, setContactSalesOpen] = useState(false);

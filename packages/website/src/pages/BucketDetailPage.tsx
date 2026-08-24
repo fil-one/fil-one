@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { CloudArrowUpIcon } from '@phosphor-icons/react/dist/ssr';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -29,6 +29,7 @@ import { apiRequest } from '../lib/api.js';
 import { formatDateTime } from '../lib/time.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
 import { useHasPermission } from '../lib/use-permissions.js';
+import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
 import { useKeyActionScope } from '../lib/use-key-scope.js';
 import { queryKeys } from '../lib/query-client.js';
 import { batchPresign } from '../lib/use-presign.js';
@@ -254,6 +255,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   const mayUpload = useHasPermission('objects.write');
   const mayDelete = useHasPermission('objects.delete');
   const { mayList: mayListKeys } = useKeyActionScope();
+  const mayCreateKeys = useHasPermission('keys.create');
 
   const setCurrentPrefix = useCallback(
     (newPrefix: string) => {
@@ -279,7 +281,8 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   const { versions, isTruncated } = readListing(objectsQuery.data);
   const analyticsData = analyticsQuery.data;
 
-  const [addKeyOpen, setAddKeyOpen] = useState(false);
+  // The Add key modal goes with the `keys.create` control inside the tab.
+  const [addKeyOpen, setAddKeyOpen] = usePermittedDialog(false, mayCreateKeys);
 
   const refreshAfterBulkDelete = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });

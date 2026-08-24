@@ -268,6 +268,39 @@ describe('RagApiKeysTab — permissions', () => {
     expect(client.getQueryData(queryKeys.ragApiKeys)).toBeDefined();
   });
 
+  // Hiding the Create button decides only what can be started. The modal is
+  // state the caller chose before the demotion, and its Create key button
+  // would still issue the request the hidden button exists to avoid.
+  it('closes an open create modal when the caller loses keys.create', async () => {
+    const { client } = renderTab([bucket()], OrgRole.Member);
+    fireEvent.click(await screen.findByRole('button', { name: /Create API key/ }));
+    expect(await screen.findByLabelText('Name')).toBeInTheDocument();
+
+    // What a /me refetch after a demotion does.
+    act(() => seedPermissions(client, OrgRole.ReadOnly));
+
+    await waitFor(() => expect(screen.queryByLabelText('Name')).not.toBeInTheDocument());
+  });
+
+  // The delete confirmation carries its target, so the gate is the same per-key
+  // revoke rule as the row's own button: a demotion from `keys.manage_all` to
+  // `keys.manage_own` takes a colleague's key out of reach mid-confirmation.
+  it('closes a delete confirmation for a key the narrowed role may no longer revoke', async () => {
+    mockList.mockResolvedValue({ keys: [KEY, OTHERS_KEY] });
+    const { client } = renderTab([bucket()], OrgRole.Admin);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Delete API key someone elses key' }),
+    );
+    expect(await screen.findByText('Delete "someone elses key"?')).toBeInTheDocument();
+
+    // What a /me refetch after a demotion does.
+    act(() => seedPermissions(client, OrgRole.Member));
+
+    await waitFor(() =>
+      expect(screen.queryByText('Delete "someone elses key"?')).not.toBeInTheDocument(),
+    );
+  });
+
   it('gives an Admin the action on every key', async () => {
     mockList.mockResolvedValue({ keys: [KEY, OTHERS_KEY] });
 

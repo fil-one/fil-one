@@ -38,6 +38,7 @@ import { bucketKey, type RagBucket } from '../lib/rag-bucket-api.js';
 import { queryKeys } from '../lib/query-client.js';
 import { useHasPermission } from '../lib/use-permissions.js';
 import { useKeyActionScope } from '../lib/use-key-scope.js';
+import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
 import { ApiReference } from './RagPipelineTabs.js';
 import { formatDate } from '../lib/time.js';
 
@@ -388,18 +389,33 @@ function visibleKeys(mayList: boolean, data: ListRagApiKeysResponse | undefined)
   return mayList ? (data?.keys ?? []) : [];
 }
 
+/**
+ * The delete confirmation's gate, as a value the component can hand the dialog
+ * hook: the same per-key rule the row's own Delete button reads. It lives out
+ * here so the tab keeps one nested closure fewer.
+ */
+function revocable(mayRevoke: (key: RagApiKey) => boolean) {
+  return (key: RagApiKey | null) => key === null || mayRevoke(key);
+}
+
 export function RagApiKeysTab({ buckets }: { buckets: RagBucket[] }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const mayCreate = useHasPermission('keys.create');
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createdKey, setCreatedKey] = useState<CreateRagApiKeyResponse | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<RagApiKey | null>(null);
-
   // Listing is `keys.manage_own`, and the server returns only the caller's own
   // keys unless they hold `keys.manage_all`. ReadOnly holds neither, so the
   // request is not made rather than made and refused.
   const { mayList, mayRevoke, mayRevokeAny } = useKeyActionScope();
+
+  // Both dialogs go with the controls that open them: Create with
+  // `keys.create`, Delete with the same per-key revoke rule as the row's own
+  // button, which a demotion to `keys.manage_own` narrows to the caller's keys.
+  const [createOpen, setCreateOpen] = usePermittedDialog(false, mayCreate);
+  const [createdKey, setCreatedKey] = useState<CreateRagApiKeyResponse | null>(null);
+  const [deleteTarget, setDeleteTarget] = usePermittedDialog<RagApiKey | null>(
+    null,
+    revocable(mayRevoke),
+  );
 
   const {
     data,

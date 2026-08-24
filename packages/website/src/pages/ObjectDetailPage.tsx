@@ -34,6 +34,7 @@ import type {
 import { FILONE_STAGE } from '../env';
 import { useObjectActions } from '../lib/use-object-actions.js';
 import { useHasPermission } from '../lib/use-permissions.js';
+import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
 import { queryKeys, queryClient } from '../lib/query-client.js';
 import { getBilling } from '../lib/api.js';
 import { batchPresign } from '../lib/use-presign.js';
@@ -179,7 +180,8 @@ export function ObjectDetailPage({
     billing?.subscription.status === SubscriptionStatus.PastDue ||
     billing?.subscription.status === SubscriptionStatus.GracePeriod;
 
-  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  // The confirmation goes with the Delete control it was opened from.
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = usePermittedDialog(false, mayDelete);
   const [shareOpen, setShareOpen] = useState(false);
 
   const objectActions = useObjectActions({
