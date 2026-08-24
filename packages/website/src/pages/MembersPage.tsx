@@ -11,7 +11,7 @@ import { TransferOwnershipDialog } from '../components/TransferOwnershipDialog';
 import { PageLayout } from '../components/PageLayout.js';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
-import { errorCodeOf, errorMessageOf, getMe } from '../lib/api.js';
+import { errorCodeOf, errorMessageOf, errorStatusOf, getMe } from '../lib/api.js';
 import {
   listMembers,
   removeMember,
@@ -101,6 +101,20 @@ interface MutationContext {
   pending: PendingRows;
   toastSuccess: (message: string) => void;
   toastError: (message: string) => void;
+  toastInfo: (message: string) => void;
+}
+
+/**
+ * Whether a removal was refused because the roster the console acted on is not
+ * the one the server has.
+ *
+ * The row is already gone (404), or its role moved under the request and the
+ * owner-count delta was decided from the old one (409). Neither is a failure to
+ * report and retry: the answer is the same until the list is re-read.
+ */
+function isStaleRemovalTarget(error: unknown): boolean {
+  const status = errorStatusOf(error);
+  return status === 404 || status === 409;
 }
 
 type RoleChange = { member: MemberSummary; role: OrgRole };
@@ -140,9 +154,21 @@ function useMemberRemoval(ctx: MutationContext) {
       ctx.notice.clear();
       ctx.toastSuccess(`${memberName(member)} was removed from the organization`);
     },
-    onError: (err) => {
+    onError: (err, member) => {
       const remedy = 'That removal would leave the organization without an owner.';
       if (ctx.notice.capture(err, remedy)) return;
+      // The confirmation closes on its own, so a refusal that leaves the row in
+      // place leaves it actionable and every retry earns the same answer. The
+      // same shape as the invitation revoke's INVITE_NOT_FOUND branch: re-read
+      // the list and state what happened rather than report a failure. A row
+      // the server says is gone goes at once, so the roster is honest before
+      // the refetch lands.
+      if (isStaleRemovalTarget(err)) {
+        if (errorStatusOf(err) === 404) dropFromRoster(ctx.client, member.userId);
+        void ctx.client.invalidateQueries({ queryKey: queryKeys.members });
+        ctx.toastInfo(errorMessageOf(err, 'That person is no longer on this roster.'));
+        return;
+      }
       ctx.toastError(errorMessageOf(err, 'Failed to remove that member'));
     },
     onSettled: (_result, _err, member) => {
@@ -433,6 +459,7 @@ export function MembersPage() {
     pending,
     toastSuccess: toast.success,
     toastError: toast.error,
+    toastInfo: toast.info,
   };
   const roleChange = useRoleChange(ctx);
   const removal = useMemberRemoval(ctx);

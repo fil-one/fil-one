@@ -350,6 +350,53 @@ describe('MembersPage', () => {
   });
 });
 
+describe('MembersPage — a removal the roster is stale for', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockListInvitations.mockResolvedValue({ invitations: [] });
+    window.history.replaceState(null, '', '/members');
+  });
+
+  // The confirmation closes on its own, so a refusal that leaves the row in
+  // place leaves it actionable and every retry earns the same 404.
+  it('drops a member the server says is already gone, and re-reads the roster', async () => {
+    mockRemove.mockRejectedValue(
+      apiError('That person is not a member of this organization.', 404),
+    );
+    renderPage();
+    await screen.findByText('grace@example.com');
+    // What the re-read finds: somebody else removed the row first.
+    mockListMembers.mockResolvedValue({ members: [OWNER, PLAIN] });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove grace@example.com' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove member' }));
+
+    expect(
+      await screen.findByText('That person is not a member of this organization.'),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('grace@example.com')).not.toBeInTheDocument());
+    // Two calls: the mount, and the re-read the refusal asked for.
+    await waitFor(() => expect(mockListMembers).toHaveBeenCalledTimes(2));
+  });
+
+  // The row is still a member — its role moved under the request, so the
+  // owner-count delta was decided from the old one. The list is what is stale.
+  it('re-reads the roster when a removal loses a race with a role change', async () => {
+    mockRemove.mockRejectedValue(
+      apiError('That member’s role changed while the removal was in flight — try again.', 409),
+    );
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove grace@example.com' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove member' }));
+
+    expect(
+      await screen.findByText(/role changed while the removal was in flight/),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(mockListMembers).toHaveBeenCalledTimes(2));
+  });
+});
+
 describe('MembersPage — transferring the owner seat', () => {
   beforeEach(() => {
     vi.clearAllMocks();
