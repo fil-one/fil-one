@@ -434,6 +434,18 @@ describe('auditPut', () => {
     });
   });
 
+  it('drops a top-level field the envelope does not name', () => {
+    // Structural typing accepts an event-shaped value carrying an extra field —
+    // a row read back with a legacy attribute, a spread at some call site — and
+    // the content guard only ever looks at `details`. The allowlist is what
+    // keeps it off the table.
+    const event = { ...renamed(), accessKeyId: 'AKIAIOSFODNN7EXAMPLE' } as ReturnType<
+      typeof renamed
+    >;
+
+    expect(auditPut(event).Put!.Item!.accessKeyId).toBeUndefined();
+  });
+
   it('marshalls the actor and the payload as maps the viewer can read back', () => {
     const item = auditPut(renamed()).Put!.Item!;
 

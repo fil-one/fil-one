@@ -383,13 +383,30 @@ function auditTtl(createdAt: string): number {
  * and a record built minutes ago, or read back and re-put, would otherwise
  * reach the table without one.
  *
+ * The envelope is named field by field rather than spread. Structural typing
+ * accepts an event-shaped value carrying an extra top-level field — a row read
+ * back with a legacy attribute on it, a `{ ...event, accessKeyId }` at some
+ * future call site — and a spread would marshal that field unchanged, past a
+ * guard that only ever looks at `details`. What is not listed here does not
+ * reach the table.
+ *
  * The keys are derived last, so a stored row spread back into an event cannot
  * carry a `pk` or `sk` that disagrees with its own `orgId` and `createdAt`.
  */
 function auditItem(event: AuditEvent): Record<string, unknown> {
+  const { phase, correlationId, outcome } = event;
+
   return {
-    ...event,
+    eventId: event.eventId,
+    type: event.type,
+    actor: event.actor,
+    orgId: event.orgId,
+    subject: event.subject,
     details: recordableDetails(event.details),
+    createdAt: event.createdAt,
+    ttl: event.ttl,
+    ...(phase ? { phase, correlationId } : {}),
+    ...(outcome ? { outcome } : {}),
     pk: AuditKeys.orgPk(event.orgId),
     sk: AuditKeys.eventSk(event.createdAt, event.eventId),
   };
