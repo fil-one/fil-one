@@ -849,7 +849,7 @@ export default $config({
     // other exports pull zod into the config bundle behind them.
     const { ROUTE_MANIFEST } = await import('./packages/shared/src/route-manifest.js');
 
-    type RouteInfraExtras = Omit<AddRouteProps, 'method' | 'routePath' | 'handler'>;
+    type RouteInfraConfig = Omit<AddRouteProps, 'method' | 'routePath' | 'handler'>;
 
     // What a route needs beyond the defaults. A handler absent from this record
     // gets them: everything in allResources linked, the shared environment, a
@@ -858,7 +858,7 @@ export default $config({
     //
     // Declared here rather than beside each route because the entries reference
     // the queues, tables and workers above, all of which have to exist first.
-    const INFRA_EXTRAS: Record<string, RouteInfraExtras> = {
+    const ROUTE_INFRA_CONFIGS: Record<string, RouteInfraConfig> = {
       // ── Buckets and objects ────────────────────────────────────────
       'list-buckets': {
         extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL, ...fthEnv, ...forgeEnv },
@@ -1114,7 +1114,7 @@ export default $config({
     };
 
     const manifestHandlers = new Set(ROUTE_MANIFEST.map((route) => route.handler));
-    const strayExtras = Object.keys(INFRA_EXTRAS).filter(
+    const strayExtras = Object.keys(ROUTE_INFRA_CONFIGS).filter(
       (handler) => !manifestHandlers.has(handler),
     );
     if (strayExtras.length > 0) {
@@ -1122,7 +1122,7 @@ export default $config({
       // environment, which fails at runtime rather than at deploy time. Fail here
       // instead.
       throw new Error(
-        `INFRA_EXTRAS names handlers with no route manifest entry: ${strayExtras.join(', ')}`,
+        `ROUTE_INFRA_CONFIGS names handlers with no route manifest entry: ${strayExtras.join(', ')}`,
       );
     }
 
@@ -1131,7 +1131,7 @@ export default $config({
         method: route.method,
         routePath: route.path,
         handler: route.handler,
-        ...INFRA_EXTRAS[route.handler],
+        ...ROUTE_INFRA_CONFIGS[route.handler],
       });
     }
 
