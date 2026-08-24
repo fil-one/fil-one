@@ -85,14 +85,9 @@ process.env.FILONE_STAGE = 'test';
 
 import { baseHandler, handler } from './query-bucket.js';
 import { hashRagKeyToken, RagApiKeyKeys } from '../lib/rag-api-keys.js';
-import {
-  buildEvent,
-  buildContext,
-  NO_MEMBERSHIP,
-  stubMembershipRead,
-} from '../test/lambda-test-utilities.js';
+import { buildEvent, buildContext, stubMembershipRead } from '../test/lambda-test-utilities.js';
 import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.js';
-import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
+import { OrgRole, S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 
 // ---------------------------------------------------------------------------
@@ -532,81 +527,6 @@ describe('query-bucket baseHandler', () => {
 
       expect(result.statusCode).toBe(200);
     });
-  });
-});
-
-describe('query-bucket handler (RAG access gate)', () => {
-  // Non-foundation email so the gate decision hinges on the allowlist lookup.
-  function gateEvent(): AuthenticatedEvent {
-    const event = buildEvent({
-      userInfo: {
-        userId: 'user-1',
-        orgId: 'org-1',
-        email: 'outsider@example.com',
-        emailVerified: true,
-      },
-      body: JSON.stringify({ query: 'hello' }),
-    });
-    event.pathParameters = { name: 'my-bucket' };
-    return event;
-  }
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    ddbMock.reset();
-    orch = fakeOrchestrator('aurora', { bucket: BUCKET });
-    mockGetOrchestratorForRegion.mockReturnValue(orch);
-    mockEmbed.mockResolvedValue([0.1]);
-    mockComplete.mockResolvedValue('answer');
-    mockQuery.mockResolvedValue([vector('a.pdf#0', 'a.pdf')]);
-    mockGetEnablement.mockResolvedValue(SYNCED_ENABLEMENT);
-  });
-
-  it('returns 403 when the caller is not foundation and not allowlisted', async () => {
-    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
-
-    const result = await handler(gateEvent(), buildContext());
-
-    expect(result.statusCode).toBe(403);
-    expect(JSON.parse(result.body!).message).toBe('You do not have access to this feature.');
-    // Gate runs before any RAG work.
-    expect(mockEmbed).not.toHaveBeenCalled();
-    expect(mockComplete).not.toHaveBeenCalled();
-  });
-
-  it('allows the request through the gate when the caller is allowlisted', async () => {
-    ddbMock.on(GetItemCommand).resolves({ Item: { pk: { S: 'ALLOWLIST#outsider@example.com' } } });
-
-    const result = await handler(gateEvent(), buildContext());
-
-    expect(result.statusCode).toBe(200);
-    expect(mockEmbed).toHaveBeenCalled();
-  });
-
-  it('refuses a cookie caller with no membership row before any RAG work', async () => {
-    // The route's other branch: no Authorization header means an ordinary
-    // console user, gated on the manifest's cookieRequires. This is also what
-    // exercises the cookie denial's use of withRefreshedCookies, which the auth
-    // mock above has to provide.
-    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    const event = buildEvent({
-      userInfo: {
-        userId: 'user-1',
-        orgId: 'org-1',
-        email: 'dev@fil.org',
-        emailVerified: true,
-        membership: NO_MEMBERSHIP,
-      },
-      body: JSON.stringify({ query: 'hello' }),
-    });
-    event.pathParameters = { name: 'my-bucket' };
-
-    const result = await handler(event, buildContext());
-
-    expect(result.statusCode).toBe(403);
-    expect(JSON.parse(result.body!).code).toBe(ApiErrorCode.NOT_A_MEMBER);
-    expect(mockEmbed).not.toHaveBeenCalled();
   });
 });
 

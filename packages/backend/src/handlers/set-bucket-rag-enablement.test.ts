@@ -236,26 +236,7 @@ describe('set-bucket-rag-enablement baseHandler', () => {
   });
 });
 
-const MOCK_CSRF_TOKEN = 'csrf-token-value';
-
-describe('set-bucket-rag-enablement handler (RAG access gate)', () => {
-  function gateEvent(): AuthenticatedEvent {
-    const e = buildEvent({
-      userInfo: {
-        userId: 'user-1',
-        orgId: 'org-1',
-        email: 'outsider@example.com',
-        emailVerified: true,
-      },
-      cookies: [`hs_csrf_token=${MOCK_CSRF_TOKEN}`],
-      body: JSON.stringify({ enabled: true }),
-      method: 'POST',
-    });
-    e.headers['x-csrf-token'] = MOCK_CSRF_TOKEN;
-    e.pathParameters = { name: 'my-bucket' };
-    return e;
-  }
-
+describe('set-bucket-rag-enablement handler (CSRF)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
@@ -265,30 +246,10 @@ describe('set-bucket-rag-enablement handler (RAG access gate)', () => {
     mockSetEnablement.mockResolvedValue(record());
   });
 
-  it('returns 403 when the caller is not foundation and not allowlisted', async () => {
-    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
-
-    const result = await handler(gateEvent(), buildContext());
-
-    expect(result.statusCode).toBe(403);
-    expect(JSON.parse(result.body!).message).toBe('You do not have access to this feature.');
-    // Gate runs before any write.
-    expect(mockSetEnablement).not.toHaveBeenCalled();
-  });
-
-  it('allows the request through the gate when the caller is allowlisted', async () => {
-    ddbMock.on(GetItemCommand).resolves({ Item: { pk: { S: 'ALLOWLIST#outsider@example.com' } } });
-
-    const result = await handler(gateEvent(), buildContext());
-
-    expect(result.statusCode).toBe(200);
-    expect(mockSetEnablement).toHaveBeenCalled();
-  });
-
   it('rejects a POST without a valid CSRF token (csrf protection in place)', async () => {
+    // An allowlisted caller, so the RAG gate is not what stops them.
     ddbMock.on(GetItemCommand).resolves({ Item: { pk: { S: 'ALLOWLIST#outsider@example.com' } } });
 
-    // Same allowlisted caller, but missing the CSRF cookie/header pair.
     const e = buildEvent({
       userInfo: {
         userId: 'user-1',

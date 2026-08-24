@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { APIGatewayProxyResultV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { ApiErrorCode, OrgRole, ROUTE_MANIFEST, roleHasPermission } from '@filone/shared';
+import { marshall } from '@aws-sdk/util-dynamodb';
+import {
+  ApiErrorCode,
+  OrgRole,
+  ROUTE_MANIFEST,
+  roleHasPermission,
+  SubscriptionStatus,
+} from '@filone/shared';
 import type { Permission, RouteManifestEntry } from '@filone/shared';
 import type { OrgMembership } from './lib/org-membership.js';
 import { sstResourceMock } from './test/sst-resource-mock.js';
@@ -43,6 +50,10 @@ process.env.FTH_MANAGEMENT_API_URL ??= 'https://fth.test.invalid';
 
 const ORG_ID = 'org-1';
 const USER_ID = 'user-1';
+/** Not a foundation address, so the RAG gate's answer hinges on the allowlist. */
+const OUTSIDER_EMAIL = 'outsider@example.com';
+/** The refusal `ragAccessMiddleware` writes, verbatim. */
+const RAG_REFUSAL = 'You do not have access to this feature.';
 
 // The `sst` mock answers the resource reads a handler module makes while it is
 // being imported, and the auth one stands in for the middleware that would have
@@ -71,22 +82,40 @@ vi.mock('sst', () =>
 );
 vi.mock('./middleware/auth.js', () => authPartialMock());
 
+type DynamoRead = { TableName?: string; Key?: { pk?: { S: string }; sk?: { S: string } } };
+
+const rowKey = (table: string, pk: string, sk: string) => `${table}/${pk}/${sk}`;
+
+const readKey = (input: DynamoRead | undefined) =>
+  rowKey(input?.TableName ?? '', input?.Key?.pk?.S ?? '', input?.Key?.sk?.S ?? '');
+
+/**
+ * The rows the mocked table answers with, keyed by {@link rowKey} and filled by
+ * the suite that needs them. Empty everywhere else, which is what leaves the
+ * BillingTable unreachable below.
+ */
+const stubbedRows = new Map<string, Record<string, unknown>>();
+
 // Neither the network nor the BillingTable is available, and that is the point.
-// Every gate below refuses its caller before the subscription guard reads
+// Most gates below refuse their caller before the subscription guard reads
 // billing, so the 403s are also the proof of the ordering: a chain that
 // installed its gate after the guard would answer 500 from the rejected read
-// instead of the 403 each case asserts. Nothing about billing is stubbed —
-// the table is simply not there.
+// instead of the 403 each case asserts. The RAG gate is the exception — it sits
+// after the guard on every chain carrying it — and its suite stubs the billing
+// row so the request reaches the gate it is about.
 //
 // Every other table answers an empty item, which is what the self-service
 // routes need: they are meant to run, and a route that runs has to reach the
 // end of its own work to say what it answers a caller with no membership row.
 vi.mock('./lib/ddb-client.js', () => ({
   getDynamoClient: () => ({
-    send: (command: { input?: { TableName?: string } }) =>
-      command.input?.TableName === 'BillingTable'
+    send: (command: { input?: DynamoRead }) => {
+      const stubbed = stubbedRows.get(readKey(command.input));
+      if (stubbed) return Promise.resolve({ Item: stubbed });
+      return command.input?.TableName === 'BillingTable'
         ? Promise.reject(new Error('BillingTable is unreachable in this test'))
-        : Promise.resolve({}),
+        : Promise.resolve({});
+    },
   }),
 }));
 vi.stubGlobal('fetch', () => Promise.reject(new Error('the network is unreachable in this test')));
@@ -105,22 +134,35 @@ type LambdaModule = {
 async function invokeRoute(
   handler: string,
   membership: OrgMembership | typeof NO_MEMBERSHIP,
+  email?: string,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const module = (await import(`./handlers/${handler}.ts`)) as LambdaModule;
-  const event = buildEvent({ userInfo: { userId: USER_ID, orgId: ORG_ID, membership } });
+  const event = buildEvent({
+    userInfo: { userId: USER_ID, orgId: ORG_ID, membership, ...(email ? { email } : {}) },
+  });
   // Every route here answers with a ResponseBuilder, so the union's string arm
   // never occurs; middy's declared return type carries it anyway.
   return (await module.handler(event, buildContext())) as APIGatewayProxyStructuredResultV2;
 }
 
-/** The `code` an error response carries, or undefined when it carries none. */
-function errorCode(result: APIGatewayProxyStructuredResultV2): string | undefined {
+/** The error body a response carries, or an empty one when it carries none. */
+function errorBody(result: APIGatewayProxyStructuredResultV2): {
+  code?: string;
+  message?: string;
+} {
   try {
-    return (JSON.parse(result.body ?? '{}') as { code?: string }).code;
+    return JSON.parse(result.body ?? '{}') as { code?: string; message?: string };
   } catch {
-    return undefined;
+    return {};
   }
 }
+
+/** The `code` an error response carries, or undefined when it carries none. */
+const errorCode = (result: APIGatewayProxyStructuredResultV2) => errorBody(result).code;
+
+/** The RAG gate's own refusal, told apart from every other 403 by its message. */
+const ragRefused = (result: APIGatewayProxyStructuredResultV2) =>
+  result.statusCode === 403 && errorBody(result).message === RAG_REFUSAL;
 
 const byRequirement = (requires: RouteManifestEntry['requires']) =>
   ROUTE_MANIFEST.filter(
@@ -145,12 +187,16 @@ const permissionGated: { handler: string; permission: Permission }[] = ROUTE_MAN
 const rolesRefused = (permission: Permission) =>
   Object.values(OrgRole).filter((role) => !roleHasPermission(role, permission));
 
-/** Silence the denial log and the EMF metric the absent-row branch writes. */
+/**
+ * Silence the denial log, the EMF metric the absent-row branch writes, and the
+ * telemetry a route that runs to completion prints on its way out.
+ */
 function quietDenialOutput(): void {
   beforeEach(() => {
     vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -249,6 +295,80 @@ describe('the cookie caller on a bearer route', () => {
       });
     });
   }
+});
+
+/**
+ * RAG ships behind a per-email allowlist while it is in early access, and the
+ * manifest says which routes that gate sits on. It is not the role gate: a
+ * caller holding every permission the route asks for is still refused without a
+ * row, so these routes owe a denial no permission check produces. The gate is
+ * the real `ragAccessMiddleware`, running against a stubbed allowlist read —
+ * the one thing about it a test can supply.
+ *
+ * The unmarked routes are checked too, from the other side: a manifest entry
+ * that quietly gained the middleware without gaining the flag would show up as
+ * a route refusing a caller the manifest says nothing about.
+ */
+describe('the RAG allowlist gates the routes the manifest marks', () => {
+  quietDenialOutput();
+
+  const owner = () => membershipFor(ORG_ID, USER_ID, OrgRole.Owner);
+  const gated = ROUTE_MANIFEST.filter((route) => route.ragAllowlisted).map(
+    (route) => route.handler,
+  );
+  const ungated = ROUTE_MANIFEST.filter(
+    (route) =>
+      !route.ragAllowlisted && (route.category === 'authenticated' || route.category === 'bearer'),
+  ).map((route) => route.handler);
+
+  // The RAG gate runs after the subscription guard on every chain that carries
+  // it, so the request only reaches the gate once the guard has a record to
+  // pass on. An active subscription is the plainest one there is.
+  beforeEach(() => {
+    stubbedRows.set(
+      rowKey('BillingTable', `CUSTOMER#${USER_ID}`, 'SUBSCRIPTION'),
+      marshall({ subscriptionStatus: SubscriptionStatus.Active }),
+    );
+  });
+
+  afterEach(() => {
+    stubbedRows.clear();
+  });
+
+  /** The allowlist row an operator writes to onboard one customer. */
+  function allowlist(email: string): void {
+    stubbedRows.set(
+      rowKey('UserInfoTable', `ALLOWLIST#${email}`, 'RAG'),
+      marshall({ pk: `ALLOWLIST#${email}`, sk: 'RAG' }),
+    );
+  }
+
+  it.each(gated)(
+    '%s refuses a caller who is neither foundation nor allowlisted',
+    async (handler) => {
+      const result = await invokeRoute(handler, owner(), OUTSIDER_EMAIL);
+
+      expect(result.statusCode).toBe(403);
+      expect(errorBody(result).message).toBe(RAG_REFUSAL);
+    },
+  );
+
+  // What the allowlisted caller then gets is the route's own business, and the
+  // route's own tests say what it is. The claim here is only that the gate is
+  // no longer what stops them.
+  it.each(gated)('%s lets an allowlisted caller past the gate', async (handler) => {
+    allowlist(OUTSIDER_EMAIL);
+
+    const result = await invokeRoute(handler, owner(), OUTSIDER_EMAIL);
+
+    expect(ragRefused(result)).toBe(false);
+  });
+
+  it.each(ungated)('%s is not behind the gate', async (handler) => {
+    const result = await invokeRoute(handler, owner(), OUTSIDER_EMAIL);
+
+    expect(ragRefused(result)).toBe(false);
+  });
 });
 
 /**

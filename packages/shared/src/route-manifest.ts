@@ -53,6 +53,14 @@ export interface RouteManifestEntry {
    * is an ordinary console user and holds this permission or is refused.
    */
   cookieRequires?: Permission;
+  /**
+   * Set on the routes whose chain installs `ragAccessMiddleware`. RAG is behind
+   * a per-email allowlist while it is in early access, so those routes carry a
+   * second gate on top of the role one: the caller reaches the handler from a
+   * foundation address or from a row on the allowlist, and is refused
+   * otherwise.
+   */
+  ragAllowlisted?: boolean;
 }
 
 export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
@@ -98,6 +106,7 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     handler: 'get-bucket-rag-enablement',
     category: 'authenticated',
     requires: 'buckets.read',
+    ragAllowlisted: true,
   },
   // Turning indexing on for a bucket is a bucket-configuration write, so it
   // sits with bucket creation rather than with object writes; turning it off
@@ -110,6 +119,7 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     handler: 'set-bucket-rag-enablement',
     category: 'authenticated',
     requires: 'in-handler',
+    ragAllowlisted: true,
   },
 
   // ── Objects ──────────────────────────────────────────────────────
@@ -190,6 +200,7 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     handler: 'list-rag-api-keys',
     category: 'authenticated',
     requires: 'keys.manage_all',
+    ragAllowlisted: true,
   },
   // A RAG key carries no permission vocabulary to intersect — it queries the
   // buckets its creator could query — so creation needs no in-handler cap.
@@ -199,6 +210,7 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     handler: 'create-rag-api-key',
     category: 'authenticated',
     requires: 'keys.create',
+    ragAllowlisted: true,
   },
   {
     method: 'DELETE',
@@ -206,6 +218,7 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     handler: 'delete-rag-api-key',
     category: 'authenticated',
     requires: 'keys.manage_all',
+    ragAllowlisted: true,
   },
 
   // ── RAG query ────────────────────────────────────────────────────
@@ -218,6 +231,7 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     handler: 'query-bucket',
     category: 'bearer',
     cookieRequires: 'buckets.read',
+    ragAllowlisted: true,
   },
 
   // ── Auth ─────────────────────────────────────────────────────────
