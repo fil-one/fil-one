@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { CheckIcon } from '@phosphor-icons/react/dist/ssr';
 import type { OrgMembershipSummary } from '@filone/shared';
 
+import { Overline } from './Overline';
 import { onSwitchingOrgChange, switchToOrg } from '../lib/active-org.js';
 
 type OrgSwitcherProps = {
@@ -59,11 +60,14 @@ export function OrgSwitcher({ memberships, activeOrgId, inMenu, testId }: OrgSwi
       aria-label="Organization"
       // The backend answers up to 100 memberships and neither dropdown scrolls,
       // so the list is what scrolls.
-      className="max-h-64 overflow-y-auto border-b border-zinc-100 pb-1"
+      // `pb-1 mb-1`: the rule is this component's trailing edge, so the space
+      // on both sides of it belongs here rather than to whatever follows.
+      className="max-h-64 overflow-y-auto border-b border-zinc-100 pb-1 mb-1"
     >
-      <p className="px-3 py-1 text-xs font-medium uppercase tracking-wide text-zinc-400">
-        Organization
-      </p>
+      {/* The shared overline rather than another hand-rolled uppercase label:
+          `SidebarNav`'s own section headings still inline theirs, which is the
+          kind of duplication FIL-1032 is about. */}
+      <Overline className="mt-1 mb-1 px-3">Organization</Overline>
       {ordered.map((membership) => {
         const isActive = membership.orgId === activeOrgId;
         const isInert = isActive || chosen !== null;
@@ -91,9 +95,12 @@ export function OrgSwitcher({ memberships, activeOrgId, inMenu, testId }: OrgSwi
                   }
             }
             className={[
+              // `py-2` and `rounded-lg` to match `Log out`, the row directly
+              // below it in the same menu.
               'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors',
-              isActive ? 'text-zinc-900' : 'text-zinc-600',
-              isInert ? '' : 'hover:bg-zinc-100',
+              'focus-visible:brand-outline',
+              isActive ? 'font-medium text-zinc-900' : 'text-zinc-600',
+              isInert ? '' : 'hover:bg-zinc-100 hover:text-zinc-900',
             ]
               .filter(Boolean)
               .join(' ')}
@@ -101,7 +108,7 @@ export function OrgSwitcher({ memberships, activeOrgId, inMenu, testId }: OrgSwi
             <span className="min-w-0 flex-1 truncate">
               {membership.orgName || 'Untitled organization'}
             </span>
-            {isActive && <CheckIcon size={14} className="flex-shrink-0 text-brand-600" />}
+            {isActive && <CheckIcon size={14} weight="bold" className="shrink-0 text-brand-600" />}
           </button>
         );
       })}
