@@ -1,6 +1,7 @@
 import type { OrgRole } from '@filone/shared';
 
 import { ROLE_LABELS } from '../lib/use-member-scope.js';
+import type { InputSize } from './Input';
 import { Select } from './Select';
 
 export type RoleSelectProps = {
@@ -15,6 +16,8 @@ export type RoleSelectProps = {
   roles: readonly OrgRole[];
   disabled?: boolean;
   invalid?: boolean;
+  size?: InputSize;
+  className?: string;
   'aria-label'?: string;
 };
 
@@ -33,6 +36,8 @@ export function RoleSelect({
   roles,
   disabled,
   invalid,
+  size,
+  className,
   'aria-label': ariaLabel,
 }: RoleSelectProps) {
   const onlyOne = roles.length === 1;
@@ -42,6 +47,8 @@ export function RoleSelect({
       {...(id ? { id } : { 'aria-label': ariaLabel ?? 'Role' })}
       value={value}
       invalid={invalid}
+      selectSize={size}
+      className={className}
       onChange={(next) => onChange(next as OrgRole)}
       disabled={disabled || onlyOne}
     >
