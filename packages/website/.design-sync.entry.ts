@@ -18,6 +18,7 @@ export * from './src/components/BucketActionMenu';
 export * from './src/components/BucketDrawer';
 export * from './src/components/BucketPropertiesCard';
 export * from './src/components/BucketStatus';
+export * from './src/components/BucketsTable';
 export * from './src/components/BulkActionsBar';
 export * from './src/components/Button';
 export * from './src/components/Card';
@@ -48,6 +49,7 @@ export * from './src/components/QueryAnswer';
 export * from './src/components/QuerySources';
 export * from './src/components/Radio';
 export * from './src/components/RadioOption';
+export * from './src/components/RegionFlag';
 export * from './src/components/RegionSelect';
 export * from './src/components/RouteRecoveryPage';
 export * from './src/components/SaveCredentialsModal';
@@ -55,6 +57,7 @@ export * from './src/components/SealingStatus';
 export * from './src/components/Select';
 export * from './src/components/SettingRow';
 export * from './src/components/SidebarNav';
+export * from './src/components/Skeleton';
 export * from './src/components/SlowOperationIndicator';
 export * from './src/components/Spinner';
 export * from './src/components/SplitButton';
@@ -63,11 +66,7 @@ export * from './src/components/StateCard';
 export * from './src/components/StatusIndicator';
 export * from './src/components/Switch';
 export * from './src/components/Table';
-// Explicit exports: the Tabs index renames TabItem -> Tab; stories import
-// TabItem from the file, so expose both names (a star-export pair would make
-// the shared names ambiguous and esbuild would drop them).
-export { Tabs, TabList, TabItem, TabPanels, TabPanel } from './src/components/Tabs/Tabs';
-export { Tab } from './src/components/Tabs';
+export * from './src/components/Table/TableSkeleton';
 export * from './src/components/TextArea';
 export * from './src/components/Toast';
 export * from './src/components/ToggleConfirmModal';
@@ -81,3 +80,8 @@ export * from './src/pages/LoginErrorPage';
 export * from './src/pages/SupportPage';
 export * from './src/pages/UploadObjectPage';
 export * from './src/pages/VerifyEmailPage';
+// Explicit exports: the Tabs index renames TabItem -> Tab; stories import
+// TabItem from the file, so expose both names (a star-export pair would make
+// the shared names ambiguous and esbuild would drop them).
+export { Tabs, TabList, TabItem, TabPanels, TabPanel } from './src/components/Tabs/Tabs';
+export { Tab } from './src/components/Tabs';
