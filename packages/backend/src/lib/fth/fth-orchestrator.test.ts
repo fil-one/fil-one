@@ -854,7 +854,6 @@ describe('fthOrchestrator.listBuckets', () => {
         region: 'us-east-1',
         createdAt: '2026-01-01T00:00:00.000Z',
         isPublic: false,
-        versioning: false,
         encrypted: true,
       },
       {
@@ -862,62 +861,31 @@ describe('fthOrchestrator.listBuckets', () => {
         region: 'us-east-1',
         createdAt: '2026-02-01T00:00:00.000Z',
         isPublic: false,
-        versioning: false,
         encrypted: true,
       },
     ]);
   });
 
-  it('reflects per-bucket versioning state from GetBucketVersioning', async () => {
-    ssmMock.on(GetParameterCommand).resolves({
-      Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
-    });
-    s3Mock.on(ListBucketsCommand).resolves({
-      Buckets: [
-        { Name: 'versioned', CreationDate: new Date('2026-01-01T00:00:00Z') },
-        { Name: 'plain', CreationDate: new Date('2026-02-01T00:00:00Z') },
-      ],
-    });
-    s3Mock.on(GetBucketVersioningCommand).callsFake((input) => ({
-      Status: input.Bucket === 'versioned' ? 'Enabled' : 'Suspended',
-    }));
-
-    const result = await fthOrchestrator.listBuckets(fthClientId);
-
-    expect(result.find((b) => b.bucketName === 'versioned')?.versioning).toBe(true);
-    expect(result.find((b) => b.bucketName === 'plain')?.versioning).toBe(false);
-  });
-
-  it('skips GetBucketVersioning and returns versioning:false when includeVersioning is false', async () => {
-    ssmMock.on(GetParameterCommand).resolves({
-      Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
-    });
-    s3Mock.on(ListBucketsCommand).resolves({
-      Buckets: [
-        { Name: 'b1', CreationDate: new Date('2026-01-01T00:00:00Z') },
-        { Name: 'b2', CreationDate: new Date('2026-02-01T00:00:00Z') },
-      ],
-    });
-    // If this were consulted the result would be versioning:true; the option
-    // must prevent the call entirely.
-    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
-
-    const result = await fthOrchestrator.listBuckets(fthClientId, { includeVersioning: false });
-
-    expect(s3Mock.commandCalls(GetBucketVersioningCommand)).toHaveLength(0);
-    expect(result.map((b) => b.versioning)).toEqual([false, false]);
-  });
-
-  it('propagates GetBucketVersioning failures instead of swallowing them', async () => {
+  it('never reads GetBucketVersioning or GetObjectLockConfiguration: both cost a call per bucket', async () => {
     ssmMock.on(GetParameterCommand).resolves({
       Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
     });
     s3Mock.on(ListBucketsCommand).resolves({
       Buckets: [{ Name: 'b1', CreationDate: new Date('2026-01-01T00:00:00Z') }],
     });
-    s3Mock.on(GetBucketVersioningCommand).rejects(new Error('AccessDenied'));
+    // If either of these were consulted the result would carry the field; the
+    // listing must not call them at all.
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
+    s3Mock.on(GetObjectLockConfigurationCommand).resolves({
+      ObjectLockConfiguration: { ObjectLockEnabled: 'Enabled' },
+    });
 
-    await expect(fthOrchestrator.listBuckets(fthClientId)).rejects.toThrow(/AccessDenied/);
+    const result = await fthOrchestrator.listBuckets(fthClientId);
+
+    expect(s3Mock.commandCalls(GetBucketVersioningCommand)).toHaveLength(0);
+    expect(s3Mock.commandCalls(GetObjectLockConfigurationCommand)).toHaveLength(0);
+    expect(result[0]).not.toHaveProperty('versioning');
+    expect(result[0]).not.toHaveProperty('objectLockEnabled');
   });
 
   it('propagates ListBuckets failures', async () => {

@@ -151,9 +151,7 @@ describe('get-activity baseHandler', () => {
       ],
     });
 
-    // The feed never surfaces versioning, so it must opt out of the per-bucket
-    // versioning lookups to avoid the FTH N+1.
-    expect(mockListBuckets).toHaveBeenCalledWith(AURORA_TENANT_ID, { includeVersioning: false });
+    expect(mockListBuckets).toHaveBeenCalledWith(AURORA_TENANT_ID);
   });
 
   it('respects the limit query parameter', async () => {
@@ -362,8 +360,8 @@ describe('get-activity baseHandler', () => {
         'eu-bucket',
         'us-bucket',
       ]);
-      expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t', { includeVersioning: false });
-      expect(fth.listBuckets).toHaveBeenCalledWith('fth-t', { includeVersioning: false });
+      expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t');
+      expect(fth.listBuckets).toHaveBeenCalledWith('fth-t');
     });
 
     it('skips orchestrators whose tenant is not ready', async () => {

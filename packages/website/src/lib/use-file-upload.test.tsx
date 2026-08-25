@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { S3Region } from '@filone/shared';
 import { ToastProvider } from '../components/Toast/index.js';
+import { queryKeys } from './query-client.js';
 import {
   calculateUploadProgress,
   isSystemFileInput,
@@ -16,10 +18,6 @@ vi.mock('./use-presign.js', () => ({
 import { batchPresign } from './use-presign.js';
 const mockBatchPresign = vi.mocked(batchPresign);
 
-function wrapper({ children }: { children: React.ReactNode }) {
-  return <ToastProvider>{children}</ToastProvider>;
-}
-
 function makeFile(name: string, size = 100): File {
   return new File(['x'.repeat(size)], name, { type: 'text/plain' });
 }
@@ -28,9 +26,19 @@ const region = S3Region.UsEast1;
 const bucketName = 'test-bucket';
 
 function renderUpload(onSuccess?: () => void) {
-  return renderHook(() => useFileUpload({ bucketName, region, onSuccess: onSuccess ?? vi.fn() }), {
-    wrapper,
-  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  function wrapper({ children }: { children: React.ReactNode }) {
+    return (
+      <QueryClientProvider client={client}>
+        <ToastProvider>{children}</ToastProvider>
+      </QueryClientProvider>
+    );
+  }
+  const view = renderHook(
+    () => useFileUpload({ bucketName, region, onSuccess: onSuccess ?? vi.fn() }),
+    { wrapper },
+  );
+  return { ...view, client };
 }
 
 describe('useFileUpload — addFiles', () => {
@@ -262,6 +270,28 @@ describe('useFileUpload — upload flow', () => {
     await act(() => result.current.handleUpload());
     await waitFor(() => expect(result.current.uploadStep).toBe('done'));
     expect(onSuccess).toHaveBeenCalledOnce();
+  });
+
+  it('invalidates the bucket object and analytics queries after a successful upload', async () => {
+    const { result, client } = renderUpload();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    act(() => result.current.addFiles([makeFile('file.txt')], ''));
+    await act(() => result.current.handleUpload());
+    await waitFor(() => expect(result.current.uploadStep).toBe('done'));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.objects(bucketName, region) });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: queryKeys.bucketAnalytics(bucketName, region),
+    });
+  });
+
+  it('does not invalidate when the upload fails', async () => {
+    mockBatchPresign.mockRejectedValue(new Error('Presign failed'));
+    const { result, client } = renderUpload();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    act(() => result.current.addFiles([makeFile('file.txt')], ''));
+    await act(() => result.current.handleUpload());
+    await waitFor(() => expect(result.current.uploadStep).toBe('idle'));
+    expect(invalidate).not.toHaveBeenCalled();
   });
 
   it('sets uploadStep to idle and marks files as error on presign failure', async () => {

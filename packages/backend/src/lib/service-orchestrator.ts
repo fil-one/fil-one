@@ -15,20 +15,40 @@ import type { OrgProfileItem } from './org-profile.js';
 // and the budget outlasts that writer. A 404 is not retried — see deleteTenant.
 export const TENANT_DELETE_RETRY = { retries: 3 } as const;
 
+/**
+ * Object-lock and retention state. Neither orchestrator's bucket *list* carries
+ * it, and a per-bucket read on every row would mean an N+1 on a page every user
+ * hits, so it's loaded only for a single bucket (see {@link BucketDetails}).
+ */
+export interface BucketProtection {
+  objectLockEnabled?: boolean;
+  defaultRetention?: RetentionMode;
+  retentionDuration?: number;
+  retentionDurationType?: RetentionDurationType;
+}
+
+/**
+ * A row in the bucket list: only what each provider's native list call already
+ * returns inline, so listing a tenant's buckets costs one call per orchestrator
+ * regardless of bucket count. Versioning and object-lock aren't included for the
+ * same reason — both cost a call per bucket on at least one orchestrator.
+ */
 export interface BucketSummary {
+  bucketName: string;
+  region: S3Region;
+  createdAt: string;
+  isPublic: boolean;
+  encrypted: boolean;
+}
+
+/** A single-bucket read, which always loads versioning and the protection state. */
+export interface BucketDetails extends BucketProtection {
   bucketName: string;
   region: S3Region;
   createdAt: string;
   isPublic: boolean;
   versioning: boolean;
   encrypted: boolean;
-}
-
-export interface BucketDetails extends BucketSummary {
-  objectLockEnabled?: boolean;
-  defaultRetention?: RetentionMode;
-  retentionDuration?: number;
-  retentionDurationType?: RetentionDurationType;
 }
 
 export interface CreateBucketArgs {
@@ -80,16 +100,6 @@ export interface EgressUsageSample {
 export interface TenantUsageMetrics {
   storage: StorageUsageSample[];
   egress: EgressUsageSample[];
-}
-
-export interface ListBucketsOptions {
-  /**
-   * When false, skip loading each bucket's versioning state and return
-   * `versioning: false`. Lets read paths that don't surface versioning
-   * (e.g. get-activity) avoid FTH's per-bucket GetBucketVersioning N+1.
-   * Defaults to true.
-   */
-  includeVersioning?: boolean;
 }
 
 export interface GetTenantUsageMetricsOptions {
@@ -196,7 +206,7 @@ export interface ServiceOrchestrator {
 
   createBucket(tenantId: string, args: CreateBucketArgs): Promise<void>;
   deleteBucket(tenantId: string, bucketName: string): Promise<void>;
-  listBuckets(tenantId: string, opts?: ListBucketsOptions): Promise<BucketSummary[]>;
+  listBuckets(tenantId: string): Promise<BucketSummary[]>;
   getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null>;
 
   /**

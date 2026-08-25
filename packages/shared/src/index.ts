@@ -77,6 +77,9 @@ export type {
 export type {
   Bucket,
   ListBucketsResponse,
+  ListBucketsQuery,
+  BucketSortKey,
+  SortDirection,
   CreateBucketRequest,
   CreateBucketResponse,
   GetBucketResponse,
@@ -88,6 +91,8 @@ export {
   BUCKET_NAME_MIN_LENGTH,
   BUCKET_NAME_MAX_LENGTH,
   BUCKET_NAME_PATTERN,
+  BUCKET_SORT_KEYS,
+  SORT_DIRECTIONS,
   RETENTION_MODES,
   RETENTION_DURATION_TYPES,
   RETENTION_MAX_DAYS,

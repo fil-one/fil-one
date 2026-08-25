@@ -2,13 +2,25 @@ import { Input as HeadlessInput, type InputProps as HeadlessInputProps } from '@
 import { clsx } from 'clsx';
 import { type AccessibleControlName, warnIfUnnamedControl } from './accessible-control.js';
 
+/**
+ * `md` is the form field. `sm` is toolbar chrome: shorter and quieter, for
+ * filters that sit alongside content rather than inside a form.
+ */
+export type InputSize = 'sm' | 'md';
+
+const SIZES: Record<InputSize, string> = {
+  sm: 'h-8 px-2.5 text-[13px]',
+  md: 'px-3 py-2.5 text-sm',
+};
+
 type InputProps = {
   onChange: (value: string) => void;
   invalid?: boolean;
+  inputSize?: InputSize;
 } & Omit<HeadlessInputProps, 'onChange' | 'id' | 'aria-label' | 'aria-labelledby'> &
   AccessibleControlName;
 
-export function Input({ onChange, invalid, className, ...rest }: InputProps) {
+export function Input({ onChange, invalid, inputSize = 'md', className, ...rest }: InputProps) {
   warnIfUnnamedControl('Input', rest.id ?? rest['aria-label']);
   return (
     <HeadlessInput
@@ -16,7 +28,8 @@ export function Input({ onChange, invalid, className, ...rest }: InputProps) {
       aria-invalid={invalid}
       onChange={(event) => onChange(event.target.value)}
       className={clsx(
-        'flex w-full rounded-md border bg-white px-3 py-2.5 text-sm text-(--color-text-base)',
+        'flex w-full rounded-md border bg-white text-(--color-text-base)',
+        SIZES[inputSize],
         'placeholder:text-(--input-placeholder-color)',
         'transition-colors',
         invalid
