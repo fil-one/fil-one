@@ -61,7 +61,9 @@ the API.
     <Card>
       <div className="flex items-center justify-between gap-4">
         <StatusIndicator status="active" label="Active" />
-        <Button variant="primary" size="md">Create bucket</Button>
+        <Button variant="primary" size="md">
+          Create bucket
+        </Button>
       </div>
     </Card>
   </div>
