@@ -6,11 +6,13 @@ export type DeletionStatus = (typeof DELETION_STATUS)[keyof typeof DELETION_STAT
 /**
  * What committed the deletion. The receipt has to distinguish a user's own
  * request from an admin deleting the org's Stripe customer, which is the standing
- * response to trial abuse.
+ * response to trial abuse, and both from an operator driving the teardown by hand.
  */
 export const DELETION_TRIGGER = {
   userRequest: 'USER_REQUEST',
   stripeCustomerDeleted: 'STRIPE_CUSTOMER_DELETED',
+  /** An operator ran `bin/account-deletion.ts start`, usually to recover a stuck teardown. */
+  operator: 'OPERATOR',
 } as const;
 export type DeletionTrigger = (typeof DELETION_TRIGGER)[keyof typeof DELETION_TRIGGER];
 
@@ -31,7 +33,7 @@ export interface DeletionRecord {
   status: DeletionStatus;
   trigger: DeletionTrigger;
   requestedAt: string;
-  /** Absent when an admin deleted the Stripe customer: there is no requester. */
+  /** Absent for every trigger but `USER_REQUEST`: there is no requester. */
   requestedByUserId?: string;
   /** Worker passes so far; the alarm threshold input. */
   attempts: number;
