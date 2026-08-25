@@ -1105,6 +1105,7 @@ export default $config({
         ragIndexerTable,
         ragVectorBucket,
         stripeSecretKey,
+        stripePriceId,
         ...managementApiTokens,
         ...mgmtRuntimeResources,
       ],

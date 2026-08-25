@@ -2,14 +2,15 @@
 
 // Create a pre-signed GetObject URL for a customer object stored in the Aurora
 // region (eu-west-1), valid for 24 hours, and print a billing report for the
-// account owning the tenant: Stripe dashboard link for the customer record,
-// subscription status (trial? card cached?), and the latest usage numbers
-// (stored bytes, egress) from the usage-reporting audit trail.
+// account owning the tenant: whether the account is being deleted, Stripe
+// dashboard link for the customer record, subscription status (trial? card
+// cached?), and the latest usage numbers (stored bytes, egress) from the
+// usage-reporting audit trail.
 //
 // The report goes to stderr for debugging. stdout carries only the closing
 // summary — subscription status, trial end, whether a card is cached, the
-// Stripe dashboard link, the expiry and the URL — so it can be copied straight
-// into a message to a colleague, or redirected to a file.
+// Stripe dashboard link, the deletion state, the expiry and the URL — so it can
+// be copied straight into a message to a colleague, or redirected to a file.
 //
 // Usage:
 //   node bin/aurora-preview-url.ts <auroraTenantId> <bucket> <objectKey>
@@ -33,6 +34,13 @@
 // state a Stripe webhook wrote rather than live Stripe data. The report is
 // best-effort: failures print a warning and the preview URL is still produced.
 //
+// Check the deletion state before trusting the subscription status.
+// `subscriptionStatus` is stamped `canceled` by the teardown's scrub, which is
+// its last step, so a deletion that has not finished leaves the row showing
+// whatever the last webhook wrote — commonly `trialing`, even for an account
+// whose Stripe customer an admin has already deleted. Drive such a deletion to
+// completion with bin/account-deletion.ts.
+//
 // The URL is bearer authority for its whole lifetime: anyone holding it can
 // read the object until it expires.
 
@@ -51,6 +59,10 @@ import { execFileSync } from 'node:child_process';
 const USAGE = 'Usage: node bin/aurora-preview-url.ts <auroraTenantId> <bucket> <objectKey>';
 
 const EXPIRES_IN_SECONDS = 24 * 60 * 60;
+
+// Passes beyond which a teardown is not retrying but blocked — BLOCKED_ATTEMPTS
+// in packages/backend/src/jobs/account-deletion-sweeper.ts. Keep in sync.
+const BLOCKED_ATTEMPTS = 10;
 
 const tenantId = process.argv[2];
 const bucketName = process.argv[3];
@@ -103,6 +115,10 @@ printShareableSummary(summary, url);
 // The fields worth passing on to someone else. Everything else the report
 // prints is for debugging.
 interface BillingSummary {
+  /** One line of deletion state — never absent, so "live" is stated, not implied. */
+  deletionSummary: string;
+  /** The teardown has not reached the scrub, so subscriptionStatus is the last webhook write. */
+  subscriptionIsStale: boolean;
   subscriptionStatus?: string;
   trialEndsAt?: string;
   hasCachedPaymentMethod: boolean;
@@ -114,12 +130,16 @@ function printShareableSummary(summary: BillingSummary | null, url: string): voi
   console.error('');
   console.error('=== Copy & share ===');
   if (summary) {
-    console.log(`Subscription: ${summary.subscriptionStatus ?? 'none recorded'}`);
+    console.log(
+      `Subscription: ${summary.subscriptionStatus ?? 'none recorded'}` +
+        (summary.subscriptionIsStale ? '  <- stale: teardown never reached the scrub' : ''),
+    );
     if (summary.trialEndsAt) console.log(`Trial ends: ${summary.trialEndsAt}`);
     console.log(
       `Payment method: ${summary.hasCachedPaymentMethod ? 'yes (cached)' : 'none cached'}`,
     );
     if (summary.stripeCustomerUrl) console.log(`Stripe dashboard: ${summary.stripeCustomerUrl}`);
+    console.log(`Account deletion: ${summary.deletionSummary}`);
   }
   // The URL goes on a line of its own: in Slack it stays selectable in one
   // click, and the label above it says what expires.
@@ -146,11 +166,16 @@ async function printBillingReport(): Promise<BillingSummary | null> {
     `Org creator user ID: ${typeof creatorUserId === 'string' ? creatorUserId : '(missing createdBy)'}`,
   );
 
+  const deletion = printDeletionReport(await readDeletionRecord(userInfoTable, orgId), profile);
   const subscriptions = await findOrgSubscriptions(billingTable, orgId, creatorUserId);
 
   console.error('');
   console.error('=== Subscription (BillingTable) ===');
-  const summary: BillingSummary = { hasCachedPaymentMethod: false };
+  const summary: BillingSummary = {
+    deletionSummary: deletion.summaryLine,
+    subscriptionIsStale: false,
+    hasCachedPaymentMethod: false,
+  };
   if (subscriptions.length === 0) {
     console.error('No subscription record — the account holds no entitlement.');
   } else {
@@ -165,8 +190,19 @@ async function printBillingReport(): Promise<BillingSummary | null> {
       'currentPeriodEnd',
       'canceledAt',
       'lastPaymentFailedAt',
+      // The scrub's fingerprint: present only once teardown has run.
+      'deletedAt',
       'updatedAt',
     ]);
+
+    summary.subscriptionIsStale = deletion.teardownIncomplete && !subscription.deletedAt;
+    if (summary.subscriptionIsStale) {
+      console.error(
+        'STALE: the deletion has not reached the scrub, so ' +
+          `"${formatValue(subscription.subscriptionStatus)}" is the last webhook write, ` +
+          'not the live Stripe state.',
+      );
+    }
 
     summary.subscriptionStatus = optionalText(subscription.subscriptionStatus);
     summary.trialEndsAt = optionalText(subscription.trialEndsAt);
@@ -193,6 +229,104 @@ async function printBillingReport(): Promise<BillingSummary | null> {
 
   await printLatestUsageReport(billingTable, orgId);
   return summary;
+}
+
+/**
+ * What the teardown has and has not done. The DELETION record
+ * (`ORG#{orgId}` / `DELETION`) drives it and stays forever as the erasure
+ * receipt; the fence and the scrub stamp live on the org PROFILE, which the
+ * caller already holds. See packages/backend/src/lib/deletion-record.ts.
+ */
+interface DeletionState {
+  /** The one line worth passing on to a colleague. */
+  summaryLine: string;
+  /** A deletion is committed but has not finished, so the scrub has not run. */
+  teardownIncomplete: boolean;
+}
+
+/** Consistent: a stale read right after a confirm misses the record entirely. */
+async function readDeletionRecord(
+  userInfoTable: string,
+  orgId: string,
+): Promise<Record<string, unknown> | undefined> {
+  const { Item } = await dynamo.send(
+    new GetItemCommand({
+      TableName: userInfoTable,
+      Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'DELETION' } },
+      ConsistentRead: true,
+    }),
+  );
+  return Item ? unmarshall(Item) : undefined;
+}
+
+/**
+ * The full block only when a deletion exists. With no record there is no
+ * teardown to describe and the fence and scrub lines would both read "not set"
+ * for every healthy account, so one line says it instead.
+ */
+function printDeletionReport(
+  record: Record<string, unknown> | undefined,
+  profile: Record<string, unknown>,
+): DeletionState {
+  const summaryLine = describeDeletion(record, profile);
+  const teardownIncomplete = record !== undefined && record.status !== 'DONE';
+
+  console.error('');
+  if (!record) {
+    console.error(`Account deletion: ${summaryLine}`);
+    return { summaryLine, teardownIncomplete };
+  }
+
+  console.error('=== Account deletion ===');
+  console.error(`State: ${summaryLine}`);
+  printFields(record, [
+    'status',
+    'trigger',
+    'requestedAt',
+    'requestedByUserId',
+    'attempts',
+    'updatedAt',
+  ]);
+  console.error(`Fence (PROFILE.deleting): ${profile.deleting === true ? 'up' : 'not set'}`);
+  console.error(
+    `Scrub (PROFILE.deletedAt): ${profile.deletedAt ? formatValue(profile.deletedAt) : 'not run'}`,
+  );
+  if (teardownIncomplete) {
+    console.error('Re-drive it with: node bin/account-deletion.ts restart <orgId> --stage <stage>');
+  }
+
+  return { summaryLine, teardownIncomplete };
+}
+
+/**
+ * The status values are inlined rather than imported — bin scripts must not
+ * import from the backend or @filone/shared. Keep in sync with DELETION_STATUS
+ * in packages/backend/src/lib/deletion-record.ts.
+ */
+function describeDeletion(
+  record: Record<string, unknown> | undefined,
+  profile: Record<string, unknown>,
+): string {
+  if (!record) {
+    // The confirm writes the record and the fence in one transaction, so a
+    // profile marked deleted with no record behind it cannot come from the
+    // normal path. Name the marks: the one-line form prints nothing else.
+    const marks = [
+      profile.deleting === true ? 'deleting=true' : undefined,
+      profile.deletedAt ? `deletedAt=${formatValue(profile.deletedAt)}` : undefined,
+    ].filter((mark) => mark !== undefined);
+    return marks.length === 0
+      ? 'none requested'
+      : `no DELETION record, but the account is marked deleted (${marks.join(', ')})`;
+  }
+  if (record.status === 'DONE') return `complete (${formatValue(record.trigger)})`;
+
+  const attempts = typeof record.attempts === 'number' ? record.attempts : 0;
+  const since = `requested ${formatValue(record.requestedAt)}`;
+  if (attempts > BLOCKED_ATTEMPTS) {
+    return `BLOCKED (${formatValue(record.trigger)}) — ${attempts} failed passes, ${since}`;
+  }
+  return `PENDING (${formatValue(record.trigger)}) — ${attempts} pass(es), ${since}`;
 }
 
 // Non-production stages run against Stripe test mode (see README.md), whose
