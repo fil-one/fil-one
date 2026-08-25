@@ -20,13 +20,19 @@
 //   node bin/fth-console-key.ts rotate staging
 //   node bin/fth-console-key.ts prune  staging
 //
-// Run `prune` days after `rotate`. Lambda containers cache the SSM value for
-// their whole lifetime (getConsoleS3Credentials in
+// Run `rotate` after the backend change is deployed, and `prune` only once
+// every container that started before the rotation is gone. Lambda containers
+// cache the SSM value for their whole lifetime (getConsoleS3Credentials in
 // packages/backend/src/lib/s3-credentials.ts has no TTL), so a warm container
-// keeps signing with the v1 key until it recycles. Both keys are valid until
-// the prune, so nothing fails in between. While both exist, each tenant holds
-// one extra key: it counts against the tenant's key limit, and the console's
-// usage view undercounts the customer's own keys by one.
+// keeps signing with the v1 key until it recycles; the next deploy replaces
+// them all. Both keys are valid until the prune, so nothing fails in between.
+// While both exist, each tenant holds one extra key: it counts against the
+// tenant's key limit, and the console's usage view undercounts the customer's
+// own keys by one.
+//
+// A tenant already at its access-key limit has nowhere to put the second key,
+// and FTH rejects the create. `rotate` reports that tenant with the error FTH
+// returned and moves on to the next one.
 //
 // `rotate` skips an org whose SSM-referenced key already carries the three
 // actions, so re-runs and tenants provisioned after the change are cheap.
@@ -40,11 +46,6 @@
 // there). Talks to AWS directly using your ambient AWS credentials
 // (env vars / SSO / profile), so make sure they target the right account
 // before running. Resource names come from `sst state export`.
-//
-// OPEN ITEM for the production run: `rotate` writes SSM (PutParameter), and
-// production logins have been read-only so far. Sort out write credentials for
-// the prod account before running it there; `--dry-run` and `prune`'s read
-// phase work read-only.
 
 import {
   DynamoDBClient,
@@ -229,23 +230,11 @@ async function rotateTenant(orgId: string, tenantId: string): Promise<boolean> {
     return true;
   }
 
-  const created = await fthRequest<FthAccessKeyWithSecret>(
-    'POST',
-    `/management/v1/clients/${encodeURIComponent(tenantId)}/storage-users/` +
-      `${encodeURIComponent(userId)}/access-keys`,
-    {
-      body: {
-        name: CONSOLE_KEY_NAME_V2,
-        permissions: FTH_FULL_PERMISSIONS,
-        buckets: [],
-        expiresAt: null,
-      },
-      // The same key the tenant-setup path sends (FTH client ids are unique
-      // across the deployment all stages share), so a rotate that races setup
-      // replays instead of minting a second key.
-      idempotencyKey: `console-key-v2-${tenantId}`,
-    },
-  );
+  // A tenant at its access-key limit is the expected rejection here: the v2 key
+  // lives alongside v1 until the prune, so there has to be a free slot. Report
+  // it with what FTH said and let the loop move on; it needs a hand-rotation
+  // once the customer has freed a slot.
+  const created = await createV2Key(tenantId, userId);
 
   // A replayed idempotency key would hand back the key just deleted, and
   // writing that to SSM would point the console at a dead credential.
@@ -321,6 +310,37 @@ async function findConsoleStorageUserId(tenantId: string): Promise<string> {
     throw new Error(`No storage user with userCode "${CONSOLE_USER_CODE}" on tenant ${tenantId}`);
   }
   return String(user.id);
+}
+
+// The loop's catch prefixes org and tenant, so this only has to say what
+// failed and what the operator does about it.
+async function createV2Key(tenantId: string, userId: string): Promise<FthAccessKeyWithSecret> {
+  try {
+    return await fthRequest<FthAccessKeyWithSecret>(
+      'POST',
+      `/management/v1/clients/${encodeURIComponent(tenantId)}/storage-users/` +
+        `${encodeURIComponent(userId)}/access-keys`,
+      {
+        body: {
+          name: CONSOLE_KEY_NAME_V2,
+          permissions: FTH_FULL_PERMISSIONS,
+          buckets: [],
+          expiresAt: null,
+        },
+        // Not the key tenant setup sent for this tenant: that one is bound to
+        // the payload of the original create, so replaying it with the v2 name
+        // and actions would 409. FTH client ids are unique across the
+        // deployment all non-production stages share, so the tenant id alone
+        // pins the target.
+        idempotencyKey: `console-key-v2-${tenantId}`,
+      },
+    );
+  } catch (err) {
+    throw new Error(
+      `could not create ${CONSOLE_KEY_NAME_V2} — ${formatError(err)}. ` +
+        'Rotate this tenant by hand once the cause is cleared.',
+    );
+  }
 }
 
 async function deleteAccessKey(tenantId: string, key: FthAccessKey): Promise<void> {
