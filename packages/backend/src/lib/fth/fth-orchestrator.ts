@@ -8,6 +8,7 @@
 //     getS3ClientContext) speak S3 directly against the FTH S3 endpoint
 //     using the service access key stashed in SSM during setup.
 
+import { createHash } from 'node:crypto';
 import pRetry from 'p-retry';
 import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
@@ -235,13 +236,17 @@ export const fthOrchestrator = {
       )}] and bucket scopes [${buckets.join(', ')}]`,
     );
 
+    const request = {
+      name: opts.keyName,
+      permissions,
+      buckets,
+      expiresAt: opts.expiresAt ?? null,
+    };
+
     try {
       const accessKey = await client.createAccessKey(tenantId, storageUserId, {
-        name: opts.keyName,
-        permissions,
-        buckets,
-        expiresAt: opts.expiresAt ?? null,
-        idempotencyKey: `issue-key-${opts.keyName}`,
+        ...request,
+        idempotencyKey: idempotencyKeyFor(tenantId, storageUserId, request),
       });
 
       return {
@@ -413,6 +418,23 @@ function buildFthPermissions(
     out.add(FTH_GRANULAR_PERMISSIONS[g]);
   }
   return [...out];
+}
+
+// FTH answers a replayed idempotency key whose payload has changed with a
+// permanent 409, so the key has to change whenever the request does. A customer
+// who deletes a key and re-creates it under the same name with a different
+// permission set sends exactly such a request, hence the hash of everything
+// that identifies the call: the tenant and storage user in the path, and the
+// body. Re-sending an identical request still replays, which is the point.
+function idempotencyKeyFor(
+  tenantId: string,
+  storageUserId: string,
+  request: { name: string; permissions: string[]; buckets: string[]; expiresAt: string | null },
+): string {
+  const digest = createHash('sha256')
+    .update(JSON.stringify([tenantId, storageUserId, request]))
+    .digest('hex');
+  return `issue-key-${digest}`;
 }
 
 function extractFthMessage(err: FthApiError): string | undefined {

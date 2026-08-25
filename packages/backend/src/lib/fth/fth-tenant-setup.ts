@@ -123,10 +123,10 @@ async function processTenantSetup(client: FthManagementClient, orgId: string): P
     // while the path does not. An org that gets re-provisioned onto a new FTH client would replay
     // such a key against a path it was never minted for, and fail with 409 "idempotency key replay
     // with different payload" — permanently, since nothing about the key would ever change again.
-    // The FTH client id is unique across the deployment all stages share, so it pins the target on
-    // its own. The `-v2` segment covers the payload change that came with FTH_CONSOLE_KEY_NAME: a
-    // tenant whose setup crashed between this call and the fthTenantId write would otherwise
-    // replay the pre-v2 key with the new payload and 409 forever.
+    // The FTH client id is unique across the deployment all non-production stages share, so it
+    // pins the target on its own. The `-v2` segment covers the payload change that came with
+    // FTH_CONSOLE_KEY_NAME: a tenant whose setup crashed between this call and the fthTenantId
+    // write would otherwise replay the pre-v2 key with the new payload and 409 forever.
     idempotencyKey: `console-key-v2-${tenantId}`,
   });
 
