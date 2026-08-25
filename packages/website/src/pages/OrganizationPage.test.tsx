@@ -49,6 +49,20 @@ describe('OrganizationPage', () => {
 
     await waitFor(() => expect(tabNames()).toContain('Members'));
     expect(tabNames()).toContain('Invitations');
+    expect(tabNames()).toContain('Billing');
+  });
+
+  it('offers the rename only to a role that holds org.rename', async () => {
+    renderPage(OrgRole.Owner);
+
+    expect(await screen.findByRole('button', { name: 'Edit organization' })).toBeInTheDocument();
+  });
+
+  it.each([OrgRole.Member, OrgRole.ReadOnly])('hides the rename from %s', async (role) => {
+    renderPage(role);
+
+    await waitFor(() => expect(tabNames()).toContain('Members'));
+    expect(screen.queryByRole('button', { name: 'Edit organization' })).not.toBeInTheDocument();
   });
 
   it('leaves out a tab the caller cannot reach', async () => {

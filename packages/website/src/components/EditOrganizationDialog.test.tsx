@@ -4,83 +4,52 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole } from '@filone/shared';
 import type { MeResponse } from '@filone/shared';
 
-import { ToastProvider } from '../components/Toast/ToastProvider.js';
+import { ToastProvider } from './Toast/ToastProvider.js';
 import { queryKeys } from '../lib/query-client.js';
 import { seedPermissions } from '../lib/test-permissions.js';
-import { OrganizationGeneral } from './OrganizationGeneral.js';
+import { EditOrganizationDialog } from './EditOrganizationDialog.js';
 
 const mockUpdateOrg = vi.fn();
-const mockGetMe = vi.fn();
 
 vi.mock('../lib/api.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/api.js')>();
-  return {
-    ...actual,
-    getMe: () => mockGetMe(),
-    updateOrg: (...args: unknown[]) => mockUpdateOrg(...args),
-  };
+  return { ...actual, updateOrg: (...args: unknown[]) => mockUpdateOrg(...args) };
 });
 
-const ME = {
-  orgId: 'org-1',
-  orgName: 'Acme',
-  email: 'ada@example.com',
-  emailVerified: true,
-  mfaEnrollments: [],
-  ragAccess: true,
-  memberships: [{ orgId: 'org-1', orgName: 'Acme', role: OrgRole.Owner }],
-} as unknown as MeResponse;
-
-function renderGeneral(role = OrgRole.Owner) {
-  mockGetMe.mockResolvedValue(ME);
+function renderDialog(onClose = vi.fn()) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  // `seedPermissions` writes the `/me` cache this component reads, so the
-  // memberships the switcher renders have to be seeded with it.
-  seedPermissions(client, role, {
+  seedPermissions(client, OrgRole.Owner, {
     orgName: 'Acme',
-    memberships: [{ orgId: 'org-1', orgName: 'Acme', role }],
+    memberships: [{ orgId: 'org-1', orgName: 'Acme', role: OrgRole.Owner }],
   });
   return {
     client,
+    onClose,
     ...render(
       <QueryClientProvider client={client}>
         <ToastProvider>
-          <OrganizationGeneral />
+          <EditOrganizationDialog open onClose={onClose} orgName="Acme" />
         </ToastProvider>
       </QueryClientProvider>,
     ),
   };
 }
 
-describe('OrganizationGeneral', () => {
+describe('EditOrganizationDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUpdateOrg.mockResolvedValue({ name: 'Acme Two' });
   });
 
-  it('lets a role holding org.rename edit the name', async () => {
-    renderGeneral(OrgRole.Admin);
+  it('opens on the name the org already has, with nothing to save', async () => {
+    renderDialog();
 
-    expect(await screen.findByLabelText('Organization name')).not.toBeDisabled();
+    expect(await screen.findByLabelText('Organization name')).toHaveValue('Acme');
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
   });
 
-  it.each([OrgRole.Member, OrgRole.ReadOnly])(
-    'stays visible but read-only for %s',
-    async (role) => {
-      // The org's name is worth showing — it names where the caller is working.
-      // Renaming it is PATCH /api/org, which the server refuses below Admin.
-      renderGeneral(role);
-
-      const field = await screen.findByLabelText('Organization name');
-      expect(field).toBeDisabled();
-      expect(field).toHaveValue('Acme');
-      // Nothing to press, rather than a button that would only be refused.
-      expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument();
-    },
-  );
-
   it('saves a rename and writes it everywhere the name is read', async () => {
-    const { client } = renderGeneral(OrgRole.Owner);
+    const { client, onClose } = renderDialog();
 
     fireEvent.change(await screen.findByLabelText('Organization name'), {
       target: { value: 'Acme Two' },
@@ -96,17 +65,32 @@ describe('OrganizationGeneral', () => {
         memberships: [{ orgId: 'org-1', orgName: 'Acme Two' }],
       }),
     );
+    expect(onClose).toHaveBeenCalled();
   });
 
   it('refuses a name the schema will not take, without asking the server', async () => {
-    renderGeneral(OrgRole.Owner);
+    renderDialog();
 
     fireEvent.change(await screen.findByLabelText('Organization name'), {
-      target: { value: '   ' },
+      target: { value: 'no/slashes' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
     expect(mockUpdateOrg).not.toHaveBeenCalled();
+  });
+
+  it('keeps a refusal in the dialog rather than closing over it', async () => {
+    mockUpdateOrg.mockRejectedValue(new Error('You cannot rename this organization'));
+    const { onClose } = renderDialog();
+
+    fireEvent.change(await screen.findByLabelText('Organization name'), {
+      target: { value: 'Acme Two' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    // The name is still in the field to try again with.
+    expect(await screen.findByText('You cannot rename this organization')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

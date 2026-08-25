@@ -1,6 +1,10 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { PencilSimpleIcon } from '@phosphor-icons/react/dist/ssr';
 import type { Permission } from '@filone/shared';
 
+import { Button } from '../components/Button';
+import { EditOrganizationDialog } from '../components/EditOrganizationDialog';
 import { PageLayout } from '../components/PageLayout.js';
 import { RequirePermission } from '../components/RequirePermission';
 import { Spinner } from '../components/Spinner';
@@ -10,7 +14,6 @@ import { ME_STALE_TIME, queryKeys } from '../lib/query-client.js';
 import { usePermissions } from '../lib/use-permissions.js';
 import { BillingDetails } from './BillingPage.js';
 import { MembersRoster } from './MembersPage.js';
-import { OrganizationGeneral } from './OrganizationGeneral.js';
 import { MembersInvitations } from './MembersInvitations.js';
 
 interface OrganizationTab {
@@ -30,13 +33,6 @@ interface OrganizationTab {
  * and Settings means the caller's own account (FIL-1094).
  */
 const ORGANIZATION_TABS: OrganizationTab[] = [
-  {
-    label: 'General',
-    testId: 'org-tab-general',
-    // No permission: every role may read the name, and the field itself is
-    // read-only for anybody without `org.rename`.
-    render: () => <OrganizationGeneral />,
-  },
   {
     label: 'Members',
     testId: 'org-tab-members',
@@ -80,6 +76,7 @@ const ORGANIZATION_TABS: OrganizationTab[] = [
 
 export function OrganizationPage() {
   const { has, isPending } = usePermissions();
+  const [editing, setEditing] = useState(false);
   const { data: me } = useQuery({
     queryKey: queryKeys.me,
     queryFn: () => getMe(),
@@ -102,7 +99,22 @@ export function OrganizationPage() {
       // tab, so two browser tabs can sit in different ones, and this is the
       // page that removes people and hands over ownership.
       description={`Manage ${me?.orgName || 'this organization'} and who has access to it.`}
+      // Only for a role that may actually rename: everybody else is not offered
+      // a button whose dialog the server would refuse.
+      action={
+        <RequirePermission permission="org.rename">
+          <Button variant="ghost" icon={PencilSimpleIcon} onClick={() => setEditing(true)}>
+            Edit organization
+          </Button>
+        </RequirePermission>
+      }
     >
+      <EditOrganizationDialog
+        open={editing}
+        onClose={() => setEditing(false)}
+        orgName={me?.orgName ?? ''}
+      />
+
       {tabs.length > 0 && (
         <Tabs>
           <TabList>
