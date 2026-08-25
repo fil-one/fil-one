@@ -35,9 +35,11 @@ That re-creation has to work, which is why `issueAccessKey` derives its idempote
 
 ### 3. The console key is minted as `filone-console-v2`
 
-`FTH_FULL_PERMISSIONS` gains all three actions, and the per-tenant console key is created under the name `filone-console-v2` (`FTH_CONSOLE_KEY_NAME`). FTH requires access-key names to be unique within a tenant, so an existing tenant cannot have its `filone-console` key replaced in place: the new key is created alongside the old one, SSM is repointed at it, and the v1 key is deleted days later once warm Lambda containers have recycled. Both keys are valid throughout, so no console operation fails during the rotation.
+`FTH_FULL_PERMISSIONS` gains all three actions, and the per-tenant console key is created under the name `filone-console-v2` (`FTH_CONSOLE_KEY_NAME`). FTH requires access-key names to be unique within a tenant, so an existing tenant cannot have its `filone-console` key replaced in place: the new key is created alongside the old one, SSM is repointed at it, and the v1 key is deleted once the containers that cached it have recycled. Both keys are valid throughout, so no console operation fails during the rotation.
 
 The two paths send different idempotency keys for the create. Tenant setup sends `console-key-v2-${stage}-${tenantId}-${storageUser.id}`, keeping the scoping that gives a re-provisioned org a fresh key and adding the `-v2` segment for the payload change: without it, a tenant whose setup crashed between the create and the `fthTenantId` write would replay the pre-v2 key with the new name and actions and 409 forever. The rotation script sends `console-key-v2-${tenantId}`, because a tenant's original setup key is bound to the payload of that create: replaying it with the v2 name and actions would 409 permanently and no existing tenant could be rotated at all.
+
+`CreateAccessKeySchema` now rejects a customer key name starting with `filone-console`. Customer keys hang off the same storage user as the console key and FTH names are unique per tenant, so a customer key under that name would block the tenant's rotation, and the rotation script matching by name would delete a credential the customer is using. The reservation is case-insensitive and covers a future `-v3`. Keys created under that name before the reservation still exist: the rotation script cross-checks the DynamoDB access-key rows of the org and refuses to touch any key it finds there, reporting the tenant for a rotation by hand.
 
 The storage user's `userCode` stays `filone-console`. It is what `fthOrchestrator` looks the user up by, and the user itself is not being replaced.
 
@@ -49,7 +51,9 @@ Waiting is cheaper, and a deploy sets the deadline: every deploy replaces the ru
 
 ### 5. Existing FTH tenants are rotated by an operator script
 
-`bin/fth-console-key.ts rotate <stage>` walks every org with an `fthTenantId`, creates the v2 key against its `filone-console` storage user, and writes the credentials to `/filone/<stage>/fth-s3/access-key/<tenantId>`. `prune` deletes the v1 key afterwards. It skips an org whose SSM-referenced key already carries the three actions, so a re-run and a tenant provisioned after this change both cost one listing call.
+`bin/fth-console-key.ts rotate <stage>` walks every org with an `fthTenantId`, creates the v2 key against its `filone-console` storage user, and writes the credentials to `/filone/<stage>/fth-s3/access-key/<tenantId>`. It skips an org whose SSM-referenced key already carries the three actions, so a re-run and a tenant provisioned after this change both cost one listing call.
+
+`prune` deletes the v1 key afterwards, and only for a tenant whose SSM-referenced key exists in FTH and carries the three actions. A tenant whose rotation did not land therefore keeps its working v1 key, counts as a failure, and makes the command exit non-zero, which separates a prune with work left from one with nothing to do.
 
 Between `rotate` and `prune`, each FTH tenant holds one extra access key. That counts against the tenant's key limit, and `aggregateRegionUsages` (`packages/backend/src/handlers/get-usage.ts`) subtracts a fixed one system key per region from the raw count, so the console's usage view undercounts the customer's own keys by one until the prune.
 
@@ -63,9 +67,10 @@ A tenant already at its key limit cannot hold the extra key, and FTH rejects the
 
 | Cost                                                                 | Reasoning                                                                                                                             |
 | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Customers with existing keys must create a new key to abort uploads  | FTH cannot widen the authority of an access key that already exists.                                                                 |
+| Customers with existing keys must create a new key to abort uploads  | FTH cannot widen the authority of an access key that already exists.                                                                  |
 | Every FTH tenant holds two console keys between `rotate` and `prune` | FTH names must be unique, and both keys valid is what keeps the console working while containers recycle.                             |
 | The usage view undercounts customer keys by one during that window   | It subtracts a fixed one key per region rather than matching by name. Correcting it for a temporary state is not worth a code change. |
+| Customers cannot name a key `filone-console…`                        | The name is the console key's, and a customer key under it would block the tenant's rotation.                                         |
 | Forge keys still cannot abort or list parts                          | Its contract has no such action. Adding the one action it does have would create a third grouping to explain.                         |
 
 ## References
