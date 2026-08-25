@@ -37,6 +37,11 @@
 // `rotate` skips an org whose SSM-referenced key already carries the three
 // actions, so re-runs and tenants provisioned after the change are cheap.
 //
+// `prune` deletes v1 only for a tenant whose SSM-referenced key exists in FTH
+// and carries the three actions. Any other state means the rotation has not
+// landed for that tenant: it keeps its working v1 key, is reported, and makes
+// the command exit non-zero.
+//
 // Environment:
 //   FTH_MANAGEMENT_API_URL    base URL of the FTH management API
 //   FTH_MANAGEMENT_API_TOKEN  bearer token; read it from the stage's secrets
@@ -50,6 +55,7 @@
 import {
   DynamoDBClient,
   GetItemCommand,
+  QueryCommand,
   ScanCommand,
   type AttributeValue,
 } from '@aws-sdk/client-dynamodb';
@@ -213,6 +219,19 @@ async function rotateTenant(orgId: string, tenantId: string): Promise<boolean> {
     (k) => k.name === CONSOLE_KEY_NAME_V2 && k.accessKeyId !== currentAccessKeyId,
   );
   if (staleV2) {
+    // The name only became reserved with this change, so a customer key can
+    // already carry it — and customer keys hang off the same storage user, which
+    // makes the name the only thing separating them here. Our DynamoDB rows are
+    // what tells the two apart: deleting a key the customer is using would break
+    // their integration and leave the row pointing at nothing.
+    const customerKeyIds = await findCustomerAccessKeyIds(orgId);
+    if (customerKeyIds.has(staleV2.accessKeyId)) {
+      throw new Error(
+        `${CONSOLE_KEY_NAME_V2} (${staleV2.accessKeyId}) is a customer key on this tenant, ` +
+          'not a leftover from a failed rotation. Ask the customer to rename or delete it, ' +
+          'then rotate this tenant again. Nothing was changed.',
+      );
+    }
     console.error(
       `${label}: ${CONSOLE_KEY_NAME_V2} exists (${staleV2.accessKeyId}) but SSM points elsewhere — ` +
         'its secret is unrecoverable, deleting it.',
@@ -275,17 +294,42 @@ async function pruneTenant(orgId: string, tenantId: string): Promise<boolean> {
     'GET',
     `/management/v1/clients/${encodeURIComponent(tenantId)}/access-keys`,
   );
-  const v1 = (keys.items ?? []).find((k) => k.name === CONSOLE_KEY_NAME_V1);
+  const existingKeys = keys.items ?? [];
+  const v1 = existingKeys.find((k) => k.name === CONSOLE_KEY_NAME_V1);
 
   if (!v1) {
     console.error(`${label}: no ${CONSOLE_KEY_NAME_V1} key — nothing to prune.`);
     return false;
   }
+
+  // v1 is the credential that still works, so it goes only once the one
+  // replacing it is real. Every way that can fail — no SSM parameter, a
+  // parameter naming a key FTH no longer has, a hand-created replacement
+  // without the multipart actions — is a tenant whose rotation has to happen
+  // before the prune, and a failure the operator has to see.
   if (v1.accessKeyId === currentAccessKeyId) {
-    console.error(
-      `${label}: SSM still points at ${CONSOLE_KEY_NAME_V1} — run \`rotate\` first, not pruning.`,
+    throw new Error(
+      `SSM still points at ${CONSOLE_KEY_NAME_V1} (${v1.accessKeyId}). Run \`rotate\` for this tenant first.`,
     );
-    return false;
+  }
+  if (!currentAccessKeyId) {
+    throw new Error(
+      `${ssmParameterName(tenantId)} holds no accessKeyId, so the console has no replacement key. ` +
+        `Run \`rotate\` for this tenant first.`,
+    );
+  }
+  const currentKey = existingKeys.find((k) => k.accessKeyId === currentAccessKeyId);
+  if (!currentKey) {
+    throw new Error(
+      `SSM points at ${currentAccessKeyId}, which FTH does not list for this tenant. ` +
+        `Run \`rotate\` for this tenant first.`,
+    );
+  }
+  if (!hasMultipartActions(currentKey)) {
+    throw new Error(
+      `SSM points at ${currentKey.name} (${currentAccessKeyId}), which lacks the multipart actions. ` +
+        `Run \`rotate\` for this tenant first.`,
+    );
   }
 
   if (dryRun) {
@@ -419,6 +463,37 @@ async function findFthTenants(): Promise<Array<{ orgId: string; tenantId: string
   } while (lastKey);
 
   return tenants;
+}
+
+/**
+ * The accessKeyIds of the org's customer-issued keys, from our own DynamoDB
+ * rows (`ORG#<orgId>` / `ACCESSKEY#<id>`, written by the create-access-key
+ * handler). The console key was never among them, so anything in here belongs
+ * to the customer.
+ */
+async function findCustomerAccessKeyIds(orgId: string): Promise<Set<string>> {
+  const ids = new Set<string>();
+  let lastKey: Record<string, AttributeValue> | undefined;
+  do {
+    const page = await dynamo.send(
+      new QueryCommand({
+        TableName: tableName,
+        KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
+        ExpressionAttributeValues: {
+          ':pk': { S: `ORG#${orgId}` },
+          ':skPrefix': { S: 'ACCESSKEY#' },
+        },
+        ProjectionExpression: 'accessKeyId',
+        ExclusiveStartKey: lastKey,
+      }),
+    );
+    for (const item of page.Items ?? []) {
+      const id = item.accessKeyId?.S;
+      if (id) ids.add(id);
+    }
+    lastKey = page.LastEvaluatedKey;
+  } while (lastKey);
+  return ids;
 }
 
 /**
