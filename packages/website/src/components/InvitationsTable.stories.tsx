@@ -37,6 +37,7 @@ const meta: Meta<typeof InvitationsTable> = {
     invitations,
     mayManageTarget: (target: string) => canManageTargetRole(OrgRole.Owner, target),
     onRevoke: () => {},
+    onResend: () => {},
   },
 };
 

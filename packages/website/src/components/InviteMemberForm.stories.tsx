@@ -9,7 +9,17 @@ const meta: Meta<typeof InviteMemberForm> = {
   args: {
     roles: [OrgRole.Owner, OrgRole.Admin, OrgRole.Member, OrgRole.ReadOnly],
     onSubmit: () => {},
+    onCancel: () => {},
   },
+  // The form renders `ModalBody`/`ModalFooter`, which are styled for the panel
+  // they normally sit in.
+  decorators: [
+    (Story) => (
+      <div className="modal-panel modal-panel--md">
+        <Story />
+      </div>
+    ),
+  ],
 };
 
 export default meta;
@@ -29,29 +39,10 @@ export const Sending: Story = {
 };
 
 /**
- * The invitation exists and its token is live, but the mail never left. The
- * retry is another invitation, which replaces this one — there is no link to
- * hand over, because the token is in the email and nowhere else.
+ * A refusal the dialog keeps rather than toasts, beside the controls that
+ * caused it. The pending cap and the beta gate are not among these: both make
+ * the whole dialog pointless, so the section closes it and says so on the page.
  */
-export const CreatedButUndelivered: Story = {
-  args: { undeliveredEmail: 'teammate@example.com' },
-};
-
-/**
- * The org has as many invitations outstanding as it may hold. It stays on the
- * form because the remedy — revoke one — is in the list right below.
- */
-export const CapReached: Story = {
-  args: {
-    errorMessage:
-      'This organization already has 25 pending invitations. Revoke one before sending another.',
-  },
-};
-
-/**
- * The invite beta is not switched on for this org. The controls go: nothing on
- * this form would work, and the server's own sentence is what explains it.
- */
-export const NotEnabled: Story = {
-  args: { notEnabledMessage: 'Inviting teammates is not enabled for this organization yet.' },
+export const Refused: Story = {
+  args: { errorMessage: 'That address is already a member of this organization.' },
 };

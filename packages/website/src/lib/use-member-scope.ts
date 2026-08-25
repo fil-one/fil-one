@@ -25,10 +25,31 @@ export const ROLE_LABELS: Record<OrgRole, string> = Object.freeze({
 
 /** One line on what each role can do, for the role picker. */
 export const ROLE_DESCRIPTIONS: Record<OrgRole, string> = Object.freeze({
-  [OrgRole.Owner]: 'Everything, including billing and ownership of the organization.',
-  [OrgRole.Admin]: 'Manage members, buckets, and keys. Cannot change billing or owners.',
-  [OrgRole.Member]: 'Read and write objects, create buckets, and mint their own keys.',
-  [OrgRole.ReadOnly]: 'Read buckets and objects. Changes nothing.',
+  [OrgRole.Owner]:
+    'This user will be able to do everything, including billing and owning the organization.',
+  [OrgRole.Admin]:
+    'This user will be able to manage members, buckets, and keys, but not billing or owners.',
+  [OrgRole.Member]:
+    'This user will be able to read and write objects, and create buckets and their own keys.',
+  [OrgRole.ReadOnly]: "This user will be able to read buckets and objects, but can't make changes.",
+});
+
+/**
+ * The same capabilities as `ROLE_DESCRIPTIONS`, addressed to the person holding
+ * the role rather than to whoever is handing it out — the accept page tells a
+ * new member what they can do, not what somebody else will be able to do.
+ *
+ * Verb phrases rather than sentences, so the accept page can set them after the
+ * role badge without a full stop landing against it. Only what the role grants,
+ * with none of the "but not X" the granting-side copy carries: this is the
+ * first screen of somebody's membership, and the limits are worth stating to
+ * whoever picks a role, not to whoever receives it.
+ */
+export const ROLE_CAPABILITIES_SELF: Record<OrgRole, string> = Object.freeze({
+  [OrgRole.Owner]: 'do everything here, including billing and owning the organization',
+  [OrgRole.Admin]: 'manage members, buckets, and keys',
+  [OrgRole.Member]: 'read and write objects, create buckets, and mint your own keys',
+  [OrgRole.ReadOnly]: 'browse buckets and read objects',
 });
 
 export function roleLabel(role: string): string {

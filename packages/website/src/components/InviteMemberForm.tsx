@@ -7,8 +7,9 @@ import { Alert } from './Alert';
 import { Button } from './Button';
 import { FormField } from './FormField';
 import { Input } from './Input';
-import { RoleSelect } from './RoleSelect';
-import { ROLE_DESCRIPTIONS } from '../lib/use-member-scope.js';
+import { ModalBody, ModalFooter } from './Modal';
+import { RadioOption } from './RadioOption';
+import { ROLE_DESCRIPTIONS, ROLE_LABELS } from '../lib/use-member-scope.js';
 
 export type InviteMemberFormProps = {
   /** The roles this caller may invite — their ceiling, as a list. */
@@ -19,20 +20,10 @@ export type InviteMemberFormProps = {
    */
   onSubmit: (body: CreateInvitationRequest) => void | Promise<unknown>;
   submitting?: boolean;
-  /**
-   * The invite beta has not been switched on for this org. The server's own
-   * sentence, rendered in place of the form: nothing here would work, so the
-   * controls go rather than sit there collecting a refusal.
-   */
-  notEnabledMessage?: string | null;
-  /** A refusal worth keeping on screen — the pending cap, most often. */
+  /** A refusal worth keeping in the dialog, beside the controls that caused it. */
   errorMessage?: string | null;
-  /**
-   * An invitation that was created but whose email did not go out. The row and
-   * its token are committed before the mail is sent, so this is a live
-   * invitation nobody has heard about.
-   */
-  undeliveredEmail?: string | null;
+  /** Close the dialog without sending. */
+  onCancel: () => void;
 };
 
 /**
@@ -47,9 +38,8 @@ export function InviteMemberForm({
   roles,
   onSubmit,
   submitting = false,
-  notEnabledMessage,
   errorMessage,
-  undeliveredEmail,
+  onCancel,
 }: InviteMemberFormProps) {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<OrgRole>(defaultRole(roles));
@@ -80,18 +70,6 @@ export function InviteMemberForm({
     if (roles.length > 0 && effectiveRole !== role) setRole(effectiveRole);
   });
 
-  if (notEnabledMessage) {
-    return (
-      <div data-testid="invite-not-enabled">
-        <Alert
-          variant="grey"
-          title="Invitations are not enabled yet"
-          description={notEnabledMessage}
-        />
-      </div>
-    );
-  }
-
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     const parsed = CreateInvitationSchema.safeParse({ email, role: effectiveRole });
@@ -108,9 +86,9 @@ export function InviteMemberForm({
       await onSubmit(parsed.data);
       setEmail('');
     } catch {
-      // Rendered by the caller — as an alert on this form for the refusals
-      // worth keeping, a toast for the rest. The address stays put: a 409 on an
-      // emptied field leaves nothing to try again with.
+      // Rendered by the caller — as an alert in this dialog for the refusals
+      // worth keeping, a toast for the rest. The address stays put: a refusal
+      // on an emptied field leaves nothing to try again with.
     }
   }
 
@@ -122,11 +100,11 @@ export function InviteMemberForm({
     <form
       onSubmit={(event) => void handleSubmit(event)}
       noValidate
-      className="flex flex-col gap-4"
+      className="flex flex-col"
       data-testid="invite-form"
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-        <div className="flex-1">
+      <ModalBody>
+        <div className="flex flex-col gap-4">
           <FormField label="Email address" htmlFor="invite-email" error={emailError ?? undefined}>
             <Input
               id="invite-email"
@@ -142,51 +120,56 @@ export function InviteMemberForm({
               autoComplete="off"
             />
           </FormField>
-        </div>
-        <div className="sm:w-56">
-          <FormField
-            label="Role"
-            htmlFor="invite-role"
-            description={ROLE_DESCRIPTIONS[effectiveRole]}
-          >
-            <RoleSelect id="invite-role" value={effectiveRole} roles={roles} onChange={setRole} />
-          </FormField>
-        </div>
-      </div>
 
-      <div className="flex items-center gap-3">
+          {/* Every assignable role listed with what it grants, rather than a
+              select whose description only appears once a role is chosen: the
+              choice is between four things a person is comparing, and a picker
+              shows one at a time. A `fieldset` because these are one question,
+              not four controls — the legend names it for anybody who reaches
+              the group by keyboard. */}
+          <fieldset className="flex flex-col gap-2.5">
+            <legend className="mb-2.5 text-xs font-medium text-zinc-900">Role</legend>
+            {roles.map((role) => (
+              <RadioOption
+                key={role}
+                name="invite-role"
+                value={role}
+                checked={role === effectiveRole}
+                onChange={() => setRole(role)}
+                description={ROLE_DESCRIPTIONS[role]}
+              >
+                {ROLE_LABELS[role]}
+              </RadioOption>
+            ))}
+          </fieldset>
+
+          {errorMessage && (
+            <div data-testid="invite-error">
+              <Alert variant="red" description={errorMessage} />
+            </div>
+          )}
+
+          <p className="text-xs text-zinc-500">
+            The invitation link can only be used once, and expires in 14 days.
+          </p>
+        </div>
+      </ModalBody>
+
+      <ModalFooter fullWidth>
+        <Button type="button" variant="ghost" size="md" onClick={onCancel} disabled={submitting}>
+          Cancel
+        </Button>
         <Button
           id="invite-submit-button"
           type="submit"
           variant="primary"
+          size="md"
           icon={PaperPlaneTiltIcon}
           disabled={submitting || email.trim().length === 0}
         >
           {submitting ? 'Sending...' : 'Send invitation'}
         </Button>
-        <p className="text-xs text-zinc-500">
-          The link in the email works once, for that address, for 14 days.
-        </p>
-      </div>
-
-      {undeliveredEmail && (
-        <div data-testid="invite-undelivered">
-          <Alert
-            variant="amber"
-            title="Invitation created, but the email did not go out"
-            // There is no link to hand over: the token lives in the email and
-            // nowhere else, so the only retry is another invitation, which
-            // replaces this one rather than adding a second.
-            description={`Nobody has heard about the invitation for ${undeliveredEmail}. Send it again to have another go at delivering it.`}
-          />
-        </div>
-      )}
-
-      {errorMessage && (
-        <div data-testid="invite-error">
-          <Alert variant="red" description={errorMessage} />
-        </div>
-      )}
+      </ModalFooter>
     </form>
   );
 }

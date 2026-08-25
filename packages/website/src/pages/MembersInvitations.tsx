@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
-import { ApiErrorCode } from '@filone/shared';
+import { PlusIcon } from '@phosphor-icons/react/dist/ssr';
+import { ApiErrorCode, MAX_PENDING_INVITATIONS_PER_ORG } from '@filone/shared';
 import type {
   CreateInvitationRequest,
   CreateInvitationResponse,
@@ -10,10 +11,11 @@ import type {
 } from '@filone/shared';
 
 import { Alert } from '../components/Alert';
-import { Card } from '../components/Card';
+import { Button } from '../components/Button';
 import { Heading } from '../components/Heading/Heading';
 import { InvitationsTable } from '../components/InvitationsTable';
 import { InviteMemberForm } from '../components/InviteMemberForm';
+import { Modal, ModalHeader } from '../components/Modal';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
 import { errorCodeOf, errorMessageOf } from '../lib/api.js';
@@ -71,18 +73,26 @@ function dropInvitation(client: QueryClient, inviteId: string): void {
  */
 function useInviteRefusals() {
   const [notEnabled, setNotEnabled] = useState<string | null>(null);
+  const [capReached, setCapReached] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   return {
     notEnabled,
+    // Kept in the dialog rather than toasted: a toast raised while a modal is
+    // open competes with it for attention and is gone in four seconds, while
+    // the controls the refusal is about are still on screen.
     error,
+    // A flag rather than the server's sentence: the form states the cap itself,
+    // from the shared constant, and puts the remedy in the field's own error.
+    capReached,
     /**
-     * Drop the cap alert. It names a slot somebody has since freed, and it is
+     * Drop the cap refusal. It names a slot somebody has since freed, and it is
      * cleared on the two things that free one: another attempt, and a revoke.
      * The beta state is not cleared with it — the feature is either on for this
      * org or it is not, and nothing on this page turns it on.
      */
     clear: () => {
+      setCapReached(false);
       setError(null);
     },
     /** @returns whether the refusal was rendered here rather than left to a toast. */
@@ -95,7 +105,14 @@ function useInviteRefusals() {
         return true;
       }
       if (code === ApiErrorCode.INVITE_LIMIT_REACHED) {
-        setError(errorMessageOf(err, 'This organization has too many invitations outstanding.'));
+        setCapReached(true);
+        return true;
+      }
+      // The role ceiling: the dialog is still usable at a lower role, so the
+      // refusal belongs beside the picker that caused it rather than in a toast
+      // behind the modal.
+      if (code === ApiErrorCode.FORBIDDEN_ROLE) {
+        setError(errorMessageOf(err, 'Your role cannot invite somebody at that role.'));
         return true;
       }
       return false;
@@ -112,14 +129,17 @@ function useInviteRefusals() {
  * that works, and withdrawing the invitation it names.
  */
 function useUndeliveredInvite() {
-  const [email, setEmail] = useState<string | null>(null);
+  // The role rides along with the address so the retry re-sends the invitation
+  // that failed, rather than whatever role the form happens to be showing by
+  // the time somebody presses it.
+  const [invite, setInvite] = useState<CreateInvitationRequest | null>(null);
 
   return {
-    email,
-    set: setEmail,
+    invite,
+    set: setInvite,
     /** Drop the alert when this is the address it is about. */
     clearFor: (address: string) => {
-      setEmail((current) => (current && sameAddress(address, current) ? null : current));
+      setInvite((current) => (current && sameAddress(address, current.email) ? null : current));
     },
   };
 }
@@ -145,7 +165,7 @@ function useCreateInvitation(
         undelivered.set(null);
         toast.success(`Invitation sent to ${result.invitation.email}`);
       } else {
-        undelivered.set(result.invitation.email);
+        undelivered.set({ email: result.invitation.email, role: result.invitation.role });
       }
     },
     onError: (err) => {
@@ -210,37 +230,130 @@ export function MembersInvitations() {
   const refusals = useInviteRefusals();
   const revoking = usePendingRows();
   const undelivered = useUndeliveredInvite();
+  const [inviteOpen, setInviteOpen] = useState(false);
 
   const pending = useQuery({ queryKey: queryKeys.invitations, queryFn: listInvitations });
   const create = useCreateInvitation(client, refusals, undelivered);
   const revoke = useRevokeInvitation(client, refusals, revoking, undelivered);
 
   const invitations = pending.data?.invitations ?? [];
+  const atCap = refusals.capReached || invitations.length >= MAX_PENDING_INVITATIONS_PER_ORG;
+
+  // Both refusals leave the dialog with nothing it could do, so it goes and the
+  // page states why. Closed once here rather than derived into `open`: a derived
+  // condition springs the dialog back open the moment a revoke clears the cap,
+  // over a caller who never asked for it again.
+  useEffect(() => {
+    if (refusals.notEnabled || refusals.capReached) setInviteOpen(false);
+  }, [refusals.notEnabled, refusals.capReached]);
 
   return (
     <section className="flex flex-col gap-4" data-testid="invitations-section">
-      <Heading
-        tag="h2"
-        size="lg"
-        description="An invitation is the only way somebody else joins this organization."
-      >
-        Invitations
-      </Heading>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Heading
+          tag="h2"
+          size="lg"
+          description="People who have been invited but haven't joined yet."
+        >
+          Invitations
+        </Heading>
 
-      {/* Issuing needs the beta flag as well as the permission; withdrawing
-          needs only the permission. An org dropped from the beta keeps
-          invitations that are still redeemable, so the list below stays. */}
+        {/* The form is a dialog rather than a permanently open block above the
+            list: inviting is the occasional job on this page and reading the
+            list is the frequent one, so the roster keeps the room.
+
+            Issuing needs the beta flag as well as the permission; withdrawing
+            needs only the permission. An org dropped from the beta keeps
+            invitations that are still redeemable, so the list below stays. */}
+        {scope.mayInvite && !refusals.notEnabled && (
+          <Button
+            variant="primary"
+            size="sm"
+            icon={PlusIcon}
+            disabled={atCap}
+            onClick={() => setInviteOpen(true)}
+          >
+            Invite member
+          </Button>
+        )}
+      </div>
+
       {scope.mayInvite && (
-        <Card>
-          <InviteMemberForm
-            roles={scope.assignableRoles}
-            onSubmit={(body) => create.mutateAsync(body)}
-            submitting={create.isPending}
-            notEnabledMessage={refusals.notEnabled}
-            errorMessage={refusals.error}
-            undeliveredEmail={undelivered.email}
-          />
-        </Card>
+        <>
+          {refusals.notEnabled && (
+            <div data-testid="invite-not-enabled">
+              <Alert
+                variant="grey"
+                title="Invitations are not enabled yet"
+                description={refusals.notEnabled}
+              />
+            </div>
+          )}
+
+          {/* The cap gates the trigger rather than the fields inside it: a dialog
+            that opens only to refuse everything typed into it is worse than a
+            button that says why it cannot be pressed. */}
+          {atCap && (
+            <div data-testid="invite-cap-reached">
+              <Alert
+                variant="amber"
+                title={`This organization is at its limit of ${String(MAX_PENDING_INVITATIONS_PER_ORG)} pending invitations`}
+                description="Revoke one below to send another."
+              />
+            </div>
+          )}
+
+          {/* Outlives the dialog on purpose: the send succeeded, so the dialog has
+            closed, and the retry has to be reachable from the page it left
+            behind. */}
+          {undelivered.invite && (
+            <div data-testid="invite-undelivered">
+              <Alert
+                variant="amber"
+                title="Invitation created, but the email wasn't sent"
+                // There is no link to hand over: the token lives in the email and
+                // nowhere else, so the only retry is another invitation, which
+                // replaces this one rather than adding a second.
+                description={`The invitation to ${undelivered.invite.email} exists, but delivery failed.`}
+                action={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={create.isPending}
+                    onClick={() => create.mutate(undelivered.invite!)}
+                  >
+                    {create.isPending ? 'Sending...' : 'Send again'}
+                  </Button>
+                }
+              />
+            </div>
+          )}
+
+          <Modal
+            open={inviteOpen}
+            onClose={() => setInviteOpen(false)}
+            size="md"
+            testId="invite-dialog"
+          >
+            <ModalHeader
+              onClose={create.isPending ? undefined : () => setInviteOpen(false)}
+              description="They join as soon as they accept, at the role you choose here."
+            >
+              Invite a member
+            </ModalHeader>
+            <InviteMemberForm
+              roles={scope.assignableRoles}
+              onSubmit={async (body) => {
+                await create.mutateAsync(body);
+                setInviteOpen(false);
+              }}
+              submitting={create.isPending}
+              errorMessage={refusals.error}
+              onCancel={() => setInviteOpen(false)}
+            />
+          </Modal>
+        </>
       )}
 
       <InvitationsPanel
@@ -251,6 +364,7 @@ export function MembersInvitations() {
         errorMessage={pending.error?.message}
         mayManageTarget={scope.mayManageTarget}
         onRevoke={(invitation) => revoke.mutate(invitation)}
+        onResend={(invitation) => create.mutate({ email: invitation.email, role: invitation.role })}
         pendingInviteIds={revoking.ids}
       />
     </section>
@@ -273,6 +387,7 @@ function InvitationsPanel({
   errorMessage,
   mayManageTarget,
   onRevoke,
+  onResend,
   pendingInviteIds,
 }: {
   invitations: InvitationSummary[];
@@ -282,6 +397,7 @@ function InvitationsPanel({
   errorMessage?: string;
   mayManageTarget: (targetRole: string) => boolean;
   onRevoke: (invitation: InvitationSummary) => void;
+  onResend: (invitation: InvitationSummary) => void;
   pendingInviteIds: ReadonlySet<string>;
 }) {
   if (isPending) {
@@ -331,6 +447,7 @@ function InvitationsPanel({
         invitations={invitations}
         mayManageTarget={mayManageTarget}
         onRevoke={onRevoke}
+        onResend={onResend}
         pendingInviteIds={pendingInviteIds}
       />
     </div>

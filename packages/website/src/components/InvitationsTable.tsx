@@ -44,6 +44,12 @@ export type InvitationsTableProps = {
   mayManageTarget: (targetRole: string) => boolean;
   onRevoke?: (invitation: InvitationSummary) => void;
   /**
+   * Send the invitation again, offered only on a row whose last send failed.
+   * Re-inviting replaces the row rather than adding a second, so this is the
+   * same call the invite form makes.
+   */
+  onResend?: (invitation: InvitationSummary) => void;
+  /**
    * The invitations a revoke is in flight for. A set rather than one id, so a
    * second revoke does not re-arm the button on the first.
    */
@@ -62,11 +68,17 @@ export function InvitationsTable({
   invitations,
   mayManageTarget,
   onRevoke,
+  onResend,
   pendingInviteIds = NONE_PENDING,
 }: InvitationsTableProps) {
   const canRevoke = (invitation: InvitationSummary) =>
     Boolean(onRevoke) && mayManageTarget(invitation.role);
-  const showActions = invitations.some(canRevoke);
+  // Only a row that failed to send: a delivered invitation nobody has answered
+  // is waiting, not broken, and re-sending it would replace a live token for no
+  // reason.
+  const canResend = (invitation: InvitationSummary) =>
+    Boolean(onResend) && Boolean(invitation.lastSendFailed) && mayManageTarget(invitation.role);
+  const showActions = invitations.some((i) => canRevoke(i) || canResend(i));
 
   return (
     <Table>
@@ -112,17 +124,33 @@ export function InvitationsTable({
 
             {showActions && (
               <Table.Cell className="text-right">
-                {canRevoke(invitation) && onRevoke && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={pendingInviteIds.has(invitation.inviteId)}
-                    aria-label={`Revoke invitation for ${invitation.email}`}
-                    onClick={() => onRevoke(invitation)}
-                  >
-                    Revoke
-                  </Button>
-                )}
+                <div className="flex justify-end gap-1">
+                  {/* Visible rather than behind an overflow menu: the row's own
+                      status column says the send failed, and the fix for it
+                      belongs beside the problem rather than one click away. */}
+                  {canResend(invitation) && onResend && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={pendingInviteIds.has(invitation.inviteId)}
+                      aria-label={`Resend invitation to ${invitation.email}`}
+                      onClick={() => onResend(invitation)}
+                    >
+                      Resend
+                    </Button>
+                  )}
+                  {canRevoke(invitation) && onRevoke && (
+                    <Button
+                      variant="tertiary"
+                      size="sm"
+                      disabled={pendingInviteIds.has(invitation.inviteId)}
+                      aria-label={`Revoke invitation for ${invitation.email}`}
+                      onClick={() => onRevoke(invitation)}
+                    >
+                      Revoke
+                    </Button>
+                  )}
+                </div>
               </Table.Cell>
             )}
           </Table.Row>

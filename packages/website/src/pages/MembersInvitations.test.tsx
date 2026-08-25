@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ApiErrorCode, OrgRole } from '@filone/shared';
+import { ApiErrorCode, MAX_PENDING_INVITATIONS_PER_ORG, OrgRole } from '@filone/shared';
 import type { InvitationSummary, MeResponse } from '@filone/shared';
 
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
@@ -66,8 +66,29 @@ function apiError(message: string, status: number, code?: string): Error {
   return Object.assign(new Error(message), { status, code });
 }
 
+/** Open the invite dialog, which is where the form lives. */
+async function openInviteDialog() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Invite member' }));
+  return screen.findByTestId('invite-form');
+}
+
+/** Type into the invite form, opening the dialog first when it is closed. */
 async function typeEmail(value: string) {
+  if (!screen.queryByLabelText('Email address')) await openInviteDialog();
   fireEvent.change(await screen.findByLabelText('Email address'), { target: { value } });
+}
+
+/** The roles the form is offering, in the order it lists them. */
+function roleOptionValues(): string[] {
+  return screen.getAllByRole('radio').map((radio) => (radio as HTMLInputElement).value);
+}
+
+/** The role the form would submit. */
+function checkedRoleValue(): string | undefined {
+  const checked = screen
+    .getAllByRole('radio')
+    .find((radio) => (radio as HTMLInputElement).checked) as HTMLInputElement | undefined;
+  return checked?.value;
 }
 
 // ---------------------------------------------------------------------------
@@ -118,7 +139,7 @@ describe('MembersInvitations', () => {
     renderSection();
 
     await typeEmail('new@example.com');
-    fireEvent.change(screen.getByLabelText('Role'), { target: { value: OrgRole.Admin } });
+    fireEvent.click(await screen.findByRole('radio', { name: /Admin/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
 
     await waitFor(() =>
@@ -129,17 +150,15 @@ describe('MembersInvitations', () => {
   it('bounds the role picker by the caller’s own ceiling', async () => {
     renderSection(OrgRole.Admin);
 
-    const select = await screen.findByLabelText('Role');
-    const options = Array.from(select.querySelectorAll('option')).map((o) => o.value);
-    expect(options).toEqual([OrgRole.Admin, OrgRole.Member, OrgRole.ReadOnly]);
+    await openInviteDialog();
+    expect(roleOptionValues()).toEqual([OrgRole.Admin, OrgRole.Member, OrgRole.ReadOnly]);
   });
 
   it('offers every role to an Owner', async () => {
     renderSection(OrgRole.Owner);
 
-    const select = await screen.findByLabelText('Role');
-    const options = Array.from(select.querySelectorAll('option')).map((o) => o.value);
-    expect(options).toContain(OrgRole.Owner);
+    await openInviteDialog();
+    expect(roleOptionValues()).toContain(OrgRole.Owner);
   });
 
   it('falls back to Member when the ceiling shrinks under the open form', async () => {
@@ -150,14 +169,11 @@ describe('MembersInvitations', () => {
     const { client } = renderSection(OrgRole.Owner);
 
     await typeEmail('new@example.com');
-    fireEvent.change(screen.getByLabelText('Role'), { target: { value: OrgRole.Owner } });
+    fireEvent.click(await screen.findByRole('radio', { name: /Owner/ }));
     seedPermissions(client, OrgRole.Admin);
 
-    await waitFor(() => expect(screen.getByLabelText('Role')).toHaveValue(OrgRole.Member));
-    const options = Array.from(screen.getByLabelText('Role').querySelectorAll('option')).map(
-      (o) => o.value,
-    );
-    expect(options).not.toContain(OrgRole.Owner);
+    await waitFor(() => expect(checkedRoleValue()).toBe(OrgRole.Member));
+    expect(roleOptionValues()).not.toContain(OrgRole.Owner);
 
     fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
     await waitFor(() =>
@@ -173,19 +189,15 @@ describe('MembersInvitations', () => {
     const { client } = renderSection(OrgRole.Owner);
 
     await typeEmail('new@example.com');
-    fireEvent.change(screen.getByLabelText('Role'), { target: { value: OrgRole.Owner } });
+    fireEvent.click(await screen.findByRole('radio', { name: /Owner/ }));
     seedPermissions(client, OrgRole.Admin);
-    await waitFor(() => expect(screen.getByLabelText('Role')).toHaveValue(OrgRole.Member));
+    await waitFor(() => expect(checkedRoleValue()).toBe(OrgRole.Member));
 
     seedPermissions(client, OrgRole.Owner);
 
-    await waitFor(() =>
-      expect(
-        Array.from(screen.getByLabelText('Role').querySelectorAll('option')).map((o) => o.value),
-      ).toContain(OrgRole.Owner),
-    );
-    // The picker, the sentence under it, and the body all read the same role.
-    expect(screen.getByLabelText('Role')).toHaveValue(OrgRole.Member);
+    await waitFor(() => expect(roleOptionValues()).toContain(OrgRole.Owner));
+    // The selection and the body both read the same role.
+    expect(checkedRoleValue()).toBe(OrgRole.Member);
     expect(screen.getByText(ROLE_DESCRIPTIONS[OrgRole.Member])).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
@@ -215,10 +227,37 @@ describe('MembersInvitations', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
 
     const notice = await screen.findByTestId('invite-undelivered');
-    expect(notice).toHaveTextContent('the email did not go out');
+    expect(notice).toHaveTextContent("the email wasn't sent");
     expect(notice).toHaveTextContent('unsent@example.com');
     // Re-inviting is the retry, so the form is still there to do it with.
     expect(screen.getByTestId('invite-form')).toBeInTheDocument();
+  });
+
+  it('retries an undelivered invitation at the role it was created with', async () => {
+    mockCreate.mockResolvedValue({
+      invitation: invitation({ email: 'unsent@example.com', role: OrgRole.Admin }),
+      emailSent: false,
+    });
+    renderSection();
+
+    await typeEmail('unsent@example.com');
+    fireEvent.click(await screen.findByRole('radio', { name: /Admin/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+
+    const notice = await screen.findByTestId('invite-undelivered');
+    // The send cleared the field, as any success does, so the address the retry
+    // needs is only held by the alert.
+    expect(screen.getByLabelText('Email address')).toHaveValue('');
+
+    mockCreate.mockClear();
+    fireEvent.click(within(notice).getByRole('button', { name: 'Send again' }));
+
+    await waitFor(() =>
+      expect(mockCreate).toHaveBeenCalledWith({
+        email: 'unsent@example.com',
+        role: OrgRole.Admin,
+      }),
+    );
   });
 });
 
@@ -242,8 +281,10 @@ describe('MembersInvitations — when the server refuses or the list goes stale'
 
     const state = await screen.findByTestId('invite-not-enabled');
     expect(state).toHaveTextContent('not enabled for this organization yet');
-    // The controls go: nothing on this form would work.
-    expect(screen.queryByTestId('invite-form')).not.toBeInTheDocument();
+    // The section says so and stops offering the dialog at all.
+    expect(screen.queryByRole('button', { name: 'Invite member' })).not.toBeInTheDocument();
+    // The dialog goes with it: nothing on that form would work.
+    await waitFor(() => expect(screen.queryByTestId('invite-form')).not.toBeInTheDocument());
   });
 
   it('leaves the form up for a 403 that names no refusal', async () => {
@@ -263,7 +304,7 @@ describe('MembersInvitations — when the server refuses or the list goes stale'
 
   it('keeps the address a refusal came back on, and clears it on success', async () => {
     mockCreate
-      .mockRejectedValueOnce(apiError('Nope', 409, ApiErrorCode.INVITE_LIMIT_REACHED))
+      .mockRejectedValueOnce(apiError('The invitation service is unavailable', 503))
       .mockResolvedValueOnce({
         invitation: invitation({ email: 'new@example.com' }),
         emailSent: true,
@@ -273,34 +314,34 @@ describe('MembersInvitations — when the server refuses or the list goes stale'
     await typeEmail('new@example.com');
     fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
 
-    // A 409 on an emptied field leaves nothing to try again with.
-    await screen.findByTestId('invite-error');
+    // A refusal on an emptied field leaves nothing to try again with.
+    await screen.findByTestId('toast');
     expect(await screen.findByLabelText('Email address')).toHaveValue('new@example.com');
 
     fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
     await waitFor(() => expect(screen.getByLabelText('Email address')).toHaveValue(''));
   });
 
-  it('drops the cap alert once a revoke frees the slot it named', async () => {
-    mockCreate.mockRejectedValue(
-      apiError(
-        'This organization already has 25 pending invitations. Revoke one before sending another.',
-        409,
-        ApiErrorCode.INVITE_LIMIT_REACHED,
-      ),
-    );
+  it('drops the cap refusal once a revoke frees the slot it named', async () => {
+    mockCreate.mockRejectedValue(apiError('Nope', 409, ApiErrorCode.INVITE_LIMIT_REACHED));
     mockRevoke.mockResolvedValue(undefined);
     renderSection(OrgRole.Owner, [invitation({ email: 'waiting@example.com' })]);
 
     await typeEmail('new@example.com');
     fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
-    await screen.findByTestId('invite-error');
+    await screen.findByTestId('invite-cap-reached');
+    // The trigger is what goes inert: a dialog that could only refuse is worse
+    // than a button that says why it cannot be pressed.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Invite member' })).toBeDisabled(),
+    );
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Revoke invitation for waiting@example.com' }),
     );
 
-    await waitFor(() => expect(screen.queryByTestId('invite-error')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByTestId('invite-cap-reached')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Invite member' })).toBeEnabled();
   });
 
   it('says which field a validation failure is about, and goes back to it', async () => {
@@ -316,6 +357,12 @@ describe('MembersInvitations — when the server refuses or the list goes stale'
     expect(field).toHaveAttribute('aria-invalid', 'true');
     expect(field).toHaveAttribute('aria-describedby', message.id);
     expect(field).toHaveFocus();
+  });
+});
+
+describe('MembersInvitations — the list and its rows', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
   it('keeps a rendered list when a refetch fails', async () => {
@@ -388,22 +435,73 @@ describe('MembersInvitations — when the server refuses or the list goes stale'
     expect(screen.getByTestId('invitation-row')).toHaveAttribute('data-invite-id', 'inv-2');
   });
 
-  it('keeps the pending cap on the form so the remedy is beside the list', async () => {
-    mockCreate.mockRejectedValue(
-      apiError(
-        'This organization already has 25 pending invitations. Revoke one before sending another.',
-        409,
-        ApiErrorCode.INVITE_LIMIT_REACHED,
-      ),
-    );
+  it('states the pending cap beside the list the remedy is in', async () => {
+    mockCreate.mockRejectedValue(apiError('Nope', 409, ApiErrorCode.INVITE_LIMIT_REACHED));
     renderSection();
 
     await typeEmail('new@example.com');
     fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
 
-    expect(await screen.findByTestId('invite-error')).toHaveTextContent(
-      'Revoke one before sending another.',
+    // The console states the cap from the shared constant rather than repeating
+    // the server's sentence, and it outlives the dialog it was raised in.
+    const refusal = await screen.findByTestId('invite-cap-reached');
+    expect(refusal).toHaveTextContent(`limit of ${MAX_PENDING_INVITATIONS_PER_ORG}`);
+    expect(refusal).toHaveTextContent('Revoke one below');
+  });
+
+  it('offers a resend only on a row whose last send failed', async () => {
+    mockCreate.mockResolvedValue({
+      invitation: invitation({ email: 'unsent@example.com', role: OrgRole.Admin }),
+      emailSent: true,
+    });
+    renderSection(OrgRole.Owner, [
+      invitation({ inviteId: 'inv-1', email: 'waiting@example.com' }),
+      invitation({
+        inviteId: 'inv-2',
+        email: 'unsent@example.com',
+        role: OrgRole.Admin,
+        lastSendFailed: true,
+      }),
+    ]);
+
+    // Awaited: the actions column depends on `/me`, which lands after the rows.
+    const resend = await screen.findByRole('button', {
+      name: 'Resend invitation to unsent@example.com',
+    });
+    // A delivered invitation nobody has answered is waiting, not broken.
+    expect(
+      screen.queryByRole('button', { name: 'Resend invitation to waiting@example.com' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(resend);
+
+    // Re-inviting replaces the row, so the retry is the same call the form makes
+    // and it carries the role the invitation already had.
+    await waitFor(() =>
+      expect(mockCreate).toHaveBeenCalledWith({
+        email: 'unsent@example.com',
+        role: OrgRole.Admin,
+      }),
     );
+  });
+
+  it('keeps a role refusal in the dialog, beside the picker it is about', async () => {
+    mockCreate.mockRejectedValue(
+      apiError(
+        'Your role in this organization cannot invite someone as Owner.',
+        403,
+        ApiErrorCode.FORBIDDEN_ROLE,
+      ),
+    );
+    renderSection();
+
+    await typeEmail('new@example.com');
+    fireEvent.click(await screen.findByRole('radio', { name: /Owner/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+
+    // A lower role would still work, so the dialog stays open with the refusal
+    // in it rather than closing or toasting behind itself.
+    expect(await screen.findByTestId('invite-error')).toHaveTextContent('cannot invite someone as');
     expect(screen.getByTestId('invite-form')).toBeInTheDocument();
   });
 
