@@ -42,3 +42,12 @@ describe('AccessKeyFormFields — permissions error', () => {
     expect(screen.queryByText('Select at least one permission.')).not.toBeInTheDocument();
   });
 });
+
+describe('AccessKeyFormFields — reserved key name', () => {
+  it('shows the error when the name starts with the reserved prefix', async () => {
+    renderForm((form) => form.setKeyName('filone-console-v2'));
+    expect(
+      await screen.findByText('Names starting with "filone-console" are reserved for FilOne.'),
+    ).toBeInTheDocument();
+  });
+});

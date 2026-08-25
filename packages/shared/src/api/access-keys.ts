@@ -143,6 +143,16 @@ export type AccessKeyBucketScope = (typeof ACCESS_KEY_BUCKET_SCOPES)[number];
 export const KEY_NAME_MAX_LENGTH = 64;
 export const KEY_NAME_PATTERN = /^[a-zA-Z0-9 _\-.]+$/;
 
+// The per-tenant console key is named `filone-console-v2` (FTH_CONSOLE_KEY_NAME
+// in the backend), and FTH requires access-key names to be unique within a
+// tenant. A customer key under that name would block the tenant's console-key
+// rotation, so the whole prefix is reserved, covering a future `-v3` too.
+export const RESERVED_KEY_NAME_PREFIX = 'filone-console';
+
+export function isReservedKeyName(keyName: string): boolean {
+  return keyName.trim().toLowerCase().startsWith(RESERVED_KEY_NAME_PREFIX);
+}
+
 export const CreateAccessKeySchema = z
   .object({
     keyName: z
@@ -153,7 +163,10 @@ export const CreateAccessKeySchema = z
       .regex(
         KEY_NAME_PATTERN,
         'Key name can only contain letters, numbers, spaces, hyphens, underscores, and periods',
-      ),
+      )
+      .refine((keyName) => !isReservedKeyName(keyName), {
+        message: `Key name must not start with "${RESERVED_KEY_NAME_PREFIX}" — the name is reserved for FilOne`,
+      }),
     permissions: z.array(z.enum(ACCESS_KEY_PERMISSIONS)),
     granularPermissions: z.array(z.enum(GRANULAR_PERMISSIONS)).optional(),
     bucketScope: z.enum(ACCESS_KEY_BUCKET_SCOPES).default('all'),

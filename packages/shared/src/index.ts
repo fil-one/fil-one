@@ -192,6 +192,8 @@ export {
   BUCKET_INFO_PERMISSION_LABELS,
   KEY_NAME_MAX_LENGTH,
   KEY_NAME_PATTERN,
+  RESERVED_KEY_NAME_PREFIX,
+  isReservedKeyName,
   CreateAccessKeySchema,
 } from './api/access-keys.js';
 export type {
