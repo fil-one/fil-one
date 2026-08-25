@@ -8,7 +8,6 @@ import { Alert } from '../components/Alert';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { MembersTable } from '../components/MembersTable';
 import { TransferOwnershipDialog } from '../components/TransferOwnershipDialog';
-import { PageLayout } from '../components/PageLayout.js';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
 import { errorCodeOf, errorMessageOf, errorStatusOf, getMe } from '../lib/api.js';
@@ -27,7 +26,6 @@ import {
 } from '../lib/use-member-scope.js';
 import { usePendingRows } from '../lib/use-pending-rows.js';
 import type { PendingRows } from '../lib/use-pending-rows.js';
-import { MembersInvitations } from './MembersInvitations.js';
 
 // ---------------------------------------------------------------------------
 // Cache edits
@@ -429,7 +427,14 @@ function MemberDialogs({
 // Page
 // ---------------------------------------------------------------------------
 
-export function MembersPage() {
+/**
+ * The roster and everything that acts on it, without page chrome.
+ *
+ * A tab body rather than a page: `OrganizationPage` owns the heading and the
+ * tabs, and invitations are a tab of their own beside this one rather than a
+ * section under it.
+ */
+export function MembersRoster() {
   const { toast } = useToast();
   const client = useQueryClient();
   const scope = useMemberActionScope();
@@ -481,14 +486,7 @@ export function MembersPage() {
   }
 
   return (
-    <PageLayout
-      title="Members"
-      headingId="members-heading"
-      // Named rather than "this organization": the active org is stashed per
-      // tab, so two tabs can sit in different ones, and this is the page that
-      // removes people and hands over ownership.
-      description={`Everyone with access to ${me?.orgName || 'this organization'}.`}
-    >
+    <>
       <div className="flex flex-col gap-6">
         {notice.message && (
           <div data-testid="members-last-owner">
@@ -512,16 +510,6 @@ export function MembersPage() {
           onTransfer={setTransferTarget}
           pendingUserIds={pending.ids}
         />
-
-        {/* The section is `members.manage`, which is what the list and the
-            revoke endpoints ask. The beta flag gates only the form inside it:
-            revoking the flag stops new invitations, and the tokens already
-            issued stay redeemable — `accept-invitation` is never flagged — so
-            the pending list and its revoke buttons have to survive the revoke
-            or the only way to withdraw them goes with it. It arrives a moment
-            after the roster, which is what gating fail-closed on `/me`
-            costs. */}
-        {scope.mayManage && <MembersInvitations />}
       </div>
 
       <MemberDialogs
@@ -533,7 +521,7 @@ export function MembersPage() {
         onRemove={removal.mutateAsync}
         onTransfer={transfer.mutate}
       />
-    </PageLayout>
+    </>
   );
 }
 

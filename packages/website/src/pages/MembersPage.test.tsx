@@ -7,7 +7,7 @@ import type { MemberSummary, MeResponse } from '@filone/shared';
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
 import { queryKeys } from '../lib/query-client.js';
 import { seedPermissions } from '../lib/test-permissions.js';
-import { MembersPage } from './MembersPage.js';
+import { MembersRoster } from './MembersPage.js';
 
 // ---------------------------------------------------------------------------
 // Mocks — API client boundary
@@ -73,7 +73,7 @@ function renderPage(
     ...render(
       <QueryClientProvider client={client}>
         <ToastProvider>
-          <MembersPage />
+          <MembersRoster />
         </ToastProvider>
       </QueryClientProvider>,
     ),
@@ -342,7 +342,7 @@ describe('MembersPage', () => {
     render(
       <QueryClientProvider client={client}>
         <ToastProvider>
-          <MembersPage />
+          <MembersRoster />
         </ToastProvider>
       </QueryClientProvider>,
     );

@@ -171,10 +171,10 @@ function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps
 // decides whether the entry exists at all — see `membersSurface`.
 const utilityNavItems: NavItem[] = [
   {
-    path: '/members',
+    path: '/organization',
     icon: UsersIcon,
-    label: 'Members',
-    testId: 'nav-members',
+    label: 'Organization',
+    testId: 'nav-organization',
     permission: 'members.read',
     membersSurface: true,
   },
