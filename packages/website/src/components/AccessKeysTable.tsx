@@ -191,6 +191,16 @@ export type AccessKeysTableProps = {
   showBuckets?: boolean;
   showPermissions?: boolean;
   showRegion?: boolean;
+  /**
+   * Who minted each key, resolved from a user id. Passed only when the org has
+   * somebody else in it: a column reading the same name on every row is noise
+   * in an org of one, and it is the column that says which keys leave with a
+   * departing member — removal does not revoke them (FIL-1021).
+   *
+   * A resolver rather than the roster itself, so the table stays presentational
+   * and does not learn what a membership is.
+   */
+  creatorFor?: (userId: string) => { name: string; email?: string } | undefined;
   onDelete?: (id: string) => Promise<void>;
   /**
    * Which rows carry the action. Omitted, every row does — the caller has
@@ -208,6 +218,7 @@ export function AccessKeysTable({
   showBuckets = false,
   showPermissions = false,
   showRegion = false,
+  creatorFor,
   onDelete,
   canDelete,
   onCreateOpen,
@@ -218,6 +229,9 @@ export function AccessKeysTable({
   // of whitespace with a screen-reader label attached to nothing.
   const rowHasAction = (key: AccessKey) => Boolean(onDelete) && (canDelete?.(key) ?? true);
   const showActions = keys.some(rowHasAction);
+  // Keys minted before attribution existed carry no `createdBy`, so a column
+  // every row would em-dash is one nobody can read anything from.
+  const showCreatedBy = Boolean(creatorFor) && keys.some((key) => key.createdBy);
 
   if (keys.length === 0) {
     return (
@@ -242,6 +256,7 @@ export function AccessKeysTable({
           {showRegion && <Table.Head className="hidden md:table-cell">Region</Table.Head>}
           {showBuckets && <Table.Head className="hidden lg:table-cell">Buckets</Table.Head>}
           {showPermissions && <Table.Head className="hidden md:table-cell">Permissions</Table.Head>}
+          {showCreatedBy && <Table.Head className="hidden lg:table-cell">Created by</Table.Head>}
           <Table.Head className="hidden sm:table-cell">Status</Table.Head>
           <Table.Head className="hidden md:table-cell">Last Used</Table.Head>
           {showActions && (
@@ -306,6 +321,25 @@ export function AccessKeysTable({
                   permissions={key.permissions ?? []}
                   granularPermissions={key.granularPermissions ?? []}
                 />
+              </Table.Cell>
+            )}
+
+            {/* Created by — the same two-tone split the members roster uses:
+                the person is the value, the address identifies which one. */}
+            {showCreatedBy && (
+              <Table.Cell className="hidden lg:table-cell">
+                {(() => {
+                  const creator = key.createdBy ? creatorFor?.(key.createdBy) : undefined;
+                  if (!creator) return <span className="text-xs text-zinc-400">—</span>;
+                  return (
+                    <>
+                      <p className="text-xs text-zinc-700">{creator.name}</p>
+                      {creator.email && creator.email !== creator.name && (
+                        <p className="text-xs text-zinc-500">{creator.email}</p>
+                      )}
+                    </>
+                  );
+                })()}
               </Table.Cell>
             )}
 
