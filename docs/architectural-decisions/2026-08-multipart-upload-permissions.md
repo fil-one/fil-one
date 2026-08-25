@@ -29,25 +29,31 @@ Forge is unchanged. Its contract has `ListBucketMultipartUploads` but no counter
 
 ### 2. Existing keys are left alone
 
-Only keys created after this change carry the new actions. Nothing rewrites the permissions of keys already issued, because the customer-visible permission set they were created with has not changed and a silent widening of an existing credential's authority is not something to do on their behalf. The customer re-creates their key to pick the actions up.
+Only keys created after this change carry the new actions. FTH has no way to widen the authority of an access key that already exists, so a customer picks the actions up by deleting their key and creating a new one.
+
+That re-creation has to work, which is why `issueAccessKey` derives its idempotency key from a hash of the request it sends (tenant, storage user, key name, permissions, bucket scopes, expiry) rather than from the key name alone. A name-only key replays the original request whenever a customer re-creates a key under the same name with anything about it changed: a different permission set, a different list of bucket scopes, a different expiry. FTH answers a replay carrying a changed payload with a permanent `409`. Hashing the request means a changed payload is simply a different request.
 
 ### 3. The console key is minted as `filone-console-v2`
 
 `FTH_FULL_PERMISSIONS` gains all three actions, and the per-tenant console key is created under the name `filone-console-v2` (`FTH_CONSOLE_KEY_NAME`). FTH requires access-key names to be unique within a tenant, so an existing tenant cannot have its `filone-console` key replaced in place: the new key is created alongside the old one, SSM is repointed at it, and the v1 key is deleted days later once warm Lambda containers have recycled. Both keys are valid throughout, so no console operation fails during the rotation.
 
-The idempotency key for the create call becomes `console-key-v2-${tenantId}` in both the tenant-setup path and the rotation script. Replaying the previous key with the new payload (new name, new actions) would 409 permanently, which would strand any tenant whose setup crashed between the key creation and the `fthTenantId` write. The FTH client id is unique within the FTH deployment that every stage shares, so it identifies the target on its own: neither the stage nor the storage-user id adds anything, and the storage user is itself created idempotently per tenant.
+The idempotency key for the create call becomes `console-key-v2-${tenantId}` in both the tenant-setup path and the rotation script. Replaying the previous key with the new payload (new name, new actions) would 409 permanently, which would strand any tenant whose setup crashed between the key creation and the `fthTenantId` write. The FTH client id is unique within the FTH deployment that every non-production stage shares, so it identifies the target on its own: neither the stage nor the storage-user id adds anything, and the storage user is itself created idempotently per tenant.
 
 The storage user's `userCode` stays `filone-console`. It is what `fthOrchestrator` looks the user up by, and the user itself is not being replaced.
 
 ### 4. The console-credentials cache has no TTL
 
-`getConsoleS3Credentials` (`packages/backend/src/lib/s3-credentials.ts`) caches the SSM value for the process lifetime. A rotation therefore takes effect per Lambda container as containers recycle, which can take hours. Adding a TTL would buy faster propagation for an event that happens roughly never, at the cost of an SSM read on the expiry of every entry. Waiting is cheaper, and it is safe because the old key keeps working until `prune` deletes it.
+`getConsoleS3Credentials` (`packages/backend/src/lib/s3-credentials.ts`) caches the SSM value for the process lifetime. A rotation therefore takes effect per Lambda container as containers recycle. Adding a TTL would buy faster propagation for an event that happens roughly never, at the cost of an SSM read on the expiry of every entry.
+
+Waiting is cheaper, and a deploy sets the deadline: every deploy replaces the running containers, so no container that started before it survives. The order is deploy the backend change, run `rotate`, let the containers that started between those two steps recycle, then `prune`. The next deploy after the rotation is what guarantees that, and the v1 key keeps working until the prune.
 
 ### 5. Existing FTH tenants are rotated by an operator script
 
 `bin/fth-console-key.ts rotate <stage>` walks every org with an `fthTenantId`, creates the v2 key against its `filone-console` storage user, and writes the credentials to `/filone/<stage>/fth-s3/access-key/<tenantId>`. `prune` deletes the v1 key afterwards. It skips an org whose SSM-referenced key already carries the three actions, so a re-run and a tenant provisioned after this change both cost one listing call.
 
-Between `rotate` and `prune`, each FTH tenant holds one extra access key. That counts against the tenant's key limit, and the console's usage view subtracts a fixed one system key per region, so it undercounts the customer's own keys by one until the prune.
+Between `rotate` and `prune`, each FTH tenant holds one extra access key. That counts against the tenant's key limit, and `aggregateRegionUsages` (`packages/backend/src/handlers/get-usage.ts`) subtracts a fixed one system key per region from the raw count, so the console's usage view undercounts the customer's own keys by one until the prune.
+
+A tenant already at its key limit cannot hold the extra key, and FTH rejects the create. The script reports that tenant by FilOne org id and FTH client id, prints what FTH returned, and carries on with the rest; those tenants get a rotation by hand afterwards. No tenant is anywhere near the limit today.
 
 ### 6. The one-off granular-permissions backfill scripts are deleted
 
@@ -55,20 +61,12 @@ Between `rotate` and `prune`, each FTH tenant holds one extra access key. That c
 
 ## Consequences
 
-### Accepted costs
-
 | Cost                                                                 | Reasoning                                                                                                                             |
 | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Customers with existing keys must create a new key to abort uploads  | The alternative widens the authority of a credential in place, without the customer asking.                                           |
+| Customers with existing keys must create a new key to abort uploads  | FTH cannot widen the authority of an access key that already exists.                                                                 |
 | Every FTH tenant holds two console keys between `rotate` and `prune` | FTH names must be unique, and both keys valid is what keeps the console working while containers recycle.                             |
 | The usage view undercounts customer keys by one during that window   | It subtracts a fixed one key per region rather than matching by name. Correcting it for a temporary state is not worth a code change. |
 | Forge keys still cannot abort or list parts                          | Its contract has no such action. Adding the one action it does have would create a third grouping to explain.                         |
-
-### Open items
-
-The prod rotation needs AWS credentials that can write SSM. Production logins have been read-only so far, so how that run gets write access is unresolved; the script's header states it.
-
-Nothing in this repository proves FTH accepts these three action strings. Its action vocabulary already differs from Aurora's in places (`s3:ListObjectVersions`), and a rejected string would fail new-tenant setup, not just key creation. A staging run that creates, lists, aborts and re-lists a multipart upload against `us-east-1.fortilyx.com` confirms the strings before they reach production.
 
 ## References
 
