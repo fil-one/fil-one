@@ -103,7 +103,12 @@ export function OrganizationPage() {
       // a button whose dialog the server would refuse.
       action={
         <RequirePermission permission="org.rename">
-          <Button variant="ghost" icon={PencilSimpleIcon} onClick={() => setEditing(true)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={PencilSimpleIcon}
+            onClick={() => setEditing(true)}
+          >
             Edit organization
           </Button>
         </RequirePermission>
