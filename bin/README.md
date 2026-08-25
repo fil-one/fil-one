@@ -98,6 +98,7 @@ aws iam list-roles --query 'length(Roles)' --output text
 | `aurora-preview-url.ts`        | Pre-signed GetObject URL for an Aurora object, plus a billing report for the owning account (deletion state, Stripe dashboard link, subscription status, latest usage) |
 | `aurora-demo.ts`               | Demo script for Aurora S3 operations                                                                                                                                   |
 | `account-deletion.ts`          | Report an org's account-deletion state, and start or re-drive the teardown worker                                                                                      |
+| `fth-console-key.ts`           | Re-issue the per-tenant FTH console access key as `filone-console-v2`, then prune the old key                                                                          |
 
 ### Shared helpers (`bin/lib/`)
 
