@@ -201,7 +201,7 @@ describe('ensureTenantReady', () => {
       serviceUserId,
       expect.objectContaining({
         name: 'filone-console-v2',
-        idempotencyKey: `console-key-v2-${fthClientId}`,
+        idempotencyKey: `console-key-v2-test-${fthClientId}-${serviceUserId}`,
       }),
     );
 

@@ -119,15 +119,14 @@ async function processTenantSetup(client: FthManagementClient, orgId: string): P
     permissions: [...FTH_FULL_PERMISSIONS],
     buckets: [],
     expiresAt: null,
-    // Scoped to the tenant rather than to orgId. A key derived from orgId alone stays constant
-    // while the path does not. An org that gets re-provisioned onto a new FTH client would replay
-    // such a key against a path it was never minted for, and fail with 409 "idempotency key replay
-    // with different payload" — permanently, since nothing about the key would ever change again.
-    // The FTH client id is unique across the deployment all non-production stages share, so it
-    // pins the target on its own. The `-v2` segment covers the payload change that came with
+    // Scoped to the tenant and storage user rather than to orgId. A key derived from orgId alone
+    // stays constant while the path does not. An org that gets re-provisioned onto a new FTH client
+    // and storage user would replay such a key against a path it was never minted for, and fail
+    // with 409 "idempotency key replay with different payload" — permanently, since nothing about
+    // the key would ever change again. The `-v2` segment covers the payload change that came with
     // FTH_CONSOLE_KEY_NAME: a tenant whose setup crashed between this call and the fthTenantId
     // write would otherwise replay the pre-v2 key with the new payload and 409 forever.
-    idempotencyKey: `console-key-v2-${tenantId}`,
+    idempotencyKey: `console-key-v2-${stage}-${tenantId}-${storageUser.id}`,
   });
 
   await ssm.send(
