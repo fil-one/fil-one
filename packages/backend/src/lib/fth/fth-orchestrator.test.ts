@@ -698,6 +698,41 @@ describe('fthOrchestrator.issueAccessKey', () => {
     expect(permissions).not.toContain('s3:GetBucketObjectLockConfiguration');
   });
 
+  // Aurora's grouping (see the permissions description in
+  // aurora-portal.swagger.json): read carries list-parts, write carries abort,
+  // list carries list-uploads. Each permission grants its own action and no other.
+  const multipartCases = [
+    { permission: 'read', action: 's3:ListMultipartUploadParts' },
+    { permission: 'write', action: 's3:AbortMultipartUpload' },
+    { permission: 'list', action: 's3:ListBucketMultipartUploads' },
+  ] as const;
+  const allMultipartActions: readonly string[] = multipartCases.map((c) => c.action);
+
+  for (const { permission, action } of multipartCases) {
+    it(`grants only ${action} for the ${permission} permission`, async () => {
+      stubConsoleStorageUser();
+      mockFthClient.createAccessKey.mockResolvedValue({
+        id: 'AKIAFTH',
+        accessKeyId: 'AKIAFTH',
+        secretAccessKey: 'sk-secret',
+        name: baseOpts.keyName,
+        permissions: [],
+        buckets: [],
+        createdAt: '2026-03-10T00:00:00Z',
+      });
+
+      await fthOrchestrator.issueAccessKey(fthClientId, {
+        keyName: baseOpts.keyName,
+        permissions: [permission],
+      });
+
+      const { permissions } = mockFthClient.createAccessKey.mock.calls[0][2];
+      expect(
+        permissions.filter((granted: string) => allMultipartActions.includes(granted)),
+      ).toEqual([action]);
+    });
+  }
+
   it('maps FthConflictError to AccessKeyAlreadyExistsError', async () => {
     stubConsoleStorageUser();
     mockFthClient.createAccessKey.mockRejectedValue(

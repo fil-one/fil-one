@@ -376,10 +376,14 @@ function createInstrumentedFthClient(): FthManagementClient {
 
 const FTH_ALWAYS_PERMISSIONS: readonly string[] = ['s3:ListAllMyBuckets'];
 
+// The multipart actions follow the same grouping as Aurora's access types (see
+// the permissions description in aurora-portal.swagger.json): reading the parts
+// of an upload goes with read, aborting one with write, listing in-progress
+// uploads with list.
 const FTH_BASE_PERMISSIONS: Record<AccessKeyPermission, readonly string[]> = {
-  read: ['s3:GetObject', 's3:ListBucket'],
-  write: ['s3:PutObject'],
-  list: ['s3:ListBucket'],
+  read: ['s3:GetObject', 's3:ListBucket', 's3:ListMultipartUploadParts'],
+  write: ['s3:PutObject', 's3:AbortMultipartUpload'],
+  list: ['s3:ListBucket', 's3:ListBucketMultipartUploads'],
   delete: ['s3:DeleteObject'],
   CreateBucket: ['s3:CreateBucket'],
   DeleteBucket: ['s3:DeleteBucket'],

@@ -63,7 +63,7 @@ function stubSetupApiCalls() {
   mockFthClient.createAccessKey.mockResolvedValue({
     accessKeyId: 'AKIATEST',
     secretAccessKey: 'SKTEST',
-    name: 'filone-console',
+    name: 'filone-console-v2',
     permissions: [],
     buckets: [],
     createdAt: '2026-01-01T00:00:00Z',
@@ -200,8 +200,8 @@ describe('ensureTenantReady', () => {
       fthClientId,
       serviceUserId,
       expect.objectContaining({
-        name: 'filone-console',
-        idempotencyKey: `console-key-test-${fthClientId}-${serviceUserId}`,
+        name: 'filone-console-v2',
+        idempotencyKey: `console-key-v2-${fthClientId}`,
       }),
     );
 
@@ -218,6 +218,26 @@ describe('ensureTenantReady', () => {
     expect(updateCalls[0].args[0].input.ExpressionAttributeValues).toMatchObject({
       ':tenantId': { S: fthClientId },
     });
+  });
+
+  // Nothing else in the repo pins these three action strings, and FTH rejecting
+  // one would fail tenant setup rather than just key creation.
+  it('grants the console key the multipart actions', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: profileItem({}) });
+    ddbMock.on(UpdateItemCommand).resolves({});
+    ssmMock.on(PutParameterCommand).resolves({});
+    stubSetupApiCalls();
+
+    await ensureTenantReady(fthClient, orgId);
+
+    const { permissions } = mockFthClient.createAccessKey.mock.calls[0][2];
+    expect(permissions).toEqual(
+      expect.arrayContaining([
+        's3:ListBucketMultipartUploads',
+        's3:AbortMultipartUpload',
+        's3:ListMultipartUploadParts',
+      ]),
+    );
   });
 
   // This test describes an error we experienced in e2e tests,
