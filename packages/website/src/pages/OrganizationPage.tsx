@@ -7,6 +7,7 @@ import { getMe } from '../lib/api.js';
 import { ME_STALE_TIME, queryKeys } from '../lib/query-client.js';
 import { usePermissions } from '../lib/use-permissions.js';
 import { MembersRoster } from './MembersPage.js';
+import { OrganizationGeneral } from './OrganizationGeneral.js';
 import { MembersInvitations } from './MembersInvitations.js';
 
 interface OrganizationTab {
@@ -26,6 +27,13 @@ interface OrganizationTab {
  * and Settings means the caller's own account (FIL-1094).
  */
 const ORGANIZATION_TABS: OrganizationTab[] = [
+  {
+    label: 'General',
+    testId: 'org-tab-general',
+    // No permission: every role may read the name, and the field itself is
+    // read-only for anybody without `org.rename`.
+    render: () => <OrganizationGeneral />,
+  },
   {
     label: 'Members',
     testId: 'org-tab-members',
