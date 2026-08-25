@@ -60,6 +60,21 @@ describe('OrganizationPage', () => {
     expect(tabNames()).not.toContain('Invitations');
   });
 
+  it('keeps Billing out for a role that cannot read it', async () => {
+    // `billing.view` is Owner and Admin; a Member is not offered the tab at all
+    // rather than shown one that refuses.
+    renderPage(OrgRole.Member);
+
+    await waitFor(() => expect(tabNames()).toContain('Members'));
+    expect(tabNames()).not.toContain('Billing');
+  });
+
+  it('offers Billing to an Admin, who holds billing.view', async () => {
+    renderPage(OrgRole.Admin);
+
+    await waitFor(() => expect(tabNames()).toContain('Billing'));
+  });
+
   it('offers a Read only member the roster and nothing that changes it', async () => {
     renderPage(OrgRole.ReadOnly);
 

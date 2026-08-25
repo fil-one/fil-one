@@ -90,8 +90,14 @@ export function BillingPage() {
   );
 }
 
+/**
+ * Everything billing, without page chrome.
+ *
+ * Exported for the Organization page's Billing tab; `BillingPage` keeps it as
+ * a page for the `/billing` path that still points here.
+ */
 // eslint-disable-next-line max-lines-per-function, complexity/complexity
-function BillingDetails() {
+export function BillingDetails() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   // Hoisted rather than wrapped per control: half of these buttons sit under

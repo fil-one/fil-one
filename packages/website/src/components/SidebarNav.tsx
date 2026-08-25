@@ -3,7 +3,6 @@ import {
   SquaresFourIcon,
   DatabaseIcon,
   KeyIcon,
-  CreditCardIcon,
   GearIcon,
   CaretLeftIcon,
   CaretRightIcon,
@@ -164,11 +163,12 @@ function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps
   );
 }
 
-// Billing carries a permission; Settings is every member's own account. Members
-// is declared with the permission it needs even though all four roles hold it,
-// so the entry stays hidden while `/me` is in flight rather than appearing for
-// a caller whose role turns out not to reach it. `members.read` is not what
-// decides whether the entry exists at all — see `membersSurface`.
+// Billing is a tab of Organization now, so it is not an entry here. Settings is
+// every member's own account. Organization is declared with the permission it
+// needs even though all four roles hold it, so the entry stays hidden while
+// `/me` is in flight rather than appearing for a caller whose role turns out
+// not to reach it. `members.read` is not what decides whether the entry exists
+// at all — see `membersSurface`.
 const utilityNavItems: NavItem[] = [
   {
     path: '/organization',
@@ -177,13 +177,6 @@ const utilityNavItems: NavItem[] = [
     testId: 'nav-organization',
     permission: 'members.read',
     membersSurface: true,
-  },
-  {
-    path: '/billing',
-    icon: CreditCardIcon,
-    label: 'Billing',
-    testId: 'nav-billing',
-    permission: 'billing.view',
   },
   { path: '/settings', icon: GearIcon, label: 'Settings', testId: 'nav-settings' },
 ];

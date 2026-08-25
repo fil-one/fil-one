@@ -2,10 +2,13 @@ import { useQuery } from '@tanstack/react-query';
 import type { Permission } from '@filone/shared';
 
 import { PageLayout } from '../components/PageLayout.js';
+import { RequirePermission } from '../components/RequirePermission';
+import { Spinner } from '../components/Spinner';
 import { Tab, TabList, TabPanel, TabPanels, Tabs } from '../components/Tabs';
 import { getMe } from '../lib/api.js';
 import { ME_STALE_TIME, queryKeys } from '../lib/query-client.js';
 import { usePermissions } from '../lib/use-permissions.js';
+import { BillingDetails } from './BillingPage.js';
 import { MembersRoster } from './MembersPage.js';
 import { OrganizationGeneral } from './OrganizationGeneral.js';
 import { MembersInvitations } from './MembersInvitations.js';
@@ -39,6 +42,31 @@ const ORGANIZATION_TABS: OrganizationTab[] = [
     testId: 'org-tab-members',
     permission: 'members.read',
     render: () => <MembersRoster />,
+  },
+  {
+    label: 'Billing',
+    testId: 'org-tab-billing',
+    // Owner and Admin hold `billing.view`; for everybody else the tab is not
+    // offered at all. `RequirePermission` still wraps the panel, because a tab
+    // nobody can see is not a guard against a request nobody should make.
+    permission: 'billing.view',
+    render: () => (
+      <RequirePermission
+        permission="billing.view"
+        pending={
+          <div className="flex items-center justify-center p-16">
+            <Spinner ariaLabel="Loading billing" />
+          </div>
+        }
+        fallback={
+          <p className="text-sm text-zinc-600">
+            Billing is managed by this organization&rsquo;s owners and admins.
+          </p>
+        }
+      >
+        <BillingDetails />
+      </RequirePermission>
+    ),
   },
   {
     label: 'Invitations',

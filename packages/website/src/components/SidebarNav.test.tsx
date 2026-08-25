@@ -92,8 +92,7 @@ const UNIQUE_TESTIDS = [
   'nav-dashboard',
   'nav-buckets',
   'nav-api-keys',
-  'nav-billing',
-  'nav-members',
+  'nav-organization',
   'nav-settings',
   'user-profile',
 ];
@@ -155,21 +154,18 @@ describe('SidebarNav — the org switcher', () => {
   });
 });
 
-describe('SidebarNav — the Billing entry', () => {
-  it('renders for a role that may see billing', () => {
-    const { container } = renderBothSidebars(OrgRole.Admin);
+describe('SidebarNav — the Organization entry', () => {
+  it.each([OrgRole.Owner, OrgRole.Admin, OrgRole.Member, OrgRole.ReadOnly])(
+    'renders for %s, since every role holds members.read',
+    (role) => {
+      // Billing is a tab of that page now rather than an entry of its own, and
+      // the tab gates itself on `billing.view`.
+      const { container } = renderBothSidebars(role);
 
-    expect(container.querySelectorAll('[data-testid="nav-billing"]')).toHaveLength(1);
-  });
-
-  it.each([OrgRole.Member, OrgRole.ReadOnly])('is absent for %s', (role) => {
-    // Every query on that page would 403; offering the link is a dead end.
-    const { container } = renderBothSidebars(role);
-
-    expect(container.querySelectorAll('[data-testid="nav-billing"]')).toHaveLength(0);
-    // Settings is every member's own account and stays.
-    expect(container.querySelectorAll('[data-testid="nav-settings"]')).toHaveLength(1);
-  });
+      expect(container.querySelectorAll('[data-testid="nav-organization"]')).toHaveLength(1);
+      expect(container.querySelectorAll('[data-testid="nav-billing"]')).toHaveLength(0);
+    },
+  );
 });
 
 describe('SidebarNav — the Members entry', () => {
@@ -177,7 +173,7 @@ describe('SidebarNav — the Members entry', () => {
     // Both mounts at once: the entry is declared in one array, so a gate that
     // only reached the desktop copy would leave the drawer offering the link.
     const { container } = renderBothSidebars(role, overrides);
-    return container.querySelectorAll('[data-testid="nav-members"]');
+    return container.querySelectorAll('[data-testid="nav-organization"]');
   }
 
   it('renders for a solo org in the beta, so somebody can send the first invite', () => {
@@ -211,7 +207,7 @@ describe('SidebarNav — the Members entry', () => {
       </QueryClientProvider>,
     );
 
-    expect(container.querySelectorAll('[data-testid="nav-members"]')).toHaveLength(0);
+    expect(container.querySelectorAll('[data-testid="nav-organization"]')).toHaveLength(0);
   });
 
   it('leaves the other utility entries alone when it hides', () => {
@@ -220,8 +216,9 @@ describe('SidebarNav — the Members entry', () => {
       orgsBeta: false,
     });
 
-    expect(container.querySelectorAll('[data-testid="nav-members"]')).toHaveLength(0);
-    expect(container.querySelectorAll('[data-testid="nav-billing"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-testid="nav-organization"]')).toHaveLength(0);
+    // Billing is a tab of that page now, so it hides with it.
+    expect(container.querySelectorAll('[data-testid="nav-billing"]')).toHaveLength(0);
     expect(container.querySelectorAll('[data-testid="nav-settings"]')).toHaveLength(1);
   });
 });

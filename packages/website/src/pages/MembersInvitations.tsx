@@ -250,9 +250,13 @@ export function MembersInvitations() {
   return (
     <section className="flex flex-col gap-4" data-testid="invitations-section">
       <div className="flex flex-wrap items-center justify-between gap-3">
+        {/* `sm`, the scale's subsection label: the tab already names this
+            section, so an `lg` heading under the page title reads as a second
+            page title. It stays rather than going entirely, because the Invite
+            button aligns against it. */}
         <Heading
           tag="h2"
-          size="lg"
+          size="sm"
           description="People who have been invited but haven't joined yet."
         >
           Invitations
