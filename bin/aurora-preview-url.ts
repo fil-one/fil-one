@@ -8,9 +8,9 @@
 // usage-reporting audit trail.
 //
 // The report goes to stderr for debugging. stdout carries only the closing
-// summary — deletion state, subscription status, trial end, whether a card is
-// cached, the Stripe dashboard link, the expiry and the URL — so it can be
-// copied straight into a message to a colleague, or redirected to a file.
+// summary — subscription status, trial end, whether a card is cached, the
+// Stripe dashboard link, the deletion state, the expiry and the URL — so it can
+// be copied straight into a message to a colleague, or redirected to a file.
 //
 // Usage:
 //   node bin/aurora-preview-url.ts <auroraTenantId> <bucket> <objectKey>
@@ -34,12 +34,12 @@
 // state a Stripe webhook wrote rather than live Stripe data. The report is
 // best-effort: failures print a warning and the preview URL is still produced.
 //
-// Read the deletion state before the subscription state. `subscriptionStatus`
-// is stamped `canceled` by the teardown's scrub, which is its last step, so a
-// deletion that has not finished leaves the row showing whatever the last
-// webhook wrote — commonly `trialing`, even for an account whose Stripe
-// customer an admin has already deleted. Drive such a deletion to completion
-// with bin/account-deletion.ts.
+// Check the deletion state before trusting the subscription status.
+// `subscriptionStatus` is stamped `canceled` by the teardown's scrub, which is
+// its last step, so a deletion that has not finished leaves the row showing
+// whatever the last webhook wrote — commonly `trialing`, even for an account
+// whose Stripe customer an admin has already deleted. Drive such a deletion to
+// completion with bin/account-deletion.ts.
 //
 // The URL is bearer authority for its whole lifetime: anyone holding it can
 // read the object until it expires.
@@ -259,26 +259,34 @@ async function readDeletionRecord(
   return Item ? unmarshall(Item) : undefined;
 }
 
+/**
+ * The full block only when a deletion exists. With no record there is no
+ * teardown to describe and the fence and scrub lines would both read "not set"
+ * for every healthy account, so one line says it instead.
+ */
 function printDeletionReport(
   record: Record<string, unknown> | undefined,
   profile: Record<string, unknown>,
 ): DeletionState {
-  console.error('');
-  console.error('=== Account deletion ===');
-
   const summaryLine = describeDeletion(record, profile);
   const teardownIncomplete = record !== undefined && record.status !== 'DONE';
-  console.error(`State: ${summaryLine}`);
-  if (record) {
-    printFields(record, [
-      'status',
-      'trigger',
-      'requestedAt',
-      'requestedByUserId',
-      'attempts',
-      'updatedAt',
-    ]);
+
+  console.error('');
+  if (!record) {
+    console.error(`Account deletion: ${summaryLine}`);
+    return { summaryLine, teardownIncomplete };
   }
+
+  console.error('=== Account deletion ===');
+  console.error(`State: ${summaryLine}`);
+  printFields(record, [
+    'status',
+    'trigger',
+    'requestedAt',
+    'requestedByUserId',
+    'attempts',
+    'updatedAt',
+  ]);
   console.error(`Fence (PROFILE.deleting): ${profile.deleting === true ? 'up' : 'not set'}`);
   console.error(
     `Scrub (PROFILE.deletedAt): ${profile.deletedAt ? formatValue(profile.deletedAt) : 'not run'}`,
@@ -300,9 +308,16 @@ function describeDeletion(
   profile: Record<string, unknown>,
 ): string {
   if (!record) {
-    return profile.deleting === true
-      ? 'INCONSISTENT — the org is fenced (deleting=true) but has no DELETION record'
-      : 'none requested';
+    // The confirm writes the record and the fence in one transaction, so a
+    // profile marked deleted with no record behind it cannot come from the
+    // normal path. Name the marks: the one-line form prints nothing else.
+    const marks = [
+      profile.deleting === true ? 'deleting=true' : undefined,
+      profile.deletedAt ? `deletedAt=${formatValue(profile.deletedAt)}` : undefined,
+    ].filter((mark) => mark !== undefined);
+    return marks.length === 0
+      ? 'none requested'
+      : `no DELETION record, but the account is marked deleted (${marks.join(', ')})`;
   }
   if (record.status === 'DONE') return `complete (${formatValue(record.trigger)})`;
 
