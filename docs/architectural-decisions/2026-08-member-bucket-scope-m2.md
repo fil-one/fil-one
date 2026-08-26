@@ -214,6 +214,11 @@ member can therefore still learn that other buckets exist:
 - `GET /api/billing` is org-wide by construction: the subscription is the org's.
 - Any SigV4 key the member already holds keeps its own authority, and a
   `ListBuckets` over S3 never reaches a FilOne handler at all (§7).
+- `HeadBucket` against a bucket outside the scope answers 403 rather than 404 on
+  both measured backends, so a member who guesses an exact name confirms it
+  exists. Confirming a name somebody already suspects is a far smaller thing
+  than listing every name, and closing it would need the gateway to lie about
+  existence, so it stays.
 - Presigned URLs already issued stay valid until they expire, up to 7 days for
   downloads (`handlers/presign.ts:40`). That is the real revocation bound for
   object reads after a scope change, the same bound M1 records for role changes.
@@ -343,10 +348,8 @@ not change that, since the bucket list governs what the key may operate on and
 not what it may see. The Aurora `CreateBucket` result says nothing, because that
 region has no bucket management over S3 at all.
 
-One leak survives every remedy. `HeadBucket` on an out-of-scope bucket answers
-403 rather than 404 on both backends, so a caller who guesses an exact name
-learns that it exists. Confirming a name you already suspect is a much smaller
-thing than listing every name, and no option below closes it.
+Existence probing by name survives every option below, and is accepted rather
+than solved (§4).
 
 | Option                                        | What it gives                                                                                                                                               | What it costs                                                                                                                                                               |
 | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
