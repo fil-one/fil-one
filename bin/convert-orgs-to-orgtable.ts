@@ -87,6 +87,7 @@ import {
   buildConversionTransactItems,
   classifyOrg,
   CONVERTED_ROLE,
+  deletionGuardFailed,
   formatPlanReport,
   legacyMemberKey,
   OrgKeys,
@@ -144,6 +145,7 @@ const scan: ScanResult = {
   legacyMemberRows: 0,
   userProfiles: 0,
   unparsedRows: 0,
+  deletionRecords: 0,
   orgTableMemberRows: 0,
   orgTableInverseRows: 0,
   orgTableMetaRows: 0,
@@ -163,6 +165,8 @@ function orgState(orgId: string): OrgState {
     legacyMembers: [],
     orgTableMemberUserIds: [],
     hasMeta: false,
+    deleting: false,
+    hasDeletionRecord: false,
   };
   orgs.set(orgId, created);
   return created;
@@ -176,6 +180,7 @@ interface UserInfoRow {
   joinedAt: string;
   createdBy: string;
   createdAt: string;
+  deleting: boolean;
 }
 
 /** The OrgTable attributes the conversion projects. */
@@ -194,19 +199,22 @@ async function scanUserInfoTable(): Promise<void> {
   const items = scanAll(dynamo, {
     TableName: userInfoTable,
     FilterExpression:
-      '(begins_with(pk, :orgPrefix) AND (sk = :profile OR begins_with(sk, :memberPrefix)))' +
+      '(begins_with(pk, :orgPrefix) AND (sk = :profile OR sk = :deletion' +
+      ' OR begins_with(sk, :memberPrefix)))' +
       ' OR (begins_with(pk, :userPrefix) AND sk = :profile)',
     // No `email`: the oldest membership rows still carry one, but the project
     // stopped storing it deliberately (commit 4f02a70, "removing stored email
     // entirely to resolve issues when email is changed"), so it is not carried
     // into OrgTable and goes with the deleted row.
-    ProjectionExpression: 'pk, sk, #role, joinedAt, createdBy, createdAt',
-    ExpressionAttributeNames: { '#role': 'role' },
+    ProjectionExpression: 'pk, sk, #role, joinedAt, createdBy, createdAt, #deleting',
+    // `role` is a DynamoDB reserved word; `deleting` is aliased for the same reason.
+    ExpressionAttributeNames: { '#role': 'role', '#deleting': 'deleting' },
     ExpressionAttributeValues: {
       ':orgPrefix': { S: OrgKeys.orgPkPrefix() },
       ':userPrefix': { S: OrgKeys.userPkPrefix() },
       ':profile': { S: UserInfoKeys.profileSk() },
       ':memberPrefix': { S: OrgKeys.memberSkPrefix() },
+      ':deletion': { S: UserInfoKeys.deletionSk() },
     },
   });
 
@@ -238,10 +246,18 @@ function collectUserInfoRow(item: Record<string, AttributeValue>): void {
     scan.orgProfiles++;
     const createdBy = text(row.createdBy);
     const createdAt = text(row.createdAt);
-    orgState(orgId).profile = {
+    const state = orgState(orgId);
+    state.profile = {
       ...(createdBy ? { createdBy } : {}),
       ...(createdAt ? { createdAt } : {}),
     };
+    state.deleting = row.deleting === true;
+    return;
+  }
+
+  if (sk === UserInfoKeys.deletionSk()) {
+    scan.deletionRecords++;
+    orgState(orgId).hasDeletionRecord = true;
     return;
   }
 
@@ -342,18 +358,23 @@ async function hasOrgTableMembership(orgId: string, userId: string): Promise<boo
   return Item !== undefined;
 }
 
-type ApplyOutcome = 'converted' | 'raced' | 'conflict';
+type ApplyOutcome = 'converted' | 'raced' | 'conflict' | 'deleting';
 
 /**
  * Apply one org's conversion.
  *
- * A cancelled transaction is read for what it says. A failed condition is
- * either a previous run or a signup that beat us to the org: neither is an
- * error and neither may be overwritten, so the row is re-read consistently — if
- * the membership this plan would have written is there, the org is done and its
- * legacy row is cleaned up; if it is not, the org is left alone and reported.
- * Throttling and transaction conflicts are retried; anything else stops the run
- * rather than being filed as an org that needs a human.
+ * A cancelled transaction is read for what it says. The deletion guard leads the
+ * transaction, so a teardown that started after the scan reports at index 0 or 1
+ * and the org is skipped at write time, the same disposition the scan gives one
+ * that was already being deleted.
+ *
+ * Any other failed condition is either a previous run or a signup that beat us
+ * to the org: neither is an error and neither may be overwritten, so the row is
+ * re-read consistently — if the membership this plan would have written is
+ * there, the org is done and its legacy row is cleaned up; if it is not, the org
+ * is left alone and reported. Throttling and transaction conflicts are retried;
+ * anything else stops the run rather than being filed as an org that needs a
+ * human.
  */
 async function applyConversion(plan: ConvertPlan): Promise<ApplyOutcome> {
   const { orgId, userId } = plan;
@@ -361,9 +382,11 @@ async function applyConversion(plan: ConvertPlan): Promise<ApplyOutcome> {
 
   const conditionFailed = await transactWithRetry(
     dynamo,
-    buildConversionTransactItems(plan, orgTable),
+    buildConversionTransactItems(plan, { orgTable, userInfoTable }),
     row,
   );
+
+  if (conditionFailed && deletionGuardFailed(conditionFailed)) return 'deleting';
 
   if (conditionFailed && !(await hasOrgTableMembership(orgId, userId))) {
     console.log(
@@ -417,6 +440,8 @@ if (verify) {
 
   const outcomes = {
     converted: 0,
+    skippedDeleting: 0,
+    skippedDeletingAtWrite: 0,
     repaired: 0,
     alreadyConverted: 0,
     raced: 0,
@@ -441,6 +466,13 @@ if (verify) {
     for (const plan of plans) {
       if (plan.kind === 'anomaly') {
         outcomes.anomalies++;
+        continue;
+      }
+
+      if (plan.kind === 'deleting') {
+        outcomes.skippedDeleting++;
+        const prefix = execute ? '  ' : '  [dry-run] ';
+        console.log(`${prefix}SKIPPED ${OrgKeys.orgPk(plan.orgId)} being deleted — ${plan.detail}`);
         continue;
       }
 
@@ -485,6 +517,11 @@ if (verify) {
         console.log(
           `  ${plan.origin === 'member-row' ? 'CONVERTED' : 'REPAIRED'} ${describe(plan)}`,
         );
+      } else if (outcome === 'deleting') {
+        outcomes.skippedDeletingAtWrite++;
+        console.log(
+          `  SKIPPED ${OrgKeys.orgPk(plan.orgId)} being deleted — a teardown started after the scan`,
+        );
       } else if (outcome === 'raced') {
         outcomes.raced++;
         if (plan.legacyRow) outcomes.legacyDeleted++;
@@ -511,11 +548,17 @@ if (verify) {
     console.log(`Legacy MEMBER# rows deleted:                 ${outcomes.legacyDeleted}`);
     console.log(`Conflicts — transaction (manual review):     ${outcomes.transactionConflict}`);
     console.log(`Conflicts — stale legacy row kept:           ${outcomes.legacyDeleteConflict}`);
+    console.log(`Skipped (being deleted):                    ${outcomes.skippedDeleting}`);
+    console.log(`Skipped (deletion started after the scan):   ${outcomes.skippedDeletingAtWrite}`);
     console.log(`Anomalies (untouched):                       ${outcomes.anomalies}`);
     console.log('');
     console.log(
-      `Convert + Repair (${planned.writes}) = Converted + Repaired + Raced + transaction conflicts (${
-        outcomes.converted + outcomes.repaired + outcomes.raced + outcomes.transactionConflict
+      `Convert + Repair (${planned.writes}) = Converted + Repaired + Raced + write-time deletion skips + transaction conflicts (${
+        outcomes.converted +
+        outcomes.repaired +
+        outcomes.raced +
+        outcomes.skippedDeletingAtWrite +
+        outcomes.transactionConflict
       }).`,
     );
     console.log(

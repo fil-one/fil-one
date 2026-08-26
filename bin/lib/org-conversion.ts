@@ -7,8 +7,9 @@
 // the procedure is docs/OrgConversionRunbook.md.
 //
 // KEY BUILDERS ARE MIRRORED, NOT IMPORTED. The canonical definitions live in
-// packages/backend/src/lib/org-membership.ts (`OrgKeys`) and the role values in
-// packages/shared/src/api/org.ts (`OrgRole`). Scripts in bin/ run as
+// packages/backend/src/lib/org-membership.ts (`OrgKeys`), the role values in
+// packages/shared/src/api/org.ts (`OrgRole`), and the deletion guard in
+// packages/backend/src/lib/org-profile.ts (`orgNotDeletingCheck`). Scripts in bin/ run as
 // `node ./bin/<script>.ts` under Node's type stripping, which resolves neither
 // the backend's `./x.js` specifiers (no .js -> .ts fallback) nor the `OrgRole`
 // enum (not erasable syntax), so a bin script cannot import from either package
@@ -42,6 +43,8 @@ export const OrgKeys = {
  */
 export const UserInfoKeys = {
   profileSk: (): string => 'PROFILE',
+  /** The deletion receipt written by account deletion; see lib/deletion-record.ts. */
+  deletionSk: (): string => 'DELETION',
 } as const;
 
 /** Mirror of `OrgRole.Owner` — what every converted membership becomes. */
@@ -106,6 +109,13 @@ export interface LegacyMemberRow {
 export interface OrgState {
   orgId: string;
   profile?: OrgProfile;
+  /**
+   * `PROFILE.deleting` — the fence account deletion raises on every teardown
+   * pass, and never lowers.
+   */
+  deleting: boolean;
+  /** Whether `ORG#{orgId}/DELETION` exists: the org was deleted, or is being. */
+  hasDeletionRecord: boolean;
   legacyMembers: LegacyMemberRow[];
   /** Members this org already has in OrgTable: a converted org, or a post-deploy signup. */
   orgTableMemberUserIds: string[];
@@ -134,6 +144,22 @@ export type AnomalyReason =
 
 /** Where the membership being written came from. */
 export type ConversionOrigin = 'member-row' | 'org-profile';
+
+/**
+ * An org account deletion has taken over: its profile carries the `deleting`
+ * fence, or it has a `DELETION` record. The conversion leaves it alone.
+ *
+ * Converting one would race the teardown for the same rows, and writing a
+ * membership into an org being deleted resurrects the thing teardown exists to
+ * remove. The teardown resolves its members from both tables during this
+ * window, so leaving the legacy rows where they are costs nothing.
+ */
+export interface DeletingPlan {
+  kind: 'deleting';
+  orgId: string;
+  /** Which of the two signals was found, for the log line and the report. */
+  detail: string;
+}
 
 export interface ConvertPlan {
   kind: 'convert';
@@ -173,7 +199,7 @@ export interface AnomalyPlan {
   detail: string;
 }
 
-export type OrgPlan = ConvertPlan | AlreadyConvertedPlan | AnomalyPlan;
+export type OrgPlan = ConvertPlan | AlreadyConvertedPlan | AnomalyPlan | DeletingPlan;
 
 /**
  * What to do with one org.
@@ -184,6 +210,11 @@ export type OrgPlan = ConvertPlan | AlreadyConvertedPlan | AnomalyPlan;
  * run needs no checkpoint and no bookkeeping of its own.
  */
 export function classifyOrg(state: OrgState, knownUserIds: ReadonlySet<string>): OrgPlan {
+  // Ahead of everything else, anomalies included: an org being deleted needs no
+  // disposition and no conversion, whatever its rows say.
+  const deleting = deletionSignal(state);
+  if (deleting) return { kind: 'deleting', orgId: state.orgId, detail: deleting };
+
   if (state.legacyMembers.length > 1) {
     const userIds = state.legacyMembers.map((member) => member.userId).join(', ');
     return anomaly(
@@ -214,6 +245,15 @@ export function classifyOrg(state: OrgState, knownUserIds: ReadonlySet<string>):
   }
 
   return classifyWithoutMemberRow(state, knownUserIds);
+}
+
+function deletionSignal(state: OrgState): string | undefined {
+  if (state.deleting && state.hasDeletionRecord) {
+    return 'PROFILE.deleting=true with a DELETION record';
+  }
+  if (state.deleting) return 'PROFILE.deleting=true';
+  if (state.hasDeletionRecord) return 'a DELETION record exists';
+  return undefined;
 }
 
 function classifyWithMemberRow(
@@ -306,13 +346,71 @@ function anomaly(orgId: string, reason: AnomalyReason, detail: string): AnomalyP
 }
 
 /**
- * The OrgTable items one org's conversion writes, as a single transaction.
+ * The guard against converting an org account deletion has taken over, as the
+ * two transaction items that enforce it — a mirror of `orgNotDeletingCheck` in
+ * packages/backend/src/lib/org-profile.ts, widened by the DELETION record the
+ * same way `classifyOrg` reads both signals.
  *
- * Every item is conditional on its own absence, which is what makes the write
- * safe to repeat and safe to race: a re-run and a signup that happened after the
- * write path deployed both lose the condition rather than overwriting a live
- * membership. The transaction is all-or-nothing, so an org is never left with a
- * canonical row and no inverse item.
+ * The scan decides which orgs are being deleted; a deletion that starts between
+ * the scan and the write would go unnoticed without these, and converting an org
+ * mid-teardown puts back the membership teardown just removed.
+ *
+ * A ConditionCheck on a missing item reads every attribute as absent, so
+ * `attribute_not_exists(deleting)` alone would pass for an org that has no
+ * profile row: `attribute_exists(pk)` refuses that case instead.
+ *
+ * Items 0 and 1 of every conversion transaction, since CancellationReasons is
+ * positional and {@link deletionGuardFailed} reads those two indexes.
+ */
+export function orgNotDeletingChecks(
+  orgId: string,
+  userInfoTableName: string,
+): TransactWriteItem[] {
+  return [
+    {
+      ConditionCheck: {
+        TableName: userInfoTableName,
+        Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: UserInfoKeys.profileSk() } },
+        ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
+      },
+    },
+    {
+      ConditionCheck: {
+        TableName: userInfoTableName,
+        Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: UserInfoKeys.deletionSk() } },
+        ConditionExpression: 'attribute_not_exists(pk)',
+      },
+    },
+  ];
+}
+
+/** The items {@link orgNotDeletingChecks} contributes, at indexes 0 and 1. */
+export const DELETION_GUARD_ITEMS = 2;
+
+const CONDITION_FAILED_CANCELLATION = 'ConditionalCheckFailed';
+
+/**
+ * Whether a cancelled conversion was the deletion guard's doing, from the
+ * positional cancellation codes. A failure anywhere else is a transaction that
+ * lost for its own reasons and is reported as a conflict.
+ */
+export function deletionGuardFailed(codes: readonly string[]): boolean {
+  return codes
+    .slice(0, DELETION_GUARD_ITEMS)
+    .some((code) => code === CONDITION_FAILED_CANCELLATION);
+}
+
+/**
+ * The items one org's conversion writes, as a single transaction.
+ *
+ * The deletion guard leads, so an org whose teardown started after the scan
+ * takes the whole transaction down instead of being converted underneath it.
+ *
+ * Every written item is conditional on its own absence, which is what makes the
+ * write safe to repeat and safe to race: a re-run and a signup that happened
+ * after the write path deployed both lose the condition rather than overwriting
+ * a live membership. The transaction is all-or-nothing, so an org is never left
+ * with a canonical row and no inverse item.
  *
  * The META item is written only for an org that has none. A cancelled condition
  * cancels the whole transaction, so including a `attribute_not_exists` Put for
@@ -323,12 +421,14 @@ function anomaly(orgId: string, reason: AnomalyReason, detail: string): AnomalyP
  */
 export function buildConversionTransactItems(
   plan: ConvertPlan,
-  orgTableName: string,
+  tables: { orgTable: string; userInfoTable: string },
 ): TransactWriteItem[] {
   const { orgId, userId, joinedAt, metaExists } = plan;
+  const orgTableName = tables.orgTable;
   const joined: Record<string, AttributeValue> = { joinedAt: { S: joinedAt } };
 
   const items: TransactWriteItem[] = [
+    ...orgNotDeletingChecks(orgId, tables.userInfoTable),
     {
       Put: {
         TableName: orgTableName,
@@ -492,6 +592,8 @@ export interface ScanCounts {
   userProfiles: number;
   /** Matched rows whose key parsed as none of the three shapes above. */
   unparsedRows: number;
+  /** `ORG#{orgId}/DELETION` receipts — one per org deleted or being deleted. */
+  deletionRecords: number;
   orgTableMemberRows: number;
   /** `USER#{userId}/MEMBERSHIP#{orgId}` items — one per canonical membership row. */
   orgTableInverseRows: number;
@@ -512,6 +614,8 @@ export interface PlanCounts {
   convertFromMemberRow: number;
   repairFromProfile: number;
   alreadyConverted: number;
+  /** Orgs account deletion owns; the conversion skips them. */
+  deleting: number;
   legacyRowsPendingDelete: number;
   /** Conversions that also write a META counter — the rest already have one. */
   metaToWrite: number;
@@ -524,6 +628,7 @@ export function summarizePlans(plans: readonly OrgPlan[]): PlanCounts {
     convertFromMemberRow: 0,
     repairFromProfile: 0,
     alreadyConverted: 0,
+    deleting: 0,
     legacyRowsPendingDelete: 0,
     metaToWrite: 0,
     anomalies: 0,
@@ -537,6 +642,8 @@ export function summarizePlans(plans: readonly OrgPlan[]): PlanCounts {
     } else if (plan.kind === 'already-converted') {
       counts.alreadyConverted++;
       if (plan.legacyRowPending) counts.legacyRowsPendingDelete++;
+    } else if (plan.kind === 'deleting') {
+      counts.deleting++;
     } else {
       counts.anomalies++;
     }
@@ -555,7 +662,7 @@ export function formatPlanReport(scan: ScanCounts, plans: readonly OrgPlan[]): s
   // Two membership items each, plus a META counter for every org that has none.
   const items = writes * 2 + counts.metaToWrite;
   const lines = [
-    `Matched in UserInfoTable: ${scan.userInfoRows} rows — ${scan.orgProfiles} org profiles, ${scan.legacyMemberRows} legacy MEMBER# rows, ${scan.userProfiles} user profiles`,
+    `Matched in UserInfoTable: ${scan.userInfoRows} rows — ${scan.orgProfiles} org profiles, ${scan.legacyMemberRows} legacy MEMBER# rows, ${scan.userProfiles} user profiles, ${scan.deletionRecords} DELETION records`,
     ...(scan.unparsedRows > 0 ? [`  Unrecognized key shapes, ignored: ${scan.unparsedRows}`] : []),
     `Matched in OrgTable: ${scan.orgTableMemberRows} MEMBER# rows, ${scan.orgTableInverseRows} MEMBERSHIP# inverse items, ${scan.orgTableMetaRows} META rows`,
     '',
@@ -565,6 +672,7 @@ export function formatPlanReport(scan: ScanCounts, plans: readonly OrgPlan[]): s
       ['  Repair (no membership row; from PROFILE.createdBy)', counts.repairFromProfile],
       ['  Already converted (skipped)', counts.alreadyConverted],
       ['    of which a legacy MEMBER# row remains to delete', counts.legacyRowsPendingDelete],
+      ['  Being deleted (skipped)', counts.deleting],
       ['  Anomalies (manual disposition)', counts.anomalies],
     ]),
     '',

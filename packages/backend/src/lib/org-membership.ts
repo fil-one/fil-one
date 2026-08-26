@@ -37,6 +37,19 @@ export const OrgKeys = {
   orgPk: (orgId: string): string => `ORG#${orgId}`,
   memberSk: (userId: string): string => `MEMBER#${userId}`,
   memberSkPrefix: (): string => 'MEMBER#',
+  /**
+   * Inverse of {@link memberSk}. User ids are UUIDs and contain no `#`, so the
+   * split is unambiguous; returns undefined for any other shape, `MEMBER#` with
+   * nothing after it included — an empty user id addresses `USER#`, a partition
+   * belonging to nobody. Every reader of this key shape parses it here so the
+   * census and the teardown cannot disagree about what a member row is.
+   */
+  parseMemberSk: (sk: string | undefined): string | undefined => {
+    const prefix = 'MEMBER#';
+    if (!sk?.startsWith(prefix)) return undefined;
+    const userId = sk.slice(prefix.length);
+    return userId && !userId.includes('#') ? userId : undefined;
+  },
   orgMetaSk: (): string => 'META',
   userPk: (userId: string): string => `USER#${userId}`,
   membershipSk: (orgId: string): string => `MEMBERSHIP#${orgId}`,
@@ -167,6 +180,21 @@ export async function resolveMembership(
 const MAX_MEMBERSHIPS = 100;
 
 /**
+ * The result of one membership walk: the rows that decoded, and how many did
+ * not.
+ *
+ * A caller that only needs somewhere to send the user reads `memberships` and
+ * ignores the rest. A caller whose decision turns on the list being complete —
+ * account deletion's census, which ends an account when it reads no other
+ * membership — reads `undecodable` and fails closed on anything above zero.
+ */
+export interface MembershipListing {
+  memberships: OrgMembershipRecord[];
+  /** Inverse items this walk could not decode into a membership. */
+  undecodable: number;
+}
+
+/**
  * Every org the user belongs to, from the inverse items. One Query, no index,
  * paged because a Query returns at most 1 MB per call.
  *
@@ -174,10 +202,12 @@ const MAX_MEMBERSHIPS = 100;
  * or its role is not one of the four, rather than surfaced as an org with an
  * empty id or a role nothing can authorize. Both drops are logged with the
  * offending value: the only way one gets written is a bad write or a conversion
- * that missed a value, and a silent drop hides exactly that.
+ * that missed a value, and a silent drop hides exactly that. The count of them
+ * is reported alongside the list, for the callers a dropped row would mislead.
  */
-export async function listMemberships(userId: string): Promise<OrgMembershipRecord[]> {
+export async function listMembershipRows(userId: string): Promise<MembershipListing> {
   const memberships: OrgMembershipRecord[] = [];
+  let undecodable = 0;
   let startKey: Record<string, AttributeValue> | undefined;
 
   do {
@@ -199,6 +229,7 @@ export async function listMemberships(userId: string): Promise<OrgMembershipReco
     for (const item of Items ?? []) {
       const record = toMembershipRecord(item, userId);
       if (record) memberships.push(record);
+      else undecodable++;
     }
 
     if (memberships.length >= MAX_MEMBERSHIPS) {
@@ -206,13 +237,21 @@ export async function listMemberships(userId: string): Promise<OrgMembershipReco
         userId,
         cap: MAX_MEMBERSHIPS,
       });
-      return memberships.slice(0, MAX_MEMBERSHIPS);
+      return { memberships: memberships.slice(0, MAX_MEMBERSHIPS), undecodable };
     }
 
     startKey = LastEvaluatedKey;
   } while (startKey);
 
-  return memberships;
+  return { memberships, undecodable };
+}
+
+/**
+ * The decoded memberships alone, for every caller that acts on the orgs it can
+ * name and has nothing to decide about the ones it cannot.
+ */
+export async function listMemberships(userId: string): Promise<OrgMembershipRecord[]> {
+  return (await listMembershipRows(userId)).memberships;
 }
 
 function toMembershipRecord(

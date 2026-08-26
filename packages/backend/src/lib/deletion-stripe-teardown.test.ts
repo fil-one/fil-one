@@ -49,7 +49,9 @@ import { tearDownStripe } from './deletion-stripe-teardown.js';
 
 const ORG = 'org-1';
 const CUSTOMER = 'cus_1';
-const MEMBERS = [{ userId: 'user-1', sub: 'auth0|one', stripeCustomerId: CUSTOMER }];
+const MEMBERS = [
+  { userId: 'user-1', sub: 'auth0|one', stripeCustomerId: CUSTOMER, deleteIdentity: true },
+];
 
 describe('tearDownStripe', () => {
   beforeEach(() => {
@@ -70,7 +72,7 @@ describe('tearDownStripe', () => {
   });
 
   it('does nothing for a member with no Stripe customer', async () => {
-    await tearDownStripe(ORG, [{ userId: 'user-1', sub: 'auth0|one' }]);
+    await tearDownStripe(ORG, [{ userId: 'user-1', sub: 'auth0|one', deleteIdentity: true }]);
 
     expect(mockCustomersDel).not.toHaveBeenCalled();
     expect(mockSubscriptionsList).not.toHaveBeenCalled();
