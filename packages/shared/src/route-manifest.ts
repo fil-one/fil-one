@@ -63,7 +63,7 @@ export interface RouteManifestEntry {
   ragAllowlisted?: boolean;
 }
 
-export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
+const MANIFEST = [
   // ── Buckets ──────────────────────────────────────────────────────
   {
     method: 'GET',
@@ -411,4 +411,21 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
 
   // ── Webhooks ─────────────────────────────────────────────────────
   { method: 'POST', path: '/api/stripe/webhook', handler: 'stripe-webhook', category: 'webhook' },
-];
+] as const satisfies readonly RouteManifestEntry[];
+
+/**
+ * The handler names the manifest actually declares. Infrastructure keyed by
+ * handler (`ROUTE_INFRA_CONFIGS` in sst.config.ts) types its keys against this
+ * union, so a key naming no route is a compile error instead of a route that
+ * silently deploys without its IAM grants and environment.
+ */
+export type RouteHandler = (typeof MANIFEST)[number]['handler'];
+
+/**
+ * The manifest as an ordinary array of entries. Widened on purpose: consumers
+ * read optional fields (`requires`, `cookieRequires`, `ragAllowlisted`) off
+ * arbitrary elements, which the union of exact literal types does not permit.
+ * The handler name is the one literal worth keeping, so it survives the
+ * widening and anything keyed by handler can be checked against it.
+ */
+export const ROUTE_MANIFEST: readonly (RouteManifestEntry & { handler: RouteHandler })[] = MANIFEST;

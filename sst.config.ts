@@ -851,14 +851,23 @@ export default $config({
 
     type RouteInfraConfig = Omit<AddRouteProps, 'method' | 'routePath' | 'handler'>;
 
+    // The manifest's handler names, as a union. A type-only import, so it is
+    // erased and the value import above stays the only thing in the bundle.
+    type RouteHandler = import('./packages/shared/src/route-manifest.js').RouteHandler;
+
     // What a route needs beyond the defaults. A handler absent from this record
     // gets them: everything in allResources linked, the shared environment, a
     // 10-second timeout, no extra IAM. That is the whole configuration of a
     // DynamoDB-only route, which most of the account and key routes are.
     //
+    // Keys are compile-checked against the manifest, so a key naming no route
+    // fails the build rather than silently dropping that route's IAM grants and
+    // environment. Partial because the map lists only the routes that need
+    // something beyond the defaults.
+    //
     // Declared here rather than beside each route because the entries reference
     // the queues, tables and workers above, all of which have to exist first.
-    const ROUTE_INFRA_CONFIGS: Record<string, RouteInfraConfig> = {
+    const ROUTE_INFRA_CONFIGS: Partial<Record<RouteHandler, RouteInfraConfig>> = {
       // ── Buckets and objects ────────────────────────────────────────
       'list-buckets': {
         extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL, ...fthEnv, ...forgeEnv },
@@ -1112,19 +1121,6 @@ export default $config({
         ],
       },
     };
-
-    const manifestHandlers = new Set(ROUTE_MANIFEST.map((route) => route.handler));
-    const strayHandlers = Object.keys(ROUTE_INFRA_CONFIGS).filter(
-      (handler) => !manifestHandlers.has(handler),
-    );
-    if (strayHandlers.length > 0) {
-      // A key naming no route silently drops that route's IAM grants and
-      // environment, which fails at runtime rather than at deploy time. Fail here
-      // instead.
-      throw new Error(
-        `ROUTE_INFRA_CONFIGS names handlers with no route manifest entry: ${strayHandlers.join(', ')}`,
-      );
-    }
 
     for (const route of ROUTE_MANIFEST) {
       addRoute({
