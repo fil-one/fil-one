@@ -123,7 +123,7 @@ describe('BucketDetailPage — the API keys tab', () => {
   it('shows the tab and its count to a role that may list keys', async () => {
     renderPage(OrgRole.Owner);
 
-    expect(await screen.findByTestId('bucket-keys-tab')).toHaveTextContent('API Keys (1)');
+    expect(await screen.findByTestId('bucket-keys-tab')).toHaveTextContent('API Keys1');
   });
 
   it('is absent for a role without keys.manage_own, and no request is made', async () => {
@@ -159,7 +159,7 @@ describe('BucketDetailPage — the API keys tab', () => {
     // mounted page is a live observer, so the key metadata and the count would
     // stay in the tab until a reload.
     const { client } = renderPage(OrgRole.Owner);
-    expect(await screen.findByTestId('bucket-keys-tab')).toHaveTextContent('API Keys (1)');
+    expect(await screen.findByTestId('bucket-keys-tab')).toHaveTextContent('API Keys1');
 
     // What a /me refetch after a demotion does.
     act(() => seedPermissions(client, OrgRole.ReadOnly));

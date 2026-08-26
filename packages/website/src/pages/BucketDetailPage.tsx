@@ -398,15 +398,18 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
 
       <Tabs>
         <TabList>
-          <Tab testId="bucket-objects-tab">
-            Objects ({displayObjectCount(analyticsData, versions, isTruncated).toLocaleString()})
+          <Tab
+            testId="bucket-objects-tab"
+            count={displayObjectCount(analyticsData, versions, isTruncated)}
+          >
+            Objects
           </Tab>
           {/* Absent, not empty, for a role that cannot list keys: an "API Keys
               (0)" tab reads as an org with no keys rather than a view this
               caller does not get. */}
           {mayListKeys && (
-            <Tab testId="bucket-keys-tab">
-              API Keys{!accessKeysLoading && ` (${accessKeys.length.toLocaleString()})`}
+            <Tab testId="bucket-keys-tab" count={accessKeysLoading ? undefined : accessKeys.length}>
+              API Keys
             </Tab>
           )}
         </TabList>

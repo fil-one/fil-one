@@ -548,8 +548,8 @@ export function ApiKeysPage() {
     >
       <Tabs>
         <TabList>
-          <Tab testId="api-keys-tab">
-            API keys {!isPending && keys.length > 0 && `(${keys.length})`}
+          <Tab testId="api-keys-tab" count={isPending ? undefined : keys.length}>
+            API keys
           </Tab>
           <Tab testId="connection-details-tab">Connection details</Tab>
         </TabList>

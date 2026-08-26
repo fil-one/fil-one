@@ -56,12 +56,61 @@ export const WithDefaultIndex: Story = {
   ),
 };
 
+export const WithCounts: Story = {
+  render: () => (
+    <Tabs>
+      <TabList>
+        <TabItem count={12}>Members</TabItem>
+        <TabItem count={0}>Invitations</TabItem>
+        <TabItem count={148213}>Objects</TabItem>
+        <TabItem>Billing</TabItem>
+      </TabList>
+      <TabPanels>
+        <TabPanel>
+          <p className="py-4">A count sits one step back from its label.</p>
+        </TabPanel>
+        <TabPanel>
+          <p className="py-4">A genuine zero shows, because nought is an answer.</p>
+        </TabPanel>
+        <TabPanel>
+          <p className="py-4">Large counts are grouped: 148,213.</p>
+        </TabPanel>
+        <TabPanel>
+          <p className="py-4">A tab with nothing to count carries no number.</p>
+        </TabPanel>
+      </TabPanels>
+    </Tabs>
+  ),
+};
+
+/** A count is absent until its list answers, so no tab flashes a nought. */
+export const CountsLoading: Story = {
+  render: () => (
+    <Tabs>
+      <TabList>
+        <TabItem count={undefined}>Members</TabItem>
+        <TabItem count={undefined}>Invitations</TabItem>
+      </TabList>
+      <TabPanels>
+        <TabPanel>
+          <p className="py-4">Members are still loading.</p>
+        </TabPanel>
+        <TabPanel>
+          <p className="py-4">Invitations are still loading.</p>
+        </TabPanel>
+      </TabPanels>
+    </Tabs>
+  ),
+};
+
 export const WithDisabledTab: Story = {
   render: () => (
     <Tabs>
       <TabList>
-        <TabItem>Active</TabItem>
-        <TabItem disabled>Disabled</TabItem>
+        <TabItem count={4}>Active</TabItem>
+        <TabItem disabled count={7}>
+          Disabled
+        </TabItem>
         <TabItem>Also active</TabItem>
       </TabList>
       <TabPanels>
