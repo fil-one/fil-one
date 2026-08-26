@@ -56,6 +56,21 @@ export default defineConfig({
       },
     },
     {
+      // CloudFront Functions run a non-Node JS 2.0 runtime: no modules, no
+      // `let`/`const` guarantees worth relying on, and the entry point is a
+      // top-level `handler` that nothing in this repo calls.
+      files: ['packages/cloudfront-functions/src/**/*.js'],
+      env: {
+        es2020: true,
+      },
+      rules: {
+        'no-var': 'off',
+        'no-unused-vars': 'off',
+        'typescript/no-explicit-any': 'off',
+        'typescript/no-floating-promises': 'off',
+      },
+    },
+    {
       files: ['**/*.test.ts', '**/*.test.tsx', '**/*.spec.ts', '**/*.spec.tsx'],
       rules: {
         'max-lines': 'off',

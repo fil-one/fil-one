@@ -27,22 +27,53 @@ behavior as a viewer-request trigger. `'/*': { bucket }` is the default behavior
 `/login`, and `/logout` are ordered behaviors, so CloudFront's behavior matcher does the
 discrimination and API responses reach the browser untouched by construction.
 
-The function rewrites the URI to `/index.html` only for a `GET` whose path sits outside the API,
-auth, `/assets`, `/static`, and `/.well-known` namespaces, whose `Accept` header lists `text/html`
-with a quality above zero, and whose Fetch Metadata, when present, says `document` plus `navigate`.
-Everything else passes through, including requests that supply a malformed HTML media range. Only
-`request.uri` changes, so the query string survives, and the rewrite happens before the cache key is
-computed, so a navigation and an XHR to the same path cannot share a cache entry.
+The function rewrites the URI to `/index.html` for a `GET` whose path sits outside the `/assets`,
+`/static`, and `/.well-known` namespaces and whose `Sec-Fetch-Dest`, when the client sends one,
+is `document`. Everything else passes through. Only `request.uri` changes, so the query string
+survives, and the rewrite happens before the cache key is computed, so a navigation and an XHR to
+the same path cannot share a cache entry.
+
+**Fetch Metadata is the only classifier.** An earlier draft also parsed `Accept` for a `text/html`
+range with a non-zero quality value. That meant a q-value grammar, a token grammar for media-type
+parameters, and about forty test cases at the edge, all to approximate a question `Sec-Fetch-Dest`
+answers directly. Browsers have sent Fetch Metadata since Chrome 80, Firefox 90, and Safari 16.4,
+and a request that declares `script`, `style`, `image`, `font`, `iframe`, or `empty` is not a
+navigation whatever it puts in `Accept`. A client that sends no Fetch Metadata at all — a crawler,
+a link unfurler, `curl`, the Playwright request context — gets the shell, which is what makes a
+deep link shareable.
+
+**The ordered behaviors do the API and auth exclusion.** The function carries no `/api`, `/login`,
+or `/logout` guard. `/api/*` is an ordered behavior on the API origin and covers every route in
+the manifest, including `/api/auth/callback`; `/login` and `/logout` are exact-match ordered
+behaviors and are the only auth paths the manifest serves. Those requests never reach the website
+origin, so a guard here would be a second copy of a rule CloudFront already enforces, and a copy
+that drifts. The leftovers — a bare `/api`, or a `/login/...` subpath no route claims — fall to
+the default behavior and become console routes, where the client router answers.
+
+`args.defaultRootObject = 'index.html'` overlaps with the function, which maps `/` to
+`/index.html` as well. Both are kept: `defaultRootObject` is what still serves the root if the
+function association is ever removed.
 
 A suffixed path is treated as a concrete object only at the top level, because every object in the
 bucket is either `/index.html`, one of the three files in `packages/website/public`, or under
 `/assets`. Deeper paths stay client routes even when a segment carries a dot: S3 accepts bucket
 names such as `my.bucket.com`, which the console links to at `/buckets/my.bucket.com`.
 
-The deployed source lives in `packages/shared/src/spa-rewrite.ts` as a single string constant
-because CloudFront Functions cannot import modules. `packages/shared/src/spa-rewrite.test.ts`
-evaluates that exact string in a VM, so the tests exercise the code that ships rather than a second
-model of it.
+## Where the code lives
+
+`packages/cloudfront-functions/src/spa-rewrite.js` is the deployed source, written in the
+CloudFront JavaScript 2.0 dialect: no imports or exports, `var` declarations, and a top-level
+`function handler(event)`. It is a `.js` file in its own package rather than a string constant in
+`@filone/shared` so that an editor, the formatter, and the linter all read it as the code it is.
+`sst.config.ts` reads the file at synth time and passes its contents as the function body;
+`packages/cloudfront-functions/src/spa-rewrite.test.ts` reads the same file and evaluates it in a
+`node:vm` context, so the tests exercise the bytes that ship rather than a second model of them.
+One of those tests walks `packages/website/public` (and `packages/website/dist` after a build) and
+asserts every object in the bucket passes through the classifier untouched.
+
+The path is resolved against the working directory, matching the `distPath` lookup below it, not
+against `import.meta.url`: SST bundles `sst.config.ts` into `.sst/platform/` before running it, so
+a module-relative URL would resolve inside the build directory.
 
 ## Alternatives considered
 
@@ -82,12 +113,13 @@ with the `cdn` transform, which assigns the default behavior's `functionAssociat
 - A missing object under `/assets` or at the top level now surfaces S3's `AccessDenied` 403 instead
   of the previous HTML 200. A follow-up can add a distribution-scoped `s3:ListBucket` grant and
   turn those responses into 404s after AWS-authenticated policy verification.
-- A client that does not announce HTML, such as `curl` with its default `Accept: */*`, now receives
-  S3's 403 for a console route instead of the shell. Browsers, crawlers, and link unfurlers send an
-  explicit `text/html` range, and `tests/e2e/smoke/routing.spec.ts` sets one for the same reason.
-- Static files kept in a subdirectory of `packages/website/public` are still served to `img`,
-  `script`, and `style` requests, but typing one into the address bar returns the console shell.
-  Root-level files and `/assets` do not have that ambiguity.
+- `HEAD` is not rewritten, so a link checker that HEADs a console deep link gets S3's 403 rather
+  than a 200 with no body. Browsers navigate with `GET`.
+- Static files in a subdirectory of `packages/website/public` would be served to `img`, `script`,
+  and `style` requests but return the console shell when typed into the address bar. The
+  cloudfront-functions test walks `public/` and `dist/` and asserts every object path passes
+  through as a document, so adding such a file fails the build rather than shipping the ambiguity.
+  Root-level files and `/assets` are unambiguous today.
 - The transform assigns the default behavior's `functionAssociations` outright. Anything that makes
   SST populate that field for the `/*` route, such as a route-level `rewrite`, needs to be
   reconciled with this association.

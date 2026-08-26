@@ -286,7 +286,6 @@ export default $config({
       PROD_CONSOLE_ALIAS_HOSTS,
       PROD_CONSOLE_HOST,
       S3Region,
-      SPA_REWRITE_FUNCTION_CODE,
       Stage,
       SUPPORTED_COMPLETION_MODELS,
     } = await import('@filone/shared');
@@ -429,10 +428,20 @@ export default $config({
     // API 403s used to reach the browser with an HTML body. The function fails
     // closed for anything that is not a document navigation; the rationale is in
     // docs/architectural-decisions/2026-08-cloudfront-spa-fallback.md.
+    //
+    // The source is read verbatim at synth time so the deployed bytes are the
+    // ones packages/cloudfront-functions tests. It is resolved against the
+    // working directory rather than import.meta.url because SST bundles this
+    // config into .sst/platform before running it, the same reason distPath
+    // below uses path.resolve.
+    const spaRewriteCode = require('fs').readFileSync(
+      require('path').resolve('packages/cloudfront-functions/src/spa-rewrite.js'),
+      'utf8',
+    ) as string;
     const spaRewriteFunction = new aws.cloudfront.Function('WebsiteSpaRewrite', {
-      comment: 'Rewrite extensionless website navigations to /index.html',
+      comment: 'Rewrite website document navigations to /index.html',
       runtime: 'cloudfront-js-2.0',
-      code: SPA_REWRITE_FUNCTION_CODE,
+      code: spaRewriteCode,
       publish: true,
     });
 
@@ -466,6 +475,9 @@ export default $config({
       },
       transform: {
         cdn: (args) => {
+          // Also covered by the SPA rewrite function, which maps `/` to
+          // /index.html as well. Keep both: defaultRootObject is what serves
+          // the root if the function association is ever removed.
           args.defaultRootObject = 'index.html';
           // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Pulumi Input wrapper; value is a plain object at transform time
           const defaultBehavior = args.defaultCacheBehavior as any;
