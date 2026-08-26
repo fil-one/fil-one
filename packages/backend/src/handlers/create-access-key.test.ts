@@ -6,6 +6,7 @@ import {
   PutItemCommand,
   QueryCommand,
 } from '@aws-sdk/client-dynamodb';
+import { ApiErrorCode, OrgRole } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.js';
 
 // ---------------------------------------------------------------------------
@@ -38,9 +39,20 @@ process.env.FILONE_STAGE = 'test';
 
 const ddbMock = mockClient(DynamoDBClient);
 
+// Importing the handler module builds its Middy chain, so the middleware that
+// chain installs is stubbed to a pass-through. The tests below call
+// `baseHandler` directly.
+vi.mock('../middleware/csrf.js', () => ({
+  csrfMiddleware: () => ({ before: () => undefined }),
+}));
+vi.mock('../middleware/subscription-guard.js', () => ({
+  AccessLevel: { Read: 'read', Write: 'write' },
+  subscriptionGuardMiddleware: () => ({ before: () => undefined }),
+}));
+
 import { baseHandler } from './create-access-key.js';
 import { AccessKeyAlreadyExistsError } from '../lib/errors.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -614,6 +626,127 @@ describe('create-access-key baseHandler', () => {
       const result = await baseHandler(event);
 
       expect(result.statusCode).toBe(400);
+      expect(mockIssueAccessKey).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── The creator-authority cap ───────────────────────────────────────
+
+  describe('the key cannot carry more than its creator', () => {
+    // A SigV4 key is authority that leaves the console and is redeemed over S3,
+    // where no role check runs until M3. Without this cap the console matrix is
+    // decoration: a Member denied bucket deletion in the console would mint a
+    // key and delete buckets with it.
+    function keyRequest(
+      role: OrgRole,
+      body: { permissions: string[]; granularPermissions?: string[]; region?: string },
+    ) {
+      return buildEvent({
+        body: JSON.stringify({
+          keyName: 'My Key',
+          bucketScope: 'all',
+          region: body.region ?? 'us-east-1',
+          permissions: body.permissions,
+          ...(body.granularPermissions ? { granularPermissions: body.granularPermissions } : {}),
+        }),
+        userInfo: {
+          ...USER_INFO,
+          membership: membershipFor(USER_INFO.orgId, USER_INFO.userId, role),
+        },
+      });
+    }
+
+    beforeEach(() => {
+      vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      ddbMock.on(PutItemCommand).resolves({});
+      mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+    });
+
+    it('lets a Member mint the four object permissions', async () => {
+      const result = await baseHandler(
+        keyRequest(OrgRole.Member, { permissions: ['read', 'list', 'write', 'delete'] }),
+      );
+
+      expect(result.statusCode).toBe(201);
+    });
+
+    it('lets a Member mint the bucket capabilities a Member already holds', async () => {
+      // Creating a bucket is `buckets.create`, which a Member holds, and
+      // reading a bucket's configuration is `buckets.read`. Refusing these
+      // would 403 a Member who submitted the form untouched.
+      const result = await baseHandler(
+        keyRequest(OrgRole.Member, {
+          permissions: ['read', 'CreateBucket', 'GetBucketVersioning'],
+        }),
+      );
+
+      expect(result.statusCode).toBe(201);
+    });
+
+    it('refuses a Member bucket deletion, naming it', async () => {
+      const result = await baseHandler(
+        keyRequest(OrgRole.Member, { permissions: ['read', 'DeleteBucket', 'CreateBucket'] }),
+      );
+
+      expect(result.statusCode).toBe(403);
+      expect(JSON.parse(result.body!)).toStrictEqual({
+        message: 'A key cannot carry more than you do. Your role does not permit: DeleteBucket.',
+        code: ApiErrorCode.FORBIDDEN_ROLE,
+      });
+      expect(mockIssueAccessKey).not.toHaveBeenCalled();
+    });
+
+    it('lets a Member mint the granulars that only narrow what they hold', async () => {
+      const result = await baseHandler(
+        keyRequest(OrgRole.Member, {
+          permissions: ['read', 'delete'],
+          granularPermissions: ['GetObjectRetention', 'DeleteObjectVersion'],
+        }),
+      );
+
+      expect(result.statusCode).toBe(201);
+    });
+
+    it('refuses everyone below Owner the mutating retention granulars', async () => {
+      for (const role of [OrgRole.Admin, OrgRole.Member]) {
+        const result = await baseHandler(
+          keyRequest(role, {
+            permissions: ['write'],
+            granularPermissions: ['PutObjectRetention'],
+          }),
+        );
+
+        expect(result.statusCode).toBe(403);
+        expect(JSON.parse(result.body!).message).toContain('PutObjectRetention');
+      }
+    });
+
+    it('lets an Owner mint them, holding privileged.grant', async () => {
+      const result = await baseHandler(
+        keyRequest(OrgRole.Owner, {
+          permissions: ['write'],
+          granularPermissions: ['PutObjectRetention', 'PutObjectLegalHold'],
+        }),
+      );
+
+      expect(result.statusCode).toBe(201);
+    });
+
+    it('lets an Admin mint the bucket-management permissions', async () => {
+      const result = await baseHandler(
+        keyRequest(OrgRole.Admin, { permissions: ['read', 'DeleteBucket'] }),
+      );
+
+      expect(result.statusCode).toBe(201);
+    });
+
+    it('checks before minting anything at the provider', async () => {
+      await baseHandler(keyRequest(OrgRole.Member, { permissions: ['DeleteBucket'] }));
+
+      // The provider call is the irreversible half: a key minted there and
+      // refused here would be a live credential with no record.
+      expect(mockEnsureTenantReady).not.toHaveBeenCalled();
       expect(mockIssueAccessKey).not.toHaveBeenCalled();
     });
   });

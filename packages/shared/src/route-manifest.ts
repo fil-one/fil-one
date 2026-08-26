@@ -30,11 +30,13 @@ export type RouteCategory =
  *
  * A {@link Permission} is checked against the caller's role before the handler
  * runs. `'self'` marks routes that only touch the caller's own account —
- * profile, preferences, MFA — and carries no org gate at all: an authenticated
- * session is the whole requirement, because gating your own password on a role
- * would lock a ReadOnly member out of their own account. `'in-handler'` marks
- * routes whose permission depends on the request body; the chain gates them on
- * membership and the handler checks the permission against this same registry.
+ * profile, preferences, MFA — and carries no org gate at all, not even a
+ * membership check: an authenticated session is the whole requirement, because
+ * gating your own password on a role would lock a ReadOnly member out of their
+ * own account, and gating it on membership would lock out a user whose
+ * membership row is what went wrong. `'in-handler'` marks routes whose
+ * permission depends on the request body; the chain gates them on membership
+ * and the handler checks the permission against this same registry.
  */
 export type RouteRequirement = Permission | 'self' | 'in-handler';
 
@@ -47,6 +49,13 @@ export interface RouteManifestEntry {
   category: RouteCategory;
   /** Set on `authenticated` routes, absent on every other category. */
   requires?: RouteRequirement;
+  /**
+   * Set on a route that carries a declared permission AND a second, body-
+   * dependent restriction the chain cannot express. `requires` still says what
+   * reaching the route costs; this says the handler narrows it further, so a
+   * reader of the manifest is not told the whole gate is in the chain.
+   */
+  capsInHandler?: boolean;
   /**
    * Set on `bearer` routes, which accept two kinds of caller. The bearer token
    * carries its own authority; a caller arriving with a cookie session instead
@@ -165,19 +174,20 @@ const MANIFEST = [
   },
 
   // ── Keys ─────────────────────────────────────────────────────────
-  // Listing and revoking are `keys.manage_all`, because no handler can yet tell
-  // whose key it is holding: keys gain `createdBy` in this milestone, and until
-  // a creator predicate exists, `keys.manage_own` would name a narrowing nobody
-  // performs and hand a Member the whole org's key inventory. Relaxing list and
-  // delete to `keys.manage_own` belongs to the change that adds that predicate.
+  // Listing and revoking are `keys.manage_own`: every role that touches keys at
+  // all holds it, and the handler narrows what the caller sees to the keys they
+  // created. `keys.manage_all` is what lifts that narrowing, so an Admin sees
+  // the org's whole inventory and a Member sees their own. Rows written before
+  // `createdBy` existed name no creator and are therefore visible only under
+  // `keys.manage_all` — nobody can claim them.
   {
     method: 'GET',
     path: '/api/access-keys',
     handler: 'list-access-keys',
     category: 'authenticated',
-    requires: 'keys.manage_all',
+    requires: 'keys.manage_own',
   },
-  // `keys.create` is the entry gate, and the creator-authority cap runs in the
+  // Minting a key is `keys.create`. The creator-authority cap runs in the
   // handler on top of it: the requested key permissions are intersected with the
   // creator's own, so a key can never carry more than the member minting it.
   {
@@ -185,21 +195,22 @@ const MANIFEST = [
     path: '/api/access-keys',
     handler: 'create-access-key',
     category: 'authenticated',
-    requires: 'in-handler',
+    requires: 'keys.create',
+    capsInHandler: true,
   },
   {
     method: 'DELETE',
     path: '/api/access-keys/{keyId}',
     handler: 'delete-access-key',
     category: 'authenticated',
-    requires: 'keys.manage_all',
+    requires: 'keys.manage_own',
   },
   {
     method: 'GET',
     path: '/api/rag-api-keys',
     handler: 'list-rag-api-keys',
     category: 'authenticated',
-    requires: 'keys.manage_all',
+    requires: 'keys.manage_own',
     ragAllowlisted: true,
   },
   // A RAG key carries no permission vocabulary to intersect — it queries the
@@ -217,7 +228,7 @@ const MANIFEST = [
     path: '/api/rag-api-keys/{keyId}',
     handler: 'delete-rag-api-key',
     category: 'authenticated',
-    requires: 'keys.manage_all',
+    requires: 'keys.manage_own',
     ragAllowlisted: true,
   },
 
@@ -234,6 +245,17 @@ const MANIFEST = [
     ragAllowlisted: true,
   },
 
+  // ── Organization ─────────────────────────────────────────────────
+  // Rename only. Ownership transfer and deletion carry their own permissions
+  // and get their own routes when they ship.
+  {
+    method: 'PATCH',
+    path: '/api/org',
+    handler: 'update-org',
+    category: 'authenticated',
+    requires: 'org.rename',
+  },
+
   // ── Auth ─────────────────────────────────────────────────────────
   { method: 'GET', path: '/login', handler: 'auth-login', category: 'public' },
   { method: 'GET', path: '/api/auth/callback', handler: 'auth-callback', category: 'public' },
@@ -247,14 +269,15 @@ const MANIFEST = [
     category: 'authenticated',
     requires: 'self',
   },
-  // Self-service profile fields, except that the same body can rename the org —
-  // that field needs `org.rename`, which the handler checks when it is present.
+  // Self-service profile fields, and only those: renaming the org left this
+  // body for PATCH /api/org, because a route mixing a field every member may
+  // change with one most may not has no single requirement to declare.
   {
     method: 'PATCH',
     path: '/api/me/profile',
     handler: 'update-profile',
     category: 'authenticated',
-    requires: 'in-handler',
+    requires: 'self',
   },
   {
     method: 'POST',
@@ -361,9 +384,10 @@ const MANIFEST = [
     requires: 'buckets.read',
   },
   // A synthesized feed of bucket, object, and key events — not the audit log.
-  // The route requirement is only half the gate: a feed carrying key-lifecycle
-  // events has to drop them for a caller holding no `keys.*` permission, or it
-  // hands a ReadOnly member the org's key inventory.
+  // The route requirement is only half the gate: the key-lifecycle entries it
+  // carries follow the same scope the keys pages do, so `keys.manage_all` sees
+  // the org's, `keys.manage_own` sees the caller's own, and a caller with
+  // neither is not handed the key inventory at all.
   {
     method: 'GET',
     path: '/api/activity',

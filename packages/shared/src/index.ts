@@ -57,11 +57,13 @@ export {
   OrgRole,
   isOrgRole,
   OrgNameSchema,
+  UpdateOrgSchema,
   ORG_NAME_MIN_LENGTH,
   ORG_NAME_MAX_LENGTH,
   ORG_NAME_PATTERN,
   ORG_NAME_DISALLOWED_CHARS,
 } from './api/org.js';
+export type { UpdateOrgRequest, UpdateOrgResponse } from './api/org.js';
 
 export {
   PERMISSIONS,
@@ -73,6 +75,13 @@ export {
   canChangeRole,
 } from './permissions.js';
 export type { Permission } from './permissions.js';
+
+export {
+  ACCESS_KEY_PERMISSION_REQUIREMENT,
+  GRANULAR_PERMISSION_REQUIREMENT,
+  excessKeyPermissions,
+} from './access-key-permissions.js';
+export type { ExcessKeyPermission } from './access-key-permissions.js';
 
 export { ROUTE_MANIFEST } from './route-manifest.js';
 export type {

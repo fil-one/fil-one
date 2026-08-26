@@ -47,9 +47,9 @@ vi.mock('../lib/bucket-rag-enablement.js', async () => {
 process.env.FILONE_STAGE = 'test';
 
 import { baseHandler } from './set-bucket-rag-enablement.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.js';
 import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.js';
-import { S3Region } from '@filone/shared';
+import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import type { BucketRAGEnablementRecord } from '../lib/dynamo-records.js';
 
@@ -82,9 +82,12 @@ function record(over: Partial<BucketRAGEnablementRecord> = {}): BucketRAGEnablem
   };
 }
 
-function event(body: unknown): AuthenticatedEvent {
+function event(body: unknown, role?: OrgRole): AuthenticatedEvent {
   const e = buildEvent({
-    userInfo: USER_INFO,
+    userInfo: {
+      ...USER_INFO,
+      ...(role ? { membership: membershipFor(USER_INFO.orgId, USER_INFO.userId, role) } : {}),
+    },
     body: typeof body === 'string' ? body : JSON.stringify(body),
     method: 'POST',
   });
@@ -221,5 +224,62 @@ describe('set-bucket-rag-enablement baseHandler', () => {
     expect(result.statusCode).toBe(503);
     expect(orch.getBucket).not.toHaveBeenCalled();
     expect(mockSetEnablement).not.toHaveBeenCalled();
+  });
+});
+
+describe('set-bucket-rag-enablement permissions', () => {
+  // The requirement depends on the body, which is why the manifest marks this
+  // route in-handler: indexing a bucket is a configuration write and sits with
+  // bucket creation; turning it off discards the index and sits with deletion.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    orch = fakeOrchestrator('aurora', { bucket: BUCKET });
+    mockGetOrchestratorForRegion.mockReturnValue(orch);
+    mockGetEnablement.mockResolvedValue(undefined);
+    mockSetEnablement.mockImplementation(async (args: { enabled: boolean }) =>
+      record({ status: args.enabled ? 'active' : 'disabled' }),
+    );
+  });
+
+  it('lets a Member turn indexing on', async () => {
+    const result = await baseHandler(event({ enabled: true }, OrgRole.Member));
+
+    expect(result.statusCode).toBe(200);
+  });
+
+  it('refuses a Member turning indexing off — that discards the index', async () => {
+    const result = await baseHandler(event({ enabled: false }, OrgRole.Member));
+
+    expect(result.statusCode).toBe(403);
+    expect(JSON.parse(result.body!)).toStrictEqual({
+      message: 'Your role does not permit discarding a bucket index.',
+      code: ApiErrorCode.FORBIDDEN_ROLE,
+    });
+    expect(mockSetEnablement).not.toHaveBeenCalled();
+  });
+
+  it('lets an Admin turn indexing off', async () => {
+    const result = await baseHandler(event({ enabled: false }, OrgRole.Admin));
+
+    expect(result.statusCode).toBe(200);
+  });
+
+  it.each([true, false])('refuses ReadOnly either way (enabled=%s)', async (enabled) => {
+    const result = await baseHandler(event({ enabled }, OrgRole.ReadOnly));
+
+    expect(result.statusCode).toBe(403);
+    expect(mockSetEnablement).not.toHaveBeenCalled();
+  });
+
+  it('refuses a caller with no membership row', async () => {
+    const e = event({ enabled: true });
+    e.requestContext.userInfo.membership = undefined;
+
+    const result = await baseHandler(e);
+
+    expect(result.statusCode).toBe(403);
+    expect(JSON.parse(result.body!).code).toBe(ApiErrorCode.NOT_A_MEMBER);
   });
 });

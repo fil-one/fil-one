@@ -6,6 +6,7 @@ import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import { ErrorResponse, S3Region } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import { keyScope, notYourKeyResponse, withinScope } from '../lib/key-scope.js';
 import { ResponseBuilder, tenantNotReadyResponse } from '../lib/response-builder.js';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { getOrgProfile } from '../lib/org-profile.js';
@@ -45,6 +46,15 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
       .build();
   }
 
+  // Revoking is `keys.manage_own` unless the caller holds `keys.manage_all`, so
+  // a Member revokes the keys they minted and no others. Checked before the
+  // orchestrator is touched: the provider-side deletion is the irreversible
+  // half.
+  if (
+    !withinScope(keyScope(event), { createdBy: Item.createdBy?.S, recovered: Item.recovered?.BOOL })
+  )
+    return notYourKeyResponse();
+
   // Legacy rows written before multi-region routing don't carry a `region`
   // attribute — those predate FTH, so they belong to Aurora (eu-west-1).
   const region: S3Region = (Item.region?.S as S3Region | undefined) ?? S3Region.EuWest1;
@@ -68,7 +78,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
-  .use(authorize('keys.manage_all'))
+  .use(authorize('keys.manage_own'))
   .use(csrfMiddleware())
   .use(subscriptionGuardMiddleware(AccessLevel.Write))
   .use(errorHandlerMiddleware());

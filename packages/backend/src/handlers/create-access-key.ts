@@ -3,7 +3,13 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { CreateAccessKeySchema, S3Region, isSupportedRegion } from '@filone/shared';
+import {
+  ApiErrorCode,
+  CreateAccessKeySchema,
+  S3Region,
+  excessKeyPermissions,
+  isSupportedRegion,
+} from '@filone/shared';
 import type {
   CreateAccessKeyRequest,
   CreateAccessKeyResponse,
@@ -15,6 +21,7 @@ import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/er
 import type { IssuedAccessKey, ServiceOrchestrator } from '../lib/service-orchestrator.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { isOrgDeleting } from '../lib/org-profile.js';
+import { parseJsonBody } from '../lib/parse-json-body.js';
 import {
   accountDeletedResponse,
   ResponseBuilder,
@@ -26,7 +33,7 @@ import type { AccessKeyRecord } from '../lib/dynamo-records.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { requireOrgMembershipMiddleware } from '../middleware/authorize.js';
+import { authorize, requireOrgMembershipMiddleware } from '../middleware/authorize.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
@@ -36,27 +43,15 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  let body: unknown;
-  try {
-    body = JSON.parse(event.body ?? '{}');
-  } catch {
-    return new ResponseBuilder()
-      .status(400)
-      .body<ErrorResponse>({ message: 'Invalid JSON body' })
-      .build();
-  }
-
-  const parsed = CreateAccessKeySchema.safeParse(body);
-  if (!parsed.success) {
-    return new ResponseBuilder()
-      .status(400)
-      .body<ErrorResponse>({ message: parsed.error.issues[0].message })
-      .build();
-  }
+  const parsed = parseJsonBody(event.body, CreateAccessKeySchema);
+  if ('error' in parsed) return parsed.error;
 
   const { keyName, permissions, granularPermissions, bucketScope, region } = parsed.data;
   const buckets = bucketScope === 'specific' ? (parsed.data.buckets ?? []) : undefined;
   const expiresAt = parsed.data.expiresAt ?? null;
+
+  const denied = checkCreatorAuthority(event, parsed.data);
+  if (denied) return denied;
 
   const { orgId, userId } = getUserInfo(event);
   const attribution = keyAttribution({ userId, creatorEmail: getVerifiedEmail(event) });
@@ -169,6 +164,37 @@ function buildAccessKeyItem({
   });
 }
 
+/**
+ * The creator-authority cap: the requested key permissions are intersected with
+ * the caller's own, so a key can never carry more than the member minting it.
+ *
+ * `keys.create` is the entry gate and runs in the chain. This is the half the
+ * chain cannot express, because what it asks of the caller depends on the
+ * checkboxes in the body. Without it the console matrix is decoration, because
+ * a SigV4 key is redeemed over S3 where no role check runs until M3: a Member
+ * denied `buckets.delete` in the console would simply mint a key and delete
+ * buckets with it.
+ *
+ * The denial names the offending permissions, because "your role does not
+ * permit this key" against a form with eight checkboxes is not actionable.
+ */
+function checkCreatorAuthority(
+  event: AuthenticatedEvent,
+  request: CreateAccessKeyRequest,
+): APIGatewayProxyStructuredResultV2 | undefined {
+  const excess = excessKeyPermissions(getUserInfo(event).membership?.role ?? '', request);
+  if (excess.length === 0) return undefined;
+
+  const named = excess.map(({ keyPermission }) => keyPermission).join(', ');
+  return new ResponseBuilder()
+    .status(403)
+    .body<ErrorResponse>({
+      message: `A key cannot carry more than you do. Your role does not permit: ${named}.`,
+      code: ApiErrorCode.FORBIDDEN_ROLE,
+    })
+    .build();
+}
+
 interface RecoverDuplicateKeyParams {
   orgId: string;
   tenantId: string;
@@ -253,6 +279,10 @@ export const handler = middy(baseHandler)
   // that the creator is in the org at all is settled here, ahead of the billing
   // read a non-member should never cost.
   .use(requireOrgMembershipMiddleware())
+  // Minting a key at all is `keys.create`, which does not depend on the body —
+  // so it is declared in the manifest and checked here, like every other gated
+  // route, rather than buried in the handler behind a JSON parse.
+  .use(authorize('keys.create'))
   .use(csrfMiddleware())
   .use(subscriptionGuardMiddleware(AccessLevel.Write))
   .use(errorHandlerMiddleware());
