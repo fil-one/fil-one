@@ -52,6 +52,12 @@ export interface Subscription {
   planId: PlanId;
   status: SubscriptionStatus;
   trialEndsAt?: string;
+  /**
+   * When the period being billed began. Absent on accounts whose record predates
+   * it being stored, so a console showing the period has to tolerate having only
+   * the end date.
+   */
+  currentPeriodStart?: string;
   currentPeriodEnd?: string;
   canceledAt?: string;
   gracePeriodEndsAt?: string;
@@ -63,6 +69,36 @@ export interface Subscription {
    * what is actually billed.
    */
   monthlyMinimumCents?: number;
+  /**
+   * What the customer's plan is called, taken from the Stripe product the
+   * subscription is billed on (`Business`, `Pay as you go`, whatever sales
+   * named it). Absent when Stripe could not be reached and nothing was cached,
+   * and for an account with no subscription at all.
+   *
+   * Reported rather than inferred from `planId`: `planId` has three values and
+   * a negotiated quote is none of them, so a console reading the enum would
+   * call every paying customer "Pay as you go" — including the ones on a
+   * contract that says otherwise.
+   */
+  planName?: string;
+  /**
+   * The exact usage rate, per TB per month, when the billed price states one
+   * unambiguously: a per-unit price, or a graduated price whose usage tiers all
+   * share a rate (the shape self-serve is on).
+   *
+   * Absent when no single number would be true — volume tiering, or graduated
+   * tiers that step, which is where a negotiated quote usually lands. A console
+   * with no rate shows none and points at the agreement, which is the point:
+   * the alternative is the list price standing in for what somebody is
+   * actually billed.
+   *
+   * Deliberately no companion "is this a custom deal" flag. The only honest
+   * source for one would be the configured self-serve price id, and that id
+   * changes whenever pricing is rotated — which would relabel every existing
+   * self-serve account as contracted. What is billed is a fact; who negotiated
+   * it is not something this endpoint can know.
+   */
+  pricePerTbCents?: number;
 }
 
 export interface PaymentMethod {
