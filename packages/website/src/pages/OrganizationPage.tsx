@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { PencilSimpleIcon } from '@phosphor-icons/react/dist/ssr';
+import { PencilSimpleIcon, UserPlusIcon } from '@phosphor-icons/react/dist/ssr';
 import type { Permission } from '@filone/shared';
 
 import { Button } from '../components/Button';
@@ -12,6 +12,7 @@ import { Tab, TabList, TabPanel, TabPanels, Tabs } from '../components/Tabs';
 import { getMe } from '../lib/api.js';
 import { listInvitations, listMembers } from '../lib/members-api.js';
 import { ME_STALE_TIME, queryKeys } from '../lib/query-client.js';
+import { useMemberActionScope } from '../lib/use-member-scope.js';
 import { usePermissions } from '../lib/use-permissions.js';
 import { BillingDetails } from './BillingPage.js';
 import { MembersRoster } from './MembersPage.js';
@@ -28,7 +29,14 @@ interface OrganizationTab {
    * a tab, not inside the one they have already opened.
    */
   countOf?: 'members' | 'invitations';
-  render: () => React.ReactNode;
+  render: (ctx: TabContext) => React.ReactNode;
+}
+
+/** What the page hands its panels. Only the Invitations panel reads it today. */
+interface TabContext {
+  /** The header's Invite member button, asking the Invitations panel to open. */
+  inviteRequested: boolean;
+  onInviteRequestHandled: () => void;
 }
 
 /**
@@ -38,6 +46,10 @@ interface OrganizationTab {
  * name lived in Settings beside the caller's own name and email, so there was
  * nowhere to answer "what is this organization". They are tabs of one page now,
  * and Settings means the caller's own account (FIL-1094).
+ *
+ * Ordered people first, money last: Members and Invitations are two views of the
+ * same question and belong beside each other, and Members is the default because
+ * it is the tab every role can open and the one most visits are for.
  */
 const ORGANIZATION_TABS: OrganizationTab[] = [
   {
@@ -46,6 +58,20 @@ const ORGANIZATION_TABS: OrganizationTab[] = [
     permission: 'members.read',
     countOf: 'members',
     render: () => <MembersRoster />,
+  },
+  {
+    label: 'Invitations',
+    testId: 'org-tab-invitations',
+    countOf: 'invitations',
+    // The list endpoint is `members.manage` rather than `members.read`, so for
+    // anybody else this tab is a request the server refuses.
+    permission: 'members.manage',
+    render: (ctx) => (
+      <MembersInvitations
+        inviteRequested={ctx.inviteRequested}
+        onInviteRequestHandled={ctx.onInviteRequestHandled}
+      />
+    ),
   },
   {
     label: 'Billing',
@@ -72,20 +98,17 @@ const ORGANIZATION_TABS: OrganizationTab[] = [
       </RequirePermission>
     ),
   },
-  {
-    label: 'Invitations',
-    testId: 'org-tab-invitations',
-    countOf: 'invitations',
-    // The list endpoint is `members.manage` rather than `members.read`, so for
-    // anybody else this tab is a request the server refuses.
-    permission: 'members.manage',
-    render: () => <MembersInvitations />,
-  },
 ];
 
 export function OrganizationPage() {
   const { has, isPending } = usePermissions();
+  const scope = useMemberActionScope();
   const [editing, setEditing] = useState(false);
+  // Which tab is showing, driven here rather than by the tab group: the Invite
+  // member button has to bring the caller to Invitations, since that panel owns
+  // the dialog and only the selected panel is mounted.
+  const [selectedTab, setSelectedTab] = useState(0);
+  const [inviteRequested, setInviteRequested] = useState(false);
   const { data: me } = useQuery({
     queryKey: queryKeys.me,
     queryFn: () => getMe(),
@@ -118,6 +141,18 @@ export function OrganizationPage() {
     invitations: pending.data?.invitations.length,
   };
 
+  const tabContext = {
+    inviteRequested,
+    onInviteRequestHandled: () => setInviteRequested(false),
+  };
+
+  const invitationsIndex = tabs.findIndex((tab) => tab.label === 'Invitations');
+
+  function requestInvite() {
+    if (invitationsIndex >= 0) setSelectedTab(invitationsIndex);
+    setInviteRequested(true);
+  }
+
   return (
     <PageLayout
       title="Organization"
@@ -129,16 +164,40 @@ export function OrganizationPage() {
       // Only for a role that may actually rename: everybody else is not offered
       // a button whose dialog the server would refuse.
       action={
-        <RequirePermission permission="org.rename">
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={PencilSimpleIcon}
-            onClick={() => setEditing(true)}
-          >
-            Edit organization
-          </Button>
-        </RequirePermission>
+        <div className="flex items-center gap-2">
+          {/* "Edit", not "Edit organization": it sits under the Organization
+              title, which is the thing it edits. */}
+          <RequirePermission permission="org.rename">
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={PencilSimpleIcon}
+              onClick={() => setEditing(true)}
+            >
+              Edit
+            </Button>
+          </RequirePermission>
+
+          {/* The page's one filled action, and `sm` like the button beside it so
+              the pair lines up. Named "Add member" rather than "Add": this page
+              holds members, invitations and billing, and beside an "Edit" that
+              means the organization, a bare "Add" reads as adding one of those.
+
+              `mayInvite` covers the beta flag as well as the permission, so an
+              org outside the beta is not offered a dialog its first submit would
+              be refused. */}
+          {scope.mayInvite && invitationsIndex >= 0 && (
+            <Button
+              variant="primary"
+              size="sm"
+              icon={UserPlusIcon}
+              data-testid="org-invite-button"
+              onClick={requestInvite}
+            >
+              Add member
+            </Button>
+          )}
+        </div>
       }
     >
       <EditOrganizationDialog
@@ -148,24 +207,21 @@ export function OrganizationPage() {
       />
 
       {tabs.length > 0 && (
-        <Tabs>
+        <Tabs selectedIndex={Math.min(selectedTab, tabs.length - 1)} onChange={setSelectedTab}>
           <TabList>
             {tabs.map((tab) => (
-              <Tab key={tab.label} testId={tab.testId}>
+              <Tab
+                key={tab.label}
+                testId={tab.testId}
+                count={tab.countOf ? counts[tab.countOf] : undefined}
+              >
                 {tab.label}
-                {/* Absent until the list has answered, so the tab does not flash
-                    a zero on the way to its real number. */}
-                {tab.countOf && counts[tab.countOf] !== undefined && (
-                  <span className="ml-1.5 text-xs text-zinc-400 tabular-nums">
-                    {counts[tab.countOf]}
-                  </span>
-                )}
               </Tab>
             ))}
           </TabList>
           <TabPanels>
             {tabs.map((tab) => (
-              <TabPanel key={tab.label}>{tab.render()}</TabPanel>
+              <TabPanel key={tab.label}>{tab.render(tabContext)}</TabPanel>
             ))}
           </TabPanels>
         </Tabs>
