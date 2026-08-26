@@ -2,8 +2,7 @@
 
 **Status:** Draft (design exploration, awaiting acceptance)
 **Created:** 2026-08-26
-**Builds on:** [`2026-08-organizations-roles-m1.md`](./2026-08-organizations-roles-m1.md), on branch
-`adr/iam-m1-organizations-roles` until M1 merges
+**Builds on:** [`2026-08-organizations-roles-m1.md`](./2026-08-organizations-roles-m1.md)
 **Ships after:** [`2026-08-privileged-operations-m2.md`](./2026-08-privileged-operations-m2.md)
 (FIL-1019)
 
