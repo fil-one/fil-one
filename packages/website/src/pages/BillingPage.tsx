@@ -1,61 +1,22 @@
-/* eslint-disable max-lines */
-import { useEffect, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowSquareOutIcon } from '@phosphor-icons/react/dist/ssr';
 
-import {
-  CheckIcon,
-  CreditCardIcon,
-  ArrowRightIcon,
-  WarningIcon,
-  DownloadSimpleIcon,
-  LightningIcon,
-} from '@phosphor-icons/react/dist/ssr';
+import { SubscriptionStatus } from '@filone/shared';
 
-import { Badge } from '../components/Badge';
+import { Alert } from '../components/Alert';
 import { Button } from '../components/Button';
-import { IconBox } from '../components/IconBox';
+import { Heading } from '../components/Heading/Heading.js';
 import { PageLayout } from '../components/PageLayout.js';
-import { ProgressBar } from '../components/ProgressBar';
-import { useToast } from '../components/Toast';
-import { formatBytes } from '@filone/shared';
-
-import { SubscriptionStatus, TB_BYTES, getUsageLimits } from '@filone/shared';
-import type { CreateSetupIntentResponse } from '@filone/shared';
-
-import { apiRequest, getUsage, getBilling, getInvoices, activateSubscription } from '../lib/api.js';
-import { daysRemainingLabel, daysUntil, formatDate } from '../lib/time.js';
-import { ChoosePlanDialog } from '../components/billing/ChoosePlanDialog.js';
-import { AddPaymentDialog } from '../components/billing/AddPaymentDialog.js';
-import { ContactSalesDialog } from '../components/billing/ContactSalesDialog.js';
-import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
-import { Overline } from '../components/Overline';
 import { RequirePermission } from '../components/RequirePermission';
+import { AddPaymentDialog } from '../components/billing/AddPaymentDialog.js';
+import { ChoosePlanDialog } from '../components/billing/ChoosePlanDialog.js';
+import { ContactSalesDialog } from '../components/billing/ContactSalesDialog.js';
+import { InvoicesCard } from '../components/billing/InvoicesCard.js';
+import { PaymentMethodCard } from '../components/billing/PaymentMethodCard.js';
+import { BillingHelpRail } from '../components/billing/BillingHelpRail.js';
+import { PlanCard } from '../components/billing/PlanCard.js';
+import { UsageCard } from '../components/billing/UsageCard.js';
+import { hasInvoiceHistory, useBillingData, useBillingFlows } from '../lib/use-billing.js';
 import { useHasPermission } from '../lib/use-permissions.js';
-import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function formatCents(cents: number): string {
-  return `$${(cents / 100).toFixed(2)}`;
-}
-
-// ---------------------------------------------------------------------------
-// Skeleton loaders
-// ---------------------------------------------------------------------------
-
-function SkeletonCard({ height = 'h-36' }: { height?: string }) {
-  return (
-    <div
-      className={`animate-pulse rounded-lg border border-zinc-200 bg-white p-5 shadow-sm ${height}`}
-    >
-      <div className="h-3 w-24 rounded bg-zinc-200 mb-4" />
-      <div className="h-4 w-48 rounded bg-zinc-200 mb-2" />
-      <div className="h-3 w-36 rounded bg-zinc-200" />
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Page
@@ -73,7 +34,7 @@ export function BillingPage() {
       permission="billing.view"
       pending={
         <PageLayout title="Billing" description="Manage your plan, usage, and payment methods">
-          <SkeletonCard height="h-40" />
+          <BillingSkeleton />
         </PageLayout>
       }
       fallback={
@@ -91,718 +52,261 @@ export function BillingPage() {
 }
 
 /**
+ * The Billing tab's own chrome: the section heading, and nothing else.
+ *
+ * `PageLayout` used to sit here, which put an `h1` and a second set of page
+ * gutters inside a tab panel — a page title under a page title. The heading is
+ * the `md` every other tab panel labels itself with, and the shape matches the
+ * Invitations tab beside it.
+ */
+function BillingSection({ children, rail }: { children: React.ReactNode; rail?: React.ReactNode }) {
+  return (
+    <section className="flex flex-col gap-4">
+      {/* Above the row rather than inside its left column: as a sibling of the
+          rail it set the row's top edge, so the rail started level with this
+          heading instead of with the cards it sits beside. */}
+      <Heading
+        id="billing-heading"
+        tag="h2"
+        size="md"
+        className="gap-0.5"
+        description="Manage your plan, usage, and payment methods"
+      >
+        Billing
+      </Heading>
+
+      <div className="flex flex-col gap-8 lg:flex-row lg:gap-10">
+        {/* Capped, unlike the table tabs beside it. Every row here is a label on
+            the left and a figure on the right, and on a wide screen an uncapped
+            card put 1700px between the two: the eye loses the pair. Tables earn
+            the full width because their columns fill it; a settings surface does
+            not. */}
+        <div className="flex max-w-4xl min-w-0 flex-1 flex-col gap-4">{children}</div>
+
+        {/* After the figures in the source, so the cards come first on a phone
+            where the rail stacks under them. */}
+        {rail}
+      </div>
+    </section>
+  );
+}
+
+/** One pulse per card, in the order the real ones arrive. */
+function BillingSkeleton() {
+  return (
+    <div className="flex flex-col gap-4" data-testid="billing-skeleton">
+      {['h-28', 'h-44', 'h-32'].map((height) => (
+        <div
+          key={height}
+          className={`animate-pulse rounded-xl border border-zinc-200 bg-white p-5 shadow-xs ${height}`}
+        >
+          <div className="mb-4 h-4 w-32 rounded-md bg-zinc-200" />
+          <div className="mb-2 h-3 w-56 rounded-md bg-zinc-200" />
+          <div className="h-3 w-40 rounded-md bg-zinc-200" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
  * Everything billing, without page chrome.
  *
  * Exported for the Organization page's Billing tab; `BillingPage` keeps it as
  * a page for the `/billing` path that still points here.
+ *
+ * One column of cards, each answering one question: what plan is this, what has
+ * it used, how does it pay, what has it been billed. Every number comes from
+ * `billing-view`, which states a rate only where Stripe reported one — this tab
+ * used to work the bill out from a hardcoded $4.99 per TB, which is right for
+ * the self-serve price and wrong for every customer whose price came from a
+ * quote.
  */
-// eslint-disable-next-line max-lines-per-function, complexity/complexity
 export function BillingDetails() {
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-  // Hoisted rather than wrapped per control: half of these buttons sit under
-  // prompt copy that only makes sense with them ("Ready to unlock unlimited
-  // storage?"), and gating the button alone left an Admin reading an invitation
-  // with nothing to accept.
   const mayManage = useHasPermission('billing.manage');
-
-  const {
-    data: billing,
-    isPending: billingPending,
-    isError: isBillingError,
-    error: billingError,
-  } = useQuery({
-    queryKey: queryKeys.billing,
-    queryFn: getBilling,
-  });
-
-  const { data: usage, isPending: usagePending } = useQuery({
-    queryKey: queryKeys.usage,
-    queryFn: getUsage,
-    staleTime: USAGE_STALE_TIME,
-  });
-
-  // No invoices to fetch while trialing, and an inactive account may have no
-  // Stripe customer at all — skip the request for both.
-  const hasInvoiceHistory = (status: SubscriptionStatus) =>
-    status !== SubscriptionStatus.Trialing && status !== SubscriptionStatus.Inactive;
-
-  const {
-    data: invoices,
-    isPending: invoicesPending,
-    isError: isInvoicesError,
-  } = useQuery({
-    queryKey: queryKeys.invoices,
-    queryFn: getInvoices,
-    enabled: !!billing && hasInvoiceHistory(billing.subscription.status),
-  });
-
-  const loading = billingPending || usagePending;
-  const error = isBillingError
-    ? (billingError?.message ?? 'Failed to load billing information')
-    : null;
-  const invoicesLoading =
-    invoicesPending && !!billing && hasInvoiceHistory(billing.subscription.status);
-  const invoicesError = isInvoicesError ? 'Unable to load invoices. Please try again later.' : null;
-
-  // Modal states. The two that write billing close with `billing.manage`: the
-  // payment dialog is the sharp one, since confirming it hands Stripe a
-  // SetupIntent that `activateSubscription` then refuses.
-  const [planOpen, setPlanOpen] = usePermittedDialog(false, mayManage);
-  const [paymentOpen, setPaymentOpen] = usePermittedDialog(false, mayManage);
-  const [clientSecret, setClientSecret] = useState('');
-  const [stripePublishableKey, setStripePublishableKey] = useState('');
-  const [contactSalesOpen, setContactSalesOpen] = useState(false);
-
-  // Handle portal return — invalidate billing + usage so data refreshes
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('portal_return') === 'true') {
-      window.history.replaceState({}, '', window.location.pathname);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.billing });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
-    }
-  }, [queryClient]);
-
-  const isTrialing = billing?.subscription.status === SubscriptionStatus.Trialing;
-  const isActive = billing?.subscription.status === SubscriptionStatus.Active;
-  const isPastDue = billing?.subscription.status === SubscriptionStatus.PastDue;
-  const isGracePeriod = billing?.subscription.status === SubscriptionStatus.GracePeriod;
-  const isCanceled = billing?.subscription.status === SubscriptionStatus.Canceled;
-  const isInactive = billing?.subscription.status === SubscriptionStatus.Inactive;
-  const trialDays =
-    isTrialing && billing?.subscription.trialEndsAt
-      ? daysUntil(billing.subscription.trialEndsAt)
-      : null;
-  const graceDays = billing?.subscription.gracePeriodEndsAt
-    ? daysUntil(billing.subscription.gracePeriodEndsAt)
-    : null;
-  const isTrialExpiredGrace = isGracePeriod && !!billing?.subscription.trialEndsAt;
-
-  const limits = getUsageLimits(!!isActive);
-  const storageUsed = usage?.storage.usedBytes ?? 0;
-  const storageLimit = limits.storageLimitBytes;
-  const storagePct = storageLimit > 0 ? Math.min(100, (storageUsed / storageLimit) * 100) : 0;
-  const egressUsed = usage?.egress.usedBytes ?? 0;
-  const egressLimit = limits.egressLimitBytes;
-  const egressPct = egressLimit > 0 ? Math.min(100, (egressUsed / egressLimit) * 100) : 0;
-  const PRICE_PER_TB_CENTS = 499;
-  // The per-org monthly minimum comes from the backend (driven by the org's
-  // Stripe plan) — 0 for grandfathered accounts that predate the minimum, so a
-  // sub-1 TB grandfathered org is never shown a floor it isn't billed.
-  const monthlyMinimumCents = billing?.subscription.monthlyMinimumCents ?? 0;
-  const hasMinimum = monthlyMinimumCents > 0;
-  const minimumLabel = `${formatCents(monthlyMinimumCents)}/month minimum`;
-  const estimatedCost = Math.max(
-    monthlyMinimumCents,
-    Math.round((storageUsed / TB_BYTES) * PRICE_PER_TB_CENTS),
-  );
-  const payAsYouGoSubtitle = hasMinimum
-    ? `Unlimited storage, billed for what you use (${minimumLabel})`
-    : 'Unlimited storage, billed for what you use';
-
-  // ── Handlers ─────────────────────────────────────────────────────
-
-  function handleUpgradeClick() {
-    setPlanOpen(true);
-  }
-
-  function handleContactSales() {
-    setPlanOpen(false);
-    setContactSalesOpen(true);
-  }
-
-  const canReactivateWithSavedCard =
-    Boolean(billing?.paymentMethod?.id) && (isGracePeriod || isCanceled);
-
-  async function startNewCardFlow() {
-    try {
-      const { clientSecret: cs, stripePublishableKey: pk } =
-        await apiRequest<CreateSetupIntentResponse>('/billing/setup-intent', { method: 'POST' });
-      setClientSecret(cs);
-      setStripePublishableKey(pk);
-      setPaymentOpen(true);
-    } catch (err) {
-      toast.error((err as Error).message || 'Failed to set up payment. Please try again.');
-    }
-  }
-
-  async function refreshSetupIntent(): Promise<string> {
-    const { clientSecret: cs } = await apiRequest<CreateSetupIntentResponse>(
-      '/billing/setup-intent',
-      { method: 'POST' },
-    );
-    return cs;
-  }
-
-  async function handleSelectPayAsYouGo() {
-    setPlanOpen(false);
-
-    if (canReactivateWithSavedCard) {
-      try {
-        await activateSubscription({ useSavedPaymentMethod: true });
-        toast.success('Subscription reactivated!');
-        void queryClient.invalidateQueries({ queryKey: queryKeys.billing });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
-        window.dispatchEvent(new CustomEvent('billing:updated'));
-      } catch (err) {
-        toast.error((err as Error).message || 'Failed to reactivate. Please try again.');
-      }
-      return;
-    }
-
-    await startNewCardFlow();
-  }
-
-  async function handleUseDifferentCard() {
-    setPlanOpen(false);
-    await startNewCardFlow();
-  }
-
-  function handlePaymentBack() {
-    setPaymentOpen(false);
-    setPlanOpen(true);
-  }
-
-  function handlePaymentSuccess() {
-    setPaymentOpen(false);
-    setClientSecret('');
-    toast.success('Subscription activated!');
-    void queryClient.invalidateQueries({ queryKey: queryKeys.billing });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
-    window.dispatchEvent(new CustomEvent('billing:updated'));
-  }
-
-  async function handleUpdatePayment() {
-    try {
-      const { url } = await apiRequest<{ url: string }>('/billing/portal', { method: 'POST' });
-      window.location.href = url;
-    } catch (err) {
-      toast.error((err as Error).message || 'Failed to open billing portal.');
-    }
-  }
-
-  // ── Loading state ────────────────────────────────────────────────
+  const { billing, usage, invoices, loading, error, invoicesPending, invoicesFailed } =
+    useBillingData();
+  const flows = useBillingFlows(billing, mayManage);
 
   if (loading && !billing) {
     return (
-      <PageLayout title="Billing" description="Manage your plan, usage, and payment methods">
-        <div className="flex gap-6">
-          <div className="flex-1 flex flex-col gap-4">
-            <SkeletonCard height="h-40" />
-            <SkeletonCard height="h-32" />
-            <SkeletonCard height="h-28" />
-          </div>
-          <div className="w-[368px] flex-shrink-0">
-            <SkeletonCard height="h-80" />
-          </div>
-        </div>
-      </PageLayout>
+      <BillingSection>
+        <BillingSkeleton />
+      </BillingSection>
     );
   }
 
   if (error && !billing) {
     return (
-      <PageLayout title="Billing" description="Manage your plan, usage, and payment methods">
-        <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
-          Failed to load billing information: {error}
-        </div>
-      </PageLayout>
+      <BillingSection>
+        <Alert variant="red" title="Unable to load billing" description={error} />
+      </BillingSection>
     );
   }
 
-  // ── Render ───────────────────────────────────────────────────────
+  if (!billing) return null;
+
+  const { status } = billing.subscription;
 
   return (
-    <PageLayout
-      title="Billing"
-      headingId="billing-heading"
-      description="Manage your plan, usage, and payment methods"
+    <BillingSection
+      rail={<BillingHelpRail status={status} onContactSales={flows.openContactSales} />}
     >
-      {/* Past due warning banner. An Admin sees the state and who to ask; only
-          `billing.manage` gets the inline action. */}
-      {isPastDue && (
-        <div className="mb-4 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <WarningIcon size={20} className="text-amber-600 flex-shrink-0" weight="fill" />
-          <span className="text-sm text-amber-800">
-            {mayManage ? (
-              <>
-                Your last payment failed. Please{' '}
-                <button
-                  type="button"
-                  onClick={handleUpdatePayment}
-                  className="font-semibold underline"
-                >
-                  update your payment method
-                </button>{' '}
-                to avoid losing access.
-              </>
-            ) : (
-              <>
-                Your last payment failed. An organization owner needs to update the payment method
-                to avoid losing access.
-              </>
-            )}
-            {graceDays !== null ? ` ${daysRemainingLabel(graceDays)}.` : ''}
-          </span>
-        </div>
-      )}
+      <StatusBanner
+        status={status}
+        mayManage={mayManage}
+        onManage={flows.openStripePortal}
+        onChoosePlan={flows.openPlan}
+      />
 
-      {/* Canceled banner */}
-      {isCanceled && (
-        <div className="mb-4 flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
-          <WarningIcon size={20} className="text-red-600 flex-shrink-0" weight="fill" />
-          <span className="text-sm text-red-800">
-            {mayManage ? (
-              <>
-                Your account has been canceled.{' '}
-                <button
-                  type="button"
-                  onClick={handleUpgradeClick}
-                  className="font-semibold underline"
-                >
-                  Reactivate
-                </button>{' '}
-                to regain access.
-              </>
-            ) : (
-              'Your account has been canceled. An organization owner can reactivate it.'
-            )}
-          </span>
-        </div>
-      )}
+      {/* Paired because they hold the same amount: a title, one line of fact,
+          and one action each. Usage carries three rows and a total, so pairing
+          it with the payment card left the shorter one stretched to match, with
+          a card's worth of empty space under a single line of text. */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <PlanCard
+          subscription={billing.subscription}
+          mayManage={mayManage}
+          onManage={flows.openStripePortal}
+          onChoosePlan={flows.openPlan}
+        />
 
-      <div className="flex gap-6">
-        {/* ── Left column ──────────────────────────────────────── */}
-        <div className="flex-1 min-w-0 flex flex-col gap-6">
-          {/* Plan card */}
-          <div
-            className={`rounded-lg border bg-white flex flex-col gap-4 py-4 px-5 shadow-sm ${
-              isActive || isPastDue
-                ? 'border-green-200'
-                : isGracePeriod
-                  ? 'border-amber-200'
-                  : isCanceled
-                    ? 'border-red-200'
-                    : isInactive
-                      ? 'border-zinc-200'
-                      : 'border-brand-200'
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-[13px] font-medium tracking-[-0.325px] leading-[19.5px] text-zinc-900">
-                  {isActive || isPastDue || isGracePeriod || isCanceled
-                    ? 'Pay as you go'
-                    : isInactive
-                      ? 'No active plan'
-                      : 'Free trial'}
-                </h2>
-                <p className="text-[13px] text-zinc-500 leading-[19.5px]">
-                  {isActive || isPastDue
-                    ? payAsYouGoSubtitle
-                    : isGracePeriod
-                      ? `Read-only access${graceDays !== null ? `. ${daysRemainingLabel(graceDays)}` : ''}`
-                      : isCanceled
-                        ? 'Subscription inactive'
-                        : isInactive
-                          ? 'Choose a plan to start storing data'
-                          : trialDays !== null
-                            ? `${trialDays} days remaining \u00b7 1 TB included`
-                            : '30-day trial \u00b7 1 TB included'}
-                </p>
-              </div>
-
-              {/* Status badge */}
-              <div
-                className="flex items-center gap-2"
-                data-testid="subscription-status"
-                data-status={billing?.subscription.status}
-              >
-                {isTrialing && (
-                  <Badge color="blue" size="sm" weight="medium" dot>
-                    Active
-                  </Badge>
-                )}
-                {(isActive || isPastDue) && (
-                  <Badge color="green" size="sm" weight="medium" dot>
-                    Active
-                  </Badge>
-                )}
-                {isGracePeriod && (
-                  <Badge color="amber" size="sm" weight="medium">
-                    Grace Period
-                  </Badge>
-                )}
-                {isCanceled && (
-                  <Badge color="red" size="sm" weight="medium">
-                    Canceled
-                  </Badge>
-                )}
-                {isInactive && (
-                  <Badge color="grey" size="sm" weight="medium">
-                    No plan
-                  </Badge>
-                )}
-              </div>
-            </div>
-
-            {/* Trial CTA banner — the invitation and its button stand or fall
-                together. */}
-            {isTrialing && mayManage && (
-              <div className="rounded-lg bg-zinc-50 border border-zinc-200/50 p-[13px] flex items-center justify-between">
-                <p className="text-[13px] font-medium text-zinc-900">
-                  Ready to unlock unlimited storage?
-                </p>
-                <Button
-                  id="billing-upgrade-button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleUpgradeClick}
-                >
-                  Upgrade
-                </Button>
-              </div>
-            )}
-
-            {/* Manage plan — active subscribers. "Billed monthly" is a fact
-                worth stating on its own, so only the button is gated. */}
-            {(isActive || isPastDue) && (
-              <div className="flex items-center justify-between border-t border-zinc-100 pt-3">
-                <span className="text-[12px] text-zinc-500">Billed monthly</span>
-                {mayManage && (
-                  <Button
-                    id="billing-manage-plan-button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleUpdatePayment}
-                  >
-                    Manage plan
-                  </Button>
-                )}
-              </div>
-            )}
-
-            {/* Grace period / Canceled reactivation CTA */}
-            {(isGracePeriod || isCanceled) && mayManage && (
-              <div
-                className={`rounded-lg p-[13px] flex items-center justify-between ${
-                  isCanceled
-                    ? 'bg-red-50 border border-red-200'
-                    : 'bg-amber-50 border border-amber-200'
-                }`}
-              >
-                <p
-                  className={`text-[13px] font-medium ${isCanceled ? 'text-red-800' : isGracePeriod ? 'text-amber-800' : 'text-zinc-900'}`}
-                >
-                  {isCanceled
-                    ? 'Reactivate your subscription to regain full access'
-                    : isTrialExpiredGrace
-                      ? 'Upgrade to keep your data and unlock unlimited storage'
-                      : 'Reactivate your subscription to restore full access'}
-                </p>
-                <Button
-                  id="billing-reactivate-button"
-                  variant={isCanceled ? 'destructive' : 'warning'}
-                  size="sm"
-                  icon={ArrowRightIcon}
-                  iconPosition="right"
-                  onClick={handleUpgradeClick}
-                >
-                  {isTrialExpiredGrace ? 'Upgrade' : 'Reactivate'}
-                </Button>
-              </div>
-            )}
-          </div>
-
-          {/* Current usage card */}
-          <div className="rounded-lg border border-zinc-200 bg-white flex flex-col gap-5 p-5 shadow-sm">
-            <div>
-              <h3 className="text-[13px] font-medium tracking-[-0.325px] leading-[19.5px] text-zinc-900">
-                Current usage
-              </h3>
-              <p className="text-[13px] text-zinc-500 leading-[19.5px] mt-1">
-                {isTrialing
-                  ? 'Storage and egress during your free trial'
-                  : isActive || isPastDue || isGracePeriod
-                    ? 'Your usage this billing period'
-                    : isCanceled
-                      ? 'Usage at time of cancellation'
-                      : isInactive
-                        ? 'Storage and egress for your account'
-                        : 'Storage and egress during your free trial'}
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-4 w-full">
-              {/* Storage bar */}
-              <div className="flex flex-col gap-[10px] w-full">
-                <div className="flex items-center justify-between">
-                  <span className="text-[13px] text-zinc-500">Storage used</span>
-                  <span className="text-[13px] font-medium text-zinc-900">
-                    {formatBytes(storageUsed)}
-                    {storageLimit > 0 && ` / ${formatBytes(storageLimit)}`}
-                  </span>
-                </div>
-                {/* Only meaningful against a finite allowance — pay-as-you-go
-                    storage is unlimited, so there is nothing to fill toward. */}
-                {storageLimit > 0 && (
-                  <ProgressBar value={storagePct} size="md" label="Storage usage" />
-                )}
-              </div>
-
-              {/* Egress bar (trial only) */}
-              {isTrialing && (
-                <div className="flex flex-col gap-[10px] w-full">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[13px] text-zinc-500">Egress used</span>
-                    <span className="text-[13px] font-medium text-zinc-900">
-                      {formatBytes(egressUsed)}
-                      {egressLimit > 0 && ` / ${formatBytes(egressLimit)}`}
-                    </span>
-                  </div>
-                  <ProgressBar value={egressPct} size="md" label="Egress usage" />
-                  <p className="text-xs text-zinc-500">
-                    No egress fees after upgrading to pay as you go
-                  </p>
-                </div>
-              )}
-
-              {/* Estimated cost (active/grace) */}
-              {(isActive || isPastDue || isGracePeriod) && (
-                <div className="w-full rounded-lg bg-zinc-50 p-3 flex items-center justify-between">
-                  <span className="text-[13px] font-normal text-zinc-500">
-                    Estimated monthly cost
-                  </span>
-                  <span className="text-[18px] font-semibold leading-[28px] text-zinc-900">
-                    {formatCents(estimatedCost)}
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Payment method card */}
-          <div className="rounded-lg border border-zinc-200 bg-white flex flex-col gap-5 p-5 shadow-sm">
-            <div>
-              <h3 className="text-[13px] font-medium tracking-[-0.325px] leading-[19.5px] text-zinc-900">
-                Payment method
-              </h3>
-              <p className="text-[13px] text-zinc-500 leading-[19.5px] mt-1">
-                {billing?.paymentMethod
-                  ? 'Your active payment method'
-                  : isInactive
-                    ? 'Add a payment method to choose a plan'
-                    : 'Add a payment method to continue after your trial'}
-              </p>
-            </div>
-
-            {billing?.paymentMethod ? (
-              <div className="w-full rounded-lg border border-zinc-200 p-[13px] flex items-center gap-3">
-                <IconBox icon={CreditCardIcon} color="blue" size="sm" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-[13px] font-medium leading-[19.5px] text-zinc-900">
-                    &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull;{' '}
-                    {billing.paymentMethod.last4}
-                  </p>
-                  <p className="text-xs text-zinc-500 leading-[18px]">
-                    Expires {String(billing.paymentMethod.expMonth).padStart(2, '0')}/
-                    {String(billing.paymentMethod.expYear).slice(-2)}
-                  </p>
-                </div>
-                {mayManage && (
-                  <Button
-                    id="billing-update-payment-button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleUpdatePayment}
-                  >
-                    Update
-                  </Button>
-                )}
-              </div>
-            ) : (
-              <div className="flex items-center gap-3 rounded-lg border border-dashed border-zinc-200 bg-zinc-50/30 p-[13px] w-full">
-                <IconBox icon={CreditCardIcon} color="grey" size="sm" />
-                <span className="flex-1 text-[13px] text-zinc-500">No payment method added</span>
-                {mayManage && (
-                  <Button
-                    id="billing-add-payment-button"
-                    variant="ghost"
-                    size="sm"
-                    icon={CreditCardIcon}
-                    onClick={handleUpgradeClick}
-                  >
-                    Add
-                  </Button>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Invoice history card — hidden while trialing or inactive: neither
-              has invoices, and an inactive account may have no Stripe customer */}
-          {!isTrialing && !isInactive && invoicesLoading && (
-            <div className="animate-pulse rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
-              <div className="h-3 w-28 rounded bg-zinc-200 mb-2" />
-              <div className="h-3 w-44 rounded bg-zinc-200 mb-4" />
-              <div className="h-4 w-full rounded bg-zinc-200 mb-3" />
-              <div className="h-4 w-full rounded bg-zinc-200 mb-3" />
-              <div className="h-4 w-full rounded bg-zinc-200" />
-            </div>
-          )}
-          {!isTrialing && !isInactive && !invoicesLoading && (
-            <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
-              <h3 className="text-[13px] font-medium tracking-[-0.325px] leading-[19.5px] text-zinc-900">
-                Invoice history
-              </h3>
-              <p className="text-[13px] text-zinc-500 leading-[19.5px] mt-1 mb-4">
-                Recent billing statements
-              </p>
-
-              {invoicesError && (
-                <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
-                  <WarningIcon size={16} className="text-red-600 flex-shrink-0" weight="fill" />
-                  <span className="text-sm text-red-700">{invoicesError}</span>
-                </div>
-              )}
-
-              {!invoicesError && invoices && invoices.invoices.length === 0 && (
-                <p className="text-sm text-zinc-400">
-                  No invoices yet. Your invoices will appear here after your first billing cycle.
-                </p>
-              )}
-
-              {!invoicesError && invoices && invoices.invoices.length > 0 && (
-                <div>
-                  {invoices.invoices.map((inv, idx) => (
-                    <div
-                      key={inv.id}
-                      data-testid="invoice-row"
-                      data-invoice-id={inv.id}
-                      className={`flex items-center justify-between py-3 ${
-                        idx > 0 ? 'border-t border-zinc-200' : ''
-                      }`}
-                    >
-                      <div className="flex flex-col">
-                        <span className="text-[13px] font-medium text-zinc-900">
-                          {formatDate(inv.createdAt)}
-                        </span>
-                        <span className="text-[11px] text-zinc-400 capitalize">{inv.status}</span>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <span className="text-[14px] font-semibold text-zinc-900">
-                          {formatCents(inv.amountDueInCents)}
-                        </span>
-                        {inv.invoicePdfUrl && (
-                          <a
-                            href={inv.invoicePdfUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            aria-label={`Download PDF invoice from ${formatDate(inv.createdAt)} for ${formatCents(inv.amountDueInCents)}`}
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50"
-                          >
-                            <DownloadSimpleIcon size={13} aria-hidden="true" />
-                            PDF
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* ── Right column (pricing sidebar) ─────────────────── */}
-        <div className="w-[368px] flex-shrink-0">
-          <div className="rounded-lg border border-zinc-200 bg-white shadow-sm overflow-hidden p-px">
-            {/* Header */}
-            <div className="flex flex-col gap-[6px] px-4 pt-4 pb-[13px] border-b border-zinc-200/50 bg-zinc-50">
-              <Overline>Pay as you go</Overline>
-              <div className="flex items-baseline gap-1">
-                <span className="text-3xl font-bold leading-9 text-zinc-900">$4.99</span>
-                <span className="text-[12px] leading-[18px] text-zinc-500">/ TB / month</span>
-              </div>
-            </div>
-
-            {/* Features */}
-            <div className="flex flex-col gap-4 p-4">
-              <ul className="flex flex-col gap-[10px]">
-                {[
-                  hasMinimum ? minimumLabel : 'Pay for the storage you use',
-                  'No egress fees',
-                  'No API request fees',
-                  'Data integrity guarantees',
-                  'Enterprise-grade security',
-                ].map((item) => (
-                  <li key={item} className="flex items-center gap-[10px] text-[13px] text-zinc-500">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-zinc-100 flex-shrink-0">
-                      <CheckIcon size={12} className="text-zinc-700" weight="bold" />
-                    </span>
-                    {item}
-                  </li>
-                ))}
-              </ul>
-
-              {/* CTA for trial / grace / canceled / inactive users. For
-                  inactive, canReactivateWithSavedCard stays false, so the flow
-                  goes through a fresh SetupIntent rather than a saved-card
-                  reactivation the backend would reject. */}
-              {(isTrialing || isGracePeriod || isCanceled || isInactive) && mayManage && (
-                <Button
-                  id="billing-plan-cta-button"
-                  variant="primary"
-                  icon={LightningIcon}
-                  onClick={handleUpgradeClick}
-                  className="w-full justify-center"
-                >
-                  {isTrialing ? 'Upgrade now' : isInactive ? 'Choose a plan' : 'Reactivate'}
-                </Button>
-              )}
-            </div>
-          </div>
-
-          {/* Need more? section */}
-          <div className="flex flex-col gap-1 mt-5 px-1">
-            <Overline>Need more?</Overline>
-            <p className="text-[12px] leading-[19.5px] text-zinc-500">
-              The <strong className="font-medium text-zinc-900">Business plan</strong> offers volume
-              discounts, SLA guarantees, and dedicated support.
-            </p>
-            <button
-              type="button"
-              onClick={() => setContactSalesOpen(true)}
-              className="text-[12px] font-medium leading-[18px] text-brand-600 hover:underline text-left"
-            >
-              Contact sales &rarr;
-            </button>
-          </div>
-        </div>
+        <PaymentMethodCard
+          billing={billing}
+          mayManage={mayManage}
+          onManage={flows.openStripePortal}
+          onAddCard={flows.openPlan}
+        />
       </div>
 
-      {/* Modals */}
+      {/* Full width: the figures align to the right edge across the card, which
+          is how a statement reads. */}
+      <UsageCard
+        subscription={billing.subscription}
+        storageBytesUsed={usage?.storage.usedBytes ?? 0}
+        egressBytesUsed={usage?.egress.usedBytes ?? 0}
+      />
+
+      {hasInvoiceHistory(status) && (
+        <InvoicesCard
+          invoices={invoices?.invoices}
+          loading={invoicesPending}
+          errorMessage={invoicesFailed ? 'Unable to load invoices. Please try again later.' : ''}
+          onViewAll={mayManage ? flows.openStripePortal : undefined}
+        />
+      )}
+
       <ChoosePlanDialog
-        open={planOpen}
-        onClose={() => setPlanOpen(false)}
-        onSelectPayAsYouGo={handleSelectPayAsYouGo}
-        onContactSales={handleContactSales}
-        savedCardLast4={canReactivateWithSavedCard ? billing?.paymentMethod?.last4 : undefined}
-        onUseDifferentCard={canReactivateWithSavedCard ? handleUseDifferentCard : undefined}
+        open={flows.planOpen}
+        onClose={flows.closePlan}
+        onSelectPayAsYouGo={flows.selectPayAsYouGo}
+        onContactSales={flows.contactSalesFromPlan}
+        savedCardLast4={flows.canReactivateWithSavedCard ? billing.paymentMethod?.last4 : undefined}
+        onUseDifferentCard={flows.canReactivateWithSavedCard ? flows.useDifferentCard : undefined}
       />
 
       <AddPaymentDialog
-        open={paymentOpen}
-        clientSecret={clientSecret}
-        stripePublishableKey={stripePublishableKey}
-        onClose={() => setPaymentOpen(false)}
-        onBack={handlePaymentBack}
-        onSuccess={handlePaymentSuccess}
-        onRefreshSetupIntent={refreshSetupIntent}
+        open={flows.paymentOpen}
+        clientSecret={flows.clientSecret}
+        stripePublishableKey={flows.stripePublishableKey}
+        onClose={flows.closePayment}
+        onBack={flows.backToPlan}
+        onSuccess={flows.paymentSucceeded}
+        onRefreshSetupIntent={flows.refreshSetupIntent}
       />
 
-      <ContactSalesDialog open={contactSalesOpen} onClose={() => setContactSalesOpen(false)} />
-    </PageLayout>
+      <ContactSalesDialog open={flows.contactSalesOpen} onClose={flows.closeContactSales} />
+    </BillingSection>
   );
+}
+
+/**
+ * The one thing wrong with this account, when something is.
+ *
+ * Above the cards, because it is about the whole account rather than any one of
+ * them, and it carries its own action so the remedy sits with the problem. An
+ * Admin without `billing.manage` still sees the state and who to ask: the
+ * banner is information, and only the button is a permission.
+ */
+function StatusBanner({
+  status,
+  mayManage,
+  onManage,
+  onChoosePlan,
+}: {
+  status: SubscriptionStatus;
+  mayManage: boolean;
+  onManage: () => void;
+  onChoosePlan: () => void;
+}) {
+  if (status === SubscriptionStatus.PastDue) {
+    return (
+      <Alert
+        variant="amber"
+        title="Your last payment failed"
+        description={
+          mayManage
+            ? 'Update your payment method in Stripe to keep access to your data.'
+            : 'An organization owner needs to update the payment method to keep access to your data.'
+        }
+        action={
+          mayManage ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={ArrowSquareOutIcon}
+              iconPosition="right"
+              onClick={onManage}
+            >
+              Update payment
+            </Button>
+          ) : undefined
+        }
+      />
+    );
+  }
+
+  if (status === SubscriptionStatus.GracePeriod) {
+    return (
+      <Alert
+        variant="amber"
+        title="This organization is read-only"
+        description={
+          mayManage
+            ? 'Choose a plan to restore writes. Your data is still here.'
+            : 'An organization owner can choose a plan to restore writes. Your data is still here.'
+        }
+        action={
+          mayManage ? (
+            <Button variant="warning" size="sm" onClick={onChoosePlan}>
+              Choose a plan
+            </Button>
+          ) : undefined
+        }
+      />
+    );
+  }
+
+  if (status === SubscriptionStatus.Canceled) {
+    return (
+      <Alert
+        variant="red"
+        title="This subscription is canceled"
+        description={
+          mayManage
+            ? 'Reactivate to regain access. Your data is still here.'
+            : 'An organization owner can reactivate it. Your data is still here.'
+        }
+        action={
+          mayManage ? (
+            <Button variant="destructive" size="sm" onClick={onChoosePlan}>
+              Reactivate
+            </Button>
+          ) : undefined
+        }
+      />
+    );
+  }
+
+  return null;
 }

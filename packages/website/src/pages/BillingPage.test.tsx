@@ -1,6 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} from '@tanstack/react-router';
 import { OrgRole, ROLE_PERMISSIONS } from '@filone/shared';
 import { seedPermissions } from '../lib/test-permissions.js';
 import { PlanId, SubscriptionStatus } from '@filone/shared';
@@ -72,8 +79,48 @@ function payAsYouGoBilling(): BillingInfo {
     subscription: {
       planId: PlanId.PayAsYouGo,
       status: SubscriptionStatus.Active,
+      planName: 'Pay as you go',
+      pricePerTbCents: 499,
+      monthlyMinimumCents: 499,
+      currentPeriodStart: '2026-08-12T00:00:00Z',
+      currentPeriodEnd: '2026-09-12T00:00:00Z',
     },
   };
+}
+
+/**
+ * An org whose price sales put together in Stripe: a named plan, a floor in the
+ * thousands, and no single per-TB rate, because a volume deal steps.
+ */
+function contractedBilling(): BillingInfo {
+  return {
+    subscription: {
+      planId: PlanId.PayAsYouGo,
+      status: SubscriptionStatus.Active,
+      planName: 'Business',
+      monthlyMinimumCents: 250_000,
+      currentPeriodEnd: '2026-09-12T00:00:00Z',
+    },
+  };
+}
+
+/**
+ * A router around the page, because the help rail links to `/support` and an
+ * internal link is the router's `Link`. Same shape as the helper in
+ * `QuerySources.test.tsx` and its neighbours.
+ */
+function renderWithRouter(ui: () => React.JSX.Element) {
+  const rootRoute = createRootRoute({ component: ui });
+  const supportRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/support',
+    component: () => null,
+  });
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([supportRoute]),
+    history: createMemoryHistory({ initialEntries: ['/'] }),
+  });
+  return render(<RouterProvider router={router} />);
 }
 
 function renderPage(role = OrgRole.Owner) {
@@ -94,11 +141,11 @@ function renderPage(role = OrgRole.Owner) {
   // role change under an open dialog looks like.
   return {
     client,
-    ...render(
+    ...renderWithRouter(() => (
       <QueryClientProvider client={client}>
         <BillingPage />
-      </QueryClientProvider>,
-    ),
+      </QueryClientProvider>
+    )),
   };
 }
 
@@ -113,13 +160,14 @@ describe('BillingPage — inactive subscription', () => {
     mockGetBilling.mockResolvedValue(inactiveBilling());
     const { container } = renderPage();
 
-    expect(await screen.findByText('No active plan')).toBeInTheDocument();
+    expect(await screen.findByTestId('plan-name')).toHaveTextContent('No plan');
     expect(screen.getByText('Choose a plan to start storing data')).toBeInTheDocument();
 
-    // The status badge is never empty for an inactive account.
+    // The state is still readable from the DOM, without a pill repeating the
+    // title beside it.
     const status = screen.getByTestId('subscription-status');
     expect(status).toHaveAttribute('data-status', 'inactive');
-    expect(status).toHaveTextContent('No plan');
+    expect(status).toBeEmptyDOMElement();
 
     // The self-serve path out of the blocked state.
     const cta = container.querySelector('#billing-plan-cta-button');
@@ -132,9 +180,9 @@ describe('BillingPage — inactive subscription', () => {
     mockGetBilling.mockResolvedValue(inactiveBilling());
     renderPage();
 
-    await screen.findByText('No active plan');
+    await screen.findByTestId('plan-name');
     expect(mockGetInvoices).not.toHaveBeenCalled();
-    expect(screen.queryByText('Invoice history')).not.toBeInTheDocument();
+    expect(screen.queryByText('Invoices')).not.toBeInTheDocument();
   });
 
   it('still shows the trial upgrade CTA while trialing', async () => {
@@ -143,7 +191,7 @@ describe('BillingPage — inactive subscription', () => {
 
     await screen.findByText('Free trial');
     const cta = container.querySelector('#billing-plan-cta-button');
-    expect(cta).toHaveTextContent('Upgrade now');
+    expect(cta).toHaveTextContent('Upgrade');
     expect(mockGetInvoices).not.toHaveBeenCalled();
   });
 });
@@ -160,7 +208,7 @@ describe('BillingPage — current usage meters', () => {
     renderPage();
 
     // The figure stays; only the bar, which implies a cap, goes away.
-    expect(await screen.findByText('Storage used')).toBeInTheDocument();
+    expect(await screen.findByText('Storage')).toBeInTheDocument();
     expect(screen.queryByRole('progressbar', { name: 'Storage usage' })).not.toBeInTheDocument();
   });
 
@@ -168,8 +216,131 @@ describe('BillingPage — current usage meters', () => {
     mockGetBilling.mockResolvedValue(trialingBilling());
     renderPage();
 
-    await screen.findByText('Storage used');
+    await screen.findByText('Storage');
     expect(screen.getByRole('progressbar', { name: 'Storage usage' })).toBeInTheDocument();
+  });
+});
+
+describe('BillingPage — an organization on a negotiated price', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetUsage.mockResolvedValue({ storage: { usedBytes: 40e12 }, egress: { usedBytes: 2e12 } });
+    mockGetInvoices.mockResolvedValue({ invoices: [] });
+  });
+
+  it('calls the plan what the contract calls it', async () => {
+    mockGetBilling.mockResolvedValue(contractedBilling());
+    renderPage();
+
+    expect(await screen.findByTestId('plan-name')).toHaveTextContent('Business');
+  });
+
+  it('says custom pricing without inventing a rate', async () => {
+    mockGetBilling.mockResolvedValue(contractedBilling());
+    renderPage();
+
+    await screen.findByText('Business');
+    // No per-TB figure, because this price has no single one, and no minimum
+    // standing in for one either. The renewal shares the line.
+    expect(screen.getByTestId('plan-meta')).toHaveTextContent(/^Custom pricing · Renews /);
+    expect(screen.queryByText(/\/TB per month/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/minimum/)).not.toBeInTheDocument();
+  });
+
+  it('sends the customer to Stripe for the total rather than estimating it', async () => {
+    mockGetBilling.mockResolvedValue(contractedBilling());
+    renderPage();
+
+    await screen.findByText('Business');
+    expect(screen.getByTestId('cost-follows-agreement')).toBeInTheDocument();
+    expect(screen.queryByTestId('estimated-cost')).not.toBeInTheDocument();
+  });
+
+  it('reads no card on a billed account as invoiced, not as missing', async () => {
+    mockGetBilling.mockResolvedValue(contractedBilling());
+    renderPage();
+
+    expect(await screen.findByTestId('billed-by-invoice')).toBeInTheDocument();
+    expect(screen.queryByText('No card on file')).not.toBeInTheDocument();
+  });
+
+  it('does not pitch a plan at an organization that already has one', async () => {
+    mockGetBilling.mockResolvedValue(contractedBilling());
+    renderPage();
+
+    await screen.findByText('Business');
+    expect(screen.queryByRole('button', { name: 'Talk to sales' })).not.toBeInTheDocument();
+  });
+
+  it('points at Stripe for invoices older than the ones listed', async () => {
+    mockGetBilling.mockResolvedValue(contractedBilling());
+    mockGetInvoices.mockResolvedValue({
+      invoices: [
+        {
+          id: 'in_1',
+          amountDueInCents: 250_000,
+          status: 'paid',
+          createdAt: '2026-07-01T00:00:00Z',
+          invoicePdfUrl: null,
+        },
+      ],
+    });
+    renderPage();
+
+    expect(await screen.findByRole('button', { name: /View all/ })).toBeInTheDocument();
+  });
+
+  it('keeps the archive link from a caller who cannot open the portal', async () => {
+    // The portal is `billing.manage`; an Admin reading invoices does not hold it.
+    mockGetBilling.mockResolvedValue(contractedBilling());
+    mockGetInvoices.mockResolvedValue({
+      invoices: [
+        {
+          id: 'in_1',
+          amountDueInCents: 250_000,
+          status: 'paid',
+          createdAt: '2026-07-01T00:00:00Z',
+          invoicePdfUrl: null,
+        },
+      ],
+    });
+    renderPage(OrgRole.Admin);
+
+    await screen.findByTestId('plan-name');
+    expect(screen.queryByRole('button', { name: /View all/ })).not.toBeInTheDocument();
+  });
+
+  it('keeps a route to support beside the figures', async () => {
+    mockGetBilling.mockResolvedValue(contractedBilling());
+    renderPage();
+
+    const support = await screen.findByRole('link', { name: 'Contact support' });
+    expect(support).toHaveAttribute('href', '/support');
+  });
+
+  it('offers sales to a trial, which has not bought anything yet', async () => {
+    mockGetBilling.mockResolvedValue(trialingBilling());
+    renderPage();
+
+    await screen.findByText('Free trial');
+    expect(screen.getByRole('button', { name: 'Talk to sales' })).toBeInTheDocument();
+  });
+
+  it('says which dates the usage figures cover', async () => {
+    mockGetBilling.mockResolvedValue(payAsYouGoBilling());
+    renderPage();
+
+    expect(await screen.findByTestId('billing-period')).toHaveTextContent(
+      /^Aug \d+ – Sep \d+, 2026$/,
+    );
+  });
+
+  it('estimates from the rate when the price states one', async () => {
+    mockGetBilling.mockResolvedValue(payAsYouGoBilling());
+    renderPage();
+
+    // 40 TB at $4.99 a TB, and the floor is nowhere near it.
+    expect(await screen.findByTestId('estimated-cost')).toHaveTextContent('$199.60');
   });
 });
 
