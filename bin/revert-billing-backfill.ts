@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 // Usage: ./bin/revert-billing-backfill.ts --stage <name> [--execute] [--force-unlock]
+//        --only-safe-before-flip-merges
 //
 // Reverts ./bin/backfill-billing-to-org.ts: deletes the `ORG#{orgId}/SUBSCRIPTION`
 // rows that backfill created. The `CUSTOMER#` rows are untouched, because the
@@ -27,10 +28,16 @@
 // Staging is AWS account 654654381893, production 811430801166. Confirm the stage
 // and the table name printed at startup before running with --execute.
 //
-// ONLY BEFORE THE FLIP. Reach for this while the flip PR is unmerged, so the
-// `CUSTOMER#` fallback is still in every read path. After the flip deploys, the
-// org row is the only row anyone looks at, and deleting it takes the account's
-// subscription with it — reverting billing then means reverting that deploy too.
+// ONLY BEFORE THE FLIP, and the flag says so. Reach for this while the flip PR
+// is unmerged, so the `CUSTOMER#` fallback is still in every read path. After
+// the flip deploys, the org row is the only row anyone looks at, and deleting it
+// takes the account's subscription with it — reverting billing then means
+// reverting that deploy too, in the same change.
+//
+// `--only-safe-before-flip-merges` is required for that reason: the flag's name
+// is the warning, so nobody reaches the delete without having read it. (After
+// the dated cleanup step the deletes also refuse per org, because each one now
+// asserts the legacy row it promises readers will fall back to still exists.)
 //
 // An --execute run holds the same BillingTable lock row the backfill takes, and
 // holds it from before the scan, so neither run can act on a plan the other has
@@ -49,12 +56,35 @@ import { parseCli } from './lib/args.ts';
 
 const RUNBOOK = 'docs/BillingRekeyRunbook.md';
 
+const REQUIRED_ACKNOWLEDGEMENT = '--only-safe-before-flip-merges';
+
 const cli = parseCli({
   script: './bin/revert-billing-backfill.ts',
-  flags: ['--force-unlock'],
+  flags: ['--force-unlock', REQUIRED_ACKNOWLEDGEMENT],
   runbook: RUNBOOK,
-  help: ['--force-unlock  Drop the run lock a crashed --execute run left behind.'],
+  help: [
+    `${REQUIRED_ACKNOWLEDGEMENT}`,
+    '                Required. Confirms the flip PR is NOT merged on this stage.',
+    '--force-unlock  Drop the run lock a crashed --execute run left behind.',
+  ],
 });
+
+if (!cli.flag(REQUIRED_ACKNOWLEDGEMENT)) {
+  console.error(`This script requires ${REQUIRED_ACKNOWLEDGEMENT}.`);
+  console.error('');
+  console.error('It deletes the ORG#{orgId}/SUBSCRIPTION rows the backfill created. That is safe');
+  console.error('only while the flip is unmerged, because every read still falls back to the');
+  console.error('CUSTOMER# row. Once the flip is deployed the org row is the only row anyone');
+  console.error("reads, and deleting it takes the account's subscription with it — every gated");
+  console.error('route answers SUBSCRIPTION_INACTIVE until the deploy is reverted too.');
+  console.error('');
+  console.error(
+    `Confirm the flip is not deployed to this stage, then pass ${REQUIRED_ACKNOWLEDGEMENT}.`,
+  );
+  console.error(`See ${RUNBOOK}. Nothing was read or written.`);
+  process.exitCode = 1;
+  process.exit();
+}
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { decodeRow, scanAll, text, transactWithRetry } from './lib/dynamo.ts';

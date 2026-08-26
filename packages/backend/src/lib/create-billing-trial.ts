@@ -16,8 +16,8 @@ export interface CreateBillingTrialParams {
  * One person can own two orgs, and a key naming only the user would hand the
  * second org the first org's customer and subscription — one Stripe meter
  * billing two orgs' usage, with no way to tell them apart after the fact. The
- * existence check re-keys with them (`readSubscription` prefers the org row),
- * so the check and the keys agree on what "already has a trial" means.
+ * existence check is keyed the same way, so the check and the keys agree on
+ * what "already has a trial" means.
  */
 const trialIdempotencyKeys = (orgId: string) => ({
   customer: `billing-trial-org-${orgId}`,
@@ -36,12 +36,12 @@ export async function createBillingTrial({
   // abandoned card form. The trial is written onto that row instead, and its
   // Stripe customer is reused rather than a second one created for the same org
   // (two customers for one org is two meters billing the same usage).
-  const existing = await readSubscription(orgId, userId, {
+  const existing = await readSubscription(orgId, {
     consistentRead: true,
     projectionExpression: 'subscriptionStatus, subscriptionId, stripeCustomerId',
   });
-  if (existing?.record.subscriptionStatus || existing?.record.subscriptionId) return;
-  const existingCustomerId = existing?.record.stripeCustomerId;
+  if (existing?.subscriptionStatus || existing?.subscriptionId) return;
+  const existingCustomerId = existing?.stripeCustomerId;
 
   // Checked here rather than at the write below, which is deliberately
   // unconditional (see step 3) and would therefore recreate a purged billing
@@ -85,26 +85,23 @@ export async function createBillingTrial({
     { idempotencyKey: idempotency.subscription },
   );
 
-  // 3. Write to DynamoDB, on both keys. Deliberately an unconditional update,
-  // NOT a conditional put: Stripe fires customer.subscription.created as soon
-  // as the subscription above exists, and if that webhook lands first it
-  // upserts a partial record (subscriptionId + status, no customer mapping). A
-  // put guarded by attribute_not_exists would then silently no-op and the
-  // stripeCustomerId would never be stored — the user could not activate. The
-  // update fills the mapping in either arrival order; subscriptionStatus uses
-  // if_not_exists so a status a webhook already wrote is never clobbered by
-  // this stale-at-write-time `trialing`. That guarantee is per row, and only the
-  // legacy row is one a webhook can have written first: the webhook's own writes
-  // never create the org twin, so on the org key `if_not_exists` is reading an
-  // attribute that is not there yet and this `trialing` always wins.
+  // 3. Write to DynamoDB. Deliberately an update rather than a conditional put:
+  // Stripe fires customer.subscription.created as soon as the subscription above
+  // exists, and if that webhook lands first it writes a partial record
+  // (subscriptionId + status, no customer mapping). A put guarded by
+  // attribute_not_exists would then silently no-op and the stripeCustomerId
+  // would never be stored — the user could not activate. The update fills the
+  // mapping in either arrival order; subscriptionStatus uses if_not_exists so a
+  // status a webhook already wrote is never clobbered by this
+  // stale-at-write-time `trialing`.
   //
-  // This is the writer that brings the record into existence (`createsOrgRow`),
-  // so it writes the whole record — the org and user attributes included, which
-  // is what every lifecycle job reads once the pk stops naming a user.
+  // This is the writer that brings the record into existence (`createsRow`), so
+  // it writes the whole record — the org and user attributes included, which is
+  // what every lifecycle job reads now that the pk names only the org.
   await updateSubscription(
     { orgId, userId },
     {
-      createsOrgRow: true,
+      createsRow: true,
       UpdateExpression:
         'SET orgId = :orgId, userId = :userId, stripeCustomerId = :customerId, ' +
         'subscriptionId = :subscriptionId, ' +

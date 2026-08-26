@@ -102,10 +102,6 @@ async function scanActiveSubscriptionRecords(): Promise<SubscriptionRecord[]> {
         subscriptionStatus: record.subscriptionStatus as string,
       };
     },
-    describe: (row) => ({
-      subscriptionId: row.subscriptionId,
-      stripeCustomerId: row.stripeCustomerId,
-    }),
   });
 }
 

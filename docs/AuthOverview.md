@@ -213,7 +213,7 @@ Could expand on this concept as a way to do more AuthZ based on Auth0 claims or 
 
 ### Subscription state machine
 
-States are held on the user's billing record (`BillingTable`, key `CUSTOMER#${userId} / SUBSCRIPTION`) and updated by the Stripe webhook ([`stripe-webhook.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/stripe-webhook.ts)). The middleware also performs _lazy_ transitions on read.
+States are held on the org's billing record (`BillingTable`, key `ORG#${orgId} / SUBSCRIPTION`) and updated by the Stripe webhook ([`stripe-webhook.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/stripe-webhook.ts)). The middleware also performs _lazy_ transitions on read.
 
 | Stripe state                      | Read                            | Write                                | Notes                                                                                                              |
 | --------------------------------- | ------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |

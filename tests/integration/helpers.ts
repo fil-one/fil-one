@@ -86,21 +86,20 @@ export function testOrgId(userId: string): string {
 }
 
 /**
- * Both keys the row lives under, org first — the order the application reads
- * them in. A suite that seeds its own `orgId` names it here too, so the key and
- * the attribute can never disagree.
+ * The key the row lives under. A suite that seeds its own `orgId` names it here
+ * too, so the key and the attribute can never disagree.
  */
-const subscriptionKeys = (userId: string, orgId: string = testOrgId(userId)) => [
-  { pk: { S: `ORG#${orgId}` }, sk: { S: 'SUBSCRIPTION' } },
-  { pk: { S: `CUSTOMER#${userId}` }, sk: { S: 'SUBSCRIPTION' } },
-];
+const subscriptionKey = (userId: string, orgId: string = testOrgId(userId)) => ({
+  pk: { S: `ORG#${orgId}` },
+  sk: { S: 'SUBSCRIPTION' },
+});
 
 /**
- * Seed the subscription on both keys, the way the application writes it.
+ * Seed the subscription on the key the application reads and writes.
  *
- * Seeding one key only would test the wrong thing in both directions: seed just
- * the legacy row and a handler that correctly writes the org twin looks like it
- * wrote nothing; seed just the org row and the fallback path is never exercised.
+ * A `CUSTOMER#` row would be seeding a key nothing looks at: the handlers read
+ * the org row and the scan-driven jobs skip anything else, so a suite seeded
+ * there would watch every assertion fail for the wrong reason.
  */
 export async function seedBillingRecord(
   userId: string,
@@ -119,39 +118,38 @@ export async function seedBillingRecord(
     orgId: { S: orgId },
   };
 
-  for (const key of subscriptionKeys(userId, orgId)) {
-    await getDynamoClient().send(
-      new PutItemCommand({
-        TableName: getBillingTableName(),
-        Item: { ...attributes, pk: key.pk },
-      }),
-    );
-  }
+  await getDynamoClient().send(
+    new PutItemCommand({
+      TableName: getBillingTableName(),
+      Item: { ...attributes, ...subscriptionKey(userId, orgId) },
+    }),
+  );
 }
 
-/** The row the application would read: the org key first, the legacy key second. */
+/** The row the application would read. */
 export async function getBillingRecord(
   userId: string,
   orgId?: string,
 ): Promise<Record<string, AttributeValue> | null> {
-  for (const Key of subscriptionKeys(userId, orgId)) {
-    const result = await getDynamoClient().send(
-      new GetItemCommand({ TableName: getBillingTableName(), Key }),
-    );
-    if (result.Item) return result.Item;
-  }
-  return null;
+  const result = await getDynamoClient().send(
+    new GetItemCommand({
+      TableName: getBillingTableName(),
+      Key: subscriptionKey(userId, orgId),
+    }),
+  );
+  return result.Item ?? null;
 }
 
 export async function deleteBillingRecord(userId: string, orgId?: string): Promise<void> {
-  for (const Key of subscriptionKeys(userId, orgId)) {
-    try {
-      await getDynamoClient().send(
-        new DeleteItemCommand({ TableName: getBillingTableName(), Key }),
-      );
-    } catch (error) {
-      console.error('Failed to delete billing record:', error);
-    }
+  try {
+    await getDynamoClient().send(
+      new DeleteItemCommand({
+        TableName: getBillingTableName(),
+        Key: subscriptionKey(userId, orgId),
+      }),
+    );
+  } catch (error) {
+    console.error('Failed to delete billing record:', error);
   }
 }
 

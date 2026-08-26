@@ -21,12 +21,15 @@ export function orgIdFromStripeMetadata(
 }
 
 /**
- * The org behind a Stripe customer, read off its billing record.
+ * The org behind a Stripe customer, read off its legacy billing record.
  *
- * Stripe callbacks carry `metadata.userId` but not always an org, and tenant
- * status changes need one. Eventually consistent: the row predates the callback.
- * The one read still keyed by user: the callers hold a Stripe object with no
- * usable org id, so there is no org key to read with.
+ * The fallback for customers that predate `metadata.orgId`, and the one read
+ * still keyed by user: its callers hold a Stripe customer with no usable org
+ * id, so there is no org key to read with. `customer.deleted` and
+ * `customer.updated` both take it — the re-key stamped no metadata on Stripe,
+ * so nothing but the row answers for that cohort. Dead once the re-key's dated
+ * cleanup deletes the legacy rows, by which point the cohort has been
+ * dispositioned by name (docs/BillingRekeyRunbook.md).
  */
 export async function resolveOrgIdFromSubscription(userId: string): Promise<string | undefined> {
   const { Item } = await getDynamoClient().send(
@@ -40,16 +43,18 @@ export async function resolveOrgIdFromSubscription(userId: string): Promise<stri
 }
 
 /**
- * The org for a Stripe object: its own metadata first (each source in the
- * order given), the billing row last.
+ * The org a Stripe event is about, from the objects it carries, in the order
+ * given. Metadata alone: the billing row is keyed by org now, so there is no
+ * row to look an org up FROM without already having the answer. An event whose
+ * objects name no org cannot be written — `updateSubscriptionByUser` throws,
+ * the webhook 500s, and Stripe retries until somebody repairs the metadata.
  */
-export async function resolveOrgId(
-  userId: string,
-  ...metadatas: Array<Stripe.Metadata | null | undefined>
-): Promise<string | undefined> {
-  for (const metadata of metadatas) {
-    const orgId = orgIdFromStripeMetadata(metadata);
+export function resolveOrgId(
+  ...metadata: Array<Stripe.Metadata | null | undefined>
+): string | undefined {
+  for (const source of metadata) {
+    const orgId = orgIdFromStripeMetadata(source);
     if (orgId) return orgId;
   }
-  return resolveOrgIdFromSubscription(userId);
+  return undefined;
 }
