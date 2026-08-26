@@ -105,6 +105,30 @@ export class NotAMemberError extends Error {
   }
 }
 
+/**
+ * The API error code an error carries, when it carries one.
+ *
+ * Every error `apiRequest` throws is an `Error` with fields assigned onto it, so
+ * a caller wanting the code writes the same unsafe cast each time. Named once
+ * here, and narrowed to a string, so a component branches on a value rather than
+ * on `unknown`.
+ */
+export function errorCodeOf(error: unknown): string | undefined {
+  const code = (error as { code?: unknown } | null | undefined)?.code;
+  return typeof code === 'string' ? code : undefined;
+}
+
+/** The HTTP status an error carries, when it carries one. */
+export function errorStatusOf(error: unknown): number | undefined {
+  const status = (error as { status?: unknown } | null | undefined)?.status;
+  return typeof status === 'number' ? status : undefined;
+}
+
+/** An error's message, or a fallback for anything that is not an `Error`. */
+export function errorMessageOf(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 function getCsrfToken(): string | undefined {
   return document.cookie
     .split('; ')
@@ -161,15 +185,48 @@ function throwAccountDeleted(status: number, fromSessionProbe: boolean): never {
 }
 
 /**
+ * What a call wants done differently in the one funnel every call goes through.
+ *
+ * Both flags exist for the invitation accept, and both are about the same thing:
+ * the caller is not yet a member of the org they are joining, so the two pieces
+ * of app-wide plumbing that assume otherwise have to be opted out of rather than
+ * worked around at the call site.
+ */
+export interface ApiRequestBehavior {
+  /**
+   * Do not name the tab's active org. The header names an org the caller is by
+   * definition not in, and the accept route resolves the org from the
+   * invitation, so sending it can only add a refusal.
+   */
+  omitOrgHeader?: boolean;
+  /**
+   * Do not navigate to `/verify-email` on `EMAIL_NOT_VERIFIED`. The caller
+   * renders that state itself, with the invitation still named and the same CTA
+   * the redirect would have landed on.
+   */
+  rendersUnverifiedEmail?: boolean;
+}
+
+/**
  * The error a 403 becomes. Every denial the API can send is named here so a
  * caller renders intent rather than a generic toast, and the two role codes get
  * types a component can branch on.
  */
-function forbidden(body: { message?: string; code?: string }): Error {
+function forbidden(
+  body: { message?: string; code?: string },
+  behavior: ApiRequestBehavior = {},
+): Error {
   switch (body.code) {
     case ApiErrorCode.EMAIL_NOT_VERIFIED:
-      if (!isRedirecting) redirectTo('/verify-email');
-      return Object.assign(new Error('Email verification required'), { status: 403 });
+      if (!isRedirecting && !behavior.rendersUnverifiedEmail) redirectTo('/verify-email');
+      // The code travels whether or not this branch navigated, so a caller that
+      // renders the state itself gets something to branch on — the accept page
+      // points at the verify-email surface with the invitation still named,
+      // which is better copy than the surface reached cold.
+      return Object.assign(new Error('Email verification required'), {
+        status: 403,
+        code: ApiErrorCode.EMAIL_NOT_VERIFIED,
+      });
 
     case ApiErrorCode.NOT_A_MEMBER:
       return new NotAMemberError(body.message);
@@ -203,8 +260,17 @@ function forbidden(body: { message?: string; code?: string }): Error {
         { status: 403 },
       );
 
+    // Every other 403 keeps its code, so a caller that knows one can branch on
+    // it — the accept page tells INVITE_EMAIL_MISMATCH from the rest — while a
+    // caller that does not still renders the message the server sent. A denial
+    // with no code arrives with none and means nothing in particular: an expired
+    // CSRF cookie is the routine one, so no component should read the absence of
+    // a code as a named refusal.
     default:
-      return Object.assign(new Error(body.message ?? 'Access denied'), { status: 403 });
+      return Object.assign(new Error(body.message ?? 'Access denied'), {
+        status: 403,
+        code: body.code,
+      });
   }
 }
 
@@ -229,6 +295,7 @@ export interface SentOrg {
 export async function apiRequest<T>(
   path: string,
   options: RequestInit = {},
+  behavior: ApiRequestBehavior = {},
   sentOrg?: SentOrg,
 ): Promise<T> {
   // The tab is on its way to another org. Held rather than rejected, for the
@@ -250,8 +317,9 @@ export async function apiRequest<T>(
   // Every call names the org it is about. Without the header the server serves
   // the caller's own org, which is right on a first visit and wrong for anyone
   // who has switched — so the header goes on here, in the one funnel, rather
-  // than at each call site.
-  const activeOrgId = getActiveOrgId();
+  // than at each call site. The exception is a call about an org the caller is
+  // not in yet, which asks not to be asked.
+  const activeOrgId = behavior.omitOrgHeader ? null : getActiveOrgId();
   if (activeOrgId) headers.set(ORG_ID_HEADER, activeOrgId);
   if (sentOrg) sentOrg.orgId = activeOrgId;
 
@@ -301,9 +369,14 @@ export async function apiRequest<T>(
 
   if (response.status === 403) {
     const body = (await response.json().catch(() => ({}))) as { message?: string; code?: string };
-    throw forbidden(body);
+    throw forbidden(body, behavior);
   }
 
+  // The code travels with the error, not just the message. Half the codes the
+  // API can send arrive on a 404 or a 409 — LAST_OWNER, INVITE_NOT_FOUND,
+  // INVITE_LIMIT_REACHED — and each exists so the console can offer a specific
+  // remedy rather than repeating a sentence at the user. Dropping it here left
+  // every caller matching on message text.
   if (!response.ok) {
     const error = (await response.json().catch(() => ({}))) as {
       message?: string;
@@ -358,10 +431,17 @@ import type {
  * it for anything the header could be at fault for. What is left is `/me`
  * failing on its own account, and a stash held through it is worth dropping
  * once: the alternative is a tab that keeps naming an org nobody will answer for.
+ *
+ * `skipOrgReconcile` is for the one caller that cannot afford the recovery: the
+ * accept page holds a single-use token in memory, and a reload would spend the
+ * invitation without redeeming anything. It reads `/me` only to name the address
+ * this session carries, and the org it is joining is not the org the stash is
+ * about, so a mismatch there says nothing about the accept.
  */
 export async function getMe(options?: {
   forceRefresh?: boolean;
   include?: 'mfa';
+  skipOrgReconcile?: boolean;
 }): Promise<MeResponse> {
   const params = new URLSearchParams();
   if (options?.forceRefresh) params.set('forceRefresh', '1');
@@ -372,14 +452,14 @@ export async function getMe(options?: {
   const sentOrg: SentOrg = { orgId: null };
   let me: MeResponse;
   try {
-    me = await apiRequest<MeResponse>(`/me${qs ? `?${qs}` : ''}`, undefined, sentOrg);
+    me = await apiRequest<MeResponse>(`/me${qs ? `?${qs}` : ''}`, undefined, {}, sentOrg);
   } catch (err) {
     // The status decides: only a refusal the header can be blamed for drops the
     // stash. A network error carries none at all.
     clearActiveOrgAfterRefusal((err as { status?: number }).status);
     throw err;
   }
-  reconcileActiveOrg(me.orgId, sentOrg.orgId);
+  if (!options?.skipOrgReconcile) reconcileActiveOrg(me.orgId, sentOrg.orgId);
   return me;
 }
 
