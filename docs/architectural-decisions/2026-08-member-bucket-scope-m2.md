@@ -1,6 +1,6 @@
 # Member bucket scope (IAM M2, FIL-1017)
 
-**Status:** Draft — design exploration, not yet accepted
+**Status:** Draft (design exploration, awaiting acceptance)
 **Created:** 2026-08-26
 **Builds on:** [`2026-08-organizations-roles-m1.md`](./2026-08-organizations-roles-m1.md)
 
@@ -12,7 +12,7 @@ console renders only those, `GET /api/buckets` returns only those, and every
 bucket-addressed route answers as if the others do not exist.
 
 A scope names whole buckets. Scoping a member to a prefix inside a bucket is
-Tier 3 work in the Forge enforcement story (FIL-1018), not this milestone.
+Tier 3 work and belongs to the Forge enforcement story (FIL-1018).
 
 Five decisions shape the design:
 
@@ -126,12 +126,13 @@ the product, including the routes that never touch a bucket, and all of an org's
 membership rows share one partition. The ceiling is comfortable and the hot-path
 cost is what rules it out.
 
-**Named bucket groups** — an org defines a group, members hold groups — match
-how a team with many buckets would describe the rule, and one edit re-scopes
-everyone holding the group. They cost a new entity with its own CRUD, console
-surface, and lifecycle, and every request resolves member → groups → buckets
-instead of member → buckets. Groups can be layered on later: a group would
-expand into the same grant rows, so nothing in §2 changes.
+**Named bucket groups**, where an org defines a group and members hold groups,
+match how a team with many buckets would describe the rule, and one edit
+re-scopes everyone holding the group. They cost a new entity with its own CRUD,
+console surface, and lifecycle. Every request also resolves the caller to their
+groups and the groups to their buckets, where reading the grant rows is one
+step. Groups can be layered on later: a group would expand into the same grant
+rows, so nothing in §2 changes.
 
 ## 2. Resolving a scope on a request
 
@@ -148,8 +149,8 @@ export type BucketScope =
 
 `Owner` and `Admin` are unscoped by role; a caller whose membership row says
 `'all'` is unscoped; everyone else is `listed`. An unscoped caller's grant rows
-are not read, on any route — the role and the marker settle the answer before
-the table is reached — and they are not deleted either. Widening a scope, and
+are not read, on any route, because the role and the marker settle the answer
+before the table is reached. They are not deleted either. Widening a scope, and
 promoting a member out of one, both leave the rows in place (§9). Which read
 follows depends on the route:
 
@@ -172,7 +173,7 @@ body. This is the `in-handler` requirement M1 already defined for presign.
 | ----------------------------------------- | --------------------------------------------------------------------------- |
 | `GET /api/buckets`                        | filter the merged fan-out result to the granted set                         |
 | `POST /api/buckets`                       | allowed; the new bucket is granted to the creator (§5)                      |
-| `GET /api/buckets/{name}`                 | no grant row → the same 404 a missing bucket returns                        |
+| `GET /api/buckets/{name}`                 | no grant row answers the same 404 a missing bucket returns                  |
 | `DELETE /api/buckets/{name}`              | gated on `buckets.delete`, which only an unscoped caller holds (§2)         |
 | `GET /api/buckets/{name}/analytics`       | 404                                                                          |
 | `GET \| POST /api/buckets/{name}/rag/enabled` | 404                                                                      |
@@ -272,9 +273,8 @@ key ID and breaks whatever client was using it. Forge gets out of that once
 FIL-918 lands: a key narrows in place, keeping its ID, and a key read returns
 its effective permissions and bucket scope from the enforcing system instead of
 from our own record. The console flow is then one flow with two regional
-outcomes — update the key on Forge, revoke and replace it elsewhere (FIL-1017)
-— and that difference is one of the rows FIL-1024's per-region matrix has to
-show.
+outcomes (FIL-1017): update the key on Forge, revoke and replace it elsewhere.
+That difference is one of the rows FIL-1024's per-region matrix has to show.
 
 `CreateBucket` and a non-empty bucket list contradict each other: a key that
 may only operate on the buckets it names cannot create one it does not name. A
@@ -367,9 +367,9 @@ and an audit event possible at all.
 The change is small and reversible: `BUCKET_PERMISSIONS`
 (`packages/shared/src/api/access-keys.ts`) stops being offered,
 `CreateAccessKeySchema` refuses the two values, the console drops the two
-checkboxes, and `supportsBucketManagement` — which today only excludes the
-Aurora region — has nothing left to gate. Re-enabling is the same edit
-backwards, with no migration either way.
+checkboxes, and `supportsBucketManagement` (which today only excludes the Aurora
+region) has nothing left to gate. Re-enabling is the same edit backwards, with
+no migration either way.
 
 **What it costs.** Customers scripting bucket lifecycle against the S3 API lose
 that, and it is a capability the product ships today in the FTH and Forge
@@ -458,9 +458,9 @@ which is the opposite of what a demotion is for.
 
 Pre-selection shows what was retained, which is nothing for a member who has
 never been scoped. Buckets an unscoped member created meanwhile are not
-recorded as grants — decision 4 writes a grant only for a member who is scoped
-at the time — so the editor does not pretend to reconstruct a scope from what
-somebody happened to touch.
+recorded as grants, because decision 4 writes a grant only for a member who is
+scoped at the time, so the editor does not pretend to reconstruct a scope from
+what somebody happened to touch.
 
 The console says which of the two is in force, rendering an Admin's scope as
 inactive rather than hiding it, and M1 already audit-logs the role change that
