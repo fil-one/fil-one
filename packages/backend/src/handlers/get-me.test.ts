@@ -91,7 +91,24 @@ function ownerTail(orgName: string) {
     role: OrgRole.Owner,
     permissions: [...ROLE_PERMISSIONS[OrgRole.Owner]],
     memberships: [{ orgId: MOCK_ORG_ID, orgName, role: OrgRole.Owner }],
+    orgsBeta: false,
   };
+}
+
+/**
+ * Either row that grants the organizations beta, absent or present.
+ *
+ * Both are stubbed on every test so the whole-body assertions read a decided
+ * `orgsBeta` rather than whatever an unstubbed `GetItemCommand` returns.
+ */
+function orgsBetaRow(pk: string, exists: boolean) {
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: pk }, sk: { S: 'ORGS_BETA' } },
+      ConsistentRead: true,
+    })
+    .resolves(exists ? { Item: { pk: { S: pk }, sk: { S: 'ORGS_BETA' } } } : { Item: undefined });
 }
 
 // ---------------------------------------------------------------------------
@@ -133,6 +150,14 @@ describe('GET /api/me handler', () => {
         Key: { pk: { S: `ALLOWLIST#${MOCK_EMAIL}` }, sk: { S: 'RAG' } },
         ConsistentRead: true,
       })
+      .resolves({ Item: undefined });
+
+    // Default: nobody is in the organizations beta. Matched on the sort key
+    // alone, because both grant rows are read on every call and a test that
+    // moves the caller's email or active org would otherwise leave one of them
+    // unstubbed — which reads as a thrown handler, not as a denied flag.
+    ddbMock
+      .on(GetItemCommand, { TableName: 'UserInfoTable', Key: { sk: { S: 'ORGS_BETA' } } })
       .resolves({ Item: undefined });
 
     // Default membership: sole Owner of the one org, as every account is today.
@@ -567,6 +592,62 @@ describe('GET /api/me handler', () => {
       const result = await handler(authenticatedEvent(), buildContext());
 
       expect(parseBody(result).ragAccess).toBe(false);
+    });
+  });
+
+  describe('orgsBeta', () => {
+    function parseBody(result: unknown): { orgsBeta: boolean } {
+      return JSON.parse((result as { body: string }).body);
+    }
+
+    it('is false when neither the caller nor the org holds the flag', async () => {
+      profileResolves();
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).orgsBeta).toBe(false);
+    });
+
+    it('is true from the caller’s own allowlist row', async () => {
+      profileResolves();
+      orgsBetaRow(`ALLOWLIST#${MOCK_EMAIL}`, true);
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).orgsBeta).toBe(true);
+    });
+
+    it('is true from the active org’s row, for a caller who holds nothing', async () => {
+      profileResolves();
+      orgsBetaRow(`ORG#${MOCK_ORG_ID}`, true);
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).orgsBeta).toBe(true);
+    });
+
+    it('ignores an allowlist row when the email is unverified', async () => {
+      mockJwtVerify.mockResolvedValue({
+        payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: false },
+      });
+      profileResolves();
+      orgsBetaRow(`ALLOWLIST#${MOCK_EMAIL}`, true);
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).orgsBeta).toBe(false);
+    });
+
+    it('grants the org row even when the caller’s email is unverified', async () => {
+      mockJwtVerify.mockResolvedValue({
+        payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: false },
+      });
+      profileResolves();
+      orgsBetaRow(`ORG#${MOCK_ORG_ID}`, true);
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).orgsBeta).toBe(true);
     });
   });
 });

@@ -227,16 +227,21 @@ export function MembersInvitations() {
         Invitations
       </Heading>
 
-      <Card>
-        <InviteMemberForm
-          roles={scope.assignableRoles}
-          onSubmit={(body) => create.mutateAsync(body)}
-          submitting={create.isPending}
-          notEnabledMessage={refusals.notEnabled}
-          errorMessage={refusals.error}
-          undeliveredEmail={undelivered.email}
-        />
-      </Card>
+      {/* Issuing needs the beta flag as well as the permission; withdrawing
+          needs only the permission. An org dropped from the beta keeps
+          invitations that are still redeemable, so the list below stays. */}
+      {scope.mayInvite && (
+        <Card>
+          <InviteMemberForm
+            roles={scope.assignableRoles}
+            onSubmit={(body) => create.mutateAsync(body)}
+            submitting={create.isPending}
+            notEnabledMessage={refusals.notEnabled}
+            errorMessage={refusals.error}
+            undeliveredEmail={undelivered.email}
+          />
+        </Card>
+      )}
 
       <InvitationsPanel
         invitations={invitations}
