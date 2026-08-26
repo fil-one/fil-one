@@ -7,7 +7,8 @@ type FormFieldProps = {
   optional?: boolean;
   htmlFor?: string;
   description?: string;
-  error?: string;
+  /** A node rather than a string, for a refusal that carries its own remedy. */
+  error?: React.ReactNode;
   className?: string;
   children: React.ReactNode;
 };

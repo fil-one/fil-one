@@ -52,21 +52,16 @@ export function TransferOwnershipDialog({
     <Modal open={open} onClose={pending ? () => {} : onClose} size="sm" testId="transfer-dialog">
       <ModalHeader
         onClose={pending ? undefined : onClose}
-        description={`${memberName} becomes an owner of ${orgName}, and you become an admin.`}
+        description={`${memberName} becomes owner of ${orgName}. You'll move to admin, and can't take ownership back yourself.`}
       >
         Transfer ownership?
       </ModalHeader>
       <ModalBody>
         <div className="flex flex-col gap-4">
-          <p className="text-sm leading-relaxed text-(--color-paragraph-text)">
-            You give up your owner role. After this, {memberName} manages billing, every member, and
-            the organization itself — including whether you keep your admin role. You cannot take
-            ownership back on your own.
-          </p>
           <FormField
             label={`Type ${orgName} to confirm`}
             htmlFor="transfer-confirm-name"
-            description="This is the slow part on purpose."
+            description="This action cannot be undone."
           >
             <Input
               id="transfer-confirm-name"

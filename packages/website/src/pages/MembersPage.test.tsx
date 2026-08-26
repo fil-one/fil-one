@@ -94,6 +94,22 @@ function apiError(message: string, status: number, code?: string): Error {
   return Object.assign(new Error(message), { status, code });
 }
 
+/** Open one row's overflow menu, where its verbs live. */
+async function openRowMenu(member: string) {
+  fireEvent.click(await screen.findByRole('button', { name: `Actions for ${member}` }));
+}
+
+/** Open a row's menu and choose one of its actions. */
+async function chooseRowAction(member: string, action: string) {
+  await openRowMenu(member);
+  fireEvent.click(await screen.findByRole('menuitem', { name: action }));
+}
+
+/** The actions a row offers, or null when it offers no menu at all. */
+function rowMenuFor(member: string): HTMLElement | null {
+  return screen.queryByRole('button', { name: `Actions for ${member}` });
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -132,7 +148,7 @@ describe('MembersPage', () => {
 
     expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Remove/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Actions for/ })).not.toBeInTheDocument();
   });
 
   it('offers the invitation form when the caller may invite and the org is in the beta', async () => {
@@ -156,11 +172,11 @@ describe('MembersPage', () => {
     // The Owner row is a badge with no verbs on it: every reach at an Owner is
     // `owners.manage`, which an Admin does not hold.
     expect(screen.queryByLabelText('Role for Ada Lovelace')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Remove Ada Lovelace' })).not.toBeInTheDocument();
+    expect(rowMenuFor('Ada Lovelace')).not.toBeInTheDocument();
 
     // Rows at or below their ceiling carry both.
     expect(screen.getByLabelText('Role for grace@example.com')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Remove grace@example.com' })).toBeInTheDocument();
+    expect(rowMenuFor('grace@example.com')).toBeInTheDocument();
   });
 
   it('offers an Admin no Owner option in the role picker', async () => {
@@ -211,7 +227,7 @@ describe('MembersPage', () => {
     mockRemove.mockResolvedValue(undefined);
     renderPage();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Remove grace@example.com' }));
+    await chooseRowAction('grace@example.com', 'Remove');
 
     expect(await screen.findByText('Remove this member?')).toBeInTheDocument();
     // The dialog says what removal does not do, because it does not do it.
@@ -343,7 +359,7 @@ describe('MembersPage', () => {
     // each one — and one that does not come back used to take the page with it.
     mockListMembers.mockRejectedValue(apiError('Members are unavailable', 503));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Remove grace@example.com' }));
+    await chooseRowAction('grace@example.com', 'Remove');
     fireEvent.click(await screen.findByRole('button', { name: 'Remove member' }));
 
     expect(await screen.findByTestId('members-stale')).toHaveTextContent('Members are unavailable');
@@ -354,7 +370,7 @@ describe('MembersPage', () => {
   it('keeps a dialog’s copy about somebody through its closing transition', async () => {
     renderPage();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Remove grace@example.com' }));
+    await chooseRowAction('grace@example.com', 'Remove');
     await screen.findByText('Remove this member?');
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -385,7 +401,7 @@ describe('MembersPage — a removal the roster is stale for', () => {
     // What the re-read finds: somebody else removed the row first.
     mockListMembers.mockResolvedValue({ members: [OWNER, PLAIN] });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Remove grace@example.com' }));
+    await chooseRowAction('grace@example.com', 'Remove');
     fireEvent.click(await screen.findByRole('button', { name: 'Remove member' }));
 
     expect(
@@ -404,7 +420,7 @@ describe('MembersPage — a removal the roster is stale for', () => {
     );
     renderPage();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Remove grace@example.com' }));
+    await chooseRowAction('grace@example.com', 'Remove');
     fireEvent.click(await screen.findByRole('button', { name: 'Remove member' }));
 
     expect(
@@ -463,13 +479,13 @@ describe('MembersPage — transferring the owner seat', () => {
   it('offers the transfer on other members’ rows and not on the owner’s own', async () => {
     renderPage();
 
-    expect(
-      await screen.findByRole('button', { name: 'Transfer ownership to grace@example.com' }),
-    ).toBeInTheDocument();
+    await openRowMenu('grace@example.com');
+    expect(await screen.findByRole('menuitem', { name: 'Transfer ownership' })).toBeInTheDocument();
+
     // Transferring to yourself is not a transfer, and an Owner is already one.
-    expect(
-      screen.queryByRole('button', { name: 'Transfer ownership to Ada Lovelace' }),
-    ).not.toBeInTheDocument();
+    // With nothing else the sole Owner may do to their own row, it carries no
+    // menu at all rather than an empty one.
+    expect(rowMenuFor('Ada Lovelace')).not.toBeInTheDocument();
   });
 
   it('does not offer it to an Admin', async () => {
@@ -482,14 +498,12 @@ describe('MembersPage — transferring the owner seat', () => {
   it('holds the transfer until the organization’s name is typed', async () => {
     renderPage();
 
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Transfer ownership to grace@example.com' }),
-    );
+    await chooseRowAction('grace@example.com', 'Transfer ownership');
 
     const confirm = await screen.findByRole('button', { name: 'Transfer ownership' });
     expect(confirm).toBeDisabled();
-    expect(screen.getByText(/becomes an owner of Acme, and you become an admin/)).toBeVisible();
-    expect(screen.getByText(/You give up your owner role/)).toBeVisible();
+    expect(screen.getByText(/becomes owner of Acme/)).toBeVisible();
+    expect(screen.getByText(/This action cannot be undone/)).toBeVisible();
 
     fireEvent.change(screen.getByLabelText('Type Acme to confirm'), {
       target: { value: 'not the org name' },
@@ -524,9 +538,7 @@ describe('MembersPage — transferring the owner seat', () => {
     });
     renderPage();
 
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Transfer ownership to grace@example.com' }),
-    );
+    await chooseRowAction('grace@example.com', 'Transfer ownership');
     fireEvent.change(screen.getByLabelText('Type Acme to confirm'), { target: { value: 'Acme' } });
     fireEvent.click(screen.getByRole('button', { name: 'Transfer ownership' }));
 
@@ -542,9 +554,7 @@ describe('MembersPage — transferring the owner seat', () => {
     mockTransfer.mockResolvedValue({ userId: 'user-2', previousOwnerUserId: 'user-1' });
     renderPage();
 
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Transfer ownership to grace@example.com' }),
-    );
+    await chooseRowAction('grace@example.com', 'Transfer ownership');
     fireEvent.change(screen.getByLabelText('Type Acme to confirm'), { target: { value: 'Acme' } });
     fireEvent.click(screen.getByRole('button', { name: 'Transfer ownership' }));
 
@@ -597,7 +607,7 @@ describe('MembersPage — transferring the owner seat', () => {
     renderPage();
 
     expect(await screen.findByTestId('transfer-dialog')).toBeInTheDocument();
-    expect(screen.getByText(/grace@example.com becomes an owner of Acme/)).toBeVisible();
+    expect(screen.getByText(/grace@example.com becomes owner of Acme/)).toBeVisible();
     // Reopened, not resubmitted: the confirmation has to be given again.
     expect(screen.getByRole('button', { name: 'Transfer ownership' })).toBeDisabled();
     expect(mockTransfer).not.toHaveBeenCalled();

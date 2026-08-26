@@ -17,6 +17,13 @@ const SIZES: Record<InputSize, { control: string; caret: { inset: string; size: 
 type SelectProps = {
   onChange: (value: string) => void;
   invalid?: boolean;
+  /**
+   * `sm` for a select set inside a dense surface — a table row, where a
+   * full-height control competes with the text beside it. A prop rather than a
+   * `className` override because the size classes cannot be overridden from
+   * outside: `clsx` concatenates, and Tailwind orders `text-sm` after
+   * `text-xs`, so the base size would win whatever a caller passed.
+   */
   selectSize?: InputSize;
 } & Omit<HeadlessSelectProps, 'onChange' | 'id' | 'aria-label' | 'aria-labelledby'> &
   AccessibleControlName;

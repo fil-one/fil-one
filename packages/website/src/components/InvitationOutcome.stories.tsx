@@ -104,7 +104,7 @@ export const NoLongerValid: Story = {
   args: {
     status: 'refused',
     error: apiError(
-      'That invitation is no longer valid. Ask for a new one.',
+      'It may have expired or been revoked. Ask an administrator for a new invitation.',
       404,
       ApiErrorCode.INVITE_NOT_FOUND,
     ),

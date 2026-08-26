@@ -128,8 +128,8 @@ describe('AcceptInvitationPage', () => {
     renderPage();
 
     const panel = await screen.findByTestId('accept-success');
-    expect(panel).toHaveTextContent('You have joined Acme');
-    expect(panel).toHaveTextContent('Your role in Acme is Admin');
+    expect(panel).toHaveTextContent('Welcome to Acme');
+    expect(panel).toHaveTextContent('Admin');
 
     fireEvent.click(screen.getByRole('button', { name: 'Continue to Acme' }));
     expect(mockSwitchToOrg).toHaveBeenCalledWith('org-9');
@@ -144,9 +144,7 @@ describe('AcceptInvitationPage', () => {
     });
     renderPage();
 
-    expect(await screen.findByTestId('accept-success')).toHaveTextContent(
-      'You are already in Acme',
-    );
+    expect(await screen.findByTestId('accept-success')).toHaveTextContent("You're already in Acme");
   });
 
   it('says which account is signed in when the invitation names another', async () => {
@@ -160,8 +158,8 @@ describe('AcceptInvitationPage', () => {
     renderPage();
 
     const panel = await screen.findByTestId('accept-mismatch');
-    expect(panel).toHaveTextContent('You are signed in as wrong@example.com');
-    expect(panel).toHaveTextContent('names another address');
+    expect(panel).toHaveTextContent('You’re signed in as wrong@example.com');
+    expect(panel).toHaveTextContent('sign in with the right address');
 
     fireEvent.click(screen.getByRole('button', { name: 'Log out' }));
     expect(mockLogout).toHaveBeenCalled();
@@ -184,7 +182,7 @@ describe('AcceptInvitationPage', () => {
   it('gives one answer for expired, revoked, and never-existed alike', async () => {
     mockAccept.mockRejectedValue(
       apiError(
-        'That invitation is no longer valid. Ask for a new one.',
+        'It may have expired or been revoked. Ask an administrator for a new invitation.',
         404,
         ApiErrorCode.INVITE_NOT_FOUND,
       ),
@@ -193,7 +191,7 @@ describe('AcceptInvitationPage', () => {
 
     const panel = await screen.findByTestId('accept-invalid');
     expect(panel).toHaveTextContent('This invitation is no longer valid');
-    expect(panel).toHaveTextContent('Ask for a new one.');
+    expect(panel).toHaveTextContent('Ask an administrator for a new invitation.');
   });
 
   it('renders the server’s sentence for a refusal it has no state for', async () => {
@@ -231,7 +229,7 @@ describe('AcceptInvitationPage', () => {
     // not watching the page has to be told the swap happened and taken to it.
     expect(panel.closest('[aria-live]')).toHaveAttribute('aria-live', 'polite');
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'You have joined Acme' })).toHaveFocus(),
+      expect(screen.getByRole('heading', { name: 'Welcome to Acme' })).toHaveFocus(),
     );
   });
 
@@ -243,6 +241,18 @@ describe('AcceptInvitationPage', () => {
     // The route took the token out of storage before this call went out, so a
     // 401 would otherwise spend the trip through Auth0 and land on the
     // dashboard with nothing left to redeem.
+    await waitFor(() => expect(hasPendingInviteToken()).toBe(true));
+  });
+
+  it('puts the token back when the account needs email verification first', async () => {
+    sessionStorage.clear();
+    mockAccept.mockRejectedValue(
+      apiError('Email verification required', 403, ApiErrorCode.EMAIL_NOT_VERIFIED),
+    );
+    renderPage();
+
+    // Otherwise the detour through /verify-email lands on the dashboard with
+    // nothing left to redeem, the same loss a 401 bounce would leave behind.
     await waitFor(() => expect(hasPendingInviteToken()).toBe(true));
   });
 

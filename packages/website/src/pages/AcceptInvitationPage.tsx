@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { ApiErrorCode } from '@filone/shared';
 import type { AcceptInvitationResponse } from '@filone/shared';
 
 import { InvitationOutcome } from '../components/InvitationOutcome';
 import type { InvitationOutcomeProps } from '../components/InvitationOutcome';
 import { switchToOrg } from '../lib/active-org.js';
-import { errorStatusOf, getMe, logout } from '../lib/api.js';
+import { errorCodeOf, errorStatusOf, getMe, logout } from '../lib/api.js';
 import { stashInviteToken } from '../lib/invite-token.js';
 import { acceptInvitation } from '../lib/members-api.js';
 import { ME_STALE_TIME, queryKeys } from '../lib/query-client.js';
@@ -70,7 +71,17 @@ export function AcceptInvitationPage({ token }: { token: string | null }) {
         // token was taken out of storage before this call went out, so without
         // this the trip through Auth0 lands on the dashboard with nothing left
         // to redeem. `sessionStorage` writes land before the navigation does.
-        if (errorStatusOf(error) === 401) stashInviteToken(token);
+        //
+        // `EMAIL_NOT_VERIFIED` sends the caller to `/verify-email` next, which is
+        // just as much a detour away from this page as the login funnel is — so
+        // it gets the same re-stash, and `/verify-email` reads it back to return
+        // here instead of landing on the dashboard with the invitation forgotten.
+        if (
+          errorStatusOf(error) === 401 ||
+          errorCodeOf(error) === ApiErrorCode.EMAIL_NOT_VERIFIED
+        ) {
+          stashInviteToken(token);
+        }
         setOutcome({ status: 'refused', error });
       },
     );

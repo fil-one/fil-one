@@ -1,9 +1,10 @@
+import { TrashIcon, UserSwitchIcon } from '@phosphor-icons/react/dist/ssr';
 import { OrgRole } from '@filone/shared';
 import type { MemberSummary } from '@filone/shared';
 
 import { Badge } from './Badge';
-import { Button } from './Button';
 import { RoleSelect } from './RoleSelect';
+import { RowActionsMenu, type RowAction } from './RowActionsMenu';
 import { Table } from './Table/Table';
 import { formatDate } from '../lib/time.js';
 import {
@@ -85,6 +86,30 @@ export function MembersTable({
   // of whitespace with a screen-reader label attached to nothing.
   const showActions = members.some((m) => canRemove(m) || offersTransfer(m));
 
+  /** The verbs this caller's role reaches on this row, least destructive first. */
+  const actionsFor = (member: MemberSummary): RowAction[] => {
+    const actions: RowAction[] = [];
+    if (offersTransfer(member) && onTransfer) {
+      actions.push({
+        label: 'Transfer ownership',
+        icon: UserSwitchIcon,
+        onSelect: () => onTransfer(member),
+      });
+    }
+    if (canRemove(member) && onRemove) {
+      actions.push({
+        // Not "Remove member": the confirmation that follows uses that as its
+        // confirm label, and two controls with one name is a coin toss for
+        // anybody selecting by name, tests included.
+        label: 'Remove',
+        icon: TrashIcon,
+        destructive: true,
+        onSelect: () => onRemove(member),
+      });
+    }
+    return actions;
+  };
+
   return (
     <Table>
       <Table.Header>
@@ -115,7 +140,7 @@ export function MembersTable({
             >
               <Table.Cell>
                 <div className="flex items-center gap-2">
-                  <p className="text-xs font-medium text-zinc-900">{name}</p>
+                  <p className="text-sm font-medium text-zinc-900">{name}</p>
                   {member.userId === currentUserId && (
                     <Badge color="grey" size="sm" weight="regular">
                       You
@@ -133,51 +158,49 @@ export function MembersTable({
                   // back — so a keyboard caller loses their place on the row
                   // they are working. `aria-busy` on the row says what the
                   // disabled attribute used to.
-                  <RoleSelect
-                    value={member.role}
-                    roles={roles}
-                    aria-label={`Role for ${name}`}
-                    onChange={(role) => {
-                      if (!pending) onChangeRole(member, role);
-                    }}
-                  />
+                  // Sized to the longest label ("Read only") rather than
+                  // filling the column: a picker of four short words reads as a
+                  // mistake when it is wider than every value it can hold. The
+                  // width goes on a wrapper because `Select` is `w-full`, which
+                  // Tailwind orders after `w-32` and would win.
+                  <div className="w-32">
+                    <RoleSelect
+                      value={member.role}
+                      roles={roles}
+                      size="sm"
+                      aria-label={`Role for ${name}`}
+                      onChange={(role) => {
+                        if (!pending) onChangeRole(member, role);
+                      }}
+                    />
+                  </div>
                 ) : (
                   <RoleBadge role={member.role} />
                 )}
               </Table.Cell>
 
-              <Table.Cell className="hidden md:table-cell text-xs text-zinc-500">
+              {/* The date is the value and the source is its caption, so they
+                  take the same two-tone split as the member cell beside them —
+                  at one step apart they read as two competing facts. */}
+              <Table.Cell className="hidden md:table-cell text-xs text-zinc-700">
                 {member.joinedAt ? formatDate(member.joinedAt) : '—'}
                 {member.source && SOURCE_LABELS[member.source] && (
-                  <span className="block text-zinc-400">{SOURCE_LABELS[member.source]}</span>
+                  <span className="block text-zinc-500">{SOURCE_LABELS[member.source]}</span>
                 )}
               </Table.Cell>
 
               {showActions && (
                 <Table.Cell className="text-right">
-                  <div className="flex justify-end gap-1">
-                    {offersTransfer(member) && onTransfer && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={pending}
-                        aria-label={`Transfer ownership to ${name}`}
-                        onClick={() => onTransfer(member)}
-                      >
-                        Transfer ownership
-                      </Button>
-                    )}
-                    {canRemove(member) && onRemove && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={pending}
-                        aria-label={`Remove ${name}`}
-                        onClick={() => onRemove(member)}
-                      >
-                        Remove
-                      </Button>
-                    )}
+                  {/* Both verbs behind one control rather than spelled out per
+                      row: "Transfer ownership" and "Remove" repeated down the
+                      table read as noise, and a destructive action one misclick
+                      from the role picker is worth a deliberate second click. */}
+                  <div className="flex justify-end">
+                    <RowActionsMenu
+                      aria-label={`Actions for ${name}`}
+                      disabled={pending}
+                      actions={actionsFor(member)}
+                    />
                   </div>
                 </Table.Cell>
               )}

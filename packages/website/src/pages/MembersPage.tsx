@@ -484,7 +484,10 @@ export function MembersPage() {
     <PageLayout
       title="Members"
       headingId="members-heading"
-      description="Who is in this organization, and what each of them can do"
+      // Named rather than "this organization": the active org is stashed per
+      // tab, so two tabs can sit in different ones, and this is the page that
+      // removes people and hands over ownership.
+      description={`Everyone with access to ${me?.orgName || 'this organization'}.`}
     >
       <div className="flex flex-col gap-6">
         {notice.message && (
