@@ -420,7 +420,19 @@ may still name the bucket, and FIL-1017 asks for no silent narrowing and no
 silent survival. So narrowing a scope through
 `PATCH /api/org/members/{userId}` computes that member's non-conforming keys
 server-side and refuses the change without an explicit confirmation, answering
-with the list. Confirmed, one flow revokes the keys and writes the scope.
+with the list. Confirmed, one flow revokes the keys and then writes the scope.
+The key's creator is not notified: the confirming admin sees the list before the
+keys go.
+
+That order carries the guarantee. Revocation is a vendor call, so the two steps
+cannot be one transaction and one of them fails first. Revoking first and
+failing leaves the member holding their key and the scope they already had,
+which is where the operation started. Writing the scope first and failing leaves
+them narrowed in the console while their key still reaches the dropped bucket at
+the gateway, which is the silent survival FIL-1017 refuses. Re-driving is safe
+as long as deleting an already-deleted key counts as success, which is what
+makes a failure partway through several keys recoverable rather than a
+half-applied change.
 
 Non-conformance is a local read. Both key kinds record `createdBy` and their
 own `bucketScope` and `buckets` (`packages/shared/src/api/access-keys.ts`,
