@@ -10,6 +10,8 @@ export const headingVariants = cva('text-(--color-text-base)', {
     size: {
       /** Subsection labels — text-sm font-medium */
       sm: 'text-sm font-medium',
+      /** Tab-panel and section titles — text-base font-medium */
+      md: 'text-base font-medium',
       /** Dashboard / section headers — text-lg font-medium */
       lg: 'text-lg font-medium',
       /** Sub-page titles — text-xl font-medium tracking-tight */
