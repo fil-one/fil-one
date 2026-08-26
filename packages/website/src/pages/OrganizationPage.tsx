@@ -10,6 +10,7 @@ import { RequirePermission } from '../components/RequirePermission';
 import { Spinner } from '../components/Spinner';
 import { Tab, TabList, TabPanel, TabPanels, Tabs } from '../components/Tabs';
 import { getMe } from '../lib/api.js';
+import { listInvitations, listMembers } from '../lib/members-api.js';
 import { ME_STALE_TIME, queryKeys } from '../lib/query-client.js';
 import { usePermissions } from '../lib/use-permissions.js';
 import { BillingDetails } from './BillingPage.js';
@@ -21,6 +22,12 @@ interface OrganizationTab {
   testId: string;
   /** Omitted, every role reaches it. */
   permission?: Permission;
+  /**
+   * Which list this tab counts, when it counts one. On the tab rather than in
+   * the panel: the number belongs with the label somebody reads before choosing
+   * a tab, not inside the one they have already opened.
+   */
+  countOf?: 'members' | 'invitations';
   render: () => React.ReactNode;
 }
 
@@ -37,6 +44,7 @@ const ORGANIZATION_TABS: OrganizationTab[] = [
     label: 'Members',
     testId: 'org-tab-members',
     permission: 'members.read',
+    countOf: 'members',
     render: () => <MembersRoster />,
   },
   {
@@ -67,6 +75,7 @@ const ORGANIZATION_TABS: OrganizationTab[] = [
   {
     label: 'Invitations',
     testId: 'org-tab-invitations',
+    countOf: 'invitations',
     // The list endpoint is `members.manage` rather than `members.read`, so for
     // anybody else this tab is a request the server refuses.
     permission: 'members.manage',
@@ -90,6 +99,24 @@ export function OrganizationPage() {
   const tabs = isPending
     ? []
     : ORGANIZATION_TABS.filter((tab) => !tab.permission || has(tab.permission));
+
+  // Same query keys the panels use, so these share their cache rather than
+  // adding requests. Each is asked only by a caller whose role may read it.
+  const roster = useQuery({
+    queryKey: queryKeys.members,
+    queryFn: listMembers,
+    enabled: !isPending && has('members.read'),
+  });
+  const pending = useQuery({
+    queryKey: queryKeys.invitations,
+    queryFn: listInvitations,
+    enabled: !isPending && has('members.manage'),
+  });
+
+  const counts = {
+    members: roster.data?.members.length,
+    invitations: pending.data?.invitations.length,
+  };
 
   return (
     <PageLayout
@@ -126,6 +153,13 @@ export function OrganizationPage() {
             {tabs.map((tab) => (
               <Tab key={tab.label} testId={tab.testId}>
                 {tab.label}
+                {/* Absent until the list has answered, so the tab does not flash
+                    a zero on the way to its real number. */}
+                {tab.countOf && counts[tab.countOf] !== undefined && (
+                  <span className="ml-1.5 text-xs text-zinc-400 tabular-nums">
+                    {counts[tab.countOf]}
+                  </span>
+                )}
               </Tab>
             ))}
           </TabList>

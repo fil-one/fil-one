@@ -20,9 +20,13 @@ vi.mock('../lib/members-api.js', () => ({
   revokeInvitation: vi.fn(),
 }));
 
-function renderPage(role = OrgRole.Owner) {
-  mockListMembers.mockResolvedValue({ members: [] });
-  mockListInvitations.mockResolvedValue({ invitations: [] });
+function renderPage(role = OrgRole.Owner, members = 0, invitations = 0) {
+  mockListMembers.mockResolvedValue({
+    members: Array.from({ length: members }, (_, i) => ({ userId: `u${String(i)}`, role })),
+  });
+  mockListInvitations.mockResolvedValue({
+    invitations: Array.from({ length: invitations }, (_, i) => ({ inviteId: `i${String(i)}` })),
+  });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   seedPermissions(client, role);
   return render(
@@ -94,6 +98,16 @@ describe('OrganizationPage', () => {
 
     await waitFor(() => expect(tabNames()).toContain('Members'));
     expect(tabNames()).not.toContain('Invitations');
+  });
+
+  it('counts each list on its own tab', async () => {
+    renderPage(OrgRole.Owner, 4, 2);
+
+    // The number belongs with the label somebody reads before choosing a tab.
+    await waitFor(() => expect(screen.getByTestId('org-tab-members')).toHaveTextContent('4'));
+    expect(screen.getByTestId('org-tab-invitations')).toHaveTextContent('2');
+    // Billing counts nothing, so it carries no number.
+    expect(screen.getByTestId('org-tab-billing')).toHaveTextContent(/^Billing$/);
   });
 
   it('names the organization it is about', async () => {

@@ -612,9 +612,6 @@ function MembersPanel({
           />
         </div>
       )}
-      <p className="text-sm text-zinc-600">
-        {members.length === 1 ? '1 member' : `${members.length} members`}
-      </p>
       <MembersTable
         members={members}
         currentUserId={scope.userId}

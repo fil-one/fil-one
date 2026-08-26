@@ -131,8 +131,9 @@ describe('MembersPage', () => {
     expect(screen.getByText('Unnamed member')).toBeInTheDocument();
     expect(screen.getByText('user-3')).toBeInTheDocument();
 
+    // The count moved to the tab that names this panel, so the roster itself
+    // only answers for its rows. `OrganizationPage.test.tsx` covers the count.
     expect(screen.getAllByTestId('member-row')).toHaveLength(3);
-    expect(screen.getByText('3 members')).toBeInTheDocument();
   });
 
   it('marks the caller’s own row', async () => {
