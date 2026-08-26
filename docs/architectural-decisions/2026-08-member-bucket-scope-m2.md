@@ -60,7 +60,9 @@ honored by all three orchestrators (`fth-orchestrator.ts:228`,
 `aurora-orchestrator.ts:199`, `orchestrator/orchestrator.ts:314`), and the
 create-key request already carries `bucketScope: 'all' | 'specific'` with a
 `buckets` array (`packages/shared/src/api/access-keys.ts:159`). The cap in §6
-is a comparison between two sets that both already exist.
+is a comparison between two sets that both already exist, and the list it
+produces is enforced against object operations at the gateway, measured rather
+than assumed (§7).
 
 ## 1. Data model
 
@@ -320,16 +322,31 @@ carrying both `s3:ListAllMyBuckets` and a non-empty `buckets` array returns the
 whole tenant's buckets or only the named ones, so it was measured on staging
 (2026-08-26, `bin/bucket-scope-probe.ts`):
 
-| Region                 | Scoped key's `ListBuckets`                 | Omitting `s3:ListAllMyBuckets`                           | `CreateBucket` outside the list |
-| ---------------------- | ------------------------------------------ | -------------------------------------------------------- | ------------------------------- |
-| `eu-west-1` (Aurora)   | filtered to the key's list                 | not expressible: `Default` access grants it implicitly   | no signal, see below            |
-| `us-east-1` (FTH)      | **unfiltered**, the whole tenant came back | key mints, and `ListBuckets` then answers `AccessDenied` | `AccessDenied`                  |
-| `eu-central-3` (Forge) | untested                                   | untested                                                 | untested                        |
+| Region                 | Out-of-scope object read | In-scope read holds | Scoped key's `ListBuckets`                 | Omitting `s3:ListAllMyBuckets`            | `CreateBucket` outside the list |
+| ---------------------- | ------------------------ | ------------------- | ------------------------------------------ | ----------------------------------------- | ------------------------------- |
+| `eu-west-1` (Aurora)   | `AccessDenied`           | yes, either way     | filtered to the key's list                 | no effect: `ListBuckets` answered anyway  | no signal, see below            |
+| `us-east-1` (FTH)      | `AccessDenied`           | yes, either way     | **unfiltered**, the whole tenant came back | `ListBuckets` then answers `AccessDenied` | `AccessDenied`                  |
+| `eu-central-3` (Forge) | untested                 | untested            | untested                                   | untested                                  | untested                        |
 
-Aurora meets the criterion natively. FTH does not, and no amount of scoping the
-key changes that, since the bucket list governs what the key may operate on and
-not what it may see. The Aurora run says nothing about `CreateBucket` because
-that region has no bucket management over S3 at all.
+**The first column is the one this design rests on, and it holds.** A key's
+bucket list is enforced against object operations on both measured backends: a
+scoped key reading a bucket it does not name is refused. Had that gone the other
+way, the list would have constrained nothing a reader cares about and §6's cap
+would have been decoration. Everything else here is about enumeration, which is
+a smaller problem than access would have been.
+
+Aurora meets the enumeration criterion natively, and cannot be made to stop:
+withholding `Default` drops `s3:GetBucketLocation` with it and `ListBuckets`
+still answered, which matches the region's documented behavior of always
+allowing it. FTH does not meet the criterion, and scoping the key harder will
+not change that, since the bucket list governs what the key may operate on and
+not what it may see. The Aurora `CreateBucket` result says nothing, because that
+region has no bucket management over S3 at all.
+
+One leak survives every remedy. `HeadBucket` on an out-of-scope bucket answers
+403 rather than 404 on both backends, so a caller who guesses an exact name
+learns that it exists. Confirming a name you already suspect is a much smaller
+thing than listing every name, and no option below closes it.
 
 | Option                                        | What it gives                                                                                                                                               | What it costs                                                                                                                                                               |
 | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -350,10 +367,10 @@ enumerates before it acts. Matching Aurora down to FTH's behavior would make a
 good region worse for no gain, so the difference is disclosed rather than
 levelled, and it is FIL-1024's first measured row.
 
-One assumption behind the FTH remedy is still unverified: that a key without
-`s3:ListAllMyBuckets` can still list objects inside a bucket it does name. It
-retains `s3:ListBucket`, so it should, and the probe is one command away from
-proving it. If that turned out false the remedy would cost more than the leak.
+The FTH remedy costs nothing beyond the enumeration itself. A key without
+`s3:ListAllMyBuckets` still lists objects inside the bucket it names, measured
+in the same run, so a scoped member keeps every operation they had except the
+one that leaked.
 
 Neither option reaches a key minted before scope existed, which is the legacy
 transition (FIL-1020) and the reason scoping a member should prompt a review of
