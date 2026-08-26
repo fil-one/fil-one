@@ -167,12 +167,51 @@ export type AuditDetailRecord = { [field: string]: AuditDetailValue | undefined 
 export interface AuditEventDetails {
   'org.created': { orgName: string; source?: OrgMembershipSource };
   'org.renamed': { name: string; previousName?: string };
-  'member.invited': { inviteId: string; email: string; role: OrgRole };
+  'member.invited': {
+    inviteId: string;
+    email: string;
+    role: OrgRole;
+    /**
+     * Live invitations to the same address this one replaced. Inviting an
+     * address that already has one revokes it in the same transaction, so the
+     * reader sees why a row they were looking at is suddenly revoked.
+     */
+    replacedInvitations?: number;
+  };
   'invite.revoked': { inviteId: string; email: string };
-  'invite.accepted': { inviteId: string; email: string; role: OrgRole };
-  'member.role_changed': { role: OrgRole; previousRole: OrgRole };
-  'member.removed': { role: OrgRole };
-  'ownership.transferred': { fromUserId: string; toUserId: string };
+  'invite.accepted': {
+    inviteId: string;
+    email: string;
+    role: OrgRole;
+    /**
+     * The caller was already a member, so the accept marked the invitation and
+     * granted nothing — the same honesty `key.created.recovered` carries about
+     * which attempt did the work.
+     */
+    alreadyMember?: boolean;
+  };
+  'member.role_changed': {
+    role: OrgRole;
+    previousRole: OrgRole;
+    /**
+     * Pending invitations this change revoked, because an invitation must not
+     * outlive its issuer's authority. A count rather than a list of ids: the
+     * revocations rode the same transaction as the role change, so the reader
+     * needs to know they happened, and each revoked row still says for itself
+     * that it is revoked.
+     */
+    revokedInvitations?: number;
+  };
+  'member.removed': { role: OrgRole; revokedInvitations?: number };
+  'ownership.transferred': {
+    fromUserId: string;
+    toUserId: string;
+    /**
+     * Owner invitations the outgoing Owner had outstanding, which the transfer
+     * revoked: an Admin cannot issue one, so they cannot keep one either.
+     */
+    revokedInvitations?: number;
+  };
   'key.created': {
     keyKind: AuditKeyKind;
     keyName: string;

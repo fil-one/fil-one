@@ -198,6 +198,17 @@ export interface IdTokenClaims {
   /** OIDC Authentication Methods References — empty when not asserted/verified. */
   amr: string[];
   /**
+   * When the user last authenticated at the identity provider (`auth_time`,
+   * epoch seconds), or null when the token asserts none.
+   *
+   * Read alongside `amr` because `amr` alone cannot express step-up for a
+   * federated user: a SAML session never carries `mfa` or `phr` and Guardian
+   * holds no enrollment for it, so "authenticated moments ago at your own
+   * identity provider" is the only strong signal available. A step-up redirect
+   * asks for it with `max_age=0`.
+   */
+  authTime: number | null;
+  /**
    * The Auth0 organization this session authenticated into (`org_id`), null for
    * a session that named none — which is every session in M1, since nothing
    * sends the `organization` parameter yet. It is read now because the rule that
@@ -213,6 +224,7 @@ const EMPTY_ID_CLAIMS: IdTokenClaims = {
   name: null,
   picture: null,
   amr: [],
+  authTime: null,
   auth0OrgId: null,
 };
 
@@ -243,6 +255,7 @@ async function extractIdTokenClaims({
       name: (payload.name as string) ?? null,
       picture: (payload.picture as string) ?? null,
       amr: Array.isArray(rawAmr) ? rawAmr.filter((v): v is string => typeof v === 'string') : [],
+      authTime: typeof payload.auth_time === 'number' ? payload.auth_time : null,
       auth0OrgId: typeof payload.org_id === 'string' ? payload.org_id : null,
     };
   } catch (err) {

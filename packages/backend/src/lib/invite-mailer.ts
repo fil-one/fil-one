@@ -1,0 +1,252 @@
+import validator from 'validator';
+import { Stage } from '@filone/shared';
+
+/**
+ * The organization-invitation email.
+ *
+ * Two behaviours, chosen by stage, because the credential the send needs does
+ * not exist everywhere: `SendGridApiKey` is created only on staging and
+ * production (sst.config.ts). Every other stage — a developer's `sst dev`, an
+ * ephemeral PR stack, the e2e suite — gets the no-op mailer, which records that
+ * an invitation went unannounced and identifies it by id. The accept URL is not
+ * in that line: it carries the token, and nothing in this repo logs a
+ * credential. Handing a developer a working link on a stage that sends no mail
+ * is a dev-tool question, not a logging one.
+ *
+ * Sending never throws. The caller has already committed the invitation row
+ * before it reaches here, and the row is the invitation — the email is only its
+ * announcement. A thrown error would either roll back a valid invitation or
+ * fail a request whose work already landed, so a failed send returns `false`
+ * and re-inviting is the retry.
+ */
+
+const SENDGRID_MAIL_SEND_URL = 'https://api.sendgrid.com/v3/mail/send';
+
+/**
+ * The same from-address split the Auth0 email provider uses
+ * (jobs/stack-setup/setup-integrations.ts): one verified sender domain, and a
+ * `+staging` sub-address everywhere else so a message that escapes a
+ * non-production stage is identifiable in the recipient's inbox rather than
+ * indistinguishable from a real one.
+ */
+const PRODUCTION_FROM_ADDRESS = 'no-reply@filone.ai';
+const NON_PRODUCTION_FROM_ADDRESS = 'no-reply+staging@filone.ai';
+
+export interface SendInvitationEmailParams {
+  /**
+   * The invited address as the inviter typed it. Normalization
+   * (email-normalization.ts) exists to key identity, not to address mail — the
+   * recipient should see the address they gave out.
+   */
+  to: string;
+  /**
+   * The same address lowercased. Log-only: every line this module writes names
+   * the invitation by its ids and this address, so an operator reading a send
+   * failure can find the row without the mail body being in the log.
+   */
+  emailNorm: string;
+  /** Log-only, so a failure names the row it belongs to rather than an org name. */
+  orgId: string;
+  /** Log-only, and the id the audit event and the pending list both use. */
+  inviteId: string;
+  orgName: string;
+  inviterName?: string;
+  inviterEmail?: string;
+  acceptUrl: string;
+  /** ISO-8601, as stored on the invitation row. */
+  expiresAt: string;
+}
+
+/**
+ * How long the send may take before it counts as failed.
+ *
+ * Five seconds, well inside the route's ten: the invitation row is already
+ * committed, so the only thing a longer wait buys is a request that times out
+ * with no answer instead of a 201 that honestly says the mail did not go.
+ */
+const SEND_TIMEOUT_MS = 5_000;
+
+/**
+ * A value safe to interpolate into the plain-text body.
+ *
+ * The HTML part escapes for markup; the text part has its own injection, and it
+ * is line-based: a display name carrying CR or LF opens a new line in a body
+ * whose lines a reader takes as ours ("Accept the invitation:" followed by
+ * somebody else's URL). Control characters go the same way — they render as
+ * nothing and hide what follows.
+ */
+function sanitizeTextValue(value: string): string {
+  return value.replace(CONTROL_CHARACTERS, ' ').trim();
+}
+
+/**
+ * Unicode's control category: C0 and C1, which is CR, LF, NUL, DEL and the rest.
+ * Named by category rather than by code-point range, so the intent reads and no
+ * control character has to be written into this file to say it.
+ */
+const CONTROL_CHARACTERS = /\p{Cc}+/gu;
+
+/**
+ * How the invitation names the person who sent it. Both fields are optional
+ * because the inviter's profile may carry neither a display name nor a
+ * verified email, and an invitation with an anonymous sender is still worth
+ * delivering — a recipient who cannot tell who invited them can at least see
+ * which organization.
+ */
+function describeInviter(inviterName?: string, inviterEmail?: string): string {
+  if (inviterName && inviterEmail) return `${inviterName} (${inviterEmail})`;
+  return inviterName ?? inviterEmail ?? 'Someone';
+}
+
+/**
+ * The expiry as a reader can act on it. The stored value is ISO-8601 with a
+ * timezone, which is precise and unreadable; UTC longhand is neither
+ * ambiguous nor machine-flavoured. An unparseable value passes through
+ * verbatim rather than becoming "Invalid Date" — a wrong-looking timestamp
+ * still tells the recipient to hurry, and tells us to go look at the row.
+ */
+function formatExpiry(expiresAt: string): string {
+  const parsed = new Date(expiresAt);
+  return Number.isNaN(parsed.getTime()) ? expiresAt : parsed.toUTCString();
+}
+
+function buildSubject(orgName: string): string {
+  return `You are invited to join ${orgName} on Fil One`;
+}
+
+function buildTextBody(params: SendInvitationEmailParams): string {
+  const inviter = sanitizeTextValue(describeInviter(params.inviterName, params.inviterEmail));
+  const orgName = sanitizeTextValue(params.orgName);
+  return [
+    `${inviter} invited you to join ${orgName} on Fil One.`,
+    '',
+    'Accept the invitation:',
+    params.acceptUrl,
+    '',
+    `The invitation expires on ${formatExpiry(params.expiresAt)}. After that, ask for a new one.`,
+    '',
+    'If you were not expecting this invitation, you can ignore this email.',
+  ].join('\n');
+}
+
+/**
+ * Every interpolated value is escaped here, whatever the caller believes about
+ * its own storage. An org name and an inviter name are user-supplied strings
+ * that arrive in a recipient's mail client, which is the classic injection
+ * target; double-escaping a value some other layer already escaped costs a
+ * cosmetic `&amp;amp;`, while trusting it once costs an HTML-injection hole.
+ *
+ * `validator.escape` is the escaper the rest of the backend uses
+ * (org-name-validation.ts), so no hand-rolled variant can drift from it. It
+ * encodes `/` as `&#x2F;`, which makes an escaped URL look startling in the
+ * raw source and decodes back to the exact URL in both an `href` and a text
+ * node.
+ */
+function buildHtmlBody(params: SendInvitationEmailParams): string {
+  const esc = validator.escape;
+  const inviter = esc(describeInviter(params.inviterName, params.inviterEmail));
+  const acceptUrl = esc(params.acceptUrl);
+  const expiry = esc(formatExpiry(params.expiresAt));
+  return [
+    `<p>${inviter} invited you to join <strong>${esc(params.orgName)}</strong> on Fil One.</p>`,
+    `<p><a href="${acceptUrl}">Accept the invitation</a></p>`,
+    `<p>The invitation expires on ${expiry}. After that, ask for a new one.</p>`,
+    `<p>If the link does not open, paste this into your browser:<br />${acceptUrl}</p>`,
+    '<p>If you were not expecting this invitation, you can ignore this email.</p>',
+  ].join('\n');
+}
+
+/**
+ * The SendGrid v3 send. `Resource` is imported here rather than at module
+ * scope: on a stage without the secret the binding does not exist, and a
+ * top-level import would make merely importing this module — which every stage
+ * does, to reach the no-op branch — fail at load.
+ */
+async function sendThroughSendGrid(
+  params: SendInvitationEmailParams,
+  isProduction: boolean,
+): Promise<boolean> {
+  try {
+    const { Resource } = await import('sst');
+
+    const response = await fetch(SENDGRID_MAIL_SEND_URL, {
+      method: 'POST',
+      // A hung send must not hold the route open: the row is committed, so a
+      // timeout is a failed send like any other and the caller says so.
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+      headers: {
+        Authorization: `Bearer ${Resource.SendGridApiKey.value}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        personalizations: [{ to: [{ email: params.to }] }],
+        from: { email: isProduction ? PRODUCTION_FROM_ADDRESS : NON_PRODUCTION_FROM_ADDRESS },
+        subject: buildSubject(params.orgName),
+        content: [
+          { type: 'text/plain', value: buildTextBody(params) },
+          { type: 'text/html', value: buildHtmlBody(params) },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      // The body carries SendGrid's own reason (unverified sender, suppressed
+      // recipient, quota). Never the Authorization header — that is the secret.
+      const body = await response.text();
+      console.error('[invite-mailer] SendGrid rejected the invitation email', {
+        status: response.status,
+        body,
+        ...invitationLogFields(params),
+      });
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    // A timeout arrives here too, as an AbortError, and is the same outcome.
+    console.error('[invite-mailer] SendGrid request failed', {
+      ...invitationLogFields(params),
+      error: err,
+    });
+    return false;
+  }
+}
+
+/**
+ * How every line in this module names an invitation: by the ids that address the
+ * row and the address it went to. Never the accept URL, and so never the token —
+ * "logged by id, never by hash" is the convention the RAG key rows already hold
+ * to, and a token in a log is a token in a log aggregator.
+ */
+function invitationLogFields(params: SendInvitationEmailParams) {
+  return {
+    orgId: params.orgId,
+    inviteId: params.inviteId,
+    emailNorm: params.emailNorm,
+    orgName: params.orgName,
+  };
+}
+
+/**
+ * Send the invitation. Returns true only when SendGrid accepted the message for
+ * delivery — a no-op stage and a failed send both return false, because in
+ * neither case is anything on its way to the recipient.
+ */
+export async function sendInvitationEmail(params: SendInvitationEmailParams): Promise<boolean> {
+  const stage = process.env.FILONE_STAGE!;
+
+  if (stage === Stage.Production || stage === Stage.Staging) {
+    return sendThroughSendGrid(params, stage === Stage.Production);
+  }
+
+  // Which invitation was not sent, and to whom — never the accept URL. The
+  // token is in that URL, and a token in a log is a credential in whatever the
+  // logs are shipped to. A stage that needs a working link needs a dev tool that
+  // mints one on demand, not a log line every stage writes.
+  console.log('[invite-mailer] Stage sends no email — invitation left unannounced', {
+    stage,
+    ...invitationLogFields(params),
+    expiresAt: params.expiresAt,
+  });
+  return false;
+}

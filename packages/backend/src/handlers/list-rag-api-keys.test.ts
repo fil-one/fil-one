@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { authPartialMock } from '../test/auth-partial-mock.js';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
@@ -8,15 +7,6 @@ vi.mock('sst', () => ({
   Resource: {
     UserInfoTable: { name: 'UserInfoTable' },
   },
-}));
-
-// The role-enforcement block at the bottom runs the route's real chain. Auth is
-// stubbed so the caller arrives on the event; the subscription guard is stubbed
-// because it has its own suite.
-vi.mock('../middleware/auth.js', () => authPartialMock());
-vi.mock('../middleware/subscription-guard.js', () => ({
-  AccessLevel: { Read: 'read', Write: 'write' },
-  subscriptionGuardMiddleware: () => ({ before: () => undefined }),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);

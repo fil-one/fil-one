@@ -6,6 +6,7 @@ import {
   ApiErrorCode,
   CSRF_COOKIE_NAME,
   GRANULAR_PERMISSION_MAP,
+  INVITE_TOKEN_MIN_LENGTH,
   GRANULAR_PERMISSION_REQUIREMENT,
   OrgRole,
   PresignOpSchema,
@@ -71,6 +72,13 @@ const CSRF_TOKEN = 'csrf-token-value';
  * it fills it.
  */
 const verifiedAmr: string[] = [];
+
+/**
+ * The `auth_time` the stubbed claims report. Null by default, which is a session
+ * that never says when it authenticated, so the step-up gate fails closed the
+ * same way; the suite that needs to reach past it names a moment ago.
+ */
+let verifiedAuthTime: number | null = null;
 /**
  * A foundation address, which the RAG feature flag admits without a lookup, and
  * the caller every case that is not about that flag arrives as.
@@ -110,6 +118,7 @@ vi.mock('./middleware/auth.js', () => ({
     name: null,
     picture: null,
     amr: verifiedAmr,
+    authTime: verifiedAuthTime,
   }),
 }));
 
@@ -275,7 +284,10 @@ const byRequirement = (requires: RouteManifestEntry['requires']) =>
  */
 const permissionGated: { route: RouteManifestEntry; permission: Permission }[] =
   ROUTE_MANIFEST.filter((route) => route.category === 'authenticated').flatMap((route) =>
-    route.requires === undefined || route.requires === 'self' || route.requires === 'in-handler'
+    route.requires === undefined ||
+    route.requires === 'self' ||
+    route.requires === 'in-handler' ||
+    route.requires === 'invite-token'
       ? []
       : [{ route, permission: route.requires }],
   );
@@ -568,7 +580,7 @@ describe('what the in-handler routes enforce', () => {
  * refusal precisely when the creator's role does not hold what that permission
  * requires.
  */
-describe('the cap the key route applies on top of keys.create', () => {
+describe('the caps routes apply on top of their declared permission', () => {
   quietDenialOutput();
   withActiveSubscription();
 
@@ -576,8 +588,16 @@ describe('the cap the key route applies on top of keys.create', () => {
     (route) => route.handler,
   );
 
-  it('is declared on the key route and nowhere else', () => {
-    expect(capped).toStrictEqual(['create-access-key']);
+  it('names every route that declares a cap', () => {
+    // A roster rather than a count, so a route that starts declaring a cap
+    // arrives here and has to be given cases rather than passing on a number.
+    expect(capped).toStrictEqual([
+      'create-access-key',
+      'update-member-role',
+      'remove-member',
+      'create-invitation',
+      'revoke-invitation',
+    ]);
   });
 
   /**
@@ -651,6 +671,102 @@ describe('the cap the key route applies on top of keys.create', () => {
       expect(result.body).toContain(keyPermission);
     },
   );
+
+  /**
+   * The other cap in this stack is a ceiling on who the caller may reach.
+   * `members.manage` opens the member and invitation routes; reaching an Owner
+   * takes `owners.manage` on top, which an Admin does not hold. Inviting is the
+   * one of those routes that names the target's role in the body, so it is the
+   * one whose ceiling can be read off a response without a stored target.
+   *
+   * The member routes read their target's current role from its row, and their
+   * ceiling belongs to their own handler tests.
+   */
+  describe('inviting reaches no further than the caller does', () => {
+    const invite = (role: string): RouteRequest => ({
+      body: JSON.stringify({ email: 'invitee@example.com', role }),
+    });
+
+    it.each(Object.values(OrgRole).filter((role) => roleHasPermission(role, 'members.manage')))(
+      '%s may invite an Admin',
+      async (role) => {
+        const result = await invokeRoute(routeFor('create-invitation'), {
+          membership: membershipFor(ORG_ID, USER_ID, role),
+          request: invite(OrgRole.Admin),
+        });
+
+        expect(errorCode(result)).not.toBe(ApiErrorCode.FORBIDDEN_ROLE);
+      },
+    );
+
+    it.each(Object.values(OrgRole).filter((role) => roleHasPermission(role, 'members.manage')))(
+      '%s invites an Owner only with owners.manage',
+      async (role) => {
+        const result = await invokeRoute(routeFor('create-invitation'), {
+          membership: membershipFor(ORG_ID, USER_ID, role),
+          request: invite(OrgRole.Owner),
+        });
+
+        if (roleHasPermission(role, 'owners.manage')) {
+          expect(errorCode(result)).not.toBe(ApiErrorCode.FORBIDDEN_ROLE);
+          return;
+        }
+
+        expect(result.statusCode).toBe(403);
+        expect(errorCode(result)).toBe(ApiErrorCode.FORBIDDEN_ROLE);
+      },
+    );
+  });
+});
+
+/**
+ * The invitation route, which asks for a token where the others ask for a role.
+ *
+ * Accepting an invitation cannot require membership in the org it is about to
+ * create one in, so `invite-token` carries no org gate at all. What stands in
+ * its place is the token: an unknown one is refused, which is what says the
+ * route is not simply open. The rest of the check — that the session's verified
+ * address is the one the invitation went to — needs a real invitation row and
+ * belongs to accept-invitation's own tests, which cover the mismatch, the
+ * casing, and the unverified session.
+ */
+describe('the invitation route asks for a token instead of a role', () => {
+  quietDenialOutput();
+
+  const inviteRoutes = byRequirement('invite-token');
+  // A token the schema accepts and no invitation matches.
+  const unknownToken = JSON.stringify({ token: 'x'.repeat(INVITE_TOKEN_MIN_LENGTH) });
+
+  it('is declared on at least one route', () => {
+    expect(inviteRoutes.length).toBeGreaterThan(0);
+  });
+
+  it.each(named(inviteRoutes))(
+    '%s refuses no caller for want of a membership row',
+    async (_handler, route) => {
+      const result = await invokeRoute(route, {
+        membership: NO_MEMBERSHIP,
+        request: { body: unknownToken },
+      });
+
+      expect([ApiErrorCode.FORBIDDEN_ROLE, ApiErrorCode.NOT_A_MEMBER]).not.toContain(
+        errorCode(result),
+      );
+    },
+  );
+
+  it.each(named(inviteRoutes))(
+    '%s refuses a token no invitation matches',
+    async (_handler, route) => {
+      const result = await invokeRoute(route, {
+        membership: NO_MEMBERSHIP,
+        request: { body: unknownToken },
+      });
+
+      expect(result.statusCode).toBe(404);
+      expect(errorCode(result)).toBe(ApiErrorCode.INVITE_NOT_FOUND);
+    },
+  );
 });
 
 describe('the cookie caller on a bearer route', () => {
@@ -697,14 +813,16 @@ describe('every mutating session route refuses a request with no CSRF token', ()
   quietDenialOutput();
 
   // The step-up gate sits ahead of the CSRF one on the MFA routes, so the
-  // caller arrives holding a strong-auth session. What the request is missing
-  // is the token and nothing else.
+  // caller arrives holding a strong-auth session, authenticated moments ago.
+  // What the request is missing is the token and nothing else.
   beforeEach(() => {
     verifiedAmr.push('mfa');
+    verifiedAuthTime = Date.now() / 1000;
   });
 
   afterEach(() => {
     verifiedAmr.length = 0;
+    verifiedAuthTime = null;
   });
 
   const mutating = ROUTE_MANIFEST.filter(
