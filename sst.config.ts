@@ -422,6 +422,29 @@ export default $config({
       },
     );
 
+    // SPA fallback belongs to the website origin, so it is attached to the
+    // default S3 behavior below and nowhere else. Distribution-level error
+    // mapping cannot tell the bucket origin from the API origin, which is why
+    // API 403s used to reach the browser with an HTML body. The function fails
+    // closed for anything that is not a document navigation; the rationale is in
+    // docs/architectural-decisions/2026-08-cloudfront-spa-fallback.md.
+    //
+    // The source is read verbatim at synth time so the deployed bytes are the
+    // ones packages/cloudfront-functions tests. It is resolved against the
+    // working directory rather than import.meta.url because SST bundles this
+    // config into .sst/platform before running it, the same reason distPath
+    // below uses path.resolve.
+    const spaRewriteCode = require('fs').readFileSync(
+      require('path').resolve('packages/cloudfront-functions/src/spa-rewrite.js'),
+      'utf8',
+    ) as string;
+    const spaRewriteFunction = new aws.cloudfront.Function('WebsiteSpaRewrite', {
+      comment: 'Rewrite website document navigations to /index.html',
+      runtime: 'cloudfront-js-2.0',
+      code: spaRewriteCode,
+      publish: true,
+    });
+
     const router = new sst.aws.Router('WebsiteRouter', {
       routes: {
         '/*': { bucket: websiteBucket },
@@ -452,21 +475,17 @@ export default $config({
       },
       transform: {
         cdn: (args) => {
+          // Also covered by the SPA rewrite function, which maps `/` to
+          // /index.html as well. Keep both: defaultRootObject is what serves
+          // the root if the function association is ever removed.
           args.defaultRootObject = 'index.html';
           // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Pulumi Input wrapper; value is a plain object at transform time
-          (args.defaultCacheBehavior as any).responseHeadersPolicyId = responseHeadersPolicy.id;
-          args.customErrorResponses = [
+          const defaultBehavior = args.defaultCacheBehavior as any;
+          defaultBehavior.responseHeadersPolicyId = responseHeadersPolicy.id;
+          defaultBehavior.functionAssociations = [
             {
-              errorCode: 403,
-              responseCode: 200,
-              responsePagePath: '/index.html',
-              errorCachingMinTtl: 0,
-            },
-            {
-              errorCode: 404,
-              responseCode: 200,
-              responsePagePath: '/index.html',
-              errorCachingMinTtl: 0,
+              eventType: 'viewer-request',
+              functionArn: spaRewriteFunction.arn,
             },
           ];
         },
