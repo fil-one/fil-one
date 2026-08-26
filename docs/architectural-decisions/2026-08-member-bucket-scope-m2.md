@@ -67,11 +67,11 @@ is a comparison between two sets that both already exist.
 Grants live in a new `BucketAccessTable`, declared in `sst.config.ts` beside the
 existing tables. One attribute joins the membership row in `OrgTable`.
 
-| Table               | pk                                       | sk                     | Attributes               | Purpose                                     |
-| ------------------- | ---------------------------------------- | ---------------------- | ------------------------ | ------------------------------------------- |
-| `BucketAccessTable` | `ORG#{orgId}#MEMBER#{userId}`            | `{region}/{bucketName}` | `grantedBy`, `grantedAt` | the grant; a member's scope is one partition |
-| `BucketAccessTable` | `ORG#{orgId}#BUCKET#{region}/{bucketName}` | `MEMBER#{userId}`     | `grantedBy`, `grantedAt` | inverse: who can see this bucket             |
-| `OrgTable`          | `ORG#{orgId}`                            | `MEMBER#{userId}`      | `bucketScope`            | whether the grants apply                     |
+| Table               | pk                                         | sk                      | Attributes               | Purpose                                      |
+| ------------------- | ------------------------------------------ | ----------------------- | ------------------------ | -------------------------------------------- |
+| `BucketAccessTable` | `ORG#{orgId}#MEMBER#{userId}`              | `{region}/{bucketName}` | `grantedBy`, `grantedAt` | the grant; a member's scope is one partition |
+| `BucketAccessTable` | `ORG#{orgId}#BUCKET#{region}/{bucketName}` | `MEMBER#{userId}`       | `grantedBy`, `grantedAt` | inverse: who can see this bucket             |
+| `OrgTable`          | `ORG#{orgId}`                              | `MEMBER#{userId}`       | `bucketScope`            | whether the grants apply                     |
 
 **A grant is one row, so grants do not collide.** Two admins granting different
 buckets to the same member write different rows. Nothing is read-modify-written,
@@ -142,9 +142,7 @@ difference is that this one does I/O, so it is an async resolver rather than a
 pure function.
 
 ```ts
-export type BucketScope =
-  | { sees: 'all' }
-  | { sees: 'listed'; orgId: string; userId: string };
+export type BucketScope = { sees: 'all' } | { sees: 'listed'; orgId: string; userId: string };
 ```
 
 `Owner` and `Admin` are unscoped by role; a caller whose membership row says
@@ -169,22 +167,22 @@ body. This is the `in-handler` requirement M1 already defined for presign.
 
 ## 3. Where the check goes
 
-| Route                                     | Scoped behavior                                                             |
-| ----------------------------------------- | --------------------------------------------------------------------------- |
-| `GET /api/buckets`                        | filter the merged fan-out result to the granted set                         |
-| `POST /api/buckets`                       | allowed; the new bucket is granted to the creator (§5)                      |
-| `GET /api/buckets/{name}`                 | no grant row answers the same 404 a missing bucket returns                  |
-| `DELETE /api/buckets/{name}`              | gated on `buckets.delete`, which only an unscoped caller holds (§2)         |
-| `GET /api/buckets/{name}/analytics`       | 404                                                                          |
-| `GET \| POST /api/buckets/{name}/rag/enabled` | 404                                                                      |
-| `POST /api/buckets/{name}/bulk-delete`    | 404                                                                          |
-| `GET /api/bulk-delete-jobs/{jobId}`       | the job row names its bucket; check that bucket, 404 otherwise              |
-| `POST /api/presign`                       | check every operation's bucket; one denial refuses the batch                |
-| `POST /api/buckets/{name}/query` (bearer) | the key creator's scope applies (§6)                                        |
-| `POST /api/access-keys`                   | requested bucket scope is capped at the creator's (§6)                      |
-| `POST /api/rag-api-keys`                  | same cap                                                                     |
-| `POST /api/org/invitations`               | carries the invited member's scope, materialized on accept (§9)             |
-| `PATCH /api/org/members/{userId}`         | carries scope changes, and refuses a narrowing that strands keys (§9)       |
+| Route                                         | Scoped behavior                                                       |
+| --------------------------------------------- | --------------------------------------------------------------------- |
+| `GET /api/buckets`                            | filter the merged fan-out result to the granted set                   |
+| `POST /api/buckets`                           | allowed; the new bucket is granted to the creator (§5)                |
+| `GET /api/buckets/{name}`                     | no grant row answers the same 404 a missing bucket returns            |
+| `DELETE /api/buckets/{name}`                  | gated on `buckets.delete`, which only an unscoped caller holds (§2)   |
+| `GET /api/buckets/{name}/analytics`           | 404                                                                   |
+| `GET \| POST /api/buckets/{name}/rag/enabled` | 404                                                                   |
+| `POST /api/buckets/{name}/bulk-delete`        | 404                                                                   |
+| `GET /api/bulk-delete-jobs/{jobId}`           | the job row names its bucket; check that bucket, 404 otherwise        |
+| `POST /api/presign`                           | check every operation's bucket; one denial refuses the batch          |
+| `POST /api/buckets/{name}/query` (bearer)     | the key creator's scope applies (§6)                                  |
+| `POST /api/access-keys`                       | requested bucket scope is capped at the creator's (§6)                |
+| `POST /api/rag-api-keys`                      | same cap                                                              |
+| `POST /api/org/invitations`                   | carries the invited member's scope, materialized on accept (§9)       |
+| `PATCH /api/org/members/{userId}`             | carries scope changes, and refuses a narrowing that strands keys (§9) |
 
 The last two are M1 routes gaining a payload rather than new ones, and they keep
 the requirement they already declare: `members.manage`, which FIL-1017's "Owner
@@ -249,7 +247,7 @@ grant nor the sweep happens, which is what §8 proposes to close.
 
 ## 6. Capping what a scoped member can mint
 
-M1 caps a new key's *permissions* at the creator's console permissions and
+M1 caps a new key's _permissions_ at the creator's console permissions and
 defers the bucket half to this milestone. With scope in place:
 
 - A creator whose scope is `all` is unaffected.
@@ -316,11 +314,11 @@ buckets" reads either way, and neither the Management API description nor
 Aurora's schema settles it. The answer is per-orchestrator and decides which
 option below each region needs.
 
-| Option                                       | What it gives                                                                                                          | What it costs                                                                                                                                                          |
-| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Scope the key, let the gateway filter        | Nothing to build: §6 already puts the member's buckets on the key, end to end on all three backends                     | Complete only where the gateway filters. Where it does not, the key cannot *operate* on an out-of-scope bucket but can still recite its name                          |
-| Withhold `s3:ListAllMyBuckets` on scoped keys | Enumeration is refused whatever the gateway does. `aws s3 ls s3://granted-bucket` still works, since that is `ListBucket` | `aws s3 ls` answers AccessDenied, which breaks tooling that enumerates first. The always-on set becomes conditional, and Aurora may grant the action with no way to omit it |
-| The backend enforces the key's scope itself  | The gateway answers correctly with no help from us, which is what M3 builds on Forge (FIL-1025, on Hilt's key vocabulary and permission read-back, FIL-918) | Reaches Forge only. Aurora's keys are immutable and FTH has no key-update endpoint, so on those two it is a vendor ask with no date |
+| Option                                        | What it gives                                                                                                                                               | What it costs                                                                                                                                                               |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Scope the key, let the gateway filter         | Nothing to build: §6 already puts the member's buckets on the key, end to end on all three backends                                                         | Complete only where the gateway filters. Where it does not, the key cannot _operate_ on an out-of-scope bucket but can still recite its name                                |
+| Withhold `s3:ListAllMyBuckets` on scoped keys | Enumeration is refused whatever the gateway does. `aws s3 ls s3://granted-bucket` still works, since that is `ListBucket`                                   | `aws s3 ls` answers AccessDenied, which breaks tooling that enumerates first. The always-on set becomes conditional, and Aurora may grant the action with no way to omit it |
+| The backend enforces the key's scope itself   | The gateway answers correctly with no help from us, which is what M3 builds on Forge (FIL-1025, on Hilt's key vocabulary and permission read-back, FIL-918) | Reaches Forge only. Aurora's keys are immutable and FTH has no key-update endpoint, so on those two it is a vendor ask with no date                                         |
 
 **Ship the first, fall back to the second per region, and let the third arrive
 with M3.** Scoping the key is already built and is correct wherever the gateway
@@ -340,6 +338,7 @@ should say that a key with a non-empty `buckets` array lists only those buckets,
 and each of the three gateways should be tested against that sentence before
 this design is accepted. Forge is ours; FTH and Aurora are vendor questions with
 lead time, which is why they go out early.
+
 ## 8. Bucket lifecycle leaves the S3 API
 
 Bucket creation and deletion are S3 operations on every backend, not Management
