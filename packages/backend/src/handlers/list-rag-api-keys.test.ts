@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { authPartialMock } from '../test/auth-partial-mock.js';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
@@ -11,9 +12,7 @@ vi.mock('sst', () => ({
 
 // Full-chain gate tests exercise the REAL ragAccessMiddleware (allowlist check);
 // auth/subscription are stubbed to pass-through so the gate is tested in isolation.
-vi.mock('../middleware/auth.js', () => ({
-  authMiddleware: () => ({ before: () => undefined }),
-}));
+vi.mock('../middleware/auth.js', () => authPartialMock());
 vi.mock('../middleware/subscription-guard.js', () => ({
   AccessLevel: { Read: 'read', Write: 'write' },
   subscriptionGuardMiddleware: () => ({ before: () => undefined }),

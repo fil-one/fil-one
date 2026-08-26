@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { authPartialMock } from '../test/auth-partial-mock.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -73,9 +74,7 @@ const ddbMock = mockClient(DynamoDBClient);
 // Those have their own dedicated tests; here we replace them with pass-through
 // middleware so the gate's wiring can be exercised in isolation. The userInfo
 // the auth middleware would populate is stamped by buildEvent instead.
-vi.mock('../middleware/auth.js', () => ({
-  authMiddleware: () => ({ before: () => undefined }),
-}));
+vi.mock('../middleware/auth.js', () => authPartialMock());
 vi.mock('../middleware/subscription-guard.js', () => ({
   AccessLevel: { Read: 'read', Write: 'write' },
   subscriptionGuardMiddleware: () => ({ before: () => undefined }),

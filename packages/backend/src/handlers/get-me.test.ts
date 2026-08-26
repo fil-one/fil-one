@@ -2,19 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
+import { sstResourceMock } from '../test/sst-resource-mock.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('sst', () => ({
-  Resource: {
-    UserInfoTable: { name: 'UserInfoTable' },
-    Auth0ClientId: { value: 'test-client-id' },
-    Auth0ClientSecret: { value: 'test-client-secret' },
-    AuroraBackofficeToken: { value: 'test-aurora-token' },
-  },
-}));
+vi.mock('sst', () => sstResourceMock());
 
 vi.mock('../lib/auth-secrets.js', () => ({
   getAuthSecrets: () => ({
@@ -66,6 +60,23 @@ function authenticatedEvent(queryStringParameters?: Record<string, string>) {
   });
 }
 
+/** The `ORG#{orgId}/PROFILE` row `/me` names the org from. */
+function profileResolves(orgId: string = MOCK_ORG_ID, name = 'Example Corp') {
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+    })
+    .resolves({
+      Item: {
+        pk: { S: `ORG#${orgId}` },
+        sk: { S: 'PROFILE' },
+        name: { S: name },
+        auroraSetupStatus: { S: FINAL_SETUP_STATUS },
+      },
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -109,19 +120,7 @@ describe('GET /api/me handler', () => {
   });
 
   it('returns the org profile', async () => {
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-      })
-      .resolves({
-        Item: {
-          pk: { S: `ORG#${MOCK_ORG_ID}` },
-          sk: { S: 'PROFILE' },
-          name: { S: 'Example Corp' },
-          auroraSetupStatus: { S: FINAL_SETUP_STATUS },
-        },
-      });
+    profileResolves();
 
     const result = await handler(authenticatedEvent(), buildContext());
 
@@ -143,19 +142,7 @@ describe('GET /api/me handler', () => {
     mockJwtVerify.mockResolvedValue({
       payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: false },
     });
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-      })
-      .resolves({
-        Item: {
-          pk: { S: `ORG#${MOCK_ORG_ID}` },
-          sk: { S: 'PROFILE' },
-          name: { S: 'Example Corp' },
-          auroraSetupStatus: { S: FINAL_SETUP_STATUS },
-        },
-      });
+    profileResolves();
 
     const result = await handler(authenticatedEvent(), buildContext());
 
@@ -198,20 +185,7 @@ describe('GET /api/me handler', () => {
   });
 
   it('does not call getMfaEnrollments when include=mfa is absent', async () => {
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-      })
-      .resolves({
-        Item: {
-          pk: { S: `ORG#${MOCK_ORG_ID}` },
-          sk: { S: 'PROFILE' },
-          name: { S: 'Example Corp' },
-          orgConfirmed: { BOOL: true },
-          auroraSetupStatus: { S: FINAL_SETUP_STATUS },
-        },
-      });
+    profileResolves();
 
     const result = await handler(authenticatedEvent(), buildContext());
 
@@ -233,20 +207,7 @@ describe('GET /api/me handler', () => {
       },
     ]);
 
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-      })
-      .resolves({
-        Item: {
-          pk: { S: `ORG#${MOCK_ORG_ID}` },
-          sk: { S: 'PROFILE' },
-          name: { S: 'Example Corp' },
-          orgConfirmed: { BOOL: true },
-          auroraSetupStatus: { S: FINAL_SETUP_STATUS },
-        },
-      });
+    profileResolves();
 
     const result = await handler(authenticatedEvent({ include: 'mfa' }), buildContext());
 
@@ -282,20 +243,7 @@ describe('GET /api/me handler', () => {
       },
     ]);
 
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-      })
-      .resolves({
-        Item: {
-          pk: { S: `ORG#${MOCK_ORG_ID}` },
-          sk: { S: 'PROFILE' },
-          name: { S: 'Example Corp' },
-          orgConfirmed: { BOOL: true },
-          setupStatus: { S: FINAL_SETUP_STATUS },
-        },
-      });
+    profileResolves();
 
     const result = await handler(authenticatedEvent({ include: 'mfa' }), buildContext());
 
@@ -340,20 +288,7 @@ describe('GET /api/me handler', () => {
           email: { S: MOCK_EMAIL },
         },
       });
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-      })
-      .resolves({
-        Item: {
-          pk: { S: `ORG#${MOCK_ORG_ID}` },
-          sk: { S: 'PROFILE' },
-          name: { S: 'Example Corp' },
-          orgConfirmed: { BOOL: true },
-          setupStatus: { S: FINAL_SETUP_STATUS },
-        },
-      });
+    profileResolves();
 
     const result = await handler(authenticatedEvent({ include: 'mfa' }), buildContext());
 
@@ -375,22 +310,6 @@ describe('GET /api/me handler', () => {
   });
 
   describe('ragAccess', () => {
-    function profileResolves() {
-      ddbMock
-        .on(GetItemCommand, {
-          TableName: 'UserInfoTable',
-          Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-        })
-        .resolves({
-          Item: {
-            pk: { S: `ORG#${MOCK_ORG_ID}` },
-            sk: { S: 'PROFILE' },
-            name: { S: 'Example Corp' },
-            auroraSetupStatus: { S: FINAL_SETUP_STATUS },
-          },
-        });
-    }
-
     function parseBody(result: unknown): { ragAccess: boolean } {
       return JSON.parse((result as { body: string }).body);
     }

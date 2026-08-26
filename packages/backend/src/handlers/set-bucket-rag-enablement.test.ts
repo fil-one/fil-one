@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { authPartialMock } from '../test/auth-partial-mock.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -49,9 +50,7 @@ import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 
 const ddbMock = mockClient(DynamoDBClient);
 
-vi.mock('../middleware/auth.js', () => ({
-  authMiddleware: () => ({ before: () => undefined }),
-}));
+vi.mock('../middleware/auth.js', () => authPartialMock());
 vi.mock('../middleware/subscription-guard.js', () => ({
   AccessLevel: { Read: 'read', Write: 'write' },
   subscriptionGuardMiddleware: () => ({ before: () => undefined }),
