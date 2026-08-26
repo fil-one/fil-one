@@ -147,8 +147,11 @@ export type BucketScope =
 ```
 
 `Owner` and `Admin` are unscoped by role; a caller whose membership row says
-`'all'` is unscoped; everyone else is `listed`. Which read follows depends on
-the route:
+`'all'` is unscoped; everyone else is `listed`. An unscoped caller's grant rows
+are not read, on any route — the role and the marker settle the answer before
+the table is reached — and they are not deleted either. Widening a scope, and
+promoting a member out of one, both leave the rows in place (§9). Which read
+follows depends on the route:
 
 - **`GET /api/buckets`** issues one `Query` on the member's partition and
   filters the merged fan-out result against it. The Query walks every page: the
@@ -406,9 +409,10 @@ bucket, and the invitation row survives acceptance (M1 keeps it for the audit
 export rather than deleting it), so the scope it names is still there to
 re-drive. The reverse order would show the invitee the whole org.
 
-An invitation carrying a role of Owner or Admin carries no scope, which is the
-same rule §2 applies to a membership, and question 1 is what settles whether
-that rule is enforced on the way in, on the way up, or both.
+An invitation carrying a role of Owner or Admin carries no scope, for the same
+reason §2 ignores one on a membership: the role already sees everything, and an
+Admin can edit their own scope anyway. The invite form offers the picker only
+for the two roles it applies to.
 
 **Revoking a grant** deletes both rows in one transaction and binds on the next
 request. It is not, on its own, the whole operation: a member's existing keys
@@ -438,7 +442,29 @@ but it would revive if the same user rejoined the org. The sweep is what stops
 that, and `deletion-scrub.ts` learns the new table so a missed sweep is still
 collected.
 
-**Promotion out of a scope** is an open question, below.
+**A scope survives promotion.** Promoting a scoped member to Admin or Owner
+leaves `bucketScope` and every grant row exactly as they are; the new role
+simply means nothing reads them. The same holds for widening a Member to
+`'all'` without a role change. Only an explicit revoke deletes a grant.
+
+Enforcing a scope against an Admin would protect nothing in any case: an Admin
+holds `members.manage`, whose ceiling is Admin and below, so they can edit their
+own scope in one request. What retention buys is the way back down. Demoting
+someone six months later opens the scope editor with their retained grants
+already selected, so the admin adjusts a real starting point and confirms, and
+the common case writes one attribute because the rows are already there.
+Clearing on promotion would instead return that member as an unrestricted one,
+which is the opposite of what a demotion is for.
+
+Pre-selection shows what was retained, which is nothing for a member who has
+never been scoped. Buckets an unscoped member created meanwhile are not
+recorded as grants — decision 4 writes a grant only for a member who is scoped
+at the time — so the editor does not pretend to reconstruct a scope from what
+somebody happened to touch.
+
+The console says which of the two is in force, rendering an Admin's scope as
+inactive rather than hiding it, and M1 already audit-logs the role change that
+put it there.
 
 **Deleting an org** reaches the new table through the members it already
 enumerates: each member's grants are one partition, and the inverse rows go with
@@ -467,32 +493,24 @@ than a redeploy.
 
 ## Open questions
 
-1. **Does a scope survive promotion?** The ADR names bucket-scoped access for
-   Member and ReadOnly. Two rules are available. Either the enforcement path
-   ignores `bucketScope` for Owner and Admin, which keeps the rule in one place
-   and means a promotion silently widens access; or the role-change transaction
-   sets `bucketScope` to `'all'` when the new role is Owner or Admin and sweeps
-   the grants, which keeps enforcement uniform and makes the widening an
-   explicit, audit-logged act. The second is the recommendation, and it needs
-   the product answer for the console copy on the role picker.
-2. **Does BFF enforcement end on Aurora and FTH?** Decision 1 accepts that
+1. **Does BFF enforcement end on Aurora and FTH?** Decision 1 accepts that
    `filone-console` addresses every bucket in the tenant. M3 is direct-key
    enforcement on Forge (FIL-1025, on FIL-918), which leaves the other two
    regions where §3 puts them unless a vendor answers. Whether they ever reach
    parity is the "parity vs Forge-first" decision the M3 milestone is gated on,
    and it decides whether any of §3 is temporary.
-3. **Whether each gateway filters `ListBuckets` for a scoped key.** The
+2. **Whether each gateway filters `ListBuckets` for a scoped key.** The
    requirement is settled (FIL-1017); §7's mechanism is not. It needs a test
    against each of the three gateways and a sentence in the Management API
    spec, since that spec is how a new orchestrator is bound. Forge answers
    quickly; FTH and Aurora are vendor questions with lead time, and the same
    message carries §8's lifecycle-reporting ask.
-4. **Whether a deleted bucket's name stays reserved.** Neither the Management
+3. **Whether a deleted bucket's name stays reserved.** Neither the Management
    API contract nor the integration README says. If names are reserved, §5's
    stale grants are permanently inert. If they are reusable, the sweep is the
    only defense and §8 is what makes the sweep reachable. Same message as
-   question 3.
-5. **The tier split source.** Four M2 tickets cite a "2026-08-11 enforcement
+   question 2.
+4. **The tier split source.** Four M2 tickets cite a "2026-08-11 enforcement
    analysis" as their source, and the M1 ADR names it
    `iam-prd-enforceability-by-backend.md` in the knowledge-base repo. It
    defines the Tier 2 / Tier 3 vocabulary those tickets sort work by and is not
