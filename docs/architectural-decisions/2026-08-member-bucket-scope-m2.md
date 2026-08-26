@@ -188,23 +188,23 @@ body. This is the `in-handler` requirement M1 already defined for presign.
 
 ## 3. Where the check goes
 
-| Route                                         | Scoped behavior                                                       |
-| --------------------------------------------- | --------------------------------------------------------------------- |
-| `GET /api/buckets`                            | filter the merged fan-out result to the granted set                   |
-| `POST /api/buckets`                           | allowed; the new bucket is granted to the creator ([§5](#5-buckets-that-appear-after-the-grant))                |
-| `GET /api/buckets/{name}`                     | no grant row gives the same 404 a missing bucket gives                |
-| `DELETE /api/buckets/{name}`                  | gated on `buckets.delete`, which only an unscoped caller holds ([§2](#2-resolving-a-scope-on-a-request))   |
-| `GET /api/buckets/{name}/analytics`           | 404                                                                   |
-| `GET \| POST /api/buckets/{name}/rag/enabled` | 404                                                                   |
-| `POST /api/buckets/{name}/bulk-delete`        | 404                                                                   |
-| `GET /api/bulk-delete-jobs/{jobId}`           | the job row names its bucket; check that bucket, 404 otherwise        |
-| `GET /api/activity`                           | filter the bucket entries to the granted set ([§4](#4-what-stays-visible))                     |
-| `POST /api/presign`                           | check every operation's bucket; one denial refuses the batch          |
+| Route                                         | Scoped behavior                                                                                                                               |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/buckets`                            | filter the merged fan-out result to the granted set                                                                                           |
+| `POST /api/buckets`                           | allowed; the new bucket is granted to the creator ([§5](#5-buckets-that-appear-after-the-grant))                                              |
+| `GET /api/buckets/{name}`                     | no grant row gives the same 404 a missing bucket gives                                                                                        |
+| `DELETE /api/buckets/{name}`                  | gated on `buckets.delete`, which only an unscoped caller holds ([§2](#2-resolving-a-scope-on-a-request))                                      |
+| `GET /api/buckets/{name}/analytics`           | 404                                                                                                                                           |
+| `GET \| POST /api/buckets/{name}/rag/enabled` | 404                                                                                                                                           |
+| `POST /api/buckets/{name}/bulk-delete`        | 404                                                                                                                                           |
+| `GET /api/bulk-delete-jobs/{jobId}`           | the job row names its bucket; check that bucket, 404 otherwise                                                                                |
+| `GET /api/activity`                           | filter the bucket entries to the granted set ([§4](#4-what-stays-visible))                                                                    |
+| `POST /api/presign`                           | check every operation's bucket; one denial refuses the batch                                                                                  |
 | `POST /api/buckets/{name}/query` (bearer)     | the bearer branch resolves the key creator's membership row, so that member's current scope applies ([§2](#2-resolving-a-scope-on-a-request)) |
-| `POST /api/access-keys`                       | requested key scope is capped at the creator's member scope ([§6](#6-capping-what-a-scoped-member-can-mint))      |
-| `POST /api/rag-api-keys`                      | same cap                                                              |
-| `POST /api/org/invitations`                   | carries the invited member's scope, materialized on accept ([§8](#8-lifecycle))       |
-| `PATCH /api/org/members/{userId}`             | carries scope changes, and refuses a narrowing that strands keys ([§8](#8-lifecycle)) |
+| `POST /api/access-keys`                       | requested key scope is capped at the creator's member scope ([§6](#6-capping-what-a-scoped-member-can-mint))                                  |
+| `POST /api/rag-api-keys`                      | same cap                                                                                                                                      |
+| `POST /api/org/invitations`                   | carries the invited member's scope, materialized on accept ([§8](#8-lifecycle))                                                               |
+| `PATCH /api/org/members/{userId}`             | carries scope changes, and refuses a narrowing that strands keys ([§8](#8-lifecycle))                                                         |
 
 The last two are M1 routes gaining a payload rather than new ones, and they keep
 the requirement they already declare: `members.manage`, which FIL-1017's "Owner
