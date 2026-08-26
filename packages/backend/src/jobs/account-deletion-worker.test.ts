@@ -14,7 +14,7 @@ vi.mock('sst', () => ({
 }));
 
 const order: string[] = [];
-const mockTearDownStripe = vi.fn(async () => void order.push('stripe'));
+const mockTearDownStripe = vi.fn(async (..._args: unknown[]) => void order.push('stripe'));
 const mockScrub = vi.fn(async () => void order.push('scrub'));
 const mockDeleteAuth0User = vi.fn(async (sub: string) => void order.push(`auth0:${sub}`));
 const mockGetAuth0UserEmail = vi.fn(async (sub: string) => {
@@ -28,7 +28,7 @@ const mockResolveTargets = vi.fn(async () => ({
 }));
 
 vi.mock('../lib/deletion-stripe-teardown.js', () => ({
-  tearDownStripe: () => mockTearDownStripe(),
+  tearDownStripe: (...args: unknown[]) => mockTearDownStripe(...args),
 }));
 vi.mock('../lib/deletion-scrub.js', () => ({ scrubOrgRecords: () => mockScrub() }));
 vi.mock('../lib/deletion-targets.js', () => ({
@@ -88,6 +88,16 @@ describe('account-deletion-worker', () => {
     await handler({ orgId: ORG });
 
     expect(order).toEqual(['email:auth0|one', 'auth0:auth0|one', 'stripe', 'tenant:42', 'scrub']);
+  });
+
+  // The teardown falls back to the members' legacy billing rows when the org row
+  // names no customer, so it needs the same census the Auth0 step ran on.
+  it('passes the resolved members to the Stripe teardown', async () => {
+    await handler({ orgId: ORG });
+
+    expect(mockTearDownStripe).toHaveBeenCalledWith(ORG, [
+      { userId: 'user-1', sub: 'auth0|one', deleteIdentity: true },
+    ]);
   });
 
   describe('the allowlist row', () => {

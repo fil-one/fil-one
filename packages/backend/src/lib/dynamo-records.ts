@@ -133,8 +133,17 @@ export interface SubscriptionRecord {
   subscriptionId?: string;
   trialEndsAt?: string;
   gracePeriodEndsAt?: string;
+  /** The billing period the meter reports against; written with the period end. */
+  currentPeriodStart?: string;
   currentPeriodEnd?: string;
   canceledAt?: string;
+  /**
+   * The deletion teardown's revive fence, an ISO timestamp the scrub stamps
+   * with `if_not_exists`. Every guarded subscription writer refuses a row
+   * carrying it (`attribute_not_exists(deletedAt)` via `guardAgainstScrub`),
+   * so a late webhook cannot revive a scrubbed org.
+   */
+  deletedAt?: string;
   lastPaymentFailedAt?: string;
   paymentMethodId?: string;
   paymentMethodLast4?: string;

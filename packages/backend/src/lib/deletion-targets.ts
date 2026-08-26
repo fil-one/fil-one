@@ -145,24 +145,20 @@ async function queryAll(params: {
   return items;
 }
 
+/**
+ * The Auth0 subject and the membership census are all a member contributes to
+ * the pass. Stripe is torn down once from the org's subscription row, so there
+ * is no per-member billing read here.
+ */
 async function resolveMember(orgId: string, row: MemberRow): Promise<DeletionMember | undefined> {
-  const dynamo = getDynamoClient();
-  const [profile, billing, listing] = await Promise.all([
-    dynamo.send(
+  const [profile, listing] = await Promise.all([
+    getDynamoClient().send(
       new GetItemCommand({
         TableName: Resource.UserInfoTable.name,
         Key: marshall({ pk: `USER#${row.userId}`, sk: 'PROFILE' }),
         // `sub` is a DynamoDB reserved word, hence #sub.
         ProjectionExpression: '#sub',
         ExpressionAttributeNames: { '#sub': 'sub' },
-        ConsistentRead: true,
-      }),
-    ),
-    dynamo.send(
-      new GetItemCommand({
-        TableName: Resource.BillingTable.name,
-        Key: marshall({ pk: `CUSTOMER#${row.userId}`, sk: 'SUBSCRIPTION' }),
-        ProjectionExpression: 'stripeCustomerId',
         ConsistentRead: true,
       }),
     ),
@@ -181,11 +177,9 @@ async function resolveMember(orgId: string, row: MemberRow): Promise<DeletionMem
   const keptReasons = censusMember(orgId, row, others, listing.undecodable);
   const deleteIdentity = keptReasons.length === 0;
   const homeOrgId = deleteIdentity ? undefined : chooseHomeOrg(others);
-  const stripeCustomerId = billing.Item?.stripeCustomerId?.S;
   return {
     userId: row.userId,
     sub,
-    ...(stripeCustomerId ? { stripeCustomerId } : {}),
     ...(homeOrgId ? { homeOrgId } : {}),
     deleteIdentity,
     ...(deleteIdentity ? {} : { keptReasons }),
