@@ -573,3 +573,104 @@ describe('MembersPage — transferring the owner seat', () => {
     expect(screen.queryByTestId('transfer-dialog')).not.toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Search and role filter
+// ---------------------------------------------------------------------------
+
+/** A roster long enough for the table to offer its controls. */
+const LONG_ROSTER: MemberSummary[] = [
+  OWNER,
+  ADMIN,
+  PLAIN,
+  { userId: 'user-4', role: OrgRole.Member, name: 'Grete Hermann' },
+  { userId: 'user-5', role: OrgRole.ReadOnly, email: 'katherine@example.com' },
+];
+
+function searchBox() {
+  return screen.getByLabelText('Search members by name, email, or user ID');
+}
+
+function roleFilter() {
+  return screen.getByLabelText('Filter members by role');
+}
+
+describe('MembersPage search and role filter', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockListInvitations.mockResolvedValue({ invitations: [] });
+  });
+
+  it('leaves a short roster alone', async () => {
+    renderPage(OrgRole.Owner, [OWNER, ADMIN, PLAIN]);
+
+    await screen.findByText('Ada Lovelace');
+    expect(screen.queryByLabelText('Search members by name, email, or user ID')).toBeNull();
+    expect(screen.queryByLabelText('Filter members by role')).toBeNull();
+  });
+
+  it('narrows the roster by name, email, or user id', async () => {
+    renderPage(OrgRole.Owner, LONG_ROSTER);
+
+    await screen.findByText('Ada Lovelace');
+    expect(screen.getByText('5 members')).toBeInTheDocument();
+
+    fireEvent.change(searchBox(), { target: { value: 'lovelace' } });
+    expect(screen.getByText('Ada Lovelace')).toBeInTheDocument();
+    expect(screen.queryByText('Grete Hermann')).toBeNull();
+    expect(screen.getByText('1 of 5')).toBeInTheDocument();
+
+    // The row with neither a name nor an email is reachable by its id.
+    fireEvent.change(searchBox(), { target: { value: 'user-3' } });
+    expect(screen.getByText('user-3')).toBeInTheDocument();
+    expect(screen.queryByText('Ada Lovelace')).toBeNull();
+  });
+
+  it('narrows the roster by role, and combines the two', async () => {
+    renderPage(OrgRole.Owner, LONG_ROSTER);
+
+    await screen.findByText('Ada Lovelace');
+
+    fireEvent.change(roleFilter(), { target: { value: OrgRole.Member } });
+    expect(screen.getByText('Grete Hermann')).toBeInTheDocument();
+    expect(screen.queryByText('Ada Lovelace')).toBeNull();
+    expect(screen.getByText('2 of 5')).toBeInTheDocument();
+
+    fireEvent.change(searchBox(), { target: { value: 'hermann' } });
+    expect(screen.getByText('1 of 5')).toBeInTheDocument();
+  });
+
+  it('offers the roles the roster actually holds, and no filter when it holds one', async () => {
+    const { unmount } = renderPage(OrgRole.Owner, LONG_ROSTER);
+
+    await screen.findByText('Ada Lovelace');
+    const options = [...roleFilter().querySelectorAll('option')].map((o) => o.textContent);
+    // Every role, because this roster happens to hold all four.
+    expect(options).toEqual(['All roles', 'Owner', 'Admin', 'Member', 'Read only']);
+    unmount();
+
+    const oneRole = Array.from({ length: 5 }, (_, i) => ({
+      userId: `same-${i}`,
+      role: OrgRole.Member,
+    }));
+    renderPage(OrgRole.Owner, oneRole);
+
+    await screen.findByText('same-0');
+    expect(screen.getByLabelText('Search members by name, email, or user ID')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Filter members by role')).toBeNull();
+  });
+
+  it('says so when nothing matches, and clears back to the whole roster', async () => {
+    renderPage(OrgRole.Owner, LONG_ROSTER);
+
+    await screen.findByText('Ada Lovelace');
+    fireEvent.change(searchBox(), { target: { value: 'nobody' } });
+
+    expect(screen.getByText('No matching members')).toBeInTheDocument();
+    expect(screen.getByText('0 of 5')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
+    expect(screen.getByText('5 members')).toBeInTheDocument();
+  });
+});
