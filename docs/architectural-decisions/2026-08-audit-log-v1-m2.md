@@ -3,8 +3,7 @@
 **Status:** Stub. M1 shipped the write path; the viewer, export, and retention
 are undecided.
 **Created:** 2026-08-26
-**Builds on:** [`2026-08-organizations-roles-m1.md`](./2026-08-organizations-roles-m1.md) §6, on
-branch `adr/iam-m1-organizations-roles` until M1 merges
+**Builds on:** [`2026-08-organizations-roles-m1.md`](./2026-08-organizations-roles-m1.md) §6
 
 ## Context
 
