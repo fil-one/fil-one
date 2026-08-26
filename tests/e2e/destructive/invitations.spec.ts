@@ -62,9 +62,19 @@ test.describe('paid user (organizations beta)', () => {
         response.request().method() === 'POST',
     );
 
-    await page.locator('#invite-email').fill(invitedEmail);
-    await page.locator('#invite-role').selectOption('member');
-    await page.locator('#invite-submit-button').click();
+    // The form lives in a dialog and nowhere else: `Modal` is a Headless UI
+    // `Transition`, so none of these fields is on the page until the trigger
+    // mounts them.
+    await page.locator('#invite-open-button').click();
+    const dialog = page.getByTestId('invite-dialog');
+    await expect(dialog).toBeVisible();
+
+    await dialog.locator('#invite-email').fill(invitedEmail);
+    // The role is a fieldset of radios, one per role the caller may hand out.
+    // The input itself is `sr-only`, so the label card around it is the control
+    // a person clicks and the one this drives.
+    await dialog.locator('label:has(input[name="invite-role"][value="member"])').click();
+    await dialog.locator('#invite-submit-button').click();
 
     // Read the response rather than only the rendered row: a refusal keeps the
     // form on screen with an alert, which would otherwise surface as an opaque

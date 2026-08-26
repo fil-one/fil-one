@@ -267,6 +267,7 @@ export function MembersInvitations() {
             invitations that are still redeemable, so the list below stays. */}
         {scope.mayInvite && !refusals.notEnabled && (
           <Button
+            id="invite-open-button"
             variant="primary"
             size="sm"
             icon={PlusIcon}

@@ -25,6 +25,12 @@ export type RowAction = {
   /** Renders in red, for an action that takes something away. */
   destructive?: boolean;
   disabled?: boolean;
+  /**
+   * A handle for tests, as `BucketAction` carries one. The panel is portalled
+   * out of the row it belongs to, so an E2E selector reaches the item from the
+   * page — and the label is copy, which moves.
+   */
+  testId?: string;
 };
 
 export type RowActionsMenuProps = {
@@ -72,6 +78,7 @@ export function RowActionsMenu({
           <MenuItem key={action.label} disabled={action.disabled}>
             <button
               type="button"
+              data-testid={action.testId}
               onClick={action.onSelect}
               disabled={action.disabled}
               className={clsx(

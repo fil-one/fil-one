@@ -93,7 +93,11 @@ test.describe('trial owner transfers the organization', () => {
     const successorRow = memberRow(page, successorUserId);
     await expect(successorRow).toHaveAttribute('data-member-role', 'admin');
 
-    await successorRow.locator('button[aria-label^="Transfer ownership to "]').click();
+    // Both of a row's verbs live in its overflow menu, whose panel Headless UI
+    // portals to the document — so the trigger is found on the row and the item
+    // is not.
+    await successorRow.locator('button[aria-label^="Actions for "]').click();
+    await page.getByTestId('member-action-transfer-ownership').click();
     await expect(page.getByTestId('transfer-dialog')).toBeVisible();
 
     const firstAttempt = transferResponse(page);
