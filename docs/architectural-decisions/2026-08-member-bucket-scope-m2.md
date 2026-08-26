@@ -372,14 +372,18 @@ lead time, which is why they go out early.
 
 ## 8. Bucket lifecycle leaves the S3 API
 
-Bucket creation and deletion are S3 operations on every backend, not Management
-API calls. The console performs them with the tenant's `filone-console`
-credential (`createBucket` and `deleteBucket` are data-plane methods on every
-orchestrator), and a user key carrying `s3:CreateBucket` or `s3:DeleteBucket`
-performs the identical operation without FilOne seeing it. Nothing reports it
-afterwards: the Management API has six paths and none of them is an event or
-audit surface, an S3 `ListBuckets` returns a name and a creation date, and no
-contract exposes which access key acted.
+Where bucket creation and deletion happen depends on the backend, and that is
+the whole of the exposure. On Aurora they are Portal API calls
+(`createAuroraBucket` and `deleteAuroraBucket`, reached through
+`createPortalClient`), so only FilOne can make them and the region has no
+exposure at all. On FTH and Forge they are S3 data-plane operations: the console
+performs them with the tenant's `filone-console` credential, and a user key
+carrying `s3:CreateBucket` or `s3:DeleteBucket` performs the identical operation
+without FilOne seeing it.
+
+Nothing reports it afterwards. The Management API has six paths and none of them
+is an event or audit surface, an S3 `ListBuckets` returns a name and a creation
+date, and no contract exposes which access key acted.
 
 Three parts of this design rest on observing that lifecycle. The §5 auto-grant
 fires only for console creations. The §5 sweep sees only console deletions. And
@@ -407,12 +411,13 @@ regions. Keys already carrying the two permissions keep them until revoked, so
 the proposal is only as complete as the legacy transition that retires them
 (FIL-1020).
 
-**Aurora already does this.** `supportsBucketManagement` withholds both
-permissions in the Aurora region, and FIL-1019 records the same fact from the
-vendor side. So the proposal generalizes a policy one of the three backends
-already runs under, rather than inventing one, and it moves the product toward
-the uniform-regions answer to FIL-1024's open question of whether capabilities
-should differ by region at all.
+**Aurora is already built this way.** Its bucket lifecycle only exists on the
+Portal API, so `supportsBucketManagement` excludes the region and no customer
+key there has ever been able to create or delete a bucket. FIL-1019 records the
+same fact from the vendor side. The proposal asks FTH and Forge to behave the
+way Aurora is built rather than inventing a policy, and it moves the product
+toward the uniform-regions answer to FIL-1024's open question of whether
+capabilities should differ by region at all.
 
 The two measurements compound in one region. `us-east-1` is where a user key can
 carry `s3:DeleteBucket`, and it is also where a deleted name can be claimed
@@ -423,8 +428,9 @@ untested. That combination is the strongest argument for this proposal, and it
 argues for taking it before the Forge probe rather than after.
 
 **What lifts it.** An orchestrator surface reporting bucket lifecycle with the
-acting `accessKeyId`. On Forge that is the same Hilt work the rest of M3 needs
-(FIL-918's permission read-back); on Aurora and FTH it is a vendor ask. It is
+acting `accessKeyId`, on the two backends that need one. On Forge that is the
+same Hilt work the rest of M3 needs (FIL-918's permission read-back); on FTH it
+is a vendor ask. Aurora needs nothing, having never had the exposure. It is
 the same ask that closes the `ListBuckets` question in §7, which is the
 argument for putting them in one message rather than three.
 
