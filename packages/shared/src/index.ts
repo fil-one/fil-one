@@ -75,7 +75,12 @@ export {
 export type { Permission } from './permissions.js';
 
 export { ROUTE_MANIFEST } from './route-manifest.js';
-export type { RouteCategory, RouteRequirement, RouteManifestEntry } from './route-manifest.js';
+export type {
+  RouteCategory,
+  RouteHandler,
+  RouteManifestEntry,
+  RouteRequirement,
+} from './route-manifest.js';
 export { ApiErrorCode } from './api/coreInterfaces.js';
 export type { ErrorResponse } from './api/coreInterfaces.js';
 export {

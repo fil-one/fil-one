@@ -5,7 +5,11 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { ApiErrorCode } from '@filone/shared';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
-import { expectErrorResponse } from '../test/assert-helpers.js';
+import {
+  expectErrorResponse,
+  expectRefreshedCookies,
+  REFRESHED_TOKENS,
+} from '../test/assert-helpers.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -384,6 +388,78 @@ describe('subscriptionGuardMiddleware', () => {
     expectErrorResponse(result, 403, {
       message: 'Your subscription has been canceled. Please reactivate to regain access.',
       code: ApiErrorCode.SUBSCRIPTION_CANCELED,
+    });
+  });
+
+  it('carries the rotated cookies on a billing denial', async () => {
+    // A billing block is a screen the caller can act on. Losing the session
+    // this request refreshed would send them to the login page instead.
+    ddbMock.on(GetItemCommand).resolves(
+      billingItem({
+        pk: `CUSTOMER#${USER_ID}`,
+        sk: 'SUBSCRIPTION',
+        subscriptionStatus: SubscriptionStatus.Canceled,
+      }),
+    );
+
+    const { before } = subscriptionGuardMiddleware(AccessLevel.Read);
+    const result = await before(
+      buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid' } }), {
+        internal: { newTokens: REFRESHED_TOKENS },
+      }),
+    );
+
+    expectRefreshedCookies(result);
+  });
+
+  describe('an API key session', () => {
+    // The RAG bearer path builds its caller from the key record, so `sub` names
+    // the key. Claiming a trial under it would write billing state keyed to a
+    // credential and stamp the claim flag on an identity row that does not
+    // exist.
+    const keyCaller = () =>
+      buildMiddyRequest(
+        buildEvent({
+          userInfo: {
+            sub: 'ragkey|key-1',
+            userId: USER_ID,
+            orgId: 'test-org-uuid',
+            email: 'creator@example.com',
+            emailVerified: true,
+            apiKeySession: true,
+          },
+        }),
+      );
+
+    it('provisions no trial for an org with no billing record', async () => {
+      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+      // The module mock's call log outlives restoreAllMocks, so the claim this
+      // test is about has to be counted from here.
+      mockEnsureTrialEntitlement.mockClear();
+
+      const { before } = subscriptionGuardMiddleware(AccessLevel.Read);
+      const result = await before(keyCaller());
+
+      expect(mockEnsureTrialEntitlement).not.toHaveBeenCalled();
+      expectErrorResponse(result, 403, {
+        message:
+          'Your subscription is not active. Please contact support or update your payment method.',
+        code: ApiErrorCode.SUBSCRIPTION_INACTIVE,
+      });
+    });
+
+    it('is served normally when the org does have one', async () => {
+      ddbMock.on(GetItemCommand).resolves(
+        billingItem({
+          pk: `CUSTOMER#${USER_ID}`,
+          sk: 'SUBSCRIPTION',
+          subscriptionStatus: SubscriptionStatus.Active,
+        }),
+      );
+
+      const { before } = subscriptionGuardMiddleware(AccessLevel.Read);
+
+      expect(await before(keyCaller())).toBeUndefined();
     });
   });
 });

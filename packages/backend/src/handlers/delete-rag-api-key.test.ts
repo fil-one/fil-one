@@ -14,8 +14,9 @@ vi.mock('sst', () => ({
   },
 }));
 
-// Full-chain gate tests exercise the REAL ragAccessMiddleware (allowlist check);
-// auth/csrf/subscription are stubbed to pass-through so the gate is tested in isolation.
+// The role-enforcement block at the bottom runs the route's real chain. Auth is
+// stubbed so the caller arrives on the event; csrf and the subscription guard
+// are stubbed because each has its own suite.
 vi.mock('../middleware/auth.js', () => authPartialMock());
 vi.mock('../middleware/csrf.js', () => ({
   csrfMiddleware: () => ({ before: () => undefined }),
@@ -30,6 +31,7 @@ const ddbMock = mockClient(DynamoDBClient);
 import { baseHandler, handler } from './delete-rag-api-key.js';
 import { RagApiKeyKeys } from '../lib/rag-api-keys.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { describeRoleEnforcement } from '../test/role-enforcement.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1', emailVerified: true };
@@ -110,53 +112,8 @@ describe('delete-rag-api-key baseHandler', () => {
   });
 });
 
-describe('delete-rag-api-key handler (allowlist gate)', () => {
-  const EMAIL = 'outsider@example.com';
-  const nonFoundationEvent = () => {
-    const event = buildEvent({
-      userInfo: { userId: 'user-1', orgId: 'org-1', email: EMAIL, emailVerified: true },
-      method: 'DELETE',
-    });
-    event.pathParameters = { keyId: 'key-1' };
-    return event as AuthenticatedEvent;
-  };
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    ddbMock.reset();
-    ddbMock.on(TransactWriteItemsCommand).resolves({});
-    // The key the handler would delete once the gate passes.
-    ddbMock
-      .on(GetItemCommand, {
-        Key: marshall({ pk: 'ORG#org-1', sk: 'RAGKEY#key-1' }),
-      })
-      .resolves({ Item: marshall({ pk: 'ORG#org-1', sk: 'RAGKEY#key-1', tokenHash: TOKEN_HASH }) });
-  });
-
-  it('returns 403 when the caller is not foundation and not allowlisted', async () => {
-    ddbMock
-      .on(GetItemCommand, { Key: { pk: { S: `ALLOWLIST#${EMAIL}` }, sk: { S: 'RAG' } } })
-      .resolves({
-        Item: undefined,
-      });
-
-    const result = await handler(nonFoundationEvent(), buildContext());
-
-    expect(result).toMatchObject({ statusCode: 403 });
-    // Nothing is deleted when the gate denies.
-    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
-  });
-
-  it('allows an allowlisted caller to delete a key', async () => {
-    ddbMock
-      .on(GetItemCommand, { Key: { pk: { S: `ALLOWLIST#${EMAIL}` }, sk: { S: 'RAG' } } })
-      .resolves({
-        Item: marshall({ pk: `ALLOWLIST#${EMAIL}`, sk: 'RAG' }),
-      });
-
-    const result = await handler(nonFoundationEvent(), buildContext());
-
-    expect(result).toMatchObject({ statusCode: 204 });
-    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
-  });
+describeRoleEnforcement({
+  permission: 'keys.manage_all',
+  invoke: (membership) =>
+    handler(buildEvent({ userInfo: { ...USER_INFO, membership } }), buildContext()),
 });

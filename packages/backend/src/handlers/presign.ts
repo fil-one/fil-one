@@ -33,6 +33,8 @@ import {
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { requireOrgMembershipMiddleware } from '../middleware/authorize.js';
+import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
 
@@ -240,5 +242,10 @@ export async function baseHandler(
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
+  // The permission depends on the requested operations, so the handler decides
+  // it; membership does not, so it is settled here — before the billing read,
+  // and inside the metric that says whether the conversion missed a cohort.
+  .use(requireOrgMembershipMiddleware())
+  .use(csrfMiddleware())
   .use(subscriptionGuardMiddleware(AccessLevel.Read))
   .use(errorHandlerMiddleware());

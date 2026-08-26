@@ -2,11 +2,10 @@ import type { Permission } from './permissions.js';
 
 /**
  * Every API route, its authentication category, and what it requires of the
- * caller. Declared rather than implied so route coverage becomes
- * machine-checkable: the enforcement PR adds a backend test that walks
- * `packages/backend/src/handlers/` and fails on any handler missing from this
- * manifest, which makes "we forgot to gate the new route" a red build instead
- * of an open door.
+ * caller. Declared rather than implied so route coverage is machine-checkable:
+ * a backend test walks `packages/backend/src/handlers/` and fails on any
+ * handler missing from this manifest, which makes "we forgot to gate the new
+ * route" a red build instead of an open door.
  *
  * The manifest is the source of truth for what `authorize()` installs; it does
  * not itself enforce anything.
@@ -20,10 +19,10 @@ export type RouteCategory =
   | 'webhook'
   /** RAG bearer token resolved by `ragQueryAuthMiddleware`, which bypasses
    * `authMiddleware` entirely on that branch and builds the caller from the key
-   * record; the enforcement PR adds the creator-membership resolution on this
-   * path, so that a revoked creator loses the key's authority. The same route
-   * still accepts a cookie session when no `Authorization` header is present,
-   * and that caller is gated on {@link RouteManifestEntry.cookieRequires}. */
+   * record. That path resolves the key creator's membership itself, so a
+   * revoked creator loses the key's authority. The same route still accepts a
+   * cookie session when no `Authorization` header is present, and that caller
+   * is gated on {@link RouteManifestEntry.cookieRequires}. */
   | 'bearer';
 
 /**
@@ -31,10 +30,11 @@ export type RouteCategory =
  *
  * A {@link Permission} is checked against the caller's role before the handler
  * runs. `'self'` marks routes that only touch the caller's own account —
- * profile, preferences, MFA — where membership in the active org is the whole
- * requirement and no role gate applies. `'in-handler'` marks routes whose
- * requirement depends on the request body, checked against this same registry
- * inside the handler.
+ * profile, preferences, MFA — and carries no org gate at all: an authenticated
+ * session is the whole requirement, because gating your own password on a role
+ * would lock a ReadOnly member out of their own account. `'in-handler'` marks
+ * routes whose permission depends on the request body; the chain gates them on
+ * membership and the handler checks the permission against this same registry.
  */
 export type RouteRequirement = Permission | 'self' | 'in-handler';
 
@@ -53,9 +53,17 @@ export interface RouteManifestEntry {
    * is an ordinary console user and holds this permission or is refused.
    */
   cookieRequires?: Permission;
+  /**
+   * Set on the routes whose chain installs `ragAccessMiddleware`. RAG is behind
+   * a per-email allowlist while it is in early access, so those routes carry a
+   * second gate on top of the role one: the caller reaches the handler from a
+   * foundation address or from a row on the allowlist, and is refused
+   * otherwise.
+   */
+  ragAllowlisted?: boolean;
 }
 
-export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
+const MANIFEST = [
   // ── Buckets ──────────────────────────────────────────────────────
   {
     method: 'GET',
@@ -98,6 +106,7 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     handler: 'get-bucket-rag-enablement',
     category: 'authenticated',
     requires: 'buckets.read',
+    ragAllowlisted: true,
   },
   // Turning indexing on for a bucket is a bucket-configuration write, so it
   // sits with bucket creation rather than with object writes; turning it off
@@ -110,6 +119,7 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     handler: 'set-bucket-rag-enablement',
     category: 'authenticated',
     requires: 'in-handler',
+    ragAllowlisted: true,
   },
 
   // ── Objects ──────────────────────────────────────────────────────
@@ -133,14 +143,33 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     category: 'authenticated',
     requires: 'in-handler',
   },
+  // Bulk deletion empties a bucket of every object and version, so starting a
+  // job is the most destructive object write there is and takes
+  // `objects.delete`. Reading a job's progress takes the same permission: the
+  // job row is polled by the caller who started the deletion, nothing else
+  // links to it, and a role that cannot delete has no reason to watch a
+  // deletion run.
+  {
+    method: 'POST',
+    path: '/api/buckets/{name}/bulk-delete',
+    handler: 'create-bulk-delete-job',
+    category: 'authenticated',
+    requires: 'objects.delete',
+  },
+  {
+    method: 'GET',
+    path: '/api/bulk-delete-jobs/{jobId}',
+    handler: 'get-bulk-delete-job',
+    category: 'authenticated',
+    requires: 'objects.delete',
+  },
 
   // ── Keys ─────────────────────────────────────────────────────────
   // Listing and revoking are `keys.manage_all`, because no handler can yet tell
   // whose key it is holding: keys gain `createdBy` in this milestone, and until
   // a creator predicate exists, `keys.manage_own` would name a narrowing nobody
-  // performs and hand a Member the whole org's key inventory. The enforcement PR
-  // relaxes list and delete to `keys.manage_own` in the same change that adds
-  // the predicate.
+  // performs and hand a Member the whole org's key inventory. Relaxing list and
+  // delete to `keys.manage_own` belongs to the change that adds that predicate.
   {
     method: 'GET',
     path: '/api/access-keys',
@@ -171,6 +200,7 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     handler: 'list-rag-api-keys',
     category: 'authenticated',
     requires: 'keys.manage_all',
+    ragAllowlisted: true,
   },
   // A RAG key carries no permission vocabulary to intersect — it queries the
   // buckets its creator could query — so creation needs no in-handler cap.
@@ -180,6 +210,7 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     handler: 'create-rag-api-key',
     category: 'authenticated',
     requires: 'keys.create',
+    ragAllowlisted: true,
   },
   {
     method: 'DELETE',
@@ -187,6 +218,7 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     handler: 'delete-rag-api-key',
     category: 'authenticated',
     requires: 'keys.manage_all',
+    ragAllowlisted: true,
   },
 
   // ── RAG query ────────────────────────────────────────────────────
@@ -199,6 +231,7 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     handler: 'query-bucket',
     category: 'bearer',
     cookieRequires: 'buckets.read',
+    ragAllowlisted: true,
   },
 
   // ── Auth ─────────────────────────────────────────────────────────
@@ -250,6 +283,25 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     handler: 'resend-verification',
     category: 'authenticated',
     requires: 'self',
+  },
+
+  // ── Account deletion ─────────────────────────────────────────────
+  // Deleting the account destroys the org, so both steps carry `org.delete`
+  // rather than `self`; the FIL-112 stack's isOrgAdmin() gate folded into
+  // this declaration when enforcement landed.
+  {
+    method: 'POST',
+    path: '/api/account/deletion',
+    handler: 'request-account-deletion',
+    category: 'authenticated',
+    requires: 'org.delete',
+  },
+  {
+    method: 'POST',
+    path: '/api/account/deletion/confirm',
+    handler: 'confirm-account-deletion',
+    category: 'authenticated',
+    requires: 'org.delete',
   },
 
   // ── MFA ──────────────────────────────────────────────────────────
@@ -309,10 +361,9 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
     requires: 'buckets.read',
   },
   // A synthesized feed of bucket, object, and key events — not the audit log.
-  // The route requirement is only half the gate. The enforcement PR also
-  // filters the feed itself, dropping key-lifecycle entries for a caller
-  // holding no `keys.*` permission; today the feed hands a ReadOnly member the
-  // org's key inventory.
+  // The route requirement is only half the gate: a feed carrying key-lifecycle
+  // events has to drop them for a caller holding no `keys.*` permission, or it
+  // hands a ReadOnly member the org's key inventory.
   {
     method: 'GET',
     path: '/api/activity',
@@ -360,4 +411,21 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
 
   // ── Webhooks ─────────────────────────────────────────────────────
   { method: 'POST', path: '/api/stripe/webhook', handler: 'stripe-webhook', category: 'webhook' },
-];
+] as const satisfies readonly RouteManifestEntry[];
+
+/**
+ * The handler names the manifest actually declares. Infrastructure keyed by
+ * handler (`ROUTE_INFRA_CONFIGS` in sst.config.ts) types its keys against this
+ * union, so a key naming no route is a compile error instead of a route that
+ * silently deploys without its IAM grants and environment.
+ */
+export type RouteHandler = (typeof MANIFEST)[number]['handler'];
+
+/**
+ * The manifest as an ordinary array of entries. Widened on purpose: consumers
+ * read optional fields (`requires`, `cookieRequires`, `ragAllowlisted`) off
+ * arbitrary elements, which the union of exact literal types does not permit.
+ * The handler name is the one literal worth keeping, so it survives the
+ * widening and anything keyed by handler can be checked against it.
+ */
+export const ROUTE_MANIFEST: readonly (RouteManifestEntry & { handler: RouteHandler })[] = MANIFEST;

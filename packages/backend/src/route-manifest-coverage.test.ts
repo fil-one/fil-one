@@ -1,0 +1,479 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { APIGatewayProxyResultV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
+import { marshall } from '@aws-sdk/util-dynamodb';
+import {
+  ApiErrorCode,
+  CSRF_COOKIE_NAME,
+  OrgRole,
+  ROUTE_MANIFEST,
+  roleHasPermission,
+  SubscriptionStatus,
+} from '@filone/shared';
+import type { Permission, RouteManifestEntry } from '@filone/shared';
+import type { OrgMembership } from './lib/org-membership.js';
+import { sstResourceMock } from './test/sst-resource-mock.js';
+import { authPartialMock } from './test/auth-partial-mock.js';
+import {
+  buildContext,
+  buildEvent,
+  membershipFor,
+  NO_MEMBERSHIP,
+} from './test/lambda-test-utilities.js';
+
+/**
+ * What the route manifest declares, proved by running the routes.
+ *
+ * The manifest says of every route which credential reaches it and what the
+ * caller's role must carry. Each claim below is checked by invoking that
+ * route's own Middy chain and reading the answer off the response: the
+ * permission-gated routes refuse every role the capability matrix refuses, the
+ * body-dependent routes refuse a caller with no membership row, the RAG query
+ * route gates its cookie caller, and the self-service routes serve a caller
+ * whose missing membership row is the very thing they exist to repair.
+ *
+ * Nothing here reads a handler's source. Matching `authorize(` in a file proves
+ * a string is present, not that a request is refused, and it stays green on a
+ * chain that installs the gate after the work it was meant to guard. Which
+ * routes exist at all is a deployment fact rather than a source fact:
+ * sst.config.ts builds the API from this manifest, so a handler module with no
+ * entry gets no Lambda and no route.
+ *
+ * One claim needs the real auth middleware and so cannot share this file's
+ * mocks — that every route behind a session refuses a request carrying no
+ * credentials. It lives in route-manifest-unauthenticated.test.ts.
+ */
+
+// The service-orchestrator registry builds its API clients as it is imported and
+// reads their base URLs from the environment, so a handler that reaches storage
+// needs these set before the first import.
+process.env.FILONE_STAGE ??= 'test';
+process.env.FTH_MANAGEMENT_API_URL ??= 'https://fth.test.invalid';
+
+const ORG_ID = 'org-1';
+const USER_ID = 'user-1';
+/** Not a foundation address, so the RAG gate's answer hinges on the allowlist. */
+const OUTSIDER_EMAIL = 'outsider@example.com';
+/** The refusal `ragAccessMiddleware` writes, verbatim. */
+const RAG_REFUSAL = 'You do not have access to this feature.';
+/** The refusal `csrfMiddleware` writes, verbatim. */
+const CSRF_REFUSAL = 'CSRF validation failed';
+/** Matched between cookie and header on every request that carries one. */
+const CSRF_TOKEN = 'csrf-token-value';
+
+/**
+ * The `amr` the stubbed auth middleware reports, which is what the step-up gate
+ * reads. Empty by default, so the gate fails closed exactly as it does on a
+ * session that never satisfied a challenge; the suite that needs to reach past
+ * it fills it.
+ */
+const verifiedAmr: string[] = [];
+
+// The `sst` mock answers the resource reads a handler module makes while it is
+// being imported, and the auth one stands in for the middleware that would have
+// resolved a cookie session, so the caller arrives on the event instead.
+//
+// This file imports every gated handler, so it reaches resources no single
+// handler test does: the argument covers what the shared list leaves out. The
+// values are never read, only their presence — a handler that reads one at
+// import time throws on `undefined` before any test runs.
+vi.mock('sst', () =>
+  sstResourceMock({
+    BillingTable: { name: 'BillingTable' },
+    BulkDeleteQueue: { url: 'https://sqs.test.invalid/bulk-delete' },
+    BulkDeleteTable: { name: 'BulkDeleteTable' },
+    DeletionChallengeTable: { name: 'DeletionChallengeTable' },
+    DeletionCodeHmacKey: { value: 'test-deletion-hmac-key' },
+    ForgeManagementApiToken: { value: 'test-forge-token' },
+    FthManagementApiToken: { value: 'test-fth-token' },
+    RagIndexerTable: { name: 'RagIndexerTable' },
+    RagVectorBucket: { name: 'RagVectorBucket' },
+    SendGridApiKey: { value: 'test-sendgrid-key' },
+    StripePriceId: { value: 'price_test_fake' },
+    StripePublishableKey: { value: 'pk_test_fake' },
+    StripeSecretKey: { value: 'sk_test_fake' },
+  }),
+);
+vi.mock('./middleware/auth.js', () => ({
+  ...authPartialMock(),
+  getVerifiedIdTokenClaims: () => ({
+    email: null,
+    emailVerified: false,
+    name: null,
+    picture: null,
+    amr: verifiedAmr,
+  }),
+}));
+
+type DynamoRead = { TableName?: string; Key?: { pk?: { S: string }; sk?: { S: string } } };
+
+const rowKey = (table: string, pk: string, sk: string) => `${table}/${pk}/${sk}`;
+
+const readKey = (input: DynamoRead | undefined) =>
+  rowKey(input?.TableName ?? '', input?.Key?.pk?.S ?? '', input?.Key?.sk?.S ?? '');
+
+/**
+ * The rows the mocked table answers with, keyed by {@link rowKey} and filled by
+ * the suite that needs them. Empty everywhere else, which is what leaves the
+ * BillingTable unreachable below.
+ */
+const stubbedRows = new Map<string, Record<string, unknown>>();
+
+// Neither the network nor the BillingTable is available, and that is the point.
+// Most gates below refuse their caller before the subscription guard reads
+// billing, so the 403s are also the proof of the ordering: a chain that
+// installed its gate after the guard would answer 500 from the rejected read
+// instead of the 403 each case asserts. The RAG gate is the exception — it sits
+// after the guard on every chain carrying it — and its suite stubs the billing
+// row so the request reaches the gate it is about.
+//
+// Every other table answers an empty item, which is what the self-service
+// routes need: they are meant to run, and a route that runs has to reach the
+// end of its own work to say what it answers a caller with no membership row.
+vi.mock('./lib/ddb-client.js', () => ({
+  getDynamoClient: () => ({
+    send: (command: { input?: DynamoRead }) => {
+      const stubbed = stubbedRows.get(readKey(command.input));
+      if (stubbed) return Promise.resolve({ Item: stubbed });
+      return command.input?.TableName === 'BillingTable'
+        ? Promise.reject(new Error('BillingTable is unreachable in this test'))
+        : Promise.resolve({});
+    },
+  }),
+}));
+vi.stubGlobal('fetch', () => Promise.reject(new Error('the network is unreachable in this test')));
+
+type LambdaModule = {
+  handler: (event: unknown, context: unknown) => Promise<APIGatewayProxyResultV2>;
+};
+
+/**
+ * Run one route's real chain, driven with the method the manifest declares so a
+ * POST route is exercised as a POST. The request carries a matching CSRF token
+ * unless a case is about the request that carries none.
+ *
+ * `.ts`, against the repo's usual `.js` specifiers: a dynamic import with a
+ * variable in it compiles to a glob over the literal part of the pattern, and
+ * `./handlers/*.js` matches nothing on disk.
+ */
+async function invokeRoute(
+  route: RouteManifestEntry,
+  {
+    membership,
+    email,
+    csrf = true,
+  }: { membership: OrgMembership | typeof NO_MEMBERSHIP; email?: string; csrf?: boolean },
+): Promise<APIGatewayProxyStructuredResultV2> {
+  const module = (await import(`./handlers/${route.handler}.ts`)) as LambdaModule;
+  const event = buildEvent({
+    method: route.method,
+    userInfo: { userId: USER_ID, orgId: ORG_ID, membership, ...(email ? { email } : {}) },
+    ...(csrf ? { cookies: [`${CSRF_COOKIE_NAME}=${CSRF_TOKEN}`] } : {}),
+  });
+  if (csrf) event.headers['x-csrf-token'] = CSRF_TOKEN;
+  // Every route here answers with a ResponseBuilder, so the union's string arm
+  // never occurs; middy's declared return type carries it anyway.
+  return (await module.handler(event, buildContext())) as APIGatewayProxyStructuredResultV2;
+}
+
+/** The caller every case that is not about roles arrives as. */
+const owner = () => membershipFor(ORG_ID, USER_ID, OrgRole.Owner);
+
+/** A manifest entry paired with its handler name, for `it.each` titles. */
+const named = (routes: readonly RouteManifestEntry[]) =>
+  routes.map((route) => [route.handler, route] as const);
+
+/** The error body a response carries, or an empty one when it carries none. */
+function errorBody(result: APIGatewayProxyStructuredResultV2): {
+  code?: string;
+  message?: string;
+} {
+  try {
+    return JSON.parse(result.body ?? '{}') as { code?: string; message?: string };
+  } catch {
+    return {};
+  }
+}
+
+/** The `code` an error response carries, or undefined when it carries none. */
+const errorCode = (result: APIGatewayProxyStructuredResultV2) => errorBody(result).code;
+
+/** The RAG gate's own refusal, told apart from every other 403 by its message. */
+const ragRefused = (result: APIGatewayProxyStructuredResultV2) =>
+  result.statusCode === 403 && errorBody(result).message === RAG_REFUSAL;
+
+const byRequirement = (requires: RouteManifestEntry['requires']) =>
+  ROUTE_MANIFEST.filter(
+    (route) => route.category === 'authenticated' && route.requires === requires,
+  );
+
+/**
+ * The gated routes with their declared permission, narrowed rather than cast:
+ * the permission each route is checked for comes from the manifest entry
+ * itself, so a test can never assert against a requirement the manifest does
+ * not declare.
+ */
+const permissionGated: { route: RouteManifestEntry; permission: Permission }[] =
+  ROUTE_MANIFEST.filter((route) => route.category === 'authenticated').flatMap((route) =>
+    route.requires === undefined || route.requires === 'self' || route.requires === 'in-handler'
+      ? []
+      : [{ route, permission: route.requires }],
+  );
+
+/** Every role the capability matrix refuses this permission to. */
+const rolesRefused = (permission: Permission) =>
+  Object.values(OrgRole).filter((role) => !roleHasPermission(role, permission));
+
+/**
+ * Silence the denial log, the EMF metric the absent-row branch writes, and the
+ * telemetry a route that runs to completion prints on its way out.
+ */
+function quietDenialOutput(): void {
+  beforeEach(() => {
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+}
+
+/**
+ * Enforcement, derived from the manifest rather than described twice: every
+ * route declaring a permission owes the same denials, so the suite is generated
+ * from the declarations instead of listed. A route added to the manifest is
+ * covered the moment it is declared.
+ *
+ * The refused roles come from the registry rather than a list, so a change to
+ * the capability matrix shows up here instead of quietly narrowing the test. A
+ * permission every role holds (`buckets.read`) has no refused roles and leaves
+ * only the absent-row case, which is the honest thing for it to assert.
+ */
+describe('enforcement derived from the manifest', () => {
+  quietDenialOutput();
+
+  for (const { route, permission } of permissionGated) {
+    describe(`${route.handler} (${permission})`, () => {
+      const refused = rolesRefused(permission);
+
+      if (refused.length > 0) {
+        it.each(refused)('refuses %s', async (role) => {
+          const result = await invokeRoute(route, {
+            membership: membershipFor(ORG_ID, USER_ID, role),
+          });
+
+          expect(result.statusCode).toBe(403);
+          expect(errorCode(result)).toBe(ApiErrorCode.FORBIDDEN_ROLE);
+        });
+      }
+
+      it('refuses a caller with no membership row', async () => {
+        const result = await invokeRoute(route, { membership: NO_MEMBERSHIP });
+
+        expect(result.statusCode).toBe(403);
+        expect(errorCode(result)).toBe(ApiErrorCode.NOT_A_MEMBER);
+      });
+    });
+  }
+});
+
+/**
+ * The routes whose permission depends on the request body still have one
+ * requirement that does not: being in the org. The handler decides which
+ * permission the body needs, but nothing about a body makes a non-member a
+ * member, so the chain settles membership before the handler is reached.
+ *
+ * Left to the handler alone these routes would serve a non-member, and the
+ * denial would be invisible to NotAMemberDenialCount — the metric whose whole
+ * job is to say whether the conversion missed a cohort.
+ */
+describe('routes whose permission depends on the body', () => {
+  quietDenialOutput();
+
+  it.each(named(byRequirement('in-handler')))(
+    '%s refuses a caller with no membership row',
+    async (_handler, route) => {
+      const result = await invokeRoute(route, { membership: NO_MEMBERSHIP });
+
+      expect(result.statusCode).toBe(403);
+      expect(errorCode(result)).toBe(ApiErrorCode.NOT_A_MEMBER);
+    },
+  );
+});
+
+/**
+ * The RAG query route takes two kinds of caller. The bearer token carries its
+ * own authority; a caller arriving with a cookie session instead is an ordinary
+ * console user, gated on the manifest's `cookieRequires` for the route. These
+ * cases drive the cookie path — no `Authorization` header — so the requirement
+ * the manifest declares is the one the response reflects.
+ */
+describe('the cookie caller on a bearer route', () => {
+  quietDenialOutput();
+
+  for (const route of ROUTE_MANIFEST.filter((entry) => entry.category === 'bearer')) {
+    describe(`${route.handler} (${route.cookieRequires})`, () => {
+      const refused = route.cookieRequires ? rolesRefused(route.cookieRequires) : [];
+
+      if (refused.length > 0) {
+        it.each(refused)('refuses %s', async (role) => {
+          const result = await invokeRoute(route, {
+            membership: membershipFor(ORG_ID, USER_ID, role),
+          });
+
+          expect(result.statusCode).toBe(403);
+          expect(errorCode(result)).toBe(ApiErrorCode.FORBIDDEN_ROLE);
+        });
+      }
+
+      it('refuses a caller with no membership row', async () => {
+        const result = await invokeRoute(route, { membership: NO_MEMBERSHIP });
+
+        expect(result.statusCode).toBe(403);
+        expect(errorCode(result)).toBe(ApiErrorCode.NOT_A_MEMBER);
+      });
+    });
+  }
+});
+
+/**
+ * A cookie is sent by the browser whether or not the page asking for it is
+ * ours, so every route that changes something behind a cookie session takes a
+ * CSRF token as well, and refuses the request that arrives without one. The
+ * rest of this file supplies the token; this is the one rule that leaves it
+ * out.
+ *
+ * The scope is the cookie session. The Stripe webhook authenticates by the
+ * provider's request signature and the RAG query route by its bearer token;
+ * neither is a credential a browser attaches on its own, and neither route
+ * carries the middleware.
+ */
+describe('every mutating session route refuses a request with no CSRF token', () => {
+  quietDenialOutput();
+
+  // The step-up gate sits ahead of the CSRF one on the MFA routes, so the
+  // caller arrives holding a strong-auth session. What the request is missing
+  // is the token and nothing else.
+  beforeEach(() => {
+    verifiedAmr.push('mfa');
+  });
+
+  afterEach(() => {
+    verifiedAmr.length = 0;
+  });
+
+  const mutating = ROUTE_MANIFEST.filter(
+    (route) => route.category === 'authenticated' && route.method !== 'GET',
+  );
+
+  it.each(named(mutating))('%s', async (_handler, route) => {
+    const result = await invokeRoute(route, { membership: owner(), csrf: false });
+
+    expect(result.statusCode).toBe(403);
+    expect(errorBody(result).message).toBe(CSRF_REFUSAL);
+  });
+});
+
+/**
+ * RAG ships behind a per-email allowlist while it is in early access, and the
+ * manifest says which routes that gate sits on. It is not the role gate: a
+ * caller holding every permission the route asks for is still refused without a
+ * row, so these routes owe a denial no permission check produces. The gate is
+ * the real `ragAccessMiddleware`, running against a stubbed allowlist read —
+ * the one thing about it a test can supply.
+ *
+ * The unmarked routes are checked too, from the other side: a manifest entry
+ * that quietly gained the middleware without gaining the flag would show up as
+ * a route refusing a caller the manifest says nothing about.
+ */
+describe('the RAG allowlist gates the routes the manifest marks', () => {
+  quietDenialOutput();
+
+  const gated = ROUTE_MANIFEST.filter((route) => route.ragAllowlisted);
+  const ungated = ROUTE_MANIFEST.filter(
+    (route) =>
+      !route.ragAllowlisted && (route.category === 'authenticated' || route.category === 'bearer'),
+  );
+
+  // The RAG gate runs after the subscription guard on every chain that carries
+  // it, so the request only reaches the gate once the guard has a record to
+  // pass on. An active subscription is the plainest one there is.
+  beforeEach(() => {
+    stubbedRows.set(
+      rowKey('BillingTable', `CUSTOMER#${USER_ID}`, 'SUBSCRIPTION'),
+      marshall({ subscriptionStatus: SubscriptionStatus.Active }),
+    );
+  });
+
+  afterEach(() => {
+    stubbedRows.clear();
+  });
+
+  /** The allowlist row an operator writes to onboard one customer. */
+  function allowlist(email: string): void {
+    stubbedRows.set(
+      rowKey('UserInfoTable', `ALLOWLIST#${email}`, 'RAG'),
+      marshall({ pk: `ALLOWLIST#${email}`, sk: 'RAG' }),
+    );
+  }
+
+  it.each(named(gated))(
+    '%s refuses a caller who is neither foundation nor allowlisted',
+    async (_handler, route) => {
+      const result = await invokeRoute(route, { membership: owner(), email: OUTSIDER_EMAIL });
+
+      expect(result.statusCode).toBe(403);
+      expect(errorBody(result).message).toBe(RAG_REFUSAL);
+    },
+  );
+
+  // What the allowlisted caller then gets is the route's own business, and the
+  // route's own tests say what it is. The claim here is only that the gate is
+  // no longer what stops them.
+  it.each(named(gated))('%s lets an allowlisted caller past the gate', async (_handler, route) => {
+    allowlist(OUTSIDER_EMAIL);
+
+    const result = await invokeRoute(route, { membership: owner(), email: OUTSIDER_EMAIL });
+
+    expect(ragRefused(result)).toBe(false);
+  });
+
+  it.each(named(ungated))('%s is not behind the gate', async (_handler, route) => {
+    const result = await invokeRoute(route, { membership: owner(), email: OUTSIDER_EMAIL });
+
+    expect(ragRefused(result)).toBe(false);
+  });
+});
+
+/**
+ * `self` waives the role gate and the membership gate together. Changing your
+ * own password or correcting your own email is not an org action: gating it on
+ * a role would lock a ReadOnly member out of their own account, and gating it
+ * on membership would lock out the one user whose membership row is the thing
+ * that went wrong.
+ *
+ * Each route answers on its own terms: the reads run all the way through, the
+ * MFA routes demand a step-up, and the writes complain about a body these
+ * cases do not trouble to fill in. None of that is pinned, and the case does
+ * not claim any of it. The single pin is that the answer is not an org denial,
+ * which is the one answer a self route must never give.
+ */
+describe('self-service routes serve a caller with no membership row', () => {
+  quietDenialOutput();
+
+  const orgDenials: (string | undefined)[] = [
+    ApiErrorCode.FORBIDDEN_ROLE,
+    ApiErrorCode.NOT_A_MEMBER,
+  ];
+  it.each(named(byRequirement('self')))(
+    '%s does not refuse them on the org gate',
+    async (_handler, route) => {
+      const result = await invokeRoute(route, { membership: NO_MEMBERSHIP });
+
+      const answer = result.statusCode === 403 ? errorCode(result) : `HTTP ${result.statusCode}`;
+      expect(orgDenials).not.toContain(answer);
+    },
+  );
+});

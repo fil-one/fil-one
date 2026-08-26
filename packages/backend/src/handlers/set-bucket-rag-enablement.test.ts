@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { authPartialMock } from '../test/auth-partial-mock.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -45,21 +44,10 @@ vi.mock('../lib/bucket-rag-enablement.js', async () => {
   };
 });
 
-import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
-
-const ddbMock = mockClient(DynamoDBClient);
-
-vi.mock('../middleware/auth.js', () => authPartialMock());
-vi.mock('../middleware/subscription-guard.js', () => ({
-  AccessLevel: { Read: 'read', Write: 'write' },
-  subscriptionGuardMiddleware: () => ({ before: () => undefined }),
-}));
-
 process.env.FILONE_STAGE = 'test';
 
-import { baseHandler, handler } from './set-bucket-rag-enablement.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { baseHandler } from './set-bucket-rag-enablement.js';
+import { buildEvent } from '../test/lambda-test-utilities.js';
 import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.js';
 import { S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -232,80 +220,6 @@ describe('set-bucket-rag-enablement baseHandler', () => {
     const result = await baseHandler(event({ enabled: true }));
     expect(result.statusCode).toBe(503);
     expect(orch.getBucket).not.toHaveBeenCalled();
-    expect(mockSetEnablement).not.toHaveBeenCalled();
-  });
-});
-
-const MOCK_CSRF_TOKEN = 'csrf-token-value';
-
-describe('set-bucket-rag-enablement handler (RAG access gate)', () => {
-  function gateEvent(): AuthenticatedEvent {
-    const e = buildEvent({
-      userInfo: {
-        userId: 'user-1',
-        orgId: 'org-1',
-        email: 'outsider@example.com',
-        emailVerified: true,
-      },
-      cookies: [`hs_csrf_token=${MOCK_CSRF_TOKEN}`],
-      body: JSON.stringify({ enabled: true }),
-      method: 'POST',
-    });
-    e.headers['x-csrf-token'] = MOCK_CSRF_TOKEN;
-    e.pathParameters = { name: 'my-bucket' };
-    return e;
-  }
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    ddbMock.reset();
-    orch = fakeOrchestrator('aurora', { bucket: BUCKET });
-    mockGetOrchestratorForRegion.mockReturnValue(orch);
-    mockGetEnablement.mockResolvedValue(undefined);
-    mockSetEnablement.mockResolvedValue(record());
-  });
-
-  it('returns 403 when the caller is not foundation and not allowlisted', async () => {
-    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
-
-    const result = await handler(gateEvent(), buildContext());
-
-    expect(result.statusCode).toBe(403);
-    expect(JSON.parse(result.body!).message).toBe('You do not have access to this feature.');
-    // Gate runs before any write.
-    expect(mockSetEnablement).not.toHaveBeenCalled();
-  });
-
-  it('allows the request through the gate when the caller is allowlisted', async () => {
-    ddbMock.on(GetItemCommand).resolves({ Item: { pk: { S: 'ALLOWLIST#outsider@example.com' } } });
-
-    const result = await handler(gateEvent(), buildContext());
-
-    expect(result.statusCode).toBe(200);
-    expect(mockSetEnablement).toHaveBeenCalled();
-  });
-
-  it('rejects a POST without a valid CSRF token (csrf protection in place)', async () => {
-    ddbMock.on(GetItemCommand).resolves({ Item: { pk: { S: 'ALLOWLIST#outsider@example.com' } } });
-
-    // Same allowlisted caller, but missing the CSRF cookie/header pair.
-    const e = buildEvent({
-      userInfo: {
-        userId: 'user-1',
-        orgId: 'org-1',
-        email: 'outsider@example.com',
-        emailVerified: true,
-      },
-      body: JSON.stringify({ enabled: true }),
-      method: 'POST',
-    });
-    e.pathParameters = { name: 'my-bucket' };
-
-    const result = await handler(e, buildContext());
-
-    expect(result.statusCode).toBe(403);
-    expect(JSON.parse(result.body!).message).toBe('CSRF validation failed');
-    // CSRF runs before any write.
     expect(mockSetEnablement).not.toHaveBeenCalled();
   });
 });
