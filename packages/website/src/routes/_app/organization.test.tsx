@@ -8,18 +8,18 @@ import type { MeResponse } from '@filone/shared';
 // it, and importing it would drag the router in.
 vi.mock('../_app', () => ({ Route: {} }));
 
-// The page itself is covered by MembersPage.test.tsx. Here it only has to be
-// distinguishable from the two refusals.
-vi.mock('../../pages/MembersPage', () => ({
-  MembersPage: () => <div data-testid="members-page" />,
+// The page itself is covered by OrganizationPage.test.tsx. Here it only has to
+// be distinguishable from the two refusals.
+vi.mock('../../pages/OrganizationPage', () => ({
+  OrganizationPage: () => <div data-testid="organization-page" />,
 }));
 
 vi.mock('../../lib/api.js', () => ({ getMe: vi.fn() }));
 
-import { Route } from './members';
+import { Route } from './organization';
 import { seedPermissions } from '../../lib/test-permissions.js';
 
-const MembersRoute = Route.options.component as () => React.ReactElement | null;
+const OrganizationRoute = Route.options.component as () => React.ReactElement | null;
 
 const SOLO = [{ orgId: 'org-1', orgName: 'Acme', role: OrgRole.Owner }];
 const TWO_ORGS = [
@@ -32,22 +32,22 @@ function renderRoute(role: OrgRole, overrides: Partial<MeResponse>) {
   seedPermissions(client, role, overrides);
   return render(
     <QueryClientProvider client={client}>
-      <MembersRoute />
+      <OrganizationRoute />
     </QueryClientProvider>,
   );
 }
 
-describe('the /members route, reached by URL', () => {
+describe('the /organization route, reached by URL', () => {
   it('opens for a solo org in the beta', () => {
     renderRoute(OrgRole.Owner, { memberships: SOLO, orgsBeta: true });
 
-    expect(screen.getByTestId('members-page')).toBeTruthy();
+    expect(screen.getByTestId('organization-page')).toBeTruthy();
   });
 
   it('opens for a caller in more than one org', () => {
     renderRoute(OrgRole.Member, { memberships: TWO_ORGS, orgsBeta: false });
 
-    expect(screen.getByTestId('members-page')).toBeTruthy();
+    expect(screen.getByTestId('organization-page')).toBeTruthy();
   });
 
   it('says the feature is off for a solo org outside the beta', () => {
@@ -57,9 +57,9 @@ describe('the /members route, reached by URL', () => {
     renderRoute(OrgRole.Owner, { memberships: SOLO, orgsBeta: false });
 
     expect(screen.getByTestId('members-not-enabled')).toBeTruthy();
-    expect(screen.queryByTestId('members-page')).toBeNull();
+    expect(screen.queryByTestId('organization-page')).toBeNull();
     expect(screen.queryByTestId('page-permission-denied')).toBeNull();
-    expect(screen.getByRole('heading', { name: 'Members' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Organization' })).toBeTruthy();
   });
 
   it('still refuses the role when the surface exists but the role cannot read it', () => {
@@ -71,19 +71,19 @@ describe('the /members route, reached by URL', () => {
     });
 
     expect(screen.getByTestId('page-permission-denied')).toBeTruthy();
-    expect(screen.queryByTestId('members-page')).toBeNull();
+    expect(screen.queryByTestId('organization-page')).toBeNull();
   });
 
   it('renders the heading and nothing else while /me is in flight', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={client}>
-        <MembersRoute />
+        <OrganizationRoute />
       </QueryClientProvider>,
     );
 
-    expect(screen.getByRole('heading', { name: 'Members' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Organization' })).toBeTruthy();
     expect(screen.queryByTestId('members-not-enabled')).toBeNull();
-    expect(screen.queryByTestId('members-page')).toBeNull();
+    expect(screen.queryByTestId('organization-page')).toBeNull();
   });
 });
