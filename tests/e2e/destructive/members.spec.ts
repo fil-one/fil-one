@@ -156,7 +156,11 @@ test.describe('paid owner manages members', () => {
           new URL(response.url()).pathname.endsWith(`/api/org/members/${memberUserId}`) &&
           response.request().method() === 'DELETE',
       );
-      await row.locator('button[aria-label^="Remove "]').click();
+      // Remove is an item in the row's overflow menu, whose panel Headless UI
+      // portals to the document — so the trigger is found on the row and the
+      // item is not.
+      await row.locator('button[aria-label^="Actions for "]').click();
+      await page.getByTestId('member-action-remove').click();
       await expect(page.getByTestId('confirm-dialog')).toBeVisible();
       await page.locator('#confirm-dialog-confirm-button').click();
 

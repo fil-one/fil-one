@@ -50,6 +50,7 @@ const memberSk = (userId: string): string => `MEMBER#${userId}`;
 const userPk = (userId: string): string => `USER#${userId}`;
 const membershipSk = (orgId: string): string => `MEMBERSHIP#${orgId}`;
 const inviteSk = (inviteId: string): string => `INVITE#${inviteId}`;
+const inviteAddrSk = (emailNorm: string): string => `INVITEADDR#${emailNorm}`;
 const inviteTokenPk = (tokenHash: string): string => `INVITETOKEN#${tokenHash}`;
 const INVITE_TOKEN_SK = 'LOOKUP';
 const INVITE_SK_PREFIX = 'INVITE#';
@@ -316,11 +317,20 @@ export async function deleteInvitation({
 }
 
 /**
- * Every invitation an org holds for one address, gone.
+ * Every invitation an org holds for one address, gone, and the address claim
+ * with them.
  *
  * The teardown for invitations a spec created through the form, whose ids it
  * never learned if the assertion failed before the response arrived. Matched on
  * `emailNorm`, which is the field the server matches on.
+ *
+ * `INVITEADDR#{emailNorm}` sits deliberately outside the `INVITE#` prefix the
+ * query below walks — a claim swept into that list would be read as an
+ * invitation with every field missing — so it has to be addressed by key. And
+ * nothing in the product ever deletes it: retiring an invitation writes the
+ * status and drops the token row (`retireInvitationItems`), leaving the claim
+ * to be destroyed with the org's whole partition. So a run that did not delete
+ * it here would leave one row behind per address it minted.
  */
 export async function deleteInvitationsFor({
   orgId,
@@ -336,6 +346,16 @@ export async function deleteInvitationsFor({
     if (!inviteId) continue;
     await deleteInvitation({ orgId, inviteId, tokenHash: item.tokenHash?.S });
   }
+
+  // Addressed rather than swept: the caller names the address it minted, and a
+  // sweep of the prefix would take claims belonging to invitations this suite
+  // never made.
+  await getDynamoClient().send(
+    new DeleteItemCommand({
+      TableName: tableName('OrgTable'),
+      Key: { pk: { S: orgPk(orgId) }, sk: { S: inviteAddrSk(emailNorm) } },
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------
