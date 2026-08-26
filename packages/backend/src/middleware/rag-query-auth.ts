@@ -5,10 +5,11 @@ import type {
   APIGatewayProxyStructuredResultV2,
   Context,
 } from 'aws-lambda';
-import { S3Region } from '@filone/shared';
+import { ORG_ID_HEADER, S3Region } from '@filone/shared';
 import type { ErrorResponse, Permission } from '@filone/shared';
 import { isOrgDeleting } from '../lib/org-profile.js';
 import { accountDeletedResponse, ResponseBuilder } from '../lib/response-builder.js';
+import { getRequestHeader } from '../lib/request-headers.js';
 import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.js';
 import { findRagKeyByToken, ragKeyAllowsBucket, touchRagKeyLastUsed } from '../lib/rag-api-keys.js';
 import { resolveMembership } from '../lib/org-membership.js';
@@ -26,7 +27,8 @@ import { requireMembership, requirePermission } from './authorize.js';
  * Authorization header, so browser behavior is unaffected).
  *
  * On bearer success this attaches a synthetic `userInfo` built from the key
- * record — orgId ALWAYS comes from the stored record, never from the request —
+ * record — orgId ALWAYS comes from the stored record, never from the request,
+ * and a bearer request that names an org in `X-Org-Id` is refused outright —
  * so the downstream chain (subscriptionGuard billing the creator,
  * ragAccessMiddleware re-checking the creator's email against the allowlist,
  * and the handler's isSupportedRegion / tenant-scoped bucket lookup) keeps
@@ -64,6 +66,19 @@ function unauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
 }
 
 /**
+ * A bearer request named an org. The key record already names one, and a request
+ * carrying two answers has no unambiguous reading.
+ */
+function orgHeaderNotAcceptedResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(400)
+    .body<ErrorResponse>({
+      message: `${ORG_ID_HEADER} is not accepted with an API key. The key names its organization.`,
+    })
+    .build();
+}
+
+/**
  * Out-of-scope buckets return the same 404 the handler returns for buckets the
  * org does not own, so a key holder cannot distinguish "exists but outside my
  * scope" from "does not exist" (no bucket-name enumeration oracle).
@@ -80,6 +95,15 @@ async function bearerAuth(
   authHeader: string,
 ): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
   const { event } = request;
+
+  // The key's org is the org. A bearer request that also names one is refused
+  // rather than served under the key's org, because the two readings of such a
+  // request — "the caller misunderstands the API" and "the caller is trying the
+  // header to see whether it moves the org" — deserve the same answer, and
+  // silently ignoring it would teach the first caller nothing.
+  if (getRequestHeader(event, ORG_ID_HEADER) !== undefined) {
+    return orgHeaderNotAcceptedResponse();
+  }
 
   const match = BEARER_HEADER_PATTERN.exec(authHeader.trim());
   const token = match?.[1];

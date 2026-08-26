@@ -45,28 +45,45 @@ export function isRoleDenial(error: unknown): boolean {
 }
 
 /**
- * Refresh the caller's permissions after a role denial.
+ * Whether the account or the org behind this request is gone.
  *
- * A denial means the server and the console disagree about what the caller may
- * do — a role changed under an open tab, or a control was left ungated. `/me`
- * is the console's only source for the answer, so it gets re-read; the failed
- * request is not retried.
+ * The backend sends this while an account deletion is running, and it reaches
+ * ordinary requests first: `api.ts` navigates to `/account-deleted` only when
+ * the session probe reports it, so an org another Owner has started deleting
+ * takes every panel down while `/me` sits fresh for its ten minutes and the
+ * console keeps rendering a session that has ended.
+ */
+export function isAccountDeleted(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null | undefined)?.code;
+  return code === ApiErrorCode.ACCOUNT_DELETED;
+}
+
+/**
+ * Re-read `/me` when a request says the console's picture of the session is out
+ * of date.
  *
- * A denial on `/me` itself is exempt: invalidating the query that just failed
+ * A role denial means the server and the console disagree about what the caller
+ * may do — a role changed under an open tab, or a control was left ungated. A
+ * deleted account means there is no session left to render at all. `/me` is the
+ * console's only source for either answer, so it gets re-read; the failed
+ * request is not retried. The `/me` that comes back carries the deletion itself,
+ * and that one navigates.
+ *
+ * A failure on `/me` itself is exempt: invalidating the query that just failed
  * would refetch it, fail again, and loop.
  */
-function refreshPermissionsOnDenial(error: unknown, queryKey?: readonly unknown[]): void {
-  if (!isRoleDenial(error)) return;
+function refreshSessionOnDenial(error: unknown, queryKey?: readonly unknown[]): void {
+  if (!isRoleDenial(error) && !isAccountDeleted(error)) return;
   if (queryKey?.[0] === 'me') return;
   void queryClient.invalidateQueries({ queryKey: ['me'] });
 }
 
 export const queryClient = new QueryClient({
   queryCache: new QueryCache({
-    onError: (error, query) => refreshPermissionsOnDenial(error, query.queryKey),
+    onError: (error, query) => refreshSessionOnDenial(error, query.queryKey),
   }),
   mutationCache: new MutationCache({
-    onError: (error) => refreshPermissionsOnDenial(error),
+    onError: (error) => refreshSessionOnDenial(error),
   }),
   defaultOptions: {
     queries: {

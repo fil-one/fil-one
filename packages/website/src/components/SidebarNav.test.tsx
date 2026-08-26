@@ -16,10 +16,21 @@ vi.mock('@tanstack/react-router', () => ({
   useMatchRoute: () => () => false,
 }));
 
-// Force both status banners to render so their button ids are present.
+// Force both status banners to render so their button ids are present, and give
+// the fixture the two memberships the org switcher needs to appear at all — with
+// one, it renders nothing and a props regression stays invisible.
 vi.mock('./use-sidebar-data.js', () => ({
   useSidebarData: () => ({
-    me: { name: 'Ada', email: 'ada@example.com', orgName: 'Acme' },
+    me: {
+      name: 'Ada',
+      email: 'ada@example.com',
+      orgName: 'Acme',
+      orgId: '11111111-1111-1111-1111-111111111111',
+      memberships: [
+        { orgId: '11111111-1111-1111-1111-111111111111', orgName: 'Acme', role: 'owner' },
+        { orgId: '22222222-2222-2222-2222-222222222222', orgName: 'Globex', role: 'member' },
+      ],
+    },
     displayName: 'Ada',
     initial: 'A',
     isTrialing: true,
@@ -103,6 +114,33 @@ describe('SidebarNav e2e selector uniqueness (desktop + drawer mounted)', () => 
     expect(triggers).toHaveLength(1);
     fireEvent.click(triggers[0]);
     expect(container.querySelectorAll('#user-menu-logout-button')).toHaveLength(1);
+  });
+});
+
+describe('SidebarNav — the org switcher', () => {
+  function openUserMenu() {
+    const rendered = renderBothSidebars();
+    fireEvent.click(rendered.container.querySelectorAll('[data-testid="user-profile"]')[0]);
+    return rendered;
+  }
+
+  it('mounts in the user menu with the active org marked', () => {
+    const { container } = openUserMenu();
+
+    // The props are the mount point's to get right — `activeOrgId={me.userId}`
+    // compiles and would leave every org unmarked.
+    expect(container.querySelectorAll('[data-testid="org-switcher"]')).toHaveLength(1);
+    const active = container.querySelector(`button[aria-current="true"]`);
+    expect(active?.textContent).toBe('Acme');
+  });
+
+  it('offers the caller’s other org', () => {
+    const { container } = openUserMenu();
+
+    const names = [...container.querySelectorAll('[data-testid="org-switcher"] button')].map(
+      (b) => b.textContent,
+    );
+    expect(names).toEqual(['Acme', 'Globex']);
   });
 });
 

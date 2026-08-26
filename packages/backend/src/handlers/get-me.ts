@@ -84,5 +84,12 @@ export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   // Opt out of the verified-email gate: the frontend relies on /me to detect
   // the unverified state and drive the verify-email flow.
-  .use(authMiddleware({ requireVerifiedEmail: false }))
+  //
+  // `orgHeaderFallback` is this route's alone. The console keeps the active org
+  // per tab, and this response is what tells it the stash has gone stale — an
+  // org the caller was removed from, or one that was deleted. Refusing the
+  // request would leave the console reading a 403 from the only endpoint that
+  // could have told it which org it should be in. Every other route answers a
+  // stale stash with the ordinary 403, which sends the console here.
+  .use(authMiddleware({ requireVerifiedEmail: false, orgHeaderFallback: true }))
   .use(errorHandlerMiddleware());
