@@ -26,6 +26,9 @@ vi.mock('../lib/api', () => ({
 vi.mock('../lib/query-client.js', () => ({
   queryKeys: { usage: ['usage'], billing: ['billing'], me: ['me'] },
   USAGE_STALE_TIME: 5 * 60_000,
+  // The shell now reads `billing.view` before fetching billing, and the
+  // permission hook is a third `/me` reader with its own staleTime.
+  ME_STALE_TIME: 10 * 60_000,
 }));
 
 vi.mock(import('../lib/time.js'), async (importOriginal) => ({

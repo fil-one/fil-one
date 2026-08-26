@@ -1,8 +1,11 @@
 import { createRoute, Outlet, redirect, useNavigate } from '@tanstack/react-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { Route as rootRoute } from './__root';
 import { AppShell } from '../components/AppShell';
-import { getMe } from '../lib/api.js';
+import { Button } from '../components/Button';
+import { getMe, logout } from '../lib/api.js';
 import { queryClient, queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
+import { usePermissions } from '../lib/use-permissions.js';
 import { consumePendingMfaAction } from '../lib/step-up.js';
 import { useEffect } from 'react';
 
@@ -31,8 +34,53 @@ export const Route = createRoute({
   component: AppWithOrgGuard,
 });
 
+/**
+ * What a caller with no membership row sees.
+ *
+ * `usePermissions` has reported this state since permissions arrived, and
+ * nothing consumed it: the console rendered the full shell, every request 403'd
+ * with `not_a_member`, and the caller was left reading a dashboard of empty
+ * counters. The two ways out are a re-read of `/me` — the usual cause is an
+ * invite accepted in another tab, or a conversion that had not finished writing
+ * the row — and signing out.
+ */
+function NotAMember() {
+  const client = useQueryClient();
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-zinc-50 px-6">
+      <div
+        data-testid="not-a-member"
+        className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-6 text-center"
+      >
+        <h1 className="text-base font-medium text-zinc-900">
+          Your account is not a member of this organization
+        </h1>
+        <p className="mt-2 text-sm text-zinc-600">
+          Ask an organization owner to invite you. If you have just been added, refresh to pick up
+          the change.
+        </p>
+        <div className="mt-5 flex items-center justify-center gap-2">
+          <Button
+            id="not-a-member-refresh-button"
+            variant="primary"
+            size="sm"
+            onClick={() => void client.invalidateQueries({ queryKey: queryKeys.me })}
+          >
+            Refresh
+          </Button>
+          <Button variant="ghost" size="sm" onClick={logout}>
+            Log out
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AppWithOrgGuard() {
   const navigate = useNavigate();
+  const { isNotAMember } = usePermissions();
 
   // Resume an MFA action after a step-up redirect round-trip. The api wrapper
   // stashes the pending action + return path in sessionStorage before bouncing
@@ -45,6 +93,8 @@ function AppWithOrgGuard() {
     url.searchParams.set('action', pending.action);
     void navigate({ to: url.pathname + url.search, replace: true });
   }, [navigate]);
+
+  if (isNotAMember) return <NotAMember />;
 
   return (
     <AppShell>

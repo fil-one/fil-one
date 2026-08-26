@@ -40,6 +40,8 @@ import type {
   UpdateProfileRequest,
 } from '@filone/shared';
 import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
+import { RequirePermission } from '../components/RequirePermission';
+import { useHasPermission } from '../lib/use-permissions.js';
 
 // ---------------------------------------------------------------------------
 // Section card wrapper
@@ -269,12 +271,13 @@ function useProfileForm(me: MeResponse) {
     }
   }, [me, initialized]);
 
+  const mayRename = useHasPermission('org.rename');
   const nameChanged = !social && name !== (me.name ?? '');
   const emailChanged = !social && email !== (me.email ?? '');
   // Against the trimmed value, because trimmed is what gets sent: otherwise a
   // trailing space alone counts as a change and the save renames the org to the
   // name it already has.
-  const orgNameChanged = orgName.trim() !== (me.orgName ?? '');
+  const orgNameChanged = mayRename && orgName.trim() !== (me.orgName ?? '');
   const hasChanges = nameChanged || emailChanged || orgNameChanged;
 
   /** Reflect what landed, in the form and in the cache the rest of the app reads. */
@@ -391,14 +394,7 @@ function ProfileSection({ me }: { me: MeResponse }) {
             </FormField>
           </div>
           <div className="flex flex-1 flex-col">
-            <FormField label="Company name" htmlFor="profile-org-name">
-              <Input
-                id="profile-org-name"
-                value={form.orgName}
-                onChange={form.setOrgName}
-                placeholder="Your company"
-              />
-            </FormField>
+            <CompanyNameField value={form.orgName} onChange={form.setOrgName} />
           </div>
         </div>
 
@@ -602,6 +598,26 @@ function DangerSection({ me }: { me: MeResponse }) {
         }}
       />
     </Card>
+  );
+}
+
+/**
+ * The organization's name, not the caller's.
+ *
+ * It goes to `PATCH /api/org` behind `org.rename`, so most members see it
+ * read-only — visible because it names the org they are working in, disabled
+ * because the server would refuse the change. Read-only is also what shows
+ * while `/me` is in flight: it never offers an edit that then vanishes.
+ */
+function CompanyNameField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const readOnly = <Input id="profile-org-name" value={value} onChange={() => {}} disabled />;
+
+  return (
+    <FormField label="Company name" htmlFor="profile-org-name">
+      <RequirePermission permission="org.rename" fallback={readOnly} pending={readOnly}>
+        <Input id="profile-org-name" value={value} onChange={onChange} placeholder="Your company" />
+      </RequirePermission>
+    </FormField>
   );
 }
 

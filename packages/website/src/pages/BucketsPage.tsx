@@ -14,6 +14,8 @@ import { TableSkeleton, type SkeletonColumn } from '../components/Table/TableSke
 import { useBucketsListing } from '../lib/use-buckets-listing.js';
 import { useDeleteBucket } from '../lib/use-delete-bucket.js';
 import { DEFAULT_BUCKET_SORT, EMPTY_BUCKET_FILTERS } from '../lib/bucket-table.js';
+import { RequirePermission } from '../components/RequirePermission';
+import { useHasPermission } from '../lib/use-permissions.js';
 
 // Mirrors BucketsTable's columns (labels and breakpoints) so the loading
 // placeholder drops the same columns at the same widths as the real table.
@@ -30,6 +32,7 @@ const SKELETON_COLUMNS: SkeletonColumn[] = [
 
 export function BucketsPage() {
   const navigate = useNavigate();
+  const mayCreate = useHasPermission('buckets.create');
 
   const [filters, setFilters] = useState(EMPTY_BUCKET_FILTERS);
   const [sort, setSort] = useState(DEFAULT_BUCKET_SORT);
@@ -51,15 +54,17 @@ export function BucketsPage() {
   // Shared across every state so navigating to Buckets never blanks the header
   // or takes the Create action away while the list loads.
   const createAction = (
-    <Button
-      id="buckets-create-button"
-      variant="ghost"
-      size="sm"
-      icon={PlusIcon}
-      onClick={() => navigate({ to: '/buckets/create' })}
-    >
-      Create bucket
-    </Button>
+    <RequirePermission permission="buckets.create">
+      <Button
+        id="buckets-create-button"
+        variant="ghost"
+        size="sm"
+        icon={PlusIcon}
+        onClick={() => navigate({ to: '/buckets/create' })}
+      >
+        Create bucket
+      </Button>
+    </RequirePermission>
   );
 
   if (isPending) {
@@ -100,20 +105,28 @@ export function BucketsPage() {
         </div>
       )}
 
+      {/* The invitation goes with the button — "Create your first bucket" over
+          an empty card is a dead end for a role that cannot. */}
       {showEmptyState ? (
         <EmptyStateCard
           icon={DatabaseIcon}
           title="No buckets yet"
-          description="Create your first bucket to start storing objects"
+          description={
+            mayCreate
+              ? 'Create your first bucket to start storing objects'
+              : 'Buckets in this organization appear here'
+          }
         >
-          <Button
-            id="buckets-empty-create-button"
-            variant="primary"
-            icon={PlusIcon}
-            onClick={() => navigate({ to: '/buckets/create' })}
-          >
-            Create bucket
-          </Button>
+          {mayCreate && (
+            <Button
+              id="buckets-empty-create-button"
+              variant="primary"
+              icon={PlusIcon}
+              onClick={() => navigate({ to: '/buckets/create' })}
+            >
+              Create bucket
+            </Button>
+          )}
         </EmptyStateCard>
       ) : (
         <BucketsTable
