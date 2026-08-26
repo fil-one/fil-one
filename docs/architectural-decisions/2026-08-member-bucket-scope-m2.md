@@ -16,9 +16,9 @@ Tier 3 work and belongs to the Forge enforcement story (FIL-1018).
 
 Five decisions shape the design:
 
-1. **Enforcement is the console API.** Out-of-scope buckets are refused at the
-   BFF. The tenant-wide console credential and existing SigV4 keys are not
-   narrowed; that is M3.
+1. **Enforcement is the console API.** Out-of-scope buckets are refused there.
+   The tenant-wide console credential and existing SigV4 keys are not narrowed;
+   that is M3.
 2. **A grant is one row per (member, bucket), in a table of its own.**
 3. **Hiding covers bucket-addressed reads.** Org-wide aggregates (usage,
    billing, dashboard counts, the activity feed) stay org-wide.
@@ -505,9 +505,9 @@ than a redeploy.
 
 ## Open questions
 
-1. **Does BFF enforcement end on Aurora and FTH?** Decision 1 accepts that
-   `filone-console` addresses every bucket in the tenant. M3 is direct-key
-   enforcement on Forge (FIL-1025, on FIL-918), which leaves the other two
+1. **Does console-mediated enforcement end on Aurora and FTH?** Decision 1
+   accepts that `filone-console` addresses every bucket in the tenant. M3 is
+   direct-key enforcement on Forge (FIL-1025, on FIL-918), which leaves the other
    regions where §3 puts them unless a vendor answers. Whether they ever reach
    parity is the "parity vs Forge-first" decision the M3 milestone is gated on,
    and it decides whether any of §3 is temporary.
