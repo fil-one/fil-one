@@ -11,6 +11,9 @@ named set of them. A member holding a named set sees only those buckets: the
 console renders only those, `GET /api/buckets` returns only those, and every
 bucket-addressed route answers as if the others do not exist.
 
+A scope names whole buckets. Scoping a member to a prefix inside a bucket is
+Tier 3 work in the Forge enforcement story (FIL-1018), not this milestone.
+
 Five decisions shape the design:
 
 1. **Enforcement is the console API.** Out-of-scope buckets are refused at the
@@ -83,6 +86,10 @@ reads the membership row, so `bucketScope: 'all'` answers the question with no
 I/O at all. Only a scoped caller, and only on a bucket-addressed route, reads
 the grant table. `'specific'` with no grant rows is a member who can see no
 bucket, and it fails closed.
+
+`'all'` is evaluated per request rather than materialized into grants, so a
+bucket created after the marker was written is inside an `'all'` scope by
+definition, with nothing to write when it appears.
 
 **Its own table, not `OrgTable`.** Grants are unbounded per member and would
 otherwise share the `ORG#{orgId}` partition with the membership, invitation, and
@@ -277,27 +284,34 @@ storage user carries no bucket scope of its own (`FthStorageUser`), the generic
 Management API has no equivalent concept, and Aurora exposes none. A per-member
 storage user would buy attribution rather than filtering.
 
-**One question decides the rest, and all three contracts leave it open.** Does a
-key carrying both `s3:ListAllMyBuckets` and a non-empty `buckets` array return
-the whole tenant's buckets or only the named ones? `ListAllMyBuckets` acts on
-the tenant rather than on a bucket, so "may only operate on these buckets" reads
-either way, and neither the Management API description nor Aurora's schema
-settles it. The answer is per-orchestrator and decides which option below is
-needed.
+**The requirement is settled and the mechanism is not.** FIL-1017 asks for
+out-of-scope buckets to be "absent from console and from ListBuckets on that
+member's keys", so filtered enumeration is a stated acceptance criterion rather
+than a choice. What no contract answers is whether the gateways already deliver
+it: does a key carrying both `s3:ListAllMyBuckets` and a non-empty `buckets`
+array return the whole tenant's buckets or only the named ones? `ListAllMyBuckets`
+acts on the tenant rather than on a bucket, so "may only operate on these
+buckets" reads either way, and neither the Management API description nor
+Aurora's schema settles it. The answer is per-orchestrator and decides which
+option below each region needs.
 
 | Option                                       | What it gives                                                                                                          | What it costs                                                                                                                                                          |
 | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Scope the key, let the gateway filter        | Nothing to build: §6 already puts the member's buckets on the key, end to end on all three backends                     | Complete only where the gateway filters. Where it does not, the key cannot *operate* on an out-of-scope bucket but can still recite its name                          |
 | Withhold `s3:ListAllMyBuckets` on scoped keys | Enumeration is refused whatever the gateway does. `aws s3 ls s3://granted-bucket` still works, since that is `ListBucket` | `aws s3 ls` answers AccessDenied, which breaks tooling that enumerates first. The always-on set becomes conditional, and Aurora may grant the action with no way to omit it |
-| A FilOne S3 proxy in front of the gateway    | Filters ListBuckets exactly, identically on all three backends, and constrains keys minted before scope existed          | A new service on the data-plane path for every request. This is the M3 shape                                                                                          |
+| The backend enforces the key's scope itself  | The gateway answers correctly with no help from us, which is what M3 builds on Forge (FIL-1025, on Hilt's key vocabulary and permission read-back, FIL-918) | Reaches Forge only. Aurora's keys are immutable and FTH has no key-update endpoint, so on those two it is a vendor ask with no date |
 
-**Ship the first, fall back to the second, and name the third as where this
-ends.** Scoping the key is already built and is correct wherever the gateway
-honors it. Withholding `s3:ListAllMyBuckets` is the per-region remedy where it
-does not, applied only to keys a scoped member mints, so an unscoped member's
-key is unchanged. Neither reaches a key minted before scope existed, which is the
+**Ship the first, fall back to the second per region, and let the third arrive
+with M3.** Scoping the key is already built and is correct wherever the gateway
+honors it. Withholding `s3:ListAllMyBuckets` is the remedy where it does not,
+applied only to keys a scoped member mints, so an unscoped member's key is
+unchanged. Neither reaches a key minted before scope existed, which is the
 legacy transition (FIL-1020) and the reason scoping a member should prompt a
 review of the keys they already hold (FIL-1021).
+
+Because Aurora and FTH keys cannot be narrowed after issue, whichever option a
+region needs has to be right at creation time. A key minted under a wrong
+assumption is corrected by revoking and replacing it, never by editing it.
 
 **Bind the behavior in the contract.** The Management API spec is how a new
 orchestrator is held to a promise, and it currently promises nothing here. It
@@ -342,12 +356,18 @@ regions. Keys already carrying the two permissions keep them until revoked, so
 the proposal is only as complete as the legacy transition that retires them
 (FIL-1020).
 
-**What lifts it.** Either an orchestrator surface reporting bucket lifecycle
-with the acting `accessKeyId`, which is a Management API addition rather than a
-gap in our reading of it, or the FilOne S3 proxy (§7), which sees the key on
-every request. Those are the same two answers that close the `ListBuckets`
-question and the attribution question, which is the argument for treating them
-as one piece of work rather than three.
+**Aurora already does this.** `supportsBucketManagement` withholds both
+permissions in the Aurora region, and FIL-1019 records the same fact from the
+vendor side. So the proposal generalizes a policy one of the three backends
+already runs under, rather than inventing one, and it moves the product toward
+the uniform-regions answer to FIL-1024's open question of whether capabilities
+should differ by region at all.
+
+**What lifts it.** An orchestrator surface reporting bucket lifecycle with the
+acting `accessKeyId`. On Forge that is the same Hilt work the rest of M3 needs
+(FIL-918's permission read-back); on Aurora and FTH it is a vendor ask. It is
+the same ask that closes the `ListBuckets` question in §7, which is the
+argument for putting them in one message rather than three.
 
 ## 9. Lifecycle
 
@@ -401,20 +421,26 @@ than a redeploy.
    the grants, which keeps enforcement uniform and makes the widening an
    explicit, audit-logged act. The second is the recommendation, and it needs
    the product answer for the console copy on the role picker.
-2. **Prefix-level scope.** Whether a member can be scoped to a prefix inside a
-   bucket rather than to whole buckets changes the sort key and the presign
-   check. Nothing here forecloses it; the PRD should say whether M2 owns it.
-3. **The tier split source.** The M1 ADR cites
-   `iam-prd-enforceability-by-backend.md` (2026-08-11) as the analysis behind
-   the M2/M3 boundary. It is not in the knowledge-base clone on this machine.
-   It should be read before this design is accepted, since it is the record of
-   what each backend can enforce.
-4. **The unscoped console credential.** Decision 1 accepts that
-   `filone-console` addresses every bucket in the tenant. Whether M3 replaces
-   it with per-member scoped credentials, or moves object operations behind a
-   request-time check on Forge, decides whether any of §3 is temporary.
-5. **What a scoped key's `ListBuckets` returns.** Unspecified in all three
-   orchestrator contracts and decisive for §7. It needs a test against each
-   gateway, and a sentence in the Management API spec, since that spec is how a
-   new orchestrator is bound. Forge answers quickly; FTH and Aurora are vendor
-   questions with lead time.
+2. **Does BFF enforcement end on Aurora and FTH?** Decision 1 accepts that
+   `filone-console` addresses every bucket in the tenant. M3 is direct-key
+   enforcement on Forge (FIL-1025, on FIL-918), which leaves the other two
+   regions where §3 puts them unless a vendor answers. Whether they ever reach
+   parity is the "parity vs Forge-first" decision the M3 milestone is gated on,
+   and it decides whether any of §3 is temporary.
+3. **Whether each gateway filters `ListBuckets` for a scoped key.** The
+   requirement is settled (FIL-1017); §7's mechanism is not. It needs a test
+   against each of the three gateways and a sentence in the Management API
+   spec, since that spec is how a new orchestrator is bound. Forge answers
+   quickly; FTH and Aurora are vendor questions with lead time, and the same
+   message carries §8's lifecycle-reporting ask.
+4. **Whether a deleted bucket's name stays reserved.** Neither the Management
+   API contract nor the integration README says. If names are reserved, §5's
+   stale grants are permanently inert. If they are reusable, the sweep is the
+   only defense and §8 is what makes the sweep reachable. Same message as
+   question 3.
+5. **The tier split source.** Four M2 tickets cite a "2026-08-11 enforcement
+   analysis" as their source, and the M1 ADR names it
+   `iam-prd-enforceability-by-backend.md` in the knowledge-base repo. It
+   defines the Tier 2 / Tier 3 vocabulary those tickets sort work by and is not
+   in the knowledge-base clone on this machine. It should be read before this
+   design is accepted.
