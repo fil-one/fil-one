@@ -1,5 +1,14 @@
 import { z } from 'zod';
 import { OrgNameSchema } from './org.js';
+import type { OrgRole } from './org.js';
+import type { Permission } from '../permissions.js';
+
+/** One row of `MeResponse.memberships` — an org the caller belongs to. */
+export interface OrgMembershipSummary {
+  orgId: string;
+  orgName: string;
+  role: OrgRole;
+}
 
 export interface MeResponse {
   orgId: string;
@@ -17,6 +26,19 @@ export interface MeResponse {
    * allowlist) so the frontend stays consistent without a second lookup.
    */
   ragAccess: boolean;
+  /** The caller's FilOne user id — the subject of every membership row. */
+  userId?: string;
+  /** The caller's role in {@link MeResponse.orgId}. */
+  role?: OrgRole;
+  /**
+   * The permissions {@link MeResponse.role} carries, computed server-side like
+   * {@link MeResponse.ragAccess} so the console gates rendering off the same
+   * table the server enforces. The server remains the enforcement point; the UI
+   * only hides what would be refused.
+   */
+  permissions?: readonly Permission[];
+  /** Every org the caller belongs to, for the org switcher. */
+  memberships?: OrgMembershipSummary[];
 }
 
 export interface MfaEnrollment {

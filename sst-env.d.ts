@@ -6,6 +6,18 @@
 
 declare module "sst" {
   export interface Resource {
+    "AccountDeletionDlq": {
+      "type": "sst.aws.Queue"
+      "url": string
+    }
+    "AccountDeletionSweeper": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "AccountDeletionWorker": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "ActivateSubscription": {
       "name": string
       "type": "sst.aws.Function"
@@ -62,6 +74,10 @@ declare module "sst" {
       "type": "sst.aws.Queue"
       "url": string
     }
+    "BulkDeleteDlqWatchdog": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "BulkDeleteQueue": {
       "type": "sst.aws.Queue"
       "url": string
@@ -70,7 +86,15 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Dynamo"
     }
+    "BulkDeleteWorker": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "ChangePassword": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "ConfirmAccountDeletion": {
       "name": string
       "type": "sst.aws.Function"
     }
@@ -79,6 +103,10 @@ declare module "sst" {
       "type": "sst.aws.Function"
     }
     "CreateBucket": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "CreateBulkDeleteJob": {
       "name": string
       "type": "sst.aws.Function"
     }
@@ -114,6 +142,14 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "DeletionChallengeTable": {
+      "name": string
+      "type": "sst.aws.Dynamo"
+    }
+    "DeletionCodeHmacKey": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
     "DisableMfa": {
       "name": string
       "type": "sst.aws.Function"
@@ -147,6 +183,10 @@ declare module "sst" {
       "type": "sst.aws.Function"
     }
     "GetBucketRagEnablement": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "GetBulkDeleteJob": {
       "name": string
       "type": "sst.aws.Function"
     }
@@ -228,6 +268,10 @@ declare module "sst" {
       "type": "sst.sst.Linkable"
     }
     "RegenerateRecoveryCode": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "RequestAccountDeletion": {
       "name": string
       "type": "sst.aws.Function"
     }

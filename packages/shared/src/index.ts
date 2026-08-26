@@ -38,6 +38,7 @@ export type { UsageLimits } from './constants.js';
 export { formatBytes, formatBytesShort } from './formatBytes.js';
 export type {
   MeResponse,
+  OrgMembershipSummary,
   MfaEnrollment,
   PasskeyEnrollment,
   UpdateProfileRequest,
@@ -54,12 +55,27 @@ export { getProvider, isSocialConnection } from './connection-providers.js';
 export type { ConnectionProvider } from './connection-providers.js';
 export {
   OrgRole,
+  isOrgRole,
   OrgNameSchema,
   ORG_NAME_MIN_LENGTH,
   ORG_NAME_MAX_LENGTH,
   ORG_NAME_PATTERN,
   ORG_NAME_DISALLOWED_CHARS,
 } from './api/org.js';
+
+export {
+  PERMISSIONS,
+  ROLE_PERMISSIONS,
+  ROLE_RANK,
+  permissionsForRole,
+  roleHasPermission,
+  canManageTargetRole,
+  canChangeRole,
+} from './permissions.js';
+export type { Permission } from './permissions.js';
+
+export { ROUTE_MANIFEST } from './route-manifest.js';
+export type { RouteCategory, RouteRequirement, RouteManifestEntry } from './route-manifest.js';
 export { ApiErrorCode } from './api/coreInterfaces.js';
 export type { ErrorResponse } from './api/coreInterfaces.js';
 export {
