@@ -179,6 +179,13 @@ body. This is the `in-handler` requirement M1 already defined for presign.
 | `POST /api/buckets/{name}/query` (bearer) | the key creator's scope applies (§6)                                        |
 | `POST /api/access-keys`                   | requested bucket scope is capped at the creator's (§6)                      |
 | `POST /api/rag-api-keys`                  | same cap                                                                     |
+| `POST /api/org/invitations`               | carries the invited member's scope, materialized on accept (§9)             |
+| `PATCH /api/org/members/{userId}`         | carries scope changes, and refuses a narrowing that strands keys (§9)       |
+
+The last two are M1 routes gaining a payload rather than new ones, and they keep
+the requirement they already declare: `members.manage`, which FIL-1017's "Owner
+or Admin assigns a bucket scope" matches exactly. Assigning a scope is part of
+inviting and managing a member, so it needs no permission of its own.
 
 **An out-of-scope bucket answers exactly like a bucket that does not exist.**
 Same status, same body, no new `ApiErrorCode`. A distinct code would confirm
@@ -254,6 +261,17 @@ Every key a scoped member holds is a snapshot. Widening a member's scope does
 not widen the keys they already minted, and reaching a newly granted bucket
 means minting a new key. The console says so at creation, and again when an
 Owner or Admin widens somebody's scope.
+
+The snapshot is a property of the backends rather than of this design. Aurora's
+keys are immutable and FTH has no key-update endpoint, so the only way to change
+what a key reaches is to revoke it and issue another, which changes the access
+key ID and breaks whatever client was using it. Forge gets out of that once
+FIL-918 lands: a key narrows in place, keeping its ID, and a key read returns
+its effective permissions and bucket scope from the enforcing system instead of
+from our own record. The console flow is then one flow with two regional
+outcomes — update the key on Forge, revoke and replace it elsewhere (FIL-1017)
+— and that difference is one of the rows FIL-1024's per-region matrix has to
+show.
 
 `CreateBucket` and a non-empty bucket list contradict each other: a key that
 may only operate on the buckets it names cannot create one it does not name. A
@@ -371,10 +389,46 @@ argument for putting them in one message rather than three.
 
 ## 9. Lifecycle
 
-**Revoking a grant** deletes both rows in one transaction. It binds on the next
-request; nothing cached server-side outlives it. The console's own cached bucket
-list survives until the next refetch, the same exposure the M1 ledger records
-for a narrowed role.
+**A scope is assigned at invite**, and edited afterwards (FIL-1017). At invite
+time there is no `userId` to key a grant row on, so the invitation row carries
+the intended scope inline: `bucketScope` plus a list of `{region}/{bucketName}`
+entries on `ORG#{orgId}/INVITE#{inviteId}`. A list is right here for the reason
+it was wrong on the membership row (§1's alternatives): the invitation is
+written once by one admin, read once on accept, expires in 14 days, and is
+never on a request path.
+
+Acceptance materializes it. M1's accept is already one `TransactWriteItems`,
+and an arbitrary number of grant rows cannot join it against the 100-item
+transaction limit, so the membership lands first with its `bucketScope` marker
+and the grants follow. The order is what makes the failure safe: a member whose
+marker says `'specific'` and whose grants have not been written yet sees no
+bucket, and the invitation row survives acceptance (M1 keeps it for the audit
+export rather than deleting it), so the scope it names is still there to
+re-drive. The reverse order would show the invitee the whole org.
+
+An invitation carrying a role of Owner or Admin carries no scope, which is the
+same rule §2 applies to a membership, and question 1 is what settles whether
+that rule is enforced on the way in, on the way up, or both.
+
+**Revoking a grant** deletes both rows in one transaction and binds on the next
+request. It is not, on its own, the whole operation: a member's existing keys
+may still name the bucket, and FIL-1017 asks for no silent narrowing and no
+silent survival. So narrowing a scope through
+`PATCH /api/org/members/{userId}` computes that member's non-conforming keys
+server-side and refuses the change without an explicit confirmation, answering
+with the list. Confirmed, one flow revokes the keys and writes the scope.
+
+Non-conformance is a local read. Both key kinds record `createdBy` and their
+own `bucketScope` and `buckets` (`packages/shared/src/api/access-keys.ts`,
+`lib/rag-api-keys.ts`), so the member's keys that hold `'all'`, or name a bucket
+the new scope does not, are found without asking a vendor. Revocation itself is
+the existing delete path, and how fast it binds at the provider is what FIL-1018
+is still asking vendors; this document publishes no number for it. The console's
+own cached bucket list survives until the next refetch, the same exposure the M1
+ledger records for a narrowed role.
+
+Member removal revokes keys the same way, which is FIL-1021's flow rather than
+this one's.
 
 **Removing a member** leaves grants behind. They are unbounded, so they cannot
 join the transaction that deletes the membership and its inverse item, and they
