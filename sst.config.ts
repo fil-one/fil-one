@@ -142,6 +142,40 @@ export default $config({
       },
     });
 
+    // Audit events: ORG#{orgId} / {iso8601}#{eventId}, so one Query per org
+    // returns its history in the order it happened. Its own table because its
+    // lifecycle is its own — the TTL that expires an event after 90 days
+    // (packages/shared/src/audit.ts) must never be able to reach a membership,
+    // profile, or billing row that happened to share a partition. Written only
+    // through lib/audit.ts, which appends an event in the same transaction as
+    // the mutation it records.
+    // Handlers reach this table with the same allResources link every route
+    // uses, so they hold dynamodb:* on it. Narrowing the audit grant to
+    // PutItem/Query is follow-up work: it is the one table where a handler
+    // holding DeleteItem contradicts the append-only claim.
+    const auditTable = new sst.aws.Dynamo('AuditTable', {
+      fields: {
+        pk: 'string',
+        sk: 'string',
+      },
+      primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
+      ttl: 'ttl',
+      transform: {
+        table: {
+          // The two protections the record itself needs: a 90-day log with no
+          // backups loses the quarter to one bad deploy, and a table a stack
+          // operation can drop is a log an operator can make disappear.
+          //
+          // Deletion protection only where the app already retains on removal.
+          // Every preview stage is torn down with `sst remove`, and a protected
+          // table refuses to go, leaving the teardown failing and the stage's
+          // resources live.
+          pointInTimeRecovery: { enabled: isProduction || isStaging },
+          deletionProtectionEnabled: isProduction,
+        },
+      },
+    });
+
     // RAG indexer's own store: per-object chunk manifests
     // (BUCKET#{orgId}#{region}#{bucket} / MANIFEST#{objectKey}) and resumable indexer
     // checkpoints (INDEXER_CHECKPOINT#{orgId}#{region}#{bucket} / CHECKPOINT). Kept out
@@ -541,6 +575,7 @@ export default $config({
       userInfoTable,
       bulkDeleteTable,
       orgTable,
+      auditTable,
       userFilesBucket,
       ragVectorBucket,
       auth0ClientId,
