@@ -4,7 +4,7 @@ import type { Permission } from '@filone/shared';
 import {
   authorize,
   requireMembership,
-  requireMembershipMiddleware,
+  requireOrgMembershipMiddleware,
   requirePermission,
 } from './authorize.js';
 import { buildEvent, buildMiddyRequest, NO_MEMBERSHIP } from '../test/lambda-test-utilities.js';
@@ -224,9 +224,9 @@ describe('authorize', () => {
     });
   });
 
-  describe('requireMembershipMiddleware', () => {
+  describe('requireOrgMembershipMiddleware', () => {
     const run = (event: AuthenticatedEvent, internal?: Record<string, unknown>) =>
-      requireMembershipMiddleware().before(buildMiddyRequest(event, internal && { internal }));
+      requireOrgMembershipMiddleware().before(buildMiddyRequest(event, internal && { internal }));
 
     it('passes any member, whatever their role', () => {
       expect(run(eventFor({ role: OrgRole.ReadOnly }))).toBeUndefined();

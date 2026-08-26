@@ -26,7 +26,7 @@ import type { AccessKeyRecord } from '../lib/dynamo-records.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { requireMembershipMiddleware } from '../middleware/authorize.js';
+import { requireOrgMembershipMiddleware } from '../middleware/authorize.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
@@ -252,7 +252,7 @@ export const handler = middy(baseHandler)
   // The key's permissions are capped at the creator's own inside the handler;
   // that the creator is in the org at all is settled here, ahead of the billing
   // read a non-member should never cost.
-  .use(requireMembershipMiddleware())
+  .use(requireOrgMembershipMiddleware())
   .use(csrfMiddleware())
   .use(subscriptionGuardMiddleware(AccessLevel.Write))
   .use(errorHandlerMiddleware());

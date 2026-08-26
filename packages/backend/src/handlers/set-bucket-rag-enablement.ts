@@ -19,7 +19,7 @@ import {
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { requireMembershipMiddleware } from '../middleware/authorize.js';
+import { requireOrgMembershipMiddleware } from '../middleware/authorize.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { ragAccessMiddleware } from '../middleware/rag-access.js';
@@ -118,7 +118,7 @@ export const handler = middy(baseHandler)
   .use(authMiddleware())
   // Turning indexing on and off need different permissions, which only the body
   // says; membership is the same either way and is settled here.
-  .use(requireMembershipMiddleware())
+  .use(requireOrgMembershipMiddleware())
   .use(csrfMiddleware())
   .use(subscriptionGuardMiddleware(AccessLevel.Write))
   .use(ragAccessMiddleware())

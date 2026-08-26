@@ -178,7 +178,7 @@ export function authorize(permission: Permission) {
  * so a non-member costs no BillingTable read, and inside the metric that says
  * whether the conversion missed a cohort.
  */
-export function requireMembershipMiddleware() {
+export function requireOrgMembershipMiddleware() {
   const before = (request: GateRequest): APIGatewayProxyStructuredResultV2 | void => {
     const denied = requireMembership(request.event as AuthenticatedEvent);
     return denied ? withRefreshedCookies(request, denied) : undefined;
