@@ -233,13 +233,22 @@ vendor. The failure that survives is a grant left behind by a failed create,
 which is inert until someone creates a bucket of that name in that region, and
 that someone is granted it anyway.
 
-**Name reuse is the sharp edge.** Delete a bucket, create another with the same
-name in the same region, and every stale grant applies to the new bucket.
-FilOne has no bucket identifier to bind a grant to, so `delete-bucket` sweeps
-the grants through the inverse partition, which is what that row family is for.
-The sweep is bounded by the org's member count rather than by anything that
-grows with usage. It sits outside the delete's own atomicity, and a grant it
-misses is a member seeing a bucket nobody gave them.
+**Name reuse is the sharp edge, and only in some regions.** Delete a bucket,
+create another with the same name, and every stale grant applies to the new
+bucket. FilOne has no bucket identifier to bind a grant to, so `delete-bucket`
+sweeps the grants through the inverse partition, which is what that row family
+is for. The sweep is bounded by the org's member count rather than by anything
+that grows with usage. It sits outside the delete's own atomicity, and a grant
+it misses is a member seeing a bucket nobody gave them.
+
+Whether the hazard exists at all was measured on staging (2026-08-26,
+`bin/bucket-name-reuse-probe.ts`). On `eu-west-1` a recreate answers HTTP 409,
+"This bucket name is already taken", so a deleted name outlives its bucket and a
+stale grant there is permanently inert. On `us-east-1` the recreate succeeds, so
+the hazard is real and the sweep is what stands against it. `eu-central-3` is
+untested. The sweep therefore ships for every region rather than being tuned per
+region, because a name policy is a vendor's to change and this design should not
+break when one does.
 
 Both halves of this section assume the console performed the operation. A
 create or delete issued against the S3 API reaches no handler, so neither the
@@ -303,16 +312,24 @@ storage user carries no bucket scope of its own (`FthStorageUser`), the generic
 Management API has no equivalent concept, and Aurora exposes none. A per-member
 storage user would buy attribution rather than filtering.
 
-**The requirement is settled and the mechanism is not.** FIL-1017 asks for
-out-of-scope buckets to be "absent from console and from ListBuckets on that
-member's keys", so filtered enumeration is a stated acceptance criterion rather
-than a choice. What no contract answers is whether the gateways already deliver
-it: does a key carrying both `s3:ListAllMyBuckets` and a non-empty `buckets`
-array return the whole tenant's buckets or only the named ones? `ListAllMyBuckets`
-acts on the tenant rather than on a bucket, so "may only operate on these
-buckets" reads either way, and neither the Management API description nor
-Aurora's schema settles it. The answer is per-orchestrator and decides which
-option below each region needs.
+**The requirement is settled and the backends disagree about delivering it.**
+FIL-1017 asks for out-of-scope buckets to be "absent from console and from
+ListBuckets on that member's keys", so filtered enumeration is a stated
+acceptance criterion rather than a choice. No contract says whether a key
+carrying both `s3:ListAllMyBuckets` and a non-empty `buckets` array returns the
+whole tenant's buckets or only the named ones, so it was measured on staging
+(2026-08-26, `bin/bucket-scope-probe.ts`):
+
+| Region                 | Scoped key's `ListBuckets`                 | Omitting `s3:ListAllMyBuckets`                           | `CreateBucket` outside the list |
+| ---------------------- | ------------------------------------------ | -------------------------------------------------------- | ------------------------------- |
+| `eu-west-1` (Aurora)   | filtered to the key's list                 | not expressible: `Default` access grants it implicitly   | no signal, see below            |
+| `us-east-1` (FTH)      | **unfiltered**, the whole tenant came back | key mints, and `ListBuckets` then answers `AccessDenied` | `AccessDenied`                  |
+| `eu-central-3` (Forge) | untested                                   | untested                                                 | untested                        |
+
+Aurora meets the criterion natively. FTH does not, and no amount of scoping the
+key changes that, since the bucket list governs what the key may operate on and
+not what it may see. The Aurora run says nothing about `CreateBucket` because
+that region has no bucket management over S3 at all.
 
 | Option                                        | What it gives                                                                                                                                               | What it costs                                                                                                                                                               |
 | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -320,13 +337,27 @@ option below each region needs.
 | Withhold `s3:ListAllMyBuckets` on scoped keys | Enumeration is refused whatever the gateway does. `aws s3 ls s3://granted-bucket` still works, since that is `ListBucket`                                   | `aws s3 ls` answers AccessDenied, which breaks tooling that enumerates first. The always-on set becomes conditional, and Aurora may grant the action with no way to omit it |
 | The backend enforces the key's scope itself   | The gateway answers correctly with no help from us, which is what M3 builds on Forge (FIL-1025, on Hilt's key vocabulary and permission read-back, FIL-918) | Reaches Forge only. Aurora's keys are immutable and FTH has no key-update endpoint, so on those two it is a vendor ask with no date                                         |
 
-**Ship the first, fall back to the second per region, and let the third arrive
-with M3.** Scoping the key is already built and is correct wherever the gateway
-honors it. Withholding `s3:ListAllMyBuckets` is the remedy where it does not,
-applied only to keys a scoped member mints, so an unscoped member's key is
-unchanged. Neither reaches a key minted before scope existed, which is the
-legacy transition (FIL-1020) and the reason scoping a member should prompt a
-review of the keys they already hold (FIL-1021).
+**So the mechanism is per region, and both are already decided by measurement.**
+Aurora ships on the first option with nothing to build. FTH takes the second:
+withhold `s3:ListAllMyBuckets` from the keys a scoped member mints, leaving an
+unscoped member's keys untouched. Forge takes whichever its probe run calls for,
+and being ours it can take the third instead.
+
+The cost lands unevenly and cannot be flattened. On Aurora a scoped member's
+`aws s3 ls` works and shows exactly their buckets. On FTH the same command
+answers `AccessDenied` and shows them nothing, which breaks tooling that
+enumerates before it acts. Matching Aurora down to FTH's behavior would make a
+good region worse for no gain, so the difference is disclosed rather than
+levelled, and it is FIL-1024's first measured row.
+
+One assumption behind the FTH remedy is still unverified: that a key without
+`s3:ListAllMyBuckets` can still list objects inside a bucket it does name. It
+retains `s3:ListBucket`, so it should, and the probe is one command away from
+proving it. If that turned out false the remedy would cost more than the leak.
+
+Neither option reaches a key minted before scope existed, which is the legacy
+transition (FIL-1020) and the reason scoping a member should prompt a review of
+the keys they already hold (FIL-1021).
 
 Because Aurora and FTH keys cannot be narrowed after issue, whichever option a
 region needs has to be right at creation time. A key minted under a wrong
@@ -382,6 +413,14 @@ vendor side. So the proposal generalizes a policy one of the three backends
 already runs under, rather than inventing one, and it moves the product toward
 the uniform-regions answer to FIL-1024's open question of whether capabilities
 should differ by region at all.
+
+The two measurements compound in one region. `us-east-1` is where a user key can
+carry `s3:DeleteBucket`, and it is also where a deleted name can be claimed
+again (§5). A customer credential can therefore delete a bucket unobserved and
+recreate the name, and every grant the old bucket left behind attaches to the
+new one. Aurora has neither half. Forge has the first and its name policy is
+untested. That combination is the strongest argument for this proposal, and it
+argues for taking it before the Forge probe rather than after.
 
 **What lifts it.** An orchestrator surface reporting bucket lifecycle with the
 acting `accessKeyId`. On Forge that is the same Hilt work the rest of M3 needs
@@ -510,17 +549,18 @@ than a redeploy.
    regions where §3 puts them unless a vendor answers. Whether they ever reach
    parity is the "parity vs Forge-first" decision the M3 milestone is gated on,
    and it decides whether any of §3 is temporary.
-2. **Whether each gateway filters `ListBuckets` for a scoped key.** The
-   requirement is settled (FIL-1017); §7's mechanism is not. It needs a test
-   against each of the three gateways and a sentence in the Management API
-   spec, since that spec is how a new orchestrator is bound. Forge answers
-   quickly; FTH and Aurora are vendor questions with lead time, and the same
-   message carries §8's lifecycle-reporting ask.
-3. **Whether a deleted bucket's name stays reserved.** Neither the Management
-   API contract nor the integration README says. If names are reserved, §5's
-   stale grants are permanently inert. If they are reusable, the sweep is the
-   only defense and §8 is what makes the sweep reachable. Same message as
-   question 2.
+2. **What Forge does with both behaviors.** Aurora and FTH are measured (§5,
+   §7). Forge is untested for scoped `ListBuckets` and for name reuse, and both
+   probes run against it unchanged. Being ours, an unwanted answer there is a
+   bug to fix rather than a vendor ask, so it is the cheapest of the three to
+   settle and the only one where the third option in §7 is available.
+3. **Whether the measured behaviors are contractual.** Aurora filters
+   `ListBuckets` and reserves deleted names today, and FTH does neither.
+   Nothing in the Management API spec requires either, so both could change
+   without a vendor breaking a promise. The spec should say what a key with a
+   non-empty `buckets` array lists, and what happens to a deleted name, since
+   that spec is how a new orchestrator is bound. The same message carries §8's
+   lifecycle-reporting ask.
 4. **The tier split source.** Four M2 tickets cite a "2026-08-11 enforcement
    analysis" as their source, and the M1 ADR names it
    `iam-prd-enforceability-by-backend.md` in the knowledge-base repo. It
