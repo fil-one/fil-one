@@ -7,6 +7,7 @@ import {
   getStripeClient,
   pollForBillingStatusChange,
   getBillingRecord,
+  testOrgId,
 } from './helpers.js';
 
 describe('Trial Canceled (customer.subscription.deleted)', () => {
@@ -32,7 +33,7 @@ describe('Trial Canceled (customer.subscription.deleted)', () => {
       customer: cusId,
       items: [{ price: getStripePriceId() }],
       trial_end: trialEnd,
-      metadata: { userId, orgId: 'test-org' },
+      metadata: { userId, orgId: testOrgId(userId) },
       trial_settings: {
         end_behavior: { missing_payment_method: 'cancel' },
       },
@@ -49,9 +50,10 @@ describe('Trial Canceled (customer.subscription.deleted)', () => {
 
     const record = await getBillingRecord(userId);
     expect(record).toMatchObject({
-      pk: { S: `CUSTOMER#${userId}` },
+      pk: { S: `ORG#${testOrgId(userId)}` },
       sk: { S: 'SUBSCRIPTION' },
-      orgId: { S: 'test-org' },
+      orgId: { S: testOrgId(userId) },
+      userId: { S: userId },
       stripeCustomerId: { S: cusId },
       subscriptionStatus: { S: 'grace_period' },
       updatedAt: { S: expect.any(String) },

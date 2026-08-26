@@ -1,17 +1,15 @@
-import {
-  ConditionalCheckFailedException,
-  GetItemCommand,
-  PutItemCommand,
-  UpdateItemCommand,
-} from '@aws-sdk/client-dynamodb';
-import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
+import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { CreateSetupIntentResponse } from '@filone/shared';
 import { Resource } from 'sst';
-import { getDynamoClient } from '../lib/ddb-client.js';
 import { getStripeClient } from '../lib/stripe-client.js';
+import {
+  readSubscription,
+  updateSubscription,
+  writeSubscription,
+} from '../lib/subscription-store.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -20,31 +18,24 @@ import { authorize } from '../middleware/authorize.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
-const dynamo = getDynamoClient();
-
 // Exported for unit testing (without the auth/csrf middleware chain).
 export async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { userId, email, orgId } = getUserInfo(event);
-  const tableName = Resource.BillingTable.name;
   const stripe = getStripeClient();
 
-  // 1. Check if customer already exists in billing table
-  const existing = await dynamo.send(
-    new GetItemCommand({
-      TableName: tableName,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
-    }),
-  );
+  // 1. Check whether the org already has a customer in the billing table.
+  // Consistently: this handler decides between updating a record and creating
+  // one, and an eventually-consistent miss on a record written seconds ago
+  // (a trial claim, or a second click on the same button) creates a second
+  // Stripe customer for the same org.
+  const existing = await readSubscription(orgId, userId, { consistentRead: true });
 
   let stripeCustomerId: string;
 
-  if (existing.Item) {
-    const record = unmarshall(existing.Item);
+  if (existing) {
+    const { record } = existing;
     if (record.stripeCustomerId) {
-      stripeCustomerId = record.stripeCustomerId as string;
+      stripeCustomerId = record.stripeCustomerId;
     } else {
       // Create Stripe customer and update record (without clobbering existing fields)
       const customer = await stripe.customers.create({
@@ -55,19 +46,15 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
       });
       stripeCustomerId = customer.id;
 
-      await dynamo.send(
-        new UpdateItemCommand({
-          TableName: tableName,
-          Key: {
-            pk: { S: `CUSTOMER#${userId}` },
-            sk: { S: 'SUBSCRIPTION' },
-          },
+      await updateSubscription(
+        { orgId, userId },
+        {
           UpdateExpression: 'SET stripeCustomerId = :cid, updatedAt = :now',
           ExpressionAttributeValues: {
             ':cid': { S: stripeCustomerId },
             ':now': { S: new Date().toISOString() },
           },
-        }),
+        },
       );
     }
   } else {
@@ -82,18 +69,18 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     stripeCustomerId = customer.id;
 
     try {
-      await dynamo.send(
-        new PutItemCommand({
-          TableName: tableName,
-          Item: marshall({
-            pk: `CUSTOMER#${userId}`,
-            sk: 'SUBSCRIPTION',
-            stripeCustomerId,
-            orgId,
-            updatedAt: new Date().toISOString(),
-          }),
+      // Both keys are born together here: the record does not exist yet, so the
+      // org row is whole from its first write rather than a partial twin that
+      // would shadow a complete legacy row.
+      await writeSubscription(
+        { orgId, userId },
+        {
+          item: {
+            stripeCustomerId: { S: stripeCustomerId },
+            updatedAt: { S: new Date().toISOString() },
+          },
           ConditionExpression: 'attribute_not_exists(pk)',
-        }),
+        },
       );
     } catch (err) {
       // A record already exists

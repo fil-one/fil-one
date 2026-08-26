@@ -137,10 +137,16 @@ const stubbedRows = new Map<string, Record<string, unknown>>();
  */
 function withActiveSubscription(): void {
   beforeEach(() => {
-    stubbedRows.set(
-      rowKey('BillingTable', `CUSTOMER#${USER_ID}`, 'SUBSCRIPTION'),
-      marshall({ subscriptionStatus: SubscriptionStatus.Active }),
-    );
+    // Both rows the store reads, because it reads them together: the org row is
+    // the one it serves, and an unstubbed legacy read would reject alongside it.
+    // Spelled out rather than read from the store's key helpers, which reach
+    // the sst resources this file mocks and cannot be imported at the top.
+    for (const pk of [`ORG#${ORG_ID}`, `CUSTOMER#${USER_ID}`]) {
+      stubbedRows.set(
+        rowKey('BillingTable', pk, 'SUBSCRIPTION'),
+        marshall({ pk, orgId: ORG_ID, subscriptionStatus: SubscriptionStatus.Active }),
+      );
+    }
   });
 
   afterEach(() => {

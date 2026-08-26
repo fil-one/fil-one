@@ -214,6 +214,30 @@ describe('usage-reporting-orchestrator', () => {
     expect(payload.userId).toBeUndefined();
   });
 
+  it('reports an org once from its org row, ignoring the legacy twin beside it', async () => {
+    // Dual-writing puts most orgs in the scan twice for the length of the
+    // re-key. Reporting both would meter one org's usage to Stripe twice.
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        subscriptionItem('org-1'),
+        subscriptionItem('org-1', { pk: 'ORG#org-1', userId: 'user-for-org-1' }),
+      ],
+    });
+    mockOrgNames(['org-1']);
+    lambdaMock.on(InvokeCommand).resolves({});
+
+    await handler();
+
+    const invokeCalls = lambdaMock.commandCalls(InvokeCommand);
+    expect(invokeCalls).toHaveLength(1);
+    const payload = JSON.parse(
+      Buffer.from(invokeCalls[0].args[0].input.Payload as Uint8Array).toString(),
+    );
+    // The org row carries the user id as an attribute, so the worker can still
+    // close out the record when it self-heals a deleted Stripe customer.
+    expect(payload.userId).toBe('user-for-org-1');
+  });
+
   it('invokes worker even when the org has no profile (orgName undefined)', async () => {
     // Tenant resolution moved to the worker, so the orchestrator no longer
     // gates on provisioning state — every active org is handed off.

@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  DynamoDBClient,
+  GetItemCommand,
+  PutItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { ApiErrorCode } from '@filone/shared';
@@ -29,13 +34,19 @@ vi.mock('../lib/trial-entitlement.js', () => ({
   ensureTrialEntitlement: vi.fn(),
 }));
 
+vi.mock('../lib/org-membership.js', () => ({
+  listMemberships: vi.fn(),
+}));
+
 const ddbMock = mockClient(DynamoDBClient);
 
 import { subscriptionGuardMiddleware, AccessLevel } from './subscription-guard.js';
+import { listMemberships } from '../lib/org-membership.js';
 import { ensureTrialEntitlement } from '../lib/trial-entitlement.js';
-import { SubscriptionStatus } from '@filone/shared';
+import { OrgRole, SubscriptionStatus } from '@filone/shared';
 
 const mockEnsureTrialEntitlement = vi.mocked(ensureTrialEntitlement);
+const mockListMemberships = vi.mocked(listMemberships);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -46,6 +57,36 @@ function billingItem(fields: Parameters<typeof marshall>[0]) {
 }
 
 const USER_ID = 'test-user-uuid';
+const ORG_ID = 'test-org-uuid';
+const OTHER_ORG_ID = 'someone-elses-org-uuid';
+
+/**
+ * A caller in their own org — the membership row `authMiddleware` attaches.
+ * Whether that org is their only one is a separate fact, stated by
+ * `mockListMemberships`, which defaults to solo.
+ */
+function soloOwner(overrides: Record<string, unknown> = {}) {
+  return buildEvent({
+    userInfo: {
+      sub: 'auth0|sub-1',
+      userId: USER_ID,
+      orgId: ORG_ID,
+      email: 'test@example.com',
+      emailVerified: true,
+      membership: { orgId: ORG_ID, userId: USER_ID, role: OrgRole.Owner, source: 'signup' },
+      ...overrides,
+    },
+  });
+}
+
+const SOLO_MEMBERSHIPS = [{ orgId: ORG_ID, role: OrgRole.Owner, joinedAt: '' }];
+
+/** The denial a caller gets in an org whose billing is somebody else's to set up. */
+const ORG_BILLING_DENIAL = {
+  message:
+    'This organization does not have billing set up. Adding a payment method for it requires the Owner role.',
+  code: ApiErrorCode.ORG_BILLING_INACTIVE,
+};
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -55,6 +96,9 @@ describe('subscriptionGuardMiddleware', () => {
   beforeEach(() => {
     ddbMock.reset();
     vi.restoreAllMocks();
+    mockListMemberships.mockResolvedValue(SOLO_MEMBERSHIPS);
+    // The read asks both keys at once; absent unless a test says otherwise.
+    ddbMock.on(GetItemCommand).resolves({});
   });
 
   it('allows when no billing record exists and the user is entitled to a trial', async () => {
@@ -62,24 +106,13 @@ describe('subscriptionGuardMiddleware', () => {
     mockEnsureTrialEntitlement.mockResolvedValue(true);
 
     const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
-    const request = buildMiddyRequest(
-      buildEvent({
-        userInfo: {
-          sub: 'auth0|sub-1',
-          userId: USER_ID,
-          orgId: 'test-org-uuid',
-          email: 'test@example.com',
-          emailVerified: true,
-        },
-      }),
-    );
-    const result = await before(request);
+    const result = await before(buildMiddyRequest(soloOwner()));
 
     expect(result).toBeUndefined();
     expect(mockEnsureTrialEntitlement).toHaveBeenCalledWith({
       sub: 'auth0|sub-1',
       userId: USER_ID,
-      orgId: 'test-org-uuid',
+      orgId: ORG_ID,
       email: 'test@example.com',
       emailVerified: true,
     });
@@ -90,19 +123,7 @@ describe('subscriptionGuardMiddleware', () => {
     mockEnsureTrialEntitlement.mockResolvedValue(false);
 
     const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
-    const result = await before(
-      buildMiddyRequest(
-        buildEvent({
-          userInfo: {
-            sub: 'auth0|sub-1',
-            userId: USER_ID,
-            orgId: 'test-org-uuid',
-            email: 'test@example.com',
-            emailVerified: false,
-          },
-        }),
-      ),
-    );
+    const result = await before(buildMiddyRequest(soloOwner({ emailVerified: false })));
 
     expectErrorResponse(result, 403, {
       message:
@@ -116,19 +137,39 @@ describe('subscriptionGuardMiddleware', () => {
     mockEnsureTrialEntitlement.mockRejectedValue(new Error('DynamoDB unavailable'));
 
     const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
-    const request = buildMiddyRequest(
-      buildEvent({
-        userInfo: {
-          sub: 'auth0|sub-1',
-          userId: USER_ID,
-          orgId: 'test-org-uuid',
-          email: 'test@example.com',
-          emailVerified: true,
-        },
-      }),
+
+    await expect(before(buildMiddyRequest(soloOwner()))).rejects.toThrow('DynamoDB unavailable');
+  });
+
+  it('reads the org key first and never looks at the caller when it hits', async () => {
+    // The whole point of the re-key: a member with no `CUSTOMER#` row of their
+    // own rides the org's subscription.
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'SUBSCRIPTION' } } })
+      .resolves(
+        billingItem({
+          pk: `ORG#${ORG_ID}`,
+          sk: 'SUBSCRIPTION',
+          orgId: ORG_ID,
+          subscriptionStatus: SubscriptionStatus.Active,
+        }),
+      );
+
+    const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
+    const result = await before(
+      buildMiddyRequest(
+        buildEvent({ userInfo: { userId: 'a-member-with-no-row', orgId: ORG_ID } }),
+      ),
     );
 
-    await expect(before(request)).rejects.toThrow('DynamoDB unavailable');
+    expect(result).toBeUndefined();
+    // Both keys are asked at once and the org row is the answer; the fallback
+    // costs a parallel read rather than a second round trip on the hot path.
+    const reads = ddbMock.commandCalls(GetItemCommand);
+    expect(reads.map((read) => read.args[0].input.Key)).toStrictEqual([
+      { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'SUBSCRIPTION' } },
+      { pk: { S: 'CUSTOMER#a-member-with-no-row' }, sk: { S: 'SUBSCRIPTION' } },
+    ]);
   });
 
   it('allows when subscription status is active', async () => {
@@ -188,15 +229,13 @@ describe('subscriptionGuardMiddleware', () => {
     // Read access during grace period → allowed
     expect(result).toBeUndefined();
 
-    // Verify UpdateItemCommand was called to transition status
+    // The transition lands on both keys, each guarded on its row already
+    // existing — this is an update, so a key with no row is a key the backfill
+    // has not reached, never a row to create.
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(updateCalls).toHaveLength(1);
-    expect(updateCalls[0].args[0].input).toStrictEqual({
+    expect(updateCalls).toHaveLength(2);
+    const transition = {
       TableName: 'BillingTable',
-      Key: {
-        pk: { S: `CUSTOMER#${USER_ID}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
       UpdateExpression:
         'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
       ExpressionAttributeValues: {
@@ -204,6 +243,16 @@ describe('subscriptionGuardMiddleware', () => {
         ':grace': { S: expect.any(String) },
         ':now': { S: expect.any(String) },
       },
+    };
+    expect(updateCalls[0].args[0].input).toStrictEqual({
+      ...transition,
+      Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'SUBSCRIPTION' } },
+      ConditionExpression: 'attribute_exists(pk)',
+    });
+    expect(updateCalls[1].args[0].input).toStrictEqual({
+      ...transition,
+      Key: { pk: { S: `CUSTOMER#${USER_ID}` }, sk: { S: 'SUBSCRIPTION' } },
+      ConditionExpression: 'attribute_exists(pk)',
     });
   });
 
@@ -278,15 +327,17 @@ describe('subscriptionGuardMiddleware', () => {
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
-  it('blocks when billing record exists but has no subscriptionStatus (fail closed)', async () => {
-    // A customer-mapping-only record (e.g. written by create-setup-intent) has
-    // no status and must NOT grant access — entitlement comes only from
-    // ensureTrialEntitlement.
+  it('blocks a record that holds a subscription but no status yet (fail closed)', async () => {
+    // A record whose status has not arrived by webhook yet grants nothing —
+    // entitlement comes only from ensureTrialEntitlement. (A record with no
+    // subscription at all is a different case: the trial claim is still open on
+    // it, and the block would forfeit it. See the claim tests below.)
     ddbMock.on(GetItemCommand).resolves(
       billingItem({
         pk: `CUSTOMER#${USER_ID}`,
         sk: 'SUBSCRIPTION',
         stripeCustomerId: 'cus_123',
+        subscriptionId: 'sub_123',
       }),
     );
 
@@ -410,6 +461,105 @@ describe('subscriptionGuardMiddleware', () => {
     );
 
     expectRefreshedCookies(result);
+  });
+
+  // The four properties ADR §4/§5 pins on the trial claim are stated there in
+  // terms of invitations, which do not exist yet. Each one reduces to a
+  // condition on this guard — the system's only claim point since the login
+  // path's two were removed — so each is pinned by the mechanics it reduces to.
+  // When the invite flow lands, these are the tests it must not break.
+  describe('the lazy trial claim is confined to the caller’s own solo org', () => {
+    /** A caller acting in an org they were invited into. */
+    const invitedMember = () => {
+      mockListMemberships.mockResolvedValue([
+        { orgId: ORG_ID, role: OrgRole.Owner, joinedAt: '' },
+        { orgId: OTHER_ORG_ID, role: OrgRole.Member, joinedAt: '' },
+      ]);
+      return buildMiddyRequest(
+        buildEvent({
+          userInfo: {
+            sub: 'auth0|sub-1',
+            userId: USER_ID,
+            orgId: OTHER_ORG_ID,
+            email: 'test@example.com',
+            emailVerified: true,
+            membership: {
+              orgId: OTHER_ORG_ID,
+              userId: USER_ID,
+              role: OrgRole.Member,
+              source: 'invitation',
+            },
+          },
+        }),
+      );
+    };
+
+    beforeEach(() => {
+      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+      // The module mock's call log outlives restoreAllMocks.
+      mockEnsureTrialEntitlement.mockClear();
+    });
+
+    it('joining an org creates no trial in it', async () => {
+      const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
+      const result = await before(invitedMember());
+
+      expect(mockEnsureTrialEntitlement).not.toHaveBeenCalled();
+      expectErrorResponse(result, 403, ORG_BILLING_DENIAL);
+    });
+
+    it('a member whose email lost the entitlement race is denied on billing, not on eligibility', async () => {
+      // `ensureTrialEntitlement` is the only reader and writer of the
+      // `EMAIL_NORM#` suppression records. Never calling it is what makes a
+      // suppressed address irrelevant to org access: the denial below is about
+      // the org's billing and would read the same for any member.
+      const { before } = subscriptionGuardMiddleware(AccessLevel.Read);
+      const result = await before(invitedMember());
+
+      expect(mockEnsureTrialEntitlement).not.toHaveBeenCalled();
+      expectErrorResponse(result, 403, ORG_BILLING_DENIAL);
+    });
+
+    it('acting in another org leaves the caller’s own claim unspent', async () => {
+      const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
+      await before(invitedMember());
+      expect(mockEnsureTrialEntitlement).not.toHaveBeenCalled();
+
+      // The same person, same request cycle, in the org that is theirs: the
+      // claim is still there to spend, and it is spent on their own org.
+      mockEnsureTrialEntitlement.mockResolvedValue(true);
+      mockListMemberships.mockResolvedValue(SOLO_MEMBERSHIPS);
+
+      expect(await before(buildMiddyRequest(soloOwner()))).toBeUndefined();
+      expect(mockEnsureTrialEntitlement).toHaveBeenCalledWith(
+        expect.objectContaining({ orgId: ORG_ID }),
+      );
+    });
+
+    it('a member of another org causes no billing write for it', async () => {
+      const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
+      await before(invitedMember());
+
+      // Not "no write with the wrong key" — no write at all. A Stripe customer
+      // created here would anchor that org's subscription to this caller.
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    });
+
+    it('a second membership suppresses the claim even in the caller’s own org', async () => {
+      // Otherwise every employee who ever opened their personal dashboard would
+      // mint a Stripe trial nobody wanted.
+      mockListMemberships.mockResolvedValue([
+        { orgId: ORG_ID, role: OrgRole.Owner, joinedAt: '' },
+        { orgId: OTHER_ORG_ID, role: OrgRole.Member, joinedAt: '' },
+      ]);
+
+      const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
+      const result = await before(buildMiddyRequest(soloOwner()));
+
+      expect(mockEnsureTrialEntitlement).not.toHaveBeenCalled();
+      expectErrorResponse(result, 403, ORG_BILLING_DENIAL);
+    });
   });
 
   describe('an API key session', () => {
