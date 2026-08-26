@@ -161,6 +161,38 @@ describe('create-access-key baseHandler', () => {
     expect(item.secretAccessKey).toBeUndefined();
   });
 
+  it('records who minted the key and the policy era it was minted under', async () => {
+    ddbMock.on(PutItemCommand).resolves({});
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+
+    const event = buildEvent({
+      body: validBody({ keyName: 'My Key' }),
+      userInfo: { ...USER_INFO, email: 'alice@example.com', emailVerified: true },
+    });
+    await baseHandler(event);
+
+    const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+    expect(item.createdBy.S).toBe('user-1');
+    expect(item.creatorEmail.S).toBe('alice@example.com');
+    expect(item.policyVersion.S).toBe('pre-member-scope');
+  });
+
+  it('leaves the creator email off when the address is unverified', async () => {
+    ddbMock.on(PutItemCommand).resolves({});
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+
+    const event = buildEvent({
+      body: validBody({ keyName: 'My Key' }),
+      userInfo: { ...USER_INFO, email: 'alice@example.com', emailVerified: false },
+    });
+    await baseHandler(event);
+
+    const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+    expect(item.createdBy.S).toBe('user-1');
+    expect(item.creatorEmail).toBeUndefined();
+    expect(item.policyVersion.S).toBe('pre-member-scope');
+  });
+
   it('returns 400 when keyName is missing', async () => {
     const event = buildEvent({ body: validBody({ keyName: undefined }), userInfo: USER_INFO });
     const result = await baseHandler(event);
@@ -392,6 +424,11 @@ describe('create-access-key baseHandler', () => {
       accessKeyId: { S: 'AKIA1234567890' },
       createdAt: { S: '2026-03-10T00:00:00Z' },
       status: { S: 'active' },
+      // Attributed to the caller who retried, and flagged as such: a key with
+      // no owner at all is the worse record.
+      createdBy: { S: 'user-1' },
+      policyVersion: { S: 'pre-member-scope' },
+      recovered: { BOOL: true },
     });
   });
 

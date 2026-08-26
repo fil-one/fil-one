@@ -21,8 +21,10 @@ import {
   tenantNotReadyResponse,
   unsupportedRegionResponse,
 } from '../lib/response-builder.js';
+import { keyAttribution } from '../lib/dynamo-records.js';
+import type { AccessKeyRecord } from '../lib/dynamo-records.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
@@ -55,7 +57,8 @@ export async function baseHandler(
   const buckets = bucketScope === 'specific' ? (parsed.data.buckets ?? []) : undefined;
   const expiresAt = parsed.data.expiresAt ?? null;
 
-  const { orgId } = getUserInfo(event);
+  const { orgId, userId } = getUserInfo(event);
+  const attribution = keyAttribution({ userId, creatorEmail: getVerifiedEmail(event) });
 
   if (!isSupportedRegion(region, process.env.FILONE_STAGE!)) {
     return unsupportedRegionResponse(region);
@@ -80,7 +83,7 @@ export async function baseHandler(
     });
   } catch (err) {
     if (err instanceof AccessKeyAlreadyExistsError) {
-      await recoverDuplicateKey({ orgId, tenantId, keyName, region, orchestrator });
+      await recoverDuplicateKey({ orgId, tenantId, keyName, region, orchestrator, attribution });
       return new ResponseBuilder()
         .status(409)
         .body<ErrorResponse>({ message: 'An access key with this name already exists' })
@@ -108,6 +111,7 @@ export async function baseHandler(
         bucketScope,
         buckets,
         expiresAt,
+        attribution,
       }),
     }),
   );
@@ -134,6 +138,7 @@ function buildAccessKeyItem({
   bucketScope,
   buckets,
   expiresAt,
+  attribution,
 }: {
   orgId: string;
   accessKey: IssuedAccessKey;
@@ -144,6 +149,7 @@ function buildAccessKeyItem({
   bucketScope: CreateAccessKeyRequest['bucketScope'];
   buckets: string[] | undefined;
   expiresAt: string | null;
+  attribution: Pick<AccessKeyRecord, 'createdBy' | 'creatorEmail' | 'policyVersion'>;
 }) {
   return marshall({
     pk: `ORG#${orgId}`,
@@ -158,6 +164,7 @@ function buildAccessKeyItem({
     bucketScope,
     ...(buckets ? { buckets } : {}),
     ...(expiresAt ? { expiresAt } : {}),
+    ...attribution,
   });
 }
 
@@ -167,6 +174,7 @@ interface RecoverDuplicateKeyParams {
   keyName: string;
   region: S3Region;
   orchestrator: ServiceOrchestrator;
+  attribution: Pick<AccessKeyRecord, 'createdBy' | 'creatorEmail' | 'policyVersion'>;
 }
 
 async function recoverDuplicateKey({
@@ -175,6 +183,7 @@ async function recoverDuplicateKey({
   keyName,
   region,
   orchestrator,
+  attribution,
 }: RecoverDuplicateKeyParams): Promise<void> {
   // Check if we already have a DynamoDB record for this key
   const { Items: existingKeys } = await getDynamoClient().send(
@@ -220,12 +229,19 @@ async function recoverDuplicateKey({
         createdAt: recovered.createdAt,
         status: 'active',
         region,
+        // Attributed to the caller who retried, which in practice is the same
+        // person whose first attempt minted the key at the provider. A key with
+        // no owner at all is the worse outcome, and `recovered` keeps the
+        // record honest about which of the two this is.
+        ...attribution,
+        recovered: true,
       }),
     }),
   );
 
-  console.log(
+  console.warn(
     `Recovered DynamoDB record for access key "${keyName}" (id=${recovered.id}) for org ${orgId} using ${orchestrator.id} orchestrator`,
+    { createdBy: attribution.createdBy, recovered: true },
   );
 }
 

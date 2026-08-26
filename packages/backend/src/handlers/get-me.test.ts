@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { OrgRole, ROLE_PERMISSIONS } from '@filone/shared';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 import { sstResourceMock } from '../test/sst-resource-mock.js';
 
@@ -41,7 +42,13 @@ process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
 import { handler } from './get-me.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import {
+  buildEvent,
+  buildContext,
+  stubAbsentMembershipRead,
+  stubMembershipList,
+  stubMembershipRead,
+} from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -75,6 +82,16 @@ function profileResolves(orgId: string = MOCK_ORG_ID, name = 'Example Corp') {
         auroraSetupStatus: { S: FINAL_SETUP_STATUS },
       },
     });
+}
+
+/** The role fields every response carries, in the order the handler writes them. */
+function ownerTail(orgName: string) {
+  return {
+    userId: MOCK_USER_ID,
+    role: OrgRole.Owner,
+    permissions: [...ROLE_PERMISSIONS[OrgRole.Owner]],
+    memberships: [{ orgId: MOCK_ORG_ID, orgName, role: OrgRole.Owner }],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -117,6 +134,17 @@ describe('GET /api/me handler', () => {
         ConsistentRead: true,
       })
       .resolves({ Item: undefined });
+
+    // Default membership: sole Owner of the one org, as every account is today.
+    stubMembershipRead(ddbMock, {
+      orgId: MOCK_ORG_ID,
+      userId: MOCK_USER_ID,
+      role: OrgRole.Owner,
+    });
+    stubMembershipList(ddbMock, {
+      userId: MOCK_USER_ID,
+      orgs: [{ orgId: MOCK_ORG_ID, role: OrgRole.Owner }],
+    });
   });
 
   it('returns the org profile', async () => {
@@ -134,6 +162,7 @@ describe('GET /api/me handler', () => {
         mfaEnrollments: [],
         connectionType: 'auth0',
         ragAccess: false,
+        ...ownerTail('Example Corp'),
       }),
     });
   });
@@ -156,6 +185,7 @@ describe('GET /api/me handler', () => {
         mfaEnrollments: [],
         connectionType: 'auth0',
         ragAccess: false,
+        ...ownerTail('Example Corp'),
       }),
     });
   });
@@ -180,6 +210,7 @@ describe('GET /api/me handler', () => {
         mfaEnrollments: [],
         connectionType: 'auth0',
         ragAccess: false,
+        ...ownerTail(''),
       }),
     });
   });
@@ -230,6 +261,7 @@ describe('GET /api/me handler', () => {
         passkeys: [],
         connectionType: 'auth0',
         ragAccess: false,
+        ...ownerTail('Example Corp'),
       }),
     });
   });
@@ -265,6 +297,7 @@ describe('GET /api/me handler', () => {
         ],
         connectionType: 'auth0',
         ragAccess: false,
+        ...ownerTail('Example Corp'),
       }),
     });
   });
@@ -305,7 +338,105 @@ describe('GET /api/me handler', () => {
         passkeys: [],
         connectionType: 'google-oauth2',
         ragAccess: false,
+        ...ownerTail('Example Corp'),
       }),
+    });
+  });
+
+  describe('role and memberships', () => {
+    function parseBody(result: unknown) {
+      return JSON.parse((result as { body: string }).body) as {
+        userId: string;
+        role: OrgRole;
+        permissions: string[];
+        memberships: Array<{ orgId: string; orgName: string; role: OrgRole }>;
+      };
+    }
+
+    it('ships the role and its permissions so the console can gate rendering', async () => {
+      profileResolves();
+      stubMembershipRead(ddbMock, {
+        orgId: MOCK_ORG_ID,
+        userId: MOCK_USER_ID,
+        role: OrgRole.ReadOnly,
+      });
+      stubMembershipList(ddbMock, {
+        userId: MOCK_USER_ID,
+        orgs: [{ orgId: MOCK_ORG_ID, role: OrgRole.ReadOnly }],
+      });
+
+      const body = parseBody(await handler(authenticatedEvent(), buildContext()));
+
+      expect(body.userId).toBe(MOCK_USER_ID);
+      expect(body.role).toBe(OrgRole.ReadOnly);
+      expect(body.permissions).toStrictEqual([...ROLE_PERMISSIONS[OrgRole.ReadOnly]]);
+      expect(body.memberships).toStrictEqual([
+        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', role: OrgRole.ReadOnly },
+      ]);
+    });
+
+    it('names every org the user belongs to', async () => {
+      const secondOrgId = 'org-2';
+      profileResolves();
+      profileResolves(secondOrgId, 'Second Corp');
+      stubMembershipList(ddbMock, {
+        userId: MOCK_USER_ID,
+        orgs: [
+          { orgId: MOCK_ORG_ID, role: OrgRole.Owner },
+          { orgId: secondOrgId, role: OrgRole.Member },
+        ],
+      });
+
+      const body = parseBody(await handler(authenticatedEvent(), buildContext()));
+
+      expect(body.memberships).toStrictEqual([
+        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', role: OrgRole.Owner },
+        { orgId: secondOrgId, orgName: 'Second Corp', role: OrgRole.Member },
+      ]);
+    });
+
+    it('reports Owner when no membership row exists yet (pre-conversion accounts)', async () => {
+      profileResolves();
+      stubAbsentMembershipRead(ddbMock, { orgId: MOCK_ORG_ID, userId: MOCK_USER_ID });
+      stubMembershipList(ddbMock, { userId: MOCK_USER_ID, orgs: [] });
+
+      const body = parseBody(await handler(authenticatedEvent(), buildContext()));
+
+      expect(body.role).toBe(OrgRole.Owner);
+      expect(body.permissions).toStrictEqual([...ROLE_PERMISSIONS[OrgRole.Owner]]);
+      // The active org is in the list even before its inverse item exists —
+      // a role naming an org the memberships omit would contradict itself.
+      expect(body.memberships).toStrictEqual([
+        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', role: OrgRole.Owner },
+      ]);
+    });
+
+    it('never 500s when another org profile cannot be read', async () => {
+      const secondOrgId = 'org-2';
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      profileResolves();
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'UserInfoTable',
+          Key: { pk: { S: `ORG#${secondOrgId}` }, sk: { S: 'PROFILE' } },
+        })
+        .rejects(new Error('DynamoDB unavailable'));
+      stubMembershipList(ddbMock, {
+        userId: MOCK_USER_ID,
+        orgs: [
+          { orgId: MOCK_ORG_ID, role: OrgRole.Owner },
+          { orgId: secondOrgId, role: OrgRole.Member },
+        ],
+      });
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect((result as { statusCode: number }).statusCode).toBe(200);
+      expect(parseBody(result).memberships).toStrictEqual([
+        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', role: OrgRole.Owner },
+        { orgId: secondOrgId, orgName: '', role: OrgRole.Member },
+      ]);
+      consoleError.mockRestore();
     });
   });
 
