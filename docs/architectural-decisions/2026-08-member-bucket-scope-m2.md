@@ -1,0 +1,420 @@
+# Member bucket scope (IAM M2, FIL-1017)
+
+**Status:** Draft — design exploration, not yet accepted
+**Created:** 2026-08-26
+**Builds on:** [`2026-08-organizations-roles-m1.md`](./2026-08-organizations-roles-m1.md)
+
+## What this delivers
+
+An Owner or Admin gives a member access to every bucket in the org or to a
+named set of them. A member holding a named set sees only those buckets: the
+console renders only those, `GET /api/buckets` returns only those, and every
+bucket-addressed route answers as if the others do not exist.
+
+Five decisions shape the design:
+
+1. **Enforcement is the console API.** Out-of-scope buckets are refused at the
+   BFF. The tenant-wide console credential and existing SigV4 keys are not
+   narrowed; that is M3.
+2. **A grant is one row per (member, bucket), in a table of its own.**
+3. **Hiding covers bucket-addressed reads.** Org-wide aggregates (usage,
+   billing, dashboard counts, the activity feed) stay org-wide.
+4. **A scoped member who creates a bucket is granted it in the same request.**
+   Every other member's scope changes only when an Owner or Admin says so.
+5. **Bucket creation and deletion stop being available on user keys** (§8),
+   until an orchestrator can report that a bucket's lifecycle changed and which
+   key changed it. The console keeps both; a customer's own credential loses
+   them.
+
+## What the code gives us
+
+**FilOne stores no bucket records.** A bucket exists at the orchestrator and
+nowhere else. `list-buckets.ts` fans out across provisioned regions and merges
+what answers; `get-bucket.ts` calls one orchestrator. So a grant names a bucket
+that FilOne cannot validate locally, and a grant can outlive the bucket it
+names.
+
+**A bucket's identity is `(region, bucketName)`.** Every bucket-addressed route
+carries a region (`get-bucket.ts:30` defaults to `S3_REGION`), `BucketSummary`
+carries one, and the RAG tables already key on
+`BUCKET#{orgId}#{region}#{bucketName}` (`lib/dynamo-records.ts`). S3 bucket
+names contain no `/`, so `{region}/{bucketName}` composes into a key
+unambiguously.
+
+**The membership row is where the caller's authorization state already
+arrives.** M1's ADR hands handlers the row itself on `userInfo.membership`
+(`lib/user-context.ts`), resolved by `authMiddleware` on every authenticated
+request.
+
+**The console signs object operations with one tenant-wide credential.**
+`presign.ts` calls `orchestrator.getS3ClientContext(tenantId)`, which resolves
+the per-tenant `filone-console` key from SSM (`lib/s3-credentials.ts`). That
+credential addresses every bucket the tenant owns. Whatever the console refuses
+to sign is the whole of the enforcement, which is what decision 1 accepts.
+
+**Key issuance already takes a bucket list.** `IssueAccessKeyOpts.buckets` is
+honored by all three orchestrators (`fth-orchestrator.ts:228`,
+`aurora-orchestrator.ts:199`, `orchestrator/orchestrator.ts:314`), and the
+create-key request already carries `bucketScope: 'all' | 'specific'` with a
+`buckets` array (`packages/shared/src/api/access-keys.ts:159`). The cap in §6
+is a comparison between two sets that both already exist.
+
+## 1. Data model
+
+Grants live in a new `BucketAccessTable`, declared in `sst.config.ts` beside the
+existing tables. One attribute joins the membership row in `OrgTable`.
+
+| Table               | pk                                       | sk                     | Attributes               | Purpose                                     |
+| ------------------- | ---------------------------------------- | ---------------------- | ------------------------ | ------------------------------------------- |
+| `BucketAccessTable` | `ORG#{orgId}#MEMBER#{userId}`            | `{region}/{bucketName}` | `grantedBy`, `grantedAt` | the grant; a member's scope is one partition |
+| `BucketAccessTable` | `ORG#{orgId}#BUCKET#{region}/{bucketName}` | `MEMBER#{userId}`     | `grantedBy`, `grantedAt` | inverse: who can see this bucket             |
+| `OrgTable`          | `ORG#{orgId}`                            | `MEMBER#{userId}`      | `bucketScope`            | whether the grants apply                     |
+
+**A grant is one row, so grants do not collide.** Two admins granting different
+buckets to the same member write different rows. Nothing is read-modify-written,
+nothing needs a version condition, and a grant is one write rather than a
+rewrite of a set that grows with the member's access.
+
+**`bucketScope` stays on the membership row, and it is what makes the common
+case free.** Zero grant rows is ambiguous between "unscoped" and "scoped to
+nothing", and resolving that from the grant table would put a Query on every
+request just to learn that most callers are unscoped. `authMiddleware` already
+reads the membership row, so `bucketScope: 'all'` answers the question with no
+I/O at all. Only a scoped caller, and only on a bucket-addressed route, reads
+the grant table. `'specific'` with no grant rows is a member who can see no
+bucket, and it fails closed.
+
+**Its own table, not `OrgTable`.** Grants are unbounded per member and would
+otherwise share the `ORG#{orgId}` partition with the membership, invitation, and
+`META` rows that every authenticated request already reads, concentrating a
+growing row count on the partition the product is hottest on. A separate table
+keyed per member gives each member's grants their own bounded partition, lets
+the IAM grant be narrowed to what the handlers actually do (the M1 ledger's
+open item on the audit table is the same lesson arriving late), and keeps
+`OrgTable`'s key space to the org domain the M1 ADR scoped it to.
+
+**Both rows are written in one `TransactWriteItems`**, on grant and on revoke,
+the way membership and its inverse item are kept consistent.
+
+**Reads are consistent.** A revoke must bind on the next request, so the grant
+reads carry `ConsistentRead` for the reason `org-membership.ts` gives for the
+role read: an access-control read must not see a stale replica.
+
+**Absence of `bucketScope` means `all` during rollout, then stops meaning
+anything.** Every membership row written before this work carries no marker, and
+today every member sees every bucket. The backfill stamps `'all'` on every row
+and the fallback is removed in the following PR, which is the sequence M1 used
+for the role fallback (`2026-08-organizations-roles-m1.md`, §2).
+
+### Alternatives
+
+**A String Set on the membership row** (`buckets`, holding the same
+`{region}/{bucketName}` entries) needs no new table and no read at all, since
+the scope arrives on the row `authMiddleware` has already fetched. `ADD` and
+`DELETE` are atomic, so grants still do not collide. It caps one member at
+roughly 14,000 entries against the 400KB item limit, which no tenant approaches,
+but the row is read on **every** authenticated request at 1 RCU per 4KB: a
+member scoped to a thousand buckets makes ~28KB, or 7 RCU, of every request in
+the product, including the routes that never touch a bucket, and all of an org's
+membership rows share one partition. The ceiling is comfortable and the hot-path
+cost is what rules it out.
+
+**Named bucket groups** — an org defines a group, members hold groups — match
+how a team with many buckets would describe the rule, and one edit re-scopes
+everyone holding the group. They cost a new entity with its own CRUD, console
+surface, and lifecycle, and every request resolves member → groups → buckets
+instead of member → buckets. Groups can be layered on later: a group would
+expand into the same grant rows, so nothing in §2 changes.
+
+## 2. Resolving a scope on a request
+
+A lib module in the shape `lib/key-scope.ts` uses for the same problem one level
+up: a permission the handler ignores is a permission that does not exist. The
+difference is that this one does I/O, so it is an async resolver rather than a
+pure function.
+
+```ts
+export type BucketScope =
+  | { sees: 'all' }
+  | { sees: 'listed'; orgId: string; userId: string };
+```
+
+`Owner` and `Admin` are unscoped by role; a caller whose membership row says
+`'all'` is unscoped; everyone else is `listed`. Which read follows depends on
+the route:
+
+- **`GET /api/buckets`** issues one `Query` on the member's partition and
+  filters the merged fan-out result against it. The Query walks every page: the
+  key-listing routes already carry a first-page-only bug on the M1 follow-up
+  ledger, and a scope that silently truncates hides buckets a member was
+  granted.
+- **Every bucket-addressed route** issues one `GetItem` on the exact grant key.
+  No Query, no list, O(1) per request.
+
+The check runs in the handler rather than in middleware. `authorize()` decides
+from the route manifest alone and the manifest cannot name a bucket; the bucket
+arrives in a path parameter or, for `POST /api/presign`, in each element of the
+body. This is the `in-handler` requirement M1 already defined for presign.
+
+## 3. Where the check goes
+
+| Route                                     | Scoped behavior                                                             |
+| ----------------------------------------- | --------------------------------------------------------------------------- |
+| `GET /api/buckets`                        | filter the merged fan-out result to the granted set                         |
+| `POST /api/buckets`                       | allowed; the new bucket is granted to the creator (§5)                      |
+| `GET /api/buckets/{name}`                 | no grant row → the same 404 a missing bucket returns                        |
+| `DELETE /api/buckets/{name}`              | gated on `buckets.delete`, which only an unscoped caller holds (§2)         |
+| `GET /api/buckets/{name}/analytics`       | 404                                                                          |
+| `GET \| POST /api/buckets/{name}/rag/enabled` | 404                                                                      |
+| `POST /api/buckets/{name}/bulk-delete`    | 404                                                                          |
+| `GET /api/bulk-delete-jobs/{jobId}`       | the job row names its bucket; check that bucket, 404 otherwise              |
+| `POST /api/presign`                       | check every operation's bucket; one denial refuses the batch                |
+| `POST /api/buckets/{name}/query` (bearer) | the key creator's scope applies (§6)                                        |
+| `POST /api/access-keys`                   | requested bucket scope is capped at the creator's (§6)                      |
+| `POST /api/rag-api-keys`                  | same cap                                                                     |
+
+**An out-of-scope bucket answers exactly like a bucket that does not exist.**
+Same status, same body, no new `ApiErrorCode`. A distinct code would confirm
+the bucket exists, which is the thing being hidden. The cost is a worse message
+for a member whose access was revoked while their tab was open: they get
+"Bucket not found" where "your access was removed" would be truthful. Hiding
+and explaining are exclusive here, and hiding is what the feature is.
+
+`POST /api/presign` refusing the whole batch follows M1's rule for a batch
+containing a denied operation. A presign batch names one or two buckets, so the
+per-operation checks are a `BatchGetItem` rather than a read per element.
+
+## 4. What stays visible
+
+Decision 3 scopes bucket-addressed reads and leaves aggregates alone. A scoped
+member can therefore still learn that other buckets exist:
+
+- `GET /api/activity` renders bucket creations, deletions, and key events by
+  name, org-wide.
+- `GET /api/usage` and `/api/usage/trends` report org-wide bytes and object
+  counts; the dashboard's bucket count and key count are org-wide totals.
+- `GET /api/billing` is org-wide by construction: the subscription is the org's.
+- Any SigV4 key the member already holds keeps its own authority, and a
+  `ListBuckets` over S3 never reaches a FilOne handler at all (§7).
+- Presigned URLs already issued stay valid until they expire, up to 7 days for
+  downloads (`handlers/presign.ts:40`). That is the real revocation bound for
+  object reads after a scope change, the same bound M1 records for role changes.
+
+Closing the first three is a per-bucket breakdown on each aggregate, and the
+numbers a scoped member sees then stop matching the invoice. Closing the last
+two is M3.
+
+## 5. Buckets that appear after the grant
+
+`create-bucket` writes the creator's grant rows **before** calling the
+orchestrator, and deletes them if creation fails. A grant naming a bucket that
+does not exist grants nothing, so the pre-write is safe in a way the post-write
+is not: a grant write that fails after a successful create leaves a member
+unable to see the bucket they just made.
+
+The two steps cannot be one transaction, because the bucket lives at the
+vendor. The failure that survives is a grant left behind by a failed create,
+which is inert until someone creates a bucket of that name in that region, and
+that someone is granted it anyway.
+
+**Name reuse is the sharp edge.** Delete a bucket, create another with the same
+name in the same region, and every stale grant applies to the new bucket.
+FilOne has no bucket identifier to bind a grant to, so `delete-bucket` sweeps
+the grants through the inverse partition, which is what that row family is for.
+The sweep is bounded by the org's member count rather than by anything that
+grows with usage. It sits outside the delete's own atomicity, and a grant it
+misses is a member seeing a bucket nobody gave them.
+
+Both halves of this section assume the console performed the operation. A
+create or delete issued against the S3 API reaches no handler, so neither the
+grant nor the sweep happens, which is what §8 proposes to close.
+
+## 6. Capping what a scoped member can mint
+
+M1 caps a new key's *permissions* at the creator's console permissions and
+defers the bucket half to this milestone. With scope in place:
+
+- A creator whose scope is `all` is unaffected.
+- A scoped creator names buckets from their own grants. A bucket outside them is
+  refused, naming the bucket.
+- A scoped creator cannot request `bucketScope: 'all'`. The console offers that
+  choice only to unscoped callers, and the handler refuses it whatever the
+  console sent. Materializing `'all'` into the creator's current grants would
+  mint the same key while hiding what it reaches, and the member would read the
+  key as following their access.
+
+Every key a scoped member holds is a snapshot. Widening a member's scope does
+not widen the keys they already minted, and reaching a newly granted bucket
+means minting a new key. The console says so at creation, and again when an
+Owner or Admin widens somebody's scope.
+
+`CreateBucket` and a non-empty bucket list contradict each other: a key that
+may only operate on the buckets it names cannot create one it does not name. A
+scoped member holding `buckets.create` therefore creates buckets in the console
+rather than with their own keys, and the key form should not offer the pair.
+The exact refusal is the vendor's, so it joins the behaviors §7 sends to be
+verified.
+
+## 7. ListBuckets over S3
+
+`aws s3 ls` reaches the storage gateway directly and never touches a FilOne
+handler, so §3 does nothing for it. Every key FilOne mints carries
+`s3:ListAllMyBuckets` unconditionally (`ALWAYS_PERMISSIONS`,
+`orchestrator/orchestrator.ts:497`; `FTH_ALWAYS_PERMISSIONS`,
+`fth-orchestrator.ts:379`), Aurora grants it among its default permissions, and
+the console renders it as a checked, disabled checkbox
+(`docs/S3Considerations.md`). A scoped member holding any key can enumerate
+every bucket in the org.
+
+**The orchestrator APIs expose exactly one bucket-scoping primitive:** the
+`buckets` array on an access key. It is `CreateAccessKeyRequest.buckets` in the
+Management API contract ("when set and non-empty, the key may only operate on
+these buckets"), the same field on Aurora's portal API, and the same on FTH.
+There is no bucket ACL, no per-user bucket ownership, and no ListBuckets filter
+in any of the three. FTH's storage users come closest, since keys are minted
+under one and FilOne creates a single `filone-console` user per tenant, but a
+storage user carries no bucket scope of its own (`FthStorageUser`), the generic
+Management API has no equivalent concept, and Aurora exposes none. A per-member
+storage user would buy attribution rather than filtering.
+
+**One question decides the rest, and all three contracts leave it open.** Does a
+key carrying both `s3:ListAllMyBuckets` and a non-empty `buckets` array return
+the whole tenant's buckets or only the named ones? `ListAllMyBuckets` acts on
+the tenant rather than on a bucket, so "may only operate on these buckets" reads
+either way, and neither the Management API description nor Aurora's schema
+settles it. The answer is per-orchestrator and decides which option below is
+needed.
+
+| Option                                       | What it gives                                                                                                          | What it costs                                                                                                                                                          |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Scope the key, let the gateway filter        | Nothing to build: §6 already puts the member's buckets on the key, end to end on all three backends                     | Complete only where the gateway filters. Where it does not, the key cannot *operate* on an out-of-scope bucket but can still recite its name                          |
+| Withhold `s3:ListAllMyBuckets` on scoped keys | Enumeration is refused whatever the gateway does. `aws s3 ls s3://granted-bucket` still works, since that is `ListBucket` | `aws s3 ls` answers AccessDenied, which breaks tooling that enumerates first. The always-on set becomes conditional, and Aurora may grant the action with no way to omit it |
+| A FilOne S3 proxy in front of the gateway    | Filters ListBuckets exactly, identically on all three backends, and constrains keys minted before scope existed          | A new service on the data-plane path for every request. This is the M3 shape                                                                                          |
+
+**Ship the first, fall back to the second, and name the third as where this
+ends.** Scoping the key is already built and is correct wherever the gateway
+honors it. Withholding `s3:ListAllMyBuckets` is the per-region remedy where it
+does not, applied only to keys a scoped member mints, so an unscoped member's
+key is unchanged. Neither reaches a key minted before scope existed, which is the
+legacy transition (FIL-1020) and the reason scoping a member should prompt a
+review of the keys they already hold (FIL-1021).
+
+**Bind the behavior in the contract.** The Management API spec is how a new
+orchestrator is held to a promise, and it currently promises nothing here. It
+should say that a key with a non-empty `buckets` array lists only those buckets,
+and each of the three gateways should be tested against that sentence before
+this design is accepted. Forge is ours; FTH and Aurora are vendor questions with
+lead time, which is why they go out early.
+## 8. Bucket lifecycle leaves the S3 API
+
+Bucket creation and deletion are S3 operations on every backend, not Management
+API calls. The console performs them with the tenant's `filone-console`
+credential (`createBucket` and `deleteBucket` are data-plane methods on every
+orchestrator), and a user key carrying `s3:CreateBucket` or `s3:DeleteBucket`
+performs the identical operation without FilOne seeing it. Nothing reports it
+afterwards: the Management API has six paths and none of them is an event or
+audit surface, an S3 `ListBuckets` returns a name and a creation date, and no
+contract exposes which access key acted.
+
+Three parts of this design rest on observing that lifecycle. The §5 auto-grant
+fires only for console creations. The §5 sweep sees only console deletions. And
+a name recreated out of band silently matches whatever grants the old bucket
+left behind.
+
+**The proposal: stop issuing `CreateBucket` and `DeleteBucket` on user keys, in
+every region, until an orchestrator can report that a bucket's lifecycle changed
+and which key changed it.** The `filone-console` key keeps both actions, so the
+console's own bucket lifecycle is untouched. What goes away is a customer
+credential creating or deleting a bucket. Bucket lifecycle then passes through a
+FilOne handler by construction, which is what makes the grant write, the sweep,
+and an audit event possible at all.
+
+The change is small and reversible: `BUCKET_PERMISSIONS`
+(`packages/shared/src/api/access-keys.ts`) stops being offered,
+`CreateAccessKeySchema` refuses the two values, the console drops the two
+checkboxes, and `supportsBucketManagement` — which today only excludes the
+Aurora region — has nothing left to gate. Re-enabling is the same edit
+backwards, with no migration either way.
+
+**What it costs.** Customers scripting bucket lifecycle against the S3 API lose
+that, and it is a capability the product ships today in the FTH and Forge
+regions. Keys already carrying the two permissions keep them until revoked, so
+the proposal is only as complete as the legacy transition that retires them
+(FIL-1020).
+
+**What lifts it.** Either an orchestrator surface reporting bucket lifecycle
+with the acting `accessKeyId`, which is a Management API addition rather than a
+gap in our reading of it, or the FilOne S3 proxy (§7), which sees the key on
+every request. Those are the same two answers that close the `ListBuckets`
+question and the attribution question, which is the argument for treating them
+as one piece of work rather than three.
+
+## 9. Lifecycle
+
+**Revoking a grant** deletes both rows in one transaction. It binds on the next
+request; nothing cached server-side outlives it. The console's own cached bucket
+list survives until the next refetch, the same exposure the M1 ledger records
+for a narrowed role.
+
+**Removing a member** leaves grants behind. They are unbounded, so they cannot
+join the transaction that deletes the membership and its inverse item, and they
+are swept after it. An orphaned grant grants nothing on its own, because
+`authorize()` refuses a caller with no membership row before any handler runs,
+but it would revive if the same user rejoined the org. The sweep is what stops
+that, and `deletion-scrub.ts` learns the new table so a missed sweep is still
+collected.
+
+**Promotion out of a scope** is an open question, below.
+
+**Deleting an org** reaches the new table through the members it already
+enumerates: each member's grants are one partition, and the inverse rows go with
+them.
+
+## 10. Rollout
+
+The M1 sequence applies unchanged: ship the table and the write path, backfill
+`bucketScope: 'all'` onto every membership row under `sst shell` with a dry run
+and a verify pass, confirm the stamp, then ship enforcement with the
+absent-means-all fallback removed. Until an Owner or Admin scopes somebody,
+nothing observable changes, which is what lets the enforcement PR merge
+independently.
+
+The table ships with point-in-time recovery, the way `OrgTable` did, and with an
+IAM grant narrowed to the operations the handlers perform rather than the shared
+`allResources` link. The account-deletion teardown and `deletion-scrub.ts` are
+wired to it in the same PR that creates it, before any row exists, so no
+migration is needed later.
+
+The console surface is a scope editor on the members page (a per-region bucket
+picker, populated from the admin's own unscoped `ListBuckets`) and an access
+list on the bucket detail page, fed by the inverse partition. Both sit behind
+the `ORGS_BETA` row pattern (`lib/orgs-beta.ts`), where granting is a row rather
+than a redeploy.
+
+## Open questions
+
+1. **Does a scope survive promotion?** The ADR names bucket-scoped access for
+   Member and ReadOnly. Two rules are available. Either the enforcement path
+   ignores `bucketScope` for Owner and Admin, which keeps the rule in one place
+   and means a promotion silently widens access; or the role-change transaction
+   sets `bucketScope` to `'all'` when the new role is Owner or Admin and sweeps
+   the grants, which keeps enforcement uniform and makes the widening an
+   explicit, audit-logged act. The second is the recommendation, and it needs
+   the product answer for the console copy on the role picker.
+2. **Prefix-level scope.** Whether a member can be scoped to a prefix inside a
+   bucket rather than to whole buckets changes the sort key and the presign
+   check. Nothing here forecloses it; the PRD should say whether M2 owns it.
+3. **The tier split source.** The M1 ADR cites
+   `iam-prd-enforceability-by-backend.md` (2026-08-11) as the analysis behind
+   the M2/M3 boundary. It is not in the knowledge-base clone on this machine.
+   It should be read before this design is accepted, since it is the record of
+   what each backend can enforce.
+4. **The unscoped console credential.** Decision 1 accepts that
+   `filone-console` addresses every bucket in the tenant. Whether M3 replaces
+   it with per-member scoped credentials, or moves object operations behind a
+   request-time check on Forge, decides whether any of §3 is temporary.
+5. **What a scoped key's `ListBuckets` returns.** Unspecified in all three
+   orchestrator contracts and decisive for §7. It needs a test against each
+   gateway, and a sentence in the Management API spec, since that spec is how a
+   new orchestrator is bound. Forge answers quickly; FTH and Aurora are vendor
+   questions with lead time.
