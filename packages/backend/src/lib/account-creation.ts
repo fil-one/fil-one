@@ -6,6 +6,15 @@ import { OrgKeys } from './org-membership.js';
 import type { OrgMembership } from './org-membership.js';
 import { OrgSetupStatus } from './org-setup-status.js';
 
+export interface NewAccountParams {
+  sub: string;
+  userId: string;
+  orgId: string;
+  orgName: string;
+  email?: string;
+  name?: string;
+}
+
 /**
  * Create the account on first login: identity, profiles, membership, and the
  * org's owner count, in one transaction. Returns the membership it wrote, so
@@ -18,6 +27,11 @@ import { OrgSetupStatus } from './org-setup-status.js';
  * pending invitation be swept — or held live — under a name they do not own.
  * Absent when the account signs up before verifying; the login path stamps it
  * on the first verified request.
+ *
+ * `name` is the display name Auth0 holds, and carries no verification gate: it
+ * is what the member roster shows a human, and it decides nothing. Absent when
+ * the identity provider gives us none, and the login path stamps it if one
+ * appears later.
  */
 export async function createNewUserAndOrg({
   sub,
@@ -25,13 +39,8 @@ export async function createNewUserAndOrg({
   orgId,
   orgName,
   email,
-}: {
-  sub: string;
-  userId: string;
-  orgId: string;
-  orgName: string;
-  email?: string;
-}): Promise<OrgMembership> {
+  name,
+}: NewAccountParams): Promise<OrgMembership> {
   const tableName = Resource.UserInfoTable.name;
   const orgTableName = Resource.OrgTable.name;
   const now = new Date().toISOString();
@@ -50,10 +59,11 @@ export async function createNewUserAndOrg({
               userId: { S: userId },
               orgId: { S: orgId },
               createdAt: { S: now },
-              // What the profile's address was last stamped from. This row is
-              // read on every authenticated request; the profile is not, so
-              // the marker is what keeps the stamp off the hot path.
+              // What the profile's address and name were last stamped from.
+              // This row is read on every authenticated request; the profile is
+              // not, so the markers are what keep the stamp off the hot path.
               ...(email ? { profileEmail: { S: email } } : {}),
+              ...(name ? { profileName: { S: name } } : {}),
             },
             ConditionExpression: 'attribute_not_exists(pk)',
           },
@@ -68,6 +78,7 @@ export async function createNewUserAndOrg({
               orgId: { S: orgId },
               createdAt: { S: now },
               ...(email ? { email: { S: email } } : {}),
+              ...(name ? { name: { S: name } } : {}),
             },
           },
         },
@@ -134,22 +145,26 @@ export async function createNewUserAndOrg({
 }
 
 /**
- * Bring the user profile's address up to date with the one Auth0 has verified.
+ * Bring the user profile's address and display name up to date with what Auth0
+ * holds.
  *
- * Accounts created before the profile carried an address, and accounts that
- * signed up unverified, reach their first verified request without one; an
- * address change leaves a stale one. Both are repaired here, on the request
- * that already knows the verified address.
+ * Accounts created before the profile carried either field, and accounts that
+ * signed up unverified, reach their first request without them; a change to
+ * either leaves a stale value. Both are repaired here, on the request that
+ * already knows the current claims.
  *
- * `profileEmail` on the identity row records what the profile was last stamped
- * from. That row is read on every authenticated request anyway, so a profile
- * already holding the current address costs nothing beyond a string compare —
- * the writes happen once per address, not once per request. The profile is
- * written first: a marker without the row it claims would stop the repair
- * forever, while a row without its marker is repeated once and is idempotent.
+ * `profileEmail` and `profileName` on the identity row record what the profile
+ * was last stamped from. That row is read on every authenticated request
+ * anyway, so a profile already holding both current values costs nothing beyond
+ * two string compares — the writes happen once per change, not once per
+ * request, and only the field that changed is written. The profile is written
+ * first: a marker without the row it claims would stop the repair forever,
+ * while a row without its marker is repeated once and is idempotent.
  *
  * Unverified addresses are never stamped: sweeping invitations by an address
- * the holder has not proven they own would revoke somebody else's.
+ * the holder has not proven they own would revoke somebody else's. The name
+ * carries no such gate — it is shown to humans and decides nothing — and an
+ * absent name is left absent rather than clearing a name we already hold.
  *
  * Best-effort by design. The address decides what a removal revokes, not
  * whether the caller is authenticated, so a failed write is logged and the next
@@ -160,25 +175,49 @@ export async function stampVerifiedEmail({
   userId,
   email,
   emailVerified,
+  name,
   stampedEmail,
+  stampedName,
 }: {
   sub: string;
   userId: string;
   email: string | null;
   emailVerified: boolean;
+  name?: string | null;
   stampedEmail?: string;
+  stampedName?: string;
 }): Promise<void> {
-  if (!email || !emailVerified || stampedEmail === email) return;
+  const stampEmail = Boolean(email) && emailVerified && stampedEmail !== email;
+  const stampName = Boolean(name) && stampedName !== name;
+  if (!stampEmail && !stampName) return;
+
   const tableName = Resource.UserInfoTable.name;
+  const profileSets: string[] = [];
+  const markerSets: string[] = [];
+  const attributeNames: Record<string, string> = {};
+  const attributeValues: Record<string, { S: string }> = {};
+
+  if (stampEmail) {
+    profileSets.push('#email = :email');
+    markerSets.push('profileEmail = :email');
+    attributeNames['#email'] = 'email';
+    attributeValues[':email'] = { S: email as string };
+  }
+  if (stampName) {
+    profileSets.push('#name = :name');
+    markerSets.push('profileName = :name');
+    attributeNames['#name'] = 'name';
+    attributeValues[':name'] = { S: name as string };
+  }
 
   try {
     await getDynamoClient().send(
       new UpdateItemCommand({
         TableName: tableName,
         Key: { pk: { S: `USER#${userId}` }, sk: { S: 'PROFILE' } },
-        UpdateExpression: 'SET #email = :email',
-        ExpressionAttributeNames: { '#email': 'email' },
-        ExpressionAttributeValues: { ':email': { S: email } },
+        UpdateExpression: `SET ${profileSets.join(', ')}`,
+        ExpressionAttributeNames: attributeNames,
+        ExpressionAttributeValues: attributeValues,
         ConditionExpression: 'attribute_exists(pk)',
       }),
     );
@@ -186,13 +225,13 @@ export async function stampVerifiedEmail({
       new UpdateItemCommand({
         TableName: tableName,
         Key: { pk: { S: `SUB#${sub}` }, sk: { S: 'IDENTITY' } },
-        UpdateExpression: 'SET profileEmail = :email',
-        ExpressionAttributeValues: { ':email': { S: email } },
+        UpdateExpression: `SET ${markerSets.join(', ')}`,
+        ExpressionAttributeValues: attributeValues,
         ConditionExpression: 'attribute_exists(pk)',
       }),
     );
   } catch (err) {
-    console.error('[account-creation] Could not stamp the verified email on the profile', {
+    console.error('[account-creation] Could not stamp the Auth0 claims on the profile', {
       userId,
       error: err,
     });

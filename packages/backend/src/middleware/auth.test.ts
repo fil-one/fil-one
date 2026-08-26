@@ -755,6 +755,8 @@ describe('authMiddleware', () => {
               userId: { S: MOCK_USER_ID },
               orgId: { S: MOCK_ORG_ID },
               createdAt: { S: expect.any(String) },
+              // The address is unverified here, so only the name is stamped.
+              profileName: { S: 'Alice Johnson' },
             },
             ConditionExpression: 'attribute_not_exists(pk)',
           },
@@ -769,6 +771,7 @@ describe('authMiddleware', () => {
               sub: { S: MOCK_SUB },
               orgId: { S: MOCK_ORG_ID },
               createdAt: { S: expect.any(String) },
+              name: { S: 'Alice Johnson' },
             },
           },
         },
@@ -1431,6 +1434,168 @@ describe('authMiddleware', () => {
       expect(result).toBeUndefined();
       expect(consoleError).toHaveBeenCalled();
       consoleError.mockRestore();
+    });
+  });
+
+  describe('display name on the user profile', () => {
+    const existingUserId = 'name-stamp-user-uuid';
+    const existingOrgId = 'name-stamp-org-uuid';
+
+    function mockExistingUser(identity: Record<string, unknown> = {}) {
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: {
+            userId: { S: existingUserId },
+            orgId: { S: existingOrgId },
+            emailEntitlementClaimed: { BOOL: true },
+            ...identity,
+          },
+        });
+      ddbMock.on(UpdateItemCommand).resolves({});
+    }
+
+    function login(idClaims: Record<string, unknown>) {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: idClaims });
+      return buildMiddyRequest(
+        buildEvent({
+          cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+        }),
+      );
+    }
+
+    it('stamps the name on a profile whose marker is absent', async () => {
+      mockExistingUser({ profileEmail: { S: MOCK_EMAIL } });
+
+      const { before } = authMiddleware();
+      await before(login({ email: MOCK_EMAIL, email_verified: true, name: MOCK_NAME }));
+
+      const updates = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updates).toHaveLength(2);
+      expect(updates[0].args[0].input.Key).toStrictEqual({
+        pk: { S: `USER#${existingUserId}` },
+        sk: { S: 'PROFILE' },
+      });
+      expect(updates[0].args[0].input.ExpressionAttributeValues).toStrictEqual({
+        ':name': { S: MOCK_NAME },
+      });
+      expect(updates[1].args[0].input.Key).toStrictEqual({
+        pk: { S: `SUB#${MOCK_SUB}` },
+        sk: { S: 'IDENTITY' },
+      });
+      expect(updates[1].args[0].input.UpdateExpression).toContain('profileName');
+    });
+
+    it('re-stamps after the name changes', async () => {
+      mockExistingUser({ profileEmail: { S: MOCK_EMAIL }, profileName: { S: 'Old Name' } });
+
+      const { before } = authMiddleware();
+      await before(login({ email: MOCK_EMAIL, email_verified: true, name: MOCK_NAME }));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(2);
+    });
+
+    it('writes nothing when the profile already holds both the address and the name', async () => {
+      mockExistingUser({ profileEmail: { S: MOCK_EMAIL }, profileName: { S: MOCK_NAME } });
+
+      const { before } = authMiddleware();
+      await before(login({ email: MOCK_EMAIL, email_verified: true, name: MOCK_NAME }));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    });
+
+    it('writes the address and the name in one update when both are stale', async () => {
+      mockExistingUser();
+
+      const { before } = authMiddleware();
+      await before(login({ email: MOCK_EMAIL, email_verified: true, name: MOCK_NAME }));
+
+      const updates = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updates).toHaveLength(2);
+      expect(updates[0].args[0].input.ExpressionAttributeValues).toStrictEqual({
+        ':email': { S: MOCK_EMAIL },
+        ':name': { S: MOCK_NAME },
+      });
+      expect(updates[1].args[0].input.ExpressionAttributeValues).toStrictEqual({
+        ':email': { S: MOCK_EMAIL },
+        ':name': { S: MOCK_NAME },
+      });
+    });
+
+    it('stamps the name even when the address is unverified', async () => {
+      mockExistingUser();
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      await before(login({ email: MOCK_EMAIL, email_verified: false, name: MOCK_NAME }));
+
+      const updates = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updates).toHaveLength(2);
+      expect(updates[0].args[0].input.ExpressionAttributeValues).toStrictEqual({
+        ':name': { S: MOCK_NAME },
+      });
+      expect(updates[1].args[0].input.UpdateExpression).not.toContain('profileEmail');
+    });
+
+    it('leaves a stamped name alone when the token carries none', async () => {
+      mockExistingUser({ profileEmail: { S: MOCK_EMAIL }, profileName: { S: MOCK_NAME } });
+
+      const { before } = authMiddleware();
+      await before(login({ email: MOCK_EMAIL, email_verified: true }));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    });
+
+    it('does not stamp an empty name', async () => {
+      mockExistingUser({ profileEmail: { S: MOCK_EMAIL } });
+
+      const { before } = authMiddleware();
+      await before(login({ email: MOCK_EMAIL, email_verified: true, name: '' }));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    });
+
+    it('stamps the name at signup', async () => {
+      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+      ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+      const { before } = authMiddleware();
+      await before(login({ email: MOCK_EMAIL, email_verified: true, name: MOCK_NAME }));
+
+      const items = ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems;
+      expect(items?.[0].Put?.Item?.profileName).toStrictEqual({ S: MOCK_NAME });
+      expect(items?.[1].Put?.Item?.name).toStrictEqual({ S: MOCK_NAME });
+      // The stamp rides the account transaction, so it costs no extra write.
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    });
+
+    it('stamps the name at signup even when the address is unverified', async () => {
+      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+      ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      await before(login({ email: MOCK_EMAIL, email_verified: false, name: MOCK_NAME }));
+
+      const items = ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems;
+      expect(items?.[0].Put?.Item?.profileName).toStrictEqual({ S: MOCK_NAME });
+      expect(items?.[1].Put?.Item?.name).toStrictEqual({ S: MOCK_NAME });
+      expect(items?.[0].Put?.Item?.profileEmail).toBeUndefined();
+      expect(items?.[1].Put?.Item?.email).toBeUndefined();
+    });
+
+    it('leaves the name off a signup whose token carries none', async () => {
+      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+      ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+      const { before } = authMiddleware();
+      await before(login({ email: MOCK_EMAIL, email_verified: true }));
+
+      const items = ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems;
+      expect(items?.[0].Put?.Item?.profileName).toBeUndefined();
+      expect(items?.[1].Put?.Item?.name).toBeUndefined();
     });
   });
 

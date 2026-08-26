@@ -384,15 +384,18 @@ async function resolveUserAndOrg(
     if (result.Item.emailEntitlementClaimed?.BOOL !== true) {
       await ensureTrialEntitlementBestEffort({ sub, userId, orgId, email, emailVerified });
     }
-    // The profile's address is the org paths' only copy of it, and accounts
-    // created before it was stamped have none. Gated on the marker this row
-    // already carries, so a profile that is current costs no write.
+    // The profile's address and name are the org paths' only copy of them, and
+    // accounts created before they were stamped have neither. Gated on the
+    // markers this row already carries, so a profile that is current costs no
+    // write.
     await stampVerifiedEmail({
       sub,
       userId,
       email,
       emailVerified,
+      name,
       stampedEmail: result.Item.profileEmail?.S,
+      stampedName: result.Item.profileName?.S,
     });
     return { userId, orgId, email };
   }
@@ -408,6 +411,8 @@ async function resolveUserAndOrg(
     orgId,
     orgName,
     email: emailVerified && email ? email : undefined,
+    // No verified gate on the name: the roster shows it and it decides nothing.
+    name: name ?? undefined,
   });
 
   // Tenant setup is deferred until the user creates their first bucket or access
