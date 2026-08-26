@@ -402,7 +402,9 @@ async function resolveUserAndOrg(
     userId,
     orgId,
     orgName,
-    email: emailVerified && email ? email : undefined,
+    // Verified only: the audit viewer shows this as the member's identity, and
+    // an unverified claim names whoever typed it.
+    email: emailVerified ? (email ?? undefined) : undefined,
     // No verified gate on the name: the roster shows it and it decides nothing.
     name: name ?? undefined,
   });

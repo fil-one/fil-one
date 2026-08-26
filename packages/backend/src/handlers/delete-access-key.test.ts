@@ -1,12 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, DeleteItemCommand, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  DynamoDBClient,
+  GetItemCommand,
+  PutItemCommand,
+  TransactionCanceledException,
+  TransactWriteItemsCommand,
+} from '@aws-sdk/client-dynamodb';
+import { unmarshall } from '@aws-sdk/util-dynamodb';
+import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.js';
 
-vi.mock('sst', () => ({
-  Resource: {
-    UserInfoTable: { name: 'UserInfoTable' },
-  },
-}));
+vi.mock('sst', () => sstResourceMock());
 
 const auroraIsTenantReady = vi.fn();
 const auroraDeleteAccessKey = vi.fn();
@@ -78,10 +83,30 @@ function accessKeyItem(region?: string, createdBy?: string, recovered?: boolean)
   return item;
 }
 
+/** Every event written on its own, in order: the intent and any completion. */
+function standaloneEvents() {
+  return ddbMock
+    .commandCalls(PutItemCommand)
+    .map((call) => unmarshall(call.args[0].input.Item ?? {}));
+}
+
+/** The revocation intents, written before the provider call. */
+function intentEvents() {
+  return standaloneEvents().filter((event) => event.phase === 'intent');
+}
+
+/** The completion, which travels with the row deletion. */
+function completionEvent() {
+  const calls = ddbMock.commandCalls(TransactWriteItemsCommand);
+  expect(calls).toHaveLength(1);
+  return unmarshall(auditItemIn(calls[0].args[0].input.TransactItems));
+}
+
 describe('delete-access-key baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
+    ddbMock.on(PutItemCommand).resolves({});
   });
 
   it('returns 400 when keyId is missing', async () => {
@@ -104,7 +129,7 @@ describe('delete-access-key baseHandler', () => {
 
   it('routes Aurora rows (region=eu-west-1) to the Aurora orchestrator', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: accessKeyItem('eu-west-1') });
-    ddbMock.on(DeleteItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
     auroraIsTenantReady.mockReturnValue('aurora-t-1');
     auroraDeleteAccessKey.mockResolvedValue(undefined);
 
@@ -114,12 +139,12 @@ describe('delete-access-key baseHandler', () => {
     expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('eu-west-1');
     expect(auroraDeleteAccessKey).toHaveBeenCalledWith('aurora-t-1', KEY_ID);
     expect(fthDeleteAccessKey).not.toHaveBeenCalled();
-    expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1);
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
   });
 
   it('routes FTH rows (region=us-east-1) to the FTH orchestrator', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: accessKeyItem('us-east-1') });
-    ddbMock.on(DeleteItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
     fthIsTenantReady.mockReturnValue('fth-t-1');
     fthDeleteAccessKey.mockResolvedValue(undefined);
 
@@ -133,7 +158,7 @@ describe('delete-access-key baseHandler', () => {
 
   it('falls back to Aurora for legacy rows without a region attribute', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: accessKeyItem() });
-    ddbMock.on(DeleteItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
     auroraIsTenantReady.mockReturnValue('aurora-t-1');
     auroraDeleteAccessKey.mockResolvedValue(undefined);
 
@@ -152,7 +177,7 @@ describe('delete-access-key baseHandler', () => {
 
     expect(result.statusCode).toBe(503);
     expect(auroraDeleteAccessKey).not.toHaveBeenCalled();
-    expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
   });
 
   it('does not delete the DDB row when the orchestrator throws', async () => {
@@ -161,7 +186,140 @@ describe('delete-access-key baseHandler', () => {
     auroraDeleteAccessKey.mockRejectedValue(new Error('Aurora API error'));
 
     await expect(baseHandler(eventWithKey(KEY_ID))).rejects.toThrow('Aurora API error');
-    expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+  });
+
+  it('records an intent before the provider call and a completion with the row deletion', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: accessKeyItem('eu-west-1') });
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+    auroraIsTenantReady.mockReturnValue('aurora-t-1');
+    auroraDeleteAccessKey.mockResolvedValue(undefined);
+
+    await baseHandler(eventWithKey(KEY_ID));
+
+    const [intent] = intentEvents();
+    const completion = completionEvent();
+
+    expect(intent).toMatchObject({
+      pk: 'ORG#org-1',
+      type: 'key.deleted',
+      phase: 'intent',
+      // The console lists the AKIA… access key id, which the log may not hold
+      // in full, so both the subject and the details record its trailing four.
+      // The path parameter is the orchestrator's own id for the row and names
+      // nothing on screen.
+      subject: 'key:1111',
+      actor: { kind: 'user', id: 'user-1' },
+      // The key is known up front here, so both halves are filed under it.
+      details: { keyKind: 's3', keyName: 'My Key', region: 'eu-west-1', keyIdSuffix: '1111' },
+    });
+    expect(completion).toMatchObject({
+      type: 'key.deleted',
+      phase: 'completion',
+      outcome: 'succeeded',
+      subject: 'key:1111',
+    });
+    // The pair is what makes a crash between them legible.
+    expect(completion.correlationId).toBe(intent.correlationId);
+    expect(completion.eventId).not.toBe(intent.eventId);
+    // The two halves of the same event name the key the same way.
+    expect(intent.subject).toBe(`key:${completion.details.keyIdSuffix}`);
+    expectNoSecrets(
+      auditItemIn(ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems),
+    );
+  });
+
+  it('names a row written before the access key id was stored by its key id', async () => {
+    // Nothing to show an operator, but a subject the viewer can still group by
+    // beats none at all.
+    const legacyRow = accessKeyItem('eu-west-1');
+    delete legacyRow.accessKeyId;
+    ddbMock.on(GetItemCommand).resolves({ Item: legacyRow });
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+    auroraIsTenantReady.mockReturnValue('aurora-t-1');
+    auroraDeleteAccessKey.mockResolvedValue(undefined);
+
+    await baseHandler(eventWithKey(KEY_ID));
+
+    const [intent] = intentEvents();
+    expect(intent.subject).toBe('key:ey-1');
+    expect(intent.details).not.toHaveProperty('keyIdSuffix');
+  });
+
+  it('revokes the key anyway when the intent cannot be written', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: accessKeyItem('eu-west-1') });
+    ddbMock.on(PutItemCommand).rejects(new Error('AuditTable unavailable'));
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+    auroraIsTenantReady.mockReturnValue('aurora-t-1');
+    auroraDeleteAccessKey.mockResolvedValue(undefined);
+
+    // An audit-table outage must never be the reason a leaked key stays live.
+    const result = (await baseHandler(eventWithKey(KEY_ID))) as { statusCode: number };
+
+    expect(result.statusCode).toBe(204);
+    expect(auroraDeleteAccessKey).toHaveBeenCalledWith('aurora-t-1', KEY_ID);
+  });
+
+  it('deletes the row when the event item is the half the table refused', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: accessKeyItem('eu-west-1') });
+    ddbMock
+      .on(TransactWriteItemsCommand)
+      .rejectsOnce(
+        new TransactionCanceledException({
+          message: 'cancelled',
+          $metadata: {},
+          CancellationReasons: [{ Code: 'None' }, { Code: 'TransactionConflict' }],
+        }),
+      )
+      .resolves({});
+    auroraIsTenantReady.mockReturnValue('aurora-t-1');
+    auroraDeleteAccessKey.mockResolvedValue(undefined);
+
+    const result = (await baseHandler(eventWithKey(KEY_ID))) as { statusCode: number };
+
+    expect(result.statusCode).toBe(204);
+    const calls = ddbMock.commandCalls(TransactWriteItemsCommand);
+    expect(calls).toHaveLength(2);
+    // The retry carries the delete and nothing else.
+    expect(calls[1].args[0].input.TransactItems).toHaveLength(1);
+    expect(calls[1].args[0].input.TransactItems![0].Delete).toBeDefined();
+  });
+
+  it('closes the correlation as failed when the provider refuses the revocation', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: accessKeyItem('eu-west-1') });
+    auroraIsTenantReady.mockReturnValue('aurora-t-1');
+    auroraDeleteAccessKey.mockRejectedValue(new Error('Aurora API error'));
+
+    await expect(baseHandler(eventWithKey(KEY_ID))).rejects.toThrow('Aurora API error');
+
+    const [intent, completion] = standaloneEvents();
+    expect(completion).toMatchObject({ phase: 'completion', outcome: 'failed' });
+    expect(completion.correlationId).toBe(intent.correlationId);
+  });
+
+  it('leaves a dangling intent when the provider revokes and the local write never lands', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: accessKeyItem('eu-west-1') });
+    ddbMock.on(TransactWriteItemsCommand).rejects(new Error('DynamoDB unavailable'));
+    auroraIsTenantReady.mockReturnValue('aurora-t-1');
+    auroraDeleteAccessKey.mockResolvedValue(undefined);
+
+    await expect(baseHandler(eventWithKey(KEY_ID))).rejects.toThrow('DynamoDB unavailable');
+
+    // The intent is the record of what happened at the vendor. Without it,
+    // a revoked credential whose row survived would leave no trace at all.
+    expect(intentEvents()).toHaveLength(1);
+    expect(intentEvents()[0].phase).toBe('intent');
+  });
+
+  it('writes no intent when the request never reaches the provider', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: accessKeyItem('eu-west-1', 'user-2') });
+
+    const result = (await baseHandler(eventWithKey(KEY_ID, OrgRole.Member))) as {
+      statusCode: number;
+    };
+
+    expect(result.statusCode).toBe(403);
+    expect(intentEvents()).toHaveLength(0);
   });
 });
 
@@ -172,7 +330,8 @@ describe('whose key a caller may revoke', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
-    ddbMock.on(DeleteItemCommand).resolves({});
+    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
     auroraIsTenantReady.mockReturnValue('aurora-t-1');
     auroraDeleteAccessKey.mockResolvedValue(undefined);
   });
@@ -199,7 +358,7 @@ describe('whose key a caller may revoke', () => {
     expect(JSON.parse(result.body).code).toBe(ApiErrorCode.FORBIDDEN_ROLE);
     // The provider-side deletion is the irreversible half.
     expect(auroraDeleteAccessKey).not.toHaveBeenCalled();
-    expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
   });
 
   it('refuses a Member an unattributed key, which nobody can claim', async () => {
@@ -229,7 +388,7 @@ describe('whose key a caller may revoke', () => {
     expect(result.statusCode).toBe(403);
     expect(JSON.parse(result.body).code).toBe(ApiErrorCode.FORBIDDEN_ROLE);
     expect(auroraDeleteAccessKey).not.toHaveBeenCalled();
-    expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
   });
 
   it('lets keys.manage_all revoke a recovered key', async () => {

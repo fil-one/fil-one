@@ -22,6 +22,21 @@ export type AccessKeyPolicyVersion = 'pre-member-scope';
 
 export const ACCESS_KEY_POLICY_VERSION: AccessKeyPolicyVersion = 'pre-member-scope';
 
+/**
+ * Every key an access-key row is addressed by, in one builder.
+ *
+ * The handlers built these strings by hand in five places, which is how a
+ * mint and a revoke end up disagreeing about where a key lives.
+ */
+const ACCESS_KEY_SK_PREFIX = 'ACCESSKEY#';
+
+export const AccessKeyKeys = {
+  orgPk: (orgId: string): string => `ORG#${orgId}`,
+  keySk: (keyId: string): string => `${ACCESS_KEY_SK_PREFIX}${keyId}`,
+  /** For the Query that lists an org's keys. */
+  keySkPrefix: (): string => ACCESS_KEY_SK_PREFIX,
+} as const;
+
 /** UserInfoTable — pk: ORG#{orgId}, sk: ACCESSKEY#{id} */
 export interface AccessKeyRecord {
   pk: string;
