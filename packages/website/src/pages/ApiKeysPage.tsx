@@ -20,6 +20,7 @@ import { getS3Endpoint, S3_REGION, DOCS_URL } from '@filone/shared';
 import { RegionSelect } from '../components/RegionSelect';
 import { FILONE_STAGE } from '../env';
 import { apiRequest } from '../lib/api.js';
+import { useKeyCreators } from '../lib/use-key-creators.js';
 import { useCopyToClipboard } from '../lib/use-copy-to-clipboard.js';
 import { LIST_GC_TIME, LIST_STALE_TIME, queryKeys } from '../lib/query-client.js';
 import { RequirePermission } from '../components/RequirePermission';
@@ -51,9 +52,16 @@ type AccessKeysTabProps = {
   onDelete?: (id: string) => Promise<void>;
   /** Whether a row's Revoke belongs to this caller. */
   canRevoke?: (key: AccessKey) => boolean;
+  creatorFor?: (userId: string) => { name: string; email?: string } | undefined;
 };
 
-function AccessKeysTab({ keys, onCreateOpen, onDelete, canRevoke }: AccessKeysTabProps) {
+function AccessKeysTab({
+  keys,
+  onCreateOpen,
+  onDelete,
+  canRevoke,
+  creatorFor,
+}: AccessKeysTabProps) {
   return (
     <>
       <div className="mt-4 mb-4">
@@ -69,6 +77,7 @@ function AccessKeysTab({ keys, onCreateOpen, onDelete, canRevoke }: AccessKeysTa
         showPermissions
         onDelete={onDelete}
         canDelete={canRevoke}
+        creatorFor={creatorFor}
         onCreateOpen={onCreateOpen}
       />
       {keys.length === 0 && (
@@ -97,6 +106,7 @@ function AccessKeysPanel({
   onCreateOpen,
   onDelete,
   canRevoke,
+  creatorFor,
 }: AccessKeysTabProps & {
   mayList: boolean;
   isPending: boolean;
@@ -137,6 +147,7 @@ function AccessKeysPanel({
       onCreateOpen={onCreateOpen}
       onDelete={onDelete}
       canRevoke={canRevoke}
+      creatorFor={creatorFor}
     />
   );
 }
@@ -492,6 +503,7 @@ export function ApiKeysPage() {
   // mid-session downgrade would leave the key names in the table and the count on
   // the tab above the no-access card.
   const keys = mayList ? (data?.keys ?? []) : [];
+  const creatorFor = useKeyCreators(mayList);
 
   const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
 
@@ -553,6 +565,7 @@ export function ApiKeysPage() {
               onCreateOpen={mayCreate ? openCreateKey : undefined}
               onDelete={handleDelete}
               canRevoke={mayRevoke}
+              creatorFor={creatorFor}
             />
           </TabPanel>
           <TabPanel>

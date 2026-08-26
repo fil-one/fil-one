@@ -141,3 +141,21 @@ export const EmptyWithoutKeyCreation: Story = {
     keys: [],
   },
 };
+
+/**
+ * A shared org, where the column says whose key each one is — the question an
+ * operator asks after removing somebody, since removal does not revoke keys
+ * (FIL-1021). Key 3 predates attribution and carries no `createdBy`.
+ */
+export const WithCreators: Story = {
+  args: {
+    keys: mockKeys.map((key, i) =>
+      i === 2 ? key : { ...key, createdBy: i === 0 ? 'user-1' : 'user-2' },
+    ),
+    showRegion: true,
+    creatorFor: (userId: string) =>
+      userId === 'user-1'
+        ? { name: 'Ada Lovelace', email: 'ada@example.com' }
+        : { name: 'grace@example.com', email: 'grace@example.com' },
+  },
+};
