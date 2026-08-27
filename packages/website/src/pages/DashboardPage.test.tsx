@@ -51,6 +51,20 @@ function payAsYouGoBilling(): BillingInfo {
       planId: PlanId.PayAsYouGo,
       status: SubscriptionStatus.Active,
       monthlyMinimumCents: 0,
+      planName: 'Pay as you go',
+      pricePerTbCents: 499,
+    },
+  };
+}
+
+/** An org billed on a price sales quoted: a name, and no single per-TB rate. */
+function contractedBilling(): BillingInfo {
+  return {
+    subscription: {
+      planId: PlanId.PayAsYouGo,
+      status: SubscriptionStatus.Active,
+      planName: 'Business',
+      monthlyMinimumCents: 250_000,
     },
   };
 }
@@ -84,6 +98,32 @@ describe('DashboardPage — the plan panels', () => {
     const status = await screen.findByTestId('subscription-status');
     expect(status).toHaveAttribute('data-status', SubscriptionStatus.Active);
     expect(screen.getByText('Est. monthly cost')).toBeInTheDocument();
+  });
+
+  it('names the plan what Stripe calls it', async () => {
+    mockGetBilling.mockResolvedValue(contractedBilling());
+    renderPage(OrgRole.Owner);
+
+    expect(await screen.findByText('Business')).toBeInTheDocument();
+  });
+
+  it('states the rate the org is billed on', async () => {
+    renderPage(OrgRole.Owner);
+
+    // 2 TB at $4.99 a TB, from the price the API reported.
+    expect(await screen.findByText('Est. monthly cost')).toBeInTheDocument();
+    expect(screen.getByText('$4.99/TB per month · no egress fees')).toBeInTheDocument();
+  });
+
+  it('withholds an estimate from an org whose price states no rate', async () => {
+    // The card used to multiply by a hardcoded $4.99, so a contracted org was
+    // shown an estimate for a rate it does not pay.
+    mockGetBilling.mockResolvedValue(contractedBilling());
+    renderPage(OrgRole.Owner);
+
+    await screen.findByText('Business');
+    expect(screen.queryByText('Est. monthly cost')).not.toBeInTheDocument();
+    expect(screen.getByText('Custom pricing · no egress fees')).toBeInTheDocument();
   });
 
   it('never asks for billing on behalf of a role that cannot read it', async () => {
