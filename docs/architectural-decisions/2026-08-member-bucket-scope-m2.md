@@ -17,10 +17,10 @@ customer's own access key deletes a bucket and nothing in the product records it
 The Management API has no event or audit surface, an S3 `ListBuckets` returns a
 name and a creation date, and no contract exposes which key acted. The same
 region lets a deleted bucket name be claimed again, measured on staging on
-2026-08-26 (`bin/bucket-name-reuse-probe.ts`). So a credential deletes a bucket
-unobserved, recreates the name, and the org's record of what happened is a
-listing showing a bucket that looks original. That is true of every tenant today,
-scoped members or not, and closing it is what puts a FilOne handler on every
+2026-08-26 (`bin/bucket-name-reuse-probe.ts`). A credential can therefore delete
+a bucket unobserved and recreate the name, leaving a listing that shows the
+replacement as an original. Every tenant carries that exposure, whether or not
+any of its members are scoped, and closing it puts a FilOne handler on every
 bucket creation and deletion ([§4](#4-bucket-lifecycle-moves-to-the-console)).
 
 **FilOne stores no bucket records.** A bucket exists at the orchestrator and
@@ -238,9 +238,9 @@ API spec requires either behavior, so both vendors could change their name polic
 without breaking a promise, and the sweep therefore ships for every region
 instead of being tuned per region.
 
-**So customer keys stop carrying `CreateBucket` and `DeleteBucket`**, in every
-region, until an orchestrator can report that a bucket's lifecycle changed and
-which key changed it. The `filone-console` key keeps both actions, so the
+**Customer keys therefore stop carrying `CreateBucket` and `DeleteBucket`**, in
+every region, until an orchestrator can report that a bucket's lifecycle changed
+and which key changed it. The `filone-console` key keeps both actions, so the
 console's own bucket lifecycle is untouched. What goes away is a customer
 credential creating or deleting a bucket.
 
@@ -250,10 +250,10 @@ through `createPortalClient`), so only FilOne can make them and the region has
 never had the exposure. On FTH and Forge they are S3 data-plane operations: the
 console performs them with the tenant's `filone-console` credential, and a user
 key carrying `s3:CreateBucket` or `s3:DeleteBucket` performs the identical
-operation without FilOne seeing it. Aurora being already built this way is the
-argument that this asks FTH and Forge to match a shipped region rather than
-inventing a policy, and it moves the product toward the uniform-regions answer to
-FIL-1024's question of whether capabilities should differ by region at all.
+operation without FilOne seeing it. Aurora is built this way today, so this asks
+FTH and Forge to match a shipped region rather than to adopt a new policy, and it
+moves the product toward the uniform-regions answer to FIL-1024's question of
+whether capabilities should differ by region at all.
 
 The change is small and reversible. `BUCKET_PERMISSIONS`
 (`packages/shared/src/api/access-keys.ts`) stops being offered,
@@ -263,15 +263,15 @@ nothing left to gate. Re-enabling is the same edit backwards, with no migration
 either way. A denied attempt answers with the vendor's `AccessDenied`, which is
 the correct S3 error FIL-1019's acceptance criteria ask for.
 
-**What it costs.** Customers scripting bucket lifecycle against the S3 API lose
-it outright, and the product ships that today in the FTH and Forge regions. The
-Console API is session-authenticated, so no credential FilOne issues reaches
-`POST /api/buckets` either: scripted bucket lifecycle has no supported path at
-all until an orchestrator reports lifecycle events and the permission can come
-back. Keys already carrying the two permissions keep them until FIL-1020 retires
-them, so a bucket deleted with one of those still leaves its grants behind, and
-the console labels those permissions as legacy on the keys that hold them so
-FIL-1021's key review has something to point at.
+Customers scripting bucket lifecycle against the S3 API lose that capability,
+which the product ships today in the FTH and Forge regions. The Console API is
+session-authenticated, so no credential FilOne issues reaches `POST /api/buckets`
+either, and scripted bucket lifecycle has no supported path until an orchestrator
+reports lifecycle events and the permission can return. Keys already carrying the
+two permissions keep them until FIL-1020 retires them, so a bucket deleted with
+one of those still leaves its grants behind. The console labels the two
+permissions as legacy on the keys that hold them, which gives FIL-1021's key
+review something to act on.
 
 With every create and delete passing through a handler, `bucket.created` and
 `bucket.deleted` become writable for the first time. Each carries the acting
@@ -484,16 +484,16 @@ instead of a redeploy.
 
 ## Options considered
 
-**Reconciling grants against `ListBuckets` on read**, instead of removing the
-two permissions, would leave customer bucket lifecycle where it is and repair
-the grant table from what the orchestrator reports. It cannot be built. A grant
-naming a bucket that no longer exists is already inert, so the failure
-reconciliation has to catch is the reused name, and catching it means telling an
-original bucket from a recreation. No orchestrator exposes a stable bucket
-identity: `BucketSummary` carries a name and a creation date, and a delete
-followed by a recreate inside the polling interval defeats both. Reconciliation
-becomes possible on the day a lifecycle feed exists, which is the same day the
-permission can come back ([§4](#4-bucket-lifecycle-moves-to-the-console)).
+**Reconciling grants against `ListBuckets` on read**, instead of removing the two
+permissions, would leave customer bucket lifecycle where it is and repair the
+grant table from what the orchestrator reports. Nothing available supports it. A
+grant naming a bucket that no longer exists is already inert, so the failure
+reconciliation has to catch is the reused name, which means telling an original
+bucket from a recreation. No orchestrator exposes a stable bucket identity:
+`BucketSummary` carries a name and a creation date, and a delete followed by a
+recreate inside the polling interval defeats both. Reconciliation becomes
+possible on the day a lifecycle feed exists, and that is the same day the
+permission can return ([§4](#4-bucket-lifecycle-moves-to-the-console)).
 
 **A String Set on the membership row** (`buckets`, holding the same
 `{region}/{bucketName}` entries) needs no new table and no read at all, since the
