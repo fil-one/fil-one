@@ -283,6 +283,31 @@ Member from an Admin. #600 alone leaves those four routes gated on membership
 but not on role, so deploy the pair — merge #601 immediately behind #600, or
 merge #600 only once #601 is approved and ready to follow.
 
+## The merge gate on enforcement
+
+**The enforcement PR merges only after this run reports `VERIFY: PASS` on
+production.** Merging to `main` auto-deploys, and enforcement makes an absent
+`OrgTable` membership row a 403 `NOT_A_MEMBER` on every gated route. Until the
+conversion has written those rows, that is every account: the console answers
+`/api/me` with no role and refuses everything else, and the only way back is a
+revert deploy.
+
+What the gate asks for, in order:
+
+1. `--verify` reports `VERIFY: PASS` on **staging**, then on **production**.
+2. Both reports are pasted on the enforcement PR, with their dates.
+3. Only then does the PR merge.
+
+Enforcement is also what makes the conversion irreversible in practice: the
+revert above is safe only while the fallback stands. Once enforcement is
+deployed, reverting membership rows without reverting that deploy locks every
+converted account out of its own org.
+
+The lockout is visible without waiting for a support ticket: each denial for an
+absent row emits the `FilOne/NotAMemberDenialCount` EMF metric, dimensioned by
+route. A non-zero rate after the enforcement deploy means the conversion missed
+a cohort.
+
 ## Revert
 
 Reach for the revert when the conversion has to be undone before enforcement

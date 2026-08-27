@@ -183,6 +183,7 @@ describe('scrubOrgRecords', () => {
     ]);
 
     expect(scrubbedKeys()).toEqual([
+      `BillingTable:ORG#${ORG}/SUBSCRIPTION`,
       'BillingTable:CUSTOMER#user-1/SUBSCRIPTION',
       'BillingTable:CUSTOMER#user-2/SUBSCRIPTION',
       'UserInfoTable:SUB#auth0|one/IDENTITY',
@@ -198,10 +199,10 @@ describe('scrubOrgRecords', () => {
 
   // The worker writes `canceled` itself, after the Stripe cancel has succeeded, so
   // the row and Stripe cannot disagree whatever order the webhooks arrive in.
-  it('strips the card fields off the billing row and cancels it', async () => {
+  it('strips the card fields off the org billing row and cancels it', async () => {
     await scrubOrgRecords(ORG, MEMBERS);
 
-    const update = scrubOf('BillingTable:CUSTOMER#user-1/SUBSCRIPTION');
+    const update = scrubOf(`BillingTable:ORG#${ORG}/SUBSCRIPTION`);
     expect(update.TableName).toBe('BillingTable');
     expect(update.UpdateExpression).toBe(
       'SET deletedAt = if_not_exists(deletedAt, :now), ' +
@@ -210,6 +211,19 @@ describe('scrubOrgRecords', () => {
         'paymentMethodExpMonth, paymentMethodExpYear, gracePeriodEndsAt',
     );
     expect(update.ExpressionAttributeValues![':canceled']).toEqual({ S: 'canceled' });
+  });
+
+  // The org row is the one every webhook writer addresses, so its stamp is the
+  // fence that stops a late webhook reviving the subscription. The legacy row
+  // belongs to a member whose account ends with the org, so it is stamped too.
+  it('stamps the org row and any legacy row the cleanup step has not removed', async () => {
+    await scrubOrgRecords(ORG, MEMBERS);
+
+    const legacy = scrubOf('BillingTable:CUSTOMER#user-1/SUBSCRIPTION');
+    expect(legacy.UpdateExpression).toBe(
+      scrubOf(`BillingTable:ORG#${ORG}/SUBSCRIPTION`).UpdateExpression,
+    );
+    expect(legacy.ConditionExpression).toBe('attribute_exists(pk)');
   });
 
   // A financial record with no personal data, on its own TTL.
@@ -504,6 +518,24 @@ describe('scrubOrgRecords', () => {
       );
       expect(moved).toBeGreaterThanOrEqual(0);
       expect(destroyed).toBeGreaterThan(moved);
+    });
+
+    // The legacy row is keyed by user, so it is the billing of the member's own
+    // personal org. Stamping it here would cancel a subscription this deletion
+    // has no claim on.
+    it('leaves their legacy CUSTOMER# billing row unstamped', async () => {
+      await scrubOrgRecords(ORG, KEPT);
+
+      const stamped = scrubbedKeys();
+      expect(stamped).not.toContain('BillingTable:CUSTOMER#user-1/SUBSCRIPTION');
+      expect(stamped).toContain('BillingTable:CUSTOMER#user-2/SUBSCRIPTION');
+    });
+
+    // Every deletion fences the org's own row, whoever the members are.
+    it('still stamps the org billing row', async () => {
+      await scrubOrgRecords(ORG, KEPT);
+
+      expect(scrubbedKeys()).toContain(`BillingTable:ORG#${ORG}/SUBSCRIPTION`);
     });
   });
 

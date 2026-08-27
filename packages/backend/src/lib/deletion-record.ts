@@ -35,8 +35,6 @@ export interface DeletionMember {
   userId: string;
   /** Auth0 subject — the account to delete, and the audit correlation key. */
   sub: string;
-  /** Absent is legal, and means there is no Stripe work for this member. */
-  stripeCustomerId?: string;
   /**
    * Whether deleting this org also ends this person's account: their Auth0 user
    * goes, their identity row is tombstoned, their profile is stamped and their
@@ -52,10 +50,6 @@ export interface DeletionMember {
    * passes changes the answer, and a pass that cannot decode a membership row
    * keeps the account. Every step this flag gates is therefore safe to skip on
    * one pass and take on the next.
-   *
-   * Billing is not gated on this flag. Both the Stripe teardown and the billing
-   * scrub still act on every member, because the billing row is keyed by user
-   * today and is re-keyed to the org by its own change.
    */
   deleteIdentity: boolean;
   /**

@@ -1,5 +1,5 @@
 import type { S3Region } from '@filone/shared';
-import { KEY_NAME_MAX_LENGTH } from '@filone/shared';
+import { KEY_NAME_MAX_LENGTH, RESERVED_KEY_NAME_PREFIX, isReservedKeyName } from '@filone/shared';
 import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 import { AccessKeyBucketScopeFields } from './AccessKeyBucketScopeFields.js';
 import { AccessKeyExpirationFields } from './AccessKeyExpirationFields.js';
@@ -44,6 +44,7 @@ export function AccessKeyFormFields({
 
   const invalidChars = [...new Set(keyName.match(INVALID_KEY_CHAR) ?? [])];
   const overLimit = keyName.length > KEY_NAME_MAX_LENGTH;
+  const reservedName = isReservedKeyName(keyName);
 
   return (
     <div className="flex flex-col gap-6">
@@ -57,13 +58,15 @@ export function AccessKeyFormFields({
             ? `Not allowed: ${invalidChars.map((c) => `"${c}"`).join(', ')}`
             : overLimit
               ? `${keyName.length}/${KEY_NAME_MAX_LENGTH} characters — too long`
-              : undefined
+              : reservedName
+                ? `Names starting with "${RESERVED_KEY_NAME_PREFIX}" are reserved for FilOne.`
+                : undefined
         }
       >
         <Input
           id="key-name"
           value={keyName}
-          invalid={invalidChars.length > 0 || overLimit}
+          invalid={invalidChars.length > 0 || overLimit || reservedName}
           onChange={setKeyName}
           placeholder="e.g., Production API Key"
         />

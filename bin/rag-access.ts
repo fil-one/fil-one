@@ -30,7 +30,7 @@ import {
   GetItemCommand,
   PutItemCommand,
 } from '@aws-sdk/client-dynamodb';
-import { execFileSync } from 'node:child_process';
+import { findTable, requireAwsProfile } from './lib/sst-state.ts';
 
 const USAGE = 'Usage: node bin/rag-access.ts <enable|disable|check> <stage> <email>';
 
@@ -69,19 +69,10 @@ if (isFoundationEmail) {
   );
 }
 
-// The AWS SDK resolves credentials from the profile; without it the DynamoDB
-// calls fail late with an unhelpful CredentialsProviderError.
-if (!process.env.AWS_PROFILE) {
-  console.error(
-    'AWS_PROFILE is not set. Log in and activate the profile first (see README.md):\n' +
-      '  aws sso login --profile filone\n' +
-      '  export AWS_PROFILE=filone',
-  );
-  process.exit(1);
-}
+requireAwsProfile();
 
 console.error('Stage:', stage);
-const { tableName, region } = findUserInfoTable(stage);
+const { tableName, region } = findTable(stage, '::UserInfoTableTable');
 console.error(`UserInfoTable: ${tableName} (region ${region})`);
 
 const dynamo = new DynamoDBClient({ region });
@@ -145,42 +136,4 @@ async function allowlistRowExists(): Promise<boolean> {
     new GetItemCommand({ TableName: tableName, Key: key, ConsistentRead: true }),
   );
   return Item !== undefined;
-}
-
-function findUserInfoTable(stage: string): { tableName: string; region: string } {
-  // The SST `UserInfoTable` Dynamo component creates a single underlying table
-  // whose URN ends with `::UserInfoTableTable`.
-  const json = execFileSync('pnpm', ['exec', 'sst', 'state', 'export', '--stage', stage], {
-    encoding: 'utf8',
-    maxBuffer: 256 * 1024 * 1024,
-    stdio: ['ignore', 'pipe', 'inherit'],
-  });
-
-  const resources: Array<{ type: string; urn: string; outputs?: { name?: string; arn?: string } }> =
-    JSON.parse(json).latest?.resources ?? [];
-
-  const table = resources.find(
-    (r) => r.type === 'aws:dynamodb/table:Table' && r.urn.endsWith('::UserInfoTableTable'),
-  );
-
-  if (!table?.outputs?.name) {
-    console.error(`Could not find UserInfoTable in SST state for stage "${stage}".`);
-    process.exit(1);
-  }
-
-  return { tableName: table.outputs.name, region: resolveRegion(stage, table.outputs.arn) };
-}
-
-function resolveRegion(stage: string, tableArn: string | undefined): string {
-  // The deployment home region is fixed for production/staging (see
-  // sst.config.ts); dev stages can deploy anywhere, so read the region from
-  // the table ARN (arn:aws:dynamodb:<region>:<account>:table/<name>).
-  if (stage === 'production' || stage === 'staging') return 'us-east-2';
-
-  const region = tableArn?.split(':')[3];
-  if (!region) {
-    console.error(`Could not parse the region from the table ARN: ${tableArn}`);
-    process.exit(1);
-  }
-  return region;
 }

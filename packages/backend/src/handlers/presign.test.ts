@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SubscriptionStatus, ApiErrorCode } from '@filone/shared';
+import { OrgRole, SubscriptionStatus, ApiErrorCode } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -62,7 +62,7 @@ vi.mock('../lib/s3-presigner.js', () => ({
 }));
 
 import { baseHandler } from './presign.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -76,12 +76,19 @@ function buildPresignEvent(
     subscriptionStatus?: string | null;
     region?: string | null;
     userInfo?: { email?: string; emailVerified?: boolean };
+    role?: OrgRole;
   },
 ) {
   const region = overrides?.region === undefined ? 'eu-west-1' : overrides.region;
   const event = buildEvent({
     body: JSON.stringify(ops),
-    userInfo: { ...USER_INFO, ...overrides?.userInfo },
+    userInfo: {
+      ...USER_INFO,
+      ...overrides?.userInfo,
+      ...(overrides?.role
+        ? { membership: membershipFor(USER_INFO.orgId, USER_INFO.userId, overrides.role) }
+        : {}),
+    },
     ...(region !== null && { queryStringParameters: { region } }),
   });
   // Default to Active so existing tests pass the trial gate.
@@ -571,6 +578,115 @@ describe('presign baseHandler', () => {
 
       expect(result.statusCode).toBe(200);
       expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('us-east-1');
+    });
+  });
+
+  // ── Role enforcement ────────────────────────────────────────────────
+
+  describe('per-operation permissions', () => {
+    // One route serves seven operations, so the requirement is the operation's,
+    // not the route's — the manifest marks it in-handler and lists this mapping.
+    beforeEach(() => {
+      vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockGetPresignedListObjectsUrl.mockResolvedValue('https://s3.example.com/list?signed');
+      mockGetPresignedGetObjectUrl.mockResolvedValue('https://s3.example.com/get?signed');
+      mockGetPresignedHeadObjectUrl.mockResolvedValue('https://s3.example.com/head?signed');
+      mockGetPresignedGetObjectRetentionUrl.mockResolvedValue(
+        'https://s3.example.com/retention?signed',
+      );
+      mockGetPresignedListObjectVersionsUrl.mockResolvedValue(
+        'https://s3.example.com/versions?signed',
+      );
+      mockGetPresignedPutObjectUrl.mockResolvedValue('https://s3.example.com/put?signed');
+      mockGetPresignedDeleteObjectUrl.mockResolvedValue('https://s3.example.com/delete?signed');
+    });
+
+    const READ_OPS = [
+      { op: 'getObject', bucket: 'b', key: 'k' },
+      { op: 'headObject', bucket: 'b', key: 'k' },
+      { op: 'listObjects', bucket: 'b' },
+      { op: 'listObjectVersions', bucket: 'b' },
+      { op: 'getObjectRetention', bucket: 'b', key: 'k' },
+    ];
+
+    it.each(READ_OPS)('lets ReadOnly presign $op', async (op) => {
+      const result = await baseHandler(buildPresignEvent([op], { role: OrgRole.ReadOnly }));
+
+      expect(result.statusCode).toBe(200);
+    });
+
+    it.each([
+      ['putObject', { op: 'putObject', bucket: 'b', key: 'k', fileName: 'f', contentType: 't' }],
+      ['deleteObject', { op: 'deleteObject', bucket: 'b', key: 'k' }],
+    ])('refuses ReadOnly on %s, naming it', async (name, op) => {
+      const result = await baseHandler(buildPresignEvent([op], { role: OrgRole.ReadOnly }));
+
+      expect(result.statusCode).toBe(403);
+      expect(JSON.parse(result.body!)).toStrictEqual({
+        message: `Your role in this organization does not permit ${name}.`,
+        code: ApiErrorCode.FORBIDDEN_ROLE,
+      });
+    });
+
+    it('lets a Member write and delete objects', async () => {
+      const result = await baseHandler(
+        buildPresignEvent(
+          [
+            { op: 'putObject', bucket: 'b', key: 'k', fileName: 'f', contentType: 't' },
+            { op: 'deleteObject', bucket: 'b', key: 'k' },
+          ],
+          { role: OrgRole.Member },
+        ),
+      );
+
+      expect(result.statusCode).toBe(200);
+    });
+
+    it('refuses the whole batch when one operation is denied', async () => {
+      const result = await baseHandler(
+        buildPresignEvent(
+          [
+            { op: 'listObjects', bucket: 'b' },
+            { op: 'deleteObject', bucket: 'b', key: 'k' },
+          ],
+          { role: OrgRole.ReadOnly },
+        ),
+      );
+
+      expect(result.statusCode).toBe(403);
+      // Not one URL of the batch: a partial response is indistinguishable from
+      // the set the caller was entitled to.
+      expect(mockGetPresignedListObjectsUrl).not.toHaveBeenCalled();
+    });
+
+    it('refuses a caller with no membership row', async () => {
+      const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }]);
+      event.requestContext.userInfo.membership = undefined;
+
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(403);
+      expect(JSON.parse(result.body!).code).toBe(ApiErrorCode.NOT_A_MEMBER);
+    });
+
+    it('denies on role before it denies on billing', async () => {
+      // A shareable link on a trial is a 402 and a ReadOnly delete is a 403.
+      // Asking for both gets the 403: what a role permits does not depend on
+      // the plan, and a member refused an operation should hear that rather
+      // than be told to upgrade.
+      const result = await baseHandler(
+        buildPresignEvent(
+          [
+            { op: 'getObject', bucket: 'b', key: 'k', expiresIn: 3600 },
+            { op: 'deleteObject', bucket: 'b', key: 'k' },
+          ],
+          { role: OrgRole.ReadOnly, subscriptionStatus: SubscriptionStatus.Trialing },
+        ),
+      );
+
+      expect(result.statusCode).toBe(403);
+      expect(JSON.parse(result.body!).code).toBe(ApiErrorCode.FORBIDDEN_ROLE);
     });
   });
 });

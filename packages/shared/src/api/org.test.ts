@@ -13,7 +13,7 @@ describe('isOrgRole', () => {
   });
 
   it.each([
-    ['the pre-M1 label that is not a role', 'billing'],
+    ['a word that is not one of the four roles', 'billing'],
     ['a role name in the wrong case', 'Owner'],
     ['a prototype member', 'constructor'],
     ['the empty string', ''],

@@ -127,20 +127,6 @@ describe('resolveDeletionTargets', () => {
     }
   });
 
-  it('carries the member Stripe customer id when there is one', async () => {
-    stubMembers({ orgTable: [memberRow('user-1')] });
-    ddbMock.on(GetItemCommand).callsFake((input) => {
-      if (input.TableName === 'BillingTable') {
-        return { Item: marshall({ stripeCustomerId: 'cus_1' }) };
-      }
-      return { Item: marshall({ sub: 'auth0|one' }) };
-    });
-
-    const { members } = await resolveDeletionTargets(ORG);
-
-    expect(members[0]!.stripeCustomerId).toBe('cus_1');
-  });
-
   // `sub` is a DynamoDB reserved word, so the profile read must alias it or
   // DynamoDB rejects the whole ProjectionExpression and every teardown fails.
   it('aliases the reserved word `sub` in the profile projection', async () => {

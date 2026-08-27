@@ -7,8 +7,9 @@ import type {
   ServiceOutputTypes,
 } from '@aws-sdk/client-dynamodb';
 import type { AwsStub } from 'aws-sdk-client-mock';
-import type { OrgRole } from '@filone/shared';
+import { OrgRole } from '@filone/shared';
 import { OrgKeys } from '../lib/org-membership.js';
+import type { OrgMembership } from '../lib/org-membership.js';
 import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.js';
 
 /** What `mockClient(DynamoDBClient)` returns. */
@@ -46,7 +47,16 @@ export function stubMembershipRead(
     });
 }
 
-/** No membership row — a pre-conversion account, which resolves as Owner. */
+/**
+ * The membership row `authMiddleware` would have attached for a caller in this
+ * role — what a handler test hands to {@link buildEvent} when the role is the
+ * point of the test.
+ */
+export function membershipFor(orgId: string, userId: string, role: OrgRole): OrgMembership {
+  return { orgId, userId, role, joinedAt: STUB_JOINED_AT, source: 'signup' };
+}
+
+/** No membership row — the caller is not a member, and `authorize` refuses. */
 export function stubAbsentMembershipRead(
   ddbMock: DynamoMock,
   { orgId, userId }: { orgId: string; userId: string },
@@ -90,9 +100,22 @@ type NormalizedHeaderEvent = {
   rawHeaders: Record<string, string>;
 };
 
-type BuildEventUserInfo = Omit<UserInfo, 'emailVerified' | 'sub'> & {
+/**
+ * How a test names the caller's membership.
+ *
+ * `'absent'` rather than `undefined`, because a conditional spread
+ * (`...(role ? { membership } : {})`) turns "no membership" into "key not
+ * present", and a fixture that reads absence off the key would then hand a
+ * denial test the default Owner and pass for the wrong reason. The value has to
+ * be said out loud.
+ */
+export const NO_MEMBERSHIP = 'absent';
+
+type BuildEventUserInfo = Omit<UserInfo, 'emailVerified' | 'sub' | 'membership'> & {
   emailVerified?: boolean;
   sub?: string;
+  /** The caller's row, or {@link NO_MEMBERSHIP} for a caller who has none. */
+  membership?: OrgMembership | typeof NO_MEMBERSHIP;
 };
 
 interface BuildEventProps {
@@ -103,6 +126,33 @@ interface BuildEventProps {
   requestContext?: Partial<APIGatewayProxyEventV2['requestContext']>;
   rawPath?: string;
   method?: string;
+}
+
+/**
+ * The `userInfo` a handler actually sees, which after enforcement always
+ * carries a membership: a request whose caller has no row never reaches a
+ * handler, because `authorize` refused it. Say nothing about membership and the
+ * caller is an Owner — the role every existing account holds — so a test about
+ * a handler's own logic says nothing about roles. Pass
+ * {@link NO_MEMBERSHIP} to describe a caller with no row.
+ *
+ * That the gate is installed at all is not left to these fixtures: the manifest
+ * coverage test proves every declared route composes `authorize`, and
+ * authorize's own tests prove what each role may do.
+ */
+function buildUserInfo(userInfo: BuildEventUserInfo): UserInfo {
+  const { membership, ...rest } = userInfo;
+  const resolved =
+    membership === undefined
+      ? membershipFor(userInfo.orgId, userInfo.userId, OrgRole.Owner)
+      : membership;
+
+  return {
+    sub: 'auth0|test-sub-id',
+    ...rest,
+    emailVerified: userInfo.emailVerified ?? true,
+    ...(resolved === NO_MEMBERSHIP ? {} : { membership: resolved }),
+  };
 }
 
 export function buildEvent(
@@ -140,15 +190,7 @@ export function buildEvent(
       stage: '$default',
       time: '01/Jan/2024:00:00:00 +0000',
       timeEpoch: 1704067200000,
-      ...(props?.userInfo
-        ? {
-            userInfo: {
-              sub: 'auth0|test-sub-id',
-              ...props.userInfo,
-              emailVerified: props.userInfo.emailVerified ?? true,
-            },
-          }
-        : {}),
+      ...(props?.userInfo ? { userInfo: buildUserInfo(props.userInfo) } : {}),
       ...props?.requestContext,
     },
     isBase64Encoded: false,

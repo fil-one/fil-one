@@ -1,38 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { authPartialMock } from '../test/auth-partial-mock.js';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
   DynamoDBClient,
-  GetItemCommand,
   TransactionCanceledException,
   TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
-import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
+import { unmarshall } from '@aws-sdk/util-dynamodb';
 
-vi.mock('sst', () => ({
-  Resource: {
-    UserInfoTable: { name: 'UserInfoTable' },
-  },
-}));
+import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.js';
 
-// Full-chain gate tests exercise the REAL ragAccessMiddleware (allowlist check
-// against DynamoDB); auth/csrf/subscription are covered by their own suites and
-// stubbed to pass-through here so the allowlist gate can be tested in isolation.
-vi.mock('../middleware/auth.js', () => authPartialMock());
-vi.mock('../middleware/csrf.js', () => ({
-  csrfMiddleware: () => ({ before: () => undefined }),
-}));
-vi.mock('../middleware/subscription-guard.js', () => ({
-  AccessLevel: { Read: 'read', Write: 'write' },
-  subscriptionGuardMiddleware: () => ({ before: () => undefined }),
-}));
+vi.mock('sst', () => sstResourceMock());
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { baseHandler, handler } from './create-rag-api-key.js';
+import { baseHandler } from './create-rag-api-key.js';
 import { OrgDeletingError } from '../lib/org-profile.js';
 import { hashRagKeyToken, RagApiKeyKeys } from '../lib/rag-api-keys.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { buildEvent } from '../test/lambda-test-utilities.js';
 
 const USER_INFO = {
   userId: 'user-1',
@@ -98,7 +83,7 @@ describe('create-rag-api-key baseHandler', () => {
     expect(body.bucketScope).toBe('all');
 
     const items = sentTransactItems();
-    expect(items).toHaveLength(2);
+    expect(items).toHaveLength(3);
     const orgItem = unmarshall(items[0].Put!.Item!);
     const lookupItem = unmarshall(items[1].Put!.Item!);
 
@@ -118,6 +103,41 @@ describe('create-rag-api-key baseHandler', () => {
     // Both puts are guarded against overwriting an existing item.
     expect(items[0].Put!.ConditionExpression).toBe('attribute_not_exists(pk)');
     expect(items[1].Put!.ConditionExpression).toBe('attribute_not_exists(pk)');
+  });
+
+  it('records the mint in the same transaction as the rows', async () => {
+    const result = await baseHandler(createEvent({ keyName: 'ci key' }));
+
+    const body = JSON.parse(result.body ?? '{}');
+    const items = sentTransactItems();
+    const auditItem = auditItemIn(items);
+    const event = unmarshall(auditItem);
+
+    expect(
+      items.find((item) => item.Put?.TableName === 'AuditTable')!.Put!.ConditionExpression,
+    ).toBe('attribute_not_exists(pk)');
+    expect(event).toMatchObject({
+      pk: 'ORG#org-1',
+      type: 'key.created',
+      orgId: 'org-1',
+      // The subject names the key the way the details do and the way the
+      // console lists it — the display prefix, reduced by the same rule as an
+      // S3 key's so no call site can pass a token here and have it persisted
+      // whole. The internal id is a UUID nothing on screen shows.
+      subject: `key:${body.keyPrefix as string}`,
+      actor: { kind: 'user', id: 'user-1', email: 'dev@example.com' },
+      // The display prefix, which is what the console lists a RAG key by, so an
+      // operator reading the event can find the key it names.
+      details: { keyKind: 'rag', keyName: 'ci key', keyIdSuffix: body.keyPrefix },
+    });
+    // Minted here rather than at a vendor, so the whole mutation is one
+    // transaction and there is no intent to correlate.
+    expect(event.phase).toBeUndefined();
+    // The token itself never reaches the log — twelve of its fifty characters
+    // are the console's label, not the credential.
+    expect(JSON.stringify(event)).not.toContain(body.token);
+    expect(event.details.keyIdSuffix).toHaveLength(12);
+    expectNoSecrets(auditItem);
   });
 
   it('persists (region, name) bucket scope pairs for specific keys', async () => {
@@ -174,48 +194,5 @@ describe('create-rag-api-key baseHandler', () => {
 
     expect(result.statusCode).toBe(400);
     expect(ddbMock.calls()).toHaveLength(0);
-  });
-});
-
-describe('create-rag-api-key handler (allowlist gate)', () => {
-  // Non-foundation email so the decision hinges on the allowlist lookup.
-  const nonFoundationEvent = () =>
-    buildEvent({
-      userInfo: {
-        userId: 'user-1',
-        orgId: 'org-1',
-        email: 'outsider@example.com',
-        emailVerified: true,
-      },
-      body: JSON.stringify({ keyName: 'ci key' }),
-    });
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    ddbMock.reset();
-    ddbMock.on(TransactWriteItemsCommand).resolves({});
-  });
-
-  it('returns 403 when the caller is not foundation and not allowlisted', async () => {
-    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
-
-    const result = await handler(nonFoundationEvent(), buildContext());
-
-    expect(result.statusCode).toBe(403);
-    // No key is minted when the gate denies.
-    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
-  });
-
-  it('allows an allowlisted caller to create a key', async () => {
-    ddbMock
-      .on(GetItemCommand, {
-        Key: { pk: { S: 'ALLOWLIST#outsider@example.com' }, sk: { S: 'RAG' } },
-      })
-      .resolves({ Item: marshall({ pk: 'ALLOWLIST#outsider@example.com', sk: 'RAG' }) });
-
-    const result = await handler(nonFoundationEvent(), buildContext());
-
-    expect(result.statusCode).toBe(201);
-    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
   });
 });

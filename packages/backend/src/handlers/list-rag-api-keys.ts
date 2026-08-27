@@ -6,11 +6,13 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ListRagApiKeysResponse, RagApiKey, RagKeyBucketRef } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import { keyScope, withinScope } from '../lib/key-scope.js';
 import { RagApiKeyKeys } from '../lib/rag-api-keys.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { authorize } from '../middleware/authorize.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { ragAccessMiddleware } from '../middleware/rag-access.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
@@ -31,11 +33,15 @@ export async function baseHandler(
     }),
   );
 
+  // A caller holding only `keys.manage_own` sees the keys they created.
+  const scope = keyScope(event);
+
   // Mapped field-by-field on purpose: the stored record carries `tokenHash`,
   // which must never reach a response.
   const keys: RagApiKey[] = (result.Items ?? [])
-    .map((item) => {
-      const record = unmarshall(item);
+    .map((item) => unmarshall(item))
+    .filter((record) => withinScope(scope, { createdBy: record.createdBy as string | undefined }))
+    .map((record) => {
       const bucketScope = record.bucketScope as RagApiKey['bucketScope'];
       return {
         id: (record.sk as string).replace(RagApiKeyKeys.orgSkPrefix(), ''),
@@ -46,6 +52,9 @@ export async function baseHandler(
           ? { buckets: record.buckets as RagKeyBucketRef[] | undefined }
           : {}),
         createdAt: record.createdAt as string,
+        // Shipped so the console can gate the per-row revoke button on the same
+        // rule the delete route enforces.
+        ...(record.createdBy ? { createdBy: record.createdBy as string } : {}),
         ...(record.creatorEmail ? { creatorEmail: record.creatorEmail as string } : {}),
         ...(record.lastUsedAt ? { lastUsedAt: record.lastUsedAt as string } : {}),
       };
@@ -58,6 +67,7 @@ export async function baseHandler(
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
+  .use(authorize('keys.manage_own'))
   .use(subscriptionGuardMiddleware(AccessLevel.Read))
   .use(ragAccessMiddleware())
   .use(errorHandlerMiddleware());

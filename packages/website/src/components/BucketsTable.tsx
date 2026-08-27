@@ -21,6 +21,7 @@ import { BucketActionMenu } from './BucketActionMenu';
 import { BucketStorageLine } from './BucketStorageLine';
 import { useToast } from './Toast';
 import { FILONE_STAGE } from '../env.js';
+import { useHasPermission } from '../lib/use-permissions.js';
 import { useCopyToClipboard } from '../lib/use-copy-to-clipboard.js';
 import { formatDate } from '../lib/time.js';
 import {
@@ -144,6 +145,7 @@ function BucketRowActions({
   const navigate = useNavigate();
   const { copy } = useCopyToClipboard();
   const { toast } = useToast();
+  const mayDelete = useHasPermission('buckets.delete');
 
   const copyValue = (label: string, value: string) => {
     void copy(value).then(() => toast.success(`${label} copied`));
@@ -172,11 +174,19 @@ function BucketRowActions({
           icon: LinkSimpleIcon,
           onSelect: () => copyValue('S3 endpoint', getS3Endpoint(region as S3Region, FILONE_STAGE)),
         },
-        {
-          label: 'Delete bucket',
-          icon: TrashIcon,
-          onSelect: () => onDelete(bucket.bucketName),
-        },
+        // Deletion is `buckets.delete`: Owner and Admin only. The item is
+        // absent for everyone else rather than disabled — a disabled Delete
+        // invites a support question about a capability the member will
+        // never have.
+        ...(mayDelete
+          ? [
+              {
+                label: 'Delete bucket',
+                icon: TrashIcon,
+                onSelect: () => onDelete(bucket.bucketName),
+              },
+            ]
+          : []),
       ]}
     />
   );
