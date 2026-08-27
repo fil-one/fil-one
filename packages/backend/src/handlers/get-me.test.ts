@@ -91,7 +91,24 @@ function ownerTail(orgName: string) {
     role: OrgRole.Owner,
     permissions: [...ROLE_PERMISSIONS[OrgRole.Owner]],
     memberships: [{ orgId: MOCK_ORG_ID, orgName, role: OrgRole.Owner }],
+    orgsBeta: false,
   };
+}
+
+/**
+ * Either row that grants the organizations beta, absent or present.
+ *
+ * Both are stubbed on every test so the whole-body assertions read a decided
+ * `orgsBeta` rather than whatever an unstubbed `GetItemCommand` returns.
+ */
+function orgsBetaRow(pk: string, exists: boolean) {
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: pk }, sk: { S: 'ORGS_BETA' } },
+      ConsistentRead: true,
+    })
+    .resolves(exists ? { Item: { pk: { S: pk }, sk: { S: 'ORGS_BETA' } } } : { Item: undefined });
 }
 
 // ---------------------------------------------------------------------------
@@ -133,6 +150,14 @@ describe('GET /api/me handler', () => {
         Key: { pk: { S: `ALLOWLIST#${MOCK_EMAIL}` }, sk: { S: 'RAG' } },
         ConsistentRead: true,
       })
+      .resolves({ Item: undefined });
+
+    // Default: nobody is in the organizations beta. Matched on the sort key
+    // alone, because both grant rows are read on every call and a test that
+    // moves the caller's email or active org would otherwise leave one of them
+    // unstubbed — which reads as a thrown handler, not as a denied flag.
+    ddbMock
+      .on(GetItemCommand, { TableName: 'UserInfoTable', Key: { sk: { S: 'ORGS_BETA' } } })
       .resolves({ Item: undefined });
 
     // Default membership: sole Owner of the one org, as every account is today.
@@ -343,6 +368,65 @@ describe('GET /api/me handler', () => {
     });
   });
 
+  describe('the active org it echoes', () => {
+    const SECOND_ORG = '22222222-2222-2222-2222-222222222222';
+
+    function eventNaming(orgId: string) {
+      const event = authenticatedEvent();
+      event.headers['x-org-id'] = orgId;
+      return event;
+    }
+
+    function resolvedOrgId(result: unknown): string {
+      return (JSON.parse((result as { body: string }).body) as { orgId: string }).orgId;
+    }
+
+    it('echoes the org the header named', async () => {
+      profileResolves();
+      profileResolves(SECOND_ORG, 'Second Corp');
+      stubMembershipRead(ddbMock, {
+        orgId: SECOND_ORG,
+        userId: MOCK_USER_ID,
+        role: OrgRole.Admin,
+      });
+
+      const result = await handler(eventNaming(SECOND_ORG), buildContext());
+
+      // The console compares this against its own stash, so it has to name the
+      // org the request was actually served in.
+      expect(resolvedOrgId(result)).toBe(SECOND_ORG);
+    });
+
+    it('echoes the caller’s own org when the named one has no membership row', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      profileResolves();
+      profileResolves(SECOND_ORG, 'Second Corp');
+      stubAbsentMembershipRead(ddbMock, { orgId: SECOND_ORG, userId: MOCK_USER_ID });
+
+      const result = await handler(eventNaming(SECOND_ORG), buildContext());
+
+      // A stale stash — removed from the org, or the org is gone. This route
+      // answers instead of refusing, because the mismatch it reports is what
+      // makes the console clear the stash. Every other route 403s and sends the
+      // console here.
+      expect(resolvedOrgId(result)).toBe(MOCK_ORG_ID);
+    });
+
+    it('echoes the caller’s own org when the header is not an organization id', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      profileResolves();
+
+      const result = await handler(eventNaming('not-a-uuid'), buildContext());
+
+      // The 400 every other route answers would leave the console holding a
+      // stash it cannot read and no endpoint willing to tell it so. Answering
+      // under the caller's own org echoes an org id the stash disagrees with,
+      // which is what clears it.
+      expect(result).toMatchObject({ statusCode: 200 });
+      expect(resolvedOrgId(result)).toBe(MOCK_ORG_ID);
+    });
+  });
+
   describe('role and memberships', () => {
     function parseBody(result: unknown) {
       return JSON.parse((result as { body: string }).body) as {
@@ -395,20 +479,19 @@ describe('GET /api/me handler', () => {
       ]);
     });
 
-    it('reports Owner when no membership row exists yet (pre-conversion accounts)', async () => {
+    it('reports no role at all when no membership row exists', async () => {
       profileResolves();
       stubAbsentMembershipRead(ddbMock, { orgId: MOCK_ORG_ID, userId: MOCK_USER_ID });
       stubMembershipList(ddbMock, { userId: MOCK_USER_ID, orgs: [] });
 
       const body = parseBody(await handler(authenticatedEvent(), buildContext()));
 
-      expect(body.role).toBe(OrgRole.Owner);
-      expect(body.permissions).toStrictEqual([...ROLE_PERMISSIONS[OrgRole.Owner]]);
-      // The active org is in the list even before its inverse item exists —
-      // a role naming an org the memberships omit would contradict itself.
-      expect(body.memberships).toStrictEqual([
-        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', role: OrgRole.Owner },
-      ]);
+      // /api/me is a `self` route and answers without a role gate, which is
+      // what lets the console tell a caller they are not a member rather than
+      // showing them an empty console. Every gated route refuses them.
+      expect(body.role).toBeUndefined();
+      expect(body.permissions).toStrictEqual([]);
+      expect(body.memberships).toStrictEqual([]);
     });
 
     it('never 500s when another org profile cannot be read', async () => {
@@ -509,6 +592,62 @@ describe('GET /api/me handler', () => {
       const result = await handler(authenticatedEvent(), buildContext());
 
       expect(parseBody(result).ragAccess).toBe(false);
+    });
+  });
+
+  describe('orgsBeta', () => {
+    function parseBody(result: unknown): { orgsBeta: boolean } {
+      return JSON.parse((result as { body: string }).body);
+    }
+
+    it('is false when neither the caller nor the org holds the flag', async () => {
+      profileResolves();
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).orgsBeta).toBe(false);
+    });
+
+    it('is true from the caller’s own allowlist row', async () => {
+      profileResolves();
+      orgsBetaRow(`ALLOWLIST#${MOCK_EMAIL}`, true);
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).orgsBeta).toBe(true);
+    });
+
+    it('is true from the active org’s row, for a caller who holds nothing', async () => {
+      profileResolves();
+      orgsBetaRow(`ORG#${MOCK_ORG_ID}`, true);
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).orgsBeta).toBe(true);
+    });
+
+    it('ignores an allowlist row when the email is unverified', async () => {
+      mockJwtVerify.mockResolvedValue({
+        payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: false },
+      });
+      profileResolves();
+      orgsBetaRow(`ALLOWLIST#${MOCK_EMAIL}`, true);
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).orgsBeta).toBe(false);
+    });
+
+    it('grants the org row even when the caller’s email is unverified', async () => {
+      mockJwtVerify.mockResolvedValue({
+        payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: false },
+      });
+      profileResolves();
+      orgsBetaRow(`ORG#${MOCK_ORG_ID}`, true);
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).orgsBeta).toBe(true);
     });
   });
 });

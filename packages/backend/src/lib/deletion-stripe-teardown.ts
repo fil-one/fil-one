@@ -1,4 +1,5 @@
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import type Stripe from 'stripe';
 import { getDynamoClient } from './ddb-client.js';
@@ -6,9 +7,16 @@ import type { DeletionMember } from './deletion-record.js';
 import { reportOrgUsage } from './org-usage-report.js';
 import { syncTenantStatusInProvisionedRegions } from './region-helpers.js';
 import { getStripeClient, isStripeResourceMissing } from './stripe-client.js';
+import { readSubscription, SubscriptionKeys } from './subscription-store.js';
+import type { SubscriptionRecord } from './dynamo-records.js';
+
+const LOG = '[deletion-stripe]';
 
 /** Statuses with nothing left to cancel or invoice. */
 const SETTLED_STATUSES = new Set<Stripe.Subscription.Status>(['canceled', 'incomplete_expired']);
+
+/** What the teardown reads off the org's row: the customer, and the period to bill. */
+const TEARDOWN_PROJECTION = 'stripeCustomerId, subscriptionId, currentPeriodStart';
 
 /**
  * Disables the tenants, bills what is owed, collects it once, then deletes the
@@ -16,38 +24,114 @@ const SETTLED_STATUSES = new Set<Stripe.Subscription.Status>(['canceled', 'incom
  * card details and prevents any further operations", taking email and metadata
  * with it — so there is no field-clearing or detach step.
  *
+ * One customer per org, read off the org's subscription row. Membership means
+ * riding the org's billing, so the members have no Stripe objects of their own
+ * to cancel and the pass deletes one customer however many members there are.
+ *
+ * When that row names no customer the pass falls back to the legacy
+ * `CUSTOMER#{userId}` rows of the members whose account this deletion ends. The
+ * backfill leaves exactly that state behind: it never re-keys a legacy row that
+ * records no orgId, and its collision handling keeps one legacy row per org. A
+ * member whose account ends here belongs to this org alone and it is their own
+ * personal org, so their legacy row is this org's subscription.
+ *
  * The disable comes first so the meter is not moving underneath the figure the
  * customer is billed for. A request already in flight when it lands can still add
  * its last writes, and that residue goes unbilled; it is bounded by a request
  * timeout measured in seconds.
  *
  * Every step treats a missing or already-deleted customer as success, because a
- * deletion triggered by the customer's deletion in Stripe finds it already gone.
+ * deletion triggered by the customer's deletion in Stripe finds it already gone,
+ * and so does every re-drive after the first.
  */
 export async function tearDownStripe(orgId: string, members: DeletionMember[]): Promise<void> {
   await syncTenantStatusInProvisionedRegions(orgId, 'disabled');
 
-  for (const { userId, stripeCustomerId } of members) {
-    // Absent is legal — an org that never onboarded.
-    if (stripeCustomerId) await tearDownCustomer(orgId, userId, stripeCustomerId);
+  // Consistent: the row may have been written moments earlier, and a stale read
+  // that missed the customer would leave a live subscription behind.
+  const subscription = await readSubscription(orgId, {
+    consistentRead: true,
+    projectionExpression: TEARDOWN_PROJECTION,
+  });
+
+  const customerId = subscription?.stripeCustomerId;
+  if (customerId) {
+    console.log(`${LOG} tearing down the customer named on the org row`, { orgId, customerId });
+    await tearDownCustomer(orgId, customerId, subscription);
+    return;
+  }
+
+  await tearDownLegacyCustomers(orgId, members);
+}
+
+/**
+ * The fallback path, over the rows the re-key never reached.
+ *
+ * Distinct customers only, and one teardown each: two members of one org share
+ * a customer whenever their rows were copied from the same account.
+ *
+ * A no-op when neither the org row nor any legacy row names a customer, which is
+ * what an org that never onboarded looks like, and what every re-drive after the
+ * first sees once the scrub has run.
+ */
+async function tearDownLegacyCustomers(orgId: string, members: DeletionMember[]): Promise<void> {
+  const byCustomer = new Map<string, SubscriptionRecord>();
+  for (const { userId, deleteIdentity } of members) {
+    if (!deleteIdentity) continue;
+    const row = await readLegacySubscription(userId);
+    if (!row?.stripeCustomerId) continue;
+    if (!byCustomer.has(row.stripeCustomerId)) byCustomer.set(row.stripeCustomerId, row);
+  }
+
+  if (byCustomer.size === 0) {
+    console.log(`${LOG} no Stripe customer on the org row or any legacy row`, { orgId });
+    return;
+  }
+
+  console.log(`${LOG} the org row names no customer, tearing down its legacy rows`, {
+    orgId,
+    customerIds: [...byCustomer.keys()],
+  });
+  for (const [customerId, row] of byCustomer) {
+    await tearDownCustomer(orgId, customerId, row);
   }
 }
 
-async function tearDownCustomer(orgId: string, userId: string, customerId: string): Promise<void> {
+/** `CUSTOMER#{userId}` — the pre-re-key address of this member's subscription. */
+async function readLegacySubscription(userId: string): Promise<SubscriptionRecord | undefined> {
+  const { Item } = await getDynamoClient().send(
+    new GetItemCommand({
+      TableName: Resource.BillingTable.name,
+      Key: { pk: { S: SubscriptionKeys.legacyPk(userId) }, sk: { S: SubscriptionKeys.sk() } },
+      ProjectionExpression: TEARDOWN_PROJECTION,
+      ConsistentRead: true,
+    }),
+  );
+  return Item ? (unmarshall(Item) as SubscriptionRecord) : undefined;
+}
+
+async function tearDownCustomer(
+  orgId: string,
+  customerId: string,
+  subscription: SubscriptionRecord,
+): Promise<void> {
   const stripe = getStripeClient();
 
   const subscriptions = await cancellableSubscriptions(customerId);
 
   // Before the cancel: a meter event after cancellation lands on no invoice.
-  await reportOutstandingUsage(orgId, userId, customerId);
+  await reportOutstandingUsage(orgId, customerId, subscription);
 
   // customers.del cancels subscriptions too, but silently and without an
   // invoice — this explicit cancel is what makes the usage billable.
   const paymentMethodIds: string[] = [];
-  for (const subscription of subscriptions) {
-    paymentMethodIds.push(...defaultPaymentMethodOf(subscription));
+  for (const stripeSubscription of subscriptions) {
+    paymentMethodIds.push(...defaultPaymentMethodOf(stripeSubscription));
     try {
-      await stripe.subscriptions.cancel(subscription.id, { invoice_now: true, prorate: false });
+      await stripe.subscriptions.cancel(stripeSubscription.id, {
+        invoice_now: true,
+        prorate: false,
+      });
     } catch (err) {
       if (!isStripeResourceMissing(err)) throw err;
     }
@@ -70,28 +154,19 @@ async function tearDownCustomer(orgId: string, userId: string, customerId: strin
  */
 async function reportOutstandingUsage(
   orgId: string,
-  userId: string,
   stripeCustomerId: string,
+  subscription: SubscriptionRecord,
 ): Promise<void> {
   const meterEventName = process.env.STRIPE_METER_EVENT_NAME;
   if (!meterEventName) throw new Error('STRIPE_METER_EVENT_NAME env var is not set');
 
-  try {
-    const { Item } = await getDynamoClient().send(
-      new GetItemCommand({
-        TableName: Resource.BillingTable.name,
-        Key: { pk: { S: `CUSTOMER#${userId}` }, sk: { S: 'SUBSCRIPTION' } },
-        ProjectionExpression: 'subscriptionId, currentPeriodStart',
-        ConsistentRead: true,
-      }),
-    );
-    const subscriptionId = Item?.subscriptionId?.S;
-    const currentPeriodStart = Item?.currentPeriodStart?.S;
-    if (!subscriptionId || !currentPeriodStart) {
-      console.warn('[deletion-stripe] no billing period to report', { orgId, stripeCustomerId });
-      return;
-    }
+  const { subscriptionId, currentPeriodStart } = subscription;
+  if (!subscriptionId || !currentPeriodStart) {
+    console.warn(`${LOG} no billing period to report`, { orgId, stripeCustomerId });
+    return;
+  }
 
+  try {
     await reportOrgUsage({
       orgId,
       subscriptionId,
@@ -101,7 +176,7 @@ async function reportOutstandingUsage(
       meterEventName,
     });
   } catch (err) {
-    console.error('[deletion-stripe] final usage report failed; continuing to cancel', {
+    console.error(`${LOG} final usage report failed; continuing to cancel`, {
       orgId,
       stripeCustomerId,
       error: err,
@@ -148,7 +223,7 @@ async function collectFinalInvoices(
       await collectInvoice(draft.id!, paymentMethod);
     }
   } catch (err) {
-    console.error('[deletion-stripe] final invoice collection failed; continuing to delete', {
+    console.error(`${LOG} final invoice collection failed; continuing to delete`, {
       customerId,
       error: err,
     });

@@ -7,11 +7,9 @@ const entries = ROUTE_MANIFEST;
 
 describe('ROUTE_MANIFEST', () => {
   it('lists every registered route once', () => {
-    // 38 routes are registered via addRoute in sst.config.ts. The enforcement
-    // PR adds the backend completeness test that walks src/handlers/; this pins
-    // the count so a route added to the config without a manifest entry is
-    // visible here too.
-    expect(entries).toHaveLength(38);
+    // Completeness is the backend's manifest coverage test, which walks
+    // src/handlers/. What this adds is uniqueness: two entries for one method
+    // and path would let a route be declared twice with different requirements.
     const keys = entries.map((route) => `${route.method} ${route.path}`);
     expect(new Set(keys).size).toBe(keys.length);
   });
@@ -49,8 +47,8 @@ describe('ROUTE_MANIFEST', () => {
     expect(bearerWithoutCookieGate).toStrictEqual([]);
   });
 
-  it('requires only declared permissions or the two in-registry markers', () => {
-    const allowed = new Set<string>([...PERMISSIONS, 'self', 'in-handler']);
+  it('requires only declared permissions or the in-registry markers', () => {
+    const allowed = new Set<string>([...PERMISSIONS, 'self', 'in-handler', 'invite-token']);
     for (const route of entries) {
       if (route.requires !== undefined) {
         expect(allowed.has(route.requires)).toBe(true);
@@ -71,26 +69,39 @@ describe('ROUTE_MANIFEST', () => {
   });
 
   it('checks the routes whose requirement depends on the request in their handlers', () => {
-    // presign serves seven operations through one route; update-profile can
-    // rename the org; set-bucket-rag-enablement creates or discards an index
-    // depending on the flag; create-access-key caps the new key at the
-    // creator's own authority.
+    // presign serves seven operations through one route, and
+    // set-bucket-rag-enablement creates or discards an index depending on the
+    // flag. Neither has a permission the chain could name.
     const inHandler = entries
       .filter((route) => route.requires === 'in-handler')
       .map((route) => route.handler);
-    expect(inHandler.sort()).toStrictEqual([
+    expect(inHandler.sort()).toStrictEqual(['presign', 'set-bucket-rag-enablement']);
+  });
+
+  it('names a declared permission alongside every in-handler cap', () => {
+    // A cap narrows a requirement; it does not replace one. create-access-key
+    // gates on `keys.create` in the chain and caps the new key at the creator's
+    // own authority in the handler; the member and invitation routes gate on
+    // `members.manage` and cap the reach at the caller's own role. The manifest
+    // states both halves in each case.
+    const capped = entries.filter((route) => route.capsInHandler);
+    expect(capped.map((route) => route.handler)).toStrictEqual([
       'create-access-key',
-      'presign',
-      'set-bucket-rag-enablement',
-      'update-profile',
+      'update-member-role',
+      'remove-member',
+      'create-invitation',
+      'revoke-invitation',
     ]);
+    for (const route of capped) {
+      expect(new Set<string>(PERMISSIONS).has(route.requires as string)).toBe(true);
+    }
   });
 
   it('keeps the self-service marker on the caller-only routes', () => {
-    // 'self' waives the role gate, so it must never reach a route that touches
-    // org state: every route carrying it is /api/me itself or lives under
-    // /api/me/ or /api/mfa/. Matching the bare prefix would let /api/members
-    // through.
+    // 'self' waives the org gate entirely, so it must never reach a route that
+    // touches org state: every route carrying it is /api/me itself or lives
+    // under /api/me/ or /api/mfa/. Matching the bare prefix would let
+    // /api/members through.
     const isSelfServicePath = (path: string) =>
       path === '/api/me' || path.startsWith('/api/me/') || path.startsWith('/api/mfa/');
     const offOrg = entries
@@ -98,5 +109,15 @@ describe('ROUTE_MANIFEST', () => {
       .filter((route) => !isSelfServicePath(route.path))
       .map((route) => route.path);
     expect(offOrg).toStrictEqual([]);
+  });
+
+  it('reserves the invite-token requirement for accepting an invitation', () => {
+    // One route, and it must stay one: the requirement waives the org gate for
+    // a caller who is not a member yet, so anything else carrying it would be
+    // an org route with no gate at all.
+    const tokenGated = entries.filter((route) => route.requires === 'invite-token');
+
+    expect(tokenGated.map((route) => route.handler)).toStrictEqual(['accept-invitation']);
+    expect(tokenGated[0].category).toBe('authenticated');
   });
 });

@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { authPartialMock } from '../test/auth-partial-mock.js';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 
 vi.mock('sst', () => ({
@@ -10,18 +9,11 @@ vi.mock('sst', () => ({
   },
 }));
 
-// Full-chain gate tests exercise the REAL ragAccessMiddleware (allowlist check);
-// auth/subscription are stubbed to pass-through so the gate is tested in isolation.
-vi.mock('../middleware/auth.js', () => authPartialMock());
-vi.mock('../middleware/subscription-guard.js', () => ({
-  AccessLevel: { Read: 'read', Write: 'write' },
-  subscriptionGuardMiddleware: () => ({ before: () => undefined }),
-}));
-
 const ddbMock = mockClient(DynamoDBClient);
 
-import { baseHandler, handler } from './list-rag-api-keys.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { OrgRole } from '@filone/shared';
+import { baseHandler } from './list-rag-api-keys.js';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1', emailVerified: true };
 
@@ -38,6 +30,13 @@ function keyItem(overrides: Record<string, unknown> = {}) {
     createdAt: '2026-07-01T00:00:00Z',
     ...overrides,
   });
+}
+
+/** A row from before `createdBy` was written — the attribute is simply absent. */
+function unattributedKeyItem() {
+  const item = keyItem({ sk: 'RAGKEY#key-legacy', keyName: 'legacy' });
+  delete item.createdBy;
+  return item;
 }
 
 describe('list-rag-api-keys baseHandler', () => {
@@ -84,6 +83,8 @@ describe('list-rag-api-keys baseHandler', () => {
       keyPrefix: 'sk_rag_AbC12',
       bucketScope: 'all',
       createdAt: '2026-07-01T00:00:00Z',
+      // Shipped so the console can gate the per-row revoke button.
+      createdBy: 'user-1',
       creatorEmail: 'dev@example.com',
       lastUsedAt: '2026-07-05T00:00:00Z',
     });
@@ -102,43 +103,34 @@ describe('list-rag-api-keys baseHandler', () => {
   });
 });
 
-describe('list-rag-api-keys handler (allowlist gate)', () => {
-  const nonFoundationEvent = () =>
-    buildEvent({
-      userInfo: {
-        userId: 'user-1',
-        orgId: 'org-1',
-        email: 'outsider@example.com',
-        emailVerified: true,
-      },
-    });
-
+describe('who sees which RAG keys', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
-    ddbMock.on(QueryCommand).resolves({ Items: [] });
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        keyItem({ sk: 'RAGKEY#key-own', keyName: 'mine', createdBy: 'user-1' }),
+        keyItem({ sk: 'RAGKEY#key-other', keyName: 'theirs', createdBy: 'user-2' }),
+        // Minted before attribution shipped: nobody can claim it.
+        unattributedKeyItem(),
+      ],
+    });
   });
 
-  it('returns 403 when the caller is not foundation and not allowlisted', async () => {
-    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+  async function keyNamesFor(role: OrgRole) {
+    const result = await baseHandler(
+      buildEvent({
+        userInfo: { ...USER_INFO, membership: membershipFor('org-1', 'user-1', role) },
+      }),
+    );
+    return (JSON.parse(result.body ?? '{}').keys as { keyName: string }[]).map((k) => k.keyName);
+  }
 
-    const result = await handler(nonFoundationEvent(), buildContext());
-
-    expect(result.statusCode).toBe(403);
-    // The org's keys are never queried once the gate denies.
-    expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(0);
+  it.each([OrgRole.Owner, OrgRole.Admin])('shows %s every key in the org', async (role) => {
+    expect((await keyNamesFor(role)).sort()).toStrictEqual(['legacy', 'mine', 'theirs']);
   });
 
-  it('allows an allowlisted caller to list keys', async () => {
-    ddbMock
-      .on(GetItemCommand, {
-        Key: { pk: { S: 'ALLOWLIST#outsider@example.com' }, sk: { S: 'RAG' } },
-      })
-      .resolves({ Item: marshall({ pk: 'ALLOWLIST#outsider@example.com', sk: 'RAG' }) });
-
-    const result = await handler(nonFoundationEvent(), buildContext());
-
-    expect(result.statusCode).toBe(200);
-    expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(1);
+  it('shows a Member only the keys they created', async () => {
+    expect(await keyNamesFor(OrgRole.Member)).toStrictEqual(['mine']);
   });
 });

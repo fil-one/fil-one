@@ -115,4 +115,30 @@ describe('buildAuth0AuthorizeUrl', () => {
     expect(params.get('audience')).toBe('https://api.test.com/v1');
     expect(params.get('login_hint')).toBe('user+tag@example.com');
   });
+
+  it('carries max_age when the caller asks for one, including zero', () => {
+    // A step-up sends `max_age=0`; dropped as falsy it would silently become an
+    // ordinary login that reuses the existing Auth0 session.
+    expect(
+      parseUrl(buildAuth0AuthorizeUrl({ ...baseOptions, maxAge: 0 })).searchParams.get('max_age'),
+    ).toBe('0');
+    expect(
+      parseUrl(buildAuth0AuthorizeUrl({ ...baseOptions, maxAge: 300 })).searchParams.get('max_age'),
+    ).toBe('300');
+  });
+
+  it('omits max_age and organization when neither is given', () => {
+    const params = parseUrl(buildAuth0AuthorizeUrl(baseOptions)).searchParams;
+
+    expect(params.has('max_age')).toBe(false);
+    expect(params.has('organization')).toBe(false);
+  });
+
+  it('carries the reserved organization parameter when one is given', () => {
+    // Nothing sends it in M1. It is plumbed so that a step-up round trip is
+    // never the place org context silently drops.
+    const url = buildAuth0AuthorizeUrl({ ...baseOptions, organization: 'org_abc123' });
+
+    expect(parseUrl(url).searchParams.get('organization')).toBe('org_abc123');
+  });
 });

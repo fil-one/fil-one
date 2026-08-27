@@ -10,6 +10,8 @@ import {
   RouterProvider,
 } from '@tanstack/react-router';
 
+import { OrgRole } from '@filone/shared';
+
 import { SidebarNav } from './SidebarNav';
 
 const meta: Meta<typeof SidebarNav> = {
@@ -76,4 +78,16 @@ export const Interactive: Story = {
       </div>
     );
   },
+};
+
+/** A Member keeps API Keys — they mint and manage their own — and loses Billing. */
+export const AsMember: Story = {
+  args: { collapsed: false },
+  parameters: { role: OrgRole.Member },
+};
+
+/** ReadOnly holds no `keys.*` and no `billing.view`: both entries are absent. */
+export const AsReadOnly: Story = {
+  args: { collapsed: false },
+  parameters: { role: OrgRole.ReadOnly },
 };

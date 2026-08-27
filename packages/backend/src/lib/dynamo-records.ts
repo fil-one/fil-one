@@ -22,6 +22,21 @@ export type AccessKeyPolicyVersion = 'pre-member-scope';
 
 export const ACCESS_KEY_POLICY_VERSION: AccessKeyPolicyVersion = 'pre-member-scope';
 
+/**
+ * Every key an access-key row is addressed by, in one builder.
+ *
+ * The handlers built these strings by hand in five places, which is how a
+ * mint and a revoke end up disagreeing about where a key lives.
+ */
+const ACCESS_KEY_SK_PREFIX = 'ACCESSKEY#';
+
+export const AccessKeyKeys = {
+  orgPk: (orgId: string): string => `ORG#${orgId}`,
+  keySk: (keyId: string): string => `${ACCESS_KEY_SK_PREFIX}${keyId}`,
+  /** For the Query that lists an org's keys. */
+  keySkPrefix: (): string => ACCESS_KEY_SK_PREFIX,
+} as const;
+
 /** UserInfoTable — pk: ORG#{orgId}, sk: ACCESSKEY#{id} */
 export interface AccessKeyRecord {
   pk: string;
@@ -93,17 +108,42 @@ export interface StripePriceDetails {
   } | null;
 }
 
-/** BillingTable — pk: CUSTOMER#{userId}, sk: SUBSCRIPTION */
+/**
+ * BillingTable — pk: `ORG#{orgId}`, sk: SUBSCRIPTION (ADR §5). Read and written
+ * through `lib/subscription-store.ts`, never keyed inline.
+ */
 export interface SubscriptionRecord {
   pk: string;
   sk: string;
+  /**
+   * The org the subscription belongs to — the partition key, and required.
+   * One org, one subscription: a row without this is not addressable, which is
+   * why the re-key's verification enumerated every such row and had each
+   * dispositioned by name before the flip merged.
+   */
+  orgId: string;
+  /**
+   * The member who owns the Stripe customer. An attribute rather than part of
+   * the key, so the self-healing paths that close out a deleted Stripe customer
+   * still have a user to name.
+   */
+  userId?: string;
   stripeCustomerId?: string;
   subscriptionStatus?: SubscriptionStatus;
   subscriptionId?: string;
   trialEndsAt?: string;
   gracePeriodEndsAt?: string;
+  /** The billing period the meter reports against; written with the period end. */
+  currentPeriodStart?: string;
   currentPeriodEnd?: string;
   canceledAt?: string;
+  /**
+   * The deletion teardown's revive fence, an ISO timestamp the scrub stamps
+   * with `if_not_exists`. Every guarded subscription writer refuses a row
+   * carrying it (`attribute_not_exists(deletedAt)` via `guardAgainstScrub`),
+   * so a late webhook cannot revive a scrubbed org.
+   */
+  deletedAt?: string;
   lastPaymentFailedAt?: string;
   paymentMethodId?: string;
   paymentMethodLast4?: string;

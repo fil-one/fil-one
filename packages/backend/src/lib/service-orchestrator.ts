@@ -129,8 +129,9 @@ export type TenantStatusProbe =
  * Normalized, orchestrator-agnostic tenant quota and status snapshot.
  *
  * `keyCount` / `accessKeyLimit` are raw values that include the per-tenant
- * `filone-console` system key (and its reserved slot). Callers that surface
- * user-managed keys should subtract one per tenant.
+ * system key (and its reserved slot): `filone-console` on Aurora,
+ * `filone-console-v2` on FTH. Callers that surface user-managed keys should
+ * subtract one per tenant.
  */
 export interface TenantInfo {
   bucketCount: number;

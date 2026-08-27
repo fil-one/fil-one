@@ -3,7 +3,6 @@
 **Status:** Draft (design exploration, awaiting acceptance)
 **Created:** 2026-08-26
 **Builds on:** [`2026-08-organizations-roles-m1.md`](./2026-08-organizations-roles-m1.md)
-**Ships after:** [`2026-08-privileged-operations-m2.md`](./2026-08-privileged-operations-m2.md) (FIL-1019)
 
 ## Context
 
@@ -11,9 +10,18 @@ An Owner or Admin gives a member access to a subset of the tenant's buckets, or
 to all of them, and a member holding a grant to a subset sees and interacts with
 only that set. Console API routes therefore return results for that set alone and
 the console renders what it gets. Scope here is whole buckets; a prefix inside a
-bucket is a later milestone. FIL-1019 ships first, which is what puts a FilOne
-handler on every bucket creation and deletion
-([§4](#4-buckets-created-and-deleted-after-the-grant)).
+bucket is a later milestone.
+
+**A bucket can change hands without FilOne learning.** On `us-east-1` a
+customer's own access key deletes a bucket and nothing in the product records it.
+The Management API has no event or audit surface, an S3 `ListBuckets` returns a
+name and a creation date, and no contract exposes which key acted. The same
+region lets a deleted bucket name be claimed again, measured on staging on
+2026-08-26 (`bin/bucket-name-reuse-probe.ts`). A credential can therefore delete
+a bucket unobserved and recreate the name, leaving a listing that shows the
+replacement as an original. Every tenant carries that exposure, whether or not
+any of its members are scoped, and closing it puts a FilOne handler on every
+bucket creation and deletion ([§4](#4-bucket-lifecycle-moves-to-the-console)).
 
 **FilOne stores no bucket records.** A bucket exists at the orchestrator and
 nowhere else: `list-buckets.ts` fans out across provisioned regions and merges
@@ -43,8 +51,7 @@ the whole of the enforcement.
 
 ## Decision
 
-Seven decisions shape this design. The seventh belongs to FIL-1019 rather than
-to this ADR, and nothing in §4 works without it.
+Seven decisions shape this design.
 
 1. **Bucket scope is enforced in the console API.** A handler refuses a request
    that names an out-of-scope bucket, and results returned by orchestrators
@@ -64,11 +71,12 @@ to this ADR, and nothing in §4 works without it.
    A key whose `buckets` array is non-empty lists only those buckets. The
    Management API spec is where that gets written, and a gateway that does not do
    it is not conforming ([§5](#5-access-keys-the-cap-and-enumeration)).
-7. **`CreateBucket` and `DeleteBucket` come off customer access keys** (FIL-1019,
-   shipping before this work). Every bucket's creation and deletion then runs
-   through a FilOne handler, which is where the auto-grant writes, the name-reuse
-   sweep runs, and the `bucket.created` and `bucket.deleted` events are appended
-   ([§4](#4-buckets-created-and-deleted-after-the-grant)).
+7. **`CreateBucket` and `DeleteBucket` come off customer access keys**, in every
+   region, until an orchestrator can report a bucket's lifecycle and the key that
+   changed it (FIL-1019). Every bucket's creation and deletion then runs through a
+   FilOne handler, which is where the auto-grant writes, the name-reuse sweep runs,
+   and the `bucket.created` and `bucket.deleted` events are appended
+   ([§4](#4-bucket-lifecycle-moves-to-the-console)).
 
 ### 1. Data model
 
@@ -144,7 +152,7 @@ a bucket, while the bucket arrives in a path parameter or, for
 | Route                                         | Scoped behavior                                                                                            |
 | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `GET /api/buckets`                            | filter the merged fan-out result to the granted set                                                        |
-| `POST /api/buckets`                           | allowed; the new bucket is granted to the creator ([§4](#4-buckets-created-and-deleted-after-the-grant))   |
+| `POST /api/buckets`                           | allowed; the new bucket is granted to the creator ([§4](#4-bucket-lifecycle-moves-to-the-console))   |
 | `GET /api/buckets/{name}`                     | no grant row gives the same 404 a missing bucket gives                                                     |
 | `DELETE /api/buckets/{name}`                  | gated on `buckets.delete`, which only an unscoped caller holds                                             |
 | `GET /api/buckets/{name}/analytics`           | 404                                                                                                        |
@@ -204,7 +212,7 @@ the org to every role. So the handler filters those entries against the same
 grant Query `GET /api/buckets` runs. Key entries need no change, since M1 already
 narrows them by `createdBy` under `keys.manage_own`.
 
-### 4. Buckets created and deleted after the grant
+### 4. Bucket lifecycle moves to the console
 
 `create-bucket` writes the creator's grant rows **before** calling the
 orchestrator and deletes them if creation fails. A grant naming a bucket that
@@ -230,12 +238,45 @@ API spec requires either behavior, so both vendors could change their name polic
 without breaking a promise, and the sweep therefore ships for every region
 instead of being tuned per region.
 
-FIL-1019 is what makes console mediation true, by taking `CreateBucket` and
-`DeleteBucket` off customer keys. The handler then writes the auto-grant, removes
-the grants on delete, and appends the `bucket.created` and `bucket.deleted` audit
-events FIL-1019 defines. Keys minted before FIL-1019 keep the two permissions
-until FIL-1020 retires them, and a bucket deleted with one of those keys still
-leaves its grants behind.
+**Customer keys therefore stop carrying `CreateBucket` and `DeleteBucket`**, in
+every region, until an orchestrator can report that a bucket's lifecycle changed
+and which key changed it. The `filone-console` key keeps both actions, so the
+console's own bucket lifecycle is untouched. What goes away is a customer
+credential creating or deleting a bucket.
+
+Where bucket lifecycle happens depends on the backend. On Aurora both operations
+are Portal API calls (`createAuroraBucket` and `deleteAuroraBucket`, reached
+through `createPortalClient`), so only FilOne can make them and the region has
+never had the exposure. On FTH and Forge they are S3 data-plane operations: the
+console performs them with the tenant's `filone-console` credential, and a user
+key carrying `s3:CreateBucket` or `s3:DeleteBucket` performs the identical
+operation without FilOne seeing it. Aurora is built this way today, so this asks
+FTH and Forge to match a shipped region rather than to adopt a new policy, and it
+moves the product toward the uniform-regions answer to FIL-1024's question of
+whether capabilities should differ by region at all.
+
+The change is small and reversible. `BUCKET_PERMISSIONS`
+(`packages/shared/src/api/access-keys.ts`) stops being offered,
+`CreateAccessKeySchema` refuses the two values, the console drops the two
+checkboxes, and `supportsBucketManagement` is deleted with its callers, having
+nothing left to gate. Re-enabling is the same edit backwards, with no migration
+either way. A denied attempt answers with the vendor's `AccessDenied`, which is
+the correct S3 error FIL-1019's acceptance criteria ask for.
+
+Customers scripting bucket lifecycle against the S3 API lose that capability,
+which the product ships today in the FTH and Forge regions. The Console API is
+session-authenticated, so no credential FilOne issues reaches `POST /api/buckets`
+either, and scripted bucket lifecycle has no supported path until an orchestrator
+reports lifecycle events and the permission can return. Keys already carrying the
+two permissions keep them until FIL-1020 retires them, so a bucket deleted with
+one of those still leaves its grants behind. The console labels the two
+permissions as legacy on the keys that hold them, which gives FIL-1021's key
+review something to act on.
+
+With every create and delete passing through a handler, `bucket.created` and
+`bucket.deleted` become writable for the first time. Each carries the acting
+user, the region, the bucket name, and the timestamp. Neither records the grants
+swept with it, which are derivable from the grants given.
 
 ### 5. Access keys: the cap and enumeration
 
@@ -297,7 +338,8 @@ backends, which is the column this design rests on. Enumeration is the smaller
 problem. Aurora conforms today, so a scoped member's `aws s3 ls` there shows
 exactly their buckets with nothing built on our side. FTH does not, and the fix
 is a change request carrying the contract sentence, sent in the message that
-carries FIL-1019's lifecycle-reporting ask. Until it lands, a scoped member on
+carries the lifecycle-feed ask from
+[§4](#4-bucket-lifecycle-moves-to-the-console). Until it lands, a scoped member on
 `us-east-1` holding any key can list every bucket name in the org, and what
 leaks is the names alone: that member cannot read, write or delete an object in
 a bucket their key does not name, and the console shows them nothing outside
@@ -312,8 +354,9 @@ A key minted before scope existed carries no bucket list, so the rule reads it
 as tenant-wide and it keeps enumerating everything after every region conforms,
 which is the legacy transition (FIL-1020) and the reason scoping a member should
 prompt a review of the keys they already hold (FIL-1021). `CreateBucket` outside
-the key's list is FIL-1019's, since it takes `s3:CreateBucket` off customer keys
-before this ships.
+the key's list stops being reachable at all once
+[§4](#4-bucket-lifecycle-moves-to-the-console) takes `s3:CreateBucket` off
+customer keys.
 
 ### 6. Lifecycle
 
@@ -405,7 +448,8 @@ before and after, the granted and revoked bucket keys, and the ids of any keys
 revoked with it, where a per-bucket `bucket.granted` would flood the FIL-1022
 viewer with a row per checkbox and multiply the items in a transaction already
 bounded at 100. `member.invited` and `invite.accepted` gain the scope, and
-`bucket.created` and `bucket.deleted` belong to FIL-1019.
+`bucket.created` and `bucket.deleted` are defined in
+[§4](#4-bucket-lifecycle-moves-to-the-console).
 
 The event joins the `TransactWriteItems` that writes the `bucketScope` marker,
 the way M1's `commitAudited` handles a pure-DynamoDB mutation, and the grant rows
@@ -439,6 +483,17 @@ behind the `ORGS_BETA` row pattern (`lib/orgs-beta.ts`), where granting is a row
 instead of a redeploy.
 
 ## Options considered
+
+**Reconciling grants against `ListBuckets` on read**, instead of removing the two
+permissions, would leave customer bucket lifecycle where it is and repair the
+grant table from what the orchestrator reports. Nothing available supports it. A
+grant naming a bucket that no longer exists is already inert, so the failure
+reconciliation has to catch is the reused name, which means telling an original
+bucket from a recreation. No orchestrator exposes a stable bucket identity:
+`BucketSummary` carries a name and a creation date, and a delete followed by a
+recreate inside the polling interval defeats both. Reconciliation becomes
+possible on the day a lifecycle feed exists, and that is the same day the
+permission can return ([§4](#4-bucket-lifecycle-moves-to-the-console)).
 
 **A String Set on the membership row** (`buckets`, holding the same
 `{region}/{bucketName}` entries) needs no new table and no read at all, since the
@@ -479,7 +534,7 @@ a per-member user would buy attribution instead of filtering.
 2. **What Forge does with an out-of-scope object read and with a reused name.**
    Forge already filters enumeration, so what is left is the object-read column
    ([§5](#5-access-keys-the-cap-and-enumeration)) and the name-reuse run
-   ([§4](#4-buckets-created-and-deleted-after-the-grant)), both against Forge
+   ([§4](#4-bucket-lifecycle-moves-to-the-console)), both against Forge
    unchanged. Being ours, an unwanted answer there is a bug to fix, which makes
    it the cheapest of the three to settle.
 3. **Whether FTH will filter `ListBuckets` by the key's bucket list.** The one
@@ -487,7 +542,18 @@ a per-member user would buy attribution instead of filtering.
    owner for the FTH relationship rather than an engineering decision, since
    nothing is built here either way: what is needed is the spec sentence accepted
    and implemented, and what would settle it is a date.
-4. **Does a RAG API key's own bucket list bind on a bearer query?** The bearer
+4. **What returns bucket lifecycle to customer keys.** A feed carrying bucket
+   creations and deletions, with the acting access key identified, on the two
+   backends that need one. On Forge that is the same Hilt work the rest of M3
+   needs (FIL-918's permission read-back); on FTH it is a vendor ask. Aurora needs
+   nothing, having never had the exposure. The feed alone would let grants be
+   reconciled ([Options considered](#options-considered)); the acting key is what
+   answers the unobserved deletion the Context describes, and only both together
+   put `CreateBucket` and `DeleteBucket` back on a customer key. It is the same
+   message that closes the `ListBuckets` question in
+   [§5](#5-access-keys-the-cap-and-enumeration), which is the argument for sending
+   them together.
+5. **Does a RAG API key's own bucket list bind on a bearer query?** The bearer
    branch resolves the creator's membership, so their current scope applies
    ([§2](#2-resolving-a-scope-on-a-request)), and the key row also records the
    scope it was minted with. Whether the query is checked against the
@@ -497,7 +563,8 @@ a per-member user would buy attribution instead of filtering.
 ## References
 
 - Tickets: FIL-1017 member bucket scope, FIL-1018 revocation timing at vendors,
-  FIL-1019 privileged operations, FIL-1020 legacy key transition, FIL-1021 key
+  FIL-1019 privileged operations (the retention half; the bucket-lifecycle half
+  is decided here), FIL-1020 legacy key transition, FIL-1021 key
   review on scope change, FIL-1022 audit viewer, FIL-1024 per-region disclosure,
   FIL-1025 M3 direct-key enforcement, FIL-918 Forge key update, FIL-949
   request-level logging.
@@ -505,7 +572,7 @@ a per-member user would buy attribution instead of filtering.
   roles, the permission registry, the audit write path, and the backfill sequence
   this design follows.
 - Staging measurements, 2026-08-26: bucket-name reuse per region
-  ([§4](#4-buckets-created-and-deleted-after-the-grant)) and `ListBuckets`
+  ([§4](#4-bucket-lifecycle-moves-to-the-console)) and `ListBuckets`
   conformance per region ([§5](#5-access-keys-the-cap-and-enumeration)).
 - **The tier split source is missing.** Four M2 tickets cite a "2026-08-11
   enforcement analysis", which the M1 ADR names
