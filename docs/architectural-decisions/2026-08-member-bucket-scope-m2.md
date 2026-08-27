@@ -150,7 +150,7 @@ a bucket, while the bucket arrives in a path parameter or, for
 | Route                                         | Scoped behavior                                                                                            |
 | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `GET /api/buckets`                            | filter the merged fan-out result to the granted set                                                        |
-| `POST /api/buckets`                           | allowed; the new bucket is granted to the creator ([§4](#4-bucket-lifecycle-moves-to-the-console))   |
+| `POST /api/buckets`                           | allowed; the new bucket is granted to the creator ([§4](#4-bucket-lifecycle-moves-to-the-console))         |
 | `GET /api/buckets/{name}`                     | no grant row gives the same 404 a missing bucket gives                                                     |
 | `DELETE /api/buckets/{name}`                  | gated on `buckets.delete`, which only an unscoped caller holds                                             |
 | `GET /api/buckets/{name}/analytics`           | 404                                                                                                        |
