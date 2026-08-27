@@ -17,10 +17,13 @@ call and a completion event after it, correlated by id.
 
 Events exist and nobody can read them. FIL-1022 is the read side.
 
-Other work adds to the event set as it lands. FIL-1017 §9 defines
-`member.scope_changed` and puts the scope on `member.invited` and
-`invite.accepted`. FIL-1019 defines `bucket.created` and `bucket.deleted`, which
-become writable once bucket lifecycle passes through a handler.
+Other work adds to the event set as it lands. FIL-1017 §7 defines
+`member.scope_changed`, puts the scope on `member.invited` and
+`invite.accepted`, and defines `bucket.created` and `bucket.deleted`, which
+become writable once bucket lifecycle passes through a handler. FIL-1019 defines
+`retention_grant.granted`, `retention_grant.revoked`, and
+`retention_override.signed`, the last of which records a signing rather than a
+deletion, for a reason the viewer will have to show honestly.
 
 ## Still to write
 
