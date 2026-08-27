@@ -101,11 +101,11 @@ the question up on its own (see [Options considered](#options-considered)).
 Three things can stop an object from being deleted, and each one is lifted
 differently.
 
-| Mechanism            | How it is lifted                                                                                                                                                                                             |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Mechanism            | How it is lifted                                                                                                                                                                                                 |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Governance retention | `s3:BypassGovernanceRetention` on the credential and `x-amz-bypass-governance-retention: true` on the request. Missing either one answers `AccessDenied`. Extending the date needs only `s3:PutObjectRetention`. |
-| Compliance retention | Nothing lifts it at any permission level. The object survives until its date passes.                                                                                                                          |
-| Legal hold           | `PutObjectLegalHold` with the status off. There is no bypass action and no header.                                                                                                                             |
+| Compliance retention | Nothing lifts it at any permission level. The object survives until its date passes.                                                                                                                             |
+| Legal hold           | `PutObjectLegalHold` with the status off. There is no bypass action and no header.                                                                                                                               |
 
 No Service Orchestrator we integrate with accepts
 `s3:BypassGovernanceRetention` today. The Management API's
