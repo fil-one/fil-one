@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
-import { expectErrorResponse } from '../test/assert-helpers.js';
+import {
+  expectErrorResponse,
+  expectRefreshedCookies,
+  REFRESHED_TOKENS,
+} from '../test/assert-helpers.js';
 import { csrfMiddleware } from './csrf.js';
 
 describe('csrfMiddleware', () => {
@@ -89,6 +93,18 @@ describe('csrfMiddleware', () => {
       const result = await before(request);
 
       expect(result).toBeUndefined();
+    });
+
+    it('carries the rotated cookies on its denial', async () => {
+      // A stale CSRF token is an ordinary thing after an idle tab wakes up.
+      // Dropping the session this request just refreshed would turn it into a
+      // logout on every tab the user has open.
+      const { before } = csrfMiddleware();
+      const request = buildMiddyRequest(buildPostEvent({ cookie: validToken }), {
+        internal: { newTokens: REFRESHED_TOKENS },
+      });
+
+      expectRefreshedCookies(await before(request));
     });
 
     it('works for DELETE requests too', async () => {

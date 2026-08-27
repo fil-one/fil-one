@@ -74,6 +74,7 @@ import {
 import { FthApiError, FthConflictError, FthNotFoundError } from './fth-management-client.js';
 
 import { fthOrchestrator, _resetFthOrchestratorCachesForTesting } from './fth-orchestrator.js';
+import type { IssueAccessKeyOpts } from '../service-orchestrator.js';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 const fthClientId = '42';
@@ -581,6 +582,18 @@ describe('fthOrchestrator.issueAccessKey', () => {
     bucketScope: 'all' as const,
   };
 
+  function stubCreatedAccessKey() {
+    mockFthClient.createAccessKey.mockResolvedValue({
+      id: 'AKIAFTH',
+      accessKeyId: 'AKIAFTH',
+      secretAccessKey: 'sk-secret',
+      name: baseOpts.keyName,
+      permissions: [],
+      buckets: [],
+      createdAt: '2026-03-10T00:00:00Z',
+    });
+  }
+
   it('issues a key against the filone-console storage user and returns the credential', async () => {
     stubConsoleStorageUser();
     mockFthClient.createAccessKey.mockResolvedValue({
@@ -697,6 +710,110 @@ describe('fthOrchestrator.issueAccessKey', () => {
     expect(permissions).not.toContain('s3:GetBucketVersioning');
     expect(permissions).not.toContain('s3:GetBucketObjectLockConfiguration');
   });
+
+  // Aurora's grouping (see the permissions description in
+  // aurora-portal.swagger.json): read carries list-parts, write carries abort,
+  // list carries list-uploads. Each permission grants its own action and no other.
+  const multipartCases = [
+    { permission: 'read', action: 's3:ListMultipartUploadParts' },
+    { permission: 'write', action: 's3:AbortMultipartUpload' },
+    { permission: 'list', action: 's3:ListBucketMultipartUploads' },
+  ] as const;
+  const allMultipartActions: readonly string[] = multipartCases.map((c) => c.action);
+
+  for (const { permission, action } of multipartCases) {
+    it(`grants only ${action} for the ${permission} permission`, async () => {
+      stubConsoleStorageUser();
+      mockFthClient.createAccessKey.mockResolvedValue({
+        id: 'AKIAFTH',
+        accessKeyId: 'AKIAFTH',
+        secretAccessKey: 'sk-secret',
+        name: baseOpts.keyName,
+        permissions: [],
+        buckets: [],
+        createdAt: '2026-03-10T00:00:00Z',
+      });
+
+      await fthOrchestrator.issueAccessKey(fthClientId, {
+        keyName: baseOpts.keyName,
+        permissions: [permission],
+      });
+
+      const { permissions } = mockFthClient.createAccessKey.mock.calls[0][2];
+      expect(
+        permissions.filter((granted: string) => allMultipartActions.includes(granted)),
+      ).toEqual([action]);
+    });
+  }
+
+  // The idempotency key is derived from the request, so re-creating a deleted
+  // key with any part of the request changed is a new request rather than a
+  // replay FTH would reject with a permanent 409.
+  it('sends the same idempotency key for the same request', async () => {
+    stubConsoleStorageUser();
+    stubCreatedAccessKey();
+
+    await fthOrchestrator.issueAccessKey(fthClientId, {
+      keyName: baseOpts.keyName,
+      permissions: ['read'],
+      buckets: ['alpha'],
+    });
+    await fthOrchestrator.issueAccessKey(fthClientId, {
+      keyName: baseOpts.keyName,
+      permissions: ['read'],
+      buckets: ['alpha'],
+    });
+
+    const [first, second] = mockFthClient.createAccessKey.mock.calls;
+    expect(second[2].idempotencyKey).toEqual(first[2].idempotencyKey);
+  });
+
+  const changedRequestCases: Record<string, IssueAccessKeyOpts> = {
+    'the permissions change': {
+      keyName: baseOpts.keyName,
+      permissions: ['read', 'write'],
+      buckets: ['alpha'],
+    },
+    'the granular permissions change': {
+      keyName: baseOpts.keyName,
+      permissions: ['read'],
+      granularPermissions: ['ListBucketVersions'],
+      buckets: ['alpha'],
+    },
+    'the bucket scopes change': {
+      keyName: baseOpts.keyName,
+      permissions: ['read'],
+      buckets: ['alpha', 'beta'],
+    },
+    'the key name changes': {
+      keyName: 'Another Key',
+      permissions: ['read'],
+      buckets: ['alpha'],
+    },
+    'the expiry changes': {
+      keyName: baseOpts.keyName,
+      permissions: ['read'],
+      buckets: ['alpha'],
+      expiresAt: '2026-12-31T00:00:00Z',
+    },
+  };
+
+  for (const [description, changed] of Object.entries(changedRequestCases)) {
+    it(`sends a different idempotency key when ${description}`, async () => {
+      stubConsoleStorageUser();
+      stubCreatedAccessKey();
+
+      await fthOrchestrator.issueAccessKey(fthClientId, {
+        keyName: baseOpts.keyName,
+        permissions: ['read'],
+        buckets: ['alpha'],
+      });
+      await fthOrchestrator.issueAccessKey(fthClientId, changed);
+
+      const [first, second] = mockFthClient.createAccessKey.mock.calls;
+      expect(second[2].idempotencyKey).not.toEqual(first[2].idempotencyKey);
+    });
+  }
 
   it('maps FthConflictError to AccessKeyAlreadyExistsError', async () => {
     stubConsoleStorageUser();

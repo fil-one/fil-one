@@ -23,18 +23,21 @@ export type OrgProfileItem = Record<string, AttributeValue>;
 //   "not provisioned" right after setup — never a wrong tenant id. Setup
 //   flows that need read-after-write (processTenantSetup) issue their own
 //   ConsistentRead and do not go through this helper.
-// - Pass `{ consistent: true }` to read the `deleting` fence; see isOrgDeleting.
+// - `consistentRead` is for the callers whose attribute is not write-once.
+//   `auth0OrgId` is one: it is set when an org adopts SSO and cleared if it
+//   leaves, and the gate reading it decides which sessions may enter the org,
+//   so a stale replica must not admit a session the current row refuses.
 // - No ProjectionExpression: it would not reduce consumed RCUs, and different
 //   orchestrators need different attributes from the same row.
 export async function getOrgProfile(
   orgId: string,
-  options?: { consistent?: boolean },
+  options: { consistentRead?: boolean } = {},
 ): Promise<OrgProfileItem | undefined> {
   const { Item } = await dynamo.send(
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-      ...(options?.consistent && { ConsistentRead: true }),
+      ...(options.consistentRead ? { ConsistentRead: true } : {}),
     }),
   );
   return Item;
@@ -49,7 +52,7 @@ export async function isOrgDeleting(
   orgId: string,
   options?: { consistent?: boolean },
 ): Promise<boolean> {
-  const orgProfile = await getOrgProfile(orgId, options);
+  const orgProfile = await getOrgProfile(orgId, { consistentRead: options?.consistent });
   return orgProfile?.deleting?.BOOL === true;
 }
 
@@ -63,7 +66,7 @@ export async function isOrgDeleting(
  * candidate list can outlive the rows it was built from.
  */
 export async function isOrgDeletedOrDeleting(orgId: string): Promise<boolean> {
-  const orgProfile = await getOrgProfile(orgId, { consistent: true });
+  const orgProfile = await getOrgProfile(orgId, { consistentRead: true });
   return orgProfile === undefined || orgProfile.deleting?.BOOL === true;
 }
 
@@ -116,7 +119,9 @@ export function orgNotDeletingCheck(orgId: string): TransactWriteItem {
 
 // Positional: reason 0 is the guard, so a caller's own failed condition reports
 // at its own index and is rethrown rather than mislabelled as a deletion.
-function isGuardRejection(err: unknown): boolean {
+// Exported with {@link orgNotDeletingCheck} for callers that assemble their own
+// transaction and need to map the same rejection.
+export function isGuardRejection(err: unknown): boolean {
   return (
     err instanceof TransactionCanceledException &&
     err.CancellationReasons?.[0]?.Code === 'ConditionalCheckFailed'

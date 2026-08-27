@@ -7,10 +7,12 @@ import type { AccessKey, GranularPermission, ListAccessKeysResponse } from '@fil
 import { S3Region, isSupportedRegion } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import { keyScope, withinScope } from '../lib/key-scope.js';
 import { ResponseBuilder, unsupportedRegionResponse } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { authorize } from '../middleware/authorize.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
 
@@ -80,9 +82,22 @@ export async function baseHandler(
     throw error;
   }
 
-  const keys: AccessKey[] = (result.Items ?? []).map((item) => {
-    const record = unmarshall(item);
-    return {
+  // A caller holding only `keys.manage_own` sees the keys they created and
+  // nothing else. The narrowing is here rather than in a FilterExpression
+  // because the query already reads the org's partition to answer the bucket and
+  // region filters, and one predicate over the page is cheaper than a second
+  // shape of query to maintain.
+  const scope = keyScope(event);
+
+  const keys: AccessKey[] = (result.Items ?? [])
+    .map((item) => unmarshall(item))
+    .filter((record) =>
+      withinScope(scope, {
+        createdBy: record.createdBy as string | undefined,
+        recovered: record.recovered as boolean | undefined,
+      }),
+    )
+    .map((record) => ({
       id: (record.sk as string).replace('ACCESSKEY#', ''),
       keyName: record.keyName as string,
       accessKeyId: record.accessKeyId as string,
@@ -95,8 +110,10 @@ export async function baseHandler(
       buckets: record.buckets as string[] | undefined,
       region: (record.region as AccessKey['region']) ?? S3Region.EuWest1,
       expiresAt: (record.expiresAt as string | undefined) ?? null,
-    };
-  });
+      // Shipped so the console can gate the per-row revoke button on the same
+      // rule the delete route enforces.
+      ...(record.createdBy ? { createdBy: record.createdBy as string } : {}),
+    }));
 
   return new ResponseBuilder().status(200).body<ListAccessKeysResponse>({ keys }).build();
 }
@@ -104,5 +121,6 @@ export async function baseHandler(
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
+  .use(authorize('keys.manage_own'))
   .use(subscriptionGuardMiddleware(AccessLevel.Read))
   .use(errorHandlerMiddleware());

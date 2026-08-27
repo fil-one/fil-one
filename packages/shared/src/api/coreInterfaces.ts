@@ -6,6 +6,12 @@ export enum ApiErrorCode {
   SUBSCRIPTION_CANCELED = 'SUBSCRIPTION_CANCELED',
   /** Subscription is in an inactive or incomplete state — all access is blocked. */
   SUBSCRIPTION_INACTIVE = 'SUBSCRIPTION_INACTIVE',
+  /**
+   * The active organization has no subscription, and the caller is not the
+   * person who can create one. Distinct from SUBSCRIPTION_INACTIVE, which tells
+   * the account holder to fix their own payment method.
+   */
+  ORG_BILLING_INACTIVE = 'ORG_BILLING_INACTIVE',
   /** Promo code is invalid, expired, or inactive. */
   INVALID_PROMOTION_CODE = 'INVALID_PROMOTION_CODE',
   /** Trial accounts cannot generate presigned URLs — upgrade required. */
@@ -32,6 +38,32 @@ export enum ApiErrorCode {
   NOT_A_MEMBER = 'NOT_A_MEMBER',
   /** The invitation was issued to a different email address than the session's. */
   INVITE_EMAIL_MISMATCH = 'INVITE_EMAIL_MISMATCH',
+  /**
+   * The token resolves to no usable invitation. One code for expired, revoked,
+   * already accepted, and never existed: the accept page says the link is no
+   * longer good and offers to ask for a new one, and telling the four apart
+   * would describe other people's invitations to whoever holds a stale link.
+   */
+  INVITE_NOT_FOUND = 'INVITE_NOT_FOUND',
+  /**
+   * The org already has as many pending invitations as it may hold. The cap is
+   * the only rate limit on the invite path, so this is a routine answer rather
+   * than an incident: revoking or accepting one frees a slot.
+   */
+  INVITE_LIMIT_REACHED = 'INVITE_LIMIT_REACHED',
+  /**
+   * Issuing invitations is not switched on for this organization yet. Its own
+   * code because the console renders it as a state of the form rather than a
+   * failed attempt, and the alternative — recognising it by the absence of a
+   * code — collects every other code-less 403 with it, CSRF expiry included.
+   */
+  INVITES_NOT_ENABLED = 'INVITES_NOT_ENABLED',
+  /**
+   * The change would leave the organization with no Owner. Its own code because
+   * the console's remedy is specific — promote somebody first, or transfer
+   * ownership — and a generic conflict would send the user to support.
+   */
+  LAST_OWNER = 'LAST_OWNER',
 }
 
 export interface ErrorResponse {

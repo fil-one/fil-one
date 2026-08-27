@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { OrgNameSchema } from './org.js';
 import type { OrgRole } from './org.js';
 import type { Permission } from '../permissions.js';
 
@@ -39,6 +38,17 @@ export interface MeResponse {
   permissions?: readonly Permission[];
   /** Every org the caller belongs to, for the org switcher. */
   memberships?: OrgMembershipSummary[];
+  /**
+   * Whether the organizations beta is switched on for this caller — their own
+   * allowlist row, or {@link MeResponse.orgId}'s. Computed server-side like
+   * {@link MeResponse.ragAccess}, from the same predicate the invitation
+   * endpoint refuses on, so the console hides a members surface the server
+   * would then refuse to populate rather than discovering the refusal.
+   *
+   * It answers for the active org only. Switching orgs re-reads `/me`, which is
+   * what makes the answer follow the org rather than the session.
+   */
+  orgsBeta: boolean;
 }
 
 export interface MfaEnrollment {
@@ -58,6 +68,13 @@ export interface PasskeyEnrollment {
 
 export const PROFILE_NAME_MAX_LENGTH = 200;
 
+/**
+ * `PATCH /api/me/profile` — the caller's own account, and nothing else. The
+ * organization's name left this body for `PATCH /api/org`: renaming the org is
+ * `org.rename`, which most members do not hold, and a route that mixes a
+ * self-service field with a privileged one has no single requirement to
+ * declare.
+ */
 export const UpdateProfileSchema = z
   .object({
     name: z
@@ -67,9 +84,8 @@ export const UpdateProfileSchema = z
       .max(PROFILE_NAME_MAX_LENGTH, `Name must be at most ${PROFILE_NAME_MAX_LENGTH} characters`)
       .optional(),
     email: z.string().trim().email('Please provide a valid email address').optional(),
-    orgName: OrgNameSchema.optional(),
   })
-  .refine((data) => data.name || data.email || data.orgName, {
+  .refine((data) => data.name || data.email, {
     message: 'At least one field is required.',
   });
 
@@ -78,7 +94,6 @@ export type UpdateProfileRequest = z.infer<typeof UpdateProfileSchema>;
 export interface UpdateProfileResponse {
   name?: string;
   email?: string;
-  orgName?: string;
 }
 
 export interface RegenerateRecoveryCodeResponse {

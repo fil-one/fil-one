@@ -50,9 +50,22 @@ const ORG_ID = 'org-xyz';
 
 function activeBillingItem(orgId = ORG_ID, userId = USER_ID) {
   return marshall({
+    pk: `ORG#${orgId}`,
+    sk: 'SUBSCRIPTION',
+    orgId,
+    userId,
+    subscriptionStatus: SubscriptionStatus.Active,
+  });
+}
+
+// A row at the address the runbook's cleanup step deletes. It names the same
+// org, so a leftover is a second row for one org.
+function leftoverLegacyItem(orgId: string, userId: string) {
+  return marshall({
     pk: `CUSTOMER#${userId}`,
     sk: 'SUBSCRIPTION',
     orgId,
+    userId,
     subscriptionStatus: SubscriptionStatus.Active,
   });
 }
@@ -68,6 +81,20 @@ function outOfSyncLogs(spy: ReturnType<typeof vi.spyOn>) {
   return calls.filter((c) => c[0] === '[subscription-drift-checker] out_of_sync');
 }
 
+/** The rows the scan dropped for not being keyed to their org. */
+function skippedLogs(spy: ReturnType<typeof vi.spyOn>) {
+  const calls = spy.mock.calls as unknown as unknown[][];
+  return calls.filter((c) => c[0] === '[subscription-drift-checker] Not an org row, skipping');
+}
+
+function invariantLogs(spy: ReturnType<typeof vi.spyOn>) {
+  const calls = spy.mock.calls as unknown as unknown[][];
+  return calls.filter(
+    (c) =>
+      c[0] === '[subscription-drift-checker] INVARIANT VIOLATED: two subscription rows for one org',
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -75,6 +102,7 @@ function outOfSyncLogs(spy: ReturnType<typeof vi.spyOn>) {
 describe('subscription-drift-checker', () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
   let warnSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
   let aurora: FakeOrchestrator;
 
   beforeEach(() => {
@@ -85,11 +113,13 @@ describe('subscription-drift-checker', () => {
     mockGetAvailableOrchestrators.mockReturnValue([aurora]);
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
     logSpy.mockRestore();
     warnSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it('emits zero counters when billing table is empty', async () => {
@@ -239,12 +269,16 @@ describe('subscription-drift-checker', () => {
     });
   });
 
-  it('dedupes multiple billing records for the same orgId and probes once', async () => {
+  it('probes an org once and drops every leftover legacy row that claims it', async () => {
+    // Probing per row would count one org's drift several times over. The
+    // leftovers are dropped at the scan, where each is named — at warning level,
+    // since a standing CUSTOMER# row is the expected state until the dated
+    // cleanup step removes it.
     ddbMock.on(ScanCommand).resolves({
       Items: [
         activeBillingItem(ORG_ID, 'user-first'),
-        activeBillingItem(ORG_ID, 'user-second'),
-        activeBillingItem(ORG_ID, 'user-third'),
+        leftoverLegacyItem(ORG_ID, 'user-second'),
+        leftoverLegacyItem(ORG_ID, 'user-third'),
       ],
     });
     aurora.getTenantStatus.mockResolvedValue({ kind: 'ok', status: 'disabled' });
@@ -252,11 +286,16 @@ describe('subscription-drift-checker', () => {
     await handler();
 
     expect(aurora.getTenantStatus).toHaveBeenCalledTimes(1);
+    expect(invariantLogs(errorSpy)).toHaveLength(0);
+    expect(skippedLogs(warnSpy).map((c) => c[1])).toMatchObject([
+      { pk: 'CUSTOMER#user-second', orgId: ORG_ID },
+      { pk: 'CUSTOMER#user-third', orgId: ORG_ID },
+    ]);
     const logs = outOfSyncLogs(logSpy);
     expect(logs).toHaveLength(1);
     expect(logs[0][1]).toMatchObject({
       orgId: ORG_ID,
-      userId: 'user-first', // first-seen userId becomes the representative
+      userId: 'user-first', // the kept row's own userId attribute
       orchestrator: 'aurora',
       status: 'disabled',
     });
@@ -264,6 +303,23 @@ describe('subscription-drift-checker', () => {
       SubscriptionsTotal: 1,
       SubscriptionsNotInSync: 1,
     });
+  });
+
+  it('reports drift for the row it keeps', async () => {
+    // The drift log has to name a member somebody can call, and the dropped row
+    // can name a different one.
+    ddbMock.on(ScanCommand).resolves({
+      Items: [activeBillingItem(), leftoverLegacyItem(ORG_ID, 'user-stale')],
+    });
+    aurora.getTenantStatus.mockResolvedValue({ kind: 'ok', status: 'disabled' });
+
+    await handler();
+
+    expect(aurora.getTenantStatus).toHaveBeenCalledTimes(1);
+    expect(skippedLogs(warnSpy)).toHaveLength(1);
+    // The user id comes off the row's own attribute, not a partition key.
+    expect(outOfSyncLogs(logSpy)[0][1]).toMatchObject({ orgId: ORG_ID, userId: USER_ID });
+    expect(emissionFor('aurora')).toMatchObject({ SubscriptionsTotal: 1 });
   });
 
   it('handles paginated scan results', async () => {
@@ -296,8 +352,9 @@ describe('subscription-drift-checker', () => {
     ddbMock.on(ScanCommand).resolves({
       Items: [
         marshall({
-          pk: `CUSTOMER#${USER_ID}`,
+          pk: `ORG#${ORG_ID}`,
           sk: 'SUBSCRIPTION',
+          userId: USER_ID,
           subscriptionStatus: SubscriptionStatus.Active,
         }),
       ],
@@ -307,8 +364,8 @@ describe('subscription-drift-checker', () => {
 
     expect(aurora.getTenantStatus).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledWith(
-      '[subscription-drift-checker] missing orgId',
-      expect.objectContaining({ pk: `CUSTOMER#${USER_ID}` }),
+      '[subscription-drift-checker] Missing orgId, skipping',
+      expect.objectContaining({ pk: `ORG#${ORG_ID}` }),
     );
     expect(emissionFor('aurora')).toMatchObject({ SubscriptionsTotal: 0 });
   });

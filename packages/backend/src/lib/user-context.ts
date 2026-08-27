@@ -15,14 +15,26 @@ export interface UserInfo {
    * a flattened role so the member bucket scope that lands on it reaches its
    * consumers with no new plumbing.
    *
-   * Absent on the RAG bearer branch, which bypasses `authMiddleware` entirely
-   * and resolves the key creator's membership itself once enforcement ships.
+   * The RAG bearer branch bypasses `authMiddleware` entirely and resolves the
+   * key creator's membership itself, so this is set there too — a key whose
+   * creator has left the org is refused rather than served.
    *
    * The permissions it carries are not cached beside it: `permissionsForRole`
    * is a table lookup, and a second copy of derived state is one more thing
    * that can disagree with the row.
    */
   membership?: OrgMembership;
+  /**
+   * Set only by the RAG bearer branch: this session was minted from an API key,
+   * not from somebody's login. {@link UserInfo.sub} then names the key rather
+   * than an Auth0 identity, so nothing keyed on `sub` — trial entitlement above
+   * all — may run for it, and a membership denial is a revoked key creator
+   * rather than an account the conversion missed.
+   *
+   * A flag rather than a `sub` prefix test, so the two consumers agree on what
+   * makes a session synthetic and neither depends on how the key id is spelled.
+   */
+  apiKeySession?: true;
 }
 
 export interface AuthenticatedEvent extends APIGatewayProxyEventV2 {

@@ -10,11 +10,11 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockIsOrgAdmin = vi.fn(async () => true);
-vi.mock('../lib/org-membership.js', () => ({ isOrgAdmin: () => mockIsOrgAdmin() }));
-
 const mockGetOrgProfile = vi.fn(async () => ({ name: { S: 'Acme Corp' } }));
-vi.mock('../lib/org-profile.js', () => ({ getOrgProfile: () => mockGetOrgProfile() }));
+vi.mock('../lib/org-profile.js', async () => ({
+  ...(await vi.importActual<typeof import('../lib/org-profile.js')>('../lib/org-profile.js')),
+  getOrgProfile: () => mockGetOrgProfile(),
+}));
 
 const mockConfirm = vi.fn();
 const mockConsumeAttempt = vi.fn(async (_orgId: string) => undefined);
@@ -45,7 +45,6 @@ describe('confirm-account-deletion', () => {
     ddbMock.reset();
     vi.clearAllMocks();
     process.env.ACCOUNT_DELETION_ENABLED = 'true';
-    mockIsOrgAdmin.mockResolvedValue(true);
     mockGetOrgProfile.mockResolvedValue({ name: { S: 'Acme Corp' } });
     mockConfirm.mockResolvedValue({ outcome: 'confirmed' });
     ddbMock.on(GetItemCommand).resolves({ Item: { salt: { S: 'deadbeef' } } });
@@ -80,15 +79,6 @@ describe('confirm-account-deletion', () => {
     mockConfirm.mockResolvedValue({ outcome: 'already_deleting' });
 
     expect((await baseHandler(event(VALID))).statusCode).toBe(202);
-  });
-
-  it('403s a non-admin before spending anything', async () => {
-    mockIsOrgAdmin.mockResolvedValue(false);
-
-    const result = await baseHandler(event(VALID));
-
-    expect(result.statusCode).toBe(403);
-    expect(mockConfirm).not.toHaveBeenCalled();
   });
 
   it('400s when the typed org name does not match', async () => {

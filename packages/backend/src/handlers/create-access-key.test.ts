@@ -5,8 +5,12 @@ import {
   GetItemCommand,
   PutItemCommand,
   QueryCommand,
+  TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
+import { unmarshall } from '@aws-sdk/util-dynamodb';
+import { ApiErrorCode, OrgRole } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -38,9 +42,20 @@ process.env.FILONE_STAGE = 'test';
 
 const ddbMock = mockClient(DynamoDBClient);
 
+// Importing the handler module builds its Middy chain, so the middleware that
+// chain installs is stubbed to a pass-through. The tests below call
+// `baseHandler` directly.
+vi.mock('../middleware/csrf.js', () => ({
+  csrfMiddleware: () => ({ before: () => undefined }),
+}));
+vi.mock('../middleware/subscription-guard.js', () => ({
+  AccessLevel: { Read: 'read', Write: 'write' },
+  subscriptionGuardMiddleware: () => ({ before: () => undefined }),
+}));
+
 import { baseHandler } from './create-access-key.js';
-import { AccessKeyAlreadyExistsError } from '../lib/errors.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.js';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -69,6 +84,45 @@ function issuedAccessKey() {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+/**
+ * The two writes a mint makes: the intent, put on its own before the vendor
+ * call, and the transaction carrying the key row with its completion event.
+ */
+function stubWrites() {
+  ddbMock.on(PutItemCommand).resolves({});
+  ddbMock.on(TransactWriteItemsCommand).resolves({});
+}
+
+/** Every transaction that wrote a key row (one per mint, or none). */
+function keyRowWrites() {
+  return ddbMock.commandCalls(TransactWriteItemsCommand);
+}
+
+/** The key row itself, found by its table rather than by its position. */
+function keyRow() {
+  const calls = keyRowWrites();
+  expect(calls).toHaveLength(1);
+  const items = calls[0].args[0].input.TransactItems ?? [];
+  return items.find((item) => item.Put?.TableName === 'UserInfoTable')!.Put!.Item!;
+}
+
+/** The completion event, which rides beside it. */
+function completionEvent() {
+  return unmarshall(auditItemIn(keyRowWrites()[0].args[0].input.TransactItems));
+}
+
+/** Every event written on its own, in order: the intent and any completion. */
+function standaloneEvents() {
+  return ddbMock
+    .commandCalls(PutItemCommand)
+    .map((call) => unmarshall(call.args[0].input.Item ?? {}));
+}
+
+/** The intents, written before the vendor was called. */
+function intentEvents() {
+  return standaloneEvents().filter((event) => event.phase === 'intent');
+}
 
 describe('create-access-key baseHandler', () => {
   beforeEach(() => {
@@ -105,7 +159,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('returns 201 with keyName, accessKeyId, and secretAccessKey on success', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
@@ -123,7 +177,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('calls orchestrator.issueAccessKey with correct params', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
@@ -139,15 +193,13 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('stores access key in DynamoDB without the secret', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
     await baseHandler(event);
 
-    const putCalls = ddbMock.commandCalls(PutItemCommand);
-    expect(putCalls).toHaveLength(1);
-    const item = putCalls[0].args[0].input.Item!;
+    const item = keyRow();
     expect(item.pk.S).toBe('ORG#org-1');
     expect(item.sk.S).toBe('ACCESSKEY#aurora-key-1');
     expect(item.keyName.S).toBe('My Key');
@@ -162,7 +214,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('records who minted the key and the policy era it was minted under', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({
@@ -171,14 +223,14 @@ describe('create-access-key baseHandler', () => {
     });
     await baseHandler(event);
 
-    const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+    const item = keyRow();
     expect(item.createdBy.S).toBe('user-1');
     expect(item.creatorEmail.S).toBe('alice@example.com');
     expect(item.policyVersion.S).toBe('pre-member-scope');
   });
 
   it('leaves the creator email off when the address is unverified', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({
@@ -187,7 +239,7 @@ describe('create-access-key baseHandler', () => {
     });
     await baseHandler(event);
 
-    const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+    const item = keyRow();
     expect(item.createdBy.S).toBe('user-1');
     expect(item.creatorEmail).toBeUndefined();
     expect(item.policyVersion.S).toBe('pre-member-scope');
@@ -222,7 +274,7 @@ describe('create-access-key baseHandler', () => {
   }
 
   it('trims whitespace from keyName', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({
@@ -246,7 +298,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('passes YYYY-MM-DD expiresAt through as-is', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({
@@ -268,7 +320,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('stores the YYYY-MM-DD expiresAt in DynamoDB (not RFC3339)', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({
@@ -283,7 +335,7 @@ describe('create-access-key baseHandler', () => {
     });
     await baseHandler(event);
 
-    const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+    const item = keyRow();
     expect(item.expiresAt.S).toBe('2026-06-01');
   });
 
@@ -350,7 +402,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('drives tenant setup via ensureTenantReady before creating the access key', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
@@ -365,7 +417,7 @@ describe('create-access-key baseHandler', () => {
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
 
     await expect(baseHandler(event)).rejects.toThrow('Aurora API error');
-    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    expect(keyRowWrites()).toHaveLength(0);
   });
 
   it('returns 409 when the orchestrator rejects duplicate key name and key exists in DynamoDB', async () => {
@@ -391,7 +443,114 @@ describe('create-access-key baseHandler', () => {
     expect(body).toStrictEqual({
       message: 'An access key with this name already exists',
     });
-    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    expect(keyRowWrites()).toHaveLength(0);
+  });
+
+  it('records an intent before the vendor mints, and a completion with the row', async () => {
+    stubWrites();
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+
+    await baseHandler(
+      buildEvent({
+        body: validBody({ keyName: 'My Key' }),
+        userInfo: { ...USER_INFO, email: 'alice@example.com', emailVerified: true },
+      }),
+    );
+
+    const [intent] = intentEvents();
+    const completion = completionEvent();
+
+    // The intent cannot name a key the vendor has not returned yet, which is
+    // what makes a dangling one legible: a key was asked for by this name and
+    // no completion followed.
+    expect(intent).toMatchObject({
+      pk: 'ORG#org-1',
+      type: 'key.created',
+      phase: 'intent',
+      subject: 'org:org-1',
+      actor: { kind: 'user', id: 'user-1', email: 'alice@example.com' },
+      details: { keyKind: 's3', keyName: 'My Key', region: 'eu-west-1' },
+    });
+    // One subject for both halves, or the viewer cannot pair them: the mint has
+    // no key id to file under until the vendor returns one, so the completion
+    // names the key in `keyIdSuffix` instead.
+    expect(completion).toMatchObject({
+      type: 'key.created',
+      phase: 'completion',
+      outcome: 'succeeded',
+      subject: 'org:org-1',
+      details: { keyKind: 's3', keyName: 'My Key', keyIdSuffix: '7890' },
+    });
+    expect(completion.correlationId).toBe(intent.correlationId);
+  });
+
+  it('carries no credential into either half', async () => {
+    stubWrites();
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+
+    await baseHandler(buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO }));
+
+    for (const call of ddbMock.commandCalls(PutItemCommand)) {
+      expectNoSecrets(call.args[0].input.Item ?? {});
+    }
+    expectNoSecrets(auditItemIn(keyRowWrites()[0].args[0].input.TransactItems));
+  });
+
+  it('closes the correlation as failed when the vendor rejects the request', async () => {
+    stubWrites();
+    mockIssueAccessKey.mockRejectedValue(new AccessKeyValidationError('bad expiry'));
+
+    const result = await baseHandler(
+      buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO }),
+    );
+
+    // A dangling intent has to mean the process died mid-flight, so a request
+    // the vendor refused closes its own correlation.
+    expect(result.statusCode).toBe(400);
+    const [intent, completion] = standaloneEvents();
+    expect(completion).toMatchObject({ phase: 'completion', outcome: 'failed' });
+    expect(completion.correlationId).toBe(intent.correlationId);
+    expect(keyRowWrites()).toHaveLength(0);
+  });
+
+  it('never calls the vendor when the intent cannot be written', async () => {
+    ddbMock.on(PutItemCommand).rejects(new Error('AuditTable unavailable'));
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+
+    // Fail-closed: no credential may exist at the vendor without a record that
+    // somebody asked for it, and here the vendor has not been called yet.
+    await expect(
+      baseHandler(buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO })),
+    ).rejects.toThrow('AuditTable unavailable');
+    expect(mockIssueAccessKey).not.toHaveBeenCalled();
+  });
+
+  it('keeps the minted credential out of the event', async () => {
+    stubWrites();
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+
+    await baseHandler(buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO }));
+
+    const written = JSON.stringify([...intentEvents(), completionEvent()]);
+    expect(written).not.toContain('secret-abc-123');
+    // The access key id is recorded by its last characters only.
+    expect(written).not.toContain('AKIA1234567890');
+    expect(completionEvent().details.keyIdSuffix).toBe('7890');
+  });
+
+  it('leaves the intent dangling when the local write never lands', async () => {
+    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).rejects(new Error('DynamoDB unavailable'));
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+
+    await expect(
+      baseHandler(buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO })),
+    ).rejects.toThrow('DynamoDB unavailable');
+
+    // A live SigV4 key now exists with no local row. The intent is the only
+    // record that it was ever asked for, which is why it is written first.
+    expect(intentEvents()).toHaveLength(1);
+    expect(intentEvents()[0].phase).toBe('intent');
   });
 
   it('returns 409 and recovers DynamoDB record on partial failure', async () => {
@@ -403,7 +562,7 @@ describe('create-access-key baseHandler', () => {
       accessKeyId: 'AKIA1234567890',
       createdAt: '2026-03-10T00:00:00Z',
     });
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
 
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
     const result = await baseHandler(event);
@@ -414,9 +573,7 @@ describe('create-access-key baseHandler', () => {
       message: 'An access key with this name already exists',
     });
     // Verify DynamoDB record was recovered
-    const putCalls = ddbMock.commandCalls(PutItemCommand);
-    expect(putCalls).toHaveLength(1);
-    const item = putCalls[0].args[0].input.Item!;
+    const item = keyRow();
     expect(item).toMatchObject({
       pk: { S: 'ORG#org-1' },
       sk: { S: 'ACCESSKEY#aurora-key-1' },
@@ -430,6 +587,46 @@ describe('create-access-key baseHandler', () => {
       policyVersion: { S: 'pre-member-scope' },
       recovered: { BOOL: true },
     });
+
+    // The completion the earlier attempt never wrote, flagged the same way.
+    expect(completionEvent()).toMatchObject({
+      type: 'key.created',
+      phase: 'completion',
+      outcome: 'succeeded',
+      subject: 'org:org-1',
+      details: { keyKind: 's3', keyName: 'My Key', keyIdSuffix: '7890', recovered: true },
+    });
+    expect(completionEvent().correlationId).toBe(intentEvents()[0].correlationId);
+    // The vendor's own timestamp for the attempt that minted the key, not this
+    // retry's clock.
+    expect(keyRow().createdAt).toStrictEqual({ S: '2026-03-10T00:00:00Z' });
+  });
+
+  it('closes the correlation as failed on a plain duplicate name', async () => {
+    mockIssueAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        {
+          pk: { S: 'ORG#org-1' },
+          sk: { S: 'ACCESSKEY#aurora-key-1' },
+          keyName: { S: 'My Key' },
+          region: { S: 'eu-west-1' },
+        },
+      ],
+    });
+    stubWrites();
+
+    const result = await baseHandler(
+      buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO }),
+    );
+
+    // Nothing to recover and nothing written, but the intent still has to be
+    // closed or it reads as a mint whose process died.
+    expect(result.statusCode).toBe(409);
+    expect(keyRowWrites()).toHaveLength(0);
+    const [intent, completion] = standaloneEvents();
+    expect(completion).toMatchObject({ phase: 'completion', outcome: 'failed' });
+    expect(completion.correlationId).toBe(intent.correlationId);
   });
 
   it('recovers DynamoDB record when same keyName exists only in a different region', async () => {
@@ -452,7 +649,7 @@ describe('create-access-key baseHandler', () => {
       accessKeyId: 'AKIA1234567890',
       createdAt: '2026-03-10T00:00:00Z',
     });
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
 
     const event = buildEvent({
       body: validBody({ keyName: 'My Key', region: 'eu-west-1' }),
@@ -462,9 +659,7 @@ describe('create-access-key baseHandler', () => {
 
     expect(result.statusCode).toBe(409);
     expect(mockFindAccessKeyByName).toHaveBeenCalled();
-    const putCalls = ddbMock.commandCalls(PutItemCommand);
-    expect(putCalls).toHaveLength(1);
-    const item = putCalls[0].args[0].input.Item!;
+    const item = keyRow();
     expect(item).toMatchObject({
       pk: { S: 'ORG#org-1' },
       sk: { S: 'ACCESSKEY#aurora-key-1' },
@@ -493,7 +688,7 @@ describe('create-access-key baseHandler', () => {
       accessKeyId: 'AKIA1234567890',
       createdAt: '2026-03-10T00:00:00Z',
     });
-    ddbMock.on(PutItemCommand).resolves({});
+    stubWrites();
 
     const event = buildEvent({
       body: validBody({ keyName: 'My Key', region: 'us-east-1' }),
@@ -502,15 +697,13 @@ describe('create-access-key baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(409);
-    const putCalls = ddbMock.commandCalls(PutItemCommand);
-    expect(putCalls).toHaveLength(1);
-    const item = putCalls[0].args[0].input.Item!;
+    const item = keyRow();
     expect(item.region.S).toBe('us-east-1');
   });
 
   describe('region', () => {
     beforeEach(() => {
-      ddbMock.on(PutItemCommand).resolves({});
+      stubWrites();
       mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
     });
 
@@ -547,7 +740,7 @@ describe('create-access-key baseHandler', () => {
 
       expect(result.statusCode).toBe(201);
       expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('us-east-1');
-      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      const item = keyRow();
       expect(item.region.S).toBe('us-east-1');
     });
 
@@ -571,7 +764,7 @@ describe('create-access-key baseHandler', () => {
 
   describe('bucket management permissions', () => {
     beforeEach(() => {
-      ddbMock.on(PutItemCommand).resolves({});
+      stubWrites();
       mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
     });
 
@@ -601,7 +794,7 @@ describe('create-access-key baseHandler', () => {
       const event = buildEvent({ body: bucketBody('us-east-1'), userInfo: USER_INFO });
       await baseHandler(event);
 
-      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      const item = keyRow();
       expect(item.permissions.L).toEqual([
         { S: 'read' },
         { S: 'CreateBucket' },
@@ -614,6 +807,127 @@ describe('create-access-key baseHandler', () => {
       const result = await baseHandler(event);
 
       expect(result.statusCode).toBe(400);
+      expect(mockIssueAccessKey).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── The creator-authority cap ───────────────────────────────────────
+
+  describe('the key cannot carry more than its creator', () => {
+    // A SigV4 key is authority that leaves the console and is redeemed over S3,
+    // where no role check runs until M3. Without this cap the console matrix is
+    // decoration: a Member denied bucket deletion in the console would mint a
+    // key and delete buckets with it.
+    function keyRequest(
+      role: OrgRole,
+      body: { permissions: string[]; granularPermissions?: string[]; region?: string },
+    ) {
+      return buildEvent({
+        body: JSON.stringify({
+          keyName: 'My Key',
+          bucketScope: 'all',
+          region: body.region ?? 'us-east-1',
+          permissions: body.permissions,
+          ...(body.granularPermissions ? { granularPermissions: body.granularPermissions } : {}),
+        }),
+        userInfo: {
+          ...USER_INFO,
+          membership: membershipFor(USER_INFO.orgId, USER_INFO.userId, role),
+        },
+      });
+    }
+
+    beforeEach(() => {
+      vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      stubWrites();
+      mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+    });
+
+    it('lets a Member mint the four object permissions', async () => {
+      const result = await baseHandler(
+        keyRequest(OrgRole.Member, { permissions: ['read', 'list', 'write', 'delete'] }),
+      );
+
+      expect(result.statusCode).toBe(201);
+    });
+
+    it('lets a Member mint the bucket capabilities a Member already holds', async () => {
+      // Creating a bucket is `buckets.create`, which a Member holds, and
+      // reading a bucket's configuration is `buckets.read`. Refusing these
+      // would 403 a Member who submitted the form untouched.
+      const result = await baseHandler(
+        keyRequest(OrgRole.Member, {
+          permissions: ['read', 'CreateBucket', 'GetBucketVersioning'],
+        }),
+      );
+
+      expect(result.statusCode).toBe(201);
+    });
+
+    it('refuses a Member bucket deletion, naming it', async () => {
+      const result = await baseHandler(
+        keyRequest(OrgRole.Member, { permissions: ['read', 'DeleteBucket', 'CreateBucket'] }),
+      );
+
+      expect(result.statusCode).toBe(403);
+      expect(JSON.parse(result.body!)).toStrictEqual({
+        message: 'A key cannot carry more than you do. Your role does not permit: DeleteBucket.',
+        code: ApiErrorCode.FORBIDDEN_ROLE,
+      });
+      expect(mockIssueAccessKey).not.toHaveBeenCalled();
+    });
+
+    it('lets a Member mint the granulars that only narrow what they hold', async () => {
+      const result = await baseHandler(
+        keyRequest(OrgRole.Member, {
+          permissions: ['read', 'delete'],
+          granularPermissions: ['GetObjectRetention', 'DeleteObjectVersion'],
+        }),
+      );
+
+      expect(result.statusCode).toBe(201);
+    });
+
+    it('refuses everyone below Owner the mutating retention granulars', async () => {
+      for (const role of [OrgRole.Admin, OrgRole.Member]) {
+        const result = await baseHandler(
+          keyRequest(role, {
+            permissions: ['write'],
+            granularPermissions: ['PutObjectRetention'],
+          }),
+        );
+
+        expect(result.statusCode).toBe(403);
+        expect(JSON.parse(result.body!).message).toContain('PutObjectRetention');
+      }
+    });
+
+    it('lets an Owner mint them, holding privileged.grant', async () => {
+      const result = await baseHandler(
+        keyRequest(OrgRole.Owner, {
+          permissions: ['write'],
+          granularPermissions: ['PutObjectRetention', 'PutObjectLegalHold'],
+        }),
+      );
+
+      expect(result.statusCode).toBe(201);
+    });
+
+    it('lets an Admin mint the bucket-management permissions', async () => {
+      const result = await baseHandler(
+        keyRequest(OrgRole.Admin, { permissions: ['read', 'DeleteBucket'] }),
+      );
+
+      expect(result.statusCode).toBe(201);
+    });
+
+    it('checks before minting anything at the provider', async () => {
+      await baseHandler(keyRequest(OrgRole.Member, { permissions: ['DeleteBucket'] }));
+
+      // The provider call is the irreversible half: a key minted there and
+      // refused here would be a live credential with no record.
+      expect(mockEnsureTenantReady).not.toHaveBeenCalled();
       expect(mockIssueAccessKey).not.toHaveBeenCalled();
     });
   });

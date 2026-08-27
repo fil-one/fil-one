@@ -24,6 +24,7 @@ export {
   AUTH0_DOMAIN_BY_CONSOLE_ORIGIN,
   OAUTH_STATE_COOKIE,
   CSRF_COOKIE_NAME,
+  ORG_ID_HEADER,
   GB_BYTES,
   TB_BYTES,
   TRIAL_STORAGE_LIMIT,
@@ -36,6 +37,7 @@ export {
 } from './constants.js';
 export type { UsageLimits } from './constants.js';
 export { formatBytes, formatBytesShort } from './formatBytes.js';
+export { UUID_PATTERN, isUuid } from './uuid.js';
 export type {
   MeResponse,
   OrgMembershipSummary,
@@ -57,11 +59,83 @@ export {
   OrgRole,
   isOrgRole,
   OrgNameSchema,
+  UpdateOrgSchema,
   ORG_NAME_MIN_LENGTH,
   ORG_NAME_MAX_LENGTH,
   ORG_NAME_PATTERN,
   ORG_NAME_DISALLOWED_CHARS,
 } from './api/org.js';
+export type { OrgMembershipSource, UpdateOrgRequest, UpdateOrgResponse } from './api/org.js';
+
+export {
+  INVITATION_STATUSES,
+  INVITE_EXPIRY_DAYS,
+  INVITE_TOKEN_MAX_LENGTH,
+  INVITE_TOKEN_MIN_LENGTH,
+  MAX_PENDING_INVITATIONS_PER_ORG,
+  AcceptInvitationSchema,
+  CreateInvitationSchema,
+  InvitedRoleSchema,
+} from './api/invitations.js';
+export type {
+  AcceptInvitationRequest,
+  AcceptInvitationResponse,
+  CreateInvitationRequest,
+  CreateInvitationResponse,
+  InvitationStatus,
+  InvitationSummary,
+  ListInvitationsResponse,
+} from './api/invitations.js';
+
+export { TransferOwnershipSchema, UpdateMemberRoleSchema } from './api/members.js';
+export type {
+  ListMembersResponse,
+  MemberSummary,
+  TransferOwnershipRequest,
+  TransferOwnershipResponse,
+  UpdateMemberRoleRequest,
+  UpdateMemberRoleResponse,
+} from './api/members.js';
+
+export {
+  AUDIT_EVENT_TYPES,
+  AUDIT_ACTOR_KINDS,
+  AUDIT_EVENT_PHASES,
+  AUDIT_OUTCOMES,
+  AUDIT_REDACTED,
+  AUDIT_RETENTION_DAYS,
+  AUDIT_KEY_ID_SUFFIX_LENGTH,
+  AUDIT_SECRET_BLOB_MIN_LENGTH,
+  CREDENTIAL_VALUE_PATTERNS,
+  PROHIBITED_AUDIT_CONTENT,
+  PROHIBITED_AUDIT_FIELD_PATTERNS,
+  TWO_PHASE_AUDIT_EVENT_TYPES,
+  auditKeyIdSuffix,
+  isAuditEventType,
+  looksLikeCredential,
+} from './audit.js';
+export type {
+  AuditActor,
+  AuditActorKind,
+  AuditCompletionPhase,
+  AuditDetailRecord,
+  AuditDetailValue,
+  AuditEvent,
+  AuditEventDetails,
+  AuditEventPhase,
+  AuditEventRecord,
+  AuditEventType,
+  AuditIntentPhase,
+  AuditKeyKind,
+  AuditOutcome,
+  AuditPhaseFields,
+  AuditSinglePhase,
+  AuditSubject,
+  CommittableAuditEvent,
+  TwoPhaseAuditEvent,
+  TwoPhaseAuditEventType,
+  VendorBackedKeyEvent,
+} from './audit.js';
 
 export {
   PERMISSIONS,
@@ -74,8 +148,20 @@ export {
 } from './permissions.js';
 export type { Permission } from './permissions.js';
 
+export {
+  ACCESS_KEY_PERMISSION_REQUIREMENT,
+  GRANULAR_PERMISSION_REQUIREMENT,
+  excessKeyPermissions,
+} from './access-key-permissions.js';
+export type { ExcessKeyPermission } from './access-key-permissions.js';
+
 export { ROUTE_MANIFEST } from './route-manifest.js';
-export type { RouteCategory, RouteRequirement, RouteManifestEntry } from './route-manifest.js';
+export type {
+  RouteCategory,
+  RouteHandler,
+  RouteManifestEntry,
+  RouteRequirement,
+} from './route-manifest.js';
 export { ApiErrorCode } from './api/coreInterfaces.js';
 export type { ErrorResponse } from './api/coreInterfaces.js';
 export {
@@ -192,6 +278,8 @@ export {
   BUCKET_INFO_PERMISSION_LABELS,
   KEY_NAME_MAX_LENGTH,
   KEY_NAME_PATTERN,
+  RESERVED_KEY_NAME_PREFIX,
+  isReservedKeyName,
   CreateAccessKeySchema,
 } from './api/access-keys.js';
 export type {

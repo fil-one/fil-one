@@ -4,6 +4,7 @@ import { formatBytes } from '@filone/shared';
 
 import { Alert } from '../components/Alert.js';
 import { BucketActionMenu } from '../components/BucketActionMenu.js';
+import { RequirePermission } from '../components/RequirePermission.js';
 import { BucketDrawer } from '../components/BucketDrawer.js';
 import { BucketStatus } from '../components/BucketStatus.js';
 import { Button } from '../components/Button.js';
@@ -17,6 +18,8 @@ import {
   isBucketQueryable,
   type RagBucket,
 } from '../lib/rag-bucket-api.js';
+import { usePermissions } from '../lib/use-permissions.js';
+import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
 import { timeAgo } from '../lib/time.js';
 
 export { bucketKey } from '../lib/rag-bucket-api.js';
@@ -139,18 +142,25 @@ function BucketRow({
                 <Button data-testid="bucket-row-ask" variant="ghost" size="sm" onClick={onAsk}>
                   {isBucketQueryable(bucket) ? 'Ask questions' : 'View details'}
                 </Button>
-                <BucketActionMenu onDisable={onToggle} />
+                {/* Turning indexing off discards the index, so it sits with
+                    bucket deletion; turning it on is a configuration write and
+                    sits with bucket creation. Asking questions needs neither. */}
+                <RequirePermission permission="buckets.delete">
+                  <BucketActionMenu onDisable={onToggle} />
+                </RequirePermission>
               </>
             ) : (
-              <Button
-                data-testid="bucket-row-index"
-                variant="primary"
-                size="sm"
-                disabled={pending}
-                onClick={onToggle}
-              >
-                {pending ? 'Starting…' : 'Index'}
-              </Button>
+              <RequirePermission permission="buckets.create">
+                <Button
+                  data-testid="bucket-row-index"
+                  variant="primary"
+                  size="sm"
+                  disabled={pending}
+                  onClick={onToggle}
+                >
+                  {pending ? 'Starting…' : 'Index'}
+                </Button>
+              </RequirePermission>
             )}
           </div>
         </div>
@@ -236,7 +246,13 @@ export function BucketsTab({
   togglingBucket: string | null;
   onConfirmToggle: (bucket: RagBucket) => void;
 }) {
-  const [confirm, setConfirm] = useState<RagBucket | null>(null);
+  const { has } = usePermissions();
+  // The confirmation asks what the row's own control asked: turning indexing
+  // off discards the index and sits with `buckets.delete`, turning it on is a
+  // configuration write and sits with `buckets.create`.
+  const [confirm, setConfirm] = usePermittedDialog<RagBucket | null>(null, (bucket) =>
+    bucket === null ? true : has(bucket.enabled ? 'buckets.delete' : 'buckets.create'),
+  );
   const [activeDrawer, setActiveDrawer] = useState<string | null>(null);
   const activeBucket = buckets.find((b) => bucketKey(b) === activeDrawer) ?? null;
 

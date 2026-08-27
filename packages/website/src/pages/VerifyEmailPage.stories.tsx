@@ -10,6 +10,7 @@ const me: MeResponse = {
   email: 'jane@acme.com',
   mfaEnrollments: [],
   ragAccess: false,
+  orgsBeta: false,
 };
 
 const meta: Meta<typeof VerifyEmailPage> = {

@@ -34,7 +34,12 @@ export function PageLayout({
         <Heading id={headingId} tag="h1" size="xl" description={description}>
           {title}
         </Heading>
-        {action && <div className="shrink-0">{action}</div>}
+        {/* `action` is usually a <RequirePermission> element, which is truthy
+            whether or not it renders anything — so the guard above it only ever
+            asked "was a slot passed", and a denied role got an empty div holding
+            the flex gap open. `empty:hidden` answers the question that matters:
+            did anything come out. */}
+        {action && <div className="shrink-0 empty:hidden">{action}</div>}
       </div>
       {children}
     </div>
