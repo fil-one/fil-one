@@ -12,14 +12,49 @@ import {
 } from 'recharts';
 import { useQuery } from '@tanstack/react-query';
 
-import type { UsageTrendsResponse } from '@filone/shared';
+import type { UsageDataPoint, UsageTrendsResponse } from '@filone/shared';
 
 import { Heading } from '../components/Heading/Heading';
-import { formatBytes, formatBytesShort } from '@filone/shared';
+import { formatBytes, bytesAxisFormatter } from '@filone/shared';
 import { getUsageTrends } from '../lib/api.js';
-import { formatDate } from '../lib/time.js';
+import { formatDate, formatDateShort } from '../lib/time.js';
+import { niceScale } from '../lib/chart-scale.js';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { Card } from '../components/Card';
+
+const CHART_HEIGHT = 160;
+
+/**
+ * Recharts grows a series in from zero over 1500ms by default, well outside the
+ * 150/200ms the design system allows, and it replays on every period switch and
+ * background refetch. It is also driven by `requestAnimationFrame`, so in a
+ * background tab the series sits at frame zero: the chart paints its axes and
+ * nothing else. A usage chart should be readable the moment it appears.
+ */
+const ANIMATE_SERIES = false;
+
+/** Shared axis and gridline styling, so the two charts cannot drift apart. */
+const AXIS_TICK = { fontSize: 10, fill: 'var(--color-zinc-500)' };
+const GRID_STROKE = 'var(--color-zinc-200)';
+const SERIES_COLOR = 'var(--color-brand-600)';
+
+/**
+ * Object counts, read two ways.
+ *
+ * A full count is what the rest of the console shows (`ObjectBrowser` says
+ * "17,300 objects"), so the card total and the tooltip match it. An axis has
+ * only the gutter's width to work with: spelled out, a 20,000 tick overruns it
+ * and clips against the left edge of the chart, so ticks go compact.
+ */
+const countFormatter = new Intl.NumberFormat(undefined, { notation: 'compact' });
+
+function formatCount(value: number): string {
+  return value.toLocaleString();
+}
+
+function formatCountTick(value: number): string {
+  return countFormatter.format(value);
+}
 
 // ---------------------------------------------------------------------------
 // Custom tooltip
@@ -48,8 +83,54 @@ function ChartTooltip({ active, payload, label, valueLabel, formatValue }: Chart
 }
 
 // ---------------------------------------------------------------------------
+// Chart card
+// ---------------------------------------------------------------------------
+
+type ChartCardProps = {
+  label: string;
+  value: string;
+  children: React.ReactElement;
+};
+
+function ChartCard({ label, value, children }: ChartCardProps) {
+  return (
+    <Card>
+      <div className="mb-3 flex items-center justify-between">
+        <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">{label}</span>
+        <span className="text-[13px] font-semibold text-zinc-900">{value}</span>
+      </div>
+      <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+        {children}
+      </ResponsiveContainer>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Series helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Storage and object count are both stocks: what the account holds right now,
+ * not what it accumulated over the window. The latest sample is the total, and
+ * summing the series would count the same objects once per day.
+ */
+function latestValue(series: UsageDataPoint[]): number {
+  return series.length > 0 ? series[series.length - 1].value : 0;
+}
+
+function seriesMax(series: UsageDataPoint[]): number {
+  return series.reduce((max, p) => Math.max(max, p.value), 0);
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
+
+const PERIODS = [
+  { value: '7d', label: '7 days' },
+  { value: '30d', label: '30 days' },
+] as const;
 
 export function UsageTrends() {
   const [period, setPeriod] = useState<'7d' | '30d'>('7d');
@@ -62,9 +143,11 @@ export function UsageTrends() {
 
   const trends: UsageTrendsResponse | null = data ?? null;
   const storageSeries = trends?.storage ?? [];
-  const latestStorage =
-    storageSeries.length > 0 ? storageSeries[storageSeries.length - 1].value : 0;
-  const latestObjects = trends?.objects.reduce((sum, p) => sum + p.value, 0) ?? 0;
+  const objectsSeries = trends?.objects ?? [];
+
+  const storageScale = niceScale(seriesMax(storageSeries), { tickCount: 5 });
+  const objectsScale = niceScale(seriesMax(objectsSeries), { tickCount: 6, integer: true });
+  const formatStorageTick = bytesAxisFormatter(storageScale.domainMax);
 
   return (
     <div className="mb-6">
@@ -73,143 +156,125 @@ export function UsageTrends() {
         <Heading tag="h2" size="sm">
           Usage Trends
         </Heading>
-        <div className="flex items-center gap-1 rounded-lg bg-[rgba(243,244,246,0.6)] p-0.5">
-          <button
-            type="button"
-            onClick={() => setPeriod('7d')}
-            className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
-              period === '7d'
-                ? 'bg-white text-zinc-900 shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)]'
-                : 'text-zinc-500 hover:text-zinc-900'
-            }`}
-          >
-            7 days
-          </button>
-          <button
-            type="button"
-            onClick={() => setPeriod('30d')}
-            className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
-              period === '30d'
-                ? 'bg-white text-zinc-900 shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)]'
-                : 'text-zinc-500 hover:text-zinc-900'
-            }`}
-          >
-            30 days
-          </button>
+        <div className="flex items-center gap-1 rounded-lg bg-zinc-100/60 p-0.5">
+          {PERIODS.map(({ value, label }) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setPeriod(value)}
+              aria-pressed={period === value}
+              className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                period === value
+                  ? 'bg-white text-zinc-900 shadow-xs'
+                  : 'text-zinc-500 hover:text-zinc-900'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
       {isPending && !trends ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div className="h-[180px] animate-pulse rounded-lg bg-zinc-100" />
-          <div className="h-[180px] animate-pulse rounded-lg bg-zinc-100" />
+          <div className="h-[180px] animate-pulse rounded-xl bg-zinc-100" />
+          <div className="h-[180px] animate-pulse rounded-xl bg-zinc-100" />
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {/* Storage chart — AreaChart */}
-          <Card>
-            <div className="mb-3 flex items-center justify-between">
-              <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">
-                STORAGE
-              </span>
-              <span className="text-[13px] font-semibold text-zinc-900">
-                {formatBytes(latestStorage)}
-              </span>
-            </div>
-            <ResponsiveContainer width="100%" height={160}>
-              <AreaChart
-                data={trends?.storage ?? []}
-                margin={{ top: 4, right: 0, left: 0, bottom: 0 }}
-              >
-                <defs>
-                  <linearGradient id="storageGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#0080FF" stopOpacity={0.15} />
-                    <stop offset="95%" stopColor="#0080FF" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid
-                  horizontal={true}
-                  vertical={false}
-                  strokeDasharray="3 3"
-                  stroke="var(--color-zinc-200)"
-                  strokeOpacity={0.6}
-                />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fontSize: 10, fill: '#677183' }}
-                  axisLine={false}
-                  tickLine={false}
-                  tickFormatter={formatDate}
-                />
-                <YAxis
-                  tick={{ fontSize: 10, fill: '#677183' }}
-                  axisLine={false}
-                  tickLine={false}
-                  width={40}
-                  tickCount={5}
-                  tickFormatter={formatBytesShort}
-                  domain={['dataMin', 'dataMax']}
-                />
-                <Tooltip
-                  content={<ChartTooltip valueLabel="Storage" formatValue={formatBytes} />}
-                  cursor={{ stroke: 'var(--color-zinc-200)', strokeWidth: 1 }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  fill="url(#storageGradient)"
-                  stroke="#0080FF"
-                  strokeWidth={2}
-                  dot={false}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </Card>
+          {/* Storage — how much the account holds, day by day */}
+          <ChartCard label="Storage" value={formatBytes(latestValue(storageSeries))}>
+            <AreaChart data={storageSeries} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="storageGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={SERIES_COLOR} stopOpacity={0.15} />
+                  <stop offset="95%" stopColor={SERIES_COLOR} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid
+                horizontal={true}
+                vertical={false}
+                strokeDasharray="3 3"
+                stroke={GRID_STROKE}
+                strokeOpacity={0.6}
+              />
+              <XAxis
+                dataKey="date"
+                tick={AXIS_TICK}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={formatDateShort}
+                interval="preserveStartEnd"
+                minTickGap={24}
+              />
+              <YAxis
+                tick={AXIS_TICK}
+                axisLine={false}
+                tickLine={false}
+                width={40}
+                domain={[0, storageScale.domainMax]}
+                ticks={storageScale.ticks}
+                tickFormatter={formatStorageTick}
+              />
+              <Tooltip
+                content={<ChartTooltip valueLabel="Storage" formatValue={formatBytes} />}
+                cursor={{ stroke: GRID_STROKE, strokeWidth: 1 }}
+              />
+              {/* `linear`, not `monotone`: these are daily samples, and a spline
+                  between them draws a curve nobody measured. */}
+              <Area
+                type="linear"
+                dataKey="value"
+                fill="url(#storageGradient)"
+                stroke={SERIES_COLOR}
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={ANIMATE_SERIES}
+              />
+            </AreaChart>
+          </ChartCard>
 
-          {/* Objects chart — BarChart */}
-          <Card>
-            <div className="mb-3 flex items-center justify-between">
-              <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">
-                OBJECTS
-              </span>
-              <span className="text-[13px] font-semibold text-zinc-900">{latestObjects} total</span>
-            </div>
-            <ResponsiveContainer width="100%" height={160}>
-              <BarChart
-                data={trends?.objects ?? []}
-                margin={{ top: 4, right: 0, left: 0, bottom: 0 }}
-              >
-                <CartesianGrid
-                  horizontal={true}
-                  vertical={false}
-                  strokeDasharray="3 3"
-                  stroke="var(--color-zinc-200)"
-                  strokeOpacity={0.6}
-                />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fontSize: 10, fill: '#677183' }}
-                  axisLine={false}
-                  tickLine={false}
-                  tickFormatter={formatDate}
-                />
-                <YAxis
-                  tick={{ fontSize: 10, fill: '#677183' }}
-                  axisLine={false}
-                  tickLine={false}
-                  width={30}
-                  tickCount={6}
-                  allowDecimals={false}
-                  domain={['dataMin', 'dataMax']}
-                />
-                <Tooltip
-                  content={<ChartTooltip valueLabel="Objects" formatValue={(v) => v.toString()} />}
-                  cursor={{ fill: 'var(--color-zinc-100)', opacity: 0.6 }}
-                />
-                <Bar dataKey="value" fill="#0080FF" radius={[2, 2, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </Card>
+          {/* Objects — a count, so bars, and bars baseline at zero */}
+          <ChartCard label="Objects" value={`${formatCount(latestValue(objectsSeries))} total`}>
+            <BarChart data={objectsSeries} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
+              <CartesianGrid
+                horizontal={true}
+                vertical={false}
+                strokeDasharray="3 3"
+                stroke={GRID_STROKE}
+                strokeOpacity={0.6}
+              />
+              <XAxis
+                dataKey="date"
+                tick={AXIS_TICK}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={formatDateShort}
+                interval="preserveStartEnd"
+                minTickGap={24}
+              />
+              <YAxis
+                tick={AXIS_TICK}
+                axisLine={false}
+                tickLine={false}
+                width={40}
+                allowDecimals={false}
+                domain={[0, objectsScale.domainMax]}
+                ticks={objectsScale.ticks}
+                tickFormatter={formatCountTick}
+              />
+              <Tooltip
+                content={<ChartTooltip valueLabel="Objects" formatValue={formatCount} />}
+                cursor={{ fill: 'var(--color-zinc-100)', opacity: 0.6 }}
+              />
+              <Bar
+                dataKey="value"
+                fill={SERIES_COLOR}
+                radius={[2, 2, 0, 0]}
+                isAnimationActive={ANIMATE_SERIES}
+              />
+            </BarChart>
+          </ChartCard>
         </div>
       )}
     </div>
