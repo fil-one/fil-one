@@ -1370,8 +1370,107 @@ export default $config({
       function: ownerCountDriftChecker.arn,
     });
 
+    // ── S3 Audit Broker billing-read role ───────────────────────────
+    // Cross-account role the abuse-detection broker (s3-auditbroker, account
+    // 654654381893) assumes for billing context on incidents: the detector
+    // Lambda's `billing_lookup_role_arn` and the operator console's
+    // `S3AB_BILLING_ROLE_ARN`. Read-only, and exactly the two calls the
+    // broker's billing lookup makes: Scan on UserInfoTable + GetItem on
+    // BillingTable. Referencing the table resources directly (rather than
+    // pinning physical names) keeps the grant on the live tables — this
+    // account also holds an orphaned duplicate table pair the role must not
+    // match.
+    //
+    // The broker's Phase 3 respond role (tenant-key SSM read + quarantine
+    // bucket writes) is deliberately NOT provisioned here: grants follow
+    // features (s3-auditbroker docs/vercel-deployment-guide.md §2). Add it
+    // when that phase starts.
+    let s3abBillingReadRoleArn: $util.Output<string> | undefined;
+    if (isStaging || isProduction) {
+      const vercelTeamSlug = 'filecoin-foundations-projects';
+      const vercelProjectName = 's3-auditbroker-visualizer';
+      const vercelOidcClaimPrefix = `oidc.vercel.com/${vercelTeamSlug}`;
+      // Mirrors the broker's own read roles: preview deployments may reach
+      // staging billing data, never production's.
+      const vercelEnvironments = isProduction ? ['production'] : ['production', 'preview'];
+      // Both broker instances live in 654654381893; each stage trusts the
+      // instance that serves it. The principal is pinned to the role's unique
+      // id at policy-write time, so recreating the detector role on the broker
+      // side silently breaks this trust until the stage is redeployed.
+      const brokerDetectorExecRoleArn = isProduction
+        ? 'arn:aws:iam::654654381893:role/s3-auditbroker-prod-detector-exec'
+        : 'arn:aws:iam::654654381893:role/s3-auditbroker-detector-exec';
+
+      // The OIDC provider is account-wide (one per URL), same as the GitHub
+      // provider in infra/sst.config.ts: look up an existing one first and
+      // only create it when deploying to a fresh account.
+      let vercelOidcArn: $util.Input<string>;
+      try {
+        const existing = await aws.iam.getOpenIdConnectProvider({
+          url: `https://${vercelOidcClaimPrefix}`,
+        });
+        vercelOidcArn = existing.arn;
+      } catch {
+        const provider = new aws.iam.OpenIdConnectProvider('VercelOidcProvider', {
+          url: `https://${vercelOidcClaimPrefix}`,
+          clientIdLists: [`https://vercel.com/${vercelTeamSlug}`],
+        });
+        vercelOidcArn = provider.arn;
+      }
+
+      const s3abBillingReadRole = new aws.iam.Role('S3abBillingReadRole', {
+        name: 'filone-console-visualizer-billing-read',
+        assumeRolePolicy: $jsonStringify({
+          Version: '2012-10-17',
+          Statement: [
+            {
+              Effect: 'Allow',
+              Principal: { Federated: vercelOidcArn },
+              Action: 'sts:AssumeRoleWithWebIdentity',
+              Condition: {
+                StringEquals: {
+                  [`${vercelOidcClaimPrefix}:aud`]: `https://vercel.com/${vercelTeamSlug}`,
+                  [`${vercelOidcClaimPrefix}:sub`]: vercelEnvironments.map(
+                    (env) =>
+                      `owner:${vercelTeamSlug}:project:${vercelProjectName}:environment:${env}`,
+                  ),
+                },
+              },
+            },
+            {
+              Effect: 'Allow',
+              Principal: { AWS: brokerDetectorExecRoleArn },
+              Action: 'sts:AssumeRole',
+            },
+          ],
+        }),
+        inlinePolicies: [
+          {
+            name: 's3ab-billing-read',
+            policy: $jsonStringify({
+              Version: '2012-10-17',
+              Statement: [
+                {
+                  Effect: 'Allow',
+                  Action: ['dynamodb:Scan'],
+                  Resource: [userInfoTable.arn],
+                },
+                {
+                  Effect: 'Allow',
+                  Action: ['dynamodb:GetItem'],
+                  Resource: [billingTable.arn],
+                },
+              ],
+            }),
+          },
+        ],
+      });
+      s3abBillingReadRoleArn = s3abBillingReadRole.arn;
+    }
+
     return {
       baseUrl: siteUrl,
+      ...(s3abBillingReadRoleArn ? { s3abBillingReadRoleArn } : {}),
     };
   },
 });
