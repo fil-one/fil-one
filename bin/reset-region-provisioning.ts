@@ -45,6 +45,7 @@ const ORCHESTRATOR_ID_BY_REGION: Record<string, string> = {
   'eu-west-1': 'aurora',
   'us-east-1': 'fth',
   'eu-central-3': 'forge',
+  'us-east-9': 'forgeDev',
 };
 
 // The region an ACCESSKEY# row belongs to when it predates the `region`
