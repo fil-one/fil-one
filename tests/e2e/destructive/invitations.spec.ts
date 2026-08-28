@@ -53,8 +53,8 @@ test.describe('paid user (organizations beta)', () => {
     await page.goto('/dashboard');
     // The nav entry itself is the beta gate's other half: `useMembersSurface`
     // renders it for a solo org only once the flag is on.
-    await page.getByTestId('nav-members').click();
-    await expect(page.locator('#members-heading')).toBeVisible();
+    await page.getByTestId('nav-organization').click();
+    await expect(page.locator('#organization-heading')).toBeVisible();
 
     const created = page.waitForResponse(
       (response) =>
@@ -62,9 +62,21 @@ test.describe('paid user (organizations beta)', () => {
         response.request().method() === 'POST',
     );
 
-    await page.locator('#invite-email').fill(invitedEmail);
-    await page.locator('#invite-role').selectOption('member');
-    await page.locator('#invite-submit-button').click();
+    // The form lives in a dialog and nowhere else: `Modal` is a Headless UI
+    // `Transition`, so none of these fields is on the page until the trigger
+    // mounts them. The trigger is the Organization page's own Add member
+    // button, in the header above the tabs; pressing it selects the
+    // Invitations tab, which is the panel that owns the dialog.
+    await page.getByTestId('org-invite-button').click();
+    const dialog = page.getByTestId('invite-dialog');
+    await expect(dialog).toBeVisible();
+
+    await dialog.locator('#invite-email').fill(invitedEmail);
+    // The role is a fieldset of radios, one per role the caller may hand out.
+    // The input itself is `sr-only`, so the label card around it is the control
+    // a person clicks and the one this drives.
+    await dialog.locator('label:has(input[name="invite-role"][value="member"])').click();
+    await dialog.locator('#invite-submit-button').click();
 
     // Read the response rather than only the rendered row: a refusal keeps the
     // form on screen with an alert, which would otherwise surface as an opaque
@@ -114,7 +126,12 @@ test.describe('paid user (organizations beta)', () => {
     // withdrawal is the server's answer rather than the cache edit that follows
     // a successful revoke.
     await page.reload();
-    await expect(page.locator('#members-heading')).toBeVisible();
+    await expect(page.locator('#organization-heading')).toBeVisible();
+    // A reload comes back on the default tab, and the row lives in the
+    // Invitations panel: without selecting it, "no such row" is true of every
+    // run and says nothing about the withdrawal.
+    await page.getByTestId('org-tab-invitations').click();
+    await expect(page.getByTestId('invitations-section')).toBeVisible();
     await expect(
       page.locator(`[data-testid="invitation-row"][data-invite-id="${invitation.inviteId}"]`),
     ).toHaveCount(0);

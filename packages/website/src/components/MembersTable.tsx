@@ -93,6 +93,7 @@ export function MembersTable({
       actions.push({
         label: 'Transfer ownership',
         icon: UserSwitchIcon,
+        testId: 'member-action-transfer-ownership',
         onSelect: () => onTransfer(member),
       });
     }
@@ -104,6 +105,7 @@ export function MembersTable({
         label: 'Remove',
         icon: TrashIcon,
         destructive: true,
+        testId: 'member-action-remove',
         onSelect: () => onRemove(member),
       });
     }
