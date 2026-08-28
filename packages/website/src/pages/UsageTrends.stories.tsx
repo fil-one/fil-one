@@ -109,6 +109,19 @@ const FIXTURES = {
   ),
 } satisfies Record<string, UsageTrendsResponse>;
 
+/**
+ * What a handler deployed before the egress series returns.
+ *
+ * Typed as a full response because that is the lie the type tells at runtime:
+ * reading `.length` off the absent field took the dashboard to the error
+ * boundary. The second slot falls back to object count rather than reporting
+ * absent egress as "0 B".
+ */
+const LEGACY_BACKEND = {
+  storage: series([6.1, 9.4, 13.8, 15.2, 19.6, 24.3, 27.1].map((n) => n * MB)),
+  objects: series([5, 9, 14, 16, 19, 21, 22]),
+} as UsageTrendsResponse;
+
 /** 30 days of steady growth, for the wider period and its axis label density. */
 const THIRTY_DAYS = trends(
   Array.from({ length: 30 }, (_, i) => (5 + i * 0.9) * MB),
@@ -189,6 +202,23 @@ export const Terabytes: Story = { args: { fixture: 'terabytes' } };
 
 /** The case that makes an egress trend worth more than a progress bar. */
 export const NearTrialCap: Story = { args: { fixture: 'nearTrialCap' } };
+
+/**
+ * A handler deployed before the egress series. Falls back to object count
+ * instead of crashing, and instead of claiming zero traffic.
+ */
+export const LegacyBackend: Story = {
+  render: () => {
+    const [client] = useState(() => seed(LEGACY_BACKEND));
+    return (
+      <QueryClientProvider client={client}>
+        <div className="max-w-4xl">
+          <UsageTrends />
+        </div>
+      </QueryClientProvider>
+    );
+  },
+};
 
 /** Nothing seeded, so the query never resolves and the skeleton holds. */
 export const Loading: Story = {

@@ -42,6 +42,21 @@ const EMPTY_STATE_HEADER_OFFSET = 32;
  */
 const ANIMATE_SERIES = false;
 
+/**
+ * Object counts, for the fallback chart. A full count matches the rest of the
+ * console (`ObjectBrowser` says "17,300 objects"); axis ticks go compact
+ * because a spelled-out 20,000 overruns the gutter and clips off the left edge.
+ */
+const countFormatter = new Intl.NumberFormat(undefined, { notation: 'compact' });
+
+function formatCount(value: number): string {
+  return value.toLocaleString();
+}
+
+function formatCountTick(value: number): string {
+  return countFormatter.format(value);
+}
+
 /** Shared axis and gridline styling, so the two charts cannot drift apart. */
 const AXIS_TICK = { fontSize: 10, fill: 'var(--color-zinc-500)' };
 const GRID_STROKE = 'var(--color-zinc-200)';
@@ -166,12 +181,86 @@ function seriesMax(series: UsageDataPoint[]): number {
  */
 type TrendsState = 'no-data' | 'no-usage' | 'ready';
 
-function trendsState(trends: UsageTrendsResponse | null): TrendsState {
-  if (!trends) return 'no-data';
-  const points = trends.storage.length + trends.egress.length;
-  if (points === 0) return 'no-data';
-  if (seriesMax(trends.storage) === 0 && seriesMax(trends.egress) === 0) return 'no-usage';
+function trendsState(series: NormalizedSeries): TrendsState {
+  if (!series.received) return 'no-data';
+  if (series.storage.length + series.egress.length === 0) return 'no-data';
+  if (seriesMax(series.storage) === 0 && seriesMax(series.egress) === 0) return 'no-usage';
   return 'ready';
+}
+
+type NormalizedSeries = {
+  /** Whether a response arrived at all, as opposed to one that arrived empty. */
+  received: boolean;
+  storage: UsageDataPoint[];
+  objects: UsageDataPoint[];
+  egress: UsageDataPoint[];
+  /** Whether the response carried an egress series, as opposed to an empty one. */
+  hasEgress: boolean;
+};
+
+/**
+ * Reads the response defensively, because the type is not a runtime guarantee.
+ *
+ * `egress` is required on `UsageTrendsResponse`, but a deployed handler that
+ * predates it does not send one, and this component can be live before that
+ * handler is. Reading `.length` off the absent field threw and the error
+ * boundary took the whole dashboard down with it.
+ *
+ * A missing series is also not an empty one. Charting an absent `egress` as
+ * "0 B" would report no traffic on an account that may be serving plenty, on
+ * the metric that disables accounts over the trial cap. So the second slot
+ * falls back to object count, which every deployed handler does send.
+ */
+function normalizeSeries(trends: UsageTrendsResponse | undefined): NormalizedSeries {
+  const egress = Array.isArray(trends?.egress) ? trends.egress : undefined;
+  return {
+    received: trends !== undefined,
+    storage: Array.isArray(trends?.storage) ? trends.storage : [],
+    objects: Array.isArray(trends?.objects) ? trends.objects : [],
+    egress: egress ?? [],
+    hasEgress: egress !== undefined,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Section chrome
+// ---------------------------------------------------------------------------
+
+function PeriodToggle({
+  period,
+  onChange,
+}: {
+  period: UsageTrendsPeriod;
+  onChange: (p: UsageTrendsPeriod) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1 rounded-lg bg-zinc-100/60 p-0.5">
+      {PERIODS.map(({ value, label }) => (
+        <button
+          key={value}
+          type="button"
+          onClick={() => onChange(value)}
+          aria-pressed={period === value}
+          className={`rounded-md px-2.5 py-1 text-meta font-medium transition-colors ${
+            period === value
+              ? 'bg-white text-zinc-900 shadow-xs'
+              : 'text-zinc-500 hover:text-zinc-900'
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function TrendsSkeleton() {
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="h-[180px] animate-pulse rounded-xl bg-zinc-100" />
+      <div className="h-[180px] animate-pulse rounded-xl bg-zinc-100" />
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -201,15 +290,51 @@ export function UsageTrends() {
     staleTime: USAGE_STALE_TIME,
   });
 
-  const trends: UsageTrendsResponse | null = data ?? null;
-  const storageSeries = trends?.storage ?? [];
-  const egressSeries = trends?.egress ?? [];
+  const {
+    storage: storageSeries,
+    objects: objectsSeries,
+    egress: egressSeries,
+    hasEgress,
+    received,
+  } = normalizeSeries(data);
 
   const storageScale = niceScale(seriesMax(storageSeries), { tickCount: 5 });
   const egressScale = niceScale(seriesMax(egressSeries), { tickCount: 5 });
+  const objectsScale = niceScale(seriesMax(objectsSeries), { tickCount: 6, integer: true });
   const formatStorageTick = bytesAxisFormatter(storageScale.domainMax);
   const formatEgressTick = bytesAxisFormatter(egressScale.domainMax);
-  const state = trendsState(trends);
+  const state = trendsState({
+    storage: storageSeries,
+    objects: objectsSeries,
+    egress: egressSeries,
+    hasEgress,
+    received,
+  });
+
+  /**
+   * The second card is egress where the handler provides it, and object count
+   * where it does not. Charting the flow and the stock through one BarChart
+   * keeps their axis, baseline and tooltip identical by construction: Recharts
+   * resolves children by type, so a shared wrapper component is not an option
+   * and the alternative is duplicating the chart.
+   */
+  const secondary = hasEgress
+    ? {
+        label: 'Egress',
+        value: formatBytes(windowTotal(egressSeries)),
+        data: egressSeries,
+        scale: egressScale,
+        tickFormatter: formatEgressTick,
+        formatValue: formatBytes,
+      }
+    : {
+        label: 'Objects',
+        value: `${formatCount(latestValue(objectsSeries))} total`,
+        data: objectsSeries,
+        scale: objectsScale,
+        tickFormatter: formatCountTick,
+        formatValue: formatCount,
+      };
 
   // A 24-hour window repeats one date on every tick and varies only by hour;
   // the 7- and 30-day windows are the other way round.
@@ -224,23 +349,7 @@ export function UsageTrends() {
         <Heading tag="h2" size="sm">
           Usage Trends
         </Heading>
-        <div className="flex items-center gap-1 rounded-lg bg-zinc-100/60 p-0.5">
-          {PERIODS.map(({ value, label }) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setPeriod(value)}
-              aria-pressed={period === value}
-              className={`rounded-md px-2.5 py-1 text-meta font-medium transition-colors ${
-                period === value
-                  ? 'bg-white text-zinc-900 shadow-xs'
-                  : 'text-zinc-500 hover:text-zinc-900'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <PeriodToggle period={period} onChange={setPeriod} />
       </div>
 
       {state === 'no-data' && !isPending ? (
@@ -253,11 +362,8 @@ export function UsageTrends() {
           title="No usage yet"
           description="Upload your first object to start the trend."
         />
-      ) : isPending && !trends ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div className="h-[180px] animate-pulse rounded-xl bg-zinc-100" />
-          <div className="h-[180px] animate-pulse rounded-xl bg-zinc-100" />
-        </div>
+      ) : isPending && !received ? (
+        <TrendsSkeleton />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {/* Storage — how much the account holds, day by day */}
@@ -318,9 +424,10 @@ export function UsageTrends() {
             </AreaChart>
           </ChartCard>
 
-          {/* Egress — bytes served per bucket, so bars, baselined at zero */}
-          <ChartCard label="Egress" value={formatBytes(windowTotal(egressSeries))}>
-            <BarChart data={egressSeries} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
+          {/* Egress, or object count where the handler predates it. Bars either
+              way, baselined at zero. */}
+          <ChartCard label={secondary.label} value={secondary.value}>
+            <BarChart data={secondary.data} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
               <CartesianGrid
                 horizontal={true}
                 vertical={false}
@@ -342,15 +449,15 @@ export function UsageTrends() {
                 axisLine={false}
                 tickLine={false}
                 width={40}
-                domain={[0, egressScale.domainMax]}
-                ticks={egressScale.ticks}
-                tickFormatter={formatEgressTick}
+                domain={[0, secondary.scale.domainMax]}
+                ticks={secondary.scale.ticks}
+                tickFormatter={secondary.tickFormatter}
               />
               <Tooltip
                 content={
                   <ChartTooltip
-                    valueLabel="Egress"
-                    formatValue={formatBytes}
+                    valueLabel={secondary.label}
+                    formatValue={secondary.formatValue}
                     formatLabel={formatTooltipLabel}
                   />
                 }
