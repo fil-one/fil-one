@@ -11,6 +11,7 @@ import {
   Tooltip,
 } from 'recharts';
 import { useQuery } from '@tanstack/react-query';
+import { ChartLineIcon } from '@phosphor-icons/react/dist/ssr';
 
 import type { UsageDataPoint, UsageTrendsResponse } from '@filone/shared';
 
@@ -21,8 +22,16 @@ import { formatDate, formatDateShort } from '../lib/time.js';
 import { niceScale } from '../lib/chart-scale.js';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { Card } from '../components/Card';
+import { IconBox } from '../components/IconBox.js';
 
 const CHART_HEIGHT = 160;
+
+/**
+ * The chart cards carry a header row the empty state does not: a 19.5px line
+ * plus its 12px margin. Adding it back keeps both cards the same height, so the
+ * section does not jump when the first object lands.
+ */
+const EMPTY_STATE_HEADER_OFFSET = 32;
 
 /**
  * Recharts grows a series in from zero over 1500ms by default, well outside the
@@ -72,7 +81,7 @@ function ChartTooltip({ active, payload, label, valueLabel, formatValue }: Chart
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 shadow-md">
-      <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+      <p className="mb-0.5 text-xs font-semibold uppercase tracking-wider text-zinc-400">
         {formatDate(label as string)}
       </p>
       <p className="text-xs text-zinc-700">
@@ -97,11 +106,34 @@ function ChartCard({ label, value, children }: ChartCardProps) {
     <Card>
       <div className="mb-3 flex items-center justify-between">
         <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">{label}</span>
-        <span className="text-[13px] font-semibold text-zinc-900">{value}</span>
+        <span className="text-ui font-semibold text-zinc-900">{value}</span>
       </div>
       <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
         {children}
       </ResponsiveContainer>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Empty state
+// ---------------------------------------------------------------------------
+
+/**
+ * Held at the chart height so the section does not resize when the first
+ * object lands and the charts take over.
+ */
+function TrendsEmptyState({ title, description }: { title: string; description: string }) {
+  return (
+    <Card>
+      <div
+        className="flex flex-col items-center justify-center gap-2 text-center"
+        style={{ height: CHART_HEIGHT + EMPTY_STATE_HEADER_OFFSET }}
+      >
+        <IconBox icon={ChartLineIcon} color="grey" size="md" />
+        <p className="text-sm font-medium text-zinc-900">{title}</p>
+        <p className="max-w-xs text-xs text-zinc-500">{description}</p>
+      </div>
     </Card>
   );
 }
@@ -121,6 +153,26 @@ function latestValue(series: UsageDataPoint[]): number {
 
 function seriesMax(series: UsageDataPoint[]): number {
   return series.reduce((max, p) => Math.max(max, p.value), 0);
+}
+
+/**
+ * Which of the two empty states a response earns, if either.
+ *
+ * The distinction matters, and the console already draws it elsewhere: on
+ * BucketsPage, "No buckets yet" is deliberately withheld while a region is
+ * down, because it is a claim about the account rather than about the request.
+ * Same here. Days reported as zero mean the account is genuinely empty and the
+ * next step is worth naming; no days reported at all means the metrics pipeline
+ * gave us nothing, and saying "no usage yet" would be inventing a fact.
+ */
+type TrendsState = 'no-data' | 'no-usage' | 'ready';
+
+function trendsState(trends: UsageTrendsResponse | null): TrendsState {
+  if (!trends) return 'no-data';
+  const points = trends.storage.length + trends.objects.length;
+  if (points === 0) return 'no-data';
+  if (seriesMax(trends.storage) === 0 && seriesMax(trends.objects) === 0) return 'no-usage';
+  return 'ready';
 }
 
 // ---------------------------------------------------------------------------
@@ -148,6 +200,7 @@ export function UsageTrends() {
   const storageScale = niceScale(seriesMax(storageSeries), { tickCount: 5 });
   const objectsScale = niceScale(seriesMax(objectsSeries), { tickCount: 6, integer: true });
   const formatStorageTick = bytesAxisFormatter(storageScale.domainMax);
+  const state = trendsState(trends);
 
   return (
     <div className="mb-6">
@@ -163,7 +216,7 @@ export function UsageTrends() {
               type="button"
               onClick={() => setPeriod(value)}
               aria-pressed={period === value}
-              className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
+              className={`rounded-md px-2.5 py-1 text-meta font-medium transition-colors ${
                 period === value
                   ? 'bg-white text-zinc-900 shadow-xs'
                   : 'text-zinc-500 hover:text-zinc-900'
@@ -175,7 +228,17 @@ export function UsageTrends() {
         </div>
       </div>
 
-      {isPending && !trends ? (
+      {state === 'no-data' && !isPending ? (
+        <TrendsEmptyState
+          title="No usage data for this period"
+          description="Usage is reported once a day. Check back shortly."
+        />
+      ) : state === 'no-usage' ? (
+        <TrendsEmptyState
+          title="No usage yet"
+          description="Upload your first object to start the trend."
+        />
+      ) : isPending && !trends ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="h-[180px] animate-pulse rounded-xl bg-zinc-100" />
           <div className="h-[180px] animate-pulse rounded-xl bg-zinc-100" />

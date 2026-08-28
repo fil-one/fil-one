@@ -51,8 +51,13 @@ const FIXTURES = {
   ),
   /** Nothing changed all week. Every value is both the min and the max. */
   flat: trends(Array(7).fill(4.5 * MB), Array(7).fill(12)),
-  /** A brand-new org: real data, all of it zero. */
+  /** A brand-new org: days were reported, all of them zero. */
   empty: trends(Array(7).fill(0), Array(7).fill(0)),
+  /**
+   * No days reported at all. Distinct from `empty`: the account may well hold
+   * data, so the copy must not claim otherwise.
+   */
+  noData: { storage: [], objects: [] },
   /** Day one, with six days of nothing behind it. */
   firstDay: trends([0, 0, 0, 0, 0, 0, 1.2 * MB], [0, 0, 0, 0, 0, 0, 3]),
   /** Small enough that a byte axis has to reach for KB. */
@@ -122,8 +127,14 @@ export const LowBaseline: Story = { args: { fixture: 'lowBaseline' } };
 /** A flat series still needs a readable axis, not a degenerate one. */
 export const Flat: Story = { args: { fixture: 'flat' } };
 
-/** All zero. The axis collapses to a single 0 tick rather than inventing one. */
+/** A genuinely empty account, so the next step is named. */
 export const Empty: Story = { args: { fixture: 'empty' } };
+
+/**
+ * The metrics pipeline returned nothing. Deliberately does NOT say "no usage
+ * yet": that is a claim about the account, and this is a fact about the request.
+ */
+export const NoData: Story = { args: { fixture: 'noData' } };
 
 export const FirstDay: Story = { args: { fixture: 'firstDay' } };
 
