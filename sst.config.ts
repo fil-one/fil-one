@@ -1381,11 +1381,11 @@ export default $config({
     // account also holds an orphaned duplicate table pair the role must not
     // match.
     //
-    // The broker's Phase 3 respond role (tenant-key SSM read + quarantine
-    // bucket writes) is deliberately NOT provisioned here: grants follow
-    // features (s3-auditbroker docs/vercel-deployment-guide.md §2). Add it
-    // when that phase starts.
+    // The respond role below is the Phase 3 counterpart (tenant-key SSM read
+    // + quarantine bucket writes) — provisioning it starts the mint slice of
+    // that phase (s3-auditbroker docs/vercel-deployment-guide.md §2).
     let s3abBillingReadRoleArn: $util.Output<string> | undefined;
+    let s3abRespondRoleArn: $util.Output<string> | undefined;
     if (isStaging || isProduction) {
       const vercelTeamSlug = 'filecoin-foundations-projects';
       const vercelProjectName = 's3-auditbroker-visualizer';
@@ -1466,11 +1466,114 @@ export default $config({
         ],
       });
       s3abBillingReadRoleArn = s3abBillingReadRole.arn;
+
+      // ── S3 Audit Broker respond role (Phase 3, armed actions) ──────
+      // What the RESPONSE ARMED surfaces assume to mint tenant-key preview
+      // URLs and quarantine objects. Its own role, separate from billing-read,
+      // so CloudTrail cleanly splits "read the evidence" from "acted on a
+      // tenant". Trusted for:
+      //  - the console's Vercel OIDC identity — production deployments ONLY,
+      //    on every stage: preview deployments run with bypass auth and must
+      //    never arm; and
+      //  - the human responder's SSO role, so the CLI response scripts
+      //    (preview_url.py, quarantine_object.py) can assume it. Same-account
+      //    assumption works on the trust policy alone, which matters on
+      //    production where ReadOnlyAccess carries no sts:AssumeRole. SSO
+      //    role names carry a random suffix and are recreated if the
+      //    permission set is reprovisioned — re-pin here if assumption starts
+      //    failing.
+      // Assumers must set RoleSessionName to the operator's identity so
+      // CloudTrail and the incident receipts agree on *who* acted.
+      const responderSsoRoleArn = isProduction
+        ? 'arn:aws:iam::811430801166:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_ReadOnlyAccess_e180918ff18ef597'
+        : 'arn:aws:iam::654654381893:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_AdministratorAccess_983a3f40ae4c07e1';
+
+      // Operator-created (deliberately outside IaC state, like the evidence it
+      // holds) and not yet created in either account. Bucket names are global,
+      // so the stages cannot share one. The s3:ResourceAccount condition below
+      // keeps the grant inert until the bucket exists *in this account* — a
+      // third party claiming the global name gains nothing.
+      const quarantineBucketName = isProduction
+        ? 'filone-ir-quarantine'
+        : 'filone-ir-quarantine-staging';
+
+      const s3abRespondRole = new aws.iam.Role('S3abRespondRole', {
+        name: 'filone-console-visualizer-respond',
+        assumeRolePolicy: $jsonStringify({
+          Version: '2012-10-17',
+          Statement: [
+            {
+              Effect: 'Allow',
+              Principal: { Federated: vercelOidcArn },
+              Action: 'sts:AssumeRoleWithWebIdentity',
+              Condition: {
+                StringEquals: {
+                  [`${vercelOidcClaimPrefix}:aud`]: `https://vercel.com/${vercelTeamSlug}`,
+                  [`${vercelOidcClaimPrefix}:sub`]: `owner:${vercelTeamSlug}:project:${vercelProjectName}:environment:production`,
+                },
+              },
+            },
+            {
+              Effect: 'Allow',
+              Principal: { AWS: responderSsoRoleArn },
+              Action: 'sts:AssumeRole',
+            },
+          ],
+        }),
+        inlinePolicies: [
+          {
+            name: 's3ab-respond',
+            policy: $jsonStringify({
+              Version: '2012-10-17',
+              Statement: [
+                {
+                  // Mint: read a tenant's console S3 key to presign a
+                  // short-lived preview URL. The exact path scripts/lib/
+                  // aurora.py builds from STAGE.
+                  Sid: 'MintTenantKeyRead',
+                  Effect: 'Allow',
+                  Action: ['ssm:GetParameter'],
+                  Resource: [`arn:aws:ssm:*:*:parameter/filone/${stage}/aurora-s3/access-key/*`],
+                },
+                {
+                  // Tenant listing (list_tenant_ids) — best-effort UX in the
+                  // scripts; scoped to the same subtree.
+                  Sid: 'MintTenantKeyList',
+                  Effect: 'Allow',
+                  Action: ['ssm:GetParametersByPath'],
+                  Resource: [
+                    `arn:aws:ssm:*:*:parameter/filone/${stage}/aurora-s3/access-key`,
+                    `arn:aws:ssm:*:*:parameter/filone/${stage}/aurora-s3/access-key/*`,
+                  ],
+                },
+                {
+                  // Quarantine: preserve evidence (Put), verify/restore (Get,
+                  // List). No DeleteObject — evidence stays.
+                  Sid: 'QuarantineEvidence',
+                  Effect: 'Allow',
+                  Action: ['s3:PutObject', 's3:GetObject', 's3:ListBucket'],
+                  Resource: [
+                    `arn:aws:s3:::${quarantineBucketName}`,
+                    `arn:aws:s3:::${quarantineBucketName}/*`,
+                  ],
+                  Condition: {
+                    StringEquals: {
+                      's3:ResourceAccount': aws.getCallerIdentityOutput({}).accountId,
+                    },
+                  },
+                },
+              ],
+            }),
+          },
+        ],
+      });
+      s3abRespondRoleArn = s3abRespondRole.arn;
     }
 
     return {
       baseUrl: siteUrl,
       ...(s3abBillingReadRoleArn ? { s3abBillingReadRoleArn } : {}),
+      ...(s3abRespondRoleArn ? { s3abRespondRoleArn } : {}),
     };
   },
 });
