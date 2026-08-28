@@ -72,6 +72,24 @@ const FIXTURES = {
   ),
 } satisfies Record<string, UsageTrendsResponse>;
 
+/**
+ * 24 hourly buckets, for the hour-resolution axis. Storage barely moves inside
+ * a day, which is the honest shape: the interesting line at this resolution is
+ * egress (FIL-1098), not storage.
+ */
+const HOUR = 60 * 60 * 1000;
+const LAST_HOUR = Date.UTC(2026, 7, 27, 12, 59, 59, 999);
+const TWENTY_FOUR_HOURS: UsageTrendsResponse = {
+  storage: Array.from({ length: 24 }, (_, i) => ({
+    date: new Date(LAST_HOUR - (23 - i) * HOUR).toISOString(),
+    value: (26 + i * 0.05) * MB,
+  })),
+  objects: Array.from({ length: 24 }, (_, i) => ({
+    date: new Date(LAST_HOUR - (23 - i) * HOUR).toISOString(),
+    value: 20 + Math.floor(i / 8),
+  })),
+};
+
 /** 30 days of steady growth, for the wider period and its axis label density. */
 const THIRTY_DAYS = trends(
   Array.from({ length: 30 }, (_, i) => (5 + i * 0.9) * MB),
@@ -82,6 +100,7 @@ function seed(data: UsageTrendsResponse) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
+  client.setQueryData(queryKeys.usageTrends('24h'), TWENTY_FOUR_HOURS);
   client.setQueryData(queryKeys.usageTrends('7d'), data);
   client.setQueryData(queryKeys.usageTrends('30d'), THIRTY_DAYS);
   return client;
@@ -159,17 +178,14 @@ export const Loading: Story = {
   },
 };
 
-/** 375px, where the two-column grid stacks. */
+/**
+ * 375px, where the two-column grid stacks.
+ *
+ * The viewport parameter is doing the work, deliberately without a fixed-width
+ * wrapper. `sm:grid-cols-2` keys off the viewport, not the container, so a
+ * narrow wrapper inside a wide viewport renders two 180px charts side by side:
+ * a layout that cannot ship, presented as if it were the mobile one.
+ */
 export const Mobile: Story = {
   parameters: { viewport: { defaultViewport: 'mobile1' } },
-  render: ({ fixture }) => {
-    const [client] = useState(() => seed(FIXTURES[fixture]));
-    return (
-      <QueryClientProvider client={client}>
-        <div style={{ width: 375 }}>
-          <UsageTrends />
-        </div>
-      </QueryClientProvider>
-    );
-  },
 };

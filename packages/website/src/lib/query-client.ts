@@ -1,5 +1,5 @@
 import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query';
-import { ApiErrorCode, type S3Region } from '@filone/shared';
+import { ApiErrorCode, type S3Region, type UsageTrendsPeriod } from '@filone/shared';
 
 export const ME_STALE_TIME = 10 * 60_000;
 
@@ -103,7 +103,7 @@ export const queryKeys = {
   activityRecent: (limit: number) => ['activity', 'recent', limit] as const,
   // Shares the ['usage'] prefix so invalidateQueries({ queryKey: queryKeys.usage })
   // also invalidates the trends charts.
-  usageTrends: (period: '7d' | '30d') => ['usage', 'trends', period] as const,
+  usageTrends: (period: UsageTrendsPeriod) => ['usage', 'trends', period] as const,
   buckets: ['buckets'] as const,
   // Shares the ['buckets'] prefix so deleting a bucket invalidates both the
   // unfiltered baseline and whatever filtered/sorted view is active.

@@ -13,12 +13,12 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { ChartLineIcon } from '@phosphor-icons/react/dist/ssr';
 
-import type { UsageDataPoint, UsageTrendsResponse } from '@filone/shared';
+import type { UsageDataPoint, UsageTrendsPeriod, UsageTrendsResponse } from '@filone/shared';
 
 import { Heading } from '../components/Heading/Heading';
 import { formatBytes, bytesAxisFormatter } from '@filone/shared';
 import { getUsageTrends } from '../lib/api.js';
-import { formatDate, formatDateShort } from '../lib/time.js';
+import { formatDate, formatDateShort, formatDateTime, formatTimeShort } from '../lib/time.js';
 import { niceScale } from '../lib/chart-scale.js';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { Card } from '../components/Card';
@@ -75,14 +75,22 @@ type ChartTooltipProps = {
   label?: string;
   valueLabel: string;
   formatValue: (v: number) => string;
+  formatLabel: (iso: string) => string;
 };
 
-function ChartTooltip({ active, payload, label, valueLabel, formatValue }: ChartTooltipProps) {
+function ChartTooltip({
+  active,
+  payload,
+  label,
+  valueLabel,
+  formatValue,
+  formatLabel,
+}: ChartTooltipProps) {
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 shadow-md">
       <p className="mb-0.5 text-xs font-semibold uppercase tracking-wider text-zinc-400">
-        {formatDate(label as string)}
+        {formatLabel(label as string)}
       </p>
       <p className="text-xs text-zinc-700">
         {valueLabel}: {formatValue(payload[0].value ?? 0)}
@@ -179,13 +187,18 @@ function trendsState(trends: UsageTrendsResponse | null): TrendsState {
 // Component
 // ---------------------------------------------------------------------------
 
-const PERIODS = [
-  { value: '7d', label: '7 days' },
-  { value: '30d', label: '30 days' },
-] as const;
+/**
+ * Compact labels, not "7 days" / "30 days": three spelled-out options crowd the
+ * section header off the right edge at 375px.
+ */
+const PERIODS: Array<{ value: UsageTrendsPeriod; label: string }> = [
+  { value: '24h', label: '24h' },
+  { value: '7d', label: '7d' },
+  { value: '30d', label: '30d' },
+];
 
 export function UsageTrends() {
-  const [period, setPeriod] = useState<'7d' | '30d'>('7d');
+  const [period, setPeriod] = useState<UsageTrendsPeriod>('7d');
 
   const { data, isPending } = useQuery({
     queryKey: queryKeys.usageTrends(period),
@@ -201,6 +214,12 @@ export function UsageTrends() {
   const objectsScale = niceScale(seriesMax(objectsSeries), { tickCount: 6, integer: true });
   const formatStorageTick = bytesAxisFormatter(storageScale.domainMax);
   const state = trendsState(trends);
+
+  // A 24-hour window repeats one date on every tick and varies only by hour;
+  // the 7- and 30-day windows are the other way round.
+  const hourly = period === '24h';
+  const formatAxisLabel = hourly ? formatTimeShort : formatDateShort;
+  const formatTooltipLabel = hourly ? formatDateTime : formatDate;
 
   return (
     <div className="mb-6">
@@ -231,7 +250,7 @@ export function UsageTrends() {
       {state === 'no-data' && !isPending ? (
         <TrendsEmptyState
           title="No usage data for this period"
-          description="Usage is reported once a day. Check back shortly."
+          description="No samples were reported for this window. Check back shortly."
         />
       ) : state === 'no-usage' ? (
         <TrendsEmptyState
@@ -266,7 +285,7 @@ export function UsageTrends() {
                 tick={AXIS_TICK}
                 axisLine={false}
                 tickLine={false}
-                tickFormatter={formatDateShort}
+                tickFormatter={formatAxisLabel}
                 interval="preserveStartEnd"
                 minTickGap={24}
               />
@@ -280,7 +299,13 @@ export function UsageTrends() {
                 tickFormatter={formatStorageTick}
               />
               <Tooltip
-                content={<ChartTooltip valueLabel="Storage" formatValue={formatBytes} />}
+                content={
+                  <ChartTooltip
+                    valueLabel="Storage"
+                    formatValue={formatBytes}
+                    formatLabel={formatTooltipLabel}
+                  />
+                }
                 cursor={{ stroke: GRID_STROKE, strokeWidth: 1 }}
               />
               {/* `linear`, not `monotone`: these are daily samples, and a spline
@@ -312,7 +337,7 @@ export function UsageTrends() {
                 tick={AXIS_TICK}
                 axisLine={false}
                 tickLine={false}
-                tickFormatter={formatDateShort}
+                tickFormatter={formatAxisLabel}
                 interval="preserveStartEnd"
                 minTickGap={24}
               />
@@ -327,7 +352,13 @@ export function UsageTrends() {
                 tickFormatter={formatCountTick}
               />
               <Tooltip
-                content={<ChartTooltip valueLabel="Objects" formatValue={formatCount} />}
+                content={
+                  <ChartTooltip
+                    valueLabel="Objects"
+                    formatValue={formatCount}
+                    formatLabel={formatTooltipLabel}
+                  />
+                }
                 cursor={{ fill: 'var(--color-zinc-100)', opacity: 0.6 }}
               />
               <Bar

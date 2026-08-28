@@ -318,6 +318,7 @@ export { ACTIVITY_ACTION_LABELS, getActivityActionLabel } from './api/dashboard.
 
 export type {
   UsageDataPoint,
+  UsageTrendsPeriod,
   UsageTrendsRequest,
   UsageTrendsResponse,
   BucketActivity,

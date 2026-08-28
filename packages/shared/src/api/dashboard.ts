@@ -5,8 +5,16 @@ export interface UsageDataPoint {
   value: number;
 }
 
+/**
+ * Windows the trend endpoint answers for.
+ *
+ * `24h` samples hourly; the others sample daily. Anything else falls back to
+ * `7d` rather than erroring, so an old client keeps working.
+ */
+export type UsageTrendsPeriod = '24h' | '7d' | '30d';
+
 export interface UsageTrendsRequest {
-  period: '7d' | '30d';
+  period: UsageTrendsPeriod;
 }
 
 export interface UsageTrendsResponse {

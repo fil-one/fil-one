@@ -51,6 +51,10 @@ const dateShortFormatter = new Intl.DateTimeFormat(undefined, {
   day: 'numeric',
 });
 
+const timeShortFormatter = new Intl.DateTimeFormat(undefined, {
+  hour: 'numeric',
+});
+
 const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
   year: 'numeric',
   month: 'short',
@@ -74,6 +78,16 @@ export function formatDate(isoString: string): string {
  */
 export function formatDateShort(isoString: string): string {
   return dateShortFormatter.format(new Date(isoString));
+}
+
+/**
+ * Locale-aware hour, e.g. "7 PM" or "19" depending on locale.
+ *
+ * For the 24-hour chart axis, where the date is the same on every tick and the
+ * hour is the only part that varies. The tooltip carries the full timestamp.
+ */
+export function formatTimeShort(isoString: string): string {
+  return timeShortFormatter.format(new Date(isoString));
 }
 
 /** Locale-aware date + time string, e.g. "Mar 27, 2026, 7:00 PM EDT". */

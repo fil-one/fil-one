@@ -128,6 +128,69 @@ describe('get-usage-trends baseHandler', () => {
     expect(body.objects.find((p: { date: string }) => p.date === latest).value).toBe(30);
   });
 
+  it('samples the 24h period hourly, ending with the current hour', async () => {
+    vi.setSystemTime(new Date('2026-01-08T12:30:00Z'));
+    const aurora = fakeOrchestrator('aurora');
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+
+    const { statusCode, body } = await run({ period: '24h' });
+
+    expect(statusCode).toBe(200);
+    expect(body.storage).toHaveLength(24);
+    // 24 hourly buckets ending with the hour in progress: 13:00 yesterday
+    // through 12:00 today, each keyed to the end of its own hour.
+    expect(body.storage[0].date).toBe('2026-01-07T13:59:59.999Z');
+    expect(body.storage[23].date).toBe('2026-01-08T12:59:59.999Z');
+    expect(aurora.getTenantUsageMetrics).toHaveBeenCalledWith(
+      AURORA_TENANT_ID,
+      expect.objectContaining({ interval: '1h' }),
+    );
+  });
+
+  it('buckets 24h samples by hour, keeping the latest reading in each', async () => {
+    vi.setSystemTime(new Date('2026-01-08T12:30:00Z'));
+    const aurora = fakeOrchestrator('aurora', {
+      storage: [
+        storageSample('2026-01-08T10:15:00.000Z', 1000, 10),
+        // Same hour, later reading: this one wins.
+        storageSample('2026-01-08T10:45:00.000Z', 2000, 20),
+        storageSample('2026-01-08T11:05:00.000Z', 3000, 30),
+      ],
+    });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+
+    const { body } = await run({ period: '24h' });
+
+    const at = (date: string) => body.storage.find((p: { date: string }) => p.date === date).value;
+    expect(at('2026-01-08T10:59:59.999Z')).toBe(2000);
+    expect(at('2026-01-08T11:59:59.999Z')).toBe(3000);
+    // An hour with no reading stays zero rather than carrying the last one.
+    expect(at('2026-01-08T09:59:59.999Z')).toBe(0);
+  });
+
+  it('requests daily granularity for the multi-day periods', async () => {
+    vi.setSystemTime(new Date('2026-01-08T12:00:00Z'));
+    const aurora = fakeOrchestrator('aurora');
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+
+    await run({ period: '7d' });
+
+    expect(aurora.getTenantUsageMetrics).toHaveBeenCalledWith(
+      AURORA_TENANT_ID,
+      expect.objectContaining({ interval: '1d' }),
+    );
+  });
+
+  it('falls back to 7d for an unrecognised period rather than erroring', async () => {
+    vi.setSystemTime(new Date('2026-01-08T12:00:00Z'));
+    mockGetAvailableOrchestrators.mockReturnValue([fakeOrchestrator('aurora')]);
+
+    const { statusCode, body } = await run({ period: '90d' });
+
+    expect(statusCode).toBe(200);
+    expect(body.storage).toHaveLength(7);
+  });
+
   it('fills correct number of entries for 30d period', async () => {
     vi.setSystemTime(new Date('2026-01-31T12:00:00Z'));
     mockGetAvailableOrchestrators.mockReturnValue([fakeOrchestrator('aurora')]);
