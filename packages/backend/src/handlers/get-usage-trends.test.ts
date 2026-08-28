@@ -70,6 +70,7 @@ describe('get-usage-trends baseHandler', () => {
     expect(body).toStrictEqual({
       storage: flatTrend(7, 0),
       objects: flatTrend(7, 0),
+      egress: flatTrend(7, 0),
     });
   });
 
@@ -126,6 +127,63 @@ describe('get-usage-trends baseHandler', () => {
     const latest = '2026-01-03T23:59:59.999Z';
     expect(body.storage.find((p: { date: string }) => p.date === latest).value).toBe(3000);
     expect(body.objects.find((p: { date: string }) => p.date === latest).value).toBe(30);
+  });
+
+  it('sums egress within a bucket rather than keeping the latest reading', async () => {
+    vi.setSystemTime(new Date('2026-01-05T12:00:00Z'));
+    // Storage and egress get the same two timestamps deliberately: storage is a
+    // stock, so the later reading replaces the earlier; egress is a flow, so the
+    // two deliveries add. Latest-wins on egress would under-report by 400.
+    const aurora = fakeOrchestrator('aurora', {
+      storage: [
+        storageSample('2026-01-03T08:00:00.000Z', 1000, 10),
+        storageSample('2026-01-03T22:00:00.000Z', 3000, 30),
+      ],
+      egress: [
+        { timestamp: '2026-01-03T08:00:00.000Z', bytesUsed: 400 },
+        { timestamp: '2026-01-03T22:00:00.000Z', bytesUsed: 700 },
+      ],
+    });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+
+    const { body } = await run();
+
+    const day = '2026-01-03T23:59:59.999Z';
+    const at = (s: { date: string; value: number }[]) => s.find((p) => p.date === day)!.value;
+    expect(at(body.egress)).toBe(1100);
+    expect(at(body.storage)).toBe(3000);
+  });
+
+  it('sums egress across regions for the org-wide figure', async () => {
+    vi.setSystemTime(new Date('2026-01-05T12:00:00Z'));
+    mockGetAvailableOrchestrators.mockReturnValue([
+      fakeOrchestrator('aurora', {
+        egress: [{ timestamp: '2026-01-04T10:00:00.000Z', bytesUsed: 500 }],
+      }),
+      fakeOrchestrator('fth', {
+        egress: [{ timestamp: '2026-01-04T10:00:00.000Z', bytesUsed: 250 }],
+      }),
+    ]);
+
+    const { body } = await run();
+
+    const day = '2026-01-04T23:59:59.999Z';
+    expect(body.egress.find((p: { date: string }) => p.date === day).value).toBe(750);
+  });
+
+  it('leaves a bucket with no egress reading at zero rather than carrying one forward', async () => {
+    vi.setSystemTime(new Date('2026-01-05T12:00:00Z'));
+    mockGetAvailableOrchestrators.mockReturnValue([
+      fakeOrchestrator('aurora', {
+        egress: [{ timestamp: '2026-01-03T10:00:00.000Z', bytesUsed: 900 }],
+      }),
+    ]);
+
+    const { body } = await run();
+
+    const at = (date: string) => body.egress.find((p: { date: string }) => p.date === date).value;
+    expect(at('2026-01-03T23:59:59.999Z')).toBe(900);
+    expect(at('2026-01-04T23:59:59.999Z')).toBe(0);
   });
 
   it('samples the 24h period hourly, ending with the current hour', async () => {

@@ -47,24 +47,6 @@ const AXIS_TICK = { fontSize: 10, fill: 'var(--color-zinc-500)' };
 const GRID_STROKE = 'var(--color-zinc-200)';
 const SERIES_COLOR = 'var(--color-brand-600)';
 
-/**
- * Object counts, read two ways.
- *
- * A full count is what the rest of the console shows (`ObjectBrowser` says
- * "17,300 objects"), so the card total and the tooltip match it. An axis has
- * only the gutter's width to work with: spelled out, a 20,000 tick overruns it
- * and clips against the left edge of the chart, so ticks go compact.
- */
-const countFormatter = new Intl.NumberFormat(undefined, { notation: 'compact' });
-
-function formatCount(value: number): string {
-  return value.toLocaleString();
-}
-
-function formatCountTick(value: number): string {
-  return countFormatter.format(value);
-}
-
 // ---------------------------------------------------------------------------
 // Custom tooltip
 // ---------------------------------------------------------------------------
@@ -151,12 +133,21 @@ function TrendsEmptyState({ title, description }: { title: string; description: 
 // ---------------------------------------------------------------------------
 
 /**
- * Storage and object count are both stocks: what the account holds right now,
- * not what it accumulated over the window. The latest sample is the total, and
- * summing the series would count the same objects once per day.
+ * Storage is a stock: what the account holds right now, not what it
+ * accumulated over the window. The latest sample is the figure, and summing the
+ * series would count the same bytes once per bucket.
  */
 function latestValue(series: UsageDataPoint[]): number {
   return series.length > 0 ? series[series.length - 1].value : 0;
+}
+
+/**
+ * Egress is a flow: each point is bytes served during that bucket, so the
+ * window's figure is the sum. This is the mirror image of `latestValue`, and
+ * using the wrong one either way is the bug FIL-995 was filed for.
+ */
+function windowTotal(series: UsageDataPoint[]): number {
+  return series.reduce((sum, p) => sum + p.value, 0);
 }
 
 function seriesMax(series: UsageDataPoint[]): number {
@@ -177,9 +168,9 @@ type TrendsState = 'no-data' | 'no-usage' | 'ready';
 
 function trendsState(trends: UsageTrendsResponse | null): TrendsState {
   if (!trends) return 'no-data';
-  const points = trends.storage.length + trends.objects.length;
+  const points = trends.storage.length + trends.egress.length;
   if (points === 0) return 'no-data';
-  if (seriesMax(trends.storage) === 0 && seriesMax(trends.objects) === 0) return 'no-usage';
+  if (seriesMax(trends.storage) === 0 && seriesMax(trends.egress) === 0) return 'no-usage';
   return 'ready';
 }
 
@@ -188,13 +179,17 @@ function trendsState(trends: UsageTrendsResponse | null): TrendsState {
 // ---------------------------------------------------------------------------
 
 /**
- * Compact labels, not "7 days" / "30 days": three spelled-out options crowd the
- * section header off the right edge at 375px.
+ * The dashboard offers the two day-resolution windows.
+ *
+ * The API and handler also answer '24h' (hourly), and the front end still
+ * formats an hourly axis, but the dashboard does not offer it: whether the
+ * upstream metrics stores hourly readings at all is unverified, and storage is
+ * near-flat inside a day regardless. Hourly belongs on the usage page
+ * (FIL-1099) alongside 90d, where egress makes it worth reading.
  */
 const PERIODS: Array<{ value: UsageTrendsPeriod; label: string }> = [
-  { value: '24h', label: '24h' },
-  { value: '7d', label: '7d' },
-  { value: '30d', label: '30d' },
+  { value: '7d', label: '7 days' },
+  { value: '30d', label: '30 days' },
 ];
 
 export function UsageTrends() {
@@ -208,11 +203,12 @@ export function UsageTrends() {
 
   const trends: UsageTrendsResponse | null = data ?? null;
   const storageSeries = trends?.storage ?? [];
-  const objectsSeries = trends?.objects ?? [];
+  const egressSeries = trends?.egress ?? [];
 
   const storageScale = niceScale(seriesMax(storageSeries), { tickCount: 5 });
-  const objectsScale = niceScale(seriesMax(objectsSeries), { tickCount: 6, integer: true });
+  const egressScale = niceScale(seriesMax(egressSeries), { tickCount: 5 });
   const formatStorageTick = bytesAxisFormatter(storageScale.domainMax);
+  const formatEgressTick = bytesAxisFormatter(egressScale.domainMax);
   const state = trendsState(trends);
 
   // A 24-hour window repeats one date on every tick and varies only by hour;
@@ -322,9 +318,9 @@ export function UsageTrends() {
             </AreaChart>
           </ChartCard>
 
-          {/* Objects — a count, so bars, and bars baseline at zero */}
-          <ChartCard label="Objects" value={`${formatCount(latestValue(objectsSeries))} total`}>
-            <BarChart data={objectsSeries} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
+          {/* Egress — bytes served per bucket, so bars, baselined at zero */}
+          <ChartCard label="Egress" value={formatBytes(windowTotal(egressSeries))}>
+            <BarChart data={egressSeries} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
               <CartesianGrid
                 horizontal={true}
                 vertical={false}
@@ -346,16 +342,15 @@ export function UsageTrends() {
                 axisLine={false}
                 tickLine={false}
                 width={40}
-                allowDecimals={false}
-                domain={[0, objectsScale.domainMax]}
-                ticks={objectsScale.ticks}
-                tickFormatter={formatCountTick}
+                domain={[0, egressScale.domainMax]}
+                ticks={egressScale.ticks}
+                tickFormatter={formatEgressTick}
               />
               <Tooltip
                 content={
                   <ChartTooltip
-                    valueLabel="Objects"
-                    formatValue={formatCount}
+                    valueLabel="Egress"
+                    formatValue={formatBytes}
                     formatLabel={formatTooltipLabel}
                   />
                 }

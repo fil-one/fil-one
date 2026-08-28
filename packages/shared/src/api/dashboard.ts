@@ -18,8 +18,22 @@ export interface UsageTrendsRequest {
 }
 
 export interface UsageTrendsResponse {
+  /** Bytes held at the close of each bucket. A stock: read the last point. */
   storage: UsageDataPoint[];
+  /**
+   * Objects held at the close of each bucket. A stock, like `storage`.
+   *
+   * Not charted on the dashboard: an object count maps to neither the bill nor
+   * a limit, and the current figure is already a stat card there. Kept in the
+   * response for the usage page (FIL-1099), since the storage query returns it
+   * at no extra cost.
+   */
   objects: UsageDataPoint[];
+  /**
+   * Bytes served during each bucket. A flow: sum the points for a window
+   * total, and never carry a value forward across a gap.
+   */
+  egress: UsageDataPoint[];
 }
 
 // ---------------------------------------------------------------------------

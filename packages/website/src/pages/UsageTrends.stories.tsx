@@ -12,8 +12,8 @@ import { UsageTrends } from './UsageTrends';
  * in against an account that happened to hold the right data (FIL-1039).
  *
  * The stories that matter are the awkward ones: a flat week, a first day, an
- * empty account. Each of the shipped bugs in FIL-995 was invisible on a
- * healthy, rising series and obvious on one of these.
+ * empty account, a single spike. Each of the bugs FIL-995 was filed for was
+ * invisible on a healthy rising series and obvious on one of these.
  */
 
 // The series are keyed by end-of-day UTC, as the backend builds them. Fixed
@@ -28,79 +28,98 @@ function series(values: number[]): UsageDataPoint[] {
   }));
 }
 
-function trends(storage: number[], objects: number[]): UsageTrendsResponse {
-  return { storage: series(storage), objects: series(objects) };
+function trends(storage: number[], objects: number[], egress: number[]): UsageTrendsResponse {
+  return { storage: series(storage), objects: series(objects), egress: series(egress) };
 }
 
 const MB = 1_000_000;
+const GB = 1_000 * MB;
 
 const FIXTURES = {
-  /** A week that grows steadily: the case every version of this chart handled. */
+  /** A week that grows steadily, with traffic to match. */
   typical: trends(
     [6.1, 9.4, 13.8, 15.2, 19.6, 24.3, 27.1].map((n) => n * MB),
     [5, 9, 14, 16, 19, 21, 22],
+    [120, 340, 180, 410, 260, 520, 300].map((n) => n * MB),
   ),
   /**
-   * The regression case. Four days at 7 objects sat below a `dataMin` baseline
-   * and drew as empty columns, and the card summed the series to "94 total"
-   * for an account holding 22.
+   * The regression case, now on the egress bars.
+   *
+   * Four quiet-but-not-silent days sat below a `dataMin` baseline and drew as
+   * empty columns, so the chart reported no traffic on days that served real
+   * bytes. The same scale bug, on the metric where under-reporting matters
+   * most: egress is what disables an account over its trial cap (FIL-869).
    */
   lowBaseline: trends(
     [18.2, 18.2, 18.4, 18.4, 26.8, 27.1, 27.1].map((n) => n * MB),
     [7, 7, 7, 7, 22, 22, 22],
+    [40, 40, 40, 40, 620, 640, 610].map((n) => n * MB),
+  ),
+  /**
+   * One heavy day in a quiet week. A flow metric's most common real shape, and
+   * the one a truncated axis flattens worst.
+   */
+  spike: trends(
+    [22, 22, 22, 23, 23, 23, 23].map((n) => n * MB),
+    [18, 18, 18, 19, 19, 19, 19],
+    [15, 12, 18, 1_400, 22, 19, 14].map((n) => n * MB),
   ),
   /** Nothing changed all week. Every value is both the min and the max. */
-  flat: trends(Array(7).fill(4.5 * MB), Array(7).fill(12)),
+  flat: trends(Array(7).fill(4.5 * MB), Array(7).fill(12), Array(7).fill(80 * MB)),
+  /** Stored, but never read. Egress is legitimately flat at zero. */
+  noEgress: trends(
+    [4, 8, 12, 16, 20, 24, 28].map((n) => n * MB),
+    [3, 6, 9, 12, 15, 18, 21],
+    Array(7).fill(0),
+  ),
   /** A brand-new org: days were reported, all of them zero. */
-  empty: trends(Array(7).fill(0), Array(7).fill(0)),
+  empty: trends(Array(7).fill(0), Array(7).fill(0), Array(7).fill(0)),
   /**
    * No days reported at all. Distinct from `empty`: the account may well hold
    * data, so the copy must not claim otherwise.
    */
-  noData: { storage: [], objects: [] },
+  noData: { storage: [], objects: [], egress: [] },
   /** Day one, with six days of nothing behind it. */
-  firstDay: trends([0, 0, 0, 0, 0, 0, 1.2 * MB], [0, 0, 0, 0, 0, 0, 3]),
+  firstDay: trends(
+    [0, 0, 0, 0, 0, 0, 1.2 * MB],
+    [0, 0, 0, 0, 0, 0, 3],
+    [0, 0, 0, 0, 0, 0, 2.4 * MB],
+  ),
   /** Small enough that a byte axis has to reach for KB. */
   kilobytes: trends(
     [12, 40, 40, 96, 96, 140, 210].map((n) => n * 1000),
     [1, 3, 3, 6, 6, 9, 14],
+    [4, 18, 9, 32, 11, 44, 26].map((n) => n * 1000),
   ),
-  /** A terabyte account, to check the axis does not run out of room. */
+  /** A terabyte account, to check neither axis runs out of room. */
   terabytes: trends(
-    [0.8, 1.1, 1.1, 1.4, 1.9, 2.2, 2.4].map((n) => n * 1_000_000 * MB),
+    [0.8, 1.1, 1.1, 1.4, 1.9, 2.2, 2.4].map((n) => n * 1_000 * GB),
     [8_400, 9_100, 9_100, 11_200, 14_800, 16_050, 17_300],
+    [180, 240, 210, 320, 280, 410, 350].map((n) => n * GB),
+  ),
+  /**
+   * Approaching the 2 TB trial egress cap, which is a threshold that disables
+   * the account rather than an allowance (FIL-869). The reason a trend beats a
+   * progress bar: this shape says roughly when, not just how far.
+   */
+  nearTrialCap: trends(
+    [140, 145, 148, 152, 155, 158, 160].map((n) => n * GB),
+    [92_000, 94_500, 96_000, 98_200, 99_100, 101_000, 102_400],
+    [210, 260, 240, 330, 380, 420, 460].map((n) => n * GB),
   ),
 } satisfies Record<string, UsageTrendsResponse>;
-
-/**
- * 24 hourly buckets, for the hour-resolution axis. Storage barely moves inside
- * a day, which is the honest shape: the interesting line at this resolution is
- * egress (FIL-1098), not storage.
- */
-const HOUR = 60 * 60 * 1000;
-const LAST_HOUR = Date.UTC(2026, 7, 27, 12, 59, 59, 999);
-const TWENTY_FOUR_HOURS: UsageTrendsResponse = {
-  storage: Array.from({ length: 24 }, (_, i) => ({
-    date: new Date(LAST_HOUR - (23 - i) * HOUR).toISOString(),
-    value: (26 + i * 0.05) * MB,
-  })),
-  objects: Array.from({ length: 24 }, (_, i) => ({
-    date: new Date(LAST_HOUR - (23 - i) * HOUR).toISOString(),
-    value: 20 + Math.floor(i / 8),
-  })),
-};
 
 /** 30 days of steady growth, for the wider period and its axis label density. */
 const THIRTY_DAYS = trends(
   Array.from({ length: 30 }, (_, i) => (5 + i * 0.9) * MB),
   Array.from({ length: 30 }, (_, i) => 4 + Math.round(i * 1.7)),
+  Array.from({ length: 30 }, (_, i) => (60 + ((i * 37) % 240)) * MB),
 );
 
 function seed(data: UsageTrendsResponse) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
-  client.setQueryData(queryKeys.usageTrends('24h'), TWENTY_FOUR_HOURS);
   client.setQueryData(queryKeys.usageTrends('7d'), data);
   client.setQueryData(queryKeys.usageTrends('30d'), THIRTY_DAYS);
   return client;
@@ -115,7 +134,7 @@ const meta: Meta<Args> = {
   },
   args: { fixture: 'typical' },
   render: ({ fixture }) => {
-    // Keyed so switching the control rebuilds the seeded client.
+    // Re-seeded when the control changes, so each fixture gets a clean client.
     const [client, setClient] = useState(() => seed(FIXTURES[fixture]));
     const [current, setCurrent] = useState(fixture);
     if (current !== fixture) {
@@ -138,13 +157,19 @@ type Story = StoryObj<Args>;
 export const Typical: Story = {};
 
 /**
- * Both charts must start at zero. Before the fix the objects bars baselined at
- * the series minimum, so the first four days drew as nothing at all.
+ * Both charts must start at zero. Before the fix the bars baselined at the
+ * series minimum, so the four quiet days drew as nothing at all.
  */
 export const LowBaseline: Story = { args: { fixture: 'lowBaseline' } };
 
+/** One heavy day. The axis has to accommodate it without flattening the rest. */
+export const Spike: Story = { args: { fixture: 'spike' } };
+
 /** A flat series still needs a readable axis, not a degenerate one. */
 export const Flat: Story = { args: { fixture: 'flat' } };
+
+/** Storage climbing while egress sits at zero: a real state, not an empty one. */
+export const NoEgress: Story = { args: { fixture: 'noEgress' } };
 
 /** A genuinely empty account, so the next step is named. */
 export const Empty: Story = { args: { fixture: 'empty' } };
@@ -161,6 +186,9 @@ export const FirstDay: Story = { args: { fixture: 'firstDay' } };
 export const Kilobytes: Story = { args: { fixture: 'kilobytes' } };
 
 export const Terabytes: Story = { args: { fixture: 'terabytes' } };
+
+/** The case that makes an egress trend worth more than a progress bar. */
+export const NearTrialCap: Story = { args: { fixture: 'nearTrialCap' } };
 
 /** Nothing seeded, so the query never resolves and the skeleton holds. */
 export const Loading: Story = {

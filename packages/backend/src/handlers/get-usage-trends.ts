@@ -94,34 +94,38 @@ async function buildTimeSeries(
   granularity.rewind(from, points - 1);
   granularity.toStartOfBucket(from);
 
-  // Fetch each region's storage series and index it by bucket, then sum across
+  // Fetch each region's series and index them by bucket, then sum across
   // regions per bucket for the org-wide trend.
-  const perRegionByDate = await Promise.all(
+  const perRegion = await Promise.all(
     regions.map(({ orchestrator, tenantId }) =>
-      fetchStorageByBucket({ orchestrator, tenantId, from, to: now, granularity }),
+      fetchSamplesByBucket({ orchestrator, tenantId, from, to: now, granularity }),
     ),
   );
 
   // Build the full range with gap-filling, summing all regions for each bucket.
   const storage: UsageDataPoint[] = [];
   const objects: UsageDataPoint[] = [];
+  const egress: UsageDataPoint[] = [];
   for (const d = new Date(from); d <= now; granularity.advance(d)) {
     const date = granularity.endOfBucket(d).toISOString();
     let bytesUsed = 0;
     let objectCount = 0;
-    for (const byDate of perRegionByDate) {
-      const sample = byDate.get(date);
+    let egressBytes = 0;
+    for (const region of perRegion) {
+      const sample = region.storage.get(date);
       bytesUsed += sample?.bytesUsed ?? 0;
       objectCount += sample?.objectCount ?? 0;
+      egressBytes += region.egress.get(date) ?? 0;
     }
     storage.push({ date, value: bytesUsed });
     objects.push({ date, value: objectCount });
+    egress.push({ date, value: egressBytes });
   }
 
-  return { storage, objects };
+  return { storage, objects, egress };
 }
 
-type FetchStorageArgs = {
+type FetchSamplesArgs = {
   orchestrator: ServiceOrchestrator;
   tenantId: string;
   from: Date;
@@ -129,42 +133,66 @@ type FetchStorageArgs = {
   granularity: Granularity;
 };
 
-async function fetchStorageByBucket({
+type SamplesByBucket = {
+  /** End-of-bucket key to the bucket's closing storage reading. */
+  storage: Map<string, StorageUsageSample>;
+  /** End-of-bucket key to the bytes served during that bucket. */
+  egress: Map<string, number>;
+};
+
+/**
+ * Storage and egress are indexed differently, and the difference is the whole
+ * point.
+ *
+ * Storage is a stock: a reading of what the account holds at an instant. Two
+ * readings in one bucket are two observations of the same quantity, so the
+ * later one wins and the earlier is discarded.
+ *
+ * Egress is a flow: bytes served *during* an interval. Two readings in one
+ * bucket are two separate deliveries, so they add. Taking the latest here would
+ * silently drop traffic, and on the metric that disables an account over its
+ * trial cap (FIL-869) that is not a rounding error.
+ */
+async function fetchSamplesByBucket({
   orchestrator,
   tenantId,
   from,
   to,
   granularity,
-}: FetchStorageArgs): Promise<Map<string, StorageUsageSample>> {
-  // Request the granularity this trend renders at. The end-of-bucket key still
-  // collapses each bucket to a single reading, and since upstream ordering isn't
-  // guaranteed we keep the sample with the greatest timestamp per bucket rather
-  // than relying on insertion order. Swallow errors so one region's outage still
-  // renders the rest.
+}: FetchSamplesArgs): Promise<SamplesByBucket> {
+  // Swallow errors so one region's outage still renders the rest.
   try {
-    const { storage } = await orchestrator.getTenantUsageMetrics(tenantId, {
+    const { storage, egress } = await orchestrator.getTenantUsageMetrics(tenantId, {
       from: from.toISOString(),
       to: to.toISOString(),
       interval: granularity.interval,
     });
-    const byDate = new Map<string, StorageUsageSample>();
+
+    const storageByBucket = new Map<string, StorageUsageSample>();
     for (const s of storage) {
       const key = granularity.endOfBucket(new Date(s.timestamp)).toISOString();
-      const existing = byDate.get(key);
+      const existing = storageByBucket.get(key);
       // Sample timestamps are canonical ISO-8601 UTC (normalized by the
       // orchestrator), so lexicographic order matches chronological order.
       if (!existing || s.timestamp > existing.timestamp) {
-        byDate.set(key, s);
+        storageByBucket.set(key, s);
       }
     }
-    return byDate;
+
+    const egressByBucket = new Map<string, number>();
+    for (const e of egress) {
+      const key = granularity.endOfBucket(new Date(e.timestamp)).toISOString();
+      egressByBucket.set(key, (egressByBucket.get(key) ?? 0) + e.bytesUsed);
+    }
+
+    return { storage: storageByBucket, egress: egressByBucket };
   } catch (err) {
     console.error('[get-usage-trends] Failed to fetch usage metrics', {
       tenantId,
       region: orchestrator.region,
       err,
     });
-    return new Map();
+    return { storage: new Map(), egress: new Map() };
   }
 }
 
