@@ -2,6 +2,8 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { UsageResponse, TenantStatus } from '@filone/shared';
+import { countAccessKeysInScope } from '../lib/access-key-inventory.js';
+import { keyScope } from '../lib/key-scope.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import { getProvisionedRegions } from '../lib/region-helpers.js';
 import type { ServiceOrchestrator, TenantInfo } from '../lib/service-orchestrator.js';
@@ -17,11 +19,17 @@ interface RegionUsage {
   objectCount: number;
   /** Total egress over the window for the region. */
   egressBytes: number;
+  /** Live bucket count for the region, from the same listing the Buckets page reads. */
+  bucketCount: number;
   info: TenantInfo;
 }
 
 export async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { orgId } = getUserInfo(event);
+
+  // Access keys live in DynamoDB, not in any region's orchestrator, so this is
+  // independent of how many regions answer below, including none.
+  const accessKeyCount = await countAccessKeysInScope(orgId, keyScope(event));
 
   // The dashboard aggregates usage across every region the org is provisioned
   // in, so resolve the ready tenant on each available orchestrator.
@@ -33,7 +41,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
       egress: { usedBytes: 0 },
       buckets: { count: 0 },
       objects: { count: 0 },
-      accessKeys: { count: 0 },
+      accessKeys: { count: accessKeyCount },
     };
     return new ResponseBuilder().status(200).body(response).build();
   }
@@ -71,35 +79,37 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
       egress: { usedBytes: 0 },
       buckets: { count: 0 },
       objects: { count: 0 },
-      accessKeys: { count: 0 },
+      accessKeys: { count: accessKeyCount },
     };
     return new ResponseBuilder().status(200).body(response).build();
   }
 
-  const response = aggregateRegionUsages(regionUsages);
+  const response = aggregateRegionUsages(regionUsages, accessKeyCount);
 
   return new ResponseBuilder().status(200).body(response).build();
 }
 
-// Folds the per-region usages into the dashboard totals. Counts (storage,
-// egress, objects, buckets, keys) are summed; storage/egress are pre-reduced
-// per region (see `fetchRegionUsage`); status collapses to the most-restrictive across regions.
-// The system `filone-console` key present in each provisioned region
-// is subtracted from the key *count* only, so users see just the keys they manage.
-function aggregateRegionUsages(regionUsages: RegionUsage[]): UsageResponse {
+// Folds the per-region usages into the dashboard totals. Counts are summed;
+// storage/egress are pre-reduced per region (see `fetchRegionUsage`); status
+// collapses to the most-restrictive across regions.
+//
+// Buckets are summed from each region's live listing rather than the
+// orchestrator's `bucketCount` quota snapshot: the snapshot lags a freshly
+// created bucket, so the card read "4 total" beside a Buckets page listing 5
+// (FIL-996). Access keys are counted separately, against DynamoDB: see
+// `countAccessKeysInScope`.
+function aggregateRegionUsages(regionUsages: RegionUsage[], accessKeyCount: number): UsageResponse {
   let storageUsedBytes = 0;
   let objectCount = 0;
   let egressUsedBytes = 0;
   let bucketCount = 0;
-  let rawKeyCount = 0;
-  let statuses: TenantStatus[] = [];
+  const statuses: TenantStatus[] = [];
 
   for (const r of regionUsages) {
     storageUsedBytes += r.storageBytes;
     objectCount += r.objectCount;
     egressUsedBytes += r.egressBytes;
-    bucketCount += r.info.bucketCount;
-    rawKeyCount += r.info.keyCount;
+    bucketCount += r.bucketCount;
     if (r.info.status) statuses.push(r.info.status);
   }
 
@@ -108,9 +118,7 @@ function aggregateRegionUsages(regionUsages: RegionUsage[]): UsageResponse {
     egress: { usedBytes: egressUsedBytes },
     buckets: { count: bucketCount },
     objects: { count: objectCount },
-    accessKeys: {
-      count: Math.max(0, rawKeyCount - regionUsages.length),
-    },
+    accessKeys: { count: accessKeyCount },
     tenantStatus: pickMostRestrictiveStatus(statuses),
   };
 }
@@ -121,13 +129,14 @@ async function fetchRegionUsage(
   from: Date,
   to: Date,
 ): Promise<RegionUsage> {
-  const [metrics, info] = await Promise.all([
+  const [metrics, info, buckets] = await Promise.all([
     orchestrator.getTenantUsageMetrics(tenantId, {
       from: from.toISOString(),
       to: to.toISOString(),
       interval: '1d',
     }),
     orchestrator.getTenantInfo(tenantId),
+    orchestrator.listBuckets(tenantId),
   ]);
 
   // Storage is point-in-time: take the most recent reading. Egress is
@@ -142,6 +151,7 @@ async function fetchRegionUsage(
     storageBytes: latestStorage?.bytesUsed ?? 0,
     objectCount: latestStorage?.objectCount ?? 0,
     egressBytes,
+    bucketCount: buckets.length,
     info,
   };
 }
