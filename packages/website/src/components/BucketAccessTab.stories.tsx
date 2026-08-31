@@ -1,10 +1,12 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 
 import type { AccessKey } from '@filone/shared';
-import { S3Region } from '@filone/shared';
+import { OrgRole, S3Region } from '@filone/shared';
 
 import { BucketAccessTab } from './BucketAccessTab';
 
+// `createdBy` matches the seeded `/me` fixture's userId, so a Member owns the
+// first key and not the second — which is the whole point of the Member story.
 const mockKeys: AccessKey[] = [
   {
     id: '1',
@@ -17,6 +19,7 @@ const mockKeys: AccessKey[] = [
     bucketScope: 'specific',
     buckets: ['my-bucket'],
     region: S3Region.UsEast1,
+    createdBy: 'user-1',
   },
   {
     id: '2',
@@ -28,6 +31,7 @@ const mockKeys: AccessKey[] = [
     bucketScope: 'specific',
     buckets: ['my-bucket'],
     region: S3Region.UsEast1,
+    createdBy: 'someone-else',
   },
 ];
 
@@ -64,4 +68,32 @@ export const Loading: Story = {
     accessKeys: [],
     accessKeysLoading: true,
   },
+};
+
+/** A failed request is not an empty bucket, and says so. */
+export const LoadFailed: Story = {
+  args: {
+    accessKeys: [],
+    accessKeysLoading: false,
+    accessKeysError: true,
+    accessKeysErrorMessage: 'Failed to load access keys for this bucket',
+  },
+};
+
+/** A Member revokes the key they minted and not the one they did not. */
+export const AsMember: Story = {
+  args: {
+    accessKeys: mockKeys,
+    accessKeysLoading: false,
+  },
+  parameters: { role: OrgRole.Member },
+};
+
+/** ReadOnly mints nothing and revokes nothing; the endpoints card still helps. */
+export const AsReadOnly: Story = {
+  args: {
+    accessKeys: mockKeys,
+    accessKeysLoading: false,
+  },
+  parameters: { role: OrgRole.ReadOnly },
 };

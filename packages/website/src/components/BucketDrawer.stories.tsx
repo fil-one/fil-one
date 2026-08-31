@@ -13,6 +13,7 @@ import {
 import { S3Region } from '@filone/shared';
 
 import type { RagBucket } from '../lib/rag-bucket-api';
+import { seedPermissions } from '../lib/test-permissions.js';
 import { BucketDrawer } from './BucketDrawer';
 
 const bucket: RagBucket = {
@@ -26,6 +27,9 @@ const bucket: RagBucket = {
 
 function withProviders(Story: () => React.JSX.Element) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // The footer is permission-gated, so without a role in the cache the story
+  // would show a drawer that has lost its Stop indexing action.
+  seedPermissions(client);
   const rootRoute = createRootRoute({ component: Story });
   const objectsRoute = createRoute({
     getParentRoute: () => rootRoute,

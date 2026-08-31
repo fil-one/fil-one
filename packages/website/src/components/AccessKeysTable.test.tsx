@@ -34,3 +34,34 @@ describe('AccessKeysTable — bucket-info permissions', () => {
     expect(screen.queryByTestId('permission-badge-bucket-info')).not.toBeInTheDocument();
   });
 });
+
+describe('AccessKeysTable — the controls a caller may not use', () => {
+  // The table's own gating is prop-driven: a page that finds the caller cannot
+  // mint or revoke keys passes undefined, and the surface disappears. That is
+  // the shape ApiKeysPage and BucketAccessTab both drive from `usePermissions`.
+  it('drops the actions column when revoking is not on offer', () => {
+    renderWithProviders(<AccessKeysTable keys={[makeKey({})]} showPermissions />);
+
+    expect(screen.queryByRole('button', { name: /actions/i })).not.toBeInTheDocument();
+  });
+
+  it('keeps the actions column when it is', () => {
+    renderWithProviders(
+      <AccessKeysTable keys={[makeKey({})]} showPermissions onDelete={async () => {}} />,
+    );
+
+    expect(screen.getByText('Actions')).toBeInTheDocument();
+  });
+
+  it('drops the empty-state create button when minting is not on offer', () => {
+    renderWithProviders(<AccessKeysTable keys={[]} />);
+
+    expect(screen.queryByRole('button', { name: 'Create your first key' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the empty-state create button when it is', () => {
+    renderWithProviders(<AccessKeysTable keys={[]} onCreateOpen={() => {}} />);
+
+    expect(screen.getByRole('button', { name: 'Create your first key' })).toBeInTheDocument();
+  });
+});

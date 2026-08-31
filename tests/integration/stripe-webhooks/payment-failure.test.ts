@@ -9,6 +9,7 @@ import {
   pollForBillingStatusChange,
   pollForPaymentMethod,
   getBillingRecord,
+  testOrgId,
 } from './helpers.js';
 
 describe('Payment Failure (invoice.payment_failed)', () => {
@@ -37,9 +38,10 @@ describe('Payment Failure (invoice.payment_failed)', () => {
     });
     const record = await getBillingRecord(userId);
     expect(record).toStrictEqual({
-      pk: { S: `CUSTOMER#${userId}` },
+      pk: { S: `ORG#${testOrgId(userId)}` },
       sk: { S: 'SUBSCRIPTION' },
-      orgId: { S: 'test-org' },
+      orgId: { S: testOrgId(userId) },
+      userId: { S: userId },
       stripeCustomerId: { S: cusId },
       subscriptionStatus: { S: 'past_due' },
       updatedAt: { S: expect.any(String) },

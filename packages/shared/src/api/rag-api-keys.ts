@@ -78,6 +78,12 @@ export interface RagApiKey {
   /** Present iff `bucketScope === 'specific'`. */
   buckets?: RagKeyBucketRef[];
   createdAt: string;
+  /**
+   * The FilOne user who minted the key, so the console can tell the caller's
+   * own keys from the org's. Absent on keys minted before attribution existed —
+   * those are only ever listed to a caller holding `keys.manage_all`.
+   */
+  createdBy?: string;
   creatorEmail?: string;
   lastUsedAt?: string;
 }

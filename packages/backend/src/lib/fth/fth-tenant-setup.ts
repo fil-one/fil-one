@@ -32,7 +32,16 @@ const FTH_FULL_PERMISSIONS = [
   's3:PutObjectLegalHold',
   's3:GetObjectVersion',
   's3:ListObjectVersions',
+  's3:ListBucketMultipartUploads',
+  's3:AbortMultipartUpload',
+  's3:ListMultipartUploadParts',
 ] as const;
+
+// The console key cannot be renamed in place: FTH requires access-key names to
+// be unique within a tenant. Existing tenants get a v2 key alongside their v1
+// key via bin/fth-console-key.ts, which prunes v1 once warm Lambda containers
+// have stopped using it.
+export const FTH_CONSOLE_KEY_NAME = 'filone-console-v2';
 
 const dynamo = getDynamoClient();
 const ssm = new SSMClient({});
@@ -106,7 +115,7 @@ async function processTenantSetup(client: FthManagementClient, orgId: string): P
   });
 
   const accessKey = await client.createAccessKey(tenantId, storageUser.id, {
-    name: 'filone-console',
+    name: FTH_CONSOLE_KEY_NAME,
     permissions: [...FTH_FULL_PERMISSIONS],
     buckets: [],
     expiresAt: null,
@@ -114,8 +123,10 @@ async function processTenantSetup(client: FthManagementClient, orgId: string): P
     // stays constant while the path does not. An org that gets re-provisioned onto a new FTH client
     // and storage user would replay such a key against a path it was never minted for, and fail
     // with 409 "idempotency key replay with different payload" — permanently, since nothing about
-    // the key would ever change again.
-    idempotencyKey: `console-key-${stage}-${tenantId}-${storageUser.id}`,
+    // the key would ever change again. The `-v2` segment covers the payload change that came with
+    // FTH_CONSOLE_KEY_NAME: a tenant whose setup crashed between this call and the fthTenantId
+    // write would otherwise replay the pre-v2 key with the new payload and 409 forever.
+    idempotencyKey: `console-key-v2-${stage}-${tenantId}-${storageUser.id}`,
   });
 
   await ssm.send(

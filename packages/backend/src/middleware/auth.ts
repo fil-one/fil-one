@@ -5,11 +5,11 @@ import type {
   APIGatewayProxyStructuredResultV2,
   Context,
 } from 'aws-lambda';
-import { GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
+import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
 import { Resource } from 'sst';
-import type { UserInfo } from '../lib/user-context.js';
-import { ApiErrorCode, OrgRole } from '@filone/shared';
+import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.js';
+import { ApiErrorCode } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
 import {
   accountDeletedResponse,
@@ -21,10 +21,12 @@ import {
 } from '../lib/response-builder.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { resolveAuth0Domain } from '../lib/auth0-domain.js';
-import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import { createNewUserAndOrg, stampVerifiedEmail } from '../lib/account-creation.js';
+import { resolveMembership } from '../lib/org-membership.js';
+import type { OrgMembership } from '../lib/org-membership.js';
 import { deriveOrgName } from '../lib/suggest-org-name.js';
-import { ensureTrialEntitlement } from '../lib/trial-entitlement.js';
+import { enforceIdentityProvider, resolveActiveOrg } from './org-context.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -112,6 +114,24 @@ function emailNotVerifiedResponse(): APIGatewayProxyStructuredResultV2 {
 }
 
 /**
+ * The caller authenticated, but OrgTable would not say what they may do. A
+ * retryable failure of ours, so it is a 503 rather than a 401 that would send
+ * the console through a pointless refresh, or a 403 that would read as a
+ * revoked membership.
+ *
+ * Exported for the RAG bearer path, which resolves the key creator's membership
+ * itself and owes a failed read the same answer this one gives.
+ */
+export function membershipUnavailableResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(503)
+    .body<ErrorResponse>({
+      message: 'We could not read your organization membership. Please try again in a moment.',
+    })
+    .build();
+}
+
+/**
  * Exchange a refresh token for fresh access/id/refresh tokens.
  * Returns null if the refresh fails for any reason.
  *
@@ -177,6 +197,25 @@ export interface IdTokenClaims {
   picture: string | null;
   /** OIDC Authentication Methods References — empty when not asserted/verified. */
   amr: string[];
+  /**
+   * When the user last authenticated at the identity provider (`auth_time`,
+   * epoch seconds), or null when the token asserts none.
+   *
+   * Read alongside `amr` because `amr` alone cannot express step-up for a
+   * federated user: a SAML session never carries `mfa` or `phr` and Guardian
+   * holds no enrollment for it, so "authenticated moments ago at your own
+   * identity provider" is the only strong signal available. A step-up redirect
+   * asks for it with `max_age=0`.
+   */
+  authTime: number | null;
+  /**
+   * The Auth0 organization this session authenticated into (`org_id`), null for
+   * a session that named none — which is every session in M1, since nothing
+   * sends the `organization` parameter yet. It is read now because the rule that
+   * consumes it is about what a session may reach: an org carrying an
+   * `auth0OrgId` is enterable only from a session authenticated at that org.
+   */
+  auth0OrgId: string | null;
 }
 
 const EMPTY_ID_CLAIMS: IdTokenClaims = {
@@ -185,6 +224,8 @@ const EMPTY_ID_CLAIMS: IdTokenClaims = {
   name: null,
   picture: null,
   amr: [],
+  authTime: null,
+  auth0OrgId: null,
 };
 
 /**
@@ -214,6 +255,8 @@ async function extractIdTokenClaims({
       name: (payload.name as string) ?? null,
       picture: (payload.picture as string) ?? null,
       amr: Array.isArray(rawAmr) ? rawAmr.filter((v): v is string => typeof v === 'string') : [],
+      authTime: typeof payload.auth_time === 'number' ? payload.auth_time : null,
+      auth0OrgId: typeof payload.org_id === 'string' ? payload.org_id : null,
     };
   } catch (err) {
     console.warn(
@@ -255,7 +298,68 @@ async function attachIdentity({
     emailVerified,
     name: name ?? undefined,
     picture: picture ?? undefined,
+    // Set only when this request created the account: the signup transaction
+    // wrote the row, so re-reading it would be a race against its own write.
+    ...(resolved.membership ? { membership: resolved.membership } : {}),
   };
+}
+
+/**
+ * Resolve the caller's membership in the active org, once authentication has
+ * succeeded.
+ *
+ * Its own step, outside token validation's catch-all: an OrgTable outage is not
+ * a bad token, and reading it as one costs the caller a 401 plus a refresh they
+ * did not need. One more GetItem in a middleware that already makes one —
+ * reading the role per request rather than carrying it in the token is what
+ * makes a role change take effect on the next request, with no invalidation
+ * machinery.
+ *
+ * An absent row is left absent. The conversion has backfilled every account, so
+ * absence now means the caller is not a member, and `authorize` turns it into a
+ * 403 — while `/api/me`, which carries no role gate, still answers with no role
+ * and an empty permission set so the console can say so.
+ *
+ * Returns a response when the read fails, and undefined when it succeeds.
+ *
+ * `fallbackOrgId` is `/api/me`'s escape hatch, and only its. When the header
+ * named an org the caller turns out not to be a member of, the active org falls
+ * back to their own and the response echoes the org that was actually resolved.
+ * Every other route answers a stale stashed org with the ordinary 403, which
+ * sends the console to `/me`; if `/me` answered that 403 too, the one surface
+ * that can clear the stash would be the one surface the stash locks out.
+ */
+async function attachMembership(
+  event: APIGatewayProxyEventV2,
+  fallbackOrgId?: string,
+): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
+  const userInfo = (
+    event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }
+  ).userInfo;
+  if (userInfo.membership) return undefined;
+
+  try {
+    userInfo.membership = await resolveMembership(userInfo.orgId, userInfo.userId);
+    if (userInfo.membership || fallbackOrgId === undefined || userInfo.orgId === fallbackOrgId) {
+      return undefined;
+    }
+
+    console.warn('[auth] The org header named an org the caller is not in — using their own', {
+      requestedOrgId: userInfo.orgId,
+      orgId: fallbackOrgId,
+      userId: userInfo.userId,
+    });
+    userInfo.orgId = fallbackOrgId;
+    userInfo.membership = await resolveMembership(fallbackOrgId, userInfo.userId);
+    return undefined;
+  } catch (err) {
+    console.error('[auth] OrgTable membership read failed — cannot resolve the role', {
+      orgId: userInfo.orgId,
+      userId: userInfo.userId,
+      error: err,
+    });
+    return membershipUnavailableResponse();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +370,8 @@ interface ResolvedIdentity {
   userId: string;
   orgId: string;
   email: string | null;
+  /** Present only on the signup branch, which just wrote the membership row. */
+  membership?: OrgMembership;
 }
 
 async function resolveUserAndOrg(
@@ -304,14 +410,19 @@ async function resolveUserAndOrg(
         { userId },
       );
     }
-    // Lazy backfill: claim the entitlement and create the trial on the first
-    // verified login (covers signup-while-unverified and post-email-change).
-    // Best-effort: a transient failure here must not block authentication —
-    // the flag stays unset so the next login (or the subscription guard)
-    // retries. Only swallow it on this login-side path.
-    if (result.Item.emailEntitlementClaimed?.BOOL !== true) {
-      await ensureTrialEntitlementBestEffort({ sub, userId, orgId, email, emailVerified });
-    }
+    // The profile's address and name are the org paths' only copy of them, and
+    // accounts created before they were stamped have neither. Gated on the
+    // markers this row already carries, so a profile that is current costs no
+    // write.
+    await stampVerifiedEmail({
+      sub,
+      userId,
+      email,
+      emailVerified,
+      name,
+      stampedEmail: result.Item.profileEmail?.S,
+      stampedName: result.Item.profileName?.S,
+    });
     return { userId, orgId, email };
   }
 
@@ -320,107 +431,31 @@ async function resolveUserAndOrg(
   const orgId = crypto.randomUUID();
   const orgName = deriveOrgName(name ?? undefined, email ?? undefined);
 
-  await createNewUserAndOrg({ sub, userId, orgId, orgName });
+  const membership = await createNewUserAndOrg({
+    sub,
+    userId,
+    orgId,
+    orgName,
+    // Verified only: the audit viewer shows this as the member's identity, and
+    // an unverified claim names whoever typed it.
+    email: emailVerified ? (email ?? undefined) : undefined,
+    // No verified gate on the name: the roster shows it and it decides nothing.
+    name: name ?? undefined,
+  });
 
   // Tenant setup is deferred until the user creates their first bucket or access
   // key — see docs/architectural-decisions/2026-05-13-synchronous-tenant-setup-on-first-resource.md.
-  // The trial is claimed+created here (verified emails only) so billing is ready
-  // before any metered operation; ensureTrialEntitlement is idempotent. Best-effort:
-  // a transient failure must not block login — the subscription guard retries later.
-  await ensureTrialEntitlementBestEffort({ sub, userId, orgId, email, emailVerified });
+  //
+  // The trial is NOT claimed here. Login is the wrong place for it once a user
+  // can belong to more than one org: the subscription guard is the only claim
+  // point (ADR §4/§5), it runs on the first gated request in the caller's own
+  // org, and it is the only code that can tell that org from somebody else's.
+  // Claiming on the login path would spend an invitee's entitlement the moment
+  // they signed in, which is the thing the guard's conditions exist to prevent.
+  // For an organic signup the claim now happens one request later, on the
+  // dashboard's first API call, with the same Stripe latency.
 
-  return { userId, orgId, email };
-}
-
-/**
- * Login-side wrapper around {@link ensureTrialEntitlement}: claiming the trial is
- * a non-critical backfill, so a transient failure (DynamoDB/Stripe) is logged and
- * swallowed rather than failing authentication. The subscription guard calls
- * ensureTrialEntitlement directly and lets transient errors surface as a 5xx.
- */
-async function ensureTrialEntitlementBestEffort(
-  params: Parameters<typeof ensureTrialEntitlement>[0],
-): Promise<void> {
-  try {
-    await ensureTrialEntitlement(params);
-  } catch (err) {
-    console.error('[auth] Trial entitlement backfill failed (continuing login)', {
-      error: err,
-      userId: params.userId,
-      orgId: params.orgId,
-    });
-  }
-}
-
-async function createNewUserAndOrg({
-  sub,
-  userId,
-  orgId,
-  orgName,
-}: {
-  sub: string;
-  userId: string;
-  orgId: string;
-  orgName: string;
-}) {
-  const tableName = Resource.UserInfoTable.name;
-  const now = new Date().toISOString();
-
-  await getDynamoClient().send(
-    new TransactWriteItemsCommand({
-      TransactItems: [
-        {
-          Put: {
-            TableName: tableName,
-            Item: {
-              pk: { S: `SUB#${sub}` },
-              sk: { S: 'IDENTITY' },
-              userId: { S: userId },
-              orgId: { S: orgId },
-              createdAt: { S: now },
-            },
-            ConditionExpression: 'attribute_not_exists(pk)',
-          },
-        },
-        {
-          Put: {
-            TableName: tableName,
-            Item: {
-              pk: { S: `USER#${userId}` },
-              sk: { S: 'PROFILE' },
-              sub: { S: sub },
-              orgId: { S: orgId },
-              createdAt: { S: now },
-            },
-          },
-        },
-        {
-          Put: {
-            TableName: tableName,
-            Item: {
-              pk: { S: `ORG#${orgId}` },
-              sk: { S: 'PROFILE' },
-              name: { S: orgName },
-              auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
-              createdBy: { S: userId },
-              createdAt: { S: now },
-            },
-          },
-        },
-        {
-          Put: {
-            TableName: tableName,
-            Item: {
-              pk: { S: `ORG#${orgId}` },
-              sk: { S: `MEMBER#${userId}` },
-              role: { S: OrgRole.Admin },
-              joinedAt: { S: now },
-            },
-          },
-        },
-      ],
-    }),
-  );
+  return { userId, orgId, email, membership };
 }
 
 // ---------------------------------------------------------------------------
@@ -477,6 +512,15 @@ export interface AuthMiddlewareOptions {
    * `get-me`, `resend-verification`) should set this to false.
    */
   requireVerifiedEmail?: boolean;
+  /**
+   * Serve the caller from their own org when the request's `X-Org-Id` names one
+   * they are not a member of, instead of letting the absent row become a 403.
+   *
+   * `GET /api/me` alone sets this. The console keeps the active org per tab, so
+   * a membership revoked or an org deleted since the stash was written must not
+   * be able to refuse the request whose answer is what clears the stash.
+   */
+  orgHeaderFallback?: boolean;
 }
 
 /**
@@ -493,10 +537,111 @@ function verifiedEmailGate(
   return claims.emailVerified ? undefined : emailNotVerifiedResponse();
 }
 
+/**
+ * Carry the rotated cookies on a response the before hook returns itself.
+ *
+ * Every gate that runs after this middleware in the same before stack owes its
+ * denials this call — `authorize`, the membership gate, CSRF, the subscription
+ * guard, the RAG access gate, the MFA gate. Returning a response from `before`
+ * short-circuits the whole chain, the after hook included (@middy/core 7.2.2
+ * runs the after stack only when the request carries no `earlyResponse`), so a
+ * refresh that already happened has to set its own cookies here. Otherwise the
+ * caller's old refresh token is spent at Auth0 and the new one never reaches
+ * them — one denial becomes a logout on every tab.
+ *
+ * Takes the plain request type and reads `internal` through {@link AuthInternal},
+ * the same way `getVerifiedIdTokenClaims` does, so a middleware downstream of
+ * this one can call it without restating the internal shape.
+ */
+export function withRefreshedCookies(
+  request: Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>,
+  response: APIGatewayProxyStructuredResultV2,
+): APIGatewayProxyStructuredResultV2 {
+  const { newTokens } = request.internal as AuthInternal;
+  if (newTokens) setCookiesFromTokens(response, newTokens);
+  return response;
+}
+
+/**
+ * The caller's standing in the org the request resolved to: their membership,
+ * then the org's identity-provider rule.
+ *
+ * The order is the security property. Membership decides whether the caller may
+ * be in this org at all, and only a member costs the org's profile a read — so
+ * naming an org id the caller is not in answers the same 403 whether or not that
+ * org authenticates through its own provider.
+ *
+ * `fallbackOrgId` is `/api/me`'s escape hatch and only its: when the org the
+ * header named refuses this session, the answer degrades to the caller's own org
+ * rather than refusing, because that answer is what tells the console its
+ * stashed org is stale. Enforcement then applies to the org fallen back to, so a
+ * session locked out of its own SSO org still gets the 403 — that is the rule
+ * working, and re-authenticating through the org's provider is the way in.
+ */
+async function resolveOrgStanding(
+  event: AuthenticatedEvent,
+  sessionAuth0OrgId: string | null,
+  fallbackOrgId: string | undefined,
+): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
+  const membershipFailure = await attachMembership(event, fallbackOrgId);
+  if (membershipFailure) return membershipFailure;
+
+  const { userInfo } = event.requestContext;
+  // No membership, no standing to rule on: `authorize` refuses the request, and
+  // reading the org's profile for a caller who is not in it would answer
+  // "does this org use SSO?" to anyone who names one.
+  if (!userInfo.membership) return undefined;
+
+  const refusal = await enforceIdentityProvider(userInfo.orgId, sessionAuth0OrgId);
+  if (!refusal || fallbackOrgId === undefined || userInfo.orgId === fallbackOrgId) return refusal;
+
+  console.warn('[auth] The org header named an org this session may not enter — using their own', {
+    requestedOrgId: userInfo.orgId,
+    orgId: fallbackOrgId,
+    userId: userInfo.userId,
+  });
+  userInfo.orgId = fallbackOrgId;
+  delete userInfo.membership;
+  return resolveOrgStanding(event, sessionAuth0OrgId, fallbackOrgId);
+}
+
+/**
+ * What runs after a token proves the caller's identity, on both the
+ * access-token and the refresh branch: the verified-email gate, then the active
+ * org, then the caller's standing in it. Identical on both so a failure cannot
+ * depend on which branch authenticated the request.
+ */
+async function completeAuthentication(
+  request: AuthMiddlewareRequest,
+  { requireVerifiedEmail = true, orgHeaderFallback = false }: AuthMiddlewareOptions,
+): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
+  const gated = verifiedEmailGate(requireVerifiedEmail, request);
+  if (gated) return withRefreshedCookies(request, gated);
+
+  const event = request.event as AuthenticatedEvent;
+  const claims = request.internal.idTokenClaims ?? EMPTY_ID_CLAIMS;
+
+  const activeOrg = resolveActiveOrg(event);
+  if (activeOrg.response) {
+    // A header that is not an org id is a client error everywhere but `/me`,
+    // which answers under the caller's own org instead: its echo is what tells
+    // the console to drop the value that produced this.
+    if (!orgHeaderFallback) return withRefreshedCookies(request, activeOrg.response);
+    console.warn('[auth] Ignoring a malformed org header on /me — using the caller’s own org', {
+      orgId: event.requestContext.userInfo.orgId,
+    });
+  }
+
+  const refusal = await resolveOrgStanding(
+    event,
+    claims.auth0OrgId,
+    orgHeaderFallback ? activeOrg.personalOrgId : undefined,
+  );
+  return refusal ? withRefreshedCookies(request, refusal) : undefined;
+}
+
 // eslint-disable-next-line max-lines-per-function
 export function authMiddleware(options: AuthMiddlewareOptions = {}) {
-  const { requireVerifiedEmail = true } = options;
-
   // Mapped once here rather than at each attachIdentity call site, so no token
   // path can turn a deleted account into a 401 and invite a retry.
   const before = async (
@@ -551,7 +696,7 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
         accessToken,
         failureLabel: '[auth] Access token verification failed',
       });
-      if (ok) return verifiedEmailGate(requireVerifiedEmail, request);
+      if (ok) return completeAuthentication(request, options);
     }
 
     // Step 2: Attempt token refresh (always runs when forceRefresh=1)
@@ -577,7 +722,7 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
           name: refreshedClaims.name,
           picture: refreshedClaims.picture,
         });
-        return verifiedEmailGate(requireVerifiedEmail, request);
+        return completeAuthentication(request, options);
       }
       if (forceRefresh) {
         console.error(
@@ -599,7 +744,7 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
         accessToken,
         failureLabel: '[auth] Fallback access token validation failed',
       });
-      if (ok) return verifiedEmailGate(requireVerifiedEmail, request);
+      if (ok) return completeAuthentication(request, options);
     }
 
     console.warn('[auth] Returning 401 — no valid tokens');

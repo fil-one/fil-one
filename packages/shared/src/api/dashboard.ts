@@ -1,3 +1,5 @@
+import type { AuditEventType } from '../audit.js';
+
 export interface UsageDataPoint {
   date: string;
   value: number;
@@ -35,7 +37,12 @@ export interface ObjectActivity extends BaseActivity {
 
 export interface KeyActivity extends BaseActivity {
   resourceType: 'key';
-  action: 'key.created' | 'key.deleted';
+  /**
+   * Derived from the audit union so this feed and the audit log cannot end up
+   * calling the same thing two names: the dashboard renders "deleted", so the
+   * event type is `key.deleted` and both read from one list.
+   */
+  action: Extract<AuditEventType, 'key.created' | 'key.deleted'>;
 }
 
 export type RecentActivity = BucketActivity | ObjectActivity | KeyActivity;

@@ -8,6 +8,7 @@
 //     getS3ClientContext) speak S3 directly against the FTH S3 endpoint
 //     using the service access key stashed in SSM during setup.
 
+import { createHash } from 'node:crypto';
 import pRetry from 'p-retry';
 import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
@@ -27,7 +28,6 @@ import type {
   GetTenantUsageMetricsOptions,
   IssueAccessKeyOpts,
   IssuedAccessKey,
-  ListBucketsOptions,
   ServiceOrchestrator,
   TenantStatusProbe,
   StorageUsageSample,
@@ -180,23 +180,22 @@ export const fthOrchestrator = {
     await s3DeleteBucket(s3, bucketName);
   },
 
-  async listBuckets(tenantId: string, opts: ListBucketsOptions = {}): Promise<BucketSummary[]> {
-    // Loading versioning costs one GetBucketVersioning call per bucket (an N+1),
-    // so callers that don't surface it opt out via includeVersioning: false.
-    const includeVersioning = opts.includeVersioning ?? true;
+  async listBuckets(tenantId: string): Promise<BucketSummary[]> {
+    // Versioning and object-lock both cost a GetBucket*/GetObjectLockConfiguration
+    // call per bucket, an N+1 nobody wants to pay just to render a list. Neither
+    // is returned here; getBucket loads both for the one bucket the detail page
+    // actually needs them for.
     const ctx = await fthOrchestrator.getS3ClientContext(tenantId);
     const s3 = createS3Client(ctx);
     const { buckets } = await s3ListBuckets(s3);
-    return Promise.all(
-      buckets.map(async (b) => ({
-        bucketName: b.name,
-        region: fthOrchestrator.region,
-        createdAt: b.createdAt,
-        isPublic: false,
-        versioning: includeVersioning ? await getBucketVersioning(s3, b.name) : false,
-        encrypted: true,
-      })),
-    );
+
+    return buckets.map((b) => ({
+      bucketName: b.name,
+      region: fthOrchestrator.region,
+      createdAt: b.createdAt,
+      isPublic: false,
+      encrypted: true,
+    }));
   },
 
   async getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null> {
@@ -237,13 +236,17 @@ export const fthOrchestrator = {
       )}] and bucket scopes [${buckets.join(', ')}]`,
     );
 
+    const request = {
+      name: opts.keyName,
+      permissions,
+      buckets,
+      expiresAt: opts.expiresAt ?? null,
+    };
+
     try {
       const accessKey = await client.createAccessKey(tenantId, storageUserId, {
-        name: opts.keyName,
-        permissions,
-        buckets,
-        expiresAt: opts.expiresAt ?? null,
-        idempotencyKey: `issue-key-${opts.keyName}`,
+        ...request,
+        idempotencyKey: idempotencyKeyFor(tenantId, storageUserId, request),
       });
 
       return {
@@ -378,10 +381,14 @@ function createInstrumentedFthClient(): FthManagementClient {
 
 const FTH_ALWAYS_PERMISSIONS: readonly string[] = ['s3:ListAllMyBuckets'];
 
+// The multipart actions follow the same grouping as Aurora's access types (see
+// the permissions description in aurora-portal.swagger.json): reading the parts
+// of an upload goes with read, aborting one with write, listing in-progress
+// uploads with list.
 const FTH_BASE_PERMISSIONS: Record<AccessKeyPermission, readonly string[]> = {
-  read: ['s3:GetObject', 's3:ListBucket'],
-  write: ['s3:PutObject'],
-  list: ['s3:ListBucket'],
+  read: ['s3:GetObject', 's3:ListBucket', 's3:ListMultipartUploadParts'],
+  write: ['s3:PutObject', 's3:AbortMultipartUpload'],
+  list: ['s3:ListBucket', 's3:ListBucketMultipartUploads'],
   delete: ['s3:DeleteObject'],
   CreateBucket: ['s3:CreateBucket'],
   DeleteBucket: ['s3:DeleteBucket'],
@@ -411,6 +418,23 @@ function buildFthPermissions(
     out.add(FTH_GRANULAR_PERMISSIONS[g]);
   }
   return [...out];
+}
+
+// FTH answers a replayed idempotency key whose payload has changed with a
+// permanent 409, so the key has to change whenever the request does. A customer
+// who deletes a key and re-creates it under the same name with a different
+// permission set sends exactly such a request, hence the hash of everything
+// that identifies the call: the tenant and storage user in the path, and the
+// body. Re-sending an identical request still replays, which is the point.
+function idempotencyKeyFor(
+  tenantId: string,
+  storageUserId: string,
+  request: { name: string; permissions: string[]; buckets: string[]; expiresAt: string | null },
+): string {
+  const digest = createHash('sha256')
+    .update(JSON.stringify([tenantId, storageUserId, request]))
+    .digest('hex');
+  return `issue-key-${digest}`;
 }
 
 function extractFthMessage(err: FthApiError): string | undefined {

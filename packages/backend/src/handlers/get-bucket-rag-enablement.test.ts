@@ -33,31 +33,10 @@ vi.mock('../lib/bucket-rag-enablement.js', async () => {
   };
 });
 
-// The real ragAccessMiddleware resolves access via hasRagAccess → isAllowlisted,
-// which reads UserInfoTable with a single GetItemCommand. We drive that path
-// with aws-sdk-client-mock so the *real* gate runs end-to-end. A non-foundation
-// email is used so the decision hinges on the (mocked) allowlist lookup.
-import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
-
-const ddbMock = mockClient(DynamoDBClient);
-
-// The full middy chain runs auth + subscription guard before the RAG gate.
-// Those have their own dedicated tests; here we replace them with pass-through
-// middleware so the gate's wiring can be exercised in isolation. The userInfo
-// the auth middleware would populate is stamped by buildEvent instead.
-vi.mock('../middleware/auth.js', () => ({
-  authMiddleware: () => ({ before: () => undefined }),
-}));
-vi.mock('../middleware/subscription-guard.js', () => ({
-  AccessLevel: { Read: 'read', Write: 'write' },
-  subscriptionGuardMiddleware: () => ({ before: () => undefined }),
-}));
-
 process.env.FILONE_STAGE = 'test';
 
-import { baseHandler, handler } from './get-bucket-rag-enablement.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { baseHandler } from './get-bucket-rag-enablement.js';
+import { buildEvent } from '../test/lambda-test-utilities.js';
 import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.js';
 import { S3_REGION, S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -258,49 +237,5 @@ describe('get-bucket-rag-enablement baseHandler', () => {
   it('selects the orchestrator from the region query param', async () => {
     await baseHandler(event({ region: S3Region.UsEast1 }));
     expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith(S3Region.UsEast1);
-  });
-});
-
-describe('get-bucket-rag-enablement handler (RAG access gate)', () => {
-  // Non-foundation email so the gate decision hinges on the allowlist lookup.
-  function gateEvent(): AuthenticatedEvent {
-    const e = buildEvent({
-      userInfo: {
-        userId: 'user-1',
-        orgId: 'org-1',
-        email: 'outsider@example.com',
-        emailVerified: true,
-      },
-    });
-    e.pathParameters = { name: 'my-bucket' };
-    return e;
-  }
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    ddbMock.reset();
-    orch = fakeOrchestrator('aurora', { bucket: BUCKET });
-    mockGetOrchestratorForRegion.mockReturnValue(orch);
-    mockGetEnablement.mockResolvedValue(enablementRecord());
-  });
-
-  it('returns 403 when the caller is not foundation and not allowlisted', async () => {
-    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
-
-    const result = await handler(gateEvent(), buildContext());
-
-    expect(result.statusCode).toBe(403);
-    expect(JSON.parse(result.body!).message).toBe('You do not have access to this feature.');
-    // Gate runs before any RAG work.
-    expect(mockGetEnablement).not.toHaveBeenCalled();
-  });
-
-  it('allows the request through the gate when the caller is allowlisted', async () => {
-    ddbMock.on(GetItemCommand).resolves({ Item: { pk: { S: 'ALLOWLIST#outsider@example.com' } } });
-
-    const result = await handler(gateEvent(), buildContext());
-
-    expect(result.statusCode).toBe(200);
-    expect(mockGetEnablement).toHaveBeenCalled();
   });
 });

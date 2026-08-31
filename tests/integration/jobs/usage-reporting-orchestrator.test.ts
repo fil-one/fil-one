@@ -24,12 +24,14 @@ describe('Usage Reporting Orchestrator (direct Lambda invoke)', () => {
   const orgC = `${prefix}-c`;
   const orgD = `${prefix}-d`;
 
-  // Subscription PKs (CUSTOMER# keys in BillingTable)
-  const pkA = `CUSTOMER#${orgA}`;
-  const pkB = `CUSTOMER#${orgB}`;
-  const pkC = `CUSTOMER#${orgC}`;
-  const pkD1 = `CUSTOMER#${orgD}-1`;
-  const pkD2 = `CUSTOMER#${orgD}-2`;
+  // Subscription PKs — the org key is the only one the orchestrator scans.
+  const pkA = `ORG#${orgA}`;
+  const pkB = `ORG#${orgB}`;
+  const pkC = `ORG#${orgC}`;
+  const pkD = `ORG#${orgD}`;
+  // A pre-re-key row the dated cleanup step has not removed yet. It names the
+  // same org and is skipped, so orgD is still metered exactly once.
+  const pkDLeftover = `CUSTOMER#${orgD}-legacy`;
 
   beforeAll(async () => {
     cusId = await createTestCustomer(prefix);
@@ -44,9 +46,9 @@ describe('Usage Reporting Orchestrator (direct Lambda invoke)', () => {
     // Test 2: Org with subscription but NO profile
     await seedSubscriptionRecord(pkC, orgC, cusId);
 
-    // Test 3: Two subscriptions for the same orgId (dedup test)
-    await seedSubscriptionRecord(pkD1, orgD, cusId);
-    await seedSubscriptionRecord(pkD2, orgD, cusId);
+    // Test 3: an org whose leftover CUSTOMER# row also claims it
+    await seedSubscriptionRecord(pkD, orgD, cusId);
+    await seedSubscriptionRecord(pkDLeftover, orgD, cusId);
     await seedUserProfile(orgD, AURORA_TEST_TENANT_ID);
   });
 
@@ -58,8 +60,8 @@ describe('Usage Reporting Orchestrator (direct Lambda invoke)', () => {
       deleteSubscriptionRecord(pkA),
       deleteSubscriptionRecord(pkB),
       deleteSubscriptionRecord(pkC),
-      deleteSubscriptionRecord(pkD1),
-      deleteSubscriptionRecord(pkD2),
+      deleteSubscriptionRecord(pkD),
+      deleteSubscriptionRecord(pkDLeftover),
     ]);
 
     // Clean up profiles
@@ -95,9 +97,8 @@ describe('Usage Reporting Orchestrator (direct Lambda invoke)', () => {
 
     expect(auditC).toBeNull();
 
-    // Only 1 audit record should exist (dedup means only 1 worker invocation)
-    // The record existing at all confirms processing; dedup is validated by
-    // the orchestrator's internal logic (it skips the second subscription)
+    // One audit record, so one worker invocation: the leftover CUSTOMER# row
+    // was skipped at the scan rather than metered as a second org.
     expect(auditD.orgId.S).toBe(orgD);
     expect(auditD.reportDate.S).toBe(reportDate);
   });

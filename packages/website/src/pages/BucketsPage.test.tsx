@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ApiErrorCode, S3Region } from '@filone/shared';
+import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
 import type { ListBucketsResponse } from '@filone/shared';
 
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
+import { seedPermissions } from '../lib/test-permissions.js';
 import { BucketsPage } from './BucketsPage.js';
 
 // ---------------------------------------------------------------------------
@@ -36,11 +37,22 @@ const BUCKETS: ListBucketsResponse = {
       region: S3Region.EuWest1,
       createdAt: '2026-07-01T00:00:00Z',
       isPublic: false,
-      versioning: false,
-      objectLockEnabled: false,
     },
   ],
 };
+
+// The row's storage line reads this endpoint independently of the bucket list.
+const EMPTY_ANALYTICS = { bytesUsed: 0, objectCount: 0 };
+
+function mockApiResponses(deleteError?: Error) {
+  mockApiRequest.mockImplementation((path: string, options?: { method?: string }) => {
+    if (options?.method === 'DELETE') {
+      return deleteError ? Promise.reject(deleteError) : Promise.resolve(undefined);
+    }
+    if (path.includes('/analytics')) return Promise.resolve(EMPTY_ANALYTICS);
+    return Promise.resolve(BUCKETS);
+  });
+}
 
 const DEGRADED: ListBucketsResponse = {
   ...BUCKETS,
@@ -49,28 +61,36 @@ const DEGRADED: ListBucketsResponse = {
 
 const DEGRADED_MESSAGE = 'Cannot list buckets in the us-east-1 region. Please try again later.';
 
-function renderPage() {
+function renderPage(role = OrgRole.Owner) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={client}>
-      <ToastProvider>
-        <BucketsPage />
-      </ToastProvider>
-    </QueryClientProvider>,
-  );
+  // Delete is gated on `buckets.delete`, so the caller's role has to be in the
+  // cache before the rows render or the control is absent for the wrong reason.
+  seedPermissions(client, role);
+  // The client comes back so a test can re-seed it mid-render, which is what a
+  // role change under an open dialog looks like.
+  return {
+    client,
+    ...render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <BucketsPage />
+        </ToastProvider>
+      </QueryClientProvider>,
+    ),
+  };
 }
 
-// Resolves once the bucket list has rendered, so the delete button is present.
-async function renderPageWithBuckets() {
-  mockApiRequest.mockResolvedValue(BUCKETS);
-  renderPage();
-  return screen.findByRole('button', { name: 'Delete bucket my-bucket' });
+// Resolves once the bucket list has rendered and its action menu is open, so
+// the "Delete bucket" menu item is present.
+async function renderPageWithBucketMenuOpen(role = OrgRole.Owner) {
+  mockApiResponses();
+  renderPage(role);
+  fireEvent.click(await screen.findByRole('button', { name: 'Bucket actions' }));
+  return screen.findByRole('menuitem', { name: 'Delete bucket' });
 }
 
 function rejectDeleteWith(error: Error) {
-  mockApiRequest.mockImplementation((path: string, options?: { method?: string }) =>
-    options?.method === 'DELETE' ? Promise.reject(error) : Promise.resolve(BUCKETS),
-  );
+  mockApiResponses(error);
 }
 
 // ---------------------------------------------------------------------------
@@ -82,20 +102,20 @@ describe('BucketsPage', () => {
     vi.clearAllMocks();
   });
 
-  // Deleting a bucket is irreversible, so the trash icon must not delete on click.
+  // Deleting a bucket is irreversible, so the menu item must not delete on click.
   it('asks for confirmation before deleting and does not call the API', async () => {
-    const deleteButton = await renderPageWithBuckets();
+    const deleteMenuItem = await renderPageWithBucketMenuOpen();
     mockApiRequest.mockClear();
 
-    fireEvent.click(deleteButton);
+    fireEvent.click(deleteMenuItem);
 
     expect(await screen.findByTestId('confirm-dialog')).toBeInTheDocument();
     expect(mockApiRequest).not.toHaveBeenCalled();
   });
 
   it('deletes the bucket once the dialog is confirmed', async () => {
-    const deleteButton = await renderPageWithBuckets();
-    fireEvent.click(deleteButton);
+    const deleteMenuItem = await renderPageWithBucketMenuOpen();
+    fireEvent.click(deleteMenuItem);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Delete bucket' }));
 
@@ -108,7 +128,7 @@ describe('BucketsPage', () => {
   // A full bucket is user-fixable, so the error explains what to do and links the docs
   // instead of passing the raw API message through.
   it('explains how to empty the bucket when the API returns BUCKET_NOT_EMPTY', async () => {
-    const deleteButton = await renderPageWithBuckets();
+    const deleteMenuItem = await renderPageWithBucketMenuOpen();
     rejectDeleteWith(
       Object.assign(new Error('Bucket "my-bucket" is not empty.'), {
         status: 409,
@@ -116,7 +136,7 @@ describe('BucketsPage', () => {
       }),
     );
 
-    fireEvent.click(deleteButton);
+    fireEvent.click(deleteMenuItem);
     fireEvent.click(await screen.findByRole('button', { name: 'Delete bucket' }));
 
     expect(await screen.findByText(/is not empty/)).toBeInTheDocument();
@@ -128,13 +148,44 @@ describe('BucketsPage', () => {
   });
 
   it('surfaces the API message for other delete failures', async () => {
-    const deleteButton = await renderPageWithBuckets();
+    const deleteMenuItem = await renderPageWithBucketMenuOpen();
     rejectDeleteWith(Object.assign(new Error('Tenant setup is not complete'), { status: 503 }));
 
-    fireEvent.click(deleteButton);
+    fireEvent.click(deleteMenuItem);
     fireEvent.click(await screen.findByRole('button', { name: 'Delete bucket' }));
 
     expect(await screen.findByText('Tenant setup is not complete')).toBeInTheDocument();
+  });
+
+  // Hiding the row's Delete decides only what can be started. The confirmation
+  // is state the caller chose before the demotion, and its Delete bucket button
+  // would still issue the request the hidden control exists to avoid.
+  it('closes an open delete confirmation when the caller loses buckets.delete', async () => {
+    mockApiResponses();
+    const { client } = renderPage(OrgRole.Owner);
+    fireEvent.click(await screen.findByRole('button', { name: 'Bucket actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete bucket' }));
+    expect(await screen.findByRole('button', { name: 'Delete bucket' })).toBeInTheDocument();
+
+    // What a /me refetch after a demotion does.
+    act(() => seedPermissions(client, OrgRole.Member));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Delete bucket' })).not.toBeInTheDocument(),
+    );
+  });
+
+  // A Member creates buckets but does not delete them, so the control is absent
+  // rather than disabled — the gate is on `buckets.delete` specifically, not on
+  // bucket access in general.
+  it('gives a Member no delete control', async () => {
+    mockApiResponses();
+    renderPage(OrgRole.Member);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Bucket actions' }));
+
+    expect(await screen.findByRole('menuitem', { name: 'Browse objects' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Delete bucket' })).not.toBeInTheDocument();
   });
 });
 

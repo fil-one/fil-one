@@ -132,16 +132,29 @@ async function deleteTenants(orgId: string, tenantIds: Record<string, string>): 
 }
 
 /**
- * Three actions per member, in a fixed order: read the email, revoke the grant it
- * keys, then delete the user. The allowlist row cannot be deleted afterwards —
- * Auth0 is the only place that address is stored.
+ * Three actions per member whose account this deletion ends, in a fixed order:
+ * read the email, revoke the grant it keys, then delete the user. The allowlist
+ * row cannot be deleted afterwards — Auth0 is the only place that address is
+ * stored.
  *
  * A 404 on the lookup skips the row for that member, which is safe because the
  * in-step ordering means the user is only gone once a previous pass finished the
  * removal. Deleting an already-deleted user likewise 404s and counts as success.
+ *
+ * A member with another membership, one who was invited into this org, and one
+ * whose memberships the census could not read all keep their login and their RAG
+ * grant: the org is going away, their account is not. `resolveDeletionTargets`
+ * decides that per member, and the reasons it decided on are logged here.
  */
 async function tearDownAuth0(members: DeletionMember[]): Promise<void> {
-  for (const { sub } of members) {
+  for (const { sub, deleteIdentity, keptReasons } of members) {
+    if (!deleteIdentity) {
+      // The census's own reasons, not one of them: an account is also kept when
+      // the member was only ever invited here, and when a membership row could
+      // not be decoded and the census failed closed.
+      console.log(`${LOG} account kept`, { sub, keptReasons });
+      continue;
+    }
     const email = await getAuth0UserEmail(sub);
     if (email) await revokeRagAllowlist(email);
     await deleteAuth0User(sub);

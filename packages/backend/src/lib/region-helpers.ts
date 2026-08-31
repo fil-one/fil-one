@@ -17,7 +17,10 @@ export async function getProvisionedRegions(
 ): Promise<ProvisionedRegion[]> {
   const orchestrators = getAvailableOrchestrators();
   if (orchestrators.length === 0) return [];
-  const orgProfile = await getOrgProfile(orgId, options);
+  const orgProfile = await getOrgProfile(
+    orgId,
+    options ? { consistentRead: options.consistent } : undefined,
+  );
   return orchestrators
     .map((orchestrator) => {
       const tenantId = orchestrator.isTenantReady(orgProfile);

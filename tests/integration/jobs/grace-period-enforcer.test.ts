@@ -29,7 +29,7 @@ describe('expired grace period → canceled + DISABLED', () => {
   });
 
   afterAll(async () => {
-    await deleteBillingRecord(userId);
+    await deleteBillingRecord(userId, orgId);
     await deleteOrgProfile(orgId);
   });
 
@@ -37,7 +37,7 @@ describe('expired grace period → canceled + DISABLED', () => {
     const result = await invokeEnforcer();
     expect(result.functionError).toBeUndefined();
 
-    const record = await getBillingRecord(userId);
+    const record = await getBillingRecord(userId, orgId);
     expect(record).not.toBeNull();
     expect(record!.subscriptionStatus?.S).toBe(SubscriptionStatus.Canceled);
   });
@@ -61,7 +61,7 @@ describe('active grace period → WRITE_LOCK applied', () => {
   });
 
   afterAll(async () => {
-    await deleteBillingRecord(userId);
+    await deleteBillingRecord(userId, orgId);
     await deleteOrgProfile(orgId);
   });
 
@@ -69,7 +69,7 @@ describe('active grace period → WRITE_LOCK applied', () => {
     const result = await invokeEnforcer();
     expect(result.functionError).toBeUndefined();
 
-    const record = await getBillingRecord(userId);
+    const record = await getBillingRecord(userId, orgId);
     expect(record).not.toBeNull();
     expect(record!.subscriptionStatus?.S).toBe(SubscriptionStatus.GracePeriod);
   });
@@ -81,38 +81,44 @@ describe('active grace period → WRITE_LOCK applied', () => {
 describe('mixed batch — only expired records get canceled', () => {
   const expiredUserId = `enforcer-mix-exp-${crypto.randomUUID().slice(0, 8)}`;
   const activeUserId = `enforcer-mix-act-${crypto.randomUUID().slice(0, 8)}`;
-  const orgId = `org-mix-${crypto.randomUUID().slice(0, 8)}`;
+  // Two accounts, so two orgs. They shared one before, which read as a single
+  // org holding two subscriptions — the collision the enforcer now resolves to
+  // one candidate, and the batch this case is about is two separate tenants.
+  const expiredOrgId = `org-mix-exp-${crypto.randomUUID().slice(0, 8)}`;
+  const activeOrgId = `org-mix-act-${crypto.randomUUID().slice(0, 8)}`;
   const tenantId = 'e7da8138-c669-4cc0-82ef-253e534be11c';
 
   beforeAll(async () => {
-    await seedOrgProfile(orgId, tenantId);
+    await seedOrgProfile(expiredOrgId, tenantId);
+    await seedOrgProfile(activeOrgId, tenantId);
     await seedBillingRecord(expiredUserId, 'cus_fake_exp', SubscriptionStatus.GracePeriod, {
-      orgId: { S: orgId },
+      orgId: { S: expiredOrgId },
       gracePeriodEndsAt: { S: pastDate(2) },
       canceledAt: { S: pastDate(32) },
     });
     await seedBillingRecord(activeUserId, 'cus_fake_act', SubscriptionStatus.GracePeriod, {
-      orgId: { S: orgId },
+      orgId: { S: activeOrgId },
       gracePeriodEndsAt: { S: futureDate(15) },
       canceledAt: { S: pastDate(5) },
     });
   });
 
   afterAll(async () => {
-    await deleteBillingRecord(expiredUserId);
-    await deleteBillingRecord(activeUserId);
-    await deleteOrgProfile(orgId);
+    await deleteBillingRecord(expiredUserId, expiredOrgId);
+    await deleteBillingRecord(activeUserId, activeOrgId);
+    await deleteOrgProfile(expiredOrgId);
+    await deleteOrgProfile(activeOrgId);
   });
 
   it('cancels expired record and WRITE_LOCKs active record', async () => {
     const result = await invokeEnforcer();
     expect(result.functionError).toBeUndefined();
 
-    const expiredRecord = await getBillingRecord(expiredUserId);
+    const expiredRecord = await getBillingRecord(expiredUserId, expiredOrgId);
     expect(expiredRecord).not.toBeNull();
     expect(expiredRecord!.subscriptionStatus?.S).toBe(SubscriptionStatus.Canceled);
 
-    const activeRecord = await getBillingRecord(activeUserId);
+    const activeRecord = await getBillingRecord(activeUserId, activeOrgId);
     expect(activeRecord).not.toBeNull();
     expect(activeRecord!.subscriptionStatus?.S).toBe(SubscriptionStatus.GracePeriod);
   });

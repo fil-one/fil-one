@@ -148,7 +148,7 @@ pnpm exec playwright install --with-deps
 | Variable                                                          | Purpose                                               |
 | ----------------------------------------------------------------- | ----------------------------------------------------- |
 | `BASE_URL`                                                        | The deployed app URL (e.g. `https://staging.fil.one`) |
-| `E2E_PAID_EMAIL` / `E2E_PAID_PASSWORD` / `E2E_PAID_USER_ID`       | Paid test user (Auth0 sub goes in `_USER_ID`)         |
+| `E2E_PAID_EMAIL` / `E2E_PAID_PASSWORD` / `E2E_PAID_USER_ID`       | Paid test user (`_USER_ID` is the FilOne user id)     |
 | `E2E_UNPAID_EMAIL` / `E2E_UNPAID_PASSWORD` / `E2E_UNPAID_USER_ID` | Unpaid test user                                      |
 | `E2E_TRIAL_EMAIL` / `E2E_TRIAL_PASSWORD` / `E2E_TRIAL_USER_ID`    | Trial test user                                       |
 
@@ -173,9 +173,9 @@ The `test:e2e` script wraps Playwright in `sst shell` so SST Resource bindings (
 ```bash
 SST_STAGE=staging \
 BASE_URL=https://staging.fil.one \
-E2E_PAID_EMAIL=...   E2E_PAID_PASSWORD=...   E2E_PAID_USER_ID=auth0|... \
-E2E_UNPAID_EMAIL=... E2E_UNPAID_PASSWORD=... E2E_UNPAID_USER_ID=auth0|... \
-E2E_TRIAL_EMAIL=...  E2E_TRIAL_PASSWORD=...  E2E_TRIAL_USER_ID=auth0|... \
+E2E_PAID_EMAIL=...   E2E_PAID_PASSWORD=...   E2E_PAID_USER_ID=<uuid> \
+E2E_UNPAID_EMAIL=... E2E_UNPAID_PASSWORD=... E2E_UNPAID_USER_ID=<uuid> \
+E2E_TRIAL_EMAIL=...  E2E_TRIAL_PASSWORD=...  E2E_TRIAL_USER_ID=<uuid> \
 pnpm test:e2e --project=chromium
 ```
 

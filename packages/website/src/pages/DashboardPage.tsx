@@ -34,6 +34,8 @@ import type { RecentActivity } from '@filone/shared';
 import { getUsage, getBilling, getActivity } from '../lib/api.js';
 import { daysUntil, formatDateTime, timeAgo } from '../lib/time.js';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
+import { RequirePermission } from '../components/RequirePermission';
+import { useHasPermission } from '../lib/use-permissions.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -108,16 +110,29 @@ function DashboardSkeleton() {
 export function DashboardPage() {
   const [trialBannerVisible, setTrialBannerVisible] = useState(true);
 
+  // Money is `billing.view`. A Member's dashboard used to sit on a skeleton
+  // forever waiting for a request that returns 403, so the plan panels are now
+  // the only thing that depends on billing, and they are simply absent for a
+  // role that cannot read it.
+  const mayReadBilling = useHasPermission('billing.view');
+
   const { data: usage, isPending: usagePending } = useQuery({
     queryKey: queryKeys.usage,
     queryFn: getUsage,
     staleTime: USAGE_STALE_TIME,
   });
 
-  const { data: billing, isPending: billingPending } = useQuery({
+  const { data: billingData } = useQuery({
     queryKey: queryKeys.billing,
     queryFn: getBilling,
+    enabled: mayReadBilling,
   });
+  // Read through the permission, not just the `enabled` flag. A mounted page is
+  // a live observer, so nothing collects the answer this query already has, and
+  // react-query keeps serving it once the query is disabled — the plan card,
+  // the trial banner and the cost estimate would all keep rendering after a
+  // demotion. Reading it here makes every derived value go absent at once.
+  const billing = mayReadBilling ? billingData : undefined;
 
   // Activity is optional — silently ignored if it fails
   const { data: activityData } = useQuery({
@@ -126,33 +141,35 @@ export function DashboardPage() {
   });
   const activities: RecentActivity[] = activityData?.activities ?? [];
 
-  if (usagePending || billingPending || !usage || !billing) {
+  // Usage alone decides whether there is a page: every counter and the quick
+  // setup read it, and it is `buckets.read`, which every role holds.
+  if (usagePending || !usage) {
     return <DashboardSkeleton />;
   }
 
-  const isTrialing = billing.subscription.status === SubscriptionStatus.Trialing;
-  const isActivePaid = billing.subscription.status === SubscriptionStatus.Active;
-  const isInactive = billing.subscription.status === SubscriptionStatus.Inactive;
+  const isTrialing = billing?.subscription.status === SubscriptionStatus.Trialing;
+  const isActivePaid = billing?.subscription.status === SubscriptionStatus.Active;
+  const isInactive = billing?.subscription.status === SubscriptionStatus.Inactive;
   // Positive check for paid-plan copy (pricing, cost estimate): planId `none`
   // and the trial both stay excluded, instead of inferring "paid" from
   // !isTrialing.
-  const isPayAsYouGo = billing.subscription.planId === PlanId.PayAsYouGo;
+  const isPayAsYouGo = billing?.subscription.planId === PlanId.PayAsYouGo;
   const trialDaysLeft =
-    isTrialing && billing.subscription.trialEndsAt
+    isTrialing && billing?.subscription.trialEndsAt
       ? daysUntil(billing.subscription.trialEndsAt)
       : null;
-  const trialEndsLabel = billing.subscription.trialEndsAt
+  const trialEndsLabel = billing?.subscription.trialEndsAt
     ? `Expires ${formatDateTime(billing.subscription.trialEndsAt)}`
     : undefined;
 
   const showQuickSetup =
     usage.buckets.count === 0 || usage.objects.count === 0 || usage.accessKeys.count === 0;
 
-  const badge = statusBadgeProps(billing.subscription.status);
-  const pricePerTbCents = billing.subscription.planId === PlanId.PayAsYouGo ? 499 : 0;
+  const badge = billing ? statusBadgeProps(billing.subscription.status) : null;
+  const pricePerTbCents = billing?.subscription.planId === PlanId.PayAsYouGo ? 499 : 0;
   // Per-org monthly minimum from the backend; 0 for grandfathered accounts and
   // trial/free plans, so their estimate is never floored.
-  const monthlyMinimumCents = billing.subscription.monthlyMinimumCents ?? 0;
+  const monthlyMinimumCents = billing?.subscription.monthlyMinimumCents ?? 0;
 
   const limits = getUsageLimits(isActivePaid);
   const storagePct =
@@ -200,15 +217,17 @@ export function DashboardPage() {
       title="Dashboard"
       headingId="dashboard-heading"
       action={
-        <Button
-          id="dashboard-new-bucket-button"
-          variant="ghost"
-          size="sm"
-          icon={PlusIcon}
-          href="/buckets"
-        >
-          New bucket
-        </Button>
+        <RequirePermission permission="buckets.create">
+          <Button
+            id="dashboard-new-bucket-button"
+            variant="ghost"
+            size="sm"
+            icon={PlusIcon}
+            href="/buckets"
+          >
+            New bucket
+          </Button>
+        </RequirePermission>
       }
     >
       {/* 2. Trial banner */}
@@ -277,58 +296,64 @@ export function DashboardPage() {
         </Card>
       )}
 
-      {/* 4. Top row: Plan · Storage · Egress */}
-      <div className="mb-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
+      {/* 4. Top row: Plan · Storage · Egress. The plan card is absent, not
+             skeletal, for a role that cannot read billing — the counters beside
+             it are `buckets.read` and stand on their own. */}
+      <div
+        className={`mb-3 grid grid-cols-1 gap-3 ${billing ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}
+      >
         {/* Plan card */}
-        <Card className="flex flex-col justify-between sm:h-[157px]">
-          <div>
-            <div className="mb-1 flex items-center justify-between">
-              <span className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">
-                PLAN
+        {billing && badge && (
+          <Card className="flex flex-col justify-between sm:h-[157px]">
+            <div>
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+                  PLAN
+                </span>
+                <span data-testid="subscription-status" data-status={billing.subscription.status}>
+                  {isTrialing && trialDaysLeft !== null && (
+                    <Badge color="blue" size="sm" description={trialEndsLabel}>
+                      {trialDaysLeft} days left
+                    </Badge>
+                  )}
+                  {!isTrialing && (
+                    <Badge color={badge.color} size="sm">
+                      {badge.label}
+                    </Badge>
+                  )}
+                </span>
+              </div>
+              <span className="text-xl font-medium text-zinc-900">
+                {planDisplayName(billing.subscription.planId)}
               </span>
-              <span data-testid="subscription-status" data-status={billing.subscription.status}>
-                {isTrialing && trialDaysLeft !== null && (
-                  <Badge color="blue" size="sm" description={trialEndsLabel}>
-                    {trialDaysLeft} days left
-                  </Badge>
-                )}
-                {!isTrialing && (
-                  <Badge color={badge.color} size="sm">
-                    {badge.label}
-                  </Badge>
-                )}
-              </span>
+              {isTrialing && (
+                <p className="mt-0.5 text-[11px] text-zinc-500">
+                  {formatBytes(limits.storageLimitBytes)} storage ·{' '}
+                  {formatBytes(limits.egressLimitBytes)} egress included
+                </p>
+              )}
+              {isInactive && (
+                <p className="mt-0.5 text-[11px] text-zinc-500">
+                  Choose a plan to start storing data
+                </p>
+              )}
+              {isPayAsYouGo && (
+                <p className="mt-0.5 text-[11px] text-zinc-500">$4.99/TB · no egress fees</p>
+              )}
             </div>
-            <span className="text-xl font-medium text-zinc-900">
-              {planDisplayName(billing.subscription.planId)}
-            </span>
-            {isTrialing && (
-              <p className="mt-0.5 text-[11px] text-zinc-500">
-                {formatBytes(limits.storageLimitBytes)} storage ·{' '}
-                {formatBytes(limits.egressLimitBytes)} egress included
-              </p>
-            )}
-            {isInactive && (
-              <p className="mt-0.5 text-[11px] text-zinc-500">
-                Choose a plan to start storing data
-              </p>
-            )}
-            {isPayAsYouGo && (
-              <p className="mt-0.5 text-[11px] text-zinc-500">$4.99/TB · no egress fees</p>
-            )}
-          </div>
-          <div>
-            {isTrialing || isInactive ? (
-              <AppLink href="/billing" className="text-[12px]">
-                {isInactive ? 'Choose a plan' : 'Upgrade'}
-              </AppLink>
-            ) : (
-              <AppLink href="/billing" className="text-[12px]">
-                Manage plan
-              </AppLink>
-            )}
-          </div>
-        </Card>
+            <div>
+              {isTrialing || isInactive ? (
+                <AppLink href="/billing" className="text-[12px]">
+                  {isInactive ? 'Choose a plan' : 'Upgrade'}
+                </AppLink>
+              ) : (
+                <AppLink href="/billing" className="text-[12px]">
+                  Manage plan
+                </AppLink>
+              )}
+            </div>
+          </Card>
+        )}
 
         {/* Storage card */}
         <Card className="flex flex-col justify-between sm:h-[157px]">
@@ -443,14 +468,16 @@ export function DashboardPage() {
             <p className="mb-4 max-w-xs text-sm text-zinc-500">
               Create a bucket to start storing objects
             </p>
-            <Button
-              id="dashboard-create-bucket-button"
-              variant="primary"
-              icon={PlusIcon}
-              href="/buckets"
-            >
-              Create bucket
-            </Button>
+            <RequirePermission permission="buckets.create">
+              <Button
+                id="dashboard-create-bucket-button"
+                variant="primary"
+                icon={PlusIcon}
+                href="/buckets"
+              >
+                Create bucket
+              </Button>
+            </RequirePermission>
           </div>
         ) : (
           <div className="divide-y divide-zinc-100/50">

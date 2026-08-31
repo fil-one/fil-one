@@ -228,15 +228,18 @@ for (const region of REGIONS) {
       // Returning to /buckets should not show a row for this bucket name. The
       // page renders the cached list immediately and refetches in the background
       // with no visible spinner, so toHaveCount(0) could pass against a stale
-      // list before the fresh server response lands. Wait for that refetch to
-      // complete before asserting the row is absent.
+      // list before the fresh server response lands. Clicking the nav link would
+      // not force that fetch: useBucketsListing keeps the list fresh for
+      // LIST_STALE_TIME, so an in-app navigation inside that window serves the
+      // cache and issues no request. Load the document instead — a fresh page
+      // gets a fresh QueryClient, so the list always comes from the server.
       const listResponse = page.waitForResponse(
         (response) =>
           new URL(response.url()).pathname.endsWith('/api/buckets') &&
           response.request().method() === 'GET' &&
           response.ok(),
       );
-      await page.getByTestId('nav-buckets').click();
+      await page.goto('/buckets');
       await listResponse;
       await expect(
         page.locator(`[data-testid="bucket-row"][data-bucket-name="${bucketName}"]`),

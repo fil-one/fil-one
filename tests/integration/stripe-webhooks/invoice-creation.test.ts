@@ -9,6 +9,7 @@ import {
   pollForBillingStatusChange,
   pollForPaymentMethod,
   getBillingRecord,
+  testOrgId,
 } from './helpers.js';
 
 describe('Invoice Creation (invoice.payment_succeeded)', () => {
@@ -39,9 +40,10 @@ describe('Invoice Creation (invoice.payment_succeeded)', () => {
     });
     const record = await getBillingRecord(userId);
     expect(record).toStrictEqual({
-      pk: { S: `CUSTOMER#${userId}` },
+      pk: { S: `ORG#${testOrgId(userId)}` },
       sk: { S: 'SUBSCRIPTION' },
-      orgId: { S: 'test-org' },
+      orgId: { S: testOrgId(userId) },
+      userId: { S: userId },
       stripeCustomerId: { S: cusId },
       subscriptionStatus: { S: 'active' },
       updatedAt: { S: expect.any(String) },

@@ -17,6 +17,22 @@ export type AlertProps = {
   description?: string;
   showIcon?: boolean;
   centered?: boolean;
+  /**
+   * `role="alert"` is for content that appears in response to something and
+   * needs an immediate, assertive announcement — a refusal, a validation
+   * failure. A box that is simply on the page from the start, like a role's
+   * description, is not that: the role fires on mount for no reason, and
+   * collides with any real alert rendered alongside it (two elements
+   * answering one `getByRole('alert')`). Callers with a persistent, non-urgent
+   * Alert should pass `assertive={false}`.
+   */
+  assertive?: boolean;
+  /**
+   * The way out of what the alert is reporting, set at its trailing edge — a
+   * retry, usually. An alert that names a remedy the reader has to go and find
+   * elsewhere is worse than one that carries it.
+   */
+  action?: React.ReactNode;
 };
 
 const containerStyles: Record<AlertVariant, string> = {
@@ -57,6 +73,8 @@ export function Alert({
   description,
   showIcon = true,
   centered = false,
+  assertive = true,
+  action,
 }: AlertProps) {
   return (
     <div
@@ -69,7 +87,7 @@ export function Alert({
         centered && 'justify-center',
         containerStyles[variant],
       )}
-      role="alert"
+      role={assertive ? 'alert' : undefined}
     >
       {/* `md` (18px glyph in a 38px box) rather than `sm` (14px in 26px): at sm the
           badge read as an undersized speck beside the text. Set here rather than
@@ -100,6 +118,9 @@ export function Alert({
           </span>
         )}
       </div>
+      {/* `shrink-0` so a long description wraps rather than squeezing the
+          control the reader is being pointed at. */}
+      {action && <div className="shrink-0">{action}</div>}
     </div>
   );
 }

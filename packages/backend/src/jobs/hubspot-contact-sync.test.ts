@@ -155,6 +155,39 @@ describe('hubspot-contact-sync', () => {
     expect(statuses).toEqual(['trialing', 'payment_failing', 'lapsed']);
   });
 
+  it('takes the user id from the row when the key is the org', async () => {
+    setupScan(record({ pk: 'ORG#org-1', userId: 'user-1' }));
+    mockGetContactStatus.mockResolvedValue('trialing');
+
+    const summary = await syncAllContacts();
+
+    expect(mockGetContactStatus).toHaveBeenCalledWith('user-1');
+    expect(mockUpsertContact).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1', status: 'paying' }),
+    );
+    expect(summary).toMatchObject({ total: 1, matched: 1, repaired: 1 });
+  });
+
+  it('prefers the stamped user id over a still-standing legacy key', async () => {
+    setupScan(record({ pk: 'CUSTOMER#stale-user', userId: 'user-1' }));
+    mockGetContactStatus.mockResolvedValue('paying');
+
+    await syncAllContacts();
+
+    expect(mockGetContactStatus).toHaveBeenCalledWith('user-1');
+  });
+
+  it('drops an org-keyed row that names no user instead of syncing the org id', async () => {
+    setupScan(record({ pk: 'ORG#org-1' }), record());
+    mockGetContactStatus.mockResolvedValue('paying');
+
+    const summary = await syncAllContacts();
+
+    expect(mockGetContactStatus).toHaveBeenCalledTimes(1);
+    expect(mockGetContactStatus).toHaveBeenCalledWith('user-1');
+    expect(summary).toMatchObject({ total: 1 });
+  });
+
   it('paginates the scan', async () => {
     ddbMock
       .on(ScanCommand)

@@ -10,6 +10,7 @@ import { CSRF_COOKIE_NAME } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import { parseCookies } from '../lib/cookies.js';
+import { withRefreshedCookies } from './auth.js';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
@@ -25,10 +26,16 @@ export function csrfMiddleware() {
     const headerToken = request.event.headers['x-csrf-token'];
 
     if (!cookieToken || !headerToken || cookieToken !== headerToken) {
-      return new ResponseBuilder()
-        .status(403)
-        .body<ErrorResponse>({ message: 'CSRF validation failed' })
-        .build();
+      // Through withRefreshedCookies like every other gate in this stack: the
+      // auth middleware may have rotated the session on this very request, and
+      // returning here skips the after hook that would have set the cookies.
+      return withRefreshedCookies(
+        request,
+        new ResponseBuilder()
+          .status(403)
+          .body<ErrorResponse>({ message: 'CSRF validation failed' })
+          .build(),
+      );
     }
   };
 

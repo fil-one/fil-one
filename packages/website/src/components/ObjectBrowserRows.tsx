@@ -23,7 +23,8 @@ import { formatDate } from '../lib/time.js';
 export type RowActions = {
   downloading: string | null;
   onDownload: (key: string, versionId?: string) => void;
-  onRequestDelete: (key: string, versionId: string) => void;
+  /** Absent for a role without `objects.delete` — the control is not rendered. */
+  onRequestDelete?: (key: string, versionId: string) => void;
   onNavigate: (key: string, versionId: string) => void;
 };
 
@@ -66,15 +67,17 @@ function VersionActions({
             onClick={() => onDownload(groupKey, version.versionId)}
           />
         ))}
-      <IconButton
-        icon={TrashIcon}
-        aria-label={`Delete ${label}`}
-        size="md"
-        // Same IconButton as the others, but the hover keeps a danger cue since
-        // this deletes directly (twMerge lets it win over the base zinc hover).
-        className="hover:text-red-600"
-        onClick={() => onRequestDelete(groupKey, version.versionId)}
-      />
+      {onRequestDelete && (
+        <IconButton
+          icon={TrashIcon}
+          aria-label={`Delete ${label}`}
+          size="md"
+          // Same IconButton as the others, but the hover keeps a danger cue since
+          // this deletes directly (twMerge lets it win over the base zinc hover).
+          className="hover:text-red-600"
+          onClick={() => onRequestDelete(groupKey, version.versionId)}
+        />
+      )}
     </div>
   );
 }

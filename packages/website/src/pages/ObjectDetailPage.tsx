@@ -33,6 +33,8 @@ import type {
 } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
 import { useObjectActions } from '../lib/use-object-actions.js';
+import { useHasPermission } from '../lib/use-permissions.js';
+import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
 import { queryKeys, queryClient } from '../lib/query-client.js';
 import { getBilling } from '../lib/api.js';
 import { batchPresign } from '../lib/use-presign.js';
@@ -159,15 +161,27 @@ export function ObjectDetailPage({
   );
   const objectVersions = (cachedVersions?.versions ?? []).filter((v) => v.key === objectKey);
 
-  const { data: billing } = useQuery({ queryKey: queryKeys.billing, queryFn: getBilling });
-  // Allowlist, not a denylist: a status this list doesn't know (e.g. inactive)
-  // must not enable sharing.
+  const mayReadBilling = useHasPermission('billing.view');
+  const mayDelete = useHasPermission('objects.delete');
+  const { data: billing } = useQuery({
+    queryKey: queryKeys.billing,
+    queryFn: getBilling,
+    enabled: mayReadBilling,
+  });
+  // With billing readable this is an allowlist: a status the list doesn't know
+  // (inactive, say) must not enable sharing. A Member cannot read billing at
+  // all, and inferring "trial" from an absent answer disabled Share for every
+  // Member on a paid plan and told them the trial was why. The presign endpoint
+  // applies the same subscription rule server-side, so the honest default when
+  // the console cannot see the plan is to offer the control.
   const canShare =
+    !mayReadBilling ||
     billing?.subscription.status === SubscriptionStatus.Active ||
     billing?.subscription.status === SubscriptionStatus.PastDue ||
     billing?.subscription.status === SubscriptionStatus.GracePeriod;
 
-  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  // The confirmation goes with the Delete control it was opened from.
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = usePermittedDialog(false, mayDelete);
   const [shareOpen, setShareOpen] = useState(false);
 
   const objectActions = useObjectActions({
@@ -282,14 +296,16 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
             disabled={!canShare}
             onClick={() => setShareOpen(true)}
           />
-          <IconButton
-            id="object-delete-button"
-            icon={TrashIcon}
-            aria-label="Delete object"
-            tooltip="Delete"
-            tooltipSide="bottom"
-            onClick={() => setConfirmDeleteOpen(true)}
-          />
+          {mayDelete && (
+            <IconButton
+              id="object-delete-button"
+              icon={TrashIcon}
+              aria-label="Delete object"
+              tooltip="Delete"
+              tooltipSide="bottom"
+              onClick={() => setConfirmDeleteOpen(true)}
+            />
+          )}
         </div>
       </div>
 

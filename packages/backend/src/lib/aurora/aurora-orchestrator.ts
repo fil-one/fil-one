@@ -8,12 +8,12 @@ import pRetry from 'p-retry';
 import { S3Region, getS3Endpoint, TenantStatus } from '@filone/shared';
 import type {
   AccessKeyPermission,
-  Bucket,
   GranularPermission,
   RetentionDurationType,
   RetentionMode,
   S3Region as S3RegionType,
 } from '@filone/shared';
+import type { BucketBucketResponse } from '@filone/aurora-portal-client';
 import { getBucketInfo, listBuckets } from '@filone/aurora-portal-client';
 import { ensureTenantReady as ensureAuroraTenantReady } from '../aurora/aurora-tenant-setup.js';
 import {
@@ -40,12 +40,12 @@ import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../
 import { BucketNotFoundError } from '../errors.js';
 import type {
   BucketDetails,
+  BucketProtection,
   BucketSummary,
   CreateBucketArgs,
   GetTenantUsageMetricsOptions,
   IssueAccessKeyOpts,
   IssuedAccessKey,
-  ListBucketsOptions,
   ServiceOrchestrator,
   TenantStatusProbe,
   StorageUsageSample,
@@ -59,6 +59,21 @@ export const _resetSsmCacheForTesting = () => _resetS3CredentialsCacheForTesting
 
 function getStage(): string {
   return process.env.FILONE_STAGE!;
+}
+
+/** Object-lock and retention fields off a portal single-bucket response. */
+function toBucketProtection(data: BucketBucketResponse): BucketProtection {
+  return {
+    objectLockEnabled: data.objectLock ?? false,
+    // The portal reports "no default retention" as the string 'off'.
+    defaultRetention:
+      data.defaultRetention && data.defaultRetention !== 'off'
+        ? (data.defaultRetention as RetentionMode)
+        : undefined,
+    retentionDuration: data.retentionDuration ?? undefined,
+    retentionDurationType:
+      (data.retentionDurationType as RetentionDurationType | undefined) ?? undefined,
+  };
 }
 
 export const auroraOrchestrator = {
@@ -125,11 +140,7 @@ export const auroraOrchestrator = {
     await deleteAuroraBucket({ tenantId, bucketName });
   },
 
-  async listBuckets(tenantId: string, opts: ListBucketsOptions = {}): Promise<BucketSummary[]> {
-    // Aurora returns versioning inline via `flags`, so there's no per-bucket
-    // cost to skip; the option is honored only to keep the contract uniform
-    // with FTH (see ListBucketsOptions).
-    const includeVersioning = opts.includeVersioning ?? true;
+  async listBuckets(tenantId: string): Promise<BucketSummary[]> {
     const client = await createPortalClient(tenantId);
     const { data, error } = await listBuckets({
       client,
@@ -150,7 +161,6 @@ export const auroraOrchestrator = {
         region: auroraOrchestrator.region,
         createdAt: b.createdAt,
         isPublic: false,
-        versioning: includeVersioning ? (b.flags?.includes('versioned') ?? false) : false,
         encrypted: b.flags?.includes('encrypted') ?? true,
       }));
   },
@@ -176,23 +186,14 @@ export const auroraOrchestrator = {
       );
     }
 
-    const defaultRetention =
-      data.defaultRetention && data.defaultRetention !== 'off'
-        ? (data.defaultRetention as Bucket['defaultRetention'])
-        : undefined;
-
     return {
       bucketName: data.name ?? bucketName,
       region: auroraOrchestrator.region,
       createdAt: data.createdAt,
       isPublic: false,
-      objectLockEnabled: data.objectLock ?? false,
       versioning: data.versioning ?? false,
       encrypted: data.encrypted ?? true,
-      defaultRetention,
-      retentionDuration: data.retentionDuration ?? undefined,
-      retentionDurationType:
-        (data.retentionDurationType as RetentionDurationType | undefined) ?? undefined,
+      ...toBucketProtection(data),
     };
   },
 

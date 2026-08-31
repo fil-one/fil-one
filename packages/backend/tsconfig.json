@@ -2,7 +2,14 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./src",
+    // `..`, not `./src`: the program reaches into the shared package's sources
+    // — lib/region-helpers.ts imports @filone/shared/src/api/tenants.js, and
+    // the include below names the same file — so a rootDir inside this package
+    // makes tsc stop at TS6059 before it type-checks anything. `packages/` is
+    // the common source directory, which oxlint's type-aware pass requires be
+    // named explicitly. esbuild does the bundling and nothing reads ./dist, so
+    // the wider root costs only the shape of an output nobody consumes.
+    "rootDir": "..",
     // esbuild handles bundling, so use Bundler resolution which resolves ESM-only
     // packages (like @middy/core) via their "import" condition rather than "require".
     "module": "ESNext",

@@ -191,7 +191,23 @@ export type AccessKeysTableProps = {
   showBuckets?: boolean;
   showPermissions?: boolean;
   showRegion?: boolean;
+  /**
+   * Who minted each key, resolved from a user id. Passed only when the org has
+   * somebody else in it: a column reading the same name on every row is noise
+   * in an org of one, and it is the column that says which keys leave with a
+   * departing member — removal does not revoke them (FIL-1021).
+   *
+   * A resolver rather than the roster itself, so the table stays presentational
+   * and does not learn what a membership is.
+   */
+  creatorFor?: (userId: string) => { name: string; email?: string } | undefined;
   onDelete?: (id: string) => Promise<void>;
+  /**
+   * Which rows carry the action. Omitted, every row does — the caller has
+   * already decided by passing `onDelete` at all. A Member holds
+   * `keys.manage_own`, so the answer is per key rather than per table.
+   */
+  canDelete?: (key: AccessKey) => boolean;
   onCreateOpen?: () => void;
   emptyTitle?: string;
   emptyDescription?: string;
@@ -202,11 +218,21 @@ export function AccessKeysTable({
   showBuckets = false,
   showPermissions = false,
   showRegion = false,
+  creatorFor,
   onDelete,
+  canDelete,
   onCreateOpen,
   emptyTitle = 'No API keys yet',
   emptyDescription = 'Generate credentials to connect your applications via S3-compatible API',
 }: AccessKeysTableProps) {
+  // The header follows the cells: a column whose every row is empty is a column
+  // of whitespace with a screen-reader label attached to nothing.
+  const rowHasAction = (key: AccessKey) => Boolean(onDelete) && (canDelete?.(key) ?? true);
+  const showActions = keys.some(rowHasAction);
+  // Keys minted before attribution existed carry no `createdBy`, so a column
+  // every row would em-dash is one nobody can read anything from.
+  const showCreatedBy = Boolean(creatorFor) && keys.some((key) => key.createdBy);
+
   if (keys.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center rounded-xl border border-zinc-200 bg-white px-6 py-16 text-center">
@@ -230,9 +256,10 @@ export function AccessKeysTable({
           {showRegion && <Table.Head className="hidden md:table-cell">Region</Table.Head>}
           {showBuckets && <Table.Head className="hidden lg:table-cell">Buckets</Table.Head>}
           {showPermissions && <Table.Head className="hidden md:table-cell">Permissions</Table.Head>}
+          {showCreatedBy && <Table.Head className="hidden lg:table-cell">Created by</Table.Head>}
           <Table.Head className="hidden sm:table-cell">Status</Table.Head>
           <Table.Head className="hidden md:table-cell">Last Used</Table.Head>
-          {onDelete && (
+          {showActions && (
             <Table.Head>
               <span className="sr-only">Actions</span>
             </Table.Head>
@@ -297,6 +324,25 @@ export function AccessKeysTable({
               </Table.Cell>
             )}
 
+            {/* Created by — the same two-tone split the members roster uses:
+                the person is the value, the address identifies which one. */}
+            {showCreatedBy && (
+              <Table.Cell className="hidden lg:table-cell">
+                {(() => {
+                  const creator = key.createdBy ? creatorFor?.(key.createdBy) : undefined;
+                  if (!creator) return <span className="text-xs text-zinc-400">—</span>;
+                  return (
+                    <>
+                      <p className="text-xs text-zinc-700">{creator.name}</p>
+                      {creator.email && creator.email !== creator.name && (
+                        <p className="text-xs text-zinc-500">{creator.email}</p>
+                      )}
+                    </>
+                  );
+                })()}
+              </Table.Cell>
+            )}
+
             {/* Status */}
             <Table.Cell className="hidden sm:table-cell">
               <StatusBadge status={key.status} />
@@ -308,9 +354,11 @@ export function AccessKeysTable({
             </Table.Cell>
 
             {/* Actions */}
-            {onDelete && (
+            {showActions && (
               <Table.Cell className="text-right">
-                <ActionMenu onDelete={() => void onDelete(key.id)} />
+                {rowHasAction(key) && onDelete && (
+                  <ActionMenu onDelete={() => void onDelete(key.id)} />
+                )}
               </Table.Cell>
             )}
           </Table.Row>

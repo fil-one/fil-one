@@ -5,14 +5,10 @@ vi.mock('sst', () => ({
   Resource: { UserInfoTable: { name: 'UserInfoTable' } },
 }));
 
-const mockIsOrgAdmin = vi.fn(async () => true);
-vi.mock('../lib/org-membership.js', () => ({
-  isOrgAdmin: () => mockIsOrgAdmin(),
-}));
-
 const mockIsOrgDeleting = vi.fn(async (_orgId: string, _o?: { consistent?: boolean }) => false);
 const mockGetOrgProfile = vi.fn(async () => ({ name: { S: 'Acme Corp' } }));
-vi.mock('../lib/org-profile.js', () => ({
+vi.mock('../lib/org-profile.js', async () => ({
+  ...(await vi.importActual<typeof import('../lib/org-profile.js')>('../lib/org-profile.js')),
   isOrgDeleting: (...args: Parameters<typeof mockIsOrgDeleting>) => mockIsOrgDeleting(...args),
   getOrgProfile: () => mockGetOrgProfile(),
 }));
@@ -50,7 +46,6 @@ describe('request-account-deletion', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.ACCOUNT_DELETION_ENABLED = 'true';
-    mockIsOrgAdmin.mockResolvedValue(true);
     mockIsOrgDeleting.mockResolvedValue(false);
     mockGetOrgProfile.mockResolvedValue({ name: { S: 'Acme Corp' } });
     mockCreateChallenge.mockResolvedValue(CREATED);
@@ -88,16 +83,6 @@ describe('request-account-deletion', () => {
     const result = await baseHandler(event());
 
     expect(result.body).not.toContain('123456');
-  });
-
-  it('403s a non-admin without issuing anything', async () => {
-    mockIsOrgAdmin.mockResolvedValue(false);
-
-    const result = await baseHandler(event());
-
-    expect(result.statusCode).toBe(403);
-    expect(mockCreateChallenge).not.toHaveBeenCalled();
-    expect(mockSendEmail).not.toHaveBeenCalled();
   });
 
   // Issuing another code would imply the deletion can still be stopped.

@@ -11,6 +11,7 @@ import { Button } from './Button.js';
 import { CodeBlock } from './CodeBlock.js';
 import { Input } from './Input.js';
 import { QueryAnswer } from './QueryAnswer.js';
+import { RequirePermission } from './RequirePermission.js';
 import { BucketStatus } from './BucketStatus.js';
 
 export type BucketDrawerProps = {
@@ -84,7 +85,14 @@ export function BucketDrawer({ bucket, onClose, onStopIndexing }: BucketDrawerPr
           <QueryFromCodeSection bucket={bucket} />
         </div>
 
-        <DrawerFooter onStopIndexing={onStopIndexing} />
+        {/* Stopping discards the index, which the server reads as
+            `buckets.delete` — the same permission behind the row's overflow
+            menu, so the drawer cannot offer what the row already hides. The
+            whole strip goes with it: it holds nothing else, and an empty
+            bordered bar reads as a control that failed to load. */}
+        <RequirePermission permission="buckets.delete">
+          <DrawerFooter onStopIndexing={onStopIndexing} />
+        </RequirePermission>
       </div>
     </div>
   );

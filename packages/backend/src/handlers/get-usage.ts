@@ -8,6 +8,7 @@ import type { ServiceOrchestrator, TenantInfo } from '../lib/service-orchestrato
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { authorize } from '../middleware/authorize.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
 interface RegionUsage {
@@ -158,4 +159,5 @@ function pickMostRestrictiveStatus(
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
+  .use(authorize('buckets.read'))
   .use(errorHandlerMiddleware());

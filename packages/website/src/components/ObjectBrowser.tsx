@@ -98,30 +98,44 @@ function TruncatedListingNotice({
   );
 }
 
-function EmptyBucketState({ bucketName, region }: { bucketName: string; region: S3Region }) {
+function EmptyBucketState({
+  bucketName,
+  region,
+  canUpload,
+}: {
+  bucketName: string;
+  region: S3Region;
+  canUpload: boolean;
+}) {
   const navigate = useNavigate();
   return (
     <div className="mt-4">
       <EmptyStateCard
         icon={CloudArrowUpIcon}
         title="No objects yet"
-        description="Upload your first object to this bucket"
+        description={
+          canUpload
+            ? 'Upload your first object to this bucket'
+            : 'Objects uploaded to this bucket appear here'
+        }
       >
         {/* Text-only: the cloud tile directly above already speaks "upload",
             so a glyph on the button here would just repeat it. */}
-        <Button
-          id="object-browser-upload-button"
-          variant="primary"
-          onClick={() =>
-            void navigate({
-              to: '/buckets/$bucketName/upload',
-              params: { bucketName },
-              search: { region },
-            })
-          }
-        >
-          Upload object
-        </Button>
+        {canUpload && (
+          <Button
+            id="object-browser-upload-button"
+            variant="primary"
+            onClick={() =>
+              void navigate({
+                to: '/buckets/$bucketName/upload',
+                params: { bucketName },
+                search: { region },
+              })
+            }
+          >
+            Upload object
+          </Button>
+        )}
       </EmptyStateCard>
     </div>
   );
@@ -231,9 +245,15 @@ export type ObjectBrowserProps = {
   onPrefixChange: (prefix: string) => void;
   onDownload: (key: string, versionId?: string) => void;
   downloading: string | null;
-  onDelete: (key: string, versionId?: string) => Promise<void>;
-  /** Enables row selection and a bulk-delete toolbar. */
+  /** Absent for a role without `objects.delete` — every row drops the control. */
+  onDelete?: (key: string, versionId?: string) => Promise<void>;
+  /**
+   * Enables row selection and a bulk-delete toolbar. Absent for a role without
+   * `objects.delete`, which leaves the table with neither.
+   */
   onBulkDelete?: (targets: ObjectDeleteTarget[]) => Promise<void>;
+  /** Whether to offer the upload route. False for a role without `objects.write`. */
+  canUpload?: boolean;
   /**
    * True when the listing is a partial page. Selection can only ever cover the
    * objects actually loaded, so the browser says so rather than implying that
@@ -255,6 +275,7 @@ export function ObjectBrowser({
   downloading,
   onDelete,
   onBulkDelete,
+  canUpload = true,
   listingTruncated = false,
   totalObjectCount,
 }: ObjectBrowserProps) {
@@ -277,10 +298,16 @@ export function ObjectBrowser({
     });
   }
 
+  function requestDelete(key: string, versionId: string) {
+    setConfirmDelete({ key, versionId });
+  }
+
   const rowActions: RowActions = {
     downloading,
     onDownload,
-    onRequestDelete: (key, versionId) => setConfirmDelete({ key, versionId }),
+    // Without a delete handler no row renders the control, so nothing reaches
+    // the confirmation dialog below either.
+    ...(onDelete && { onRequestDelete: requestDelete }),
     onNavigate: (key, versionId) => {
       void navigate({
         to: '/buckets/$bucketName/objects',
@@ -297,7 +324,7 @@ export function ObjectBrowser({
   };
 
   if (versions.length === 0) {
-    return <EmptyBucketState bucketName={bucketName} region={region} />;
+    return <EmptyBucketState bucketName={bucketName} region={region} canUpload={canUpload} />;
   }
 
   const groups = groupVersionsByKey(versions);
@@ -359,7 +386,7 @@ export function ObjectBrowser({
         open={confirmDelete !== null}
         onClose={() => setConfirmDelete(null)}
         onConfirm={() => {
-          if (!confirmDelete) return Promise.resolve();
+          if (!confirmDelete || !onDelete) return Promise.resolve();
           return onDelete(confirmDelete.key, confirmDelete.versionId);
         }}
         title="Delete object"

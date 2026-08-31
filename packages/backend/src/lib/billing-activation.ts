@@ -1,14 +1,14 @@
 import type Stripe from 'stripe';
-import { Resource } from 'sst';
 import { SubscriptionStatus } from '@filone/shared';
-import { sendGuardedBillingUpdate } from './billing-guard.js';
+
 import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
 } from './region-helpers.js';
+import { updateSubscription, type SubscriptionOwner } from './subscription-store.js';
 
 export async function saveBillingRecord(
-  userId: string,
+  owner: SubscriptionOwner,
   subscription: Stripe.Subscription,
   paymentMethodId: string,
   mappedStatus: SubscriptionStatus,
@@ -26,31 +26,24 @@ export async function saveBillingRecord(
     paymentMethodExpYear = pm.card.exp_year;
   }
 
-  await sendGuardedBillingUpdate(
-    {
-      TableName: Resource.BillingTable.name,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
+  await updateSubscription(owner, {
+    UpdateExpression:
+      'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now REMOVE trialEndsAt',
+    ExpressionAttributeValues: {
+      ':subId': { S: subscription.id },
+      ':status': { S: mappedStatus },
+      ':periodEnd': {
+        S: new Date(subscription.items.data[0].current_period_end * 1000).toISOString(),
       },
-      UpdateExpression:
-        'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now REMOVE trialEndsAt',
-      ExpressionAttributeValues: {
-        ':subId': { S: subscription.id },
-        ':status': { S: mappedStatus },
-        ':periodEnd': {
-          S: new Date(subscription.items.data[0].current_period_end * 1000).toISOString(),
-        },
-        ':pmId': { S: paymentMethodId },
-        ':last4': { S: paymentMethodLast4 },
-        ':brand': { S: paymentMethodBrand },
-        ':expMonth': { N: String(paymentMethodExpMonth) },
-        ':expYear': { N: String(paymentMethodExpYear) },
-        ':now': { S: new Date().toISOString() },
-      },
+      ':pmId': { S: paymentMethodId },
+      ':last4': { S: paymentMethodLast4 },
+      ':brand': { S: paymentMethodBrand },
+      ':expMonth': { N: String(paymentMethodExpMonth) },
+      ':expYear': { N: String(paymentMethodExpYear) },
+      ':now': { S: new Date().toISOString() },
     },
-    { userId, caller: 'subscription activation' },
-  );
+    guardAgainstScrub: { caller: 'subscription activation' },
+  });
 }
 
 // Unlocks the org's tenant on every orchestrator where it exists (Aurora, FTH,

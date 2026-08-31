@@ -19,6 +19,7 @@ import {
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { requireOrgMembershipMiddleware, requirePermission } from '../middleware/authorize.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { ragAccessMiddleware } from '../middleware/rag-access.js';
@@ -62,6 +63,19 @@ export async function baseHandler(
       .build();
   }
   const { enabled } = parsed.data;
+
+  // The requirement depends on the body, which is why the manifest marks this
+  // route in-handler: turning indexing on is a bucket-configuration write and
+  // sits with bucket creation, while turning it off discards the index and
+  // sits with bucket deletion.
+  const denied = enabled
+    ? requirePermission(event, 'buckets.create', 'Your role does not permit indexing a bucket.')
+    : requirePermission(
+        event,
+        'buckets.delete',
+        'Your role does not permit discarding a bucket index.',
+      );
+  if (denied) return denied;
 
   const { orgId } = getUserInfo(event);
 
@@ -115,6 +129,9 @@ export async function baseHandler(
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
+  // Turning indexing on and off need different permissions, which only the body
+  // says; membership is the same either way and is settled here.
+  .use(requireOrgMembershipMiddleware())
   .use(csrfMiddleware())
   .use(subscriptionGuardMiddleware(AccessLevel.Write))
   .use(ragAccessMiddleware())

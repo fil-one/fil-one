@@ -10,6 +10,7 @@ import {
 import { fromInternalStatus } from '../lib/hubspot-lifecycle-status.js';
 import { type ContactSyncSummary, emitContactSyncSummary } from '../lib/hubspot-metrics.js';
 import { getStripeClient } from '../lib/stripe-client.js';
+import { SubscriptionKeys } from '../lib/subscription-store.js';
 
 const dynamo = getDynamoClient();
 
@@ -110,6 +111,36 @@ async function resolveStripeEmail(candidate: Candidate): Promise<string | undefi
   }
 }
 
+/**
+ * The candidate a scanned row names, or nothing.
+ *
+ * The row is keyed `ORG#{orgId}` since the billing re-key, so the user id
+ * HubSpot stamps on its contacts comes off the row's own `userId` attribute; a
+ * pre-cleanup `CUSTOMER#` row still standing carries it in the key instead. A
+ * row with neither names no contact to reconcile, and syncing under its `pk`
+ * would write the org id into HubSpot as a user id.
+ */
+function toCandidate(record: Record<string, unknown>): Candidate | undefined {
+  if (typeof record.pk !== 'string') return undefined;
+
+  const userId =
+    typeof record.userId === 'string' && record.userId
+      ? record.userId
+      : SubscriptionKeys.parseLegacyPk(record.pk);
+
+  if (!userId) {
+    console.error(`${LOG} no user id on subscription row`, { pk: record.pk, orgId: record.orgId });
+    return undefined;
+  }
+
+  return {
+    userId,
+    orgId: record.orgId as string | undefined,
+    stripeCustomerId: record.stripeCustomerId as string | undefined,
+    subscriptionStatus: record.subscriptionStatus as SubscriptionStatus,
+  };
+}
+
 // Scan filters are applied after consuming RCUs for the full table; the same
 // deferred GSI on subscriptionStatus noted in subscription-drift-checker would
 // help here too.
@@ -127,14 +158,8 @@ async function* scanSubscriptions(billingTableName: string): AsyncGenerator<Cand
     );
 
     for (const item of result.Items ?? []) {
-      const record = unmarshall(item);
-      if (typeof record.pk !== 'string') continue;
-      yield {
-        userId: record.pk.replace('CUSTOMER#', ''),
-        orgId: record.orgId,
-        stripeCustomerId: record.stripeCustomerId,
-        subscriptionStatus: record.subscriptionStatus,
-      };
+      const candidate = toCandidate(unmarshall(item));
+      if (candidate) yield candidate;
     }
 
     cursor = result.LastEvaluatedKey;

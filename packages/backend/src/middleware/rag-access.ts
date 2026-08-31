@@ -13,6 +13,7 @@ import { getDynamoClient } from '../lib/ddb-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getVerifiedEmail } from '../lib/user-context.js';
+import { withRefreshedCookies } from './auth.js';
 
 const dynamo = getDynamoClient();
 
@@ -90,8 +91,14 @@ async function runRagAccessGuard(
   const event = request.event as AuthenticatedEvent;
   const allowed = await hasRagAccess(getVerifiedEmail(event));
   if (allowed) return undefined;
-  return new ResponseBuilder()
-    .status(403)
-    .body<ErrorResponse>({ message: 'You do not have access to this feature.' })
-    .build();
+  // Through withRefreshedCookies: returning a response here short-circuits the
+  // after stack, so a session rotated earlier in this same request would
+  // otherwise never reach the caller.
+  return withRefreshedCookies(
+    request,
+    new ResponseBuilder()
+      .status(403)
+      .body<ErrorResponse>({ message: 'You do not have access to this feature.' })
+      .build(),
+  );
 }

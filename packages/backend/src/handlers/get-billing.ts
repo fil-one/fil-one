@@ -1,48 +1,58 @@
-import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
-import { convertToAttr, unmarshall } from '@aws-sdk/util-dynamodb';
+import { convertToAttr } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { PlanId, SubscriptionStatus } from '@filone/shared';
+import { ApiErrorCode, PlanId, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
 import type { BillingInfo, ErrorResponse } from '@filone/shared';
-import { Resource } from 'sst';
 import type Stripe from 'stripe';
-import { getDynamoClient } from '../lib/ddb-client.js';
 import { getStripeClient } from '../lib/stripe-client.js';
+import {
+  readSubscription,
+  updateSubscription,
+  type SubscriptionOwner,
+} from '../lib/subscription-store.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
+import { claimTrialIfEligible, isTrialClaimable } from '../lib/trial-claim.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { authorize } from '../middleware/authorize.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import type { StripePriceDetails, SubscriptionRecord } from '../lib/dynamo-records.js';
-
-const dynamo = getDynamoClient();
 
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const { userId } = getUserInfo(event);
-  const billingTableName = Resource.BillingTable.name;
+  const userInfo = getUserInfo(event);
+  const { userId, orgId } = userInfo;
+  const owner: SubscriptionOwner = { orgId, userId };
 
-  // 1. Get billing record
-  const billingResult = await dynamo.send(
-    new GetItemCommand({
-      TableName: billingTableName,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
-    }),
-  );
+  // 1. Get the org's billing record — every member sees the org's plan and
+  // status, which is what riding the org's subscription means.
+  let billingRecord = (await readSubscription(orgId)) ?? null;
 
-  const billingRecord = billingResult.Item
-    ? (unmarshall(billingResult.Item) as SubscriptionRecord)
-    : null;
+  // 2. This is the dashboard's first call and no subscription guard sits in
+  // front of it, so it is where an organic signup's trial gets claimed. Without
+  // this the account would read as inactive until the user happened to touch a
+  // gated route. Same eligibility test as the guard's, one implementation, and
+  // it writes only when the claim is genuinely open.
+  if (isTrialClaimable(billingRecord ?? undefined)) {
+    const outcome = await claimTrialIfEligible(userInfo);
+    if (outcome === 'claimed') {
+      billingRecord = (await readSubscription(orgId, { consistentRead: true })) ?? null;
+    } else if (outcome === 'legacy-row') {
+      // The claim refused because a pre-re-key `CUSTOMER#` row is still
+      // standing: this account has billing the org key cannot see. Reporting
+      // "no plan" would be a lie the dashboard invites the user to act on, so
+      // the honest answer is that the state cannot be read right now.
+      return billingUnavailableResponse();
+    }
+  }
 
-  // 2. No record, or a record without a status (e.g. the customer mapping
-  // written by create-setup-intent) → not entitled. This read model must report
-  // the same truth as the subscription guard, never synthesize a trial;
-  // entitlement is granted only by ensureTrialEntitlement.
+  // 3. No record, or a record without a status (e.g. the customer mapping
+  // written by create-setup-intent, for a caller who cannot claim a trial) →
+  // not entitled. This read model reports the same truth as the subscription
+  // guard; entitlement itself is granted only by ensureTrialEntitlement.
   const storedStatus = billingRecord?.subscriptionStatus;
   if (!billingRecord || !storedStatus) {
     return inactiveResponse(billingRecord);
@@ -55,12 +65,7 @@ export async function baseHandler(
   // record with no snapshot at all reports no minimum, and that is factual:
   // with no Stripe customer there is no subscription to bill a minimum on.
   if (!billingRecord.stripeCustomerId) {
-    const currentStatus = await evaluateStatusTransitions(
-      billingRecord,
-      storedStatus,
-      userId,
-      billingTableName,
-    );
+    const currentStatus = await evaluateStatusTransitions(billingRecord, storedStatus, owner);
     const response = buildBillingResponse(billingRecord, currentStatus, {
       paymentMethod: cachedPaymentMethod(billingRecord),
       monthlyMinimumCents: deriveMonthlyMinimumCents(billingRecord.stripePrice),
@@ -69,11 +74,7 @@ export async function baseHandler(
   }
 
   // 4. Has Stripe customer — fetch subscription details (payment method + price)
-  const stripeDetails = await resolveStripeSubscriptionDetails(
-    billingRecord,
-    userId,
-    billingTableName,
-  );
+  const stripeDetails = await resolveStripeSubscriptionDetails(billingRecord, owner);
 
   // The billed price is unknown: Stripe is unreachable and we have nothing
   // cached. Fail loudly rather than understate what the customer pays.
@@ -84,12 +85,7 @@ export async function baseHandler(
       .build();
   }
 
-  const currentStatus = await evaluateStatusTransitions(
-    billingRecord,
-    storedStatus,
-    userId,
-    billingTableName,
-  );
+  const currentStatus = await evaluateStatusTransitions(billingRecord, storedStatus, owner);
 
   const response = buildBillingResponse(billingRecord, currentStatus, stripeDetails);
   return new ResponseBuilder().status(200).body(response).build();
@@ -103,6 +99,25 @@ export async function baseHandler(
  * no DynamoDB write. A cached card is still reported so the console can offer
  * it once the user picks a plan.
  */
+/**
+ * The account's billing exists somewhere this route cannot read, so its state is
+ * unknown rather than absent.
+ *
+ * Same status and code as the subscription guard's refusal, because it is the
+ * same condition seen from the read side: the console shows "unable to load
+ * billing details" and offers no plan actions, instead of a "no plan" panel that
+ * would invite the user to buy a second subscription.
+ */
+function billingUnavailableResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(503)
+    .body<ErrorResponse>({
+      message: 'Unable to load billing details for this account. Please try again shortly.',
+      code: ApiErrorCode.SUBSCRIPTION_INACTIVE,
+    })
+    .build();
+}
+
 function inactiveResponse(
   billingRecord: SubscriptionRecord | null,
 ): APIGatewayProxyStructuredResultV2 {
@@ -137,8 +152,7 @@ const isStripeResourceMissing = (err: unknown): boolean =>
  */
 async function resolveStripeSubscriptionDetails(
   billingRecord: SubscriptionRecord,
-  userId: string,
-  billingTableName: string,
+  owner: SubscriptionOwner,
 ): Promise<StripeSubscriptionDetails | null> {
   let paymentMethod: BillingInfo['paymentMethod'];
   let price: StripePriceDetails | undefined;
@@ -152,7 +166,7 @@ async function resolveStripeSubscriptionDetails(
       });
 
       paymentMethod = toPaymentMethod(subscription.default_payment_method);
-      price = await resolveLivePrice(subscription, billingRecord, userId, billingTableName);
+      price = await resolveLivePrice(subscription, billingRecord, owner);
     } catch (err) {
       console.warn('[get-billing] Failed to fetch Stripe subscription', {
         error: (err as Error).message,
@@ -199,15 +213,14 @@ function cachedPaymentMethod(billingRecord: SubscriptionRecord): BillingInfo['pa
 async function resolveLivePrice(
   subscription: Stripe.Subscription,
   billingRecord: SubscriptionRecord,
-  userId: string,
-  billingTableName: string,
+  owner: SubscriptionOwner,
 ): Promise<StripePriceDetails | undefined> {
   const livePrice = subscription.items?.data?.at(0)?.price;
   if (!livePrice) return undefined;
 
   const price = toStripePriceDetails(livePrice);
   if (price.id !== billingRecord.stripePrice?.id) {
-    await cacheStripePrice(price, userId, billingTableName);
+    await cacheStripePrice(price, owner);
   }
   return price;
 }
@@ -300,30 +313,21 @@ function toDecimalString(value: Stripe.Price['unit_amount_decimal']): string | n
 
 async function cacheStripePrice(
   price: StripePriceDetails,
-  userId: string,
-  billingTableName: string,
+  owner: SubscriptionOwner,
 ): Promise<void> {
-  await dynamo.send(
-    new UpdateItemCommand({
-      TableName: billingTableName,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
-      UpdateExpression: 'SET stripePrice = :price, updatedAt = :now',
-      ExpressionAttributeValues: {
-        ':price': convertToAttr(price, { removeUndefinedValues: true }),
-        ':now': { S: new Date().toISOString() },
-      },
-    }),
-  );
+  await updateSubscription(owner, {
+    UpdateExpression: 'SET stripePrice = :price, updatedAt = :now',
+    ExpressionAttributeValues: {
+      ':price': convertToAttr(price, { removeUndefinedValues: true }),
+      ':now': { S: new Date().toISOString() },
+    },
+  });
 }
 
 async function evaluateStatusTransitions(
   billingRecord: SubscriptionRecord,
   storedStatus: SubscriptionStatus,
-  userId: string,
-  billingTableName: string,
+  owner: SubscriptionOwner,
 ): Promise<SubscriptionStatus> {
   let currentStatus = storedStatus;
 
@@ -334,25 +338,18 @@ async function evaluateStatusTransitions(
     new Date(billingRecord.trialEndsAt).getTime() < Date.now()
   ) {
     const gracePeriodEndsAt = new Date(
-      new Date(billingRecord.trialEndsAt).getTime() + 7 * 24 * 60 * 60 * 1000,
+      new Date(billingRecord.trialEndsAt).getTime() + TRIAL_GRACE_DAYS * 24 * 60 * 60 * 1000,
     ).toISOString();
 
-    await dynamo.send(
-      new UpdateItemCommand({
-        TableName: billingTableName,
-        Key: {
-          pk: { S: `CUSTOMER#${userId}` },
-          sk: { S: 'SUBSCRIPTION' },
-        },
-        UpdateExpression:
-          'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
-        ExpressionAttributeValues: {
-          ':status': { S: SubscriptionStatus.GracePeriod },
-          ':grace': { S: gracePeriodEndsAt },
-          ':now': { S: new Date().toISOString() },
-        },
-      }),
-    );
+    await updateSubscription(owner, {
+      UpdateExpression:
+        'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
+      ExpressionAttributeValues: {
+        ':status': { S: SubscriptionStatus.GracePeriod },
+        ':grace': { S: gracePeriodEndsAt },
+        ':now': { S: new Date().toISOString() },
+      },
+    });
     currentStatus = SubscriptionStatus.GracePeriod;
     billingRecord.gracePeriodEndsAt = gracePeriodEndsAt;
   }
@@ -415,4 +412,5 @@ function buildBillingResponse(
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
+  .use(authorize('billing.view'))
   .use(errorHandlerMiddleware());

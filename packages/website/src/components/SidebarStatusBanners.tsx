@@ -13,6 +13,12 @@ export type StatusBannersProps = {
   storagePct: number;
   egressUsed: number;
   egressPct: number;
+  /**
+   * Whether the plan's allowances are known. A meter needs a denominator, and
+   * the console only has one when it could read billing — the free tier's is
+   * not a safe stand-in for a plan it never saw.
+   */
+  limitsKnown: boolean;
   graceDays: number | null;
   graceEndsLabel: string | undefined;
   isPastDue: boolean;
@@ -29,6 +35,7 @@ export function StatusBanners({
   storagePct,
   egressUsed,
   egressPct,
+  limitsKnown,
   graceDays,
   graceEndsLabel,
   isPastDue,
@@ -37,7 +44,7 @@ export function StatusBanners({
 }: StatusBannersProps) {
   return (
     <>
-      {!collapsed && isTrialing && (
+      {!collapsed && isTrialing && limitsKnown && (
         <div className="border-t border-zinc-200 px-3 py-3">
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
             <p className="text-xs font-medium text-zinc-900" title={trialEndsLabel}>

@@ -74,6 +74,7 @@ import {
 import { FthApiError, FthConflictError, FthNotFoundError } from './fth-management-client.js';
 
 import { fthOrchestrator, _resetFthOrchestratorCachesForTesting } from './fth-orchestrator.js';
+import type { IssueAccessKeyOpts } from '../service-orchestrator.js';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 const fthClientId = '42';
@@ -581,6 +582,18 @@ describe('fthOrchestrator.issueAccessKey', () => {
     bucketScope: 'all' as const,
   };
 
+  function stubCreatedAccessKey() {
+    mockFthClient.createAccessKey.mockResolvedValue({
+      id: 'AKIAFTH',
+      accessKeyId: 'AKIAFTH',
+      secretAccessKey: 'sk-secret',
+      name: baseOpts.keyName,
+      permissions: [],
+      buckets: [],
+      createdAt: '2026-03-10T00:00:00Z',
+    });
+  }
+
   it('issues a key against the filone-console storage user and returns the credential', async () => {
     stubConsoleStorageUser();
     mockFthClient.createAccessKey.mockResolvedValue({
@@ -697,6 +710,110 @@ describe('fthOrchestrator.issueAccessKey', () => {
     expect(permissions).not.toContain('s3:GetBucketVersioning');
     expect(permissions).not.toContain('s3:GetBucketObjectLockConfiguration');
   });
+
+  // Aurora's grouping (see the permissions description in
+  // aurora-portal.swagger.json): read carries list-parts, write carries abort,
+  // list carries list-uploads. Each permission grants its own action and no other.
+  const multipartCases = [
+    { permission: 'read', action: 's3:ListMultipartUploadParts' },
+    { permission: 'write', action: 's3:AbortMultipartUpload' },
+    { permission: 'list', action: 's3:ListBucketMultipartUploads' },
+  ] as const;
+  const allMultipartActions: readonly string[] = multipartCases.map((c) => c.action);
+
+  for (const { permission, action } of multipartCases) {
+    it(`grants only ${action} for the ${permission} permission`, async () => {
+      stubConsoleStorageUser();
+      mockFthClient.createAccessKey.mockResolvedValue({
+        id: 'AKIAFTH',
+        accessKeyId: 'AKIAFTH',
+        secretAccessKey: 'sk-secret',
+        name: baseOpts.keyName,
+        permissions: [],
+        buckets: [],
+        createdAt: '2026-03-10T00:00:00Z',
+      });
+
+      await fthOrchestrator.issueAccessKey(fthClientId, {
+        keyName: baseOpts.keyName,
+        permissions: [permission],
+      });
+
+      const { permissions } = mockFthClient.createAccessKey.mock.calls[0][2];
+      expect(
+        permissions.filter((granted: string) => allMultipartActions.includes(granted)),
+      ).toEqual([action]);
+    });
+  }
+
+  // The idempotency key is derived from the request, so re-creating a deleted
+  // key with any part of the request changed is a new request rather than a
+  // replay FTH would reject with a permanent 409.
+  it('sends the same idempotency key for the same request', async () => {
+    stubConsoleStorageUser();
+    stubCreatedAccessKey();
+
+    await fthOrchestrator.issueAccessKey(fthClientId, {
+      keyName: baseOpts.keyName,
+      permissions: ['read'],
+      buckets: ['alpha'],
+    });
+    await fthOrchestrator.issueAccessKey(fthClientId, {
+      keyName: baseOpts.keyName,
+      permissions: ['read'],
+      buckets: ['alpha'],
+    });
+
+    const [first, second] = mockFthClient.createAccessKey.mock.calls;
+    expect(second[2].idempotencyKey).toEqual(first[2].idempotencyKey);
+  });
+
+  const changedRequestCases: Record<string, IssueAccessKeyOpts> = {
+    'the permissions change': {
+      keyName: baseOpts.keyName,
+      permissions: ['read', 'write'],
+      buckets: ['alpha'],
+    },
+    'the granular permissions change': {
+      keyName: baseOpts.keyName,
+      permissions: ['read'],
+      granularPermissions: ['ListBucketVersions'],
+      buckets: ['alpha'],
+    },
+    'the bucket scopes change': {
+      keyName: baseOpts.keyName,
+      permissions: ['read'],
+      buckets: ['alpha', 'beta'],
+    },
+    'the key name changes': {
+      keyName: 'Another Key',
+      permissions: ['read'],
+      buckets: ['alpha'],
+    },
+    'the expiry changes': {
+      keyName: baseOpts.keyName,
+      permissions: ['read'],
+      buckets: ['alpha'],
+      expiresAt: '2026-12-31T00:00:00Z',
+    },
+  };
+
+  for (const [description, changed] of Object.entries(changedRequestCases)) {
+    it(`sends a different idempotency key when ${description}`, async () => {
+      stubConsoleStorageUser();
+      stubCreatedAccessKey();
+
+      await fthOrchestrator.issueAccessKey(fthClientId, {
+        keyName: baseOpts.keyName,
+        permissions: ['read'],
+        buckets: ['alpha'],
+      });
+      await fthOrchestrator.issueAccessKey(fthClientId, changed);
+
+      const [first, second] = mockFthClient.createAccessKey.mock.calls;
+      expect(second[2].idempotencyKey).not.toEqual(first[2].idempotencyKey);
+    });
+  }
 
   it('maps FthConflictError to AccessKeyAlreadyExistsError', async () => {
     stubConsoleStorageUser();
@@ -854,7 +971,6 @@ describe('fthOrchestrator.listBuckets', () => {
         region: 'us-east-1',
         createdAt: '2026-01-01T00:00:00.000Z',
         isPublic: false,
-        versioning: false,
         encrypted: true,
       },
       {
@@ -862,62 +978,31 @@ describe('fthOrchestrator.listBuckets', () => {
         region: 'us-east-1',
         createdAt: '2026-02-01T00:00:00.000Z',
         isPublic: false,
-        versioning: false,
         encrypted: true,
       },
     ]);
   });
 
-  it('reflects per-bucket versioning state from GetBucketVersioning', async () => {
-    ssmMock.on(GetParameterCommand).resolves({
-      Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
-    });
-    s3Mock.on(ListBucketsCommand).resolves({
-      Buckets: [
-        { Name: 'versioned', CreationDate: new Date('2026-01-01T00:00:00Z') },
-        { Name: 'plain', CreationDate: new Date('2026-02-01T00:00:00Z') },
-      ],
-    });
-    s3Mock.on(GetBucketVersioningCommand).callsFake((input) => ({
-      Status: input.Bucket === 'versioned' ? 'Enabled' : 'Suspended',
-    }));
-
-    const result = await fthOrchestrator.listBuckets(fthClientId);
-
-    expect(result.find((b) => b.bucketName === 'versioned')?.versioning).toBe(true);
-    expect(result.find((b) => b.bucketName === 'plain')?.versioning).toBe(false);
-  });
-
-  it('skips GetBucketVersioning and returns versioning:false when includeVersioning is false', async () => {
-    ssmMock.on(GetParameterCommand).resolves({
-      Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
-    });
-    s3Mock.on(ListBucketsCommand).resolves({
-      Buckets: [
-        { Name: 'b1', CreationDate: new Date('2026-01-01T00:00:00Z') },
-        { Name: 'b2', CreationDate: new Date('2026-02-01T00:00:00Z') },
-      ],
-    });
-    // If this were consulted the result would be versioning:true; the option
-    // must prevent the call entirely.
-    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
-
-    const result = await fthOrchestrator.listBuckets(fthClientId, { includeVersioning: false });
-
-    expect(s3Mock.commandCalls(GetBucketVersioningCommand)).toHaveLength(0);
-    expect(result.map((b) => b.versioning)).toEqual([false, false]);
-  });
-
-  it('propagates GetBucketVersioning failures instead of swallowing them', async () => {
+  it('never reads GetBucketVersioning or GetObjectLockConfiguration: both cost a call per bucket', async () => {
     ssmMock.on(GetParameterCommand).resolves({
       Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
     });
     s3Mock.on(ListBucketsCommand).resolves({
       Buckets: [{ Name: 'b1', CreationDate: new Date('2026-01-01T00:00:00Z') }],
     });
-    s3Mock.on(GetBucketVersioningCommand).rejects(new Error('AccessDenied'));
+    // If either of these were consulted the result would carry the field; the
+    // listing must not call them at all.
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
+    s3Mock.on(GetObjectLockConfigurationCommand).resolves({
+      ObjectLockConfiguration: { ObjectLockEnabled: 'Enabled' },
+    });
 
-    await expect(fthOrchestrator.listBuckets(fthClientId)).rejects.toThrow(/AccessDenied/);
+    const result = await fthOrchestrator.listBuckets(fthClientId);
+
+    expect(s3Mock.commandCalls(GetBucketVersioningCommand)).toHaveLength(0);
+    expect(s3Mock.commandCalls(GetObjectLockConfigurationCommand)).toHaveLength(0);
+    expect(result[0]).not.toHaveProperty('versioning');
+    expect(result[0]).not.toHaveProperty('objectLockEnabled');
   });
 
   it('propagates ListBuckets failures', async () => {

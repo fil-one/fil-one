@@ -9,6 +9,14 @@ type TooltipProps = {
   content: React.ReactNode;
   side?: TooltipSide;
   className?: string;
+  /**
+   * Makes the trigger a tab stop, for when the wrapped content isn't focusable
+   * on its own (plain text, an icon). Without it a keyboard user has no way to
+   * reach the tooltip, so set it whenever the content isn't repeated elsewhere.
+   */
+  focusable?: boolean;
+  /** Announced label for a `focusable` trigger. Defaults to the tooltip text. */
+  label?: string;
 };
 
 type Rect = {
@@ -56,7 +64,14 @@ function computePosition(side: TooltipSide, trigger: Rect, tw: number, th: numbe
   return { top, left };
 }
 
-export function Tooltip({ children, content, side = 'right', className }: TooltipProps) {
+export function Tooltip({
+  children,
+  content,
+  side = 'right',
+  className,
+  focusable,
+  label,
+}: TooltipProps) {
   const [visible, setVisible] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
@@ -88,21 +103,42 @@ export function Tooltip({ children, content, side = 'right', className }: Toolti
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(position);
     };
+    // Escape dismisses it without moving focus, which is what a keyboard user
+    // expects of a tooltip that's covering something they want to read.
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setVisible(false);
+    };
+
     window.addEventListener('scroll', schedule, true);
     window.addEventListener('resize', schedule);
+    document.addEventListener('keydown', handleKeyDown);
     return () => {
       cancelAnimationFrame(frame);
       window.removeEventListener('scroll', schedule, true);
       window.removeEventListener('resize', schedule);
+      document.removeEventListener('keydown', handleKeyDown);
     };
   }, [visible, side]);
 
   return (
     <div
       ref={containerRef}
-      className={clsx('relative inline-block', className)}
+      className={clsx(
+        'relative inline-block',
+        focusable && 'focus-visible:brand-outline',
+        className,
+      )}
+      // React's onFocus/onBlur map to focusin/focusout, so a focusable child
+      // surfaces the tooltip without the wrapper needing to be the tab stop.
       onMouseEnter={() => setVisible(true)}
       onMouseLeave={() => setVisible(false)}
+      onFocus={() => setVisible(true)}
+      onBlur={() => setVisible(false)}
+      {...(focusable && {
+        tabIndex: 0,
+        role: 'note',
+        'aria-label': label ?? (typeof content === 'string' ? content : undefined),
+      })}
     >
       {children}
       {visible &&

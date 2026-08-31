@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import type {
   AccessKeyPermission,
   BucketInfoPermission,
@@ -7,16 +8,19 @@ import type {
   S3Region,
 } from '@filone/shared';
 import {
+  ACCESS_KEY_PERMISSION_REQUIREMENT,
   BUCKET_INFO_PERMISSIONS,
   BUCKET_INFO_PERMISSION_LABELS,
   BUCKET_PERMISSIONS,
   BUCKET_PERMISSION_LABELS,
   GRANULAR_PERMISSION_MAP,
   GRANULAR_PERMISSION_LABELS,
+  GRANULAR_PERMISSION_REQUIREMENT,
   getRegionLabel,
   supportsBucketManagement,
 } from '@filone/shared';
 
+import { usePermissions } from '../lib/use-permissions.js';
 import { Checkbox } from './Checkbox';
 import { Tooltip } from './Tooltip';
 
@@ -48,6 +52,36 @@ export function AccessKeyPermissionsFields({
   onGranularPermissionsChange,
   region,
 }: AccessKeyPermissionsFieldsProps) {
+  // A key carries authority out of the console, so the create handler caps what
+  // it may carry at what the creator holds. Offering a checkbox above that cap
+  // builds a form whose only outcome is a 403 naming a permission the caller
+  // cannot see — so the same two tables the server reads decide what is offered
+  // here. `PutObjectRetention` and `PutObjectLegalHold` are the sharp end:
+  // `privileged.grant` is an Owner's, and the rows simply are not there for
+  // anyone else.
+  const { has, isPending, isError } = usePermissions();
+  const mayGrant = (keyPermission: AccessKeyPermission) =>
+    has(ACCESS_KEY_PERMISSION_REQUIREMENT[keyPermission]);
+  const mayGrantGranular = (granular: GranularPermission) =>
+    has(GRANULAR_PERMISSION_REQUIREMENT[granular]);
+
+  // Hiding a row decides only what can be added. A box checked before a
+  // demotion is still in the form's state, and submitting it earns the 403 the
+  // rows above are here to avoid, so the selection is pruned to the same
+  // ceiling from the same two tables. Only once `/me` has answered: `has`
+  // grants nothing while the query is pending or failed, and pruning on that
+  // would clear the form's default selection with nothing to put it back.
+  const ceilingKnown = !isPending && !isError;
+  const allowed = value.filter(mayGrant);
+  const allowedGranular = granularPermissions.filter(mayGrantGranular);
+  useEffect(() => {
+    if (!ceilingKnown) return;
+    if (allowed.length !== value.length) onChange(allowed);
+    if (allowedGranular.length !== granularPermissions.length) {
+      onGranularPermissionsChange(allowedGranular);
+    }
+  });
+
   function toggleBasic(permission: ObjectPermission) {
     if (value.includes(permission)) {
       onChange(value.filter((p) => p !== permission));
@@ -77,9 +111,9 @@ export function AccessKeyPermissionsFields({
   return (
     <div className="flex flex-col gap-4" data-testid="access-key-permissions">
       <Section title="Object permissions" testId="permissions-section-object">
-        {PERMISSION_OPTIONS.map((option) => {
+        {PERMISSION_OPTIONS.filter((option) => mayGrant(option.value)).map((option) => {
           const isChecked = value.includes(option.value);
-          const granularOptions = GRANULAR_PERMISSION_MAP[option.value];
+          const granularOptions = GRANULAR_PERMISSION_MAP[option.value].filter(mayGrantGranular);
 
           return (
             <div key={option.value}>
@@ -128,7 +162,12 @@ export function AccessKeyPermissionsFields({
       </Section>
 
       <Section title="Bucket management" testId="permissions-section-bucket">
-        <BucketManagementFields permissions={value} onToggle={toggleBucket} region={region} />
+        <BucketManagementFields
+          permissions={value}
+          onToggle={toggleBucket}
+          region={region}
+          mayGrant={mayGrant}
+        />
       </Section>
     </div>
   );
@@ -157,9 +196,16 @@ type BucketManagementFieldsProps = {
   permissions: AccessKeyPermission[];
   onToggle: (permission: BucketPermission | BucketInfoPermission) => void;
   region: S3Region;
+  /** Whether the caller's role can put this permission on a key at all. */
+  mayGrant: (permission: AccessKeyPermission) => boolean;
 };
 
-function BucketManagementFields({ permissions, onToggle, region }: BucketManagementFieldsProps) {
+function BucketManagementFields({
+  permissions,
+  onToggle,
+  region,
+  mayGrant,
+}: BucketManagementFieldsProps) {
   const supported = supportsBucketManagement(region);
   const unsupportedReason = `Not supported in ${getRegionLabel(region)}`;
 
@@ -176,7 +222,7 @@ function BucketManagementFields({ permissions, onToggle, region }: BucketManagem
       />
 
       {/* Bucket-info reads — selectable in every region, not region-gated. */}
-      {BUCKET_INFO_PERMISSIONS.map((permission: BucketInfoPermission) => {
+      {BUCKET_INFO_PERMISSIONS.filter(mayGrant).map((permission: BucketInfoPermission) => {
         const meta = BUCKET_INFO_PERMISSION_LABELS[permission];
         return (
           <PermissionRow
@@ -190,7 +236,7 @@ function BucketManagementFields({ permissions, onToggle, region }: BucketManagem
         );
       })}
 
-      {BUCKET_PERMISSIONS.map((permission: BucketPermission) => {
+      {BUCKET_PERMISSIONS.filter(mayGrant).map((permission: BucketPermission) => {
         const meta = BUCKET_PERMISSION_LABELS[permission];
         return (
           <PermissionRow

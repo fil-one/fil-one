@@ -1,5 +1,7 @@
 # Authentication
 
+> **Historical (superseded 2026-08):** this document is the provider bake-off and hosting comparison that preceded the Auth0 decision. What runs today is described in [`AuthOverview.md`](./AuthOverview.md), and organizations, membership, and roles are designed in [`architectural-decisions/2026-08-organizations-roles-m1.md`](./architectural-decisions/2026-08-organizations-roles-m1.md). Retained for the record of which providers were compared and why.
+
 ## Constraints
 
 - We do not want to handle credentials ourselves

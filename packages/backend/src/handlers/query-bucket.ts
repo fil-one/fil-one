@@ -234,7 +234,9 @@ function sourcesFromChunks(chunks: VectorQueryResult[]): string[] {
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   // Cookie session OR RAG API key bearer token — see ragQueryAuthMiddleware.
-  .use(ragQueryAuthMiddleware())
+  // The bearer token carries its own authority; the cookie caller is gated on
+  // the manifest's `cookieRequires` for this route.
+  .use(ragQueryAuthMiddleware({ cookieRequires: 'buckets.read' }))
   .use(subscriptionGuardMiddleware(AccessLevel.Read))
   .use(ragAccessMiddleware())
   .use(errorHandlerMiddleware());

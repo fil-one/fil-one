@@ -29,6 +29,9 @@ import { AddPaymentDialog } from '../components/billing/AddPaymentDialog.js';
 import { ContactSalesDialog } from '../components/billing/ContactSalesDialog.js';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { Overline } from '../components/Overline';
+import { RequirePermission } from '../components/RequirePermission';
+import { useHasPermission } from '../lib/use-permissions.js';
+import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -58,10 +61,44 @@ function SkeletonCard({ height = 'h-36' }: { height?: string }) {
 // Page
 // ---------------------------------------------------------------------------
 
-// eslint-disable-next-line max-lines-per-function, complexity/complexity
+/**
+ * Money is Owner-and-Admin territory: `billing.view` reads usage and invoices,
+ * `billing.manage` changes the plan or the card. A Member or ReadOnly holds
+ * neither, and every query on this page would 403, so the page says so instead
+ * of rendering an error for each one.
+ */
 export function BillingPage() {
+  return (
+    <RequirePermission
+      permission="billing.view"
+      pending={
+        <PageLayout title="Billing" description="Manage your plan, usage, and payment methods">
+          <SkeletonCard height="h-40" />
+        </PageLayout>
+      }
+      fallback={
+        <PageLayout title="Billing" description="Manage your plan, usage, and payment methods">
+          <div className="rounded-xl border border-zinc-200 bg-white p-6 text-sm text-zinc-600">
+            Billing is managed by your organization&rsquo;s owners and admins. Ask one of them for
+            plan or invoice details.
+          </div>
+        </PageLayout>
+      }
+    >
+      <BillingDetails />
+    </RequirePermission>
+  );
+}
+
+// eslint-disable-next-line max-lines-per-function, complexity/complexity
+function BillingDetails() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  // Hoisted rather than wrapped per control: half of these buttons sit under
+  // prompt copy that only makes sense with them ("Ready to unlock unlimited
+  // storage?"), and gating the button alone left an Admin reading an invitation
+  // with nothing to accept.
+  const mayManage = useHasPermission('billing.manage');
 
   const {
     data: billing,
@@ -102,9 +139,11 @@ export function BillingPage() {
     invoicesPending && !!billing && hasInvoiceHistory(billing.subscription.status);
   const invoicesError = isInvoicesError ? 'Unable to load invoices. Please try again later.' : null;
 
-  // Modal states
-  const [planOpen, setPlanOpen] = useState(false);
-  const [paymentOpen, setPaymentOpen] = useState(false);
+  // Modal states. The two that write billing close with `billing.manage`: the
+  // payment dialog is the sharp one, since confirming it hands Stripe a
+  // SetupIntent that `activateSubscription` then refuses.
+  const [planOpen, setPlanOpen] = usePermittedDialog(false, mayManage);
+  const [paymentOpen, setPaymentOpen] = usePermittedDialog(false, mayManage);
   const [clientSecret, setClientSecret] = useState('');
   const [stripePublishableKey, setStripePublishableKey] = useState('');
   const [contactSalesOpen, setContactSalesOpen] = useState(false);
@@ -274,16 +313,31 @@ export function BillingPage() {
       headingId="billing-heading"
       description="Manage your plan, usage, and payment methods"
     >
-      {/* Past due warning banner */}
+      {/* Past due warning banner. An Admin sees the state and who to ask; only
+          `billing.manage` gets the inline action. */}
       {isPastDue && (
         <div className="mb-4 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
           <WarningIcon size={20} className="text-amber-600 flex-shrink-0" weight="fill" />
           <span className="text-sm text-amber-800">
-            Your last payment failed. Please{' '}
-            <button type="button" onClick={handleUpdatePayment} className="font-semibold underline">
-              update your payment method
-            </button>{' '}
-            to avoid losing access.{graceDays !== null ? ` ${daysRemainingLabel(graceDays)}.` : ''}
+            {mayManage ? (
+              <>
+                Your last payment failed. Please{' '}
+                <button
+                  type="button"
+                  onClick={handleUpdatePayment}
+                  className="font-semibold underline"
+                >
+                  update your payment method
+                </button>{' '}
+                to avoid losing access.
+              </>
+            ) : (
+              <>
+                Your last payment failed. An organization owner needs to update the payment method
+                to avoid losing access.
+              </>
+            )}
+            {graceDays !== null ? ` ${daysRemainingLabel(graceDays)}.` : ''}
           </span>
         </div>
       )}
@@ -293,11 +347,21 @@ export function BillingPage() {
         <div className="mb-4 flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
           <WarningIcon size={20} className="text-red-600 flex-shrink-0" weight="fill" />
           <span className="text-sm text-red-800">
-            Your account has been canceled.{' '}
-            <button type="button" onClick={handleUpgradeClick} className="font-semibold underline">
-              Reactivate
-            </button>{' '}
-            to regain access.
+            {mayManage ? (
+              <>
+                Your account has been canceled.{' '}
+                <button
+                  type="button"
+                  onClick={handleUpgradeClick}
+                  className="font-semibold underline"
+                >
+                  Reactivate
+                </button>{' '}
+                to regain access.
+              </>
+            ) : (
+              'Your account has been canceled. An organization owner can reactivate it.'
+            )}
           </span>
         </div>
       )}
@@ -377,8 +441,9 @@ export function BillingPage() {
               </div>
             </div>
 
-            {/* Trial CTA banner */}
-            {isTrialing && (
+            {/* Trial CTA banner — the invitation and its button stand or fall
+                together. */}
+            {isTrialing && mayManage && (
               <div className="rounded-lg bg-zinc-50 border border-zinc-200/50 p-[13px] flex items-center justify-between">
                 <p className="text-[13px] font-medium text-zinc-900">
                   Ready to unlock unlimited storage?
@@ -394,23 +459,26 @@ export function BillingPage() {
               </div>
             )}
 
-            {/* Manage plan — active subscribers */}
+            {/* Manage plan — active subscribers. "Billed monthly" is a fact
+                worth stating on its own, so only the button is gated. */}
             {(isActive || isPastDue) && (
               <div className="flex items-center justify-between border-t border-zinc-100 pt-3">
                 <span className="text-[12px] text-zinc-500">Billed monthly</span>
-                <Button
-                  id="billing-manage-plan-button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleUpdatePayment}
-                >
-                  Manage plan
-                </Button>
+                {mayManage && (
+                  <Button
+                    id="billing-manage-plan-button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleUpdatePayment}
+                  >
+                    Manage plan
+                  </Button>
+                )}
               </div>
             )}
 
             {/* Grace period / Canceled reactivation CTA */}
-            {(isGracePeriod || isCanceled) && (
+            {(isGracePeriod || isCanceled) && mayManage && (
               <div
                 className={`rounded-lg p-[13px] flex items-center justify-between ${
                   isCanceled
@@ -536,28 +604,32 @@ export function BillingPage() {
                     {String(billing.paymentMethod.expYear).slice(-2)}
                   </p>
                 </div>
-                <Button
-                  id="billing-update-payment-button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleUpdatePayment}
-                >
-                  Update
-                </Button>
+                {mayManage && (
+                  <Button
+                    id="billing-update-payment-button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleUpdatePayment}
+                  >
+                    Update
+                  </Button>
+                )}
               </div>
             ) : (
               <div className="flex items-center gap-3 rounded-lg border border-dashed border-zinc-200 bg-zinc-50/30 p-[13px] w-full">
                 <IconBox icon={CreditCardIcon} color="grey" size="sm" />
                 <span className="flex-1 text-[13px] text-zinc-500">No payment method added</span>
-                <Button
-                  id="billing-add-payment-button"
-                  variant="ghost"
-                  size="sm"
-                  icon={CreditCardIcon}
-                  onClick={handleUpgradeClick}
-                >
-                  Add
-                </Button>
+                {mayManage && (
+                  <Button
+                    id="billing-add-payment-button"
+                    variant="ghost"
+                    size="sm"
+                    icon={CreditCardIcon}
+                    onClick={handleUpgradeClick}
+                  >
+                    Add
+                  </Button>
+                )}
               </div>
             )}
           </div>
@@ -672,7 +744,7 @@ export function BillingPage() {
                   inactive, canReactivateWithSavedCard stays false, so the flow
                   goes through a fresh SetupIntent rather than a saved-card
                   reactivation the backend would reject. */}
-              {(isTrialing || isGracePeriod || isCanceled || isInactive) && (
+              {(isTrialing || isGracePeriod || isCanceled || isInactive) && mayManage && (
                 <Button
                   id="billing-plan-cta-button"
                   variant="primary"

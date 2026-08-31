@@ -70,6 +70,7 @@ const ddbMock = mockClient(DynamoDBClient);
 
 import { handler } from './stripe-webhook.js';
 import { WEBHOOK_STATUS_SYNC_RETRY } from '../lib/region-helpers.js';
+import { BILLING_IDENTITY_PROJECTION } from '../lib/subscription-store.js';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
@@ -81,6 +82,7 @@ const MOCK_USER_ID = 'test-user-uuid';
 const MOCK_CUSTOMER_ID = 'cus_test_123';
 const MOCK_SUBSCRIPTION_ID = 'sub_test_456';
 const MOCK_EVENT_ID = 'evt_test_789';
+const MOCK_ORG_ID = 'test-org-uuid';
 
 function buildWebhookEvent(body: string, opts?: { isBase64Encoded?: boolean }) {
   const evt = buildEvent();
@@ -95,7 +97,7 @@ function mockSubscription(overrides?: Record<string, unknown>) {
     id: MOCK_SUBSCRIPTION_ID,
     customer: MOCK_CUSTOMER_ID,
     status: 'active',
-    metadata: { userId: MOCK_USER_ID },
+    metadata: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID },
     items: {
       data: [
         {
@@ -116,6 +118,22 @@ function mockInvoice(overrides?: Record<string, unknown>) {
   };
 }
 
+/**
+ * An invoice carrying the subscription metadata Stripe snapshots onto it at
+ * finalization, which is where an invoice event learns its org.
+ */
+function mockInvoiceForOrgSubscription(overrides?: Record<string, unknown>) {
+  return mockInvoice({
+    parent: {
+      subscription_details: {
+        subscription: MOCK_SUBSCRIPTION_ID,
+        metadata: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID },
+      },
+    },
+    ...overrides,
+  });
+}
+
 function setupStripeEvent(type: string, object: unknown) {
   mockConstructEvent.mockReturnValue({
     id: MOCK_EVENT_ID,
@@ -124,12 +142,32 @@ function setupStripeEvent(type: string, object: unknown) {
   });
 }
 
-function setupCustomerRetrieve(userId?: string) {
+function setupCustomerRetrieve(userId?: string, orgId?: string) {
   mockCustomersRetrieve.mockResolvedValue({
     id: MOCK_CUSTOMER_ID,
     deleted: false,
-    metadata: { userId: userId ?? MOCK_USER_ID },
+    metadata: { userId: userId ?? MOCK_USER_ID, orgId: orgId ?? MOCK_ORG_ID },
   });
+}
+
+/** A customer whose metadata names no org, so no billing row can be addressed for it. */
+function setupCustomerRetrieveWithoutOrg() {
+  mockCustomersRetrieve.mockResolvedValue({
+    id: MOCK_CUSTOMER_ID,
+    deleted: false,
+    metadata: { userId: MOCK_USER_ID },
+  });
+}
+
+/**
+ * What the stored billing row names, for the guards that compare it against the
+ * event in hand. Keyed on the projection so it does not answer the org-resolution
+ * read, which projects `orgId`.
+ */
+function setupStoredIdentity(identity: { subscriptionId?: string; stripeCustomerId?: string }) {
+  ddbMock
+    .on(GetItemCommand, { ProjectionExpression: BILLING_IDENTITY_PROJECTION })
+    .resolves({ Item: marshall(identity) });
 }
 
 function setupDeletedCustomerRetrieve() {
@@ -161,7 +199,7 @@ function mockPaymentMethod(overrides?: Record<string, unknown>) {
 function mockCustomerObject(overrides?: Record<string, unknown>) {
   return {
     id: MOCK_CUSTOMER_ID,
-    metadata: { userId: MOCK_USER_ID },
+    metadata: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID },
     invoice_settings: {
       default_payment_method: mockPaymentMethod(),
     },
@@ -173,8 +211,23 @@ function setupPaymentMethodsRetrieve() {
   mockPaymentMethodsRetrieve.mockResolvedValue(mockPaymentMethod());
 }
 
-const MOCK_ORG_ID = 'test-org-uuid';
 const MOCK_AURORA_TENANT_ID = 'aurora-tenant-123';
+
+// The key every subscription write lands on. The org id in it comes from Stripe
+// metadata, which is the only place the webhook can learn it.
+const ORG_KEY = { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'SUBSCRIPTION' } };
+
+// The pre-re-key row, which is where a customer created before
+// `metadata.orgId` existed still names its org.
+const LEGACY_KEY = { pk: { S: `CUSTOMER#${MOCK_USER_ID}` }, sk: { S: 'SUBSCRIPTION' } };
+
+function updateInputs() {
+  return ddbMock.commandCalls(UpdateItemCommand).map((c) => c.args[0].input);
+}
+
+function updatedKeys() {
+  return updateInputs().map((input) => input.Key);
+}
 
 // Per-region failure as reported by syncTenantStatusInProvisionedRegions,
 // which never throws.
@@ -193,10 +246,10 @@ function setupAuroraTenantResolution() {
   ddbMock
     .on(GetItemCommand, {
       TableName: 'BillingTable',
-      Key: { pk: { S: `CUSTOMER#${MOCK_USER_ID}` }, sk: { S: 'SUBSCRIPTION' } },
+      Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'SUBSCRIPTION' } },
     })
     .resolves({
-      Item: marshall({ pk: `CUSTOMER#${MOCK_USER_ID}`, sk: 'SUBSCRIPTION', orgId: MOCK_ORG_ID }),
+      Item: marshall({ pk: `ORG#${MOCK_ORG_ID}`, sk: 'SUBSCRIPTION', orgId: MOCK_ORG_ID }),
     });
   ddbMock
     .on(GetItemCommand, {
@@ -363,7 +416,7 @@ describe('stripe-webhook handler', () => {
   // 3. customer.subscription.created
   // -----------------------------------------------------------------------
   describe('customer.subscription.created', () => {
-    it('updates billing record using subscription.metadata.userId', async () => {
+    it('updates the billing record named by subscription.metadata', async () => {
       setupStripeEvent('customer.subscription.created', mockSubscription());
 
       const result = await handler(buildWebhookEvent('{}'));
@@ -372,27 +425,27 @@ describe('stripe-webhook handler', () => {
       expect(updateCalls).toHaveLength(1);
       expect(updateCalls[0].args[0].input).toStrictEqual({
         TableName: TABLE_NAME,
-        Key: {
-          pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
-          sk: { S: 'SUBSCRIPTION' },
-        },
-        ConditionExpression: 'attribute_not_exists(deletedAt)',
+        Key: ORG_KEY,
         UpdateExpression:
-          'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now REMOVE gracePeriodEndsAt, canceledAt',
+          'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now, orgId = if_not_exists(orgId, :orgId) REMOVE gracePeriodEndsAt, canceledAt',
         ExpressionAttributeValues: {
           ':subId': { S: MOCK_SUBSCRIPTION_ID },
           ':status': { S: 'active' },
           ':periodStart': { S: new Date(1600000000 * 1000).toISOString() },
           ':periodEnd': { S: new Date(1700000000 * 1000).toISOString() },
           ':now': { S: expect.any(String) },
+          ':orgId': { S: MOCK_ORG_ID },
         },
+        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
       });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
-    it('falls back to customer.metadata.userId when subscription metadata empty', async () => {
+    it('falls back to customer metadata when subscription metadata empty', async () => {
       setupStripeEvent('customer.subscription.created', mockSubscription({ metadata: {} }));
-      setupCustomerRetrieve('fallback-user');
+      // A distinct org on the customer: the key the write lands on is what says
+      // which metadata the handler read.
+      setupCustomerRetrieve('fallback-user', 'fallback-org');
 
       const result = await handler(buildWebhookEvent('{}'));
 
@@ -401,7 +454,7 @@ describe('stripe-webhook handler', () => {
       expect(updateCalls[0].args[0].input).toEqual(
         expect.objectContaining({
           Key: {
-            pk: { S: 'CUSTOMER#fallback-user' },
+            pk: { S: 'ORG#fallback-org' },
             sk: { S: 'SUBSCRIPTION' },
           },
         }),
@@ -544,7 +597,7 @@ describe('stripe-webhook handler', () => {
         'customer.subscription.created',
         mockSubscription({ metadata: { userId: '' } }),
       );
-      setupCustomerRetrieve('fallback-user');
+      setupCustomerRetrieve('fallback-user', 'fallback-org');
 
       const result = await handler(buildWebhookEvent('{}'));
 
@@ -554,7 +607,7 @@ describe('stripe-webhook handler', () => {
       expect(updateCalls[0].args[0].input).toEqual(
         expect.objectContaining({
           Key: {
-            pk: { S: 'CUSTOMER#fallback-user' },
+            pk: { S: 'ORG#fallback-org' },
             sk: { S: 'SUBSCRIPTION' },
           },
         }),
@@ -576,20 +629,18 @@ describe('stripe-webhook handler', () => {
       expect(updateCalls).toHaveLength(1);
       expect(updateCalls[0].args[0].input).toStrictEqual({
         TableName: TABLE_NAME,
-        Key: {
-          pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
-          sk: { S: 'SUBSCRIPTION' },
-        },
-        ConditionExpression: 'attribute_not_exists(deletedAt)',
+        Key: ORG_KEY,
         UpdateExpression:
-          'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now REMOVE gracePeriodEndsAt, canceledAt',
+          'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now, orgId = if_not_exists(orgId, :orgId) REMOVE gracePeriodEndsAt, canceledAt',
         ExpressionAttributeValues: {
           ':subId': { S: MOCK_SUBSCRIPTION_ID },
           ':status': { S: 'active' },
           ':periodStart': { S: new Date(1600000000 * 1000).toISOString() },
           ':periodEnd': { S: new Date(1700000000 * 1000).toISOString() },
           ':now': { S: expect.any(String) },
+          ':orgId': { S: MOCK_ORG_ID },
         },
+        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
       });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -659,11 +710,7 @@ describe('stripe-webhook handler', () => {
       expect(updateCalls).toHaveLength(1);
       expect(updateCalls[0].args[0].input).toStrictEqual({
         TableName: TABLE_NAME,
-        Key: {
-          pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
-          sk: { S: 'SUBSCRIPTION' },
-        },
-        ConditionExpression: 'attribute_not_exists(deletedAt)',
+        Key: ORG_KEY,
         UpdateExpression:
           'SET paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now',
         ExpressionAttributeValues: {
@@ -674,8 +721,31 @@ describe('stripe-webhook handler', () => {
           ':expYear': { N: String(MOCK_PM_EXP_YEAR) },
           ':now': { S: expect.any(String) },
         },
+        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
       });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('swallows a missing billing row, with a metric so it is not silent', async () => {
+      // The event carries a card's last four and expiry. A 500 would buy three
+      // days of Stripe retries and alert noise to redeliver that; post-verify
+      // the state is near-impossible and the metric is how anyone learns of it.
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      setupStripeEvent('customer.updated', mockCustomerObject());
+      const noRow = new Error('The conditional request failed');
+      (noRow as { name: string }).name = 'ConditionalCheckFailedException';
+      ddbMock.on(UpdateItemCommand).rejects(noRow);
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0); // claim not released
+      expect(
+        reportMetricMock.mock.calls.some(
+          ([event]) => (event as { BillingRowMissing?: number }).BillingRowMissing === 1,
+        ),
+      ).toBe(true);
+      errorSpy.mockRestore();
     });
 
     it('fetches payment method via paymentMethods.retrieve when default_payment_method is a string ID', async () => {
@@ -700,6 +770,58 @@ describe('stripe-webhook handler', () => {
         }),
       );
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('resolves the org from the billing row when the customer metadata carries none', async () => {
+      // Nothing stamped metadata.orgId onto customers created before it, and
+      // the re-key made no Stripe calls — so without this fallback every
+      // metadata write by the daily usage worker 500s and Stripe retries it
+      // until the endpoint is disabled.
+      setupStripeEvent(
+        'customer.updated',
+        mockCustomerObject({ metadata: { userId: MOCK_USER_ID } }),
+      );
+      ddbMock
+        .on(GetItemCommand, { Key: LEGACY_KEY })
+        .resolves({ Item: marshall({ orgId: MOCK_ORG_ID }) });
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(updatedKeys()).toEqual([ORG_KEY]);
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('does not read the billing row when the metadata already names the org', async () => {
+      setupStripeEvent('customer.updated', mockCustomerObject());
+
+      await handler(buildWebhookEvent('{}'));
+
+      const legacyReads = ddbMock
+        .commandCalls(GetItemCommand)
+        .filter((call) => call.args[0].input.Key?.pk?.S === `CUSTOMER#${MOCK_USER_ID}`);
+      expect(legacyReads).toHaveLength(0);
+    });
+
+    it('returns 200 for a customer no source can resolve to an org', async () => {
+      // The rows carrying no orgId were dispositioned by name before the
+      // re-key, so no retry converges on an answer: retrying would spend three
+      // days of redeliveries and then disable the endpoint.
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      setupStripeEvent(
+        'customer.updated',
+        mockCustomerObject({ metadata: { userId: MOCK_USER_ID } }),
+      );
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0); // claim not released
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('resolves to no org'),
+        expect.objectContaining({ customerId: MOCK_CUSTOMER_ID, userId: MOCK_USER_ID }),
+      );
+      errorSpy.mockRestore();
     });
 
     it('throws when customer has no userId in metadata', async () => {
@@ -782,6 +904,112 @@ describe('stripe-webhook handler', () => {
   // -----------------------------------------------------------------------
   // 5. customer.subscription.deleted
   // -----------------------------------------------------------------------
+  describe('a subscription the account has already replaced', () => {
+    function supersededEmissions(): MetricEvent[] {
+      return reportMetricMock.mock.calls
+        .map(([event]) => event)
+        .filter((e) => (e as { SupersededBillingEvent?: unknown }).SupersededBillingEvent === 1);
+    }
+
+    it('does not put a paying tenant into grace on a late cancellation', async () => {
+      // Stripe retries out of order: a cancellation for the trial subscription
+      // an upgrade replaced can arrive after the replacement is live.
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+      setupStoredIdentity({ subscriptionId: 'sub_the_live_one' });
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+      expect(supersededEmissions()).toHaveLength(1);
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('grants the grace period when the event names the subscription on the row', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+      setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(updateInputs()[0].ExpressionAttributeValues![':status']).toEqual({
+        S: SubscriptionStatus.GracePeriod,
+      });
+      expect(supersededEmissions()).toHaveLength(0);
+    });
+
+    it('does not mark a live subscription past due on a late payment failure', async () => {
+      setupStripeEvent(
+        'invoice.payment_failed',
+        mockInvoice({
+          parent: { subscription_details: { subscription: 'sub_the_old_one' } },
+        }),
+      );
+      setupCustomerRetrieve();
+      setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(supersededEmissions()).toHaveLength(1);
+    });
+
+    it('does not reactivate the org on a successful invoice from a replaced subscription', async () => {
+      // The other direction of the same refusal: on the shared org row, a late
+      // success for historical subscription A would mark the org active and
+      // re-enable tenants the authoritative past-due subscription locked.
+      setupStripeEvent(
+        'invoice.payment_succeeded',
+        mockInvoice({
+          parent: { subscription_details: { subscription: 'sub_the_old_one' } },
+        }),
+      );
+      setupCustomerRetrieve();
+      setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+      expect(supersededEmissions()).toHaveLength(1);
+    });
+
+    it('marks past due when the failing invoice names the subscription on the row', async () => {
+      setupStripeEvent(
+        'invoice.payment_failed',
+        mockInvoice({
+          parent: { subscription_details: { subscription: MOCK_SUBSCRIPTION_ID } },
+        }),
+      );
+      setupCustomerRetrieve();
+      setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(updateInputs()[0].ExpressionAttributeValues![':status']).toEqual({
+        S: SubscriptionStatus.PastDue,
+      });
+      expect(supersededEmissions()).toHaveLength(0);
+    });
+
+    it('still applies an update arriving under a new subscription id', async () => {
+      // The upsert keeps last-writer-wins: an upgrade legitimately arrives
+      // under an id the row has never seen, and refusing it as superseded would
+      // leave the account on the plan it just left.
+      setupStripeEvent('customer.subscription.updated', mockSubscription());
+      setupCustomerRetrieve();
+      setupStoredIdentity({ subscriptionId: 'sub_the_previous_one' });
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(updateInputs()[0].ExpressionAttributeValues![':subId']).toEqual({
+        S: MOCK_SUBSCRIPTION_ID,
+      });
+      expect(supersededEmissions()).toHaveLength(0);
+    });
+  });
+
   describe('customer.subscription.deleted', () => {
     it('sets GracePeriod status with 30-day grace window', async () => {
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
@@ -797,18 +1025,16 @@ describe('stripe-webhook handler', () => {
       const input = updateCalls[0].args[0].input;
       expect(input).toStrictEqual({
         TableName: TABLE_NAME,
-        Key: {
-          pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
-          sk: { S: 'SUBSCRIPTION' },
-        },
-        ConditionExpression: 'attribute_not_exists(deletedAt)',
+        Key: ORG_KEY,
         UpdateExpression:
-          'SET subscriptionStatus = :status, canceledAt = :now, gracePeriodEndsAt = :grace, updatedAt = :now',
+          'SET subscriptionStatus = :status, canceledAt = :now, gracePeriodEndsAt = :grace, updatedAt = :now, orgId = if_not_exists(orgId, :orgId)',
         ExpressionAttributeValues: {
           ':status': { S: SubscriptionStatus.GracePeriod },
           ':now': { S: expect.any(String) },
           ':grace': { S: expect.any(String) },
+          ':orgId': { S: MOCK_ORG_ID },
         },
+        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
       });
 
       const graceDate = new Date(input.ExpressionAttributeValues![':grace'].S!).getTime();
@@ -842,12 +1068,44 @@ describe('stripe-webhook handler', () => {
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
+    it('falls back to the subscription’s own org when the customer names none', async () => {
+      // The subscription's metadata is the more specific answer, and resolving
+      // only from the customer defined a cohort of accounts whose cancellation
+      // quietly wrote nothing.
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieveWithoutOrg();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(updatedKeys()).toEqual([ORG_KEY]);
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('fails the webhook when neither object names an org', async () => {
+      // The org id is both the row's address and the tenant's name, so nothing
+      // can be written or locked. A 500 releases the idempotency claim and lets
+      // Stripe retry until the metadata is repaired.
+      setupStripeEvent(
+        'customer.subscription.deleted',
+        mockSubscription({ metadata: { userId: MOCK_USER_ID } }),
+      );
+      setupCustomerRetrieveWithoutOrg();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        statusCode: 500,
+        body: JSON.stringify({ message: 'Processing error' }),
+      });
+    });
+
     describe('when the customer is already deleted', () => {
       // The fallback for a customer.deleted event that was never delivered.
       it('starts the deletion instead of granting a grace period', async () => {
         setupStripeEvent('customer.subscription.deleted', mockSubscription());
         setupDeletedCustomerRetrieve();
-        setupAuroraTenantResolution();
 
         const result = await handler(buildWebhookEvent('{}'));
 
@@ -861,7 +1119,6 @@ describe('stripe-webhook handler', () => {
       it('emits a DunningEscalation metric with reason customer_deleted', async () => {
         setupStripeEvent('customer.subscription.deleted', mockSubscription());
         setupDeletedCustomerRetrieve();
-        setupAuroraTenantResolution();
 
         await handler(buildWebhookEvent('{}'));
 
@@ -909,7 +1166,6 @@ describe('stripe-webhook handler', () => {
     it('calls updateTenantStatus WRITE_LOCKED on subscription deletion', async () => {
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
       setupCustomerRetrieve();
-      setupAuroraTenantResolution();
 
       const result = await handler(buildWebhookEvent('{}'));
 
@@ -925,27 +1181,15 @@ describe('stripe-webhook handler', () => {
     it('does not fail webhook when Aurora WRITE_LOCK fails', async () => {
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
       setupCustomerRetrieve();
-      setupAuroraTenantResolution();
       mockSyncTenantStatusInProvisionedRegions.mockResolvedValue(
         regionSyncFailure(new Error('Aurora API error')),
       );
 
       const result = await handler(buildWebhookEvent('{}'));
 
-      // DynamoDB subscription update should still have happened
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+      // The grace period is already recorded when the lock is attempted
+      expect(updatedKeys()).toEqual([ORG_KEY]);
       // Webhook should still return 200
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-
-    it('skips Aurora call when billing record has no orgId', async () => {
-      setupStripeEvent('customer.subscription.deleted', mockSubscription());
-      setupCustomerRetrieve();
-      // GetItemCommand returns no orgId (default mock returns undefined Item)
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
   });
@@ -977,7 +1221,6 @@ describe('stripe-webhook handler', () => {
 
     it('reads userId from the event payload and never calls Stripe customers.retrieve', async () => {
       setupStripeEvent('customer.deleted', mockCustomerObject());
-      setupAuroraTenantResolution();
 
       await handler(buildWebhookEvent('{}'));
 
@@ -1003,7 +1246,6 @@ describe('stripe-webhook handler', () => {
 
     it('emits a DunningEscalation metric with reason customer_deleted', async () => {
       setupStripeEvent('customer.deleted', mockCustomerObject());
-      setupAuroraTenantResolution();
 
       await handler(buildWebhookEvent('{}'));
 
@@ -1063,17 +1305,15 @@ describe('stripe-webhook handler', () => {
 
       expect(updateCalls[0].args[0].input).toStrictEqual({
         TableName: TABLE_NAME,
-        Key: {
-          pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
-          sk: { S: 'SUBSCRIPTION' },
-        },
-        ConditionExpression: 'attribute_not_exists(deletedAt)',
+        Key: ORG_KEY,
         UpdateExpression:
-          'SET subscriptionStatus = :active, lastPaymentAt = :now, updatedAt = :now REMOVE gracePeriodEndsAt, lastPaymentFailedAt, canceledAt',
+          'SET subscriptionStatus = :active, lastPaymentAt = :now, updatedAt = :now, orgId = if_not_exists(orgId, :orgId) REMOVE gracePeriodEndsAt, lastPaymentFailedAt, canceledAt',
         ExpressionAttributeValues: {
           ':active': { S: SubscriptionStatus.Active },
           ':now': { S: expect.any(String) },
+          ':orgId': { S: MOCK_ORG_ID },
         },
+        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
         ReturnValues: 'ALL_OLD',
       });
       expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
@@ -1125,7 +1365,6 @@ describe('stripe-webhook handler', () => {
     it('calls updateTenantStatus ACTIVE on payment success', async () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice());
       setupCustomerRetrieve();
-      setupAuroraTenantResolution();
 
       const result = await handler(buildWebhookEvent('{}'));
 
@@ -1141,14 +1380,13 @@ describe('stripe-webhook handler', () => {
     it('does not fail webhook when Aurora re-activation fails', async () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice());
       setupCustomerRetrieve();
-      setupAuroraTenantResolution();
       mockSyncTenantStatusInProvisionedRegions.mockResolvedValue(
         regionSyncFailure(new Error('Aurora API error')),
       );
 
       const result = await handler(buildWebhookEvent('{}'));
 
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+      expect(updatedKeys()).toEqual([ORG_KEY]);
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
   });
@@ -1157,6 +1395,24 @@ describe('stripe-webhook handler', () => {
   // 8. invoice.payment_failed
   // -----------------------------------------------------------------------
   describe('invoice.payment_failed', () => {
+    it('fails the webhook when the Stripe objects name no org', async () => {
+      // There is no key to write the row under, and no billing-row fallback any
+      // more. A 500 releases the idempotency claim, so Stripe's retries converge
+      // once somebody repairs the metadata; reporting success would consume the
+      // event and take the status change with it.
+      setupStripeEvent('invoice.payment_failed', mockInvoice());
+      setupCustomerRetrieveWithoutOrg();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1); // idempotency release
+      expect(result).toEqual({
+        statusCode: 500,
+        body: JSON.stringify({ message: 'Processing error' }),
+      });
+    });
+
     it('sets PastDue status with lastPaymentFailedAt (no grace period)', async () => {
       setupStripeEvent('invoice.payment_failed', mockInvoice());
       setupCustomerRetrieve();
@@ -1169,18 +1425,16 @@ describe('stripe-webhook handler', () => {
       const input = updateCalls[0].args[0].input;
       expect(input).toStrictEqual({
         TableName: TABLE_NAME,
-        Key: {
-          pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
-          sk: { S: 'SUBSCRIPTION' },
-        },
-        ConditionExpression: 'attribute_not_exists(deletedAt)',
+        Key: ORG_KEY,
         UpdateExpression:
-          'SET subscriptionStatus = :status, lastPaymentFailedAt = :failedAt, updatedAt = :now',
+          'SET subscriptionStatus = :status, lastPaymentFailedAt = :failedAt, updatedAt = :now, orgId = if_not_exists(orgId, :orgId)',
         ExpressionAttributeValues: {
           ':status': { S: SubscriptionStatus.PastDue },
           ':failedAt': { S: expect.any(String) },
           ':now': { S: expect.any(String) },
+          ':orgId': { S: MOCK_ORG_ID },
         },
+        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
       });
 
       // Must NOT set gracePeriodEndsAt — Stripe Smart Retries handle the retry window
@@ -1433,7 +1687,6 @@ describe('stripe-webhook handler', () => {
     it('emits stage=recovered with reason=grace_period when prior status was grace_period', async () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice({ attempt_count: 4 }));
       setupCustomerRetrieve();
-      setupAuroraTenantResolution();
       ddbMock.on(UpdateItemCommand, { TableName: TABLE_NAME }).resolves({
         Attributes: marshall({ subscriptionStatus: SubscriptionStatus.GracePeriod }),
       });
@@ -1635,36 +1888,42 @@ describe('stripe-webhook handler', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 11. orgId backfill — webhook-born records without an orgId are invisible
-  // to every lifecycle job, so each writer persists it from Stripe metadata.
+  // 11. orgId backfill — the org id keys the row, and every lifecycle job
+  // reads the attribute off it, so each writer stamps it from Stripe metadata.
   // if_not_exists is the do-not-overwrite guarantee: a stored orgId wins over
-  // whatever the metadata carries.
+  // whatever the metadata carries. Metadata that names no org names no row
+  // either, and that write is refused outright.
   // -----------------------------------------------------------------------
   describe('orgId backfill', () => {
-    function setupCustomerRetrieveWithOrg() {
-      mockCustomersRetrieve.mockResolvedValue({
-        id: MOCK_CUSTOMER_ID,
-        deleted: false,
-        metadata: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID },
-      });
-    }
+    let errorSpy: MockInstance;
 
-    function billingUpdateInput() {
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-      return updateCalls[0].args[0].input;
-    }
+    beforeEach(() => {
+      errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      errorSpy.mockRestore();
+    });
 
     function expectOrgIdBackfilled() {
-      const input = billingUpdateInput();
+      expect(updatedKeys()).toEqual([ORG_KEY]);
+      const input = updateInputs()[0];
       expect(input.UpdateExpression).toContain('orgId = if_not_exists(orgId, :orgId)');
       expect(input.ExpressionAttributeValues![':orgId']).toEqual({ S: MOCK_ORG_ID });
     }
 
-    function expectNoOrgIdClause() {
-      const input = billingUpdateInput();
-      expect(input.UpdateExpression).not.toContain('orgId');
-      expect(input.ExpressionAttributeValues![':orgId']).toBeUndefined();
+    // A key built from a guessed org would put this subscription on another
+    // org's partition, so nothing is written — and the webhook fails rather than
+    // reporting success. A 500 releases the idempotency claim, so Stripe keeps
+    // retrying and the event converges on its own once somebody repairs the
+    // metadata. Swallowing it consumes the event and the status change with it.
+    function expectRefusedAndRetryable(result: unknown) {
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1);
+      expect(result).toEqual({
+        statusCode: 500,
+        body: JSON.stringify({ message: 'Processing error' }),
+      });
     }
 
     it('subscription update persists orgId from subscription metadata when present', async () => {
@@ -1680,73 +1939,119 @@ describe('stripe-webhook handler', () => {
 
     it('subscription update persists orgId from customer metadata on the fallback path', async () => {
       setupStripeEvent('customer.subscription.updated', mockSubscription({ metadata: {} }));
-      setupCustomerRetrieveWithOrg();
+      setupCustomerRetrieve();
 
       await handler(buildWebhookEvent('{}'));
 
       expectOrgIdBackfilled();
     });
 
-    it('subscription update omits the orgId clause when metadata carries none', async () => {
-      setupStripeEvent('customer.subscription.updated', mockSubscription());
+    // A subscription created before the metadata stamped an orgId still names
+    // its user, and that alone used to take the no-fetch path and reach the
+    // store with no org — a permanent 500 for every status change on every
+    // legacy subscription. The customer is where the org actually is.
+    it('subscription update falls back to customer metadata when the subscription names only the user', async () => {
+      setupStripeEvent(
+        'customer.subscription.updated',
+        mockSubscription({ metadata: { userId: MOCK_USER_ID } }),
+      );
+      setupCustomerRetrieve();
 
-      await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'));
 
-      expectNoOrgIdClause();
+      expectOrgIdBackfilled();
+      expect(mockCustomersRetrieve).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('subscription update writes nothing when neither the subscription nor the customer names an org', async () => {
+      setupStripeEvent(
+        'customer.subscription.updated',
+        mockSubscription({ metadata: { userId: MOCK_USER_ID } }),
+      );
+      setupCustomerRetrieveWithoutOrg();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expectRefusedAndRetryable(result);
     });
 
     it('subscription deleted persists orgId from customer metadata', async () => {
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
-      setupCustomerRetrieveWithOrg();
+      setupCustomerRetrieve();
 
       await handler(buildWebhookEvent('{}'));
 
       expectOrgIdBackfilled();
     });
 
-    it('subscription deleted omits the orgId clause when metadata carries none', async () => {
-      setupStripeEvent('customer.subscription.deleted', mockSubscription());
-      setupCustomerRetrieve();
+    it('subscription deleted writes nothing when metadata carries no orgId', async () => {
+      setupStripeEvent(
+        'customer.subscription.deleted',
+        mockSubscription({ metadata: { userId: MOCK_USER_ID } }),
+      );
+      setupCustomerRetrieveWithoutOrg();
 
-      await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'));
 
-      expectNoOrgIdClause();
+      expectRefusedAndRetryable(result);
     });
 
     it('payment succeeded persists orgId from customer metadata', async () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice());
-      setupCustomerRetrieveWithOrg();
+      setupCustomerRetrieve();
 
       await handler(buildWebhookEvent('{}'));
 
       expectOrgIdBackfilled();
     });
 
-    it('payment succeeded omits the orgId clause when metadata carries none', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
-      setupCustomerRetrieve();
+    // Stripe snapshots the subscription's metadata onto the invoice, so an
+    // invoice for a customer created before the metadata carried an orgId still
+    // names the org it is paying for.
+    it('payment succeeded persists orgId from the invoice subscription metadata', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoiceForOrgSubscription());
+      setupCustomerRetrieveWithoutOrg();
 
       await handler(buildWebhookEvent('{}'));
 
-      expectNoOrgIdClause();
+      expectOrgIdBackfilled();
+    });
+
+    it('payment succeeded writes nothing when metadata carries no orgId', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
+      setupCustomerRetrieveWithoutOrg();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expectRefusedAndRetryable(result);
     });
 
     it('payment failed persists orgId from customer metadata', async () => {
       setupStripeEvent('invoice.payment_failed', mockInvoice());
-      setupCustomerRetrieveWithOrg();
+      setupCustomerRetrieve();
 
       await handler(buildWebhookEvent('{}'));
 
       expectOrgIdBackfilled();
     });
 
-    it('payment failed omits the orgId clause when metadata carries none', async () => {
-      setupStripeEvent('invoice.payment_failed', mockInvoice());
-      setupCustomerRetrieve();
+    it('payment failed persists orgId from the invoice subscription metadata', async () => {
+      setupStripeEvent('invoice.payment_failed', mockInvoiceForOrgSubscription());
+      setupCustomerRetrieveWithoutOrg();
 
       await handler(buildWebhookEvent('{}'));
 
-      expectNoOrgIdClause();
+      expectOrgIdBackfilled();
+    });
+
+    it('payment failed writes nothing when metadata carries no orgId', async () => {
+      setupStripeEvent('invoice.payment_failed', mockInvoice());
+      setupCustomerRetrieveWithoutOrg();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expectRefusedAndRetryable(result);
     });
   });
 
@@ -1896,7 +2201,7 @@ describe('stripe-webhook handler', () => {
         id: MOCK_CUSTOMER_ID,
         deleted: false,
         email: 'customer@example.com',
-        metadata: { userId: MOCK_USER_ID },
+        metadata: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID },
       });
 
       await handler(buildWebhookEvent('{}'));

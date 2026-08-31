@@ -1,6 +1,7 @@
 import { init, track as plausibleTrack } from '@plausible-analytics/tracker';
 import { Stage } from '@filone/shared';
 import { FILONE_STAGE } from './env.js';
+import { scrubTrackedPayload } from './lib/url-scrub.js';
 
 const enabled = FILONE_STAGE === Stage.Production;
 
@@ -9,6 +10,10 @@ if (enabled) {
     domain: 'fil.one',
     captureOnLocalhost: false,
     autoCapturePageviews: true,
+    // The invitation accept link carries a single-use token in its fragment,
+    // and this tracker captures its first pageview when the module above is
+    // evaluated — before any route code has had a chance to strip it.
+    transformRequest: scrubTrackedPayload,
   });
 }
 
