@@ -27,7 +27,7 @@ export const REGION_LABELS: Record<S3Region, string> = {
   [S3Region.EuWest1]: 'Europe (France)',
   [S3Region.UsEast1]: 'US East (Michigan)',
   [S3Region.EuCentral3]: 'Europe (Amsterdam)',
-  [S3Region.UsEast9]: 'Forge Dev Sandbox (US East)',
+  [S3Region.UsEast9]: 'Forge dev sandbox (US East)',
 };
 
 /** Format a region as `"Europe (France) eu-west-1"`. */

@@ -289,7 +289,7 @@ describe('REGION_LABELS', () => {
   });
 
   it('names us-east-9 as the Forge dev sandbox', () => {
-    expect(REGION_LABELS[S3Region.UsEast9]).toBe('Forge Dev Sandbox (US East)');
+    expect(REGION_LABELS[S3Region.UsEast9]).toBe('Forge dev sandbox (US East)');
   });
 });
 
