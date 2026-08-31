@@ -130,12 +130,19 @@ Page size is 50 and the default window is the full 90 days. An auditor opening t
 log wants to see it rather than discover a narrower default after searching for a
 change they know happened.
 
-**An empty page can carry a cursor.** DynamoDB applies a `FilterExpression` after
-reading a 1MB page, so a filtered query legitimately returns zero rows and a
-continuation token. A client that reads an empty page as "no results" will report
-an empty history for an org with hundreds of events. The rule belongs in the API
-type's doc comment and in the console's fetch loop, because it ships as a bug
-exactly once and is then never explained.
+**The handler pages, and the console never sees a partial one.** DynamoDB caps a
+Query at 1MB of items read and applies a `FilterExpression` afterwards, so one
+Query can match nothing and still return a `LastEvaluatedKey`. AWS's guidance is
+to keep issuing requests with that key until a response carries none, and the
+read path does exactly that: it loops until it has filled the requested page or
+the window is exhausted, and answers only then. A response holds a full page or
+the last events in the window, and a cursor comes back only when the page filled
+first.
+
+Draining the loop inside the request costs, at worst, reading the whole 90-day
+window, which is the price of the unfiltered query and a handful of pages at the
+volumes [§2](#2-the-event-type-index) describes. Above the threshold named there,
+that stops being true, which is a second reason to revisit it.
 
 ## 2. The event-type index
 
@@ -232,8 +239,8 @@ CSV as its response body.
 
 No job row, no queue, no worker, no bucket. The bulk-delete job exists because
 deleting a large bucket takes longer than a request can stay open; an export of
-control-plane events does not. A handler queries, builds the file, and returns it
-inside the API Gateway timeout.
+control-plane events does not. A handler drains the same paging loop the viewer
+uses, builds the file, and returns it inside the API Gateway timeout.
 
 **Capped at 20,000 rows.** The binding constraint is Lambda's 6MB synchronous
 response limit, which at roughly 300 bytes per row lands near 20,000. Exceeding the
