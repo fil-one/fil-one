@@ -1401,21 +1401,28 @@ export default $config({
         ? 'arn:aws:iam::654654381893:role/s3-auditbroker-prod-detector-exec'
         : 'arn:aws:iam::654654381893:role/s3-auditbroker-detector-exec';
 
-      // The OIDC provider is account-wide (one per URL), same as the GitHub
-      // provider in infra/sst.config.ts: look up an existing one first and
-      // only create it when deploying to a fresh account.
-      let vercelOidcArn: $util.Input<string>;
+      // The OIDC provider is account-wide (one per URL) and owned OUTSIDE
+      // this stack. It must not be created here: a lookup-or-create would
+      // flip the provider between a data source and a managed resource across
+      // deploys, so the deploy after the creating one would drop it from
+      // Pulumi state and delete it on removable stages, breaking both roles'
+      // Vercel trust. Provision it once per account — the s3-auditbroker
+      // tooling does this (scripts/vercel_setup.sh, `aws-oidc` phase), or:
+      //   aws iam create-open-id-connect-provider \
+      //     --url https://oidc.vercel.com/<team-slug> \
+      //     --client-id-list https://vercel.com/<team-slug>
+      let vercelOidcArn: string;
       try {
         const existing = await aws.iam.getOpenIdConnectProvider({
           url: `https://${vercelOidcClaimPrefix}`,
         });
         vercelOidcArn = existing.arn;
       } catch {
-        const provider = new aws.iam.OpenIdConnectProvider('VercelOidcProvider', {
-          url: `https://${vercelOidcClaimPrefix}`,
-          clientIdLists: [`https://vercel.com/${vercelTeamSlug}`],
-        });
-        vercelOidcArn = provider.arn;
+        throw new Error(
+          `Vercel OIDC provider https://${vercelOidcClaimPrefix} not found in this account. ` +
+            'It is owned outside this stack — create it once per account (see the comment ' +
+            'above this throw) and re-deploy.',
+        );
       }
 
       const s3abBillingReadRole = new aws.iam.Role('S3abBillingReadRole', {
@@ -1475,7 +1482,8 @@ export default $config({
       //  - the console's Vercel OIDC identity — production deployments ONLY,
       //    on every stage: preview deployments run with bypass auth and must
       //    never arm; and
-      //  - the human responder's SSO role, so responders can assume it via STS.
+      //  - the human responder's SSO role, so the CLI response scripts
+      //    (preview_url.py, quarantine_object.py) can assume it via STS.
       //    Note: AssumeRole requires BOTH this role's trust policy and an identity
       //    policy on the caller that allows sts:AssumeRole (even same-account).
       //    If the SSO permission set doesn't grant sts:AssumeRole, add it there.
@@ -1528,23 +1536,14 @@ export default $config({
               Statement: [
                 {
                   // Mint: read a tenant's console S3 key to presign a
-                  // short-lived preview URL. The exact path scripts/lib/
-                  // aurora.py builds from STAGE.
+                  // short-lived preview URL, plus tenant listing
+                  // (list_tenant_ids). The shared constant covers every SP
+                  // backend's key subtree (aurora-s3, fth-s3, forge-s3) and
+                  // stays in sync as backends are added.
                   Sid: 'MintTenantKeyRead',
                   Effect: 'Allow',
-                  Action: ['ssm:GetParameter'],
-                  Resource: [`arn:aws:ssm:*:*:parameter/filone/${stage}/aurora-s3/access-key/*`],
-                },
-                {
-                  // Tenant listing (list_tenant_ids) — best-effort UX in the
-                  // scripts; scoped to the same subtree.
-                  Sid: 'MintTenantKeyList',
-                  Effect: 'Allow',
-                  Action: ['ssm:GetParametersByPath'],
-                  Resource: [
-                    `arn:aws:ssm:*:*:parameter/filone/${stage}/aurora-s3/access-key`,
-                    `arn:aws:ssm:*:*:parameter/filone/${stage}/aurora-s3/access-key/*`,
-                  ],
+                  Action: ['ssm:GetParameter', 'ssm:GetParametersByPath'],
+                  Resource: orchestratorS3KeySsmArns,
                 },
                 {
                   // Quarantine: preserve evidence (Put), verify/restore (Get,
