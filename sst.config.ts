@@ -1475,11 +1475,11 @@ export default $config({
       //  - the console's Vercel OIDC identity — production deployments ONLY,
       //    on every stage: preview deployments run with bypass auth and must
       //    never arm; and
-      //  - the human responder's SSO role, so the CLI response scripts
-      //    (preview_url.py, quarantine_object.py) can assume it. Same-account
-      //    assumption works on the trust policy alone, which matters on
-      //    production where ReadOnlyAccess carries no sts:AssumeRole. SSO
-      //    role names carry a random suffix and are recreated if the
+      //  - the human responder's SSO role, so responders can assume it via STS.
+      //    Note: AssumeRole requires BOTH this role's trust policy and an identity
+      //    policy on the caller that allows sts:AssumeRole (even same-account).
+      //    If the SSO permission set doesn't grant sts:AssumeRole, add it there.
+      //    SSO role names carry a random suffix and are recreated if the
       //    permission set is reprovisioned — re-pin here if assumption starts
       //    failing.
       // Assumers must set RoleSessionName to the operator's identity so
