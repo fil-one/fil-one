@@ -60,13 +60,17 @@ export default $config({
     const stripeMeterEventName = 'gb_month_meter';
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
     const fthManagementApiToken = new sst.Secret('FthManagementApiToken');
-    // linked on non-production stages.
+    // Forge tokens are linked on non-production stages only. Each Forge network
+    // has its own Hilt, so each one we talk to carries its own token.
     const forgeManagementApiToken =
       isStaging || isEphemeralStage ? new sst.Secret('ForgeManagementApiToken') : undefined;
+    const forgeDevManagementApiToken =
+      isStaging || isEphemeralStage ? new sst.Secret('ForgeDevManagementApiToken') : undefined;
     const managementApiTokens = [
       auroraBackofficeToken,
       fthManagementApiToken,
       ...(forgeManagementApiToken ? [forgeManagementApiToken] : []),
+      ...(forgeDevManagementApiToken ? [forgeDevManagementApiToken] : []),
     ];
     const grafanaLokiAuth = new sst.Secret('GrafanaLokiAuth');
     const hubSpotServiceKey = new sst.Secret('HubSpotServiceKey');
@@ -111,6 +115,69 @@ export default $config({
         sk: 'string',
       },
       primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
+    });
+
+    // Organization membership and invitations: ORG#{orgId}/MEMBER#{userId},
+    // its USER#{userId}/MEMBERSHIP#{orgId} inverse item, ORG#{orgId}/INVITE#{id}
+    // and the INVITETOKEN#{hash}/LOOKUP row that resolves an accept link. Its
+    // own table rather than more sort keys in UserInfoTable: membership is read
+    // on every authenticated request and nothing needs it co-located with the
+    // identity, entitlement, and RAG-key rows already sharing those partitions.
+    const orgTable = new sst.aws.Dynamo('OrgTable', {
+      fields: {
+        pk: 'string',
+        sk: 'string',
+      },
+      primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
+      transform: {
+        table: {
+          // Membership is the authorization record, and nothing else holds it:
+          // losing these rows locks every org out of itself and leaves no
+          // source to rebuild who belonged where. Backups on the stages that
+          // carry real accounts.
+          //
+          // Deletion protection only where the app already retains on removal.
+          // Every preview stage is torn down with `sst remove`, and a protected
+          // table refuses to go, leaving the teardown failing and the stage's
+          // resources live.
+          pointInTimeRecovery: { enabled: isProduction || isStaging },
+          deletionProtectionEnabled: isProduction,
+        },
+      },
+    });
+
+    // Audit events: ORG#{orgId} / {iso8601}#{eventId}, so one Query per org
+    // returns its history in the order it happened. Its own table because its
+    // lifecycle is its own — the TTL that expires an event after 90 days
+    // (packages/shared/src/audit.ts) must never be able to reach a membership,
+    // profile, or billing row that happened to share a partition. Written only
+    // through lib/audit.ts, which appends an event in the same transaction as
+    // the mutation it records.
+    // Handlers reach this table with the same allResources link every route
+    // uses, so they hold dynamodb:* on it. Narrowing the audit grant to
+    // PutItem/Query is follow-up work: it is the one table where a handler
+    // holding DeleteItem contradicts the append-only claim.
+    const auditTable = new sst.aws.Dynamo('AuditTable', {
+      fields: {
+        pk: 'string',
+        sk: 'string',
+      },
+      primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
+      ttl: 'ttl',
+      transform: {
+        table: {
+          // The two protections the record itself needs: a 90-day log with no
+          // backups loses the quarter to one bad deploy, and a table a stack
+          // operation can drop is a log an operator can make disappear.
+          //
+          // Deletion protection only where the app already retains on removal.
+          // Every preview stage is torn down with `sst remove`, and a protected
+          // table refuses to go, leaving the teardown failing and the stage's
+          // resources live.
+          pointInTimeRecovery: { enabled: isProduction || isStaging },
+          deletionProtectionEnabled: isProduction,
+        },
+      },
     });
 
     // RAG indexer's own store: per-object chunk manifests
@@ -281,8 +348,19 @@ export default $config({
         allowOrigins: allowedOrigins,
         allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
         // Authorization carries RAG API key bearer tokens (query endpoint);
-        // origins stay locked to our own domain above.
-        allowHeaders: ['Content-Type', 'X-CSRF-Token', 'X-Requested-With', 'Authorization'],
+        // X-Org-Id names the organization each request operates on. Deployed
+        // stages serve the console and the API from one origin through the
+        // Router, so CORS never applies there — local dev at
+        // https://localhost:5173 is cross-origin, and a preflight that omitted
+        // X-Org-Id would strip the header before it reached the API. Origins
+        // stay locked to our own domain above.
+        allowHeaders: [
+          'Content-Type',
+          'X-CSRF-Token',
+          'X-Requested-With',
+          'Authorization',
+          'X-Org-Id',
+        ],
         allowCredentials: true,
         maxAge: '1 day',
       },
@@ -359,9 +437,37 @@ export default $config({
       },
     );
 
+    // SPA fallback belongs to the website origin, so it is attached to the
+    // default S3 behavior below and nowhere else. Distribution-level error
+    // mapping cannot tell the bucket origin from the API origin, which is why
+    // API 403s used to reach the browser with an HTML body. The function fails
+    // closed for anything that is not a document navigation; the rationale is in
+    // docs/architectural-decisions/2026-08-cloudfront-spa-fallback.md.
+    //
+    // The source is read verbatim at synth time so the deployed bytes are the
+    // ones packages/cloudfront-functions tests. It is resolved against the
+    // working directory rather than import.meta.url because SST bundles this
+    // config into .sst/platform before running it, the same reason distPath
+    // below uses path.resolve.
+    const spaRewriteCode = require('fs').readFileSync(
+      require('path').resolve('packages/cloudfront-functions/src/spa-rewrite.js'),
+      'utf8',
+    ) as string;
+    const spaRewriteFunction = new aws.cloudfront.Function('WebsiteSpaRewrite', {
+      comment: 'Rewrite website document navigations to /index.html',
+      runtime: 'cloudfront-js-2.0',
+      code: spaRewriteCode,
+      publish: true,
+    });
+
     const router = new sst.aws.Router('WebsiteRouter', {
       routes: {
         '/*': { bucket: websiteBucket },
+        // CachingDisabled means every /api/* request reaches the origin, so
+        // X-Org-Id needs no place in a cache key. Any future cache policy on
+        // this route must add the header to its key: two orgs' responses to the
+        // same path differ by nothing else, and a shared entry would serve one
+        // org's data to the other.
         '/api/*': {
           url: api.url,
           cachePolicy: AWS_CACHING_DISABLED_POLICY,
@@ -389,21 +495,17 @@ export default $config({
       },
       transform: {
         cdn: (args) => {
+          // Also covered by the SPA rewrite function, which maps `/` to
+          // /index.html as well. Keep both: defaultRootObject is what serves
+          // the root if the function association is ever removed.
           args.defaultRootObject = 'index.html';
           // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Pulumi Input wrapper; value is a plain object at transform time
-          (args.defaultCacheBehavior as any).responseHeadersPolicyId = responseHeadersPolicy.id;
-          args.customErrorResponses = [
+          const defaultBehavior = args.defaultCacheBehavior as any;
+          defaultBehavior.responseHeadersPolicyId = responseHeadersPolicy.id;
+          defaultBehavior.functionAssociations = [
             {
-              errorCode: 403,
-              responseCode: 200,
-              responsePagePath: '/index.html',
-              errorCachingMinTtl: 0,
-            },
-            {
-              errorCode: 404,
-              responseCode: 200,
-              responsePagePath: '/index.html',
-              errorCachingMinTtl: 0,
+              eventType: 'viewer-request',
+              functionArn: spaRewriteFunction.arn,
             },
           ];
         },
@@ -511,6 +613,8 @@ export default $config({
       billingTable,
       userInfoTable,
       bulkDeleteTable,
+      orgTable,
+      auditTable,
       userFilesBucket,
       ragVectorBucket,
       auth0ClientId,
@@ -548,10 +652,12 @@ export default $config({
       FTH_MANAGEMENT_API_URL: 'https://api.fortilyx.com',
     };
 
-    // Forge (Management-API) — non-prod only. One shared endpoint serves every
-    // Forge region; the region is sent per-tenant in the PUT /tenants body.
+    // Forge (Management-API) — non-prod only. One endpoint per Forge network,
+    // serving every region in it; the region is sent per-tenant in the PUT
+    // /tenants body.
     const forgeEnv = {
       FORGE_MANAGEMENT_API_URL: isProduction ? '' : 'https://hilt.staging.fil.one',
+      FORGE_DEV_MANAGEMENT_API_URL: isProduction ? '' : 'https://hilt.dev.forge-sandbox.fil.one',
     };
 
     // Everything the service-orchestrator layer needs at runtime. FILONE_STAGE
@@ -566,7 +672,13 @@ export default $config({
     const auroraS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/*`;
     const fthS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/fth-s3/*`;
     const forgeS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/forge-s3/*`;
-    const orchestratorS3KeySsmArns = [auroraS3KeySsmArn, fthS3KeySsmArn, forgeS3KeySsmArn];
+    const forgeDevS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/forgeDev-s3/*`;
+    const orchestratorS3KeySsmArns = [
+      auroraS3KeySsmArn,
+      fthS3KeySsmArn,
+      forgeS3KeySsmArn,
+      forgeDevS3KeySsmArn,
+    ];
     // Per-tenant console S3 access keys (getConsoleS3Credentials), needed by
     // handlers that talk to the S3 data plane directly (presign, indexing, …).
     const s3DataPlanePermissions: sst.aws.FunctionPermissionArgs[] = [
@@ -580,7 +692,7 @@ export default $config({
     const bucketReadPermissions: sst.aws.FunctionPermissionArgs[] = [
       {
         actions: ['ssm:GetParameter'],
-        resources: [auroraApiKeySsmArn, fthS3KeySsmArn, forgeS3KeySsmArn],
+        resources: [auroraApiKeySsmArn, fthS3KeySsmArn, forgeS3KeySsmArn, forgeDevS3KeySsmArn],
       },
     ];
 
@@ -678,63 +790,6 @@ export default $config({
     // ── Provisioned concurrency for critical-path endpoints ────────
     const criticalPathLambdaProvisionedConcurrency = isProduction ? 1 : 0;
 
-    // ── Data routes ──────────────────────────────────────────────────
-    addRoute({
-      method: 'GET',
-      routePath: '/api/buckets',
-      handler: 'list-buckets',
-      extraEnv: {
-        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
-        ...fthEnv,
-        ...forgeEnv,
-      },
-      permissions: bucketReadPermissions,
-      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
-      memory: '1024 MB',
-    });
-    addRoute({
-      method: 'POST',
-      routePath: '/api/buckets',
-      handler: 'create-bucket',
-      extraEnv: orchestratorEnv,
-      permissions: [
-        {
-          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-          resources: [auroraApiKeySsmArn, ...orchestratorS3KeySsmArns],
-        },
-      ],
-      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
-      timeout: '30 seconds',
-    });
-    addRoute({
-      method: 'GET',
-      routePath: '/api/buckets/{name}',
-      handler: 'get-bucket',
-      extraEnv: {
-        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
-        ...fthEnv,
-        ...forgeEnv,
-      },
-      permissions: bucketReadPermissions,
-      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
-      memory: '1024 MB',
-    });
-    addRoute({
-      method: 'DELETE',
-      routePath: '/api/buckets/{name}',
-      handler: 'delete-bucket',
-      // Same credentials as create-bucket, minus ssm:PutParameter — deleting never
-      // mints a key. Aurora deletes through the portal (tenant API key from SSM),
-      // FTH/Forge through the S3 data plane (console S3 key).
-      extraEnv: orchestratorEnv,
-      permissions: [
-        {
-          actions: ['ssm:GetParameter'],
-          resources: [auroraApiKeySsmArn, ...orchestratorS3KeySsmArns],
-        },
-      ],
-    });
-
     // ── Bulk object deletion (API → FIFO queue → worker, resumed via SQS) ──
     // Empties a bucket, or a prefix within one, by walking the listing and
     // deleting page by page. A bucket can hold far more objects than one
@@ -799,292 +854,8 @@ export default $config({
     });
     bulkDeleteDlq.subscribe(bulkDeleteDlqWatchdog.arn);
 
-    addRoute({
-      method: 'POST',
-      routePath: '/api/buckets/{name}/bulk-delete',
-      handler: 'create-bulk-delete-job',
-      extraEnv: { ...fthEnv, ...forgeEnv },
-      // Linking the queue grants the send; the handler only enqueues the job.
-      extraLink: [bulkDeleteQueue],
-    });
-    addRoute({
-      method: 'GET',
-      routePath: '/api/bulk-delete-jobs/{jobId}',
-      handler: 'get-bulk-delete-job',
-    });
-    addRoute({
-      method: 'GET',
-      routePath: '/api/access-keys',
-      handler: 'list-access-keys',
-      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
-    });
-    addRoute({
-      method: 'POST',
-      routePath: '/api/access-keys',
-      handler: 'create-access-key',
-      extraEnv: orchestratorEnv,
-      permissions: [
-        {
-          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-          resources: [auroraApiKeySsmArn, ...orchestratorS3KeySsmArns],
-        },
-      ],
-      timeout: '30 seconds',
-    });
-    addRoute({
-      method: 'DELETE',
-      routePath: '/api/access-keys/{keyId}',
-      handler: 'delete-access-key',
-      extraEnv: {
-        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
-        ...fthEnv,
-        ...forgeEnv,
-      },
-      permissions: [
-        {
-          actions: ['ssm:GetParameter'],
-          resources: [auroraApiKeySsmArn],
-        },
-      ],
-    });
-    // RAG API keys: named bearer tokens scoped to the RAG query endpoint only
-    // (distinct from S3 access keys). DDB-only handlers — UserInfoTable is
-    // already linked via allResources, so no extra env/permissions needed.
-    addRoute({
-      method: 'GET',
-      routePath: '/api/rag-api-keys',
-      handler: 'list-rag-api-keys',
-    });
-    addRoute({
-      method: 'POST',
-      routePath: '/api/rag-api-keys',
-      handler: 'create-rag-api-key',
-    });
-    addRoute({
-      method: 'DELETE',
-      routePath: '/api/rag-api-keys/{keyId}',
-      handler: 'delete-rag-api-key',
-    });
-    addRoute({
-      method: 'POST',
-      routePath: '/api/presign',
-      handler: 'presign',
-      extraEnv: { ...fthEnv, ...forgeEnv },
-      permissions: s3DataPlanePermissions,
-      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
-      memory: '512 MB',
-    });
-    addRoute({
-      method: 'GET',
-      routePath: '/api/buckets/{name}/analytics',
-      handler: 'get-bucket-analytics',
-      permissions: bucketReadPermissions,
-      extraEnv: orchestratorEnv,
-    });
-    // RAG query playground (FIL-554): embed the question, vector-search the
-    // bucket's index, and ground a Bedrock completion on the retrieved chunks.
-    // `rag: true` grants s3vectors:QueryVectors + bedrock:InvokeModel on the
-    // Titan embeddings model; the extra permission below covers the Claude
-    // completion model — both its cross-region inference profile and the
-    // underlying foundation model. Higher timeout/memory for the Bedrock calls.
-    addRoute({
-      method: 'POST',
-      routePath: '/api/buckets/{name}/query',
-      handler: 'query-bucket',
-      rag: true,
-      // Reads the bucket's enablement row to reject queries before the first
-      // indexing pass completes (BUCKET_NOT_INDEXED).
-      extraLink: [ragIndexerTable],
-      extraEnv: orchestratorEnv,
-      permissions: [
-        ...bucketReadPermissions,
-        {
-          actions: ['bedrock:InvokeModel'],
-          // Built from the shared allowlist so the grant and QueryBucketSchema's
-          // accepted `model` ids stay in sync — a model added there is invokable here.
-          resources: SUPPORTED_COMPLETION_MODELS.flatMap((m) => [
-            m.inferenceProfileArn,
-            m.foundationModelArn,
-          ]),
-        },
-      ],
-      timeout: '30 seconds',
-      memory: '512 MB',
-    });
-    // RAG per-bucket enablement (FIL-555): read/write the BUCKET#{name}/RAG
-    // enablement row + sync telemetry for the caller's tenant. Both are gated by
-    // auth + subscriptionGuard + ragAccessMiddleware. The enablement row lives in
-    // ragIndexerTable (extraLink below); they also read UserInfoTable (already
-    // linked via allResources) for tenant/org profile, and resolve tenant
-    // ownership via the orchestrator (SSM-backed S3 keys), so they need the SSM
-    // read grant but not `rag: true` (no s3vectors/bedrock).
-    addRoute({
-      method: 'GET',
-      routePath: '/api/buckets/{name}/rag/enabled',
-      handler: 'get-bucket-rag-enablement',
-      extraEnv: orchestratorEnv,
-      extraLink: [ragIndexerTable],
-      permissions: bucketReadPermissions,
-    });
-    addRoute({
-      method: 'POST',
-      routePath: '/api/buckets/{name}/rag/enabled',
-      handler: 'set-bucket-rag-enablement',
-      extraEnv: orchestratorEnv,
-      extraLink: [ragIndexerTable],
-      permissions: bucketReadPermissions,
-    });
-
-    // ── Auth routes ──────────────────────────────────────────────────
+    // Where a login round trip or a Stripe return may send the browser back to.
     const allowedRedirectOrigins = allowedOrigins.join(',');
-    addRoute({
-      method: 'GET',
-      routePath: '/login',
-      handler: 'auth-login',
-      extraEnv: { WEBSITE_URL: siteUrl, ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins },
-      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
-    });
-    addRoute({
-      method: 'GET',
-      routePath: '/api/auth/callback',
-      handler: 'auth-callback',
-      extraEnv: { WEBSITE_URL: siteUrl, ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins },
-      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
-    });
-    addRoute({
-      method: 'GET',
-      routePath: '/logout',
-      handler: 'auth-logout',
-      extraEnv: { WEBSITE_URL: siteUrl, ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins },
-    });
-
-    // ── Me route ───────────────────────────────────────────────────
-    addRoute({
-      method: 'GET',
-      routePath: '/api/me',
-      handler: 'get-me',
-      extraLink: mgmtRuntimeResources,
-      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
-      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
-    });
-    addRoute({
-      method: 'PATCH',
-      routePath: '/api/me/profile',
-      handler: 'update-profile',
-      extraLink: mgmtRuntimeResources,
-      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
-    });
-    addRoute({ method: 'POST', routePath: '/api/me/change-password', handler: 'change-password' });
-    addRoute({
-      method: 'GET',
-      routePath: '/api/me/preferences',
-      handler: 'get-preferences',
-      extraLink: [hubSpotServiceKey],
-    });
-    addRoute({
-      method: 'PATCH',
-      routePath: '/api/me/preferences',
-      handler: 'update-preferences',
-      extraLink: [hubSpotServiceKey],
-    });
-    addRoute({
-      method: 'POST',
-      routePath: '/api/me/resend-verification',
-      handler: 'resend-verification',
-      extraLink: mgmtRuntimeResources,
-      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
-    });
-
-    // ── MFA routes ──────────────────────────────────────────────────
-    addRoute({
-      method: 'POST',
-      routePath: '/api/mfa/enroll',
-      handler: 'enroll-mfa',
-      extraLink: mgmtRuntimeResources,
-      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
-    });
-    addRoute({
-      method: 'POST',
-      routePath: '/api/mfa/disable',
-      handler: 'disable-mfa',
-      extraLink: mgmtRuntimeResources,
-      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
-    });
-    addRoute({
-      method: 'DELETE',
-      routePath: '/api/mfa/enrollments/{enrollmentId}',
-      handler: 'delete-mfa-enrollment',
-      extraLink: mgmtRuntimeResources,
-      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
-    });
-    addRoute({
-      method: 'POST',
-      routePath: '/api/mfa/recovery-code/regenerate',
-      handler: 'regenerate-recovery-code',
-      extraLink: mgmtRuntimeResources,
-      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
-    });
-    addRoute({
-      method: 'DELETE',
-      routePath: '/api/mfa/passkeys/{methodId}',
-      handler: 'delete-passkey',
-      extraLink: mgmtRuntimeResources,
-      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
-    });
-
-    // ── Usage + Dashboard routes ─────────────────────────────────────
-    addRoute({
-      method: 'GET',
-      routePath: '/api/usage',
-      handler: 'get-usage',
-      extraEnv: orchestratorEnv,
-      permissions: s3DataPlanePermissions,
-      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
-    });
-    addRoute({
-      method: 'GET',
-      routePath: '/api/usage/trends',
-      handler: 'get-usage-trends',
-      extraEnv: orchestratorEnv,
-      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
-    });
-    addRoute({
-      method: 'GET',
-      routePath: '/api/activity',
-      handler: 'get-activity',
-      extraEnv: orchestratorEnv,
-      permissions: bucketReadPermissions,
-      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
-      memory: '1024 MB',
-    });
-
-    // ── Billing routes ───────────────────────────────────────────────
-    addRoute({
-      method: 'GET',
-      routePath: '/api/billing',
-      handler: 'get-billing',
-      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
-    });
-    addRoute({
-      method: 'POST',
-      routePath: '/api/billing/setup-intent',
-      handler: 'create-setup-intent',
-    });
-    addRoute({
-      method: 'POST',
-      routePath: '/api/billing/activate',
-      handler: 'activate-subscription',
-      extraEnv: orchestratorEnv,
-    });
-    addRoute({ method: 'GET', routePath: '/api/billing/invoices', handler: 'list-invoices' });
-    addRoute({
-      method: 'POST',
-      routePath: '/api/billing/portal',
-      handler: 'create-portal-session',
-      // ALLOWED_REDIRECT_ORIGINS so the Stripe return_url can follow the alias
-      // the user is on; resolveOrigin falls back to WEBSITE_URL without it.
-      extraEnv: { WEBSITE_URL: siteUrl, ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins },
-    });
 
     // ── Account deletion ─────────────────────────────────────────────
     // Off on every stage until FIL-919 gives Aurora a tenant DELETE. Gates the
@@ -1151,59 +922,316 @@ export default $config({
       function: accountDeletionSweeper.arn,
     });
 
-    // No subscriptionGuardMiddleware on these: it blocks writes for cancelled
-    // and inactive subscriptions, the population most likely to be leaving.
-    addRoute({
-      method: 'POST',
-      routePath: '/api/account/deletion',
-      handler: 'request-account-deletion',
-      extraLink: [
-        deletionChallengeTable,
-        deletionCodeHmacKey,
-        ...(sendGridApiKey ? [sendGridApiKey] : []),
-      ],
-      extraEnv: { ACCOUNT_DELETION_ENABLED: accountDeletionEnabled },
-    });
-    addRoute({
-      method: 'POST',
-      routePath: '/api/account/deletion/confirm',
-      handler: 'confirm-account-deletion',
-      // The org-name read, salt read and step-up enrollment lookup do not fit the
-      // 10s default.
-      timeout: '30 seconds',
-      extraLink: [deletionChallengeTable, deletionCodeHmacKey, ...mgmtRuntimeResources],
-      extraEnv: {
-        AUTH0_MGMT_DOMAIN: auth0MgmtDomain,
-        ACCOUNT_DELETION_ENABLED: accountDeletionEnabled,
-        ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
-      },
-      permissions: [{ actions: ['lambda:InvokeFunction'], resources: [accountDeletionWorker.arn] }],
-    });
+    // ── Routes ───────────────────────────────────────────────────────
+    // The manifest is the route list: every entry becomes a Lambda and an API
+    // Gateway route below, so a handler cannot reach the internet without a
+    // manifest entry declaring what it requires of the caller.
+    //
+    // Straight from the manifest module rather than the package barrel, whose
+    // other exports pull zod into the config bundle behind them.
+    const { ROUTE_MANIFEST } = await import('./packages/shared/src/route-manifest.js');
 
-    // Declared after the deletion worker: customer.deleted commits a full account
-    // teardown and invokes it.
-    addRoute({
-      method: 'POST',
-      routePath: '/api/stripe/webhook',
-      handler: 'stripe-webhook',
-      // HubSpot key: the webhook mirrors subscription status onto the contact
-      // so lifecycle sequences can tell a paying customer from a trial (FIL-828).
-      extraLink: [hubSpotServiceKey],
-      extraEnv: {
-        ...orchestratorEnv,
-        STRIPE_WEBHOOK_SECRET_SSM_PATH: $interpolate`/filone/${$app.stage}/stripe-webhook-secret`,
-        ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
+    type RouteInfraConfig = Omit<AddRouteProps, 'method' | 'routePath' | 'handler'>;
+
+    // The manifest's handler names, as a union. A type-only import, so it is
+    // erased and the value import above stays the only thing in the bundle.
+    type RouteHandler = import('./packages/shared/src/route-manifest.js').RouteHandler;
+
+    // What a route needs beyond the defaults. A handler absent from this record
+    // gets them: everything in allResources linked, the shared environment, a
+    // 10-second timeout, no extra IAM. That is the whole configuration of a
+    // DynamoDB-only route, which most of the account and key routes are.
+    //
+    // Keys are compile-checked against the manifest, so a key naming no route
+    // fails the build rather than silently dropping that route's IAM grants and
+    // environment. Partial because the map lists only the routes that need
+    // something beyond the defaults.
+    //
+    // Declared here rather than beside each route because the entries reference
+    // the queues, tables and workers above, all of which have to exist first.
+    const ROUTE_INFRA_CONFIGS: Partial<Record<RouteHandler, RouteInfraConfig>> = {
+      // ── Buckets and objects ────────────────────────────────────────
+      'list-buckets': {
+        extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL, ...fthEnv, ...forgeEnv },
+        permissions: bucketReadPermissions,
+        provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+        memory: '1024 MB',
       },
-      permissions: [
-        {
-          actions: ['ssm:GetParameter'],
-          resources: [
-            $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/stripe-webhook-secret`,
-          ],
+      'create-bucket': {
+        extraEnv: orchestratorEnv,
+        permissions: [
+          {
+            actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+            resources: [auroraApiKeySsmArn, ...orchestratorS3KeySsmArns],
+          },
+        ],
+        provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+        timeout: '30 seconds',
+      },
+      'get-bucket': {
+        extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL, ...fthEnv, ...forgeEnv },
+        permissions: bucketReadPermissions,
+        provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+        memory: '1024 MB',
+      },
+      'delete-bucket': {
+        // Same credentials as create-bucket, minus ssm:PutParameter — deleting never
+        // mints a key. Aurora deletes through the portal (tenant API key from SSM),
+        // FTH/Forge through the S3 data plane (console S3 key).
+        extraEnv: orchestratorEnv,
+        permissions: [
+          {
+            actions: ['ssm:GetParameter'],
+            resources: [auroraApiKeySsmArn, ...orchestratorS3KeySsmArns],
+          },
+        ],
+      },
+      'create-bulk-delete-job': {
+        extraEnv: { ...fthEnv, ...forgeEnv },
+        // Linking the queue grants the send; the handler only enqueues the job.
+        extraLink: [bulkDeleteQueue],
+      },
+      presign: {
+        extraEnv: { ...fthEnv, ...forgeEnv },
+        permissions: s3DataPlanePermissions,
+        provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+        memory: '512 MB',
+      },
+      'get-bucket-analytics': {
+        permissions: bucketReadPermissions,
+        extraEnv: orchestratorEnv,
+      },
+
+      // ── Keys ───────────────────────────────────────────────────────
+      // The RAG API key routes take no entry: they are named bearer tokens
+      // scoped to the RAG query endpoint (distinct from S3 access keys), and
+      // their handlers touch nothing but UserInfoTable, which allResources
+      // already links.
+      'list-access-keys': {
+        provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      },
+      'create-access-key': {
+        extraEnv: orchestratorEnv,
+        permissions: [
+          {
+            actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+            resources: [auroraApiKeySsmArn, ...orchestratorS3KeySsmArns],
+          },
+        ],
+        timeout: '30 seconds',
+      },
+      'delete-access-key': {
+        extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL, ...fthEnv, ...forgeEnv },
+        permissions: [
+          {
+            actions: ['ssm:GetParameter'],
+            resources: [auroraApiKeySsmArn],
+          },
+        ],
+      },
+
+      // ── RAG ────────────────────────────────────────────────────────
+      // RAG query playground (FIL-554): embed the question, vector-search the
+      // bucket's index, and ground a Bedrock completion on the retrieved chunks.
+      // `rag: true` grants s3vectors:QueryVectors + bedrock:InvokeModel on the
+      // Titan embeddings model; the extra permission below covers the Claude
+      // completion model — both its cross-region inference profile and the
+      // underlying foundation model. Higher timeout/memory for the Bedrock calls.
+      'query-bucket': {
+        rag: true,
+        // Reads the bucket's enablement row to reject queries before the first
+        // indexing pass completes (BUCKET_NOT_INDEXED).
+        extraLink: [ragIndexerTable],
+        extraEnv: orchestratorEnv,
+        permissions: [
+          ...bucketReadPermissions,
+          {
+            actions: ['bedrock:InvokeModel'],
+            // Built from the shared allowlist so the grant and QueryBucketSchema's
+            // accepted `model` ids stay in sync — a model added there is invokable here.
+            resources: SUPPORTED_COMPLETION_MODELS.flatMap((m) => [
+              m.inferenceProfileArn,
+              m.foundationModelArn,
+            ]),
+          },
+        ],
+        timeout: '30 seconds',
+        memory: '512 MB',
+      },
+      // RAG per-bucket enablement (FIL-555): read/write the BUCKET#{name}/RAG
+      // enablement row + sync telemetry for the caller's tenant. Both are gated by
+      // auth + subscriptionGuard + ragAccessMiddleware. The enablement row lives in
+      // ragIndexerTable (extraLink below); they also read UserInfoTable (already
+      // linked via allResources) for tenant/org profile, and resolve tenant
+      // ownership via the orchestrator (SSM-backed S3 keys), so they need the SSM
+      // read grant but not `rag: true` (no s3vectors/bedrock).
+      'get-bucket-rag-enablement': {
+        extraEnv: orchestratorEnv,
+        extraLink: [ragIndexerTable],
+        permissions: bucketReadPermissions,
+      },
+      'set-bucket-rag-enablement': {
+        extraEnv: orchestratorEnv,
+        extraLink: [ragIndexerTable],
+        permissions: bucketReadPermissions,
+      },
+
+      // ── Auth ───────────────────────────────────────────────────────
+      'auth-login': {
+        extraEnv: { WEBSITE_URL: siteUrl, ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins },
+        provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      },
+      'auth-callback': {
+        extraEnv: { WEBSITE_URL: siteUrl, ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins },
+        provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      },
+      'auth-logout': {
+        extraEnv: { WEBSITE_URL: siteUrl, ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins },
+      },
+
+      // ── Account and MFA ────────────────────────────────────────────
+      'get-me': {
+        extraLink: mgmtRuntimeResources,
+        extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+        provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      },
+      'update-profile': {
+        extraLink: mgmtRuntimeResources,
+        extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+      },
+      'get-preferences': {
+        extraLink: [hubSpotServiceKey],
+      },
+      'update-preferences': {
+        extraLink: [hubSpotServiceKey],
+      },
+      'resend-verification': {
+        extraLink: mgmtRuntimeResources,
+        extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+      },
+      'enroll-mfa': {
+        extraLink: mgmtRuntimeResources,
+        extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+      },
+      'disable-mfa': {
+        extraLink: mgmtRuntimeResources,
+        extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+      },
+      'delete-mfa-enrollment': {
+        extraLink: mgmtRuntimeResources,
+        extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+      },
+      'regenerate-recovery-code': {
+        extraLink: mgmtRuntimeResources,
+        extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+      },
+      'delete-passkey': {
+        extraLink: mgmtRuntimeResources,
+        extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+      },
+
+      // ── Organization ───────────────────────────────────────────────
+      // Ownership transfer reads the caller's MFA enrollments to decide whether a
+      // fresh sign-in is enough of a step-up, so it needs the Management API
+      // credentials the account routes already carry.
+      'transfer-ownership': {
+        extraLink: mgmtRuntimeResources,
+        extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+      },
+
+      // ── Invitations ────────────────────────────────────────────────
+      // The only route that sends mail. `SendGridApiKey` exists on staging and
+      // production alone; every other stage sends no email and logs the invitation
+      // by id, never the accept URL, because the URL carries the token.
+      // `WEBSITE_URL` is the accept link's origin, taken from configuration rather
+      // than from the request, since the link goes to somebody else's inbox.
+      'create-invitation': {
+        extraEnv: { WEBSITE_URL: siteUrl },
+        ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
+      },
+
+      // ── Usage and dashboard ────────────────────────────────────────
+      'get-usage': {
+        extraEnv: orchestratorEnv,
+        permissions: s3DataPlanePermissions,
+        provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      },
+      'get-usage-trends': {
+        extraEnv: orchestratorEnv,
+        provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      },
+      'get-activity': {
+        extraEnv: orchestratorEnv,
+        permissions: bucketReadPermissions,
+        provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+        memory: '1024 MB',
+      },
+
+      // ── Billing ────────────────────────────────────────────────────
+      'get-billing': {
+        provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      },
+      'activate-subscription': {
+        extraEnv: orchestratorEnv,
+      },
+      'create-portal-session': {
+        // ALLOWED_REDIRECT_ORIGINS so the Stripe return_url can follow the alias
+        // the user is on; resolveOrigin falls back to WEBSITE_URL without it.
+        extraEnv: { WEBSITE_URL: siteUrl, ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins },
+      },
+
+      // ── Account deletion and webhooks ──────────────────────────────
+      'request-account-deletion': {
+        extraLink: [
+          deletionChallengeTable,
+          deletionCodeHmacKey,
+          ...(sendGridApiKey ? [sendGridApiKey] : []),
+        ],
+        extraEnv: { ACCOUNT_DELETION_ENABLED: accountDeletionEnabled },
+      },
+      'confirm-account-deletion': {
+        // The org-name read, salt read and step-up enrollment lookup do not fit the
+        // 10s default.
+        timeout: '30 seconds',
+        extraLink: [deletionChallengeTable, deletionCodeHmacKey, ...mgmtRuntimeResources],
+        extraEnv: {
+          AUTH0_MGMT_DOMAIN: auth0MgmtDomain,
+          ACCOUNT_DELETION_ENABLED: accountDeletionEnabled,
+          ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
         },
-        { actions: ['lambda:InvokeFunction'], resources: [accountDeletionWorker.arn] },
-      ],
-    });
+        permissions: [
+          { actions: ['lambda:InvokeFunction'], resources: [accountDeletionWorker.arn] },
+        ],
+      },
+      'stripe-webhook': {
+        // HubSpot key: the webhook mirrors subscription status onto the contact
+        // so lifecycle sequences can tell a paying customer from a trial (FIL-828).
+        extraLink: [hubSpotServiceKey],
+        extraEnv: {
+          ...orchestratorEnv,
+          STRIPE_WEBHOOK_SECRET_SSM_PATH: $interpolate`/filone/${$app.stage}/stripe-webhook-secret`,
+          ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
+        },
+        permissions: [
+          {
+            actions: ['ssm:GetParameter'],
+            resources: [
+              $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/stripe-webhook-secret`,
+            ],
+          },
+          { actions: ['lambda:InvokeFunction'], resources: [accountDeletionWorker.arn] },
+        ],
+      },
+    };
+
+    for (const route of ROUTE_MANIFEST) {
+      addRoute({
+        method: route.method,
+        routePath: route.path,
+        handler: route.handler,
+        ...ROUTE_INFRA_CONFIGS[route.handler],
+      });
+    }
 
     // ── Usage reporting (cron-based) ────────────────────────────────
     const usageWorker = createFn('UsageReportingWorker', {
@@ -1335,6 +1363,23 @@ export default $config({
       // propagation lag documented for ops on the HubSpot property itself.
       schedule: 'cron(30 0/6 * * ? *)',
       function: hubSpotContactSync.arn,
+    });
+
+    // ── Owner-count drift checker (cron-based, repairs the counter) ──
+    // The last-Owner invariant is a counter, and a counter with no
+    // reconciliation path eventually lies: this recounts each org's Owners from
+    // the membership rows and repairs a META row that disagrees.
+    const ownerCountDriftChecker = createFn('OwnerCountDriftChecker', {
+      handler: 'packages/backend/src/jobs/owner-count-drift-checker.handler',
+      link: [orgTable],
+      timeout: '300 seconds',
+      memory: '256 MB',
+    });
+
+    new sst.aws.CronV2('OwnerCountDriftCheckerCron', {
+      // Daily at 04:00 UTC, away from the billing jobs' windows.
+      schedule: 'cron(0 4 * * ? *)',
+      function: ownerCountDriftChecker.arn,
     });
 
     return {

@@ -1,49 +1,43 @@
-import {
-  ConditionalCheckFailedException,
-  GetItemCommand,
-  PutItemCommand,
-  UpdateItemCommand,
-} from '@aws-sdk/client-dynamodb';
-import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
+import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import type { CreateSetupIntentResponse } from '@filone/shared';
+import { ApiErrorCode } from '@filone/shared';
+import type { CreateSetupIntentResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
-import { getDynamoClient } from '../lib/ddb-client.js';
 import { getStripeClient } from '../lib/stripe-client.js';
+import { emitTrialClaimBlockedByLegacyRow } from '../lib/stripe-webhook-metrics.js';
+import {
+  legacyRowExists,
+  readSubscription,
+  updateSubscription,
+  writeSubscription,
+} from '../lib/subscription-store.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { authorize } from '../middleware/authorize.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-
-const dynamo = getDynamoClient();
 
 // Exported for unit testing (without the auth/csrf middleware chain).
 export async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { userId, email, orgId } = getUserInfo(event);
-  const tableName = Resource.BillingTable.name;
   const stripe = getStripeClient();
 
-  // 1. Check if customer already exists in billing table
-  const existing = await dynamo.send(
-    new GetItemCommand({
-      TableName: tableName,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
-    }),
-  );
+  // 1. Check whether the org already has a customer in the billing table.
+  // Consistently: this handler decides between updating a record and creating
+  // one, and an eventually-consistent miss on a record written seconds ago
+  // (a trial claim, or a second click on the same button) creates a second
+  // Stripe customer for the same org.
+  const record = await readSubscription(orgId, { consistentRead: true });
 
   let stripeCustomerId: string;
 
-  if (existing.Item) {
-    const record = unmarshall(existing.Item);
+  if (record) {
     if (record.stripeCustomerId) {
-      stripeCustomerId = record.stripeCustomerId as string;
+      stripeCustomerId = record.stripeCustomerId;
     } else {
       // Create Stripe customer and update record (without clobbering existing fields)
       const customer = await stripe.customers.create({
@@ -54,22 +48,40 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
       });
       stripeCustomerId = customer.id;
 
-      await dynamo.send(
-        new UpdateItemCommand({
-          TableName: tableName,
-          Key: {
-            pk: { S: `CUSTOMER#${userId}` },
-            sk: { S: 'SUBSCRIPTION' },
-          },
+      await updateSubscription(
+        { orgId, userId },
+        {
           UpdateExpression: 'SET stripeCustomerId = :cid, updatedAt = :now',
           ExpressionAttributeValues: {
             ':cid': { S: stripeCustomerId },
             ':now': { S: new Date().toISOString() },
           },
-        }),
+        },
       );
     }
   } else {
+    // No org record — but that is only "first time" if the backfill has reached
+    // this account. A pre-re-key `CUSTOMER#` row still standing means it has
+    // not, and this org already has a Stripe customer nothing reading the org
+    // key can see. Minting here would give it a second one, and
+    // activate-subscription would then put a second live subscription beside
+    // the one still billing. Same refusal, metric and log as the trial claim's,
+    // and it dies with the runbook's dated cleanup like that one.
+    if (await legacyRowExists(userId)) {
+      emitTrialClaimBlockedByLegacyRow();
+      console.error(
+        '[create-setup-intent] Refusing to mint a Stripe customer: a pre-re-key CUSTOMER# row still exists',
+        { userId, orgId },
+      );
+      return new ResponseBuilder()
+        .status(503)
+        .body<ErrorResponse>({
+          message: 'Billing is temporarily unavailable for this account. Please try again shortly.',
+          code: ApiErrorCode.SUBSCRIPTION_INACTIVE,
+        })
+        .build();
+    }
+
     // First time — create the Stripe customer and persist only the customer
     // mapping. Trial entitlement is granted only by ensureTrialEntitlement.
     const customer = await stripe.customers.create({
@@ -81,18 +93,17 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     stripeCustomerId = customer.id;
 
     try {
-      await dynamo.send(
-        new PutItemCommand({
-          TableName: tableName,
-          Item: marshall({
-            pk: `CUSTOMER#${userId}`,
-            sk: 'SUBSCRIPTION',
-            stripeCustomerId,
-            orgId,
-            updatedAt: new Date().toISOString(),
-          }),
+      // The org's record does not exist yet, so this is its first write and it
+      // carries the whole mapping — nothing reads a half-written one into being.
+      await writeSubscription(
+        { orgId, userId },
+        {
+          item: {
+            stripeCustomerId: { S: stripeCustomerId },
+            updatedAt: { S: new Date().toISOString() },
+          },
           ConditionExpression: 'attribute_not_exists(pk)',
-        }),
+        },
       );
     } catch (err) {
       // A record already exists
@@ -117,5 +128,6 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
+  .use(authorize('billing.manage'))
   .use(csrfMiddleware())
   .use(errorHandlerMiddleware());

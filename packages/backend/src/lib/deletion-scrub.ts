@@ -17,8 +17,10 @@ import {
 } from '../jobs/rag-indexer-manifest.js';
 import { getDynamoClient } from './ddb-client.js';
 import { RAGKeys } from './dynamo-records.js';
+import { OrgKeys } from './org-membership.js';
 import type { DeletionMember } from './deletion-record.js';
 import { RagApiKeyKeys } from './rag-api-keys.js';
+import { SubscriptionKeys } from './subscription-store.js';
 
 type Item = Record<string, AttributeValue>;
 type Cursor = Record<string, AttributeValue> | undefined;
@@ -39,6 +41,10 @@ type Cursor = Record<string, AttributeValue> | undefined;
  * rekeyed to a hash by its own migration. `WEBHOOK#{eventId}` carries no org
  * attribute and expires on its own TTL. `ALLOWLIST#{email}` is deleted in the
  * Auth0 step, which is the only place its key can still be resolved.
+ *
+ * The OrgTable rows are destroyed rather than retained. They describe an org
+ * that no longer exists, and leaving a membership behind would leave the member
+ * able to act in it. They go last, after every step that reads a member has run.
  */
 export async function scrubOrgRecords(orgId: string, members: DeletionMember[]): Promise<void> {
   const orgRows = await readOrgPartition(orgId);
@@ -49,12 +55,16 @@ export async function scrubOrgRecords(orgId: string, members: DeletionMember[]):
   await purgeRagState(orgId);
   await destroyOrgCredentials(orgRows);
 
-  await scrubBilling(members);
+  await scrubBilling(orgId, members);
   await scrubMembers(orgId, members);
 
-  // Last: it holds the tenant ids a resumed pass reads, and a failed pass leaves
-  // the most context for troubleshooting behind it.
+  // It holds the tenant ids a resumed pass reads, and a failed pass leaves the
+  // most context for troubleshooting behind it.
   await scrubOrgProfile(orgId);
+
+  // Last of all: these are the rows a re-driven pass resolves its members from,
+  // and every member-dependent step above has to be able to run again.
+  await destroyOrgTableRows(orgId, members);
 }
 
 /**
@@ -154,20 +164,37 @@ async function purgeRagBucket(
  * disagree: the Stripe cancel has already succeeded by the time the scrub runs,
  * and the stamp refuses every webhook that arrives afterwards.
  *
+ * The org's row carries the fence, because it is the row every reader and writer
+ * addresses, and it is stamped for every deletion.
+ *
+ * A member's pre-re-key `CUSTOMER#` row is stamped only when this deletion also
+ * ends their account. The legacy row is keyed by user, so it belongs to the
+ * member's own personal org; an invited member keeps that org and its billing,
+ * and stamping their row here would fence a subscription this deletion has no
+ * claim on. Where the row is stamped it keeps the old fence closed until the
+ * runbook's dated cleanup step deletes those rows; a row that is already gone
+ * makes its own stamp a no-op.
+ *
  * `stripeCustomerId` and `subscriptionId` are system identifiers and stay.
  */
-async function scrubBilling(members: DeletionMember[]): Promise<void> {
-  for (const { userId } of members) {
-    await scrubRow({
-      tableName: Resource.BillingTable.name,
-      key: { pk: `CUSTOMER#${userId}`, sk: 'SUBSCRIPTION' },
-      set: 'subscriptionStatus = :canceled, updatedAt = :now',
-      remove:
-        'paymentMethodId, paymentMethodLast4, paymentMethodBrand, ' +
-        'paymentMethodExpMonth, paymentMethodExpYear, gracePeriodEndsAt',
-      values: { ':canceled': SubscriptionStatus.Canceled },
-    });
+async function scrubBilling(orgId: string, members: DeletionMember[]): Promise<void> {
+  await scrubSubscriptionRow(SubscriptionKeys.orgPk(orgId));
+  for (const { userId, deleteIdentity } of members) {
+    if (!deleteIdentity) continue;
+    await scrubSubscriptionRow(SubscriptionKeys.legacyPk(userId));
   }
+}
+
+async function scrubSubscriptionRow(pk: string): Promise<void> {
+  await scrubRow({
+    tableName: Resource.BillingTable.name,
+    key: { pk, sk: SubscriptionKeys.sk() },
+    set: 'subscriptionStatus = :canceled, updatedAt = :now',
+    remove:
+      'paymentMethodId, paymentMethodLast4, paymentMethodBrand, ' +
+      'paymentMethodExpMonth, paymentMethodExpYear, gracePeriodEndsAt',
+    values: { ':canceled': SubscriptionStatus.Canceled },
+  });
 }
 
 /**
@@ -195,12 +222,158 @@ async function destroyOrgCredentials(orgRows: Item[]): Promise<void> {
  * fresh ids and then cancels its own transaction against the still-present key —
  * a 500 on every login instead of a clean refusal. The user profile keeps `sub`,
  * the audit correlation key, which outlives the Auth0 user.
+ *
+ * The first two rows are the member's account, so they are stamped only for a
+ * member whose account this deletion ends (`deleteIdentity`). A member who was
+ * invited here, or who belongs to another org, still logs in tomorrow, and a
+ * `deletedAt` on their identity row would say otherwise. That member's rows are
+ * re-pointed instead. The legacy membership row is stamped either way: it
+ * belongs to this org.
  */
 async function scrubMembers(orgId: string, members: DeletionMember[]): Promise<void> {
-  for (const { userId, sub } of members) {
-    await scrubRow({ key: { pk: `SUB#${sub}`, sk: 'IDENTITY' } });
-    await scrubRow({ key: { pk: `USER#${userId}`, sk: 'PROFILE' } });
-    await scrubRow({ key: { pk: `ORG#${orgId}`, sk: `MEMBER#${userId}` } });
+  for (const member of members) {
+    if (member.deleteIdentity) {
+      await scrubRow({ key: { pk: `SUB#${member.sub}`, sk: 'IDENTITY' } });
+      await scrubRow({ key: { pk: `USER#${member.userId}`, sk: 'PROFILE' } });
+    } else {
+      await repointHomeOrg(orgId, member);
+    }
+    await scrubRow({ key: { pk: `ORG#${orgId}`, sk: `MEMBER#${member.userId}` } });
+  }
+}
+
+/**
+ * Moves a surviving member's home org to one they still belong to.
+ *
+ * Both rows name the org the member logs in to: `authMiddleware` reads the orgId
+ * off the identity row and refuses the request when that org is deleting, before
+ * any `X-Org-Id` header is looked at. A member left naming this org would keep
+ * their Auth0 user and their rows and still be refused on every request.
+ *
+ * `homeOrgId` is absent when the member has no other membership to move to —
+ * an invited sole member, whose account survives with nowhere to send it. The
+ * rows are left as they are; there is no org to name.
+ *
+ * Both writes are conditioned on the row still naming the deleting org, so a
+ * re-drive after the move lands on a row that no longer matches and changes
+ * nothing.
+ */
+async function repointHomeOrg(orgId: string, member: DeletionMember): Promise<void> {
+  const { homeOrgId } = member;
+  if (!homeOrgId) return;
+  await repointRow({ pk: `SUB#${member.sub}`, sk: 'IDENTITY' }, orgId, homeOrgId);
+  await repointRow({ pk: `USER#${member.userId}`, sk: 'PROFILE' }, orgId, homeOrgId);
+}
+
+async function repointRow(
+  key: Record<string, string>,
+  deletingOrgId: string,
+  homeOrgId: string,
+): Promise<void> {
+  try {
+    await getDynamoClient().send(
+      new UpdateItemCommand({
+        TableName: Resource.UserInfoTable.name,
+        Key: marshall(key),
+        UpdateExpression: 'SET orgId = :home',
+        ConditionExpression: 'attribute_exists(pk) AND orgId = :deleting',
+        ExpressionAttributeValues: marshall({ ':home': homeOrgId, ':deleting': deletingOrgId }),
+      }),
+    );
+  } catch (err) {
+    // The row is gone or already moved. Either way there is nothing to do.
+    if (!(err instanceof ConditionalCheckFailedException)) throw err;
+  }
+}
+
+/**
+ * The invite token lookup, `INVITETOKEN#{sha256(token)}` / `LOOKUP`. Its key
+ * builders arrive with invitations; the shape is mirrored here so an invitation
+ * outstanding on the day an org is deleted takes its lookup row with it.
+ */
+const INVITE_SK_PREFIX = 'INVITE#';
+const inviteTokenLookupKey = (tokenHash: string): Record<string, string> => ({
+  pk: `INVITETOKEN#${tokenHash}`,
+  sk: 'LOOKUP',
+});
+
+/**
+ * Everything the org owns in OrgTable: the membership rows, the `META` counter,
+ * any invitation rows, and each member's `USER#{userId}/MEMBERSHIP#{orgId}`
+ * inverse item.
+ *
+ * The membership rows go last, both within this step and across the scrub as a
+ * whole. Teardown resolves its member list from them, so a pass that dies
+ * partway through leaves the rows a re-drive reads to resolve the same members
+ * again — the same reason the UserInfoTable `MEMBER#` rows are retained rather
+ * than destroyed.
+ */
+async function destroyOrgTableRows(orgId: string, members: DeletionMember[]): Promise<void> {
+  const orgTable = Resource.OrgTable.name;
+  const rows = await readOrgTablePartition(orgId);
+  const memberRows = rows.filter(isMemberRow);
+
+  // Before the invitation rows that name them, for the same reason the RAG
+  // lookups go first: the lookup key derives from the row's `tokenHash`.
+  await deleteInviteTokenLookups(rows);
+
+  for (const row of rows.filter((candidate) => !isMemberRow(candidate))) {
+    await deleteItem(orgTable, { pk: row.pk!, sk: row.sk! });
+  }
+
+  // Parsed the way the census parses it, not sliced: a `MEMBER#` row with no id
+  // after the prefix would otherwise yield an empty user id and send a delete at
+  // `USER#`, a partition this org does not own.
+  const userIds = new Set([
+    ...memberRows
+      .map((row) => OrgKeys.parseMemberSk(row.sk?.S))
+      .filter((userId): userId is string => userId !== undefined),
+    ...members.map((member) => member.userId),
+  ]);
+  for (const userId of userIds) {
+    await deleteRow(orgTable, { pk: OrgKeys.userPk(userId), sk: OrgKeys.membershipSk(orgId) });
+  }
+
+  for (const row of memberRows) {
+    await deleteItem(orgTable, { pk: row.pk!, sk: row.sk! });
+  }
+}
+
+function isMemberRow(row: Item): boolean {
+  return row.sk?.S?.startsWith(OrgKeys.memberSkPrefix()) === true;
+}
+
+/**
+ * Enumerated by pk rather than by known sks, so a row shape added later is
+ * destroyed with the rest instead of outliving the org silently.
+ */
+async function readOrgTablePartition(orgId: string): Promise<Item[]> {
+  return collectPages((cursor) =>
+    getDynamoClient().send(
+      new QueryCommand({
+        TableName: Resource.OrgTable.name,
+        KeyConditionExpression: 'pk = :pk',
+        ExpressionAttributeValues: marshall({ ':pk': OrgKeys.orgPk(orgId) }),
+        ConsistentRead: true,
+        ...(cursor ? { ExclusiveStartKey: cursor } : {}),
+      }),
+    ),
+  );
+}
+
+/**
+ * An invitation row that stores no `tokenHash` leaves its lookup row in place:
+ * the lookup pk is the hash, and without it the row cannot be addressed. Nothing
+ * reclaims it — OrgTable has no TTL, and invite expiry is a comparison made when
+ * the accept link is read, not a row that disappears. The row holds the hash of
+ * a token whose invitation is gone, so accepting it resolves to nothing.
+ */
+async function deleteInviteTokenLookups(orgRows: Item[]): Promise<void> {
+  for (const row of orgRows) {
+    if (!row.sk?.S?.startsWith(INVITE_SK_PREFIX)) continue;
+    const tokenHash = row.tokenHash?.S;
+    if (!tokenHash) continue;
+    await deleteRow(Resource.OrgTable.name, inviteTokenLookupKey(tokenHash));
   }
 }
 

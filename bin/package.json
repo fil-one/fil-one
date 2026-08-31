@@ -3,6 +3,9 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1031.0",
     "@aws-sdk/client-lambda": "^3.1031.0",
@@ -13,5 +16,10 @@
     "@filone/aurora-backoffice-client": "workspace:*",
     "sst": "^4.5.12",
     "stripe": "^22.0.2"
+  },
+  "devDependencies": {
+    "@filone/backend": "workspace:*",
+    "@filone/shared": "workspace:*",
+    "vitest": "^4.1.2"
   }
 }

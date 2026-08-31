@@ -23,12 +23,25 @@ import {
   changePassword,
   getMe,
   getPreferences,
+  updateOrg,
   updatePreferences,
   updateProfile,
 } from '../lib/api.js';
-import { getProvider, isSocialConnection, UpdateProfileSchema } from '@filone/shared';
-import type { ConnectionProvider, MeResponse, PreferencesResponse } from '@filone/shared';
+import {
+  getProvider,
+  isSocialConnection,
+  OrgNameSchema,
+  UpdateProfileSchema,
+} from '@filone/shared';
+import type {
+  ConnectionProvider,
+  MeResponse,
+  PreferencesResponse,
+  UpdateProfileRequest,
+} from '@filone/shared';
 import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
+import { RequirePermission } from '../components/RequirePermission';
+import { useHasPermission } from '../lib/use-permissions.js';
 
 // ---------------------------------------------------------------------------
 // Section card wrapper
@@ -154,9 +167,88 @@ function applyProfileUpdate(result: {
       // An email change always resets verification — reflect it immediately so
       // the verify-email gate in _app.tsx re-triggers without a /me round-trip.
       ...(result.email !== undefined ? { email: result.email, emailVerified: false } : {}),
-      ...(result.orgName !== undefined ? { orgName: result.orgName } : {}),
+      ...(result.orgName !== undefined
+        ? {
+            orgName: result.orgName,
+            // The switcher reads the same name from `memberships`; patching one
+            // and not the other renames the org in the header and leaves the
+            // old name in the list until /me is refetched.
+            memberships: old.memberships?.map((membership) =>
+              membership.orgId === old.orgId
+                ? { ...membership, orgName: result.orgName as string }
+                : membership,
+            ),
+          }
+        : {}),
     };
   };
+}
+
+/** What one Save press changed, whether or not the whole press succeeded. */
+interface SavedFields {
+  name?: string;
+  email?: string;
+  orgName?: string;
+}
+
+/**
+ * A save where one call succeeded and the other did not.
+ *
+ * The two halves go to two endpoints and either can fail on its own — most
+ * often the rename, which a Member is not allowed to make. Carrying what did
+ * land keeps the page honest: the message names the half that failed, and the
+ * half that succeeded still reaches the cache instead of being silently
+ * discarded and reappearing on the next refetch.
+ */
+class PartialSaveError extends Error {
+  constructor(
+    message: string,
+    readonly saved: SavedFields,
+  ) {
+    super(message);
+    this.name = 'PartialSaveError';
+  }
+}
+
+function messageFor(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
+}
+
+/**
+ * What one Save press sends. The personal fields go to `PATCH /api/me/profile`
+ * and the org name to `PATCH /api/org`: two endpoints because they are two
+ * permissions, and only the fields that changed are sent at all.
+ *
+ * Personal fields first. They are the caller's own and every role may change
+ * them, while the rename is the call a Member's role refuses — running it
+ * second means the likely failure cannot strand the likely success.
+ */
+async function saveProfileAndOrg({
+  profile,
+  orgName,
+}: {
+  profile: UpdateProfileRequest | undefined;
+  orgName: string | undefined;
+}): Promise<SavedFields> {
+  const saved: SavedFields = {};
+
+  if (profile !== undefined) {
+    try {
+      Object.assign(saved, await updateProfile(profile));
+    } catch (err) {
+      throw new PartialSaveError(messageFor(err, 'Failed to update your profile'), saved);
+    }
+  }
+
+  if (orgName !== undefined) {
+    try {
+      saved.orgName = (await updateOrg({ name: orgName })).name;
+    } catch (err) {
+      throw new PartialSaveError(messageFor(err, 'Failed to rename the organization'), saved);
+    }
+  }
+
+  return saved;
 }
 
 function useProfileForm(me: MeResponse) {
@@ -179,48 +271,87 @@ function useProfileForm(me: MeResponse) {
     }
   }, [me, initialized]);
 
+  const mayRename = useHasPermission('org.rename');
   const nameChanged = !social && name !== (me.name ?? '');
   const emailChanged = !social && email !== (me.email ?? '');
-  const orgNameChanged = orgName !== (me.orgName ?? '');
+  // Against the trimmed value, because trimmed is what gets sent: otherwise a
+  // trailing space alone counts as a change and the save renames the org to the
+  // name it already has.
+  const orgNameChanged = mayRename && orgName.trim() !== (me.orgName ?? '');
   const hasChanges = nameChanged || emailChanged || orgNameChanged;
 
+  /** Reflect what landed, in the form and in the cache the rest of the app reads. */
+  function applySaved(saved: SavedFields) {
+    if (saved.name !== undefined) setName(saved.name);
+    if (saved.email !== undefined) setEmail(saved.email);
+    if (saved.orgName !== undefined) setOrgName(saved.orgName);
+
+    const update = applyProfileUpdate(saved);
+    queryClient.setQueryData<MeResponse>(queryKeys.me, update);
+    queryClient.setQueryData<MeResponse>(queryKeys.meWithMfa, update);
+  }
+
+  /**
+   * Apply what landed, then follow a landed email change to the verify page.
+   *
+   * The redirect belongs to the email having changed, not to the press as a
+   * whole having succeeded: a new address is unverified from the moment the
+   * profile PATCH returns, and `_app.tsx`'s gate is a `beforeLoad` redirect that
+   * never fires while the user stays on Settings. Both paths go through here so
+   * they cannot drift apart again. Returns whether the redirect was issued.
+   */
+  function applyAndFollow(saved: SavedFields): boolean {
+    applySaved(saved);
+    if (saved.email === undefined) return false;
+    // The cache update above means the verify-email page renders the unverified
+    // state immediately, without a /me round-trip.
+    void navigate({ to: '/verify-email' });
+    return true;
+  }
+
   const mutation = useMutation({
-    mutationFn: updateProfile,
-    onSuccess: (result) => {
-      if (result.name !== undefined) setName(result.name);
-      if (result.email !== undefined) setEmail(result.email);
-      if (result.orgName !== undefined) setOrgName(result.orgName);
-
-      const update = applyProfileUpdate(result);
-      queryClient.setQueryData<MeResponse>(queryKeys.me, update);
-      queryClient.setQueryData<MeResponse>(queryKeys.meWithMfa, update);
-
-      if (result.email !== undefined) {
-        // The cache update above means the verify-email page renders the
-        // unverified state immediately, without a /me round-trip.
-        void navigate({ to: '/verify-email' });
-      } else {
-        toast.success('Profile updated');
-      }
+    mutationFn: saveProfileAndOrg,
+    onSuccess: (saved) => {
+      if (!applyAndFollow(saved)) toast.success('Profile updated');
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : 'Failed to update profile');
+      // A half that succeeded is applied even though the press as a whole
+      // failed; discarding it would show the old value until the next refetch
+      // and invite the user to save it again. The error toast still names the
+      // half that failed, on the verify page if that is where this lands.
+      if (err instanceof PartialSaveError) applyAndFollow(err.saved);
+      toast.error(messageFor(err, 'Failed to update profile'));
     },
   });
 
   function save() {
-    const payload: Record<string, string> = {};
-    if (nameChanged) payload.name = name;
-    if (emailChanged) payload.email = email;
-    if (orgNameChanged) payload.orgName = orgName;
+    let profile: UpdateProfileRequest | undefined;
+    if (nameChanged || emailChanged) {
+      const payload: Record<string, string> = {};
+      if (nameChanged) payload.name = name;
+      if (emailChanged) payload.email = email;
 
-    const validated = UpdateProfileSchema.safeParse(payload);
-    if (!validated.success) {
-      toast.error(validated.error.issues[0].message);
-      return;
+      const validated = UpdateProfileSchema.safeParse(payload);
+      if (!validated.success) {
+        toast.error(validated.error.issues[0].message);
+        return;
+      }
+      profile = validated.data;
     }
 
-    mutation.mutate(validated.data);
+    let nextOrgName: string | undefined;
+    if (orgNameChanged) {
+      const validated = OrgNameSchema.safeParse(orgName);
+      if (!validated.success) {
+        toast.error(validated.error.issues[0].message);
+        return;
+      }
+      // The schema's own trimmed output, so the value stored is the value the
+      // form was checked against.
+      nextOrgName = validated.data;
+    }
+
+    mutation.mutate({ profile, orgName: nextOrgName });
   }
 
   return {
@@ -263,14 +394,7 @@ function ProfileSection({ me }: { me: MeResponse }) {
             </FormField>
           </div>
           <div className="flex flex-1 flex-col">
-            <FormField label="Company name" htmlFor="profile-org-name">
-              <Input
-                id="profile-org-name"
-                value={form.orgName}
-                onChange={form.setOrgName}
-                placeholder="Your company"
-              />
-            </FormField>
+            <CompanyNameField value={form.orgName} onChange={form.setOrgName} />
           </div>
         </div>
 
@@ -474,6 +598,26 @@ function DangerSection({ me }: { me: MeResponse }) {
         }}
       />
     </Card>
+  );
+}
+
+/**
+ * The organization's name, not the caller's.
+ *
+ * It goes to `PATCH /api/org` behind `org.rename`, so most members see it
+ * read-only — visible because it names the org they are working in, disabled
+ * because the server would refuse the change. Read-only is also what shows
+ * while `/me` is in flight: it never offers an edit that then vanishes.
+ */
+function CompanyNameField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const readOnly = <Input id="profile-org-name" value={value} onChange={() => {}} disabled />;
+
+  return (
+    <FormField label="Company name" htmlFor="profile-org-name">
+      <RequirePermission permission="org.rename" fallback={readOnly} pending={readOnly}>
+        <Input id="profile-org-name" value={value} onChange={onChange} placeholder="Your company" />
+      </RequirePermission>
+    </FormField>
   );
 }
 

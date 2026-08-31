@@ -10,11 +10,11 @@ import {
 import { createDeletionChallenge } from '../lib/deletion-challenge.js';
 import { sendDeletionCodeEmail } from '../lib/deletion-email.js';
 import { getOrgProfile, isOrgDeleting } from '../lib/org-profile.js';
-import { isOrgAdmin } from '../lib/org-membership.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { authorize } from '../middleware/authorize.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
@@ -29,13 +29,6 @@ export async function baseHandler(
   if (!isSelfServeDeletionEnabled()) return selfServeDeletionUnavailable();
 
   const { orgId, userId } = getUserInfo(event);
-
-  if (!(await isOrgAdmin(orgId, userId))) {
-    return new ResponseBuilder()
-      .status(403)
-      .body<ErrorResponse>({ message: 'Only an organization admin can delete the organization.' })
-      .build();
-  }
 
   // Already confirmed: issuing another code would imply it can still be
   // stopped or re-authorized, and it cannot.
@@ -89,5 +82,6 @@ export async function baseHandler(
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
+  .use(authorize('org.delete'))
   .use(csrfMiddleware())
   .use(errorHandlerMiddleware());

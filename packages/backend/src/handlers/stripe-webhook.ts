@@ -9,9 +9,8 @@ import {
   mapStripeStatus,
 } from '@filone/shared';
 import { Resource } from 'sst';
-import { sendGuardedBillingUpdate } from '../lib/billing-guard.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { resolveOrgIdFromSubscription } from '../lib/billing-org-lookup.js';
+import { resolveOrgId, resolveOrgIdFromSubscription } from '../lib/billing-org-lookup.js';
 import { startDeletionFromStripe } from '../lib/deletion-from-stripe.js';
 import {
   assertRegionSyncSucceeded,
@@ -20,8 +19,15 @@ import {
 } from '../lib/region-helpers.js';
 import { fromInternalStatus } from '../lib/hubspot-lifecycle-status.js';
 import { syncHubSpotStatusBestEffort } from '../lib/hubspot-status-sync.js';
-import { getStripeClient, getWebhookSecret } from '../lib/stripe-client.js';
 import {
+  invoiceSubscriptionId,
+  invoiceSubscriptionMetadata,
+  subscriptionSuperseded,
+} from '../lib/billing-identity.js';
+import { getStripeClient, getWebhookSecret } from '../lib/stripe-client.js';
+import { updateSubscriptionByUser } from '../lib/subscription-store.js';
+import {
+  emitBillingRowMissing,
   emitDunningEscalation,
   emitInvoiceFinalizationFailed,
   emitInvoiceFinalized,
@@ -93,7 +99,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
 
   // 4. Process event
   try {
-    await processStripeEvent(tableName, stripeEvent);
+    await processStripeEvent(stripeEvent);
   } catch (err) {
     console.error('[stripe-webhook] Error processing event:', err);
     // Release idempotency claim so Stripe retries can reprocess
@@ -108,27 +114,27 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
   return { statusCode: 200, body: JSON.stringify({ received: true }) };
 }
 
-async function processStripeEvent(tableName: string, stripeEvent: Stripe.Event): Promise<void> {
+async function processStripeEvent(stripeEvent: Stripe.Event): Promise<void> {
   switch (stripeEvent.type) {
     case 'customer.subscription.created':
     case 'customer.subscription.updated': {
       const subscription = stripeEvent.data.object as Stripe.Subscription;
-      await handleSubscriptionUpdate(tableName, subscription);
+      await handleSubscriptionUpdate(subscription);
       return;
     }
     case 'customer.subscription.deleted': {
       const subscription = stripeEvent.data.object as Stripe.Subscription;
-      await handleSubscriptionDeleted(tableName, subscription);
+      await handleSubscriptionDeleted(subscription);
       return;
     }
     case 'customer.updated': {
       const customer = stripeEvent.data.object as Stripe.Customer;
-      await handleCustomerUpdated(tableName, customer);
+      await handleCustomerUpdated(customer);
       return;
     }
     case 'customer.deleted': {
       const customer = stripeEvent.data.object as Stripe.Customer;
-      await handleCustomerDeleted(tableName, customer);
+      await handleCustomerDeleted(customer);
       return;
     }
     case 'customer.subscription.trial_will_end': {
@@ -138,12 +144,12 @@ async function processStripeEvent(tableName: string, stripeEvent: Stripe.Event):
     }
     case 'invoice.payment_succeeded': {
       const invoice = stripeEvent.data.object as Stripe.Invoice;
-      await handlePaymentSucceeded(tableName, invoice);
+      await handlePaymentSucceeded(invoice);
       return;
     }
     case 'invoice.payment_failed': {
       const invoice = stripeEvent.data.object as Stripe.Invoice;
-      await handlePaymentFailed(tableName, invoice);
+      await handlePaymentFailed(invoice);
       return;
     }
     case 'invoice.finalized': {
@@ -183,7 +189,7 @@ function orgIdBackfill(orgId: string | undefined): {
   };
 }
 
-async function handleCustomerUpdated(tableName: string, customer: Stripe.Customer): Promise<void> {
+async function handleCustomerUpdated(customer: Stripe.Customer): Promise<void> {
   const userId = customer.metadata?.userId;
   if (!userId) {
     throw new Error(`[stripe-webhook] No userId in metadata for customer: ${customer.id}`);
@@ -198,40 +204,66 @@ async function handleCustomerUpdated(tableName: string, customer: Stripe.Custome
     return;
   }
 
+  // Nothing stamped `metadata.orgId` onto customers created before the metadata
+  // existed, and the re-key made no Stripe calls — so the daily usage worker's
+  // metadata writes generate `customer.updated` for those customers forever.
+  // Asking the billing row is the same fallback `customer.deleted` already
+  // takes: the legacy `CUSTOMER#{userId}` row carries the orgId the backfill
+  // keyed its copy by.
+  const orgId = resolveOrgId(customer.metadata) ?? (await resolveOrgIdFromSubscription(userId));
+  if (!orgId) {
+    // Not a throw. The rows with no `orgId` were enumerated and dispositioned
+    // by name before the re-key (docs/BillingRekeyRunbook.md), so no retry
+    // converges on an answer — Stripe would redeliver this for three days and
+    // then disable the endpoint over a card that no row can record.
+    console.error('[stripe-webhook] customer.updated resolves to no org; payment method dropped', {
+      customerId: customer.id,
+      userId,
+    });
+    return;
+  }
+
   const stripe = getStripeClient();
   const pm =
     typeof defaultPm === 'string' ? await stripe.paymentMethods.retrieve(defaultPm) : defaultPm;
-  await updatePaymentMethod(tableName, userId, pm);
+  await updatePaymentMethod({ userId, orgId }, pm);
 }
 
 async function updatePaymentMethod(
-  tableName: string,
-  userId: string,
+  owner: { userId: string; orgId: string },
   pm: Stripe.PaymentMethod,
 ): Promise<void> {
-  await sendGuardedBillingUpdate(
-    {
-      TableName: tableName,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
-      UpdateExpression:
-        'SET paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now',
-      ExpressionAttributeValues: {
-        ':pmId': { S: pm.id },
-        ':last4': { S: pm.card?.last4 ?? '' },
-        ':brand': { S: pm.card?.brand ?? '' },
-        ':expMonth': { N: String(pm.card?.exp_month ?? 0) },
-        ':expYear': { N: String(pm.card?.exp_year ?? 0) },
-        ':now': { S: new Date().toISOString() },
-      },
+  // A missing row is swallowed here rather than failing the webhook. The store
+  // refuses to create one, and every other writer treats that refusal as an
+  // error — but this one carries a card's last four digits and expiry, and a
+  // 500 buys three days of Stripe retries and alert noise to redeliver them.
+  // Post-verify the state is near-impossible; the metric is how anyone would
+  // learn it happened at all.
+  const { written } = await updateSubscriptionByUser(owner, {
+    UpdateExpression:
+      'SET paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now',
+    ExpressionAttributeValues: {
+      ':pmId': { S: pm.id },
+      ':last4': { S: pm.card?.last4 ?? '' },
+      ':brand': { S: pm.card?.brand ?? '' },
+      ':expMonth': { N: String(pm.card?.exp_month ?? 0) },
+      ':expYear': { N: String(pm.card?.exp_year ?? 0) },
+      ':now': { S: new Date().toISOString() },
     },
-    { userId, caller: 'customer.updated' },
-  );
+    tolerateMissingRow: true,
+    guardAgainstScrub: { caller: 'customer.updated' },
+  });
+
+  if (!written) {
+    emitBillingRowMissing('customer.updated');
+    console.error('[stripe-webhook] No billing row to record the payment method on', {
+      userId: owner.userId,
+      orgId: owner.orgId,
+    });
+  }
 }
 
-async function handleCustomerDeleted(tableName: string, customer: Stripe.Customer): Promise<void> {
+async function handleCustomerDeleted(customer: Stripe.Customer): Promise<void> {
   // The customer.deleted payload carries the full pre-deletion Customer, including metadata.
   // We do NOT retrieve from Stripe — the customer no longer exists there.
   const userId = customer.metadata?.userId;
@@ -256,10 +288,7 @@ async function handleCustomerDeleted(tableName: string, customer: Stripe.Custome
   emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
 }
 
-async function handleSubscriptionUpdate(
-  tableName: string,
-  subscription: Stripe.Subscription,
-): Promise<void> {
+async function handleSubscriptionUpdate(subscription: Stripe.Subscription): Promise<void> {
   const customerId = getCustomerIdString(subscription.customer);
   const mappedStatus = mapStripeStatus(subscription.status);
 
@@ -278,45 +307,51 @@ async function handleSubscriptionUpdate(
 
   // Find billing record by Stripe customer ID — we need to scan or use a GSI.
   // For MVP, use metadata.userId set during customer creation.
-  const userId = subscription.metadata?.userId;
-  if (!userId) {
-    // Try fetching from Stripe customer metadata
-    const stripe = getStripeClient();
-    const customer = await stripe.customers.retrieve(customerId);
-    if ('deleted' in customer && customer.deleted) {
-      console.warn('[stripe-webhook] Customer deleted, skipping subscription update', {
-        customerId,
-        subscriptionId: subscription.id,
-      });
-      return;
-    }
-    const metaUserId = customer.metadata?.userId;
-    if (!metaUserId) {
-      console.warn('[stripe-webhook] No userId in metadata for customer:', customerId);
-      return;
-    }
+  // Empty-string metadata reads the same as absent, here and in resolveOrgId.
+  const eventUserId = subscription.metadata?.userId || undefined;
+  const eventOrgId = resolveOrgId(subscription.metadata);
+
+  // The event already names the org the row is keyed by, so it addresses the
+  // write on its own and the Stripe call is skipped.
+  if (eventUserId && eventOrgId) {
     await updateBillingRecord({
-      tableName,
-      userId: metaUserId,
+      userId: eventUserId,
       subscription,
       mappedStatus,
-      orgId: subscription.metadata?.orgId || customer.metadata?.orgId,
-      email: customer.email,
+      orgId: eventOrgId,
     });
     return;
   }
 
+  // Whatever the subscription is missing, the customer may still carry: a
+  // subscription created before the metadata stamped an orgId names none, and
+  // the org is the key the row is written under. Fetch the customer and resolve
+  // against both — writing with no org resolves nothing and throws
+  // MissingOrgIdError, which Stripe would retry forever.
+  const stripe = getStripeClient();
+  const customer = await stripe.customers.retrieve(customerId);
+  if ('deleted' in customer && customer.deleted) {
+    console.warn('[stripe-webhook] Customer deleted, skipping subscription update', {
+      customerId,
+      subscriptionId: subscription.id,
+    });
+    return;
+  }
+  const userId = eventUserId ?? customer.metadata?.userId;
+  if (!userId) {
+    console.warn('[stripe-webhook] No userId in metadata for customer:', customerId);
+    return;
+  }
   await updateBillingRecord({
-    tableName,
     userId,
     subscription,
     mappedStatus,
-    orgId: subscription.metadata?.orgId,
+    orgId: resolveOrgId(subscription.metadata, customer.metadata),
+    email: customer.email,
   });
 }
 
 interface UpdateBillingRecordParams {
-  tableName: string;
   userId: string;
   subscription: Stripe.Subscription;
   mappedStatus: SubscriptionStatus;
@@ -326,7 +361,6 @@ interface UpdateBillingRecordParams {
 }
 
 async function updateBillingRecord({
-  tableName,
   userId,
   subscription,
   mappedStatus,
@@ -334,13 +368,9 @@ async function updateBillingRecord({
   email,
 }: UpdateBillingRecordParams): Promise<void> {
   const backfill = orgIdBackfill(orgId);
-  await sendGuardedBillingUpdate(
+  await updateSubscriptionByUser(
+    { userId, orgId },
     {
-      TableName: tableName,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
       UpdateExpression: `SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now${backfill.clause} REMOVE gracePeriodEndsAt, canceledAt`,
       ExpressionAttributeValues: {
         ':subId': { S: subscription.id },
@@ -354,17 +384,14 @@ async function updateBillingRecord({
         ':now': { S: new Date().toISOString() },
         ...backfill.values,
       },
+      guardAgainstScrub: { caller: 'subscription.updated' },
     },
-    { userId, caller: 'subscription.updated' },
   );
 
   await syncHubSpotStatusBestEffort({ userId, status: fromInternalStatus(mappedStatus), email });
 }
 
-async function handleSubscriptionDeleted(
-  tableName: string,
-  subscription: Stripe.Subscription,
-): Promise<void> {
+async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Promise<void> {
   const stripe = getStripeClient();
   const customerId = getCustomerIdString(subscription.customer);
   const customer = await stripe.customers.retrieve(customerId);
@@ -382,9 +409,12 @@ async function handleSubscriptionDeleted(
       );
       return;
     }
+    // A deleted customer carries no metadata, so the subscription's is the only
+    // one there is; startDeletionFromStripe's row fallback covers the rest.
     await startDeletionFromStripe({
       userId,
       customerId,
+      orgId: subscription.metadata?.orgId,
       caller: 'subscription.deleted',
     });
     emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
@@ -399,14 +429,24 @@ async function handleSubscriptionDeleted(
   const now = new Date();
   const gracePeriodEndsAt = new Date(now.getTime() + graceDays * 24 * 60 * 60 * 1000).toISOString();
 
-  const backfill = orgIdBackfill(customer.metadata?.orgId);
-  await sendGuardedBillingUpdate(
+  // Resolved once: the same org id keys the write below and the tenant
+  // write-lock after it.
+  const orgId = resolveOrgId(subscription.metadata, customer.metadata);
+  if (
+    await subscriptionSuperseded({
+      source: 'customer.subscription.deleted',
+      userId,
+      orgId,
+      subscriptionId: subscription.id,
+    })
+  ) {
+    return;
+  }
+
+  const backfill = orgIdBackfill(orgId);
+  await updateSubscriptionByUser(
+    { userId, orgId },
     {
-      TableName: tableName,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
       UpdateExpression: `SET subscriptionStatus = :status, canceledAt = :now, gracePeriodEndsAt = :grace, updatedAt = :now${backfill.clause}`,
       ExpressionAttributeValues: {
         ':status': { S: SubscriptionStatus.GracePeriod },
@@ -414,8 +454,8 @@ async function handleSubscriptionDeleted(
         ':grace': { S: gracePeriodEndsAt },
         ...backfill.values,
       },
+      guardAgainstScrub: { caller: 'subscription.deleted' },
     },
-    { userId, caller: 'subscription.deleted' },
   );
 
   const latestInvoice = subscription.latest_invoice;
@@ -432,7 +472,6 @@ async function handleSubscriptionDeleted(
   // attempt WRITE_LOCK for active grace periods missing it. The sync never
   // downgrades a tenant that is already disabled.
   try {
-    const orgId = await resolveOrgIdFromSubscription(userId);
     if (orgId) {
       assertRegionSyncSucceeded(
         await syncTenantStatusInProvisionedRegions(
@@ -455,7 +494,7 @@ async function handleSubscriptionDeleted(
   });
 }
 
-async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice): Promise<void> {
+async function handlePaymentSucceeded(invoice: Stripe.Invoice): Promise<void> {
   if (!invoice.customer) return;
   const stripe = getStripeClient();
   const customerId = getCustomerIdString(invoice.customer);
@@ -465,14 +504,29 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   const userId = customer.metadata?.userId;
   if (!userId) return;
 
-  const backfill = orgIdBackfill(customer.metadata?.orgId);
-  const updateResult = await sendGuardedBillingUpdate(
+  // The invoice's own subscription snapshot answers first, for the reason every
+  // subscription path prefers it: a customer can outlive an org, and the
+  // subscription that generated this invoice cannot.
+  const orgId = resolveOrgId(invoiceSubscriptionMetadata(invoice), customer.metadata);
+
+  // A success is destructive in the other direction: on the shared org row, a
+  // late invoice from a replaced subscription would mark the org active and
+  // re-enable its tenants while the authoritative subscription is past due.
+  if (
+    await subscriptionSuperseded({
+      source: 'invoice.payment_succeeded',
+      userId,
+      orgId,
+      subscriptionId: invoiceSubscriptionId(invoice),
+    })
+  ) {
+    return;
+  }
+
+  const backfill = orgIdBackfill(orgId);
+  const updateResult = await updateSubscriptionByUser(
+    { userId, orgId },
     {
-      TableName: tableName,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
       UpdateExpression: `SET subscriptionStatus = :active, lastPaymentAt = :now, updatedAt = :now${backfill.clause} REMOVE gracePeriodEndsAt, lastPaymentFailedAt, canceledAt`,
       ExpressionAttributeValues: {
         ':active': { S: SubscriptionStatus.Active },
@@ -480,11 +534,13 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
         ...backfill.values,
       },
       ReturnValues: 'ALL_OLD',
+      guardAgainstScrub: { caller: 'invoice.paid' },
     },
-    { userId, caller: 'invoice.paid' },
   );
 
-  const priorStatus = updateResult?.Attributes?.subscriptionStatus?.S;
+  // The prior status comes from the row the guard reads, so a recovery is
+  // reported off the record that governs access.
+  const priorStatus = updateResult.previous?.subscriptionStatus?.S;
   if (
     priorStatus === SubscriptionStatus.PastDue ||
     priorStatus === SubscriptionStatus.GracePeriod
@@ -500,10 +556,10 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
 
   // Best-effort: re-enable the tenant on every orchestrator if recovering from
   // PastDue/GracePeriod. If this fails, the tenant may remain locked until
-  // manual intervention.
+  // manual intervention. A refused write means the teardown owns this account:
+  // the tenant it disabled stays disabled.
   try {
-    const orgId = await resolveOrgIdFromSubscription(userId);
-    if (orgId) {
+    if (orgId && !updateResult.refused) {
       assertRegionSyncSucceeded(
         await syncTenantStatusInProvisionedRegions(orgId, 'active', WEBHOOK_STATUS_SYNC_RETRY),
       );
@@ -523,7 +579,7 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   });
 }
 
-async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): Promise<void> {
+async function handlePaymentFailed(invoice: Stripe.Invoice): Promise<void> {
   if (!invoice.customer) return;
   const stripe = getStripeClient();
   const customerId = getCustomerIdString(invoice.customer);
@@ -537,14 +593,25 @@ async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): 
   // continue attempting payment. Grace period only begins when Stripe cancels
   // the subscription after all retries are exhausted.
   const now = new Date().toISOString();
-  const backfill = orgIdBackfill(customer.metadata?.orgId);
-  await sendGuardedBillingUpdate(
+  // The invoice's own subscription snapshot answers first, for the reason every
+  // subscription path prefers it: a customer can outlive an org, and the
+  // subscription that generated this invoice cannot.
+  const orgId = resolveOrgId(invoiceSubscriptionMetadata(invoice), customer.metadata);
+  if (
+    await subscriptionSuperseded({
+      source: 'invoice.payment_failed',
+      userId,
+      orgId,
+      subscriptionId: invoiceSubscriptionId(invoice),
+    })
+  ) {
+    return;
+  }
+
+  const backfill = orgIdBackfill(orgId);
+  await updateSubscriptionByUser(
+    { userId, orgId },
     {
-      TableName: tableName,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
       UpdateExpression: `SET subscriptionStatus = :status, lastPaymentFailedAt = :failedAt, updatedAt = :now${backfill.clause}`,
       ExpressionAttributeValues: {
         ':status': { S: SubscriptionStatus.PastDue },
@@ -552,8 +619,8 @@ async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): 
         ':now': { S: now },
         ...backfill.values,
       },
+      guardAgainstScrub: { caller: 'invoice.payment_failed' },
     },
-    { userId, caller: 'invoice.payment_failed' },
   );
 
   await syncHubSpotStatusBestEffort({

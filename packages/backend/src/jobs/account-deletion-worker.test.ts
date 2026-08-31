@@ -7,13 +7,14 @@ import {
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
+import type { DeletionMember } from '../lib/deletion-record.js';
 
 vi.mock('sst', () => ({
   Resource: { UserInfoTable: { name: 'UserInfoTable' } },
 }));
 
 const order: string[] = [];
-const mockTearDownStripe = vi.fn(async () => void order.push('stripe'));
+const mockTearDownStripe = vi.fn(async (..._args: unknown[]) => void order.push('stripe'));
 const mockScrub = vi.fn(async () => void order.push('scrub'));
 const mockDeleteAuth0User = vi.fn(async (sub: string) => void order.push(`auth0:${sub}`));
 const mockGetAuth0UserEmail = vi.fn(async (sub: string) => {
@@ -22,12 +23,12 @@ const mockGetAuth0UserEmail = vi.fn(async (sub: string) => {
 });
 const mockDeleteTenant = vi.fn(async (tenantId: string) => void order.push(`tenant:${tenantId}`));
 const mockResolveTargets = vi.fn(async () => ({
-  members: [{ userId: 'user-1', sub: 'auth0|one' }],
+  members: [{ userId: 'user-1', sub: 'auth0|one', deleteIdentity: true }] as DeletionMember[],
   tenantIds: { fth: '42' } as Record<string, string>,
 }));
 
 vi.mock('../lib/deletion-stripe-teardown.js', () => ({
-  tearDownStripe: () => mockTearDownStripe(),
+  tearDownStripe: (...args: unknown[]) => mockTearDownStripe(...args),
 }));
 vi.mock('../lib/deletion-scrub.js', () => ({ scrubOrgRecords: () => mockScrub() }));
 vi.mock('../lib/deletion-targets.js', () => ({
@@ -75,7 +76,7 @@ describe('account-deletion-worker', () => {
     ddbMock.on(GetItemCommand).resolves({ Item: record() });
     ddbMock.on(UpdateItemCommand).resolves({});
     mockResolveTargets.mockResolvedValue({
-      members: [{ userId: 'user-1', sub: 'auth0|one' }],
+      members: [{ userId: 'user-1', sub: 'auth0|one', deleteIdentity: true }],
       tenantIds: { fth: '42' },
     });
     mockGetAvailableOrchestrators.mockReturnValue([orchestrator('fth')]);
@@ -87,6 +88,16 @@ describe('account-deletion-worker', () => {
     await handler({ orgId: ORG });
 
     expect(order).toEqual(['email:auth0|one', 'auth0:auth0|one', 'stripe', 'tenant:42', 'scrub']);
+  });
+
+  // The teardown falls back to the members' legacy billing rows when the org row
+  // names no customer, so it needs the same census the Auth0 step ran on.
+  it('passes the resolved members to the Stripe teardown', async () => {
+    await handler({ orgId: ORG });
+
+    expect(mockTearDownStripe).toHaveBeenCalledWith(ORG, [
+      { userId: 'user-1', sub: 'auth0|one', deleteIdentity: true },
+    ]);
   });
 
   describe('the allowlist row', () => {
@@ -107,6 +118,68 @@ describe('account-deletion-worker', () => {
 
       expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
       expect(mockDeleteAuth0User).toHaveBeenCalledWith('auth0|one');
+    });
+  });
+
+  describe('a member whose account outlives the org', () => {
+    beforeEach(() => {
+      mockResolveTargets.mockResolvedValue({
+        members: [
+          {
+            userId: 'user-1',
+            sub: 'auth0|one',
+            deleteIdentity: false,
+            keptReasons: ['INVITED_MEMBER'],
+          },
+          { userId: 'user-2', sub: 'auth0|two', deleteIdentity: true },
+        ],
+        tenantIds: {},
+      });
+    });
+
+    // They belong to another org, or were invited into this one. The org is going
+    // away; their login is not.
+    it('leaves their Auth0 user and their allowlist row alone', async () => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      try {
+        await handler({ orgId: ORG });
+
+        expect(mockDeleteAuth0User).toHaveBeenCalledTimes(1);
+        expect(mockDeleteAuth0User).toHaveBeenCalledWith('auth0|two');
+        expect(mockGetAuth0UserEmail).not.toHaveBeenCalledWith('auth0|one');
+        expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1);
+      } finally {
+        log.mockRestore();
+      }
+    });
+
+    // Three census conditions reach the same kept account, so the line has to
+    // name which one it was rather than assert the most common cause.
+    it('logs the census reasons the account was kept for', async () => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      try {
+        await handler({ orgId: ORG });
+
+        expect(log).toHaveBeenCalledWith(expect.stringContaining('account kept'), {
+          sub: 'auth0|one',
+          keptReasons: ['INVITED_MEMBER'],
+        });
+      } finally {
+        log.mockRestore();
+      }
+    });
+
+    it('still runs the rest of the teardown', async () => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      try {
+        await handler({ orgId: ORG });
+        expect(order).toContain('scrub');
+      } finally {
+        log.mockRestore();
+      }
     });
   });
 
@@ -180,7 +253,7 @@ describe('account-deletion-worker', () => {
 
     it('skips a tenant whose orchestrator is not registered on this stage', async () => {
       mockResolveTargets.mockResolvedValue({
-        members: [{ userId: 'user-1', sub: 'auth0|one' }],
+        members: [{ userId: 'user-1', sub: 'auth0|one', deleteIdentity: true }],
         tenantIds: { forge: 'forge-t-1' },
       });
       mockGetAvailableOrchestrators.mockReturnValue([orchestrator('fth')]);

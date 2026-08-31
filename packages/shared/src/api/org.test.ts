@@ -1,5 +1,37 @@
 import { describe, it, expect } from 'vitest';
-import { OrgNameSchema, ORG_NAME_MIN_LENGTH, ORG_NAME_MAX_LENGTH } from './org.js';
+import {
+  OrgNameSchema,
+  OrgRole,
+  isOrgRole,
+  ORG_NAME_MIN_LENGTH,
+  ORG_NAME_MAX_LENGTH,
+} from './org.js';
+
+describe('isOrgRole', () => {
+  it.each(Object.values(OrgRole))('accepts the stored value %s', (role) => {
+    expect(isOrgRole(role)).toBe(true);
+  });
+
+  it.each([
+    ['a word that is not one of the four roles', 'billing'],
+    ['a role name in the wrong case', 'Owner'],
+    ['a prototype member', 'constructor'],
+    ['the empty string', ''],
+    ['a plausible near-miss', 'read-only'],
+  ])('rejects %s', (_label, value) => {
+    expect(isOrgRole(value)).toBe(false);
+  });
+
+  it.each([
+    ['undefined', undefined],
+    ['null', null],
+    ['a number', 1],
+    ['an object', { role: 'owner' }],
+    ['an array', ['owner']],
+  ])('rejects %s, whatever DynamoDB handed us', (_label, value) => {
+    expect(isOrgRole(value)).toBe(false);
+  });
+});
 
 describe('OrgNameSchema', () => {
   describe('valid names', () => {

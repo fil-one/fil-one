@@ -3,6 +3,7 @@ import { S3Region } from '@filone/shared';
 import { createRoute } from '@tanstack/react-router';
 import { Route as appRoute } from '../_app';
 import { UploadObjectPage } from '../../pages/UploadObjectPage';
+import { RequirePermissionPage } from '../../components/RequirePermissionPage';
 
 const uploadObjectSearchSchema = z.object({
   region: z.enum(S3Region),
@@ -11,7 +12,15 @@ const uploadObjectSearchSchema = z.object({
 function UploadObjectRoute() {
   const { bucketName } = Route.useParams();
   const { region } = Route.useSearch();
-  return <UploadObjectPage bucketName={bucketName} region={region} />;
+  return (
+    <RequirePermissionPage
+      permission="objects.write"
+      title="Upload object"
+      deniedMessage="Uploading objects is not part of your role. You can browse and download what is already stored here."
+    >
+      <UploadObjectPage bucketName={bucketName} region={region} />
+    </RequirePermissionPage>
+  );
 }
 
 export const Route = createRoute({

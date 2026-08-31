@@ -26,6 +26,11 @@ export function redirectToStepUp(action: string): void {
   }
   const params = new URLSearchParams({
     acr_values: 'http://schemas.openid.net/pape/policies/2007/06/multi-factor',
+    // Forces a fresh authentication rather than reusing the Auth0 session, so
+    // the new ID token carries a current `auth_time`. That is the step-up signal
+    // for a user whose identity provider never emits an `mfa` in `amr` — a
+    // federated login, where an MFA challenge is not ours to issue.
+    max_age: '0',
   });
   window.location.href = `${API_URL}/login?${params.toString()}`;
 }

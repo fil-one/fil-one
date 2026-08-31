@@ -10,7 +10,7 @@ import {
 } from '@tanstack/react-router';
 
 import type { QueryBucketResponse } from '@filone/shared';
-import { S3Region } from '@filone/shared';
+import { OrgRole, S3Region } from '@filone/shared';
 
 const mockQueryBucket = vi.fn();
 
@@ -23,6 +23,7 @@ vi.mock('../lib/rag-bucket-api.js', async (importOriginal) => ({
 }));
 
 import type { RagBucket } from '../lib/rag-bucket-api';
+import { seedPermissions } from '../lib/test-permissions.js';
 import { ToastProvider } from './Toast/ToastProvider.js';
 import { BucketDrawer } from './BucketDrawer';
 
@@ -35,8 +36,15 @@ const bucket: RagBucket = {
   lastSyncedAt: '2026-06-22T11:59:00Z',
 };
 
-function renderDrawer(onClose: () => void = () => {}, onStopIndexing: () => void = () => {}) {
+function renderDrawer(
+  onClose: () => void = () => {},
+  onStopIndexing: () => void = () => {},
+  role = OrgRole.Owner,
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // Stop indexing is gated on the bucket permissions, so the caller's role has
+  // to be in the cache before the drawer renders.
+  seedPermissions(client, role);
   const rootRoute = createRootRoute({
     component: () => (
       <ToastProvider>
@@ -133,5 +141,25 @@ describe('BucketDrawer', () => {
 
     fireEvent.click(stop);
     expect(onStopIndexing).toHaveBeenCalledOnce();
+  });
+});
+
+describe('BucketDrawer — permissions', () => {
+  it.each([OrgRole.Member, OrgRole.ReadOnly])(
+    'hides stop indexing from %s — that discards the index',
+    async (role) => {
+      renderDrawer(undefined, undefined, role);
+
+      // The playground itself is theirs; only the footer is not.
+      expect(await screen.findByTestId('bucket-drawer-ask')).toBeInTheDocument();
+      expect(screen.queryByTestId('bucket-drawer-stop')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('bucket-drawer-footer')).not.toBeInTheDocument();
+    },
+  );
+
+  it('offers stop indexing to an Admin', async () => {
+    renderDrawer(undefined, undefined, OrgRole.Admin);
+
+    expect(await screen.findByTestId('bucket-drawer-stop')).toBeInTheDocument();
   });
 });

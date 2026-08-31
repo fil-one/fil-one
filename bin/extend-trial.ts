@@ -45,6 +45,15 @@ import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/clie
 import Stripe from 'stripe';
 import { createClient, setTenantStatus } from '@filone/aurora-backoffice-client';
 
+// BillingTable keys — mirror of `SubscriptionKeys` in
+// packages/backend/src/lib/subscription-store.ts, for the reason
+// ./lib/org-conversion.ts records: bin scripts run under Node's type stripping,
+// which resolves neither the backend's `./x.js` specifiers nor its enums.
+const BillingKeys = {
+  orgPk: (id: string): string => `ORG#${id}`,
+  subscriptionSk: (): string => 'SUBSCRIPTION',
+} as const;
+
 const PROTECTED_STAGES = ['production'];
 
 const stage = readFileSync('.sst/stage', 'utf8').trim();
@@ -87,15 +96,15 @@ if (!auroraTenantId) {
   process.exit(1);
 }
 
-// 2. Read current subscription
+// 2. Read the current subscription, on the key the application reads.
 const subRes = await dynamo.send(
   new GetItemCommand({
     TableName: Resource.BillingTable.name,
-    Key: { pk: { S: `CUSTOMER#${userId}` }, sk: { S: 'SUBSCRIPTION' } },
+    Key: { pk: { S: BillingKeys.orgPk(orgId) }, sk: { S: BillingKeys.subscriptionSk() } },
   }),
 );
 if (!subRes.Item) {
-  console.error(`No SUBSCRIPTION record for userId="${userId}" (orgId="${orgId}")`);
+  console.error(`No SUBSCRIPTION record for orgId="${orgId}" (userId="${userId}")`);
   process.exit(1);
 }
 const stripeCustomerId = subRes.Item.stripeCustomerId?.S;
@@ -142,11 +151,11 @@ if (currentSub.status === 'canceled') {
   });
 }
 
-// 5. Reset BillingTable in a single atomic write
+// 5. Reset BillingTable, on the org's row, in a single atomic write.
 await dynamo.send(
   new UpdateItemCommand({
     TableName: Resource.BillingTable.name,
-    Key: { pk: { S: `CUSTOMER#${userId}` }, sk: { S: 'SUBSCRIPTION' } },
+    Key: { pk: { S: BillingKeys.orgPk(orgId) }, sk: { S: BillingKeys.subscriptionSk() } },
     UpdateExpression:
       'SET subscriptionStatus = :status, subscriptionId = :subId, trialStartedAt = :start, trialEndsAt = :end, updatedAt = :now ' +
       'REMOVE gracePeriodEndsAt, canceledAt, lastPaymentFailedAt',
@@ -157,6 +166,7 @@ await dynamo.send(
       ':end': { S: trialEndsAt.toISOString() },
       ':now': { S: now.toISOString() },
     },
+    ConditionExpression: 'attribute_exists(pk)',
   }),
 );
 

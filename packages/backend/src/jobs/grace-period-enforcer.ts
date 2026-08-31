@@ -1,21 +1,16 @@
-import { ScanCommand, UpdateItemCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
-import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
-import { Resource } from 'sst';
-import { getDynamoClient } from '../lib/ddb-client.js';
 import { isOrgDeletedOrDeleting } from '../lib/org-profile.js';
 import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
 } from '../lib/region-helpers.js';
-
-const dynamo = getDynamoClient();
+import { scanSubscriptions, updateSubscriptionByUser } from '../lib/subscription-store.js';
 
 type Action = 'cancel' | 'write_lock';
 
 interface Candidate {
   pk: string;
-  userId: string;
+  userId?: string;
   orgId: string;
   subscriptionStatus: string;
   action: Action;
@@ -24,14 +19,13 @@ interface Candidate {
 type CandidateOutcome = 'canceled' | 'write_locked' | 'skipped';
 
 export async function handler(): Promise<void> {
-  const billingTableName = Resource.BillingTable.name;
   const now = new Date();
 
   console.log('[grace-period-enforcer] Starting enforcement run', {
     timestamp: now.toISOString(),
   });
 
-  const candidates = await scanGracePeriodCandidates(billingTableName, now.getTime());
+  const candidates = await scanGracePeriodCandidates(now.getTime());
 
   console.log('[grace-period-enforcer] Found candidates', { count: candidates.length });
 
@@ -50,7 +44,7 @@ export async function handler(): Promise<void> {
         continue;
       }
 
-      const outcome = await processCandidate(candidate, billingTableName, now);
+      const outcome = await processCandidate(candidate, now);
       if (outcome === 'canceled') canceled++;
       else if (outcome === 'write_locked') writeLocked++;
       else skipped++;
@@ -74,71 +68,37 @@ export async function handler(): Promise<void> {
   });
 }
 
-async function processCandidate(
-  candidate: Candidate,
-  billingTableName: string,
-  now: Date,
-): Promise<CandidateOutcome> {
+async function processCandidate(candidate: Candidate, now: Date): Promise<CandidateOutcome> {
   if (candidate.action === 'cancel') {
-    await cancelSubscriptionAndDisableTenant(candidate, billingTableName, now);
+    await cancelSubscriptionAndDisableTenant(candidate, now);
     return 'canceled';
   }
 
   return ensureTenantWriteLocked(candidate);
 }
 
-// Scan for grace_period records
-async function scanGracePeriodCandidates(
-  billingTableName: string,
-  nowMs: number,
-): Promise<Candidate[]> {
-  const candidates: Candidate[] = [];
-  let lastEvaluatedKey: Record<string, AttributeValue> | undefined;
-
-  do {
-    const result = await dynamo.send(
-      new ScanCommand({
-        TableName: billingTableName,
-        FilterExpression:
-          'sk = :sk AND subscriptionStatus = :gracePeriod AND attribute_not_exists(deletedAt)',
-        ExpressionAttributeValues: {
-          ':sk': { S: 'SUBSCRIPTION' },
-          ':gracePeriod': { S: SubscriptionStatus.GracePeriod },
-        },
-        ...(lastEvaluatedKey ? { ExclusiveStartKey: lastEvaluatedKey } : {}),
-      }),
-    );
-
-    for (const item of result.Items ?? []) {
-      const record = unmarshall(item);
-
-      if (!record.orgId) {
-        console.warn('[grace-period-enforcer] Missing orgId, skipping', { pk: record.pk });
-        continue;
-      }
-
-      const userId = (record.pk as string).replace('CUSTOMER#', '');
-      const base = {
-        pk: record.pk,
-        userId,
-        orgId: record.orgId,
-        subscriptionStatus: record.subscriptionStatus,
-      };
-
+/** Scan for grace_period records, one candidate per org. */
+async function scanGracePeriodCandidates(nowMs: number): Promise<Candidate[]> {
+  return scanSubscriptions<Candidate>({
+    job: 'grace-period-enforcer',
+    filterExpression: 'sk = :sk AND subscriptionStatus = :gracePeriod',
+    expressionAttributeValues: {
+      ':sk': { S: 'SUBSCRIPTION' },
+      ':gracePeriod': { S: SubscriptionStatus.GracePeriod },
+    },
+    select: (record, owner) => {
       const gracePeriodEndsAt = record.gracePeriodEndsAt as string | undefined;
-      if (gracePeriodEndsAt && new Date(gracePeriodEndsAt).getTime() < nowMs) {
-        // Grace period expired → cancel + DISABLE
-        candidates.push({ ...base, action: 'cancel' });
-      } else {
-        // Grace period still active → ensure WRITE_LOCKED
-        candidates.push({ ...base, action: 'write_lock' });
-      }
-    }
-
-    lastEvaluatedKey = result.LastEvaluatedKey;
-  } while (lastEvaluatedKey);
-
-  return candidates;
+      return {
+        ...owner,
+        subscriptionStatus: record.subscriptionStatus as string,
+        // Grace period expired → cancel + DISABLE. Still active → ensure WRITE_LOCKED.
+        action:
+          gracePeriodEndsAt && new Date(gracePeriodEndsAt).getTime() < nowMs
+            ? 'cancel'
+            : 'write_lock',
+      };
+    },
+  });
 }
 
 // Grace period expired — disable the tenant on every orchestrator it exists on
@@ -148,26 +108,20 @@ async function scanGracePeriodCandidates(
 // in grace_period so the next run retries only the out-of-sync regions. An org
 // with no provisioned regions still transitions out of grace (empty outcomes,
 // cancel proceeds).
-async function cancelSubscriptionAndDisableTenant(
-  candidate: Candidate,
-  billingTableName: string,
-  now: Date,
-): Promise<void> {
+async function cancelSubscriptionAndDisableTenant(candidate: Candidate, now: Date): Promise<void> {
   assertRegionSyncSucceeded(
     await syncTenantStatusInProvisionedRegions(candidate.orgId, 'disabled'),
   );
-  // Transition DynamoDB status to canceled
-  await dynamo.send(
-    new UpdateItemCommand({
-      TableName: billingTableName,
-      Key: { pk: { S: candidate.pk }, sk: { S: 'SUBSCRIPTION' } },
-      UpdateExpression: 'SET subscriptionStatus = :status, updatedAt = :now',
-      ExpressionAttributeValues: {
-        ':status': { S: SubscriptionStatus.Canceled },
-        ':now': { S: now.toISOString() },
-      },
-    }),
-  );
+  // Transition DynamoDB status to canceled, on both keys — a cancel that
+  // reached only the row this scan happened to pick would leave the twin in
+  // grace_period, and the next run would see the org again.
+  await updateSubscriptionByUser(candidate, {
+    UpdateExpression: 'SET subscriptionStatus = :status, updatedAt = :now',
+    ExpressionAttributeValues: {
+      ':status': { S: SubscriptionStatus.Canceled },
+      ':now': { S: now.toISOString() },
+    },
+  });
 
   console.log('[grace-period-enforcer] Canceled + disabled', {
     userId: candidate.userId,

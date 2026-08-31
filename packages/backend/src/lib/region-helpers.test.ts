@@ -320,7 +320,7 @@ describe('getProvisionedRegions', () => {
 
     await getProvisionedRegions('org-1', { consistent: true });
 
-    expect(mockGetOrgProfile).toHaveBeenCalledWith('org-1', { consistent: true });
+    expect(mockGetOrgProfile).toHaveBeenCalledWith('org-1', { consistentRead: true });
   });
 
   it('does not fetch the PROFILE row when no orchestrator is available', async () => {

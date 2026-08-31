@@ -7,6 +7,7 @@ import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { authorize } from '../middleware/authorize.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { ProvisionedRegion, getProvisionedRegions } from '../lib/region-helpers.js';
 
@@ -107,4 +108,5 @@ async function fetchStorageByDate(
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
+  .use(authorize('buckets.read'))
   .use(errorHandlerMiddleware());

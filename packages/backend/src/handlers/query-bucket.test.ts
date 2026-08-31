@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { authPartialMock } from '../test/auth-partial-mock.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -7,6 +8,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('sst', () => ({
   Resource: {
     UserInfoTable: { name: 'UserInfoTable' },
+    OrgTable: { name: 'OrgTable' },
     RagVectorBucket: { name: 'RagVectorBucket' },
   },
 }));
@@ -73,9 +75,7 @@ const ddbMock = mockClient(DynamoDBClient);
 // Those have their own dedicated tests; here we replace them with pass-through
 // middleware so the gate's wiring can be exercised in isolation. The userInfo
 // the auth middleware would populate is stamped by buildEvent instead.
-vi.mock('../middleware/auth.js', () => ({
-  authMiddleware: () => ({ before: () => undefined }),
-}));
+vi.mock('../middleware/auth.js', () => authPartialMock());
 vi.mock('../middleware/subscription-guard.js', () => ({
   AccessLevel: { Read: 'read', Write: 'write' },
   subscriptionGuardMiddleware: () => ({ before: () => undefined }),
@@ -85,9 +85,9 @@ process.env.FILONE_STAGE = 'test';
 
 import { baseHandler, handler } from './query-bucket.js';
 import { hashRagKeyToken, RagApiKeyKeys } from '../lib/rag-api-keys.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { buildEvent, buildContext, stubMembershipRead } from '../test/lambda-test-utilities.js';
 import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.js';
-import { S3Region } from '@filone/shared';
+import { OrgRole, S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 
 // ---------------------------------------------------------------------------
@@ -530,55 +530,6 @@ describe('query-bucket baseHandler', () => {
   });
 });
 
-describe('query-bucket handler (RAG access gate)', () => {
-  // Non-foundation email so the gate decision hinges on the allowlist lookup.
-  function gateEvent(): AuthenticatedEvent {
-    const event = buildEvent({
-      userInfo: {
-        userId: 'user-1',
-        orgId: 'org-1',
-        email: 'outsider@example.com',
-        emailVerified: true,
-      },
-      body: JSON.stringify({ query: 'hello' }),
-    });
-    event.pathParameters = { name: 'my-bucket' };
-    return event;
-  }
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    ddbMock.reset();
-    orch = fakeOrchestrator('aurora', { bucket: BUCKET });
-    mockGetOrchestratorForRegion.mockReturnValue(orch);
-    mockEmbed.mockResolvedValue([0.1]);
-    mockComplete.mockResolvedValue('answer');
-    mockQuery.mockResolvedValue([vector('a.pdf#0', 'a.pdf')]);
-    mockGetEnablement.mockResolvedValue(SYNCED_ENABLEMENT);
-  });
-
-  it('returns 403 when the caller is not foundation and not allowlisted', async () => {
-    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
-
-    const result = await handler(gateEvent(), buildContext());
-
-    expect(result.statusCode).toBe(403);
-    expect(JSON.parse(result.body!).message).toBe('You do not have access to this feature.');
-    // Gate runs before any RAG work.
-    expect(mockEmbed).not.toHaveBeenCalled();
-    expect(mockComplete).not.toHaveBeenCalled();
-  });
-
-  it('allows the request through the gate when the caller is allowlisted', async () => {
-    ddbMock.on(GetItemCommand).resolves({ Item: { pk: { S: 'ALLOWLIST#outsider@example.com' } } });
-
-    const result = await handler(gateEvent(), buildContext());
-
-    expect(result.statusCode).toBe(200);
-    expect(mockEmbed).toHaveBeenCalled();
-  });
-});
-
 // ---------------------------------------------------------------------------
 // Full chain — RAG API key bearer auth (ragQueryAuthMiddleware)
 // ---------------------------------------------------------------------------
@@ -614,6 +565,9 @@ describe('query-bucket handler (RAG API key bearer auth)', () => {
         Key: { pk: { S: RagApiKeyKeys.orgPk('org-1') }, sk: { S: RagApiKeyKeys.orgSk('key-1') } },
       })
       .resolves({ Item: marshall({ ...KEY_RECORD, ...overrides }) });
+    // The key's authority is its creator's membership, which the bearer path
+    // reads before it lets the request through.
+    stubMembershipRead(ddbMock, { orgId: 'org-1', userId: 'user-1', role: OrgRole.Member });
     ddbMock.on(UpdateItemCommand).resolves({});
   }
 

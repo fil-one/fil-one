@@ -10,13 +10,17 @@ import { mockClient } from 'aws-sdk-client-mock';
 import {
   DynamoDBClient,
   GetItemCommand,
+  TransactionCanceledException,
   TransactWriteItemsCommand,
+  UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { ApiErrorCode, OrgRole, Stage } from '@filone/shared';
 import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../lib/org-setup-status.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
+import { sstResourceMock } from '../test/sst-resource-mock.js';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
 import { expectErrorResponse } from '../test/assert-helpers.js';
+import { auditItemIn, hasAuditItem } from '../test/audit-assertions.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -35,18 +39,18 @@ const MOCK_NAME = 'Test User';
 
 let uuidCallCount = 0;
 const MOCK_UUIDS = [MOCK_USER_ID, MOCK_ORG_ID];
+const realRandomUUID = crypto.randomUUID.bind(crypto);
+// The seeded pair is the user id and the org id, in the order signup mints
+// them. Every id after those — the audit event's, and the CSRF token's — stays
+// random, so a test that pins the first two does not silently hand a later
+// caller `undefined`.
 vi.spyOn(crypto, 'randomUUID').mockImplementation(
-  () => MOCK_UUIDS[uuidCallCount++] as `${string}-${string}-${string}-${string}-${string}`,
+  () =>
+    (MOCK_UUIDS[uuidCallCount++] ??
+      realRandomUUID()) as `${string}-${string}-${string}-${string}-${string}`,
 );
 
-vi.mock('sst', () => ({
-  Resource: {
-    UserInfoTable: { name: 'UserInfoTable' },
-    Auth0ClientId: { value: 'test-client-id' },
-    Auth0ClientSecret: { value: 'test-client-secret' },
-    AuroraBackofficeToken: { value: 'test-aurora-token' },
-  },
-}));
+vi.mock('sst', () => sstResourceMock());
 
 vi.mock('../lib/auth-secrets.js', () => ({
   getAuthSecrets: () => ({
@@ -55,7 +59,12 @@ vi.mock('../lib/auth-secrets.js', () => ({
   }),
 }));
 
-const mockEnsureTrialEntitlement = vi.fn().mockResolvedValue(true);
+// The subscription guard is the system's only entitlement claim point: it runs
+// on the first gated request, in the caller's own org, which is the one place
+// that can tell that org from somebody else's (ADR §4/§5). This mock stands so
+// a claim on the login path is caught here instead of reaching Stripe — the
+// tests below require it to stay unused.
+const mockEnsureTrialEntitlement = vi.fn();
 vi.mock('../lib/trial-entitlement.js', () => ({
   ensureTrialEntitlement: (args: unknown) => mockEnsureTrialEntitlement(args),
 }));
@@ -80,6 +89,7 @@ process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
 // Import after all mocks are set up
 import { authMiddleware } from './auth.js';
+import { authorize } from './authorize.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -97,6 +107,29 @@ function getUserInfoFromEvent(event: APIGatewayProxyEventV2) {
   return (event as AuthenticatedEvent).requestContext.userInfo;
 }
 
+/**
+ * What `userInfo` carries when OrgTable holds no membership row: nothing. The
+ * conversion has backfilled every account, so absence means the caller is not a
+ * member — `authorize` refuses the request, and the middleware's job is to
+ * report the absence honestly rather than default it away.
+ */
+function noMembership() {
+  return { membership: undefined };
+}
+
+/** What `userInfo` carries on the signup branch: the row just written, unread. */
+function createdMembership(orgId: string, userId: string) {
+  return {
+    membership: {
+      orgId,
+      userId,
+      role: OrgRole.Owner,
+      joinedAt: expect.any(String),
+      source: 'signup',
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -109,6 +142,10 @@ describe('authMiddleware', () => {
     // stubbed (the org-profile fence read) resolves undefined and throws.
     ddbMock.on(GetItemCommand).resolves({});
     uuidCallCount = 0;
+    // Every authenticated request reads the membership row. Default: no row,
+    // which the middleware reports as absent and `authorize` refuses; tests
+    // that care about a role stub the read again with one.
+    ddbMock.on(GetItemCommand, { TableName: 'OrgTable' }).resolves({});
   });
 
   describe('before hook', () => {
@@ -238,6 +275,7 @@ describe('authMiddleware', () => {
         emailVerified: false,
         name: undefined,
         picture: undefined,
+        ...noMembership(),
       });
     });
 
@@ -343,6 +381,165 @@ describe('authMiddleware', () => {
       });
     });
 
+    it('resolves the role from the membership row', async () => {
+      const existingUserId = 'existing-user-uuid';
+      const existingOrgId = 'existing-org-uuid';
+
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: { userId: { S: existingUserId }, orgId: { S: existingOrgId } },
+        });
+
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'OrgTable',
+          Key: {
+            pk: { S: `ORG#${existingOrgId}` },
+            sk: { S: `MEMBER#${existingUserId}` },
+          },
+        })
+        .resolves({
+          Item: {
+            role: { S: OrgRole.ReadOnly },
+            joinedAt: { S: '2026-02-02T00:00:00.000Z' },
+            source: { S: 'invitation' },
+            invitedBy: { S: 'inviter-user-id' },
+          },
+        });
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+      });
+
+      await before(buildMiddyRequest(event));
+
+      // The row's field mapping is org-membership.test.ts's subject; what this
+      // one owns is that the middleware exposes the role the row carries.
+      expect(getUserInfoFromEvent(event).membership?.role).toBe(OrgRole.ReadOnly);
+    });
+
+    it('leaves an absent membership row absent, defaulting nothing', async () => {
+      // The conversion has run: an account with no row is not a member, and
+      // resolving one as Owner here would hand the whole org to whoever the
+      // conversion missed. `authorize` turns the absence into a 403.
+      const existingUserId = 'existing-user-uuid';
+      const existingOrgId = 'existing-org-uuid';
+
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: { userId: { S: existingUserId }, orgId: { S: existingOrgId } },
+        });
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+      });
+
+      // Authentication still succeeds — /api/me carries no role gate and must
+      // answer, so the console can say what happened.
+      expect(await before(buildMiddyRequest(event))).toBeUndefined();
+      expect(getUserInfoFromEvent(event).membership).toBeUndefined();
+    });
+
+    describe('when the OrgTable membership read fails', () => {
+      const existingUserId = 'existing-user-uuid';
+      const existingOrgId = 'existing-org-uuid';
+
+      function stubIdentityAndFailingMembership() {
+        ddbMock
+          .on(GetItemCommand, {
+            Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+          })
+          .resolves({
+            Item: { userId: { S: existingUserId }, orgId: { S: existingOrgId } },
+          });
+        ddbMock
+          .on(GetItemCommand, { TableName: 'OrgTable' })
+          .rejects(new Error('DynamoDB unavailable'));
+      }
+
+      it('answers a retryable 503 rather than spending a refresh on a good token', async () => {
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+        mockJwtVerify
+          .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+          .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+        stubIdentityAndFailingMembership();
+
+        const { before } = authMiddleware({ requireVerifiedEmail: false });
+        const request = buildMiddyRequest(
+          buildEvent({
+            cookies: [
+              `hs_access_token=valid-token`,
+              `hs_id_token=id-token`,
+              `hs_refresh_token=valid-refresh`,
+            ],
+          }),
+        );
+
+        const result = (await before(request)) as APIGatewayProxyStructuredResultV2;
+
+        expect(result.statusCode).toBe(503);
+        // The token was fine — a refresh would have burned the caller's
+        // refresh token to fix a failure that is ours.
+        expect(mockFetch).not.toHaveBeenCalled();
+        expect(consoleError).toHaveBeenCalledWith(
+          expect.stringContaining('OrgTable'),
+          expect.objectContaining({ orgId: existingOrgId, userId: existingUserId }),
+        );
+        consoleError.mockRestore();
+      });
+
+      it('answers the same 503 on the refresh branch, carrying the rotated cookies', async () => {
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+        mockJwtVerify
+          .mockRejectedValueOnce(new Error('token expired'))
+          .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+        mockDecodeJwt.mockReturnValue({ sub: MOCK_SUB });
+        mockFetch.mockResolvedValue({
+          ok: true,
+          json: async () => ({
+            access_token: 'new-access-token',
+            id_token: 'new-id-token',
+            refresh_token: 'new-refresh-token',
+          }),
+        });
+        stubIdentityAndFailingMembership();
+
+        const { before } = authMiddleware({ requireVerifiedEmail: false });
+        const request = buildMiddyRequest(
+          buildEvent({
+            cookies: [`hs_access_token=expired-token`, `hs_refresh_token=valid-refresh`],
+          }),
+        );
+
+        const result = (await before(request)) as APIGatewayProxyStructuredResultV2;
+
+        expect(result.statusCode).toBe(503);
+        // The refresh already happened: the old refresh token is spent, so the
+        // denial has to hand back the new one or the caller is logged out.
+        expect(result.cookies).toEqual(
+          expect.arrayContaining([expect.stringContaining('hs_refresh_token=new-refresh-token')]),
+        );
+        expect(consoleError).toHaveBeenCalled();
+        consoleError.mockRestore();
+      });
+    });
+
     it('extracts name and picture from ID token claims', async () => {
       const existingUserId = 'existing-user-uuid';
       const existingOrgId = 'existing-org-uuid';
@@ -404,6 +601,7 @@ describe('authMiddleware', () => {
         emailVerified: true,
         name: MOCK_NAME,
         picture: MOCK_PICTURE,
+        ...noMembership(),
       });
     });
 
@@ -471,6 +669,7 @@ describe('authMiddleware', () => {
         emailVerified: true,
         name: MOCK_NAME,
         picture: MOCK_PICTURE,
+        ...noMembership(),
       });
     });
 
@@ -525,6 +724,7 @@ describe('authMiddleware', () => {
         emailVerified: false,
         name: undefined,
         picture: undefined,
+        ...noMembership(),
       });
     });
 
@@ -555,10 +755,11 @@ describe('authMiddleware', () => {
         emailVerified: false,
         name: undefined,
         picture: undefined,
+        ...createdMembership(MOCK_ORG_ID, MOCK_USER_ID),
       });
     });
 
-    it('creates new user and org with auto-confirmed name and triggers setup + billing trial', async () => {
+    it('creates new user and org with a derived name, deferring tenant setup and claiming nothing', async () => {
       // First call: access token verify; second call: ID token verify
       mockJwtVerify
         .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
@@ -585,6 +786,7 @@ describe('authMiddleware', () => {
         emailVerified: false,
         name: 'Alice Johnson',
         picture: undefined,
+        ...createdMembership(MOCK_ORG_ID, MOCK_USER_ID),
       });
 
       const transactCalls = ddbMock.commandCalls(TransactWriteItemsCommand);
@@ -600,6 +802,8 @@ describe('authMiddleware', () => {
               userId: { S: MOCK_USER_ID },
               orgId: { S: MOCK_ORG_ID },
               createdAt: { S: expect.any(String) },
+              // The address is unverified here, so only the name is stamped.
+              profileName: { S: 'Alice Johnson' },
             },
             ConditionExpression: 'attribute_not_exists(pk)',
           },
@@ -614,6 +818,7 @@ describe('authMiddleware', () => {
               sub: { S: MOCK_SUB },
               orgId: { S: MOCK_ORG_ID },
               createdAt: { S: expect.any(String) },
+              name: { S: 'Alice Johnson' },
             },
           },
         },
@@ -631,40 +836,155 @@ describe('authMiddleware', () => {
             },
           },
         },
-        // Org membership
+        // Owner count — in OrgTable, beside the membership rows it counts
         {
           Put: {
-            TableName: 'UserInfoTable',
+            TableName: 'OrgTable',
+            Item: {
+              pk: { S: `ORG#${MOCK_ORG_ID}` },
+              sk: { S: 'META' },
+              ownerCount: { N: '1' },
+            },
+          },
+        },
+        // Org membership — authoritative, in OrgTable, and the creator owns it
+        {
+          Put: {
+            TableName: 'OrgTable',
             Item: {
               pk: { S: `ORG#${MOCK_ORG_ID}` },
               sk: { S: `MEMBER#${MOCK_USER_ID}` },
-              role: { S: OrgRole.Admin },
+              role: { S: OrgRole.Owner },
+              joinedAt: { S: expect.any(String) },
+              source: { S: 'signup' },
+            },
+          },
+        },
+        // Inverse item — same transaction, so the two can never disagree
+        {
+          Put: {
+            TableName: 'OrgTable',
+            Item: {
+              pk: { S: `USER#${MOCK_USER_ID}` },
+              sk: { S: `MEMBERSHIP#${MOCK_ORG_ID}` },
+              role: { S: OrgRole.Owner },
               joinedAt: { S: expect.any(String) },
             },
           },
         },
+        // The org.created event, seventh item and the one after the six rows an
+        // account is: an org cannot come into existence unrecorded, because the
+        // rows that create it and the row that records it are the same
+        // transaction.
+        {
+          Put: {
+            TableName: 'AuditTable',
+            Item: {
+              pk: { S: `ORG#${MOCK_ORG_ID}` },
+              sk: { S: expect.any(String) },
+              eventId: { S: expect.any(String) },
+              type: { S: 'org.created' },
+              // No email: this ID token carries no `email_verified` claim, and
+              // an unverified address must never be the name the audit viewer
+              // shows as the member's identity.
+              actor: { M: { kind: { S: 'user' }, id: { S: MOCK_USER_ID } } },
+              orgId: { S: MOCK_ORG_ID },
+              subject: { S: `org:${MOCK_ORG_ID}` },
+              details: { M: { orgName: { S: 'Alice Org' }, source: { S: 'signup' } } },
+              createdAt: { S: expect.any(String) },
+              ttl: { N: expect.any(String) },
+            },
+            ConditionExpression: 'attribute_not_exists(pk)',
+          },
+        },
       ]);
 
-      // Entitlement claim + trial are delegated to ensureTrialEntitlement
-      // (verified-email gated). Unit-tested separately in trial-entitlement.test.ts.
-      expect(mockEnsureTrialEntitlement).toHaveBeenCalledWith({
-        sub: MOCK_SUB,
-        userId: MOCK_USER_ID,
-        orgId: MOCK_ORG_ID,
-        email: MOCK_EMAIL,
-        emailVerified: false,
+      // Signup mints the account and stops there. Claiming here would spend an
+      // invitee's entitlement the moment they signed in — the thing the guard's
+      // conditions exist to prevent; an organic signup claims one request later,
+      // on the dashboard's first API call.
+      expect(mockEnsureTrialEntitlement).not.toHaveBeenCalled();
+    });
+
+    it('names the actor by their email once the claim says it is verified', async () => {
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+        payload: { email: MOCK_EMAIL, email_verified: true, name: 'Alice Johnson' },
+      });
+
+      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+      ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      const request = buildMiddyRequest(
+        buildEvent({
+          cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+          rawPath: '/api/me',
+        }),
+      );
+
+      await before(request);
+
+      const items = ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems;
+      expect(auditItemIn(items).actor).toStrictEqual({
+        M: { kind: { S: 'user' }, id: { S: MOCK_USER_ID }, email: { S: MOCK_EMAIL } },
       });
     });
 
-    it('does not block login when the trial entitlement backfill fails transiently', async () => {
+    it('creates the account anyway when the audit item is the half the table refused', async () => {
       mockJwtVerify
         .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
         .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, name: 'Alice Johnson' } });
 
       ddbMock.on(GetItemCommand).resolves({ Item: undefined });
-      ddbMock.on(TransactWriteItemsCommand).resolves({});
-      // Entitlement backfill throws (e.g. Stripe/DynamoDB down) — login must still succeed.
-      mockEnsureTrialEntitlement.mockRejectedValueOnce(new Error('Stripe down'));
+      ddbMock
+        .on(TransactWriteItemsCommand)
+        .rejectsOnce(
+          new TransactionCanceledException({
+            message: 'cancelled',
+            $metadata: {},
+            CancellationReasons: [
+              ...Array.from({ length: 6 }, () => ({ Code: 'None' })),
+              { Code: 'TransactionConflict' },
+            ],
+          }),
+        )
+        .resolves({});
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+        rawPath: '/api/me',
+      });
+
+      // This runs inside the auth middleware: a cancelled signup would answer
+      // every new customer's first login with a 401 and send them round the
+      // auth loop. An unrecorded org is recoverable; an account nobody can
+      // create is not.
+      const result = await before(buildMiddyRequest(event));
+
+      expect(result).toBeUndefined();
+      expect(getUserInfoFromEvent(event)).toMatchObject({ userId: MOCK_USER_ID });
+      const calls = ddbMock.commandCalls(TransactWriteItemsCommand);
+      expect(calls).toHaveLength(2);
+      expect(hasAuditItem(calls[1].args[0].input.TransactItems)).toBe(false);
+      expect(calls[1].args[0].input.TransactItems).toHaveLength(6);
+    });
+
+    it('signs an existing user in without claiming an entitlement', async () => {
+      const existingUserId = 'existing-user-uuid';
+      const existingOrgId = 'existing-org-uuid';
+
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: { userId: { S: existingUserId }, orgId: { S: existingOrgId } },
+        });
 
       const { before } = authMiddleware({ requireVerifiedEmail: false });
       const event = buildEvent({
@@ -678,10 +998,13 @@ describe('authMiddleware', () => {
       expect(result).toBeUndefined();
       expect(getUserInfoFromEvent(event)).toMatchObject({
         sub: MOCK_SUB,
-        userId: MOCK_USER_ID,
-        orgId: MOCK_ORG_ID,
+        userId: existingUserId,
+        orgId: existingOrgId,
       });
-      expect(mockEnsureTrialEntitlement).toHaveBeenCalledOnce();
+      expect(mockEnsureTrialEntitlement).not.toHaveBeenCalled();
+      // Every account a user belongs to reaches the guard on its own first
+      // gated request, so the login path owes none of them a Stripe call.
+      expect(mockFetch).not.toHaveBeenCalled();
     });
 
     it('falls back to email-derived org name when no JWT name claim is present', async () => {
@@ -770,6 +1093,7 @@ describe('authMiddleware', () => {
         emailVerified: false,
         name: undefined,
         picture: undefined,
+        ...noMembership(),
       });
       expect(request.internal.newTokens).toEqual({
         access_token: 'new-access-token',
@@ -839,7 +1163,9 @@ describe('authMiddleware', () => {
       mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } });
       mockFetch.mockResolvedValue({ ok: false, status: 401, text: async () => '' });
 
-      // Use call-order mocking: first GetItem is IDENTITY lookup, second is ORG PROFILE lookup
+      // Use call-order mocking: first GetItem is the IDENTITY lookup, second the
+      // membership read. Everything after — the org profile the
+      // identity-provider rule reads — falls to the empty default.
       ddbMock
         .on(GetItemCommand)
         .resolvesOnce({ Item: { userId: { S: existingUserId }, orgId: { S: existingOrgId } } })
@@ -847,7 +1173,8 @@ describe('authMiddleware', () => {
           Item: {
             auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
           },
-        });
+        })
+        .resolves({});
 
       const { before } = authMiddleware({ requireVerifiedEmail: false });
       const event = buildEvent({
@@ -1025,12 +1352,18 @@ describe('authMiddleware', () => {
         }),
       );
 
-      const result = await before(request);
+      const result = (await before(request)) as APIGatewayProxyStructuredResultV2;
 
-      expectErrorResponse(result, 403, {
+      expect(result.statusCode).toBe(403);
+      expect(JSON.parse(result.body as string)).toStrictEqual({
         message: 'Email verification required',
         code: ApiErrorCode.EMAIL_NOT_VERIFIED,
       });
+      // The refresh already spent the caller's refresh token, so the denial
+      // carries its replacement — otherwise a 403 becomes a logout.
+      expect(result.cookies).toEqual(
+        expect.arrayContaining([expect.stringContaining('hs_refresh_token=new-refresh-token')]),
+      );
     });
 
     it('fails closed when the ID token cookie is missing entirely', async () => {
@@ -1094,6 +1427,569 @@ describe('authMiddleware', () => {
         code: ApiErrorCode.EMAIL_NOT_VERIFIED,
       });
       expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
+    });
+  });
+
+  describe('verified email on the user profile', () => {
+    const existingUserId = 'stamp-user-uuid';
+    const existingOrgId = 'stamp-org-uuid';
+
+    function mockExistingUser(identity: Record<string, unknown> = {}) {
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: {
+            userId: { S: existingUserId },
+            orgId: { S: existingOrgId },
+            emailEntitlementClaimed: { BOOL: true },
+            ...identity,
+          },
+        });
+      ddbMock.on(UpdateItemCommand).resolves({});
+    }
+
+    function verifiedLogin() {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: true } });
+      return buildMiddyRequest(
+        buildEvent({
+          cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+        }),
+      );
+    }
+
+    it('stamps the verified email at signup', async () => {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: true } });
+      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+      ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+      const { before } = authMiddleware();
+      await before(
+        buildMiddyRequest(
+          buildEvent({
+            cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+          }),
+        ),
+      );
+
+      const items = ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems;
+      expect(items?.[0].Put?.Item?.profileEmail).toStrictEqual({ S: MOCK_EMAIL });
+      expect(items?.[1].Put?.Item?.email).toStrictEqual({ S: MOCK_EMAIL });
+      // The stamp rides the account transaction, so it costs no extra write.
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    });
+
+    it('leaves the address off an unverified signup', async () => {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: false } });
+      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+      ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      await before(
+        buildMiddyRequest(
+          buildEvent({
+            cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+          }),
+        ),
+      );
+
+      const items = ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems;
+      expect(items?.[0].Put?.Item?.profileEmail).toBeUndefined();
+      expect(items?.[1].Put?.Item?.email).toBeUndefined();
+    });
+
+    it('backfills a profile that was created before the address was stamped', async () => {
+      mockExistingUser();
+
+      const { before } = authMiddleware();
+      const result = await before(verifiedLogin());
+
+      expect(result).toBeUndefined();
+      const updates = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updates).toHaveLength(2);
+      // Profile first: a marker ahead of the row it claims would stop the repair.
+      expect(updates[0].args[0].input.Key).toStrictEqual({
+        pk: { S: `USER#${existingUserId}` },
+        sk: { S: 'PROFILE' },
+      });
+      expect(updates[0].args[0].input.ExpressionAttributeValues).toStrictEqual({
+        ':email': { S: MOCK_EMAIL },
+      });
+      expect(updates[1].args[0].input.Key).toStrictEqual({
+        pk: { S: `SUB#${MOCK_SUB}` },
+        sk: { S: 'IDENTITY' },
+      });
+    });
+
+    it('writes nothing when the profile already holds the current address', async () => {
+      mockExistingUser({ profileEmail: { S: MOCK_EMAIL } });
+
+      const { before } = authMiddleware();
+      await before(verifiedLogin());
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    });
+
+    it('re-stamps after the address changes', async () => {
+      mockExistingUser({ profileEmail: { S: 'old@example.com' } });
+
+      const { before } = authMiddleware();
+      await before(verifiedLogin());
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(2);
+    });
+
+    it('does not stamp an unverified address on an existing account', async () => {
+      mockExistingUser();
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: false } });
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      await before(
+        buildMiddyRequest(
+          buildEvent({
+            cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+          }),
+        ),
+      );
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    });
+
+    it('does not block the request when the stamp fails', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockExistingUser();
+      ddbMock.on(UpdateItemCommand).rejects(new Error('DynamoDB unavailable'));
+
+      const { before } = authMiddleware();
+      const result = await before(verifiedLogin());
+
+      expect(result).toBeUndefined();
+      expect(consoleError).toHaveBeenCalled();
+      consoleError.mockRestore();
+    });
+  });
+
+  describe('display name on the user profile', () => {
+    const existingUserId = 'name-stamp-user-uuid';
+    const existingOrgId = 'name-stamp-org-uuid';
+
+    function mockExistingUser(identity: Record<string, unknown> = {}) {
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: {
+            userId: { S: existingUserId },
+            orgId: { S: existingOrgId },
+            emailEntitlementClaimed: { BOOL: true },
+            ...identity,
+          },
+        });
+      ddbMock.on(UpdateItemCommand).resolves({});
+    }
+
+    function login(idClaims: Record<string, unknown>) {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: idClaims });
+      return buildMiddyRequest(
+        buildEvent({
+          cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+        }),
+      );
+    }
+
+    it('stamps the name on a profile whose marker is absent', async () => {
+      mockExistingUser({ profileEmail: { S: MOCK_EMAIL } });
+
+      const { before } = authMiddleware();
+      await before(login({ email: MOCK_EMAIL, email_verified: true, name: MOCK_NAME }));
+
+      const updates = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updates).toHaveLength(2);
+      expect(updates[0].args[0].input.Key).toStrictEqual({
+        pk: { S: `USER#${existingUserId}` },
+        sk: { S: 'PROFILE' },
+      });
+      expect(updates[0].args[0].input.ExpressionAttributeValues).toStrictEqual({
+        ':name': { S: MOCK_NAME },
+      });
+      expect(updates[1].args[0].input.Key).toStrictEqual({
+        pk: { S: `SUB#${MOCK_SUB}` },
+        sk: { S: 'IDENTITY' },
+      });
+      expect(updates[1].args[0].input.UpdateExpression).toContain('profileName');
+    });
+
+    it('re-stamps after the name changes', async () => {
+      mockExistingUser({ profileEmail: { S: MOCK_EMAIL }, profileName: { S: 'Old Name' } });
+
+      const { before } = authMiddleware();
+      await before(login({ email: MOCK_EMAIL, email_verified: true, name: MOCK_NAME }));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(2);
+    });
+
+    it('writes nothing when the profile already holds both the address and the name', async () => {
+      mockExistingUser({ profileEmail: { S: MOCK_EMAIL }, profileName: { S: MOCK_NAME } });
+
+      const { before } = authMiddleware();
+      await before(login({ email: MOCK_EMAIL, email_verified: true, name: MOCK_NAME }));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    });
+
+    it('writes the address and the name in one update when both are stale', async () => {
+      mockExistingUser();
+
+      const { before } = authMiddleware();
+      await before(login({ email: MOCK_EMAIL, email_verified: true, name: MOCK_NAME }));
+
+      const updates = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updates).toHaveLength(2);
+      expect(updates[0].args[0].input.ExpressionAttributeValues).toStrictEqual({
+        ':email': { S: MOCK_EMAIL },
+        ':name': { S: MOCK_NAME },
+      });
+      expect(updates[1].args[0].input.ExpressionAttributeValues).toStrictEqual({
+        ':email': { S: MOCK_EMAIL },
+        ':name': { S: MOCK_NAME },
+      });
+    });
+
+    it('stamps the name even when the address is unverified', async () => {
+      mockExistingUser();
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      await before(login({ email: MOCK_EMAIL, email_verified: false, name: MOCK_NAME }));
+
+      const updates = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updates).toHaveLength(2);
+      expect(updates[0].args[0].input.ExpressionAttributeValues).toStrictEqual({
+        ':name': { S: MOCK_NAME },
+      });
+      expect(updates[1].args[0].input.UpdateExpression).not.toContain('profileEmail');
+    });
+
+    it('leaves a stamped name alone when the token carries none', async () => {
+      mockExistingUser({ profileEmail: { S: MOCK_EMAIL }, profileName: { S: MOCK_NAME } });
+
+      const { before } = authMiddleware();
+      await before(login({ email: MOCK_EMAIL, email_verified: true }));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    });
+
+    it('does not stamp an empty name', async () => {
+      mockExistingUser({ profileEmail: { S: MOCK_EMAIL } });
+
+      const { before } = authMiddleware();
+      await before(login({ email: MOCK_EMAIL, email_verified: true, name: '' }));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    });
+
+    it('stamps the name at signup', async () => {
+      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+      ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+      const { before } = authMiddleware();
+      await before(login({ email: MOCK_EMAIL, email_verified: true, name: MOCK_NAME }));
+
+      const items = ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems;
+      expect(items?.[0].Put?.Item?.profileName).toStrictEqual({ S: MOCK_NAME });
+      expect(items?.[1].Put?.Item?.name).toStrictEqual({ S: MOCK_NAME });
+      // The stamp rides the account transaction, so it costs no extra write.
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    });
+
+    it('stamps the name at signup even when the address is unverified', async () => {
+      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+      ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      await before(login({ email: MOCK_EMAIL, email_verified: false, name: MOCK_NAME }));
+
+      const items = ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems;
+      expect(items?.[0].Put?.Item?.profileName).toStrictEqual({ S: MOCK_NAME });
+      expect(items?.[1].Put?.Item?.name).toStrictEqual({ S: MOCK_NAME });
+      expect(items?.[0].Put?.Item?.profileEmail).toBeUndefined();
+      expect(items?.[1].Put?.Item?.email).toBeUndefined();
+    });
+
+    it('leaves the name off a signup whose token carries none', async () => {
+      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+      ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+      const { before } = authMiddleware();
+      await before(login({ email: MOCK_EMAIL, email_verified: true }));
+
+      const items = ddbMock.commandCalls(TransactWriteItemsCommand)[0].args[0].input.TransactItems;
+      expect(items?.[0].Put?.Item?.profileName).toBeUndefined();
+      expect(items?.[1].Put?.Item?.name).toBeUndefined();
+    });
+  });
+
+  describe('the active org header', () => {
+    const PERSONAL_ORG = 'aaaaaaaa-0000-0000-0000-000000000001';
+    const OTHER_ORG = 'aaaaaaaa-0000-0000-0000-000000000002';
+    const USER_ID = 'aaaaaaaa-0000-0000-0000-00000000000a';
+
+    /**
+     * `idTokenClaims` lands in the ID token's verified payload, so a test naming
+     * `org_id` there drives the real claim through `extractIdTokenClaims` into
+     * the identity-provider rule — renaming the claim breaks the test.
+     */
+    function signInAs(orgId: string, idTokenClaims: Record<string, unknown> = {}) {
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+        payload: { email: MOCK_EMAIL, email_verified: true, ...idTokenClaims },
+      });
+      ddbMock
+        .on(GetItemCommand, { Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } } })
+        .resolves({ Item: { userId: { S: USER_ID }, orgId: { S: orgId } } });
+      // No `auth0OrgId` on either org — the M1 state, in which the rule admits
+      // every session.
+      for (const profiled of [PERSONAL_ORG, OTHER_ORG]) {
+        ddbMock
+          .on(GetItemCommand, {
+            TableName: 'UserInfoTable',
+            Key: { pk: { S: `ORG#${profiled}` }, sk: { S: 'PROFILE' } },
+          })
+          .resolves({ Item: { name: { S: 'Acme' } } });
+      }
+    }
+
+    function stubMemberOf(orgId: string, role: OrgRole) {
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'OrgTable',
+          Key: { pk: { S: `ORG#${orgId}` }, sk: { S: `MEMBER#${USER_ID}` } },
+        })
+        .resolves({ Item: { role: { S: role }, joinedAt: { S: '2026-01-01T00:00:00.000Z' } } });
+    }
+
+    function requestNaming(orgId: string) {
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+      });
+      event.headers['x-org-id'] = orgId;
+      return { event, request: buildMiddyRequest(event) };
+    }
+
+    it('resolves the role in the org the header names', async () => {
+      signInAs(PERSONAL_ORG);
+      stubMemberOf(PERSONAL_ORG, OrgRole.Owner);
+      stubMemberOf(OTHER_ORG, OrgRole.ReadOnly);
+      const { event, request } = requestNaming(OTHER_ORG);
+
+      const result = await authMiddleware().before(request);
+
+      expect(result).toBeUndefined();
+      // Both halves matter: the org every downstream key expression is built
+      // from, and the role that org's own row carries.
+      expect(getUserInfoFromEvent(event).orgId).toBe(OTHER_ORG);
+      expect(getUserInfoFromEvent(event).membership?.role).toBe(OrgRole.ReadOnly);
+    });
+
+    it('refuses a header that is not an organization id', async () => {
+      signInAs(PERSONAL_ORG);
+      stubMemberOf(PERSONAL_ORG, OrgRole.Owner);
+      const { event, request } = requestNaming(`ORG#${OTHER_ORG}`);
+
+      const result = (await authMiddleware().before(request)) as APIGatewayProxyStructuredResultV2;
+
+      expect(result.statusCode).toBe(400);
+      expect(getUserInfoFromEvent(event).orgId).toBe(PERSONAL_ORG);
+    });
+
+    it('leaves the membership absent when the caller is not in the named org', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      signInAs(PERSONAL_ORG);
+      stubMemberOf(PERSONAL_ORG, OrgRole.Owner);
+      // No row in the named org, and the default stub answers absence.
+      const { event, request } = requestNaming(OTHER_ORG);
+
+      expect(await authMiddleware().before(request)).toBeUndefined();
+      expect(getUserInfoFromEvent(event).membership).toBeUndefined();
+
+      // Which is the 403 every authenticated route already produces: the header
+      // adds no authority, so naming an org the caller has left is refused by
+      // the same gate that refuses a revoked membership in their own org.
+      const denied = authorize('buckets.read').before(
+        buildMiddyRequest(event),
+      ) as APIGatewayProxyStructuredResultV2;
+      expectErrorResponse(denied, 403, {
+        message: 'You are not a member of this organization.',
+        code: ApiErrorCode.NOT_A_MEMBER,
+      });
+      errorSpy.mockRestore();
+    });
+
+    it('serves /me from the caller’s own org when the named one has no row', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      signInAs(PERSONAL_ORG);
+      stubMemberOf(PERSONAL_ORG, OrgRole.Owner);
+      const { event, request } = requestNaming(OTHER_ORG);
+
+      const result = await authMiddleware({ orgHeaderFallback: true }).before(request);
+
+      expect(result).toBeUndefined();
+      // The response then echoes an org id that disagrees with the console's
+      // stash, which is what tells the console to clear it.
+      expect(getUserInfoFromEvent(event).orgId).toBe(PERSONAL_ORG);
+      expect(getUserInfoFromEvent(event).membership?.role).toBe(OrgRole.Owner);
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('does not fall back for a caller who is a member of the named org', async () => {
+      signInAs(PERSONAL_ORG);
+      stubMemberOf(PERSONAL_ORG, OrgRole.Owner);
+      stubMemberOf(OTHER_ORG, OrgRole.Admin);
+      const { event, request } = requestNaming(OTHER_ORG);
+
+      await authMiddleware({ orgHeaderFallback: true }).before(request);
+
+      expect(getUserInfoFromEvent(event).orgId).toBe(OTHER_ORG);
+      expect(getUserInfoFromEvent(event).membership?.role).toBe(OrgRole.Admin);
+    });
+
+    it('serves /me from the caller’s own org when the header is not an org id', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      signInAs(PERSONAL_ORG);
+      stubMemberOf(PERSONAL_ORG, OrgRole.Owner);
+      const { event, request } = requestNaming('not-a-uuid');
+
+      const result = await authMiddleware({ orgHeaderFallback: true }).before(request);
+
+      // The 400 every other route answers would leave the console holding an
+      // unreadable stash and no endpoint willing to say so.
+      expect(result).toBeUndefined();
+      expect(getUserInfoFromEvent(event).orgId).toBe(PERSONAL_ORG);
+      warnSpy.mockRestore();
+    });
+
+    describe('the identity-provider rule', () => {
+      function stubRestrictedProfile(orgId: string, auth0OrgId: string) {
+        ddbMock
+          .on(GetItemCommand, {
+            TableName: 'UserInfoTable',
+            Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+          })
+          .resolves({ Item: { name: { S: 'Acme' }, auth0OrgId: { S: auth0OrgId } } });
+      }
+
+      function requestWithNoHeader() {
+        const event = buildEvent({
+          cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+        });
+        return { event, request: buildMiddyRequest(event) };
+      }
+
+      function profileReadsOf(orgId: string) {
+        return ddbMock
+          .commandCalls(GetItemCommand)
+          .map((call) => call.args[0].input)
+          .filter(
+            (input) => input.TableName === 'UserInfoTable' && input.Key?.pk?.S === `ORG#${orgId}`,
+          );
+      }
+
+      it('refuses a session that did not authenticate at the org, header or not', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        signInAs(PERSONAL_ORG);
+        stubMemberOf(PERSONAL_ORG, OrgRole.Owner);
+        stubRestrictedProfile(PERSONAL_ORG, 'org_auth0_acme');
+        const { event, request } = requestWithNoHeader();
+
+        const result = (await authMiddleware().before(
+          request,
+        )) as APIGatewayProxyStructuredResultV2;
+
+        // Sending no header would otherwise skip the one rule that keeps a
+        // plain Universal Login session out of an org that demands its own
+        // provider — including the caller's own.
+        expect(result.statusCode).toBe(403);
+        expect(JSON.parse(result.body!).message).toContain('identity provider');
+        expect(getUserInfoFromEvent(event).orgId).toBe(PERSONAL_ORG);
+        warnSpy.mockRestore();
+      });
+
+      it('admits the session whose ID token carries the org’s org_id claim', async () => {
+        signInAs(PERSONAL_ORG, { org_id: 'org_auth0_acme' });
+        stubMemberOf(PERSONAL_ORG, OrgRole.Owner);
+        stubRestrictedProfile(PERSONAL_ORG, 'org_auth0_acme');
+        const { event, request } = requestWithNoHeader();
+
+        expect(await authMiddleware().before(request)).toBeUndefined();
+        expect(getUserInfoFromEvent(event).membership?.role).toBe(OrgRole.Owner);
+      });
+
+      it('reads no profile for a caller who is not a member of the org they named', async () => {
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        signInAs(PERSONAL_ORG);
+        stubMemberOf(PERSONAL_ORG, OrgRole.Owner);
+        stubRestrictedProfile(OTHER_ORG, 'org_auth0_acme');
+        const { event, request } = requestNaming(OTHER_ORG);
+
+        expect(await authMiddleware().before(request)).toBeUndefined();
+
+        // Whether an org authenticates through its own provider is not
+        // something a non-member gets to learn by naming its id: they meet the
+        // same NOT_A_MEMBER 403 either way.
+        expect(profileReadsOf(OTHER_ORG)).toHaveLength(0);
+        const denied = authorize('buckets.read').before(
+          buildMiddyRequest(event),
+        ) as APIGatewayProxyStructuredResultV2;
+        expectErrorResponse(denied, 403, {
+          message: 'You are not a member of this organization.',
+          code: ApiErrorCode.NOT_A_MEMBER,
+        });
+        errorSpy.mockRestore();
+      });
+
+      it('serves /me from the caller’s own org when the named one refuses the session', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        signInAs(PERSONAL_ORG);
+        stubMemberOf(PERSONAL_ORG, OrgRole.Owner);
+        stubMemberOf(OTHER_ORG, OrgRole.Admin);
+        stubRestrictedProfile(OTHER_ORG, 'org_auth0_acme');
+        const { event, request } = requestNaming(OTHER_ORG);
+
+        const result = await authMiddleware({ orgHeaderFallback: true }).before(request);
+
+        expect(result).toBeUndefined();
+        expect(getUserInfoFromEvent(event).orgId).toBe(PERSONAL_ORG);
+        expect(getUserInfoFromEvent(event).membership?.role).toBe(OrgRole.Owner);
+        warnSpy.mockRestore();
+      });
+
+      it('refuses /me too when the caller’s own org refuses the session', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        signInAs(PERSONAL_ORG);
+        stubMemberOf(PERSONAL_ORG, OrgRole.Owner);
+        stubRestrictedProfile(PERSONAL_ORG, 'org_auth0_acme');
+        const { request } = requestWithNoHeader();
+
+        const result = (await authMiddleware({
+          orgHeaderFallback: true,
+        }).before(request)) as APIGatewayProxyStructuredResultV2;
+
+        // There is nowhere left to fall back to, and the way in is to
+        // authenticate through the org's own provider.
+        expect(result.statusCode).toBe(403);
+        warnSpy.mockRestore();
+      });
     });
   });
 

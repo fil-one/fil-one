@@ -48,6 +48,10 @@ declare module "sst" {
       value: string;
       type: "sst.Secret";
     };
+    ForgeDevManagementApiToken: {
+      value: string;
+      type: "sst.Secret";
+    };
     SendGridApiKey: {
       value: string;
       type: "sst.Secret";

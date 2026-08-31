@@ -7,6 +7,7 @@ import {
   sleep,
   pollTestClockReady,
   deleteBillingRecord,
+  testOrgId,
 } from './helpers.js';
 
 describe('Usage Reporting (meter events via test clock)', () => {
@@ -49,7 +50,7 @@ describe('Usage Reporting (meter events via test clock)', () => {
       default_payment_method: pmId,
       billing_cycle_anchor: anchorTime,
       proration_behavior: 'none',
-      metadata: { userId, orgId: 'test-org' },
+      metadata: { userId, orgId: testOrgId(userId) },
     });
     subId = sub.id;
   });

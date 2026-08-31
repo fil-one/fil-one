@@ -5,8 +5,10 @@ import { SubscriptionStatus } from '@filone/shared';
 import { SidebarNav } from './SidebarNav';
 import { Banner } from './Banner';
 import { UserAvatar } from './UserAvatar';
+import { OrgSwitcher } from './OrgSwitcher';
 import { getUsage, getBilling, getMe, logout } from '../lib/api';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
+import { useHasPermission } from '../lib/use-permissions.js';
 import { daysUntil, pluralizeDays } from '../lib/time.js';
 
 function MobileUserMenu() {
@@ -59,6 +61,12 @@ function MobileUserMenu() {
             {me?.orgName && <p className="truncate text-xs text-zinc-500">{me.orgName}</p>}
           </div>
           <div className="my-1 border-t border-zinc-100" />
+          <OrgSwitcher
+            memberships={me?.memberships}
+            activeOrgId={me?.orgId}
+            inMenu
+            testId="mobile-org-switcher"
+          />
           <button
             type="button"
             role="menuitem"
@@ -73,6 +81,61 @@ function MobileUserMenu() {
       )}
     </div>
   );
+}
+
+/**
+ * What the org's account state means for the caller in front of it.
+ *
+ * Why a tenant is write-locked is a billing fact, and `billing.view` is what
+ * says whether the console may know it. Without that permission the old copy
+ * guessed: a Member on a past-due account was told the storage limit was
+ * exceeded — a specific, wrong reason — and pointed at a page that would 403.
+ * The lock itself is real and worth saying; the cause and the CTA are not.
+ */
+function TenantBanners({
+  tenantStatus,
+  mayReadBilling,
+  isGracePeriod,
+  graceDays,
+}: {
+  tenantStatus: string | undefined;
+  mayReadBilling: boolean;
+  isGracePeriod: boolean;
+  graceDays: number | null;
+}) {
+  if (tenantStatus === 'write-locked') {
+    if (!mayReadBilling) {
+      return (
+        <Banner variant="warning">
+          Uploads are disabled for this organization — contact an organization owner.
+        </Banner>
+      );
+    }
+    return (
+      <Banner variant="warning" action={{ label: 'Upgrade', href: '/billing' }}>
+        {isGracePeriod
+          ? gracePeriodMessage(graceDays)
+          : 'Storage limit exceeded. Uploads are disabled. Delete files or upgrade to resume.'}
+      </Banner>
+    );
+  }
+
+  if (tenantStatus === 'disabled') {
+    if (!mayReadBilling) {
+      return (
+        <Banner variant="error">
+          This organization&rsquo;s account is disabled — contact an organization owner.
+        </Banner>
+      );
+    }
+    return (
+      <Banner variant="error" action={{ label: 'Manage account', href: '/billing' }}>
+        Account disabled. Visit billing to restore access.
+      </Banner>
+    );
+  }
+
+  return null;
 }
 
 type AppShellProps = {
@@ -101,12 +164,18 @@ export function AppShell({ children }: AppShellProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
   const drawerId = useId();
 
+  const mayReadBilling = useHasPermission('billing.view');
+
   const { data: usage } = useQuery({
     queryKey: queryKeys.usage,
     queryFn: getUsage,
     staleTime: USAGE_STALE_TIME,
   });
-  const { data: billing } = useQuery({ queryKey: queryKeys.billing, queryFn: getBilling });
+  const { data: billing } = useQuery({
+    queryKey: queryKeys.billing,
+    queryFn: getBilling,
+    enabled: mayReadBilling,
+  });
 
   const tenantStatus = usage?.tenantStatus;
   const isGracePeriod = billing?.subscription.status === SubscriptionStatus.GracePeriod;
@@ -167,18 +236,12 @@ export function AppShell({ children }: AppShellProps) {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
-      {tenantStatus === 'write-locked' && (
-        <Banner variant="warning" action={{ label: 'Upgrade', href: '/billing' }}>
-          {isGracePeriod
-            ? gracePeriodMessage(graceDays)
-            : 'Storage limit exceeded. Uploads are disabled. Delete files or upgrade to resume.'}
-        </Banner>
-      )}
-      {tenantStatus === 'disabled' && (
-        <Banner variant="error" action={{ label: 'Manage account', href: '/billing' }}>
-          Account disabled. Visit billing to restore access.
-        </Banner>
-      )}
+      <TenantBanners
+        tenantStatus={tenantStatus}
+        mayReadBilling={mayReadBilling}
+        isGracePeriod={isGracePeriod}
+        graceDays={graceDays}
+      />
       <div className="flex flex-1 overflow-hidden">
         {/* Desktop sidebar — unchanged */}
         <div

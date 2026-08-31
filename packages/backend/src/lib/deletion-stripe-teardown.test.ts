@@ -46,10 +46,36 @@ vi.mock('./stripe-client.js', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 import { tearDownStripe } from './deletion-stripe-teardown.js';
+import type { DeletionMember } from './deletion-record.js';
 
 const ORG = 'org-1';
 const CUSTOMER = 'cus_1';
-const MEMBERS = [{ userId: 'user-1', sub: 'auth0|one', stripeCustomerId: CUSTOMER }];
+
+function member(userId: string, deleteIdentity = true): DeletionMember {
+  return { userId, sub: `auth0|${userId}`, deleteIdentity };
+}
+
+const MEMBERS = [member('user-1')];
+
+/** The org's subscription row, as the teardown projects it. */
+function orgRow(attributes: Record<string, { S: string }> = {}) {
+  return {
+    Item: {
+      stripeCustomerId: { S: CUSTOMER },
+      subscriptionId: { S: 'sub_1' },
+      currentPeriodStart: { S: '2026-08-01T00:00:00.000Z' },
+      ...attributes,
+    },
+  };
+}
+
+/** The key of every GetItem the teardown issued, as `pk/sk`. */
+function readKeys(): string[] {
+  return ddbMock.commandCalls(GetItemCommand).map((call) => {
+    const { Key } = call.args[0].input;
+    return `${Key!.pk!.S}/${Key!.sk!.S}`;
+  });
+}
 
 describe('tearDownStripe', () => {
   beforeEach(() => {
@@ -57,23 +83,64 @@ describe('tearDownStripe', () => {
     ddbMock.reset();
     order.length = 0;
     process.env.STRIPE_METER_EVENT_NAME = 'filone_storage';
-    ddbMock.on(GetItemCommand).resolves({
-      Item: {
-        subscriptionId: { S: 'sub_1' },
-        currentPeriodStart: { S: '2026-08-01T00:00:00.000Z' },
-      },
-    });
+    ddbMock.on(GetItemCommand).resolves(orgRow());
     mockSubscriptionsList.mockResolvedValue({ data: [] });
     mockInvoicesList.mockResolvedValue({ data: [] });
     mockCustomersRetrieve.mockResolvedValue({ invoice_settings: {} });
     mockPaymentMethodsList.mockResolvedValue({ data: [] });
   });
 
-  it('does nothing for a member with no Stripe customer', async () => {
-    await tearDownStripe(ORG, [{ userId: 'user-1', sub: 'auth0|one' }]);
+  // One org, one subscription: the customer is the org's, and which member is
+  // being deleted does not change the answer.
+  it('reads the customer off the org subscription row', async () => {
+    await tearDownStripe(ORG, MEMBERS);
+
+    expect(readKeys()).toEqual([`ORG#${ORG}/SUBSCRIPTION`]);
+    expect(mockCustomersDel).toHaveBeenCalledTimes(1);
+    expect(mockCustomersDel).toHaveBeenCalledWith(CUSTOMER);
+  });
+
+  it('does nothing when the org row names no customer', async () => {
+    ddbMock.on(GetItemCommand).resolves({
+      Item: { subscriptionId: { S: 'sub_1' } },
+    });
+
+    await tearDownStripe(ORG, MEMBERS);
 
     expect(mockCustomersDel).not.toHaveBeenCalled();
     expect(mockSubscriptionsList).not.toHaveBeenCalled();
+    expect(mockReportOrgUsage).not.toHaveBeenCalled();
+  });
+
+  // A re-drive after the org row is gone still disables the tenants and returns.
+  it('does nothing when the org row is missing', async () => {
+    ddbMock.on(GetItemCommand).resolves({});
+
+    await expect(tearDownStripe(ORG, MEMBERS)).resolves.toBeUndefined();
+
+    expect(mockDisableTenants).toHaveBeenCalledWith(ORG, 'disabled');
+    expect(mockCustomersDel).not.toHaveBeenCalled();
+  });
+
+  // The period comes off the same row as the customer, so a row that never
+  // recorded one bills nothing rather than guessing a period.
+  it('cancels without a usage report when the row has no billing period', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: { stripeCustomerId: { S: CUSTOMER } } });
+    mockSubscriptionsList.mockResolvedValue({ data: [{ id: 'sub_1', status: 'active' }] });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      await tearDownStripe(ORG, MEMBERS);
+
+      expect(mockReportOrgUsage).not.toHaveBeenCalled();
+      expect(mockSubscriptionsCancel).toHaveBeenCalledWith('sub_1', {
+        invoice_now: true,
+        prorate: false,
+      });
+      expect(mockCustomersDel).toHaveBeenCalledWith(CUSTOMER);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   // customers.del cancels subscriptions itself, but silently and without an
@@ -230,6 +297,90 @@ describe('tearDownStripe', () => {
     );
 
     await expect(tearDownStripe(ORG, MEMBERS)).resolves.toBeUndefined();
+  });
+
+  // The backfill leaves an org keyed only to its legacy rows whenever a legacy
+  // row records no orgId, and the org row it never wrote names no customer.
+  describe('when the org row names no customer', () => {
+    const LEGACY = 'cus_legacy';
+
+    function legacyRow(customerId: string) {
+      return {
+        Item: {
+          stripeCustomerId: { S: customerId },
+          subscriptionId: { S: 'sub_legacy' },
+          currentPeriodStart: { S: '2026-07-01T00:00:00.000Z' },
+        },
+      };
+    }
+
+    beforeEach(() => {
+      ddbMock.on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG}` } } }).resolves({});
+      ddbMock
+        .on(GetItemCommand, { Key: { pk: { S: 'CUSTOMER#user-1' } } })
+        .resolves(legacyRow(LEGACY));
+      mockSubscriptionsList.mockResolvedValue({ data: [{ id: 'sub_legacy', status: 'active' }] });
+    });
+
+    it('tears down the customer on the legacy row of a member being deleted', async () => {
+      await tearDownStripe(ORG, MEMBERS);
+
+      expect(readKeys()).toEqual([`ORG#${ORG}/SUBSCRIPTION`, 'CUSTOMER#user-1/SUBSCRIPTION']);
+      expect(mockSubscriptionsCancel).toHaveBeenCalledWith('sub_legacy', {
+        invoice_now: true,
+        prorate: false,
+      });
+      expect(mockCustomersDel).toHaveBeenCalledWith(LEGACY);
+    });
+
+    // The period comes off the legacy row too, so the final usage is billed over
+    // the period that row still describes.
+    it('bills the period the legacy row records', async () => {
+      await tearDownStripe(ORG, MEMBERS);
+
+      expect(mockReportOrgUsage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orgId: ORG,
+          subscriptionId: 'sub_legacy',
+          stripeCustomerId: LEGACY,
+          currentPeriodStart: '2026-07-01T00:00:00.000Z',
+        }),
+      );
+    });
+
+    // Two members copied from the same account share a customer; deleting it
+    // twice would 404 on the second pass and bill nothing extra.
+    it('deletes each distinct customer once', async () => {
+      ddbMock
+        .on(GetItemCommand, { Key: { pk: { S: 'CUSTOMER#user-2' } } })
+        .resolves(legacyRow(LEGACY));
+      ddbMock
+        .on(GetItemCommand, { Key: { pk: { S: 'CUSTOMER#user-3' } } })
+        .resolves(legacyRow('cus_other'));
+
+      await tearDownStripe(ORG, [member('user-1'), member('user-2'), member('user-3')]);
+
+      expect(mockCustomersDel.mock.calls.map(([id]) => id)).toEqual([LEGACY, 'cus_other']);
+    });
+
+    // An invited member, or one who belongs to another org, keeps their account
+    // and their billing; their row is not this org's subscription.
+    it('reads no row for a member whose account is kept', async () => {
+      await tearDownStripe(ORG, [member('user-1', false)]);
+
+      expect(readKeys()).toEqual([`ORG#${ORG}/SUBSCRIPTION`]);
+      expect(mockCustomersDel).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when no legacy row names a customer either', async () => {
+      ddbMock.on(GetItemCommand, { Key: { pk: { S: 'CUSTOMER#user-1' } } }).resolves({});
+
+      await tearDownStripe(ORG, MEMBERS);
+
+      expect(mockCustomersDel).not.toHaveBeenCalled();
+      expect(mockSubscriptionsList).not.toHaveBeenCalled();
+      expect(mockReportOrgUsage).not.toHaveBeenCalled();
+    });
   });
 
   it('propagates any other Stripe failure', async () => {

@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
-import { expectErrorResponse } from '../test/assert-helpers.js';
+import {
+  expectErrorResponse,
+  expectRefreshedCookies,
+  REFRESHED_TOKENS,
+} from '../test/assert-helpers.js';
 
 vi.mock('sst', () => ({
   Resource: {
@@ -165,6 +169,29 @@ describe('ragAccessMiddleware', () => {
     );
 
     expectErrorResponse(result, 403, { message: 'You do not have access to this feature.' });
+  });
+
+  it('carries the rotated cookies on its denial', async () => {
+    // A feature-flag refusal is not an authentication failure, so it must not
+    // cost the caller the session this request just refreshed.
+    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+
+    const { before } = ragAccessMiddleware();
+    const result = await before(
+      buildMiddyRequest(
+        buildEvent({
+          userInfo: {
+            userId: 'user-1',
+            orgId: 'org-1',
+            email: 'eve@example.com',
+            emailVerified: true,
+          },
+        }),
+        { internal: { newTokens: REFRESHED_TOKENS } },
+      ),
+    );
+
+    expectRefreshedCookies(result);
   });
 
   it('returns a 403 for an unverified email AND performs no DynamoDB lookup', async () => {

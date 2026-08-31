@@ -6,6 +6,22 @@
 
 declare module "sst" {
   export interface Resource {
+    "AcceptInvitation": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "AccountDeletionDlq": {
+      "type": "sst.aws.Queue"
+      "url": string
+    }
+    "AccountDeletionSweeper": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "AccountDeletionWorker": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "ActivateSubscription": {
       "name": string
       "type": "sst.aws.Function"
@@ -13,6 +29,10 @@ declare module "sst" {
     "Api": {
       "type": "sst.aws.ApiGatewayV2"
       "url": string
+    }
+    "AuditTable": {
+      "name": string
+      "type": "sst.aws.Dynamo"
     }
     "AuroraBackofficeToken": {
       "type": "sst.sst.Secret"
@@ -62,6 +82,10 @@ declare module "sst" {
       "type": "sst.aws.Queue"
       "url": string
     }
+    "BulkDeleteDlqWatchdog": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "BulkDeleteQueue": {
       "type": "sst.aws.Queue"
       "url": string
@@ -70,7 +94,15 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Dynamo"
     }
+    "BulkDeleteWorker": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "ChangePassword": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "ConfirmAccountDeletion": {
       "name": string
       "type": "sst.aws.Function"
     }
@@ -79,6 +111,14 @@ declare module "sst" {
       "type": "sst.aws.Function"
     }
     "CreateBucket": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "CreateBulkDeleteJob": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "CreateInvitation": {
       "name": string
       "type": "sst.aws.Function"
     }
@@ -114,6 +154,14 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "DeletionChallengeTable": {
+      "name": string
+      "type": "sst.aws.Dynamo"
+    }
+    "DeletionCodeHmacKey": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
     "DisableMfa": {
       "name": string
       "type": "sst.aws.Function"
@@ -121,6 +169,10 @@ declare module "sst" {
     "EnrollMfa": {
       "name": string
       "type": "sst.aws.Function"
+    }
+    "ForgeDevManagementApiToken": {
+      "type": "sst.sst.Secret"
+      "value": string
     }
     "ForgeManagementApiToken": {
       "type": "sst.sst.Secret"
@@ -147,6 +199,10 @@ declare module "sst" {
       "type": "sst.aws.Function"
     }
     "GetBucketRagEnablement": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "GetBulkDeleteJob": {
       "name": string
       "type": "sst.aws.Function"
     }
@@ -190,7 +246,15 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "ListInvitations": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "ListInvoices": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "ListMembers": {
       "name": string
       "type": "sst.aws.Function"
     }
@@ -198,9 +262,17 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "OrgTable": {
+      "name": string
+      "type": "sst.aws.Dynamo"
+    }
     "OtelFirehoseBackup": {
       "name": string
       "type": "sst.aws.Bucket"
+    }
+    "OwnerCountDriftChecker": {
+      "name": string
+      "type": "sst.aws.Function"
     }
     "Presign": {
       "name": string
@@ -231,7 +303,19 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "RemoveMember": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "RequestAccountDeletion": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "ResendVerification": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "RevokeInvitation": {
       "name": string
       "type": "sst.aws.Function"
     }
@@ -260,6 +344,18 @@ declare module "sst" {
       "type": "sst.aws.Function"
     }
     "SubscriptionDriftChecker": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "TransferOwnership": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "UpdateMemberRole": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "UpdateOrg": {
       "name": string
       "type": "sst.aws.Function"
     }

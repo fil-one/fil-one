@@ -91,6 +91,33 @@ describe('isObjectPermission', () => {
   });
 });
 
+describe('CreateAccessKeySchema reserved key names', () => {
+  const base = {
+    permissions: ['read'],
+    bucketScope: 'all' as const,
+    region: S3Region.UsEast1,
+  };
+
+  const reservedNames: Record<string, string> = {
+    'the name is the console key itself': 'filone-console-v2',
+    'the name is the retired console key': 'filone-console',
+    'the name only starts with the prefix': 'filone-console-mine',
+    'the case differs': 'FilOne-Console-v2',
+    'the name is padded with spaces': '  filone-console  ',
+  };
+  for (const [desc, keyName] of Object.entries(reservedNames)) {
+    it(`rejects a key name when ${desc}`, () => {
+      const result = CreateAccessKeySchema.safeParse({ ...base, keyName });
+      expect(result.success).toBe(false);
+    });
+  }
+
+  it('accepts a name that merely contains the prefix', () => {
+    const result = CreateAccessKeySchema.safeParse({ ...base, keyName: 'my filone-console key' });
+    expect(result.success).toBe(true);
+  });
+});
+
 describe('CreateAccessKeySchema bucket permissions', () => {
   const base = {
     keyName: 'My Key',

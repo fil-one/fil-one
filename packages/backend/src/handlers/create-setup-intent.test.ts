@@ -5,6 +5,7 @@ import {
   DynamoDBClient,
   GetItemCommand,
   PutItemCommand,
+  UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 
 // ---------------------------------------------------------------------------
@@ -29,11 +30,16 @@ vi.mock('sst', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
+import { ApiErrorCode } from '@filone/shared';
 import { baseHandler } from './create-setup-intent.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
 const USER_ID = 'user-1';
 const ORG_ID = 'org-1';
+
+/** The subscription row's key, and the dead `CUSTOMER#` key the cleanup step deletes. */
+const ORG_KEY = { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'SUBSCRIPTION' } };
+const LEGACY_KEY = { pk: { S: `CUSTOMER#${USER_ID}` }, sk: { S: 'SUBSCRIPTION' } };
 
 function setupIntentEvent() {
   return buildEvent({
@@ -41,6 +47,21 @@ function setupIntentEvent() {
     method: 'POST',
     rawPath: '/api/billing/setup-intent',
   });
+}
+
+/** A stored row on one of the two keys. */
+function subscriptionItem(key: typeof ORG_KEY, attributes: Record<string, { S: string }> = {}) {
+  return { Item: { ...key, ...attributes } };
+}
+
+/** The partition keys the record was written to, in order. */
+function putKeys() {
+  return ddbMock.commandCalls(PutItemCommand).map((call) => call.args[0].input.Item?.pk?.S);
+}
+
+/** The partition keys the updates landed on, in the order the store wrote them. */
+function updatedKeys() {
+  return ddbMock.commandCalls(UpdateItemCommand).map((call) => call.args[0].input.Key?.pk?.S);
 }
 
 describe('create-setup-intent baseHandler', () => {
@@ -61,17 +82,18 @@ describe('create-setup-intent baseHandler', () => {
     expect(mockCustomersCreate).toHaveBeenCalledOnce();
     expect(mockSetupIntentsCreate).toHaveBeenCalledOnce();
 
-    const putCalls = ddbMock.commandCalls(PutItemCommand);
-    expect(putCalls).toHaveLength(1);
+    expect(putKeys()).toStrictEqual([ORG_KEY.pk.S]);
 
-    const input = putCalls[0].args[0].input;
+    const input = ddbMock.commandCalls(PutItemCommand)[0].args[0].input;
     // Race guard: never clobber a record created by the entitlement path.
     expect(input.ConditionExpression).toBe('attribute_not_exists(pk)');
 
     const item = input.Item!;
-    expect(item.pk).toEqual({ S: `CUSTOMER#${USER_ID}` });
     expect(item.stripeCustomerId).toEqual({ S: 'cus_test_123' });
+    // The row carries both ids, since the key names only the org and the paths
+    // that close out a deleted Stripe customer still need the member.
     expect(item.orgId).toEqual({ S: ORG_ID });
+    expect(item.userId).toEqual({ S: USER_ID });
 
     // The invariant: this endpoint must not write trial entitlement.
     expect(item.subscriptionStatus).toBeUndefined();
@@ -94,9 +116,8 @@ describe('create-setup-intent baseHandler', () => {
   });
 
   it('stamps userId and orgId on the Stripe customer (existing record without one)', async () => {
-    ddbMock.on(GetItemCommand).resolves({
-      Item: { pk: { S: `CUSTOMER#${USER_ID}` }, sk: { S: 'SUBSCRIPTION' } },
-    });
+    ddbMock.on(GetItemCommand).resolves(subscriptionItem(ORG_KEY));
+    ddbMock.on(UpdateItemCommand).resolves({});
 
     await baseHandler(setupIntentEvent());
 
@@ -104,6 +125,63 @@ describe('create-setup-intent baseHandler', () => {
       email: 'user@example.com',
       metadata: { userId: USER_ID, orgId: ORG_ID },
     });
+  });
+
+  it('records the customer mapping on the org row when the record exists without one', async () => {
+    ddbMock.on(GetItemCommand).resolves(subscriptionItem(ORG_KEY));
+    ddbMock.on(UpdateItemCommand).resolves({});
+
+    await baseHandler(setupIntentEvent());
+
+    expect(updatedKeys()).toStrictEqual([ORG_KEY.pk.S]);
+    const input = ddbMock.commandCalls(UpdateItemCommand).at(0)!.args[0].input;
+    expect(input.ExpressionAttributeValues?.[':cid']).toEqual({ S: 'cus_test_123' });
+  });
+
+  it("uses the org's Stripe customer rather than the one on the caller's legacy row", async () => {
+    // Billing belongs to the org: a member setting up a card must land on the
+    // org's Stripe customer, not mint or reuse one of their own.
+    ddbMock
+      .on(GetItemCommand, { Key: ORG_KEY })
+      .resolves(subscriptionItem(ORG_KEY, { stripeCustomerId: { S: 'cus_org_1' } }))
+      .on(GetItemCommand, { Key: LEGACY_KEY })
+      .resolves(subscriptionItem(LEGACY_KEY, { stripeCustomerId: { S: 'cus_legacy_9' } }));
+
+    const result = await baseHandler(setupIntentEvent());
+
+    expect(result).toMatchObject({ statusCode: 200 });
+    expect(mockSetupIntentsCreate).toHaveBeenCalledWith({
+      customer: 'cus_org_1',
+      usage: 'off_session',
+    });
+    expect(mockCustomersCreate).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(1);
+  });
+
+  it('mints nothing while a pre-re-key CUSTOMER# row is still standing', async () => {
+    // No org row, but the legacy row says the backfill missed this account: the
+    // org already has a Stripe customer. Minting a second one here would have
+    // activate-subscription put a second live subscription beside the one that
+    // is still billing.
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    ddbMock
+      .on(GetItemCommand, { Key: ORG_KEY })
+      .resolves({})
+      .on(GetItemCommand, { Key: LEGACY_KEY })
+      .resolves(subscriptionItem(LEGACY_KEY, { stripeCustomerId: { S: 'cus_legacy_9' } }));
+
+    const result = await baseHandler(setupIntentEvent());
+
+    expect(result).toMatchObject({ statusCode: 503 });
+    expect(JSON.parse(String((result as { body: string }).body)).code).toBe(
+      ApiErrorCode.SUBSCRIPTION_INACTIVE,
+    );
+    expect(mockCustomersCreate).not.toHaveBeenCalled();
+    expect(mockSetupIntentsCreate).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    errorSpy.mockRestore();
   });
 
   it('swallows ConditionalCheckFailedException when a record was created concurrently', async () => {
@@ -122,6 +200,7 @@ describe('create-setup-intent baseHandler', () => {
 
     expect(result).toMatchObject({ statusCode: 200 });
     expect(mockSetupIntentsCreate).toHaveBeenCalledOnce();
+    expect(putKeys()).toStrictEqual([ORG_KEY.pk.S]);
   });
 
   it('rethrows non-conditional DynamoDB errors', async () => {
