@@ -214,13 +214,13 @@ marker, shown because the resolver takes it as input
 `UserInfoTable`, being console bearer credentials outside the domain
 ([§4](#4-access-keys-belong-to-a-member)).
 
-| Table               | pk                              | sk                  | Attributes                                                                                                   | Purpose                                        |
-| ------------------- | ------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------- |
-| `BucketPolicyTable` | `ORG#{orgId}`                   | `POLICY#{policyId}` | `name`, `region`, `buckets`, `permissions`, `granularPermissions`, `version`, `createdBy/At`, `updatedBy/At` | the policy                                     |
-| `BucketPolicyTable` | `ORG#{orgId}#POLICY#{policyId}` | `MEMBER#{userId}`   | `addedBy`, `addedAt`                                                                                         | the roster                                     |
-| `BucketPolicyTable` | `ORG#{orgId}#MEMBER#{userId}`   | `POLICY#{policyId}` | `addedBy`, `addedAt`                                                                                         | inverse: a member's policies, the request read |
+| Table               | pk                              | sk                  | Attributes                                                                                                   | Purpose                                                  |
+| ------------------- | ------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
+| `BucketPolicyTable` | `ORG#{orgId}`                   | `POLICY#{policyId}` | `name`, `region`, `buckets`, `permissions`, `granularPermissions`, `version`, `createdBy/At`, `updatedBy/At` | the policy                                               |
+| `BucketPolicyTable` | `ORG#{orgId}#POLICY#{policyId}` | `MEMBER#{userId}`   | `addedBy`, `addedAt`                                                                                         | the roster                                               |
+| `BucketPolicyTable` | `ORG#{orgId}#MEMBER#{userId}`   | `POLICY#{policyId}` | `addedBy`, `addedAt`                                                                                         | inverse: a member's policies, the request read           |
 | `BucketPolicyTable` | `ORG#{orgId}#MEMBER#{userId}`   | `KEY#{keyId}`       | `keyName`, `region`, stamped grant, `createdBy/At`, `creatorEmail?`, `expiresAt?`, `recovered?`              | the key record ([§4](#4-access-keys-belong-to-a-member)) |
-| `OrgTable`          | `ORG#{orgId}`                   | `MEMBER#{userId}`   | `bucketScope`                                                                                                | whether policies apply                         |
+| `OrgTable`          | `ORG#{orgId}`                   | `MEMBER#{userId}`   | `bucketScope`                                                                                                | whether policies apply                                   |
 
 **Buckets ride on the policy row as a list**, so adding or removing a bucket is
 one conditional update to one row rather than a fan-out. The list is bounded by
@@ -312,26 +312,26 @@ while the bucket arrives in a path parameter or, for `POST /api/presign`, in
 each element of the body. This is the `in-handler` requirement M1 already
 defines for presign.
 
-| Route                                                    | Scoped behavior                                                                                                             |
-| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/buckets`                                       | filter the merged fan-out result to the resolved set                                                                        |
-| `POST /api/buckets`                                      | allowed; the creator names one of their policies for the new bucket ([§6](#6-bucket-lifecycle-moves-to-the-console))        |
-| `GET /api/buckets/{name}`                                | absent from the set gives the same 404 a missing bucket gives                                                               |
-| `DELETE /api/buckets/{name}`                             | gated on `buckets.delete`, which only an unscoped caller holds                                                              |
-| `GET /api/buckets/{name}/analytics`                      | 404                                                                                                                         |
-| `GET \| POST /api/buckets/{name}/rag/enabled`            | 404                                                                                                                         |
-| `POST /api/buckets/{name}/bulk-delete`                   | 404                                                                                                                         |
-| `GET /api/bulk-delete-jobs/{jobId}`                      | the job row names its bucket; check that bucket, 404 otherwise                                                              |
-| `GET /api/activity`                                      | filter the bucket entries to the resolved set                                                                               |
-| `POST /api/presign`                                      | per operation, the bucket in the set and the effective permission for it; one denial refuses the batch                      |
-| `POST /api/buckets/{name}/query` (bearer)                | the bearer branch resolves the key creator's membership row, so that member's live access applies                           |
-| `POST /api/access-keys`                                  | minted for the caller from their effective access; a scoped caller with no reachable bucket is refused ([§4](#4-access-keys-belong-to-a-member))                              |
-| `POST /api/rag-api-keys`                                 | bucket refs must sit inside the caller's effective access; same refusal                                                     |
-| `POST /api/org/invitations`                              | carries the invited member's policy ids ([§7](#7-policy-lifecycle))                                                         |
-| `PATCH /api/org/members/{userId}`                        | role changes; any change to the member's effective access runs the key re-sync ([§7](#7-policy-lifecycle))                  |
-| `GET \| POST /api/bucket-policies`                       | list and create, `policies.manage`                                                                                          |
-| `GET \| PATCH \| DELETE /api/bucket-policies/{policyId}` | read, edit, delete, `policies.manage`                                                                                       |
-| `POST \| DELETE /api/bucket-policies/{policyId}/members` | roster changes, `policies.manage`                                                                                           |
+| Route                                                    | Scoped behavior                                                                                                                                  |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /api/buckets`                                       | filter the merged fan-out result to the resolved set                                                                                             |
+| `POST /api/buckets`                                      | allowed; the creator names one of their policies for the new bucket ([§6](#6-bucket-lifecycle-moves-to-the-console))                             |
+| `GET /api/buckets/{name}`                                | absent from the set gives the same 404 a missing bucket gives                                                                                    |
+| `DELETE /api/buckets/{name}`                             | gated on `buckets.delete`, which only an unscoped caller holds                                                                                   |
+| `GET /api/buckets/{name}/analytics`                      | 404                                                                                                                                              |
+| `GET \| POST /api/buckets/{name}/rag/enabled`            | 404                                                                                                                                              |
+| `POST /api/buckets/{name}/bulk-delete`                   | 404                                                                                                                                              |
+| `GET /api/bulk-delete-jobs/{jobId}`                      | the job row names its bucket; check that bucket, 404 otherwise                                                                                   |
+| `GET /api/activity`                                      | filter the bucket entries to the resolved set                                                                                                    |
+| `POST /api/presign`                                      | per operation, the bucket in the set and the effective permission for it; one denial refuses the batch                                           |
+| `POST /api/buckets/{name}/query` (bearer)                | the bearer branch resolves the key creator's membership row, so that member's live access applies                                                |
+| `POST /api/access-keys`                                  | minted for the caller from their effective access; a scoped caller with no reachable bucket is refused ([§4](#4-access-keys-belong-to-a-member)) |
+| `POST /api/rag-api-keys`                                 | bucket refs must sit inside the caller's effective access; same refusal                                                                          |
+| `POST /api/org/invitations`                              | carries the invited member's policy ids ([§7](#7-policy-lifecycle))                                                                              |
+| `PATCH /api/org/members/{userId}`                        | role changes; any change to the member's effective access runs the key re-sync ([§7](#7-policy-lifecycle))                                       |
+| `GET \| POST /api/bucket-policies`                       | list and create, `policies.manage`                                                                                                               |
+| `GET \| PATCH \| DELETE /api/bucket-policies/{policyId}` | read, edit, delete, `policies.manage`                                                                                                            |
+| `POST \| DELETE /api/bucket-policies/{policyId}/members` | roster changes, `policies.manage`                                                                                                                |
 
 The `bucket-policies` routes carry the policy's region alongside the id, the
 way presign carries one, since the id alone does not name the orchestrator
