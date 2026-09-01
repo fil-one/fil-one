@@ -30,6 +30,10 @@ declare module "sst" {
       "type": "sst.aws.ApiGatewayV2"
       "url": string
     }
+    "AuditLog": {
+      "name": string
+      "type": "sst.sst.Linkable"
+    }
     "AuditTable": {
       "name": string
       "type": "sst.aws.Dynamo"
