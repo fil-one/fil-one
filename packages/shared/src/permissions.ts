@@ -48,8 +48,17 @@ export const PERMISSIONS = [
   'keys.manage_own',
   /** List and revoke every key in the org. */
   'keys.manage_all',
-  /** Read the org's audit log (viewer ships in M2). */
+  /** Read the org's audit log. */
   'audit.view',
+  /**
+   * Download the org's audit log as a CSV.
+   *
+   * Separate from reading it because it is a different act: exporting takes the
+   * history out of the system, where nothing FilOne runs can see what happens
+   * to it next. The two are granted to the same roles today, and the split is
+   * what lets that change without touching a handler.
+   */
+  'audit.export',
   /**
    * Manage privileged-operation grants — the M2 grant-management authority.
    * Holding it confers no privileged operation; it is the right to grant one to
@@ -90,6 +99,7 @@ export const ROLE_PERMISSIONS: Record<OrgRole, readonly Permission[]> = Object.f
     'keys.manage_own',
     'keys.manage_all',
     'audit.view',
+    'audit.export',
     'privileged.grant',
   ] as const),
   [OrgRole.Admin]: Object.freeze([
@@ -107,6 +117,7 @@ export const ROLE_PERMISSIONS: Record<OrgRole, readonly Permission[]> = Object.f
     'keys.manage_own',
     'keys.manage_all',
     'audit.view',
+    'audit.export',
   ] as const),
   [OrgRole.Member]: Object.freeze([
     'members.read',
