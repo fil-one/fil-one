@@ -90,23 +90,36 @@ Eight decisions carry the design:
    queue, no bucket.
 5. **Export is its own permission and its own route**, declared in the route
    manifest rather than branched in a handler.
-6. **The audit grant narrows to `PutItem` and `Query`.**
+6. **The audit grant narrows to `PutItem` and `Query`**, with the
+   account-deletion worker the one credential that keeps `DeleteItem`.
 7. **Account deletion destroys the org's audit partition.**
 8. **The activity feed and the audit log stay separate**, with a stated boundary
    between them.
 
-## Prerequisite: the index attributes ship before the first event
+## What the index cannot reach
 
 DynamoDB backfills a new index only from items that already carry its key
 attributes. An event written without `gsi1pk` stays invisible to the index
 forever, whenever the index is created.
 
-No audit events exist yet. Stamping `gsi1pk` and `gsi1sk` on the envelope before
-the first one is written means every event the log ever holds is indexed, and no
-backfill is needed. The same change made after events accumulate costs a `bin/`
-script over live data, and the base-table fallback in
-[§2](#2-the-event-type-index) becomes the only correct answer for any org the
-script has not reached.
+Events are already being written. The organizations beta gates one thing,
+creating an invitation, and the two flows that produce most of the log sit
+outside it: `org.created` lands on every signup, and `key.created` and
+`key.deleted` land on every access key a customer mints or revokes. The write
+path has been in production since it merged, so the log already holds events the
+index will never see.
+
+Those events stay unindexed rather than being repaired. A `bin/` script over live
+data is the alternative, and what it buys is single-type visibility for a few
+weeks of events that an unfiltered query already returns and that the TTL removes
+within the quarter. It costs a migration PR, a manual run against each stage, and
+the rule that nothing depending on migrated data merges until the counts verify.
+
+The log therefore disagrees with itself for one quarter. A query filtered to a
+single event type answers from the index and omits everything written before the
+index existed; the same query with no type filter reads the base table and
+returns it. Ninety days after the index deploys the difference is gone, and the
+viewer says nothing about it in the meantime.
 
 ## 1. Reading an org's history
 
@@ -125,6 +138,12 @@ A request reaching past 90 days is clamped to the retention window, and the
 response carries the effective window so the console can say that older events
 have been removed under the retention policy. Silently returning a quarter to
 someone who asked for half a year reads as data loss.
+
+An expired row is dropped at read. DynamoDB deletes items on its own schedule
+once their TTL passes and keeps serving them until it gets to them, which can be
+48 hours later. The promise made to the customer is 90 days, so both the query
+and the export exclude a row whose `ttl` has gone by rather than showing an
+auditor events the policy says are already gone.
 
 Page size is 50 and the default window is the full 90 days. An auditor opening the
 log wants to see it rather than discover a narrower default after searching for a
@@ -188,9 +207,11 @@ redesign.
 
 **No index at all**, filtering type in the same `FilterExpression` as the actor.
 Cheapest to build and adequate at today's volumes. Rejected because event type is
-the filter an investigator reaches for first and it is the one dimension with low
-enough cardinality to index usefully, and because adding the index later costs a
-backfill script that adding it now does not.
+the filter an investigator reaches for first, and it is the one dimension with
+low enough cardinality to index usefully. Deferring it also costs more than
+building it. Every day without the attributes is another day of events a later
+index cannot see, and the quarter in which the log disagrees with itself starts
+from whenever the index ships.
 
 **An index per dimension**, type and actor both. Rejected because a query can use
 only one index and would filter the other dimension regardless, so a second index
@@ -324,8 +345,15 @@ on its index, replacing the `dynamodb:*` that the shared `allResources` link
 grants today. `TransactWriteItems` needs the underlying `PutItem` on each item it
 writes, so `commitAudited` keeps working unchanged.
 
+The account-deletion worker is the exception. It destroys the org's audit
+partition ([§10](#10-lifecycle)), so it holds `DeleteItem` and no other
+credential in the system does. It already carries its own link list rather than
+the blanket one, which is where the grant goes.
+
 This is the difference between an application that cannot delete an audit entry
-and an application that merely does not.
+and an application that merely does not. The teardown worker is the one place
+where deleting is the point, and it deletes whole partitions of orgs that have
+asked to be erased.
 
 ## 7. The console
 
@@ -398,11 +426,21 @@ on the distinction, so the type stays single-phase.
 ## 10. Lifecycle
 
 Account deletion destroys the org's audit partition. `deletion-scrub.ts` gains
-`AuditTable` beside the four tables it already tears down.
+`AuditTable` beside the four tables it already tears down, and the worker gains
+the `DeleteItem` grant that [§6](#6-narrowing-the-audit-grant) withholds from
+everything else.
 
 Today the partition is untouched and an org's history survives the org by up to 90
 days. The self-serve deletion design exists to make deletion true, and a full
 record of who belonged to an org and what they did is a hole in that.
+
+The deletion design usually keeps a row and empties it; an audit event is
+destroyed instead. Its personal data is `actor.email` and the addresses on the
+invitation payloads, and both sit in the row body, so emptying them means
+rewriting stored events. That contradicts append-only further than removing them
+does. The same design already destroys outright wherever a scrub would be a
+rewrite or a structural no-op, which is how it treats credential rows and
+`RagIndexerTable`.
 
 ## 11. Observability
 
@@ -417,9 +455,10 @@ complains.
 
 ## Open questions
 
-1. **What an append-only claim covers.** After this design, no product route and
-   no application credential can modify or remove an entry
-   ([§6](#6-narrowing-the-audit-grant)), writes are
+1. **What an append-only claim covers.** After this design, no product route can
+   modify or remove an entry, and the only credential that can delete one is the
+   account-deletion worker, which removes a whole partition when an org is torn
+   down and can do nothing finer ([§6](#6-narrowing-the-audit-grant)). Writes are
    create-only and transactional, point-in-time recovery is on for staging and
    production, and rows expire at 90 days by TTL. There is no tamper-evidence: M1
    left Merkle roots, KMS signing, and proof endpoints behind, and AWS
