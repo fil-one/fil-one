@@ -170,6 +170,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "ForgeDevManagementApiToken": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
     "ForgeManagementApiToken": {
       "type": "sst.sst.Secret"
       "value": string

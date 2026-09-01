@@ -12,6 +12,11 @@ export enum S3Region {
   UsEast1 = 'us-east-1',
   /** Forge-backed. Not yet GA — non-production stages only (see getAvailableRegions). */
   EuCentral3 = 'eu-central-3',
+  /**
+   * The Forge dev sandbox: a virtual S3 region label for the dev FilOne
+   * Appliance. Non-production stages only (see getAvailableRegions).
+   */
+  UsEast9 = 'us-east-9',
 }
 
 /** Default S3 region for Fil One. */
@@ -22,6 +27,7 @@ export const REGION_LABELS: Record<S3Region, string> = {
   [S3Region.EuWest1]: 'Europe (France)',
   [S3Region.UsEast1]: 'US East (Michigan)',
   [S3Region.EuCentral3]: 'Europe (Amsterdam)',
+  [S3Region.UsEast9]: 'Forge dev sandbox (US East)',
 };
 
 /** Format a region as `"Europe (France) eu-west-1"`. */
@@ -55,9 +61,9 @@ export function isFoundationEmail(email: string | undefined): boolean {
 
 /**
  * Regions available to users. `eu-west-1` and `us-east-1` are generally
- * available in every stage; `eu-central-3` (Forge) is not yet GA and is only
- * offered on non-production stages. Pass the deployment `stage`; only
- * `production` returns the GA-only set.
+ * available in every stage; the Forge regions `eu-central-3` and `us-east-9`
+ * are not yet GA and are only offered on non-production stages. Pass the
+ * deployment `stage`; only `production` returns the GA-only set.
  * The per-region S3 endpoints still vary by stage — see {@link getS3Endpoint}.
  *
  * Note to developers: do not remove stage argument from this function, even if
@@ -67,7 +73,7 @@ export function isFoundationEmail(email: string | undefined): boolean {
 export function getAvailableRegions(stage: Stage | string): S3Region[] {
   const regions: S3Region[] = [S3Region.EuWest1, S3Region.UsEast1];
   if (stage !== Stage.Production) {
-    regions.push(S3Region.EuCentral3);
+    regions.push(S3Region.EuCentral3, S3Region.UsEast9);
   }
   return regions;
 }
@@ -76,7 +82,7 @@ export function getAvailableRegions(stage: Stage | string): S3Region[] {
  * Checks if the region is one Fil One supports for the given stage. Provides
  * type-narrowing information to TypeScript, changing `region` from `string` to
  * `S3Region` when the function returns `true`. Pass `stage` so non-GA regions
- * (e.g. `eu-central-3`) validate on non-production stages.
+ * (e.g. `eu-central-3`, `us-east-9`) validate on non-production stages.
  *
  * Note to developers: do not remove stage argument from this function, even if
  * unused. It causes considerable churn and it is likely in the future that we
@@ -119,6 +125,8 @@ export function getS3Endpoint(region: S3Region, stage: Stage | string): string {
         return 'https://us-east-1.fortilyx.com';
       case S3Region.EuCentral3:
         return 'https://ingot.staging.fil.one';
+      case S3Region.UsEast9:
+        return 'https://ingot.dev.forge-sandbox.fil.one';
     }
   }
   return `https://${region}.${S3_DATA_DOMAIN}`;

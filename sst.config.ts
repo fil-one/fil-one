@@ -60,13 +60,17 @@ export default $config({
     const stripeMeterEventName = 'gb_month_meter';
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
     const fthManagementApiToken = new sst.Secret('FthManagementApiToken');
-    // linked on non-production stages.
+    // Forge tokens are linked on non-production stages only. Each Forge network
+    // has its own Hilt, so each one we talk to carries its own token.
     const forgeManagementApiToken =
       isStaging || isEphemeralStage ? new sst.Secret('ForgeManagementApiToken') : undefined;
+    const forgeDevManagementApiToken =
+      isStaging || isEphemeralStage ? new sst.Secret('ForgeDevManagementApiToken') : undefined;
     const managementApiTokens = [
       auroraBackofficeToken,
       fthManagementApiToken,
       ...(forgeManagementApiToken ? [forgeManagementApiToken] : []),
+      ...(forgeDevManagementApiToken ? [forgeDevManagementApiToken] : []),
     ];
     const grafanaLokiAuth = new sst.Secret('GrafanaLokiAuth');
     const hubSpotServiceKey = new sst.Secret('HubSpotServiceKey');
@@ -648,10 +652,12 @@ export default $config({
       FTH_MANAGEMENT_API_URL: 'https://api.fortilyx.com',
     };
 
-    // Forge (Management-API) — non-prod only. One shared endpoint serves every
-    // Forge region; the region is sent per-tenant in the PUT /tenants body.
+    // Forge (Management-API) — non-prod only. One endpoint per Forge network,
+    // serving every region in it; the region is sent per-tenant in the PUT
+    // /tenants body.
     const forgeEnv = {
       FORGE_MANAGEMENT_API_URL: isProduction ? '' : 'https://hilt.staging.fil.one',
+      FORGE_DEV_MANAGEMENT_API_URL: isProduction ? '' : 'https://hilt.dev.forge-sandbox.fil.one',
     };
 
     // Everything the service-orchestrator layer needs at runtime. FILONE_STAGE
@@ -666,7 +672,13 @@ export default $config({
     const auroraS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/*`;
     const fthS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/fth-s3/*`;
     const forgeS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/forge-s3/*`;
-    const orchestratorS3KeySsmArns = [auroraS3KeySsmArn, fthS3KeySsmArn, forgeS3KeySsmArn];
+    const forgeDevS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/forgeDev-s3/*`;
+    const orchestratorS3KeySsmArns = [
+      auroraS3KeySsmArn,
+      fthS3KeySsmArn,
+      forgeS3KeySsmArn,
+      forgeDevS3KeySsmArn,
+    ];
     // Per-tenant console S3 access keys (getConsoleS3Credentials), needed by
     // handlers that talk to the S3 data plane directly (presign, indexing, …).
     const s3DataPlanePermissions: sst.aws.FunctionPermissionArgs[] = [
@@ -680,7 +692,7 @@ export default $config({
     const bucketReadPermissions: sst.aws.FunctionPermissionArgs[] = [
       {
         actions: ['ssm:GetParameter'],
-        resources: [auroraApiKeySsmArn, fthS3KeySsmArn, forgeS3KeySsmArn],
+        resources: [auroraApiKeySsmArn, fthS3KeySsmArn, forgeS3KeySsmArn, forgeDevS3KeySsmArn],
       },
     ];
 
