@@ -221,3 +221,47 @@ describe('BillingPage — permissions', () => {
     expect(container.querySelector('#billing-plan-cta-button')).not.toBeNull();
   });
 });
+
+describe('BillingPage — a canceled account', () => {
+  // The page's own canceled banner, now gone. The shell states it above every
+  // page and the plan card states it over the button that acts on it.
+  const PAGE_BANNER = /Your account has been canceled/;
+
+  function canceledBilling(): BillingInfo {
+    return {
+      subscription: {
+        planId: PlanId.PayAsYouGo,
+        status: SubscriptionStatus.Canceled,
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetUsage.mockResolvedValue(USAGE);
+    mockGetBilling.mockResolvedValue(canceledBilling());
+    mockGetInvoices.mockResolvedValue({ invoices: [] });
+  });
+
+  it('states it once, in the card that carries the Reactivate button', async () => {
+    renderPage(OrgRole.Owner);
+
+    expect(
+      await screen.findByText('Reactivate your subscription to regain full access'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(PAGE_BANNER)).not.toBeInTheDocument();
+  });
+
+  // The Reactivate control is `billing.manage`, so this caller gets neither the
+  // card nor a page banner. The shell's banner above them is what says why the
+  // account is unusable, on this page as on every other.
+  it('adds no page banner for a caller who cannot reactivate', async () => {
+    renderPage(OrgRole.Admin);
+
+    await screen.findByTestId('subscription-status');
+    expect(screen.queryByText(PAGE_BANNER)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Reactivate your subscription to regain full access'),
+    ).not.toBeInTheDocument();
+  });
+});

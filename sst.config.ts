@@ -60,13 +60,17 @@ export default $config({
     const stripeMeterEventName = 'gb_month_meter';
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
     const fthManagementApiToken = new sst.Secret('FthManagementApiToken');
-    // linked on non-production stages.
+    // Forge tokens are linked on non-production stages only. Each Forge network
+    // has its own Hilt, so each one we talk to carries its own token.
     const forgeManagementApiToken =
       isStaging || isEphemeralStage ? new sst.Secret('ForgeManagementApiToken') : undefined;
+    const forgeDevManagementApiToken =
+      isStaging || isEphemeralStage ? new sst.Secret('ForgeDevManagementApiToken') : undefined;
     const managementApiTokens = [
       auroraBackofficeToken,
       fthManagementApiToken,
       ...(forgeManagementApiToken ? [forgeManagementApiToken] : []),
+      ...(forgeDevManagementApiToken ? [forgeDevManagementApiToken] : []),
     ];
     const grafanaLokiAuth = new sst.Secret('GrafanaLokiAuth');
     const hubSpotServiceKey = new sst.Secret('HubSpotServiceKey');
@@ -648,10 +652,12 @@ export default $config({
       FTH_MANAGEMENT_API_URL: 'https://api.fortilyx.com',
     };
 
-    // Forge (Management-API) — non-prod only. One shared endpoint serves every
-    // Forge region; the region is sent per-tenant in the PUT /tenants body.
+    // Forge (Management-API) — non-prod only. One endpoint per Forge network,
+    // serving every region in it; the region is sent per-tenant in the PUT
+    // /tenants body.
     const forgeEnv = {
       FORGE_MANAGEMENT_API_URL: isProduction ? '' : 'https://hilt.staging.fil.one',
+      FORGE_DEV_MANAGEMENT_API_URL: isProduction ? '' : 'https://hilt.dev.forge-sandbox.fil.one',
     };
 
     // Everything the service-orchestrator layer needs at runtime. FILONE_STAGE
@@ -666,7 +672,13 @@ export default $config({
     const auroraS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/*`;
     const fthS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/fth-s3/*`;
     const forgeS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/forge-s3/*`;
-    const orchestratorS3KeySsmArns = [auroraS3KeySsmArn, fthS3KeySsmArn, forgeS3KeySsmArn];
+    const forgeDevS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/forgeDev-s3/*`;
+    const orchestratorS3KeySsmArns = [
+      auroraS3KeySsmArn,
+      fthS3KeySsmArn,
+      forgeS3KeySsmArn,
+      forgeDevS3KeySsmArn,
+    ];
     // Per-tenant console S3 access keys (getConsoleS3Credentials), needed by
     // handlers that talk to the S3 data plane directly (presign, indexing, …).
     const s3DataPlanePermissions: sst.aws.FunctionPermissionArgs[] = [
@@ -680,7 +692,7 @@ export default $config({
     const bucketReadPermissions: sst.aws.FunctionPermissionArgs[] = [
       {
         actions: ['ssm:GetParameter'],
-        resources: [auroraApiKeySsmArn, fthS3KeySsmArn, forgeS3KeySsmArn],
+        resources: [auroraApiKeySsmArn, fthS3KeySsmArn, forgeS3KeySsmArn, forgeDevS3KeySsmArn],
       },
     ];
 
@@ -1370,8 +1382,209 @@ export default $config({
       function: ownerCountDriftChecker.arn,
     });
 
+    // ── S3 Audit Broker billing-read role ───────────────────────────
+    // Cross-account role the abuse-detection broker (s3-auditbroker, account
+    // 654654381893) assumes for billing context on incidents: the detector
+    // Lambda's `billing_lookup_role_arn` and the operator console's
+    // `S3AB_BILLING_ROLE_ARN`. Read-only, and exactly the two calls the
+    // broker's billing lookup makes: Scan on UserInfoTable + GetItem on
+    // BillingTable. Referencing the table resources directly (rather than
+    // pinning physical names) keeps the grant on the live tables — this
+    // account also holds an orphaned duplicate table pair the role must not
+    // match.
+    //
+    // The respond role below is the Phase 3 counterpart (tenant-key SSM read
+    // + quarantine bucket writes) — provisioning it starts the mint slice of
+    // that phase (s3-auditbroker docs/vercel-deployment-guide.md §2).
+    let s3abBillingReadRoleArn: $util.Output<string> | undefined;
+    let s3abRespondRoleArn: $util.Output<string> | undefined;
+    if (isStaging || isProduction) {
+      const vercelTeamSlug = 'filecoin-foundations-projects';
+      const vercelProjectName = 's3-auditbroker-visualizer';
+      const vercelOidcClaimPrefix = `oidc.vercel.com/${vercelTeamSlug}`;
+      // Mirrors the broker's own read roles: preview deployments may reach
+      // staging billing data, never production's.
+      const vercelEnvironments = isProduction ? ['production'] : ['production', 'preview'];
+      // Both broker instances live in 654654381893; each stage trusts the
+      // instance that serves it. The principal is pinned to the role's unique
+      // id at policy-write time, so recreating the detector role on the broker
+      // side silently breaks this trust until the stage is redeployed.
+      const brokerDetectorExecRoleArn = isProduction
+        ? 'arn:aws:iam::654654381893:role/s3-auditbroker-prod-detector-exec'
+        : 'arn:aws:iam::654654381893:role/s3-auditbroker-detector-exec';
+
+      // The OIDC provider is account-wide (one per URL) and owned OUTSIDE
+      // this stack. It must not be created here: a lookup-or-create would
+      // flip the provider between a data source and a managed resource across
+      // deploys, so the deploy after the creating one would drop it from
+      // Pulumi state and delete it on removable stages, breaking both roles'
+      // Vercel trust. Provision it once per account — the s3-auditbroker
+      // tooling does this (scripts/vercel_setup.sh, `aws-oidc` phase), or:
+      //   aws iam create-open-id-connect-provider \
+      //     --url https://oidc.vercel.com/<team-slug> \
+      //     --client-id-list https://vercel.com/<team-slug>
+      let vercelOidcArn: string;
+      try {
+        const existing = await aws.iam.getOpenIdConnectProvider({
+          url: `https://${vercelOidcClaimPrefix}`,
+        });
+        vercelOidcArn = existing.arn;
+      } catch {
+        throw new Error(
+          `Vercel OIDC provider https://${vercelOidcClaimPrefix} not found in this account. ` +
+            'It is owned outside this stack — create it once per account (see the comment ' +
+            'above this throw) and re-deploy.',
+        );
+      }
+
+      const s3abBillingReadRole = new aws.iam.Role('S3abBillingReadRole', {
+        name: 'filone-console-visualizer-billing-read',
+        assumeRolePolicy: $jsonStringify({
+          Version: '2012-10-17',
+          Statement: [
+            {
+              Effect: 'Allow',
+              Principal: { Federated: vercelOidcArn },
+              Action: 'sts:AssumeRoleWithWebIdentity',
+              Condition: {
+                StringEquals: {
+                  [`${vercelOidcClaimPrefix}:aud`]: `https://vercel.com/${vercelTeamSlug}`,
+                  [`${vercelOidcClaimPrefix}:sub`]: vercelEnvironments.map(
+                    (env) =>
+                      `owner:${vercelTeamSlug}:project:${vercelProjectName}:environment:${env}`,
+                  ),
+                },
+              },
+            },
+            {
+              Effect: 'Allow',
+              Principal: { AWS: brokerDetectorExecRoleArn },
+              Action: 'sts:AssumeRole',
+            },
+          ],
+        }),
+        inlinePolicies: [
+          {
+            name: 's3ab-billing-read',
+            policy: $jsonStringify({
+              Version: '2012-10-17',
+              Statement: [
+                {
+                  Effect: 'Allow',
+                  Action: ['dynamodb:Scan'],
+                  Resource: [userInfoTable.arn],
+                },
+                {
+                  Effect: 'Allow',
+                  Action: ['dynamodb:GetItem'],
+                  Resource: [billingTable.arn],
+                },
+              ],
+            }),
+          },
+        ],
+      });
+      s3abBillingReadRoleArn = s3abBillingReadRole.arn;
+
+      // ── S3 Audit Broker respond role (Phase 3, armed actions) ──────
+      // What the RESPONSE ARMED surfaces assume to mint tenant-key preview
+      // URLs and quarantine objects. Its own role, separate from billing-read,
+      // so CloudTrail cleanly splits "read the evidence" from "acted on a
+      // tenant". Trusted for:
+      //  - the console's Vercel OIDC identity — production deployments ONLY,
+      //    on every stage: preview deployments run with bypass auth and must
+      //    never arm; and
+      //  - the human responder's SSO role, so the CLI response scripts
+      //    (preview_url.py, quarantine_object.py) can assume it via STS.
+      //    Note: AssumeRole requires BOTH this role's trust policy and an identity
+      //    policy on the caller that allows sts:AssumeRole (even same-account).
+      //    If the SSO permission set doesn't grant sts:AssumeRole, add it there.
+      //    SSO role names carry a random suffix and are recreated if the
+      //    permission set is reprovisioned — re-pin here if assumption starts
+      //    failing.
+      // Assumers must set RoleSessionName to the operator's identity so
+      // CloudTrail and the incident receipts agree on *who* acted.
+      const responderSsoRoleArn = isProduction
+        ? 'arn:aws:iam::811430801166:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_ReadOnlyAccess_e180918ff18ef597'
+        : 'arn:aws:iam::654654381893:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_AdministratorAccess_983a3f40ae4c07e1';
+
+      // Operator-created (deliberately outside IaC state, like the evidence it
+      // holds) and not yet created in either account. Bucket names are global,
+      // so the stages cannot share one. The s3:ResourceAccount condition below
+      // keeps the grant inert until the bucket exists *in this account* — a
+      // third party claiming the global name gains nothing.
+      const quarantineBucketName = isProduction
+        ? 'filone-ir-quarantine'
+        : 'filone-ir-quarantine-staging';
+
+      const s3abRespondRole = new aws.iam.Role('S3abRespondRole', {
+        name: 'filone-console-visualizer-respond',
+        assumeRolePolicy: $jsonStringify({
+          Version: '2012-10-17',
+          Statement: [
+            {
+              Effect: 'Allow',
+              Principal: { Federated: vercelOidcArn },
+              Action: 'sts:AssumeRoleWithWebIdentity',
+              Condition: {
+                StringEquals: {
+                  [`${vercelOidcClaimPrefix}:aud`]: `https://vercel.com/${vercelTeamSlug}`,
+                  [`${vercelOidcClaimPrefix}:sub`]: `owner:${vercelTeamSlug}:project:${vercelProjectName}:environment:production`,
+                },
+              },
+            },
+            {
+              Effect: 'Allow',
+              Principal: { AWS: responderSsoRoleArn },
+              Action: 'sts:AssumeRole',
+            },
+          ],
+        }),
+        inlinePolicies: [
+          {
+            name: 's3ab-respond',
+            policy: $jsonStringify({
+              Version: '2012-10-17',
+              Statement: [
+                {
+                  // Mint: read a tenant's console S3 key to presign a
+                  // short-lived preview URL, plus tenant listing
+                  // (list_tenant_ids). The shared constant covers every SP
+                  // backend's key subtree (aurora-s3, fth-s3, forge-s3) and
+                  // stays in sync as backends are added.
+                  Sid: 'MintTenantKeyRead',
+                  Effect: 'Allow',
+                  Action: ['ssm:GetParameter', 'ssm:GetParametersByPath'],
+                  Resource: orchestratorS3KeySsmArns,
+                },
+                {
+                  // Quarantine: preserve evidence (Put), verify/restore (Get,
+                  // List). No DeleteObject — evidence stays.
+                  Sid: 'QuarantineEvidence',
+                  Effect: 'Allow',
+                  Action: ['s3:PutObject', 's3:GetObject', 's3:ListBucket'],
+                  Resource: [
+                    `arn:aws:s3:::${quarantineBucketName}`,
+                    `arn:aws:s3:::${quarantineBucketName}/*`,
+                  ],
+                  Condition: {
+                    StringEquals: {
+                      's3:ResourceAccount': aws.getCallerIdentityOutput({}).accountId,
+                    },
+                  },
+                },
+              ],
+            }),
+          },
+        ],
+      });
+      s3abRespondRoleArn = s3abRespondRole.arn;
+    }
+
     return {
       baseUrl: siteUrl,
+      ...(s3abBillingReadRoleArn ? { s3abBillingReadRoleArn } : {}),
+      ...(s3abRespondRoleArn ? { s3abRespondRoleArn } : {}),
     };
   },
 });
