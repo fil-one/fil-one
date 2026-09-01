@@ -37,9 +37,9 @@ permissions ordinary. The conflict is surfaced instead of resolved silently: a
 key covers buckets whose permissions agree, and a member whose access is mixed
 either names a set that agrees or accepts the lower permissions across the ones
 they named. No key ever carries a permission on a bucket the member's statements
-withhold there. What the flat primitive costs is credentials, not safety, and
-Forge stops charging it when enforcement moves into the storage system
-(FIL-1025, on FIL-918).
+withhold there. The flat primitive therefore costs a member with mixed access
+more than one credential, and that cost goes away on Forge when enforcement
+moves into the storage system (FIL-1025, on FIL-918).
 
 **FilOne stores no bucket records.** A bucket exists at the orchestrator and
 nowhere else: `list-buckets.ts` fans out across provisioned regions and
@@ -382,9 +382,9 @@ statements govern the console alone.
 **A key covers buckets whose permissions agree.** The vendor primitive is one
 permission list over one bucket array (`IssueAccessKeyOpts`,
 `lib/service-orchestrator.ts:66-72`), so a member with read on `logs` and write
-on `uploads` has no single key that says both. Rather than round the grant up to
-the union, which would let that key write `logs`, the request resolves the
-conflict:
+on `uploads` has no single key that says both. Rounding the grant up to the
+union would give that key write on `logs`. The request resolves the conflict
+instead:
 
 | Request                                         | Caller's access   | Result                                 |
 | ----------------------------------------------- | ----------------- | -------------------------------------- |
@@ -398,15 +398,14 @@ conflict:
 `acceptReducedPermissions` is an acknowledgement rather than a choice. It cannot
 add a permission, it does nothing on a set that already agrees, and it exists so
 that a member wanting one read-only credential across everything they can see
-says so out loud. A set with no permission in common is refused whether or not
-the flag is present, because a credential that can do nothing is broken rather
-than narrow.
+has to ask for it. A set with no permission in common is refused whether or not
+the flag is present, since the credential it produced could do nothing at all.
 
-The caller therefore chooses which buckets a key is for and never what it may do
-to them. That is AWS's session policy, the `--policy` on `AssumeRole`: it can
-narrow a session below the identity and never widen it. No key carries a
-permission the member's statements withhold on any bucket it names, on any
-backend, so nothing here waits on M3.
+The caller chooses which buckets a key is for. What it may do to them comes from
+the member's statements, which is AWS's session policy, the `--policy` on
+`AssumeRole`: it narrows a session below the identity and cannot widen it. No
+key carries a permission the member's statements withhold on any bucket it
+names, on any backend, so nothing here waits on M3.
 
 M1's creation-time cap disappears by construction. `checkCreatorAuthority`
 (`handlers/create-access-key.ts:207-222`) refused any requested permission the
@@ -421,13 +420,13 @@ a key to a policy. A key wider than its member is revoked by
 [§7](#7-policy-lifecycle)'s re-sync, and by the reconciliation pass where a race
 let one through ([§9](#9-rollout)). A key narrower than its member is the
 ordinary case, since most keys name a subset of what their holder reaches, and
-the console reports a key by what it carries and never by how it compares to
-anything. On a region whose keys derive from the member live, the stamp means
-nothing: a key read answers with effective permissions from the storage system,
-so the console reads one shape everywhere. A `recovered` record's attribution
-names whoever retried, who may not be the creator
-(`lib/dynamo-records.ts:54-59`), so the re-sync treats recovered records like
-unattributed ones: counted in the dialog, never auto-revoked.
+the console reports what a key carries and makes no comparison. On a region
+whose keys derive from the member live, the stamp means nothing: a key read
+answers with effective permissions from the storage system, so the console reads
+one shape everywhere. A `recovered` record's attribution names whoever retried,
+who may not be the creator (`lib/dynamo-records.ts:54-59`), so the re-sync
+treats recovered records like unattributed ones: counted in the dialog, never
+auto-revoked.
 
 **RAG API keys already work this way.** Their schema carries no permissions at
 all (`packages/shared/src/api/rag-api-keys.ts:37-68`), and the bearer branch
@@ -796,13 +795,12 @@ says what the state is and does not demand a response.
 
 The key creation form keeps the name, the region, and the expiry, and loses its
 permission checkboxes. A bucket picker appears only when the member's access in
-the chosen region carries different permissions on different buckets, since it
-is there to resolve that and nothing else. It opens with every bucket selected,
-states the conflict, and offers the two resolutions: drop the buckets that
-disagree, or keep them and accept the permissions they share. Either way the
-resulting permission set is on screen before the form is submitted. A member
-with no conflict, and every Owner, Admin, and member marked `'all'`, sees no
-picker.
+the chosen region carries different permissions on different buckets, since that
+is what it is for. It opens with every bucket selected, states the conflict, and
+offers the two resolutions: drop the buckets that disagree, or keep them and
+accept the permissions they share. Either way the resulting permission set is on
+screen before the form is submitted. A member with no conflict, and every Owner,
+Admin, and member marked `'all'`, sees no picker.
 
 ### 10. The Service Orchestrator interface
 
@@ -816,7 +814,7 @@ bucket-access domain:
 | ------------------------------ | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `resolveMemberAccess`          | —                                                                  | **new**: `(tenantId, member)` returns the `BucketAccess` map for this region ([§3](#3-resolving-access-on-a-request)). `member` is `{ userId, role, bucketScope }`, the console-owned facts resolution needs                                                                                                                                                         |
 | policy surface                 | —                                                                  | **new**: `getBucketPolicy`, `putBucketPolicy`, `deleteBucketPolicy`, `listPolicies` for one region, and `removeMemberFromPolicies` for the removal sweep. Mutations take the `updatedAt` they are conditioned on and `retainKeyIds`, and return the keys they revoked; `previewPolicyChange` returns the value the mutation must present ([§7](#7-policy-lifecycle)) |
-| `issueAccessKey`               | `(tenantId, opts)`                                                 | `(tenantId, member, opts)`: the grant derives from the member inside the call; the caller may name buckets and never a permission, and a conflicting set is refused without `acceptReducedPermissions` ([§4](#4-access-keys-belong-to-a-member))                                                                                                                     |
+| `issueAccessKey`               | `(tenantId, opts)`                                                 | `(tenantId, member, opts)`: the grant derives from the member inside the call; the caller may name buckets but no permission, and a conflicting set is refused without `acceptReducedPermissions` ([§4](#4-access-keys-belong-to-a-member))                                                                                                                          |
 | `listAccessKeys`               | —                                                                  | **new**: `(tenantId, filter)`, the filter naming a member or the whole tenant; returns key records with their effective permissions, the stamp on a `'reissue'` region and the storage system's answer on a `'live'` one                                                                                                                                             |
 | `syncMemberKeys`               | —                                                                  | **new**: re-syncs a member's keys after a change to their access; a dry run returns the keys a commit would revoke, the commit takes `retainKeyIds` and returns the keys it revoked ([§7](#7-policy-lifecycle))                                                                                                                                                      |
 | `reconcileBuckets`             | —                                                                  | **new**: `(tenantId)` runs the scheduled pass for this region, returning the policies it wrote, the rows it retired, and the keys it revoked ([§9](#9-rollout))                                                                                                                                                                                                      |
