@@ -13,9 +13,6 @@
 // before running.
 //
 //   stage      defaults to "production"; pass e.g. "staging" to override.
-//   AWS_REGION the control-plane region for DynamoDB + SSM. Defaults to the
-//              region the stage's table lives in. (This is independent of the
-//              FTH S3 region, which is us-east-1.)
 
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
@@ -33,15 +30,14 @@ if (!orgId) {
 // resolve the SST link, so read the name out of the exported SST state
 // (`sst state export` works in production — it doesn't evaluate providers).
 const { tableName, region: stageRegion } = findTable(stage, '::UserInfoTableTable');
-console.error(`UserInfoTable: ${tableName}`);
+console.error(`UserInfoTable: ${tableName} (region ${stageRegion})`);
 
-// Control-plane (DynamoDB + SSM) region, which is NOT the FTH S3 region
-// (us-east-1). An explicit AWS_REGION wins; otherwise take the region the
-// table actually lives in.
-const controlPlaneRegion = process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? stageRegion;
-
-const dynamo = new DynamoDBClient({ region: controlPlaneRegion });
-const ssm = new SSMClient({ region: controlPlaneRegion });
+// DynamoDB and SSM live in the region of the table SST deployed, which is not
+// the FTH S3 region (us-east-1). Ambient AWS_REGION cannot override it: this
+// script exports AWS_REGION=us-east-1 for the S3 client, so honouring it would
+// send the next invocation in the same shell to a region with no table.
+const dynamo = new DynamoDBClient({ region: stageRegion });
+const ssm = new SSMClient({ region: stageRegion });
 
 // Fetch fthTenantId from DynamoDB
 const { Item } = await dynamo.send(
@@ -82,5 +78,7 @@ console.log(`export AWS_SECRET_ACCESS_KEY=${secretAccessKey}`);
 // packages/shared/src/constants.ts. Inlined to keep this script free of
 // application source imports.
 function getFthS3Endpoint(stage: string): string {
-  return stage === 'production' ? 'https://us-east-1.s3.fil.one' : 'https://us-east-1.fortilyx.com';
+  return stage === 'production'
+    ? 'https://us-east-1.s3.filonecontent.com'
+    : 'https://us-east-1.fortilyx.com';
 }

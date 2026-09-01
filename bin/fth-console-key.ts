@@ -557,7 +557,9 @@ async function verifyS3Access(keyName: string, key: FthAccessKeyWithSecret): Pro
 // Mirrors getS3Endpoint(S3Region.UsEast1, stage) in
 // packages/shared/src/constants.ts, as bin/fth-s3-env.ts does.
 function getFthS3Endpoint(stage: string): string {
-  return stage === 'production' ? 'https://us-east-1.s3.fil.one' : 'https://us-east-1.fortilyx.com';
+  return stage === 'production'
+    ? 'https://us-east-1.s3.filonecontent.com'
+    : 'https://us-east-1.fortilyx.com';
 }
 
 // ── AWS lookups ─────────────────────────────────────────────────
