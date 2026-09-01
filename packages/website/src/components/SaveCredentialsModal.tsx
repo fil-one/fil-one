@@ -8,6 +8,7 @@ import { Button } from './Button.js';
 import { CopyButton } from './CopyButton.js';
 import { IconButton } from './IconButton.js';
 import { SplitButton } from './SplitButton.js';
+import { downloadText } from '../lib/download.js';
 
 export type SaveCredentialsModalProps = {
   open: boolean;
@@ -21,22 +22,12 @@ export type SaveCredentialsModalProps = {
 export function SaveCredentialsModal({ open, onDone, credentials }: SaveCredentialsModalProps) {
   const [showSecret, setShowSecret] = useState(false);
 
-  function downloadBlob(content: string, filename: string, type: string) {
-    const blob = new Blob([content], { type });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
   function handleDownloadCsv() {
     const csv = [
       'Access Key ID,Secret Access Key',
       `${credentials.accessKeyId},${credentials.secretAccessKey}`,
     ].join('\n');
-    downloadBlob(csv, 'credentials.csv', 'text/csv');
+    downloadText(csv, 'credentials.csv', 'text/csv');
   }
 
   function handleDownloadEnv() {
@@ -44,7 +35,7 @@ export function SaveCredentialsModal({ open, onDone, credentials }: SaveCredenti
       `export AWS_ACCESS_KEY_ID=${credentials.accessKeyId}`,
       `export AWS_SECRET_ACCESS_KEY=${credentials.secretAccessKey}`,
     ].join('\n');
-    downloadBlob(env, 'credentials.env', 'text/plain');
+    downloadText(env, 'credentials.env', 'text/plain');
   }
 
   return (
