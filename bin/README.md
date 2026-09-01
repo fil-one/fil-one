@@ -178,6 +178,7 @@ production. Set `AWS_PROFILE` first.
 | `aurora-demo.ts`               | Demo script for Aurora S3 operations                                                                                                                                   |
 | `account-deletion.ts`          | Report an org's account-deletion state, and start or re-drive the teardown worker                                                                                      |
 | `fth-console-key.ts`           | Re-issue the per-tenant FTH console access key as `filone-console-v2`, prune the old key, and repair a tenant whose key FTH reported creating but does not have        |
+| `fth-s3-env.ts`                | Print FTH (us-east-1) S3 environment variables for one org, without `sst shell`                                                                                        |
 
 ### Shared helpers (`bin/lib/`)
 
