@@ -3,18 +3,15 @@ import { S3Region } from '@filone/shared';
 
 vi.hoisted(() => {
   process.env.FILONE_STAGE = 'staging';
-  process.env.FORGE_MANAGEMENT_API_URL = 'https://forge.test';
 });
-
-vi.mock('sst', () => ({
-  Resource: { ForgeManagementApiToken: { value: 'fkid.fsecret' } },
-}));
 
 import { createForgeOrchestrator } from './forge-orchestrator.js';
 
+const api = { baseUrl: 'https://forge.test', accessToken: 'fkid.fsecret' };
+
 describe('createForgeOrchestrator', () => {
   it('builds a region-specific orchestrator with custom ID', () => {
-    const orchestrator = createForgeOrchestrator('acme', S3Region.EuCentral3);
+    const orchestrator = createForgeOrchestrator('acme', S3Region.EuCentral3, api);
     expect(orchestrator.id).toBe('acme');
     expect(orchestrator.region).toBe(S3Region.EuCentral3);
   });
