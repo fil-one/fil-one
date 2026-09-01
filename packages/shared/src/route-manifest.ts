@@ -490,6 +490,31 @@ const MANIFEST = [
     requires: 'buckets.read',
   },
 
+  // ── Audit log ────────────────────────────────────────────────────
+  // The org's recorded history, written in the same transaction as the mutation
+  // it describes. Two routes rather than one taking `format=csv`, so the
+  // manifest states each gate declaratively: this permission depends on which
+  // endpoint was called, not on the request body, which is what the
+  // `in-handler` escape hatch is for. Keeping them apart also keeps the row cap
+  // and the `audit.exported` write on the route that has them.
+  //
+  // Both queries scope to the org resolved from the caller's membership, never
+  // from a request parameter.
+  {
+    method: 'GET',
+    path: '/api/audit',
+    handler: 'list-audit-events',
+    category: 'authenticated',
+    requires: 'audit.view',
+  },
+  {
+    method: 'GET',
+    path: '/api/audit/export',
+    handler: 'export-audit-events',
+    category: 'authenticated',
+    requires: 'audit.export',
+  },
+
   // ── Billing ──────────────────────────────────────────────────────
   {
     method: 'GET',
