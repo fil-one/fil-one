@@ -125,6 +125,9 @@ export const queryKeys = {
   // one most callers cannot.
   members: ['members'] as const,
   invitations: ['invitations'] as const,
+  // Prefixed, so invalidating ['audit'] clears every filter combination a
+  // session has looked at rather than just the one on screen.
+  auditEvents: (params: string) => ['audit', 'events', params] as const,
   instatusSummary: ['instatus-summary'] as const,
   preferences: ['preferences'] as const,
   // RAG Pipeline (FIL-555). Distinct from `buckets` so the RAG surface can be

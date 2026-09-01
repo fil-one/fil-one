@@ -41,6 +41,7 @@ import { useKeyActionScope } from '../lib/use-key-scope.js';
 import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
 import { ApiReference } from './RagPipelineTabs.js';
 import { formatDate } from '../lib/time.js';
+import { downloadText } from '../lib/download.js';
 
 // ---------------------------------------------------------------------------
 // Scope rendering
@@ -237,28 +238,15 @@ function RagKeyCreatedModal({
 }) {
   const [showToken, setShowToken] = useState(false);
 
-  // Mirrors the S3-credentials flow (SaveCredentialsModal): the token is shown
-  // exactly once, so offer a file as well as the clipboard. Written from a local
-  // Blob and never sent anywhere.
-  function downloadBlob(content: string, filename: string, type: string) {
-    const blob = new Blob([content], { type });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
   // .env leads because the Query API sample and the reference copy both read the
   // key from $FILONE_RAG_KEY, so this file drops straight in.
   function handleDownloadEnv() {
-    downloadBlob(`FILONE_RAG_KEY=${createdKey.token}\n`, 'filone-rag-key.env', 'text/plain');
+    downloadText(`FILONE_RAG_KEY=${createdKey.token}\n`, 'filone-rag-key.env', 'text/plain');
   }
 
   function handleDownloadCsv() {
     const csv = ['Key name,API key', `${createdKey.keyName},${createdKey.token}`].join('\n');
-    downloadBlob(csv, 'filone-rag-key.csv', 'text/csv');
+    downloadText(csv, 'filone-rag-key.csv', 'text/csv');
   }
 
   return (

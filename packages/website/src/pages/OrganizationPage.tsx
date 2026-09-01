@@ -17,6 +17,7 @@ import { usePermissions } from '../lib/use-permissions.js';
 import { BillingDetails } from './BillingPage.js';
 import { MembersRoster } from './MembersPage.js';
 import { MembersInvitations } from './MembersInvitations.js';
+import { OrganizationAuditTab } from './OrganizationAuditTab.js';
 
 interface OrganizationTab {
   label: string;
@@ -49,7 +50,8 @@ interface TabContext {
  *
  * Ordered people first, money last: Members and Invitations are two views of the
  * same question and belong beside each other, and Members is the default because
- * it is the tab every role can open and the one most visits are for.
+ * it is the tab every role can open and the one most visits are for. The audit
+ * log sits after them because it is what those two tabs did, recorded.
  */
 const ORGANIZATION_TABS: OrganizationTab[] = [
   {
@@ -72,6 +74,15 @@ const ORGANIZATION_TABS: OrganizationTab[] = [
         onInviteRequestHandled={ctx.onInviteRequestHandled}
       />
     ),
+  },
+  {
+    label: 'Audit log',
+    testId: 'org-tab-audit',
+    // Owner and Admin. The PRD's "an auditor joins as ReadOnly" flow would need
+    // this open to ReadOnly, and the review thread narrowed it instead: an
+    // external auditor holds an Admin seat, or is sent a CSV by someone who does.
+    permission: 'audit.view',
+    render: () => <OrganizationAuditTab />,
   },
   {
     label: 'Billing',
