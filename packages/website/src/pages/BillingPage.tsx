@@ -342,30 +342,10 @@ function BillingDetails() {
         </div>
       )}
 
-      {/* Canceled banner */}
-      {isCanceled && (
-        <div className="mb-4 flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
-          <WarningIcon size={20} className="text-red-600 flex-shrink-0" weight="fill" />
-          <span className="text-sm text-red-800">
-            {mayManage ? (
-              <>
-                Your account has been canceled.{' '}
-                <button
-                  type="button"
-                  onClick={handleUpgradeClick}
-                  className="font-semibold underline"
-                >
-                  Reactivate
-                </button>{' '}
-                to regain access.
-              </>
-            ) : (
-              'Your account has been canceled. An organization owner can reactivate it.'
-            )}
-          </span>
-        </div>
-      )}
-
+      {/* No canceled banner here. The shell's banner states it on every page,
+          including this one, and the plan card below carries the same sentence
+          over the Reactivate button that acts on it. A third copy in between
+          only pushed that control further down the page. */}
       <div className="flex gap-6">
         {/* ── Left column ──────────────────────────────────────── */}
         <div className="flex-1 min-w-0 flex flex-col gap-6">

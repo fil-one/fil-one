@@ -8,7 +8,8 @@ import { Button } from '../components/Button';
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from '../components/Tabs';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { Alert } from '../components/Alert';
-import { Spinner } from '../components/Spinner';
+import { Skeleton } from '../components/Skeleton';
+import { TableSkeleton, type SkeletonColumn } from '../components/Table/TableSkeleton';
 import { AddBucketKeyModal } from '../components/AddBucketKeyModal';
 import { BucketPropertyCards } from '../components/BucketPropertiesCard';
 import { ObjectBrowser, countObjects } from '../components/ObjectBrowser';
@@ -31,7 +32,7 @@ import { useObjectActions } from '../lib/use-object-actions.js';
 import { useHasPermission } from '../lib/use-permissions.js';
 import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
 import { useKeyActionScope } from '../lib/use-key-scope.js';
-import { queryKeys } from '../lib/query-client.js';
+import { LIST_GC_TIME, LIST_STALE_TIME, queryKeys } from '../lib/query-client.js';
 import { batchPresign } from '../lib/use-presign.js';
 import {
   parseListObjectVersionsResponse,
@@ -156,13 +157,40 @@ function BucketOverview({
 }
 
 /**
+ * The overview's own placeholder, shown while the bucket metadata is in flight.
+ *
+ * It mirrors the real block it stands in for: one line of meta, then the same
+ * responsive grid of three property cards at the same height. Without it the
+ * heading sat directly on top of the tabs and everything below jumped down a
+ * card's height the moment metadata landed.
+ */
+function BucketOverviewSkeleton() {
+  return (
+    <div role="status" aria-label="Loading bucket details">
+      <Skeleton className="mb-6 h-4 w-72 max-w-full" />
+      <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {['versioning', 'object-lock', 'retention'].map((property) => (
+          <Skeleton key={property} className="h-[68px] rounded-xl" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
  * The page's four reads, grouped so the component body stays about layout. The
  * objects query is gated on bucket metadata because the versioning flag decides
  * which listing operation to use.
  */
 function useBucketQueries(bucketName: string, region: S3Region, mayListKeys: boolean) {
+  // Cached the way the list pages are (FIL-1078): stepping into a bucket, back
+  // out and in again repaints from cache instead of blanking to a placeholder
+  // each time. Every write to a bucket invalidates these keys, so nothing here
+  // outlives the user's own edit.
   const bucketQuery = useQuery({
     queryKey: queryKeys.bucket(bucketName, region),
+    staleTime: LIST_STALE_TIME,
+    gcTime: LIST_GC_TIME,
     queryFn: () => {
       const params = new URLSearchParams({ region });
       return apiRequest<GetBucketResponse>(
@@ -175,11 +203,15 @@ function useBucketQueries(bucketName: string, region: S3Region, mayListKeys: boo
   const objectsQuery = useQuery({
     queryKey: queryKeys.objects(bucketName, region),
     enabled: bucketQuery.data !== undefined,
+    staleTime: LIST_STALE_TIME,
+    gcTime: LIST_GC_TIME,
     queryFn: () => fetchObjectListing(region, bucketName, bucket),
   });
 
   const analyticsQuery = useQuery({
     queryKey: queryKeys.bucketAnalytics(bucketName, region),
+    staleTime: LIST_STALE_TIME,
+    gcTime: LIST_GC_TIME,
     queryFn: () => {
       const params = new URLSearchParams({ region });
       return apiRequest<BucketAnalyticsResponse>(
@@ -196,6 +228,8 @@ function useBucketQueries(bucketName: string, region: S3Region, mayListKeys: boo
   const accessKeysQuery = useQuery({
     queryKey: queryKeys.bucketAccessKeys(bucketName, region),
     enabled: mayListKeys,
+    staleTime: LIST_STALE_TIME,
+    gcTime: LIST_GC_TIME,
     queryFn: () => {
       const params = new URLSearchParams({ bucket: bucketName, region });
       return apiRequest<ListAccessKeysResponse>(`/access-keys?${params.toString()}`);
@@ -234,6 +268,58 @@ function BucketErrorState({
         <Alert variant="red" description={error?.message ?? fallback} />
       </div>
     </div>
+  );
+}
+
+// Mirrors ObjectBrowser's columns so the placeholder holds the same shape as the
+// table it stands in for. The Version and Status pair is versioning-only, and
+// versioning is not known until the bucket metadata lands, so the skeleton shows
+// the columns every bucket has rather than guessing at two that may not appear.
+const OBJECT_SKELETON_COLUMNS: SkeletonColumn[] = [
+  { label: 'Name' },
+  { label: 'Size' },
+  { label: 'Last Modified' },
+  {},
+];
+
+/**
+ * The Objects tab's body: the listing, or a table-shaped placeholder while it
+ * loads. Extracted so the page component stays about layout, and so the
+ * loading branch sits next to the table it stands in for.
+ */
+function ObjectsPanel({
+  loading,
+  objectActions,
+  mayUpload,
+  mayDelete,
+  ...browser
+}: {
+  loading: boolean;
+  bucketName: string;
+  region: S3Region;
+  versions: S3ObjectVersion[];
+  versioningEnabled: boolean;
+  currentPrefix: string;
+  onPrefixChange: (prefix: string) => void;
+  objectActions: ReturnType<typeof useObjectActions>;
+  mayUpload: boolean;
+  mayDelete: boolean;
+  listingTruncated: boolean;
+  totalObjectCount: number | undefined;
+}) {
+  if (loading) {
+    return <TableSkeleton columns={OBJECT_SKELETON_COLUMNS} aria-label="Loading objects" />;
+  }
+
+  return (
+    <ObjectBrowser
+      {...browser}
+      onDownload={objectActions.downloadObject}
+      downloading={objectActions.downloading}
+      canUpload={mayUpload}
+      onDelete={mayDelete ? objectActions.deleteObject : undefined}
+      onBulkDelete={mayDelete ? objectActions.deleteObjects : undefined}
+    />
   );
 }
 
@@ -328,14 +414,6 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     );
   }
 
-  if (objectsQuery.isPending) {
-    return (
-      <div className="flex items-center justify-center p-16">
-        <Spinner ariaLabel="Loading objects" size={32} />
-      </div>
-    );
-  }
-
   if (objectsQuery.isError) {
     return (
       <BucketErrorState
@@ -394,12 +472,22 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
         )}
       </div>
 
-      <BucketOverview bucket={bucket} region={region} bytesUsed={analyticsData?.bytesUsed} />
+      {bucketQuery.isPending ? (
+        <BucketOverviewSkeleton />
+      ) : (
+        <BucketOverview bucket={bucket} region={region} bytesUsed={analyticsData?.bytesUsed} />
+      )}
 
       <Tabs>
         <TabList>
+          {/* The count waits for the listing rather than counting an empty
+              array: "Objects (0)" on a bucket that turns out to hold hundreds is
+              a worse answer than no number yet, and it is the same rule the API
+              Keys tab beside it already follows. */}
           <Tab testId="bucket-objects-tab">
-            Objects ({displayObjectCount(analyticsData, versions, isTruncated).toLocaleString()})
+            Objects
+            {!objectsQuery.isPending &&
+              ` (${displayObjectCount(analyticsData, versions, isTruncated).toLocaleString()})`}
           </Tab>
           {/* Absent, not empty, for a role that cannot list keys: an "API Keys
               (0)" tab reads as an org with no keys rather than a view this
@@ -413,18 +501,17 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
 
         <TabPanels>
           <TabPanel>
-            <ObjectBrowser
+            <ObjectsPanel
+              loading={objectsQuery.isPending}
               bucketName={bucketName}
               region={region}
               versions={versions}
               versioningEnabled={bucket?.versioning ?? false}
               currentPrefix={currentPrefix}
               onPrefixChange={setCurrentPrefix}
-              onDownload={objectActions.downloadObject}
-              downloading={objectActions.downloading}
-              canUpload={mayUpload}
-              onDelete={mayDelete ? objectActions.deleteObject : undefined}
-              onBulkDelete={mayDelete ? objectActions.deleteObjects : undefined}
+              objectActions={objectActions}
+              mayUpload={mayUpload}
+              mayDelete={mayDelete}
               listingTruncated={isTruncated}
               totalObjectCount={analyticsData?.objectCount}
             />
