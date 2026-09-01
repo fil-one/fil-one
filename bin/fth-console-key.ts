@@ -37,6 +37,13 @@
 // `rotate` skips an org whose SSM-referenced key already carries the three
 // actions, so re-runs and tenants provisioned after the change are cheap.
 //
+// A create that lands but whose response is lost leaves a `filone-console-v2`
+// key SSM does not name, and the next `rotate` deletes that key and mints a
+// replacement. FTH keeps a deleted key's name reserved, so that create comes
+// back `409: duplicate key name` and the tenant cannot be rotated until FTH
+// releases the name. SSM still names the working v1 key, so the console keeps
+// working; the fix belongs on the FTH side.
+//
 // `prune` deletes v1 only for a tenant whose SSM-referenced key exists in FTH
 // and carries the three actions. Any other state means the rotation has not
 // landed for that tenant: it keeps its working v1 key, is reported, and makes
@@ -255,16 +262,19 @@ async function rotateTenant(orgId: string, tenantId: string): Promise<boolean> {
   // once the customer has freed a slot.
   const created = await createV2Key(tenantId, userId);
 
-  // A replayed idempotency key would hand back the key just deleted, and
-  // writing that to SSM would point the console at a dead credential.
-  if (staleV2 && created.accessKeyId === staleV2.accessKeyId) {
-    throw new Error(
-      `FTH replayed the deleted key ${staleV2.accessKeyId} for the idempotency key. ` +
-        'SSM was not written; the tenant needs a key created by hand.',
-    );
-  }
   if (!created.accessKeyId || !created.secretAccessKey) {
     throw new Error('FTH returned no credentials for the new key; SSM was not written.');
+  }
+
+  // SSM must never name a key FTH does not have: the console would sign every
+  // request with a dead credential. Comparing against the key deleted earlier in
+  // this run is not enough — a run that finds the delete already done has
+  // nothing to compare with — so read the tenant's keys back instead.
+  if (!(await tenantHasAccessKey(tenantId, created.accessKeyId))) {
+    throw new Error(
+      `FTH returned ${created.accessKeyId} for the new key but does not list it for this tenant. ` +
+        'SSM was not written.',
+    );
   }
 
   await ssm.send(
@@ -376,6 +386,10 @@ async function createV2Key(tenantId: string, userId: string): Promise<FthAccessK
         // and actions would 409. FTH client ids are unique across the
         // deployment all non-production stages share, so the tenant id alone
         // pins the target.
+        //
+        // FTH dedupes on this value, so a second run on a tenant gets back the
+        // response of the first, naming a key this run has since deleted. The
+        // read-back above catches that before SSM is written.
         idempotencyKey: `console-key-v2-${tenantId}`,
       },
     );
@@ -385,6 +399,14 @@ async function createV2Key(tenantId: string, userId: string): Promise<FthAccessK
         'Rotate this tenant by hand once the cause is cleared.',
     );
   }
+}
+
+async function tenantHasAccessKey(tenantId: string, accessKeyId: string): Promise<boolean> {
+  const keys = await fthRequest<{ items?: FthAccessKey[] }>(
+    'GET',
+    `/management/v1/clients/${encodeURIComponent(tenantId)}/access-keys`,
+  );
+  return (keys.items ?? []).some((k) => k.accessKeyId === accessKeyId);
 }
 
 async function deleteAccessKey(tenantId: string, key: FthAccessKey): Promise<void> {
