@@ -78,9 +78,10 @@ the whole of the enforcement there.
 
 ## Decision
 
-1. **A bucket policy belongs to one bucket** and is identified by `(region,
-   bucketName)`. It holds a list of statements, each carrying an effect, a set
-   of principals, and a set of actions ([§1](#1-what-a-bucket-policy-is)).
+1. **A bucket policy belongs to one bucket** and is identified by
+   `(region, bucketName)`. It holds a list of statements, each carrying an
+   effect, a set of principals, and a set of actions
+   ([§1](#1-what-a-bucket-policy-is)).
 2. **A member's permission on a bucket** is the Allow statements naming them,
    minus the Deny statements naming them, intersected with the permissions their
    role holds in the M1 matrix ([§1](#1-what-a-bucket-policy-is)).
@@ -201,11 +202,11 @@ Policies live in a new `BucketPolicyTable`, declared in `sst.config.ts` beside
 the existing tables, `pk`/`sk` with no secondary index. One attribute joins the
 membership row in `OrgTable`.
 
-| Table               | pk            | sk                             | Attributes                                                       | Purpose                |
-| ------------------- | ------------- | ------------------------------ | ---------------------------------------------------------------- | ---------------------- |
-| `BucketPolicyTable` | `ORG#{orgId}` | `POLICY#{region}#{bucketName}` | `statements`, `bucketCreatedAt`, `updatedAt`, `updatedBy`, `createdBy/At` | the policy       |
-| `BucketPolicyTable` | `ORG#{orgId}` | `KEY#{region}#{keyId}`         | the stamped grant, `userId`, `createdBy`, `keyName`, `expiresAt` | the key record         |
-| `OrgTable`          | `ORG#{orgId}` | `MEMBER#{userId}`              | `bucketScope`                                                    | whether policies apply |
+| Table               | pk            | sk                             | Attributes                                                                | Purpose                |
+| ------------------- | ------------- | ------------------------------ | ------------------------------------------------------------------------- | ---------------------- |
+| `BucketPolicyTable` | `ORG#{orgId}` | `POLICY#{region}#{bucketName}` | `statements`, `bucketCreatedAt`, `updatedAt`, `updatedBy`, `createdBy/At` | the policy             |
+| `BucketPolicyTable` | `ORG#{orgId}` | `KEY#{region}#{keyId}`         | the stamped grant, `userId`, `createdBy`, `keyName`, `expiresAt`          | the key record         |
+| `OrgTable`          | `ORG#{orgId}` | `MEMBER#{userId}`              | `bucketScope`                                                             | whether policies apply |
 
 S3 bucket names contain no `#`, so the sort key composes unambiguously and a
 `begins_with` on `POLICY#{region}#` returns one region's policies in a single
@@ -282,13 +283,13 @@ statements naming them, and a member named in none reaches no bucket.
 
 `resolveMemberAccess` sits behind a per-region orchestrator
 ([§10](#10-the-service-orchestrator-interface)), so a scoped member listing
-buckets costs one Query per provisioned region, each `begins_with
-POLICY#{region}#`, merged and evaluated in memory against the fan-out the
-handler already performs for the names. Paging past 1MB is the same paging
-`list-buckets.ts` already does. A scoped member addressing one bucket costs one
-`GetItem` on that region's `POLICY#{region}#{bucketName}`. That is the common
-case, and it is O(1). The map answers both questions a route asks: is this
-bucket in reach, and with which permissions.
+buckets costs one Query per provisioned region, each
+`begins_with POLICY#{region}#`, merged and evaluated in memory against the
+fan-out the handler already performs for the names. Paging past 1MB is the same
+paging `list-buckets.ts` already does. A scoped member addressing one bucket
+costs one `GetItem` on that region's `POLICY#{region}#{bucketName}`. That is the
+common case, and it is O(1). The map answers both questions a route asks: is
+this bucket in reach, and with which permissions.
 
 The check runs in the handler, because `authorize()` decides from the route
 manifest alone and the manifest cannot name a bucket, while the bucket arrives
@@ -298,17 +299,17 @@ This is the `in-handler` requirement M1 already defines for presign.
 | Route                                             | Scoped behavior                                                                                          |
 | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | `GET /api/buckets`                                | filter the merged fan-out result to the resolved set                                                     |
-| `POST /api/buckets`                               | allowed; the handler writes the new bucket's policy ([§6](#6-bucket-lifecycle-moves-to-the-console))      |
+| `POST /api/buckets`                               | allowed; the handler writes the new bucket's policy ([§6](#6-bucket-lifecycle-moves-to-the-console))     |
 | `GET /api/buckets/{name}`                         | absent from the set gives the same 404 a missing bucket gives                                            |
 | `DELETE /api/buckets/{name}`                      | gated on `buckets.delete`, which only an unscoped caller holds                                           |
-| `GET /api/buckets/{name}/analytics`               | 404                                                                                                       |
-| `GET \| POST /api/buckets/{name}/rag/enabled`     | 404                                                                                                       |
-| `POST /api/buckets/{name}/bulk-delete`            | 404                                                                                                       |
+| `GET /api/buckets/{name}/analytics`               | 404                                                                                                      |
+| `GET \| POST /api/buckets/{name}/rag/enabled`     | 404                                                                                                      |
+| `POST /api/buckets/{name}/bulk-delete`            | 404                                                                                                      |
 | `GET /api/bulk-delete-jobs/{jobId}`               | the job row names its bucket; check that bucket, 404 otherwise                                           |
 | `GET /api/activity`                               | filter the bucket entries to the resolved set                                                            |
-| `POST /api/presign`                               | per operation, the bucket in the set and the effective permission for it; one denial refuses the batch    |
-| `POST /api/buckets/{name}/query` (bearer)         | the creator's live access, capped by the key's own bucket refs ([§4](#4-access-keys-belong-to-a-member))  |
-| `POST /api/access-keys`                           | name, region, expiry; the grant derives from the caller ([§4](#4-access-keys-belong-to-a-member))         |
+| `POST /api/presign`                               | per operation, the bucket in the set and the effective permission for it; one denial refuses the batch   |
+| `POST /api/buckets/{name}/query` (bearer)         | the creator's live access, capped by the key's own bucket refs ([§4](#4-access-keys-belong-to-a-member)) |
+| `POST /api/access-keys`                           | name, region, expiry; the grant derives from the caller ([§4](#4-access-keys-belong-to-a-member))        |
 | `POST /api/org/invitations`                       | carries the invited member's marker and bucket grants ([§7](#7-policy-lifecycle))                        |
 | `PATCH /api/org/members/{userId}`                 | role and scope changes; a narrowing re-syncs the member's keys ([§7](#7-policy-lifecycle))               |
 | `GET \| PUT \| DELETE /api/buckets/{name}/policy` | read, replace, delete, `buckets.policy_manage`                                                           |
@@ -504,12 +505,12 @@ already narrows them by `createdBy` under `keys.manage_own`.
 
 ### 6. Bucket lifecycle moves to the console
 
-**A bucket gets its policy immediately after it is created.** `POST
-/api/buckets` calls the orchestrator and, on success, writes a policy holding
-one `Allow` statement naming the creator with the actions their role holds, plus
-the `bucketCreatedAt` the create reported. An Owner, an Admin, or a member
-marked `'all'` reaches the bucket regardless of the statement; it is what a
-later scope change falls back on.
+**A bucket gets its policy immediately after it is created.**
+`POST /api/buckets` calls the orchestrator and, on success, writes a policy
+holding one `Allow` statement naming the creator with the actions their role
+holds, plus the `bucketCreatedAt` the create reported. An Owner, an Admin, or a
+member marked `'all'` reaches the bucket regardless of the statement; it is what
+a later scope change falls back on.
 
 The write follows the create because a successful create proves no bucket of
 that name existed in that region. The row key is the bucket's name and region,
@@ -575,9 +576,9 @@ error FIL-1019's acceptance criteria ask for.
 
 Customers scripting bucket lifecycle against the S3 API lose that capability.
 The product ships it today in the FTH and Forge regions. The Console API is
-session-authenticated, so no credential FilOne issues reaches `POST
-/api/buckets` either, and scripted bucket lifecycle has no supported path until
-an orchestrator reports lifecycle events and the permission can return.
+session-authenticated, so no credential FilOne issues reaches
+`POST /api/buckets` either, and scripted bucket lifecycle has no supported path
+until an orchestrator reports lifecycle events and the permission can return.
 
 **Keys minted before this ships keep both permissions until FIL-1020 retires
 them, and the exposure stays open for that window.** A legacy key can create a
@@ -784,20 +785,20 @@ lists (`IssueAccessKeyOpts`, `lib/service-orchestrator.ts:66-72`), and nothing
 on the interface names a user or a policy. The changeset gives it the
 bucket-access domain:
 
-| Type or method                 | Today                                                              | Becomes                                                                                                                                                                                                                                                                                                                          |
-| ------------------------------ | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `resolveMemberAccess`          | —                                                                  | **new**: `(tenantId, member)` returns the `BucketAccess` map for this region ([§3](#3-resolving-access-on-a-request)). `member` is `{ userId, role, bucketScope }`, the console-owned facts resolution needs                                                                                                                       |
+| Type or method                 | Today                                                              | Becomes                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------------ | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `resolveMemberAccess`          | —                                                                  | **new**: `(tenantId, member)` returns the `BucketAccess` map for this region ([§3](#3-resolving-access-on-a-request)). `member` is `{ userId, role, bucketScope }`, the console-owned facts resolution needs                                                                                                                                                         |
 | policy surface                 | —                                                                  | **new**: `getBucketPolicy`, `putBucketPolicy`, `deleteBucketPolicy`, `listPolicies` for one region, and `removeMemberFromPolicies` for the removal sweep. Mutations take the `updatedAt` they are conditioned on and `retainKeyIds`, and return the keys they revoked; `previewPolicyChange` returns the value the mutation must present ([§7](#7-policy-lifecycle)) |
-| `issueAccessKey`               | `(tenantId, opts)`                                                 | `(tenantId, member, opts)`: the grant derives from the member inside the call ([§4](#4-access-keys-belong-to-a-member)), and nothing about it is the caller's to choose                                                                                                                                                           |
-| `listAccessKeys`               | —                                                                  | **new**: `(tenantId, filter)`, the filter naming a member or the whole tenant; returns key records with their effective permissions, the stamp on a `'reissue'` region and the storage system's answer on a `'live'` one                                                                                                           |
-| `syncMemberKeys`               | —                                                                  | **new**: re-syncs a member's keys after a change to their access; a dry run returns the keys a commit would revoke, the commit takes `retainKeyIds` and returns the keys it revoked ([§7](#7-policy-lifecycle))                                                                                                                    |
-| `reconcileBuckets`             | —                                                                  | **new**: `(tenantId)` runs the scheduled pass for this region, returning the policies it wrote, the rows it retired, and the keys it revoked ([§9](#9-rollout))                                                                                                                                                                   |
-| `keyGrantSync`                 | —                                                                  | **new** readonly capability, `'reissue' \| 'live'`: whether an existing key follows its member by revocation and reissue, or automatically at the enforcing system                                                                                                                                                                |
-| `IssueAccessKeyOpts`           | `keyName, permissions, granularPermissions?, buckets?, expiresAt?` | `keyName, expiresAt?`                                                                                                                                                                                                                                                                                                            |
-| `deleteAccessKey`              | idempotent revoke                                                  | unchanged in signature; the implementation deletes the store's key record with the vendor key, still idempotent ([§7](#7-policy-lifecycle))                                                                                                                                                                                       |
-| `createBucket`, `deleteBucket` | bucket lifecycle                                                   | `createBucket(tenantId, member, args)` writes the new bucket's policy after a successful create and returns it; `deleteBucket` retires the policy and re-syncs the members it named ([§6](#6-bucket-lifecycle-moves-to-the-console))                                                                                              |
-| `getS3ClientContext`           | per-tenant `filone-console` key                                    | unchanged: console-side enforcement keeps signing with it ([§3](#3-resolving-access-on-a-request))                                                                                                                                                                                                                                |
-| tenant and usage methods       |                                                                    | unchanged in signature; `deleteTenant` now also destroys the store's policy rows and key records ([§7](#7-policy-lifecycle))                                                                                                                                                                                                      |
+| `issueAccessKey`               | `(tenantId, opts)`                                                 | `(tenantId, member, opts)`: the grant derives from the member inside the call ([§4](#4-access-keys-belong-to-a-member)), and nothing about it is the caller's to choose                                                                                                                                                                                              |
+| `listAccessKeys`               | —                                                                  | **new**: `(tenantId, filter)`, the filter naming a member or the whole tenant; returns key records with their effective permissions, the stamp on a `'reissue'` region and the storage system's answer on a `'live'` one                                                                                                                                             |
+| `syncMemberKeys`               | —                                                                  | **new**: re-syncs a member's keys after a change to their access; a dry run returns the keys a commit would revoke, the commit takes `retainKeyIds` and returns the keys it revoked ([§7](#7-policy-lifecycle))                                                                                                                                                      |
+| `reconcileBuckets`             | —                                                                  | **new**: `(tenantId)` runs the scheduled pass for this region, returning the policies it wrote, the rows it retired, and the keys it revoked ([§9](#9-rollout))                                                                                                                                                                                                      |
+| `keyGrantSync`                 | —                                                                  | **new** readonly capability, `'reissue' \| 'live'`: whether an existing key follows its member by revocation and reissue, or automatically at the enforcing system                                                                                                                                                                                                   |
+| `IssueAccessKeyOpts`           | `keyName, permissions, granularPermissions?, buckets?, expiresAt?` | `keyName, expiresAt?`                                                                                                                                                                                                                                                                                                                                                |
+| `deleteAccessKey`              | idempotent revoke                                                  | unchanged in signature; the implementation deletes the store's key record with the vendor key, still idempotent ([§7](#7-policy-lifecycle))                                                                                                                                                                                                                          |
+| `createBucket`, `deleteBucket` | bucket lifecycle                                                   | `createBucket(tenantId, member, args)` writes the new bucket's policy after a successful create and returns it; `deleteBucket` retires the policy and re-syncs the members it named ([§6](#6-bucket-lifecycle-moves-to-the-console))                                                                                                                                 |
+| `getS3ClientContext`           | per-tenant `filone-console` key                                    | unchanged: console-side enforcement keeps signing with it ([§3](#3-resolving-access-on-a-request))                                                                                                                                                                                                                                                                   |
+| tenant and usage methods       |                                                                    | unchanged in signature; `deleteTenant` now also destroys the store's policy rows and key records ([§7](#7-policy-lifecycle))                                                                                                                                                                                                                                         |
 
 The gap between the vendor model and the product's is written once:
 `lib/bucket-access`, the shared store holding `BucketPolicyTable`, the key
@@ -941,9 +942,9 @@ that are the source of truth. The projection can disagree with the policies it
 came from, and nothing on the request path would notice.
 
 **A bucket with no policy reachable by every member**, scoped ones included,
-would need no marker and no default policy. It also makes `DELETE
-/api/buckets/{name}/policy` a route that silently opens a bucket to the whole
-org, so one click would widen access while appearing to remove it.
+would need no marker and no default policy. It also makes
+`DELETE /api/buckets/{name}/policy` a route that silently opens a bucket to the
+whole org, so one click would widen access while appearing to remove it.
 
 **Intersection instead of union** across a member's statements would let an
 admin narrow somebody by adding a restrictive statement. `Deny` is the AWS
@@ -952,10 +953,11 @@ subtractive is not, because adding a member to an Allow statement would then
 silently remove a permission they already had.
 
 **Withholding `s3:ListAllMyBuckets` from a scoped member's keys** refuses
-enumeration whatever the gateway does. It costs the command outright, since `aws
-s3 ls` then answers `AccessDenied` and breaks tooling that enumerates before it
-acts, and on Aurora the action rides inside the `Default` grant, so withholding
-it drops `s3:GetBucketLocation` with it and `ListBuckets` is answered anyway.
+enumeration whatever the gateway does. It costs the command outright, since
+`aws s3 ls` then answers `AccessDenied` and breaks tooling that enumerates
+before it acts, and on Aurora the action rides inside the `Default` grant, so
+withholding it drops `s3:GetBucketLocation` with it and `ListBuckets` is
+answered anyway.
 
 **Reconciling what a policy says against the vendor**, so that customer keys
 could keep bucket lifecycle and the rows repaired themselves, needs to know
