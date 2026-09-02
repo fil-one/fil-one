@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-import { WelcomePage, orgInitials } from './WelcomePage';
+import { WelcomePage } from './WelcomePage';
 
 const mockUpdateOrg = vi.fn();
 
@@ -25,21 +25,7 @@ function renderPage(suggestedName = 'Acme') {
 }
 
 const field = () => screen.getByLabelText('Organization name');
-const submit = () => screen.getByRole('button', { name: 'Continue' });
-
-describe('orgInitials', () => {
-  it('takes one letter from each of the first two words', () => {
-    expect(orgInitials('Acme Storage')).toBe('AS');
-  });
-
-  it('takes two letters from a single word', () => {
-    expect(orgInitials('Acme')).toBe('AC');
-  });
-
-  it('is empty for a blank name, so the monogram holds no stale letter', () => {
-    expect(orgInitials('   ')).toBe('');
-  });
-});
+const submit = () => screen.getByRole('button', { name: 'Create organization' });
 
 describe('WelcomePage', () => {
   beforeEach(() => {
@@ -47,7 +33,7 @@ describe('WelcomePage', () => {
     mockUpdateOrg.mockResolvedValue({ name: 'Acme' });
   });
 
-  it('starts with the derived name, so the common answer is Continue', () => {
+  it('starts with the derived name, so the common answer is submit', () => {
     renderPage();
     expect(field()).toHaveValue('Acme');
   });
@@ -83,7 +69,7 @@ describe('WelcomePage', () => {
     expect(onNamed).not.toHaveBeenCalled();
   });
 
-  it('disables Continue on an empty field rather than refusing after a click', () => {
+  it('disables the submit on an empty field rather than refusing after a click', () => {
     renderPage();
     fireEvent.change(field(), { target: { value: '' } });
     expect(submit()).toBeDisabled();
