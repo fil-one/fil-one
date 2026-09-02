@@ -1030,6 +1030,23 @@ export default $config({
         ],
       },
 
+      // ── Members ────────────────────────────────────────────────────
+      // A narrowing revokes the keys the member could no longer mint, in
+      // whichever regions hold them, and emails the member that their client
+      // just stopped working. So these routes reach every orchestrator and the
+      // mail credential. `transfer-ownership` carries the same, below, beside
+      // the Management API credentials its step-up already needs.
+      'update-member-role': {
+        extraEnv: orchestratorEnv,
+        permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+        ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
+      },
+      'remove-member': {
+        extraEnv: orchestratorEnv,
+        permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+        ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
+      },
+
       // ── RAG ────────────────────────────────────────────────────────
       // RAG query playground (FIL-554): embed the question, vector-search the
       // bucket's index, and ground a Bedrock completion on the retrieved chunks.
@@ -1135,8 +1152,9 @@ export default $config({
       // fresh sign-in is enough of a step-up, so it needs the Management API
       // credentials the account routes already carry.
       'transfer-ownership': {
-        extraLink: mgmtRuntimeResources,
-        extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+        extraLink: [...mgmtRuntimeResources, ...(sendGridApiKey ? [sendGridApiKey] : [])],
+        extraEnv: { ...orchestratorEnv, AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+        permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
       },
 
       // ── Invitations ────────────────────────────────────────────────

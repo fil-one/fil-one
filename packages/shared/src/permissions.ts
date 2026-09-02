@@ -187,6 +187,19 @@ export function canManageTargetRole(actorRole: string, targetRole: string): bool
  * so both must clear the ceiling: an Admin can neither demote an Owner nor
  * promote anyone to Owner.
  */
+/**
+ * Whether moving from one role to another takes a permission away.
+ *
+ * A widening can strand nothing: every key its holder could mint before, they
+ * could mint after. A narrowing is the change that has to look at what they
+ * already hold. Asked of the permission sets rather than of {@link ROLE_RANK},
+ * so the registry stays the single answer to what a role may do.
+ */
+export function roleNarrows(fromRole: string, toRole: string): boolean {
+  const after = new Set<Permission>(permissionsForRole(toRole));
+  return permissionsForRole(fromRole).some((permission) => !after.has(permission));
+}
+
 export function canChangeRole(actorRole: string, fromRole: string, toRole: string): boolean {
   return canManageTargetRole(actorRole, fromRole) && canManageTargetRole(actorRole, toRole);
 }

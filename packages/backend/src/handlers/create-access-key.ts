@@ -15,6 +15,8 @@ import type {
   CreateAccessKeyRequest,
   CreateAccessKeyResponse,
   ErrorResponse,
+  GranularPermission,
+  OrgRole,
 } from '@filone/shared';
 import { Resource } from 'sst';
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.js';
@@ -32,6 +34,7 @@ import {
   unsupportedRegionResponse,
 } from '../lib/response-builder.js';
 import { AccessKeyKeys, keyAttribution } from '../lib/dynamo-records.js';
+import { cancelledLabels, memberRoleCheck } from '../lib/membership-changes.js';
 import type { AccessKeyRecord } from '../lib/dynamo-records.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
@@ -56,7 +59,10 @@ export async function baseHandler(
   const denied = checkCreatorAuthority(event, parsed.data);
   if (denied) return denied;
 
-  const { orgId, userId } = getUserInfo(event);
+  const { orgId, userId, membership } = getUserInfo(event);
+  // The role the cap above was evaluated against. The key row's write asserts
+  // it is still the role on file.
+  const creatorRole = membership!.role;
   const creatorEmail = getVerifiedEmail(event);
   const attribution = keyAttribution({ userId, creatorEmail });
   const actor = userActor({ userId, email: creatorEmail });
@@ -107,6 +113,7 @@ export async function baseHandler(
         orchestrator,
         attribution,
         mint,
+        creator: { orgId, userId, role: creatorRole },
       });
       return new ResponseBuilder()
         .status(409)
@@ -128,7 +135,7 @@ export async function baseHandler(
     throw err;
   }
 
-  await recordMintedKey({
+  const stale = await recordMintedKey({
     row: {
       pk: AccessKeyKeys.orgPk(orgId),
       sk: AccessKeyKeys.keySk(accessKey.id),
@@ -138,15 +145,18 @@ export async function baseHandler(
       status: 'active',
       region,
       permissions,
-      ...(granularPermissions?.length ? { granularPermissions } : {}),
       bucketScope,
-      ...(buckets ? { buckets } : {}),
-      ...(expiresAt ? { expiresAt } : {}),
+      ...stampedScope({ granularPermissions, buckets, expiresAt }),
       ...attribution,
     },
     accessKeyId: accessKey.accessKeyId,
+    keyId: accessKey.id,
     mint,
+    creator: { orgId, userId, role: creatorRole },
+    orchestrator,
+    tenantId,
   });
+  if (stale) return stale;
 
   return new ResponseBuilder()
     .status(201)
@@ -171,23 +181,109 @@ export async function baseHandler(
 async function recordMintedKey({
   row,
   accessKeyId,
+  keyId,
   mint,
+  creator,
+  orchestrator,
+  tenantId,
   recovered,
 }: {
   row: Record<string, unknown>;
   accessKeyId: string;
+  /** The orchestrator's id for the key, in case the write has to undo it. */
+  keyId: string;
   mint: AuditCorrelation<'key.created'>;
+  /** Whose role the cap was evaluated against, and the role it read. */
+  creator: { orgId: string; userId: string; role: OrgRole };
+  orchestrator: ServiceOrchestrator;
+  tenantId: string;
   recovered?: true;
-}): Promise<void> {
-  await mint.complete({
-    outcome: 'succeeded',
-    details: {
-      // The id the console shows, by its last characters only.
-      keyIdSuffix: auditKeyIdSuffix('s3', accessKeyId),
-      ...(recovered ? { recovered } : {}),
-    },
-    items: [{ Put: { TableName: Resource.UserInfoTable.name, Item: marshall(row) } }],
-  });
+}): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
+  try {
+    await mint.complete({
+      outcome: 'succeeded',
+      details: {
+        // The id the console shows, by its last characters only.
+        keyIdSuffix: auditKeyIdSuffix('s3', accessKeyId),
+        ...(recovered ? { recovered } : {}),
+      },
+      // The cap ran against a role read before the vendor call. A narrowing
+      // that commits in between revokes the keys it can see, and this row is
+      // not one of them yet, so the row refuses to land at all.
+      items: [
+        memberRoleCheck(creator),
+        { Put: { TableName: Resource.UserInfoTable.name, Item: marshall(row) } },
+      ],
+    });
+    return undefined;
+  } catch (err) {
+    // The role check is item 0; `commitAudited` appends the audit Put last.
+    if (!cancelledLabels(err, ['creatorRole', 'keyRow']).includes('creatorRole')) throw err;
+    await mint.complete({ outcome: 'failed' });
+    return discardKeyMintedUnderAStaleRole({
+      tenantId,
+      keyId,
+      orchestrator,
+      context: { orgId: creator.orgId, userId: creator.userId },
+    });
+  }
+}
+
+/**
+ * The attributes a key row carries only when the form asked for them, so an
+ * absent one reads as "not requested" rather than as an empty list.
+ */
+function stampedScope({
+  granularPermissions,
+  buckets,
+  expiresAt,
+}: {
+  granularPermissions: GranularPermission[] | undefined;
+  buckets: string[] | undefined;
+  expiresAt: string | null;
+}): Record<string, unknown> {
+  return {
+    ...(granularPermissions?.length ? { granularPermissions } : {}),
+    ...(buckets ? { buckets } : {}),
+    ...(expiresAt ? { expiresAt } : {}),
+  };
+}
+
+/**
+ * The creator's role narrowed while the key was being minted.
+ *
+ * The credential exists at the vendor and nothing local records it, so it is
+ * deleted here rather than left for the non-conforming-key review: the secret
+ * has not been returned to anybody, and a 409 says to try again under the role
+ * they now hold.
+ */
+async function discardKeyMintedUnderAStaleRole({
+  tenantId,
+  keyId,
+  orchestrator,
+  context,
+}: {
+  tenantId: string;
+  keyId: string;
+  orchestrator: ServiceOrchestrator;
+  context: { orgId: string; userId: string };
+}): Promise<APIGatewayProxyStructuredResultV2> {
+  try {
+    await orchestrator.deleteAccessKey(tenantId, keyId);
+  } catch (err) {
+    console.error('[create-access-key] Could not discard a key minted under a stale role', {
+      ...context,
+      error: err,
+    });
+  }
+
+  return new ResponseBuilder()
+    .status(409)
+    .body<ErrorResponse>({
+      message: 'Your role in this organization changed while the key was being created.',
+      code: ApiErrorCode.FORBIDDEN_ROLE,
+    })
+    .build();
 }
 
 /**
@@ -230,6 +326,8 @@ interface RecoverDuplicateKeyParams {
   attribution: Pick<AccessKeyRecord, 'createdBy' | 'creatorEmail' | 'policyVersion'>;
   /** The intent this attempt already wrote — every exit here closes it. */
   mint: AuditCorrelation<'key.created'>;
+  /** Whose role the cap was evaluated against, and the role it read. */
+  creator: { orgId: string; userId: string; role: OrgRole };
 }
 
 async function recoverDuplicateKey({
@@ -240,6 +338,7 @@ async function recoverDuplicateKey({
   orchestrator,
   attribution,
   mint,
+  creator,
 }: RecoverDuplicateKeyParams): Promise<void> {
   // Check if we already have a DynamoDB record for this key
   const { Items: existingKeys } = await getDynamoClient().send(
@@ -300,9 +399,16 @@ async function recoverDuplicateKey({
       recovered: true,
     },
     accessKeyId: recovered.accessKeyId,
+    keyId: recovered.id,
     mint,
+    creator,
+    orchestrator,
+    tenantId,
     recovered: true,
   });
+  // Its answer is dropped: this path is a 409 either way, and a role that went
+  // stale leaves no row and no credential, which is the same outcome by a
+  // different name.
 
   console.warn(
     `Recovered DynamoDB record for access key "${keyName}" (id=${recovered.id}) for org ${orgId} using ${orchestrator.id} orchestrator`,

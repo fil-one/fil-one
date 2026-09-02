@@ -317,6 +317,37 @@ export function inviterAuthorityCheck({
 }
 
 /**
+ * Assert, inside the transaction, that a member still holds the role a decision
+ * was made against.
+ *
+ * The mint path evaluates its permission cap against the creator's role and
+ * then writes the key row, and a role narrowing between the two would leave a
+ * key above the role that authorized it. The narrowing revokes what it finds,
+ * so this closes the window where a row lands after its listing: the row cannot
+ * be written unless the role the cap was checked against is still the one on
+ * file.
+ */
+export function memberRoleCheck({
+  orgId,
+  userId,
+  role,
+}: {
+  orgId: string;
+  userId: string;
+  role: OrgRole;
+}): TransactWriteItem {
+  return {
+    ConditionCheck: {
+      TableName: Resource.OrgTable.name,
+      Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: OrgKeys.memberSk(userId) } },
+      ConditionExpression: 'attribute_exists(pk) AND #role = :role',
+      ExpressionAttributeNames: { '#role': 'role' },
+      ExpressionAttributeValues: { ':role': { S: role } },
+    },
+  };
+}
+
+/**
  * Which of a transaction's items failed their CONDITIONS, by the caller's own
  * names for them.
  *

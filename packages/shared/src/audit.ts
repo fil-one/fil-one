@@ -58,12 +58,24 @@ export function isAuditEventType(value: string): value is AuditEventType {
  * `completion` after it. Every other type is single-phase, and the envelope
  * types below make stamping a phase on one a compile error.
  *
- * Only the key flows: a credential is minted or revoked at the storage vendor
- * before any local write, so the local write cannot be the thing that
- * authorizes it. `key.created` also appears single-phase — a RAG key is minted
- * here rather than at a vendor, so its whole mutation is one transaction.
+ * The key flows: a credential is minted or revoked at the storage vendor before
+ * any local write, so the local write cannot be the thing that authorizes it.
+ * `key.created` also appears single-phase — a RAG key is minted here rather
+ * than at a vendor, so its whole mutation is one transaction.
+ *
+ * The three membership flows for the same reason, when they revoke keys: a
+ * narrowing revokes at the vendor before it writes the role, so a crash between
+ * the two leaves a visible dangling intent instead of revoked credentials with
+ * no record. They also appear single-phase, and every membership change that
+ * touches no vendor takes that form.
  */
-export const TWO_PHASE_AUDIT_EVENT_TYPES = ['key.created', 'key.deleted'] as const;
+export const TWO_PHASE_AUDIT_EVENT_TYPES = [
+  'key.created',
+  'key.deleted',
+  'member.role_changed',
+  'member.removed',
+  'ownership.transferred',
+] as const;
 export type TwoPhaseAuditEventType = (typeof TWO_PHASE_AUDIT_EVENT_TYPES)[number];
 
 /**
@@ -216,8 +228,15 @@ export interface AuditEventDetails {
      * that it is revoked.
      */
     revokedInvitations?: number;
+    /**
+     * The access keys this change revoked, because a key must not outlive its
+     * holder's authority to mint it. Ids rather than a count, unlike the
+     * invitations: each revocation is its own `key.deleted` outside this
+     * event's transaction, and the ids are what join the summary to those.
+     */
+    revokedKeys?: string[];
   };
-  'member.removed': { role: OrgRole; revokedInvitations?: number };
+  'member.removed': { role: OrgRole; revokedInvitations?: number; revokedKeys?: string[] };
   'ownership.transferred': {
     fromUserId: string;
     toUserId: string;
@@ -226,6 +245,8 @@ export interface AuditEventDetails {
      * revoked: an Admin cannot issue one, so they cannot keep one either.
      */
     revokedInvitations?: number;
+    /** The outgoing Owner's keys an Admin could not mint, revoked with the seat. */
+    revokedKeys?: string[];
   };
   'key.created': {
     keyKind: AuditKeyKind;

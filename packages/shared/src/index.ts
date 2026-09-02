@@ -94,6 +94,7 @@ export type {
   MemberSummary,
   AccessKeySummary,
   RoleChangePreviewResponse,
+  UpdateMemberRoleFailure,
   TransferOwnershipRequest,
   TransferOwnershipResponse,
   UpdateMemberRoleRequest,
@@ -149,6 +150,7 @@ export {
   roleHasPermission,
   canManageTargetRole,
   canChangeRole,
+  roleNarrows,
 } from './permissions.js';
 export type { Permission } from './permissions.js';
 

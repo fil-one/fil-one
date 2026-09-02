@@ -1,5 +1,5 @@
 import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query';
-import { ApiErrorCode, type S3Region } from '@filone/shared';
+import { ApiErrorCode, type OrgRole, type S3Region } from '@filone/shared';
 
 export const ME_STALE_TIME = 10 * 60_000;
 
@@ -124,6 +124,11 @@ export const queryKeys = {
   // `members.manage`, so a single key would tie a query most callers can run to
   // one most callers cannot.
   members: ['members'] as const,
+  // Its own prefix rather than under ['members']: the roster is invalidated on
+  // every change, and a preview of what a change would revoke is about a role
+  // nobody holds yet, so refetching it after the change asks a stale question.
+  roleChangePreview: (userId: string, role: OrgRole) =>
+    ['role-change-preview', userId, role] as const,
   invitations: ['invitations'] as const,
   instatusSummary: ['instatus-summary'] as const,
   preferences: ['preferences'] as const,
