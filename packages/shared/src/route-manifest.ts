@@ -306,6 +306,17 @@ const MANIFEST = [
     requires: 'members.manage',
     capsInHandler: true,
   },
+  // What the PATCH would revoke, read before it happens. Same gate and same
+  // ceiling as the PATCH itself: it names the target's access keys, which
+  // nobody who could not change their role has any business reading.
+  {
+    method: 'GET',
+    path: '/api/org/members/{userId}/role-change-preview',
+    handler: 'get-role-change-preview',
+    category: 'authenticated',
+    requires: 'members.manage',
+    capsInHandler: true,
+  },
 
   // ── Invitations ──────────────────────────────────────────────────
   // The same split the members routes have: `members.manage` is what reaching

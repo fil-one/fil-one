@@ -596,6 +596,7 @@ describe('the caps routes apply on top of their declared permission', () => {
       'create-access-key',
       'update-member-role',
       'remove-member',
+      'get-role-change-preview',
       'create-invitation',
       'revoke-invitation',
     ]);

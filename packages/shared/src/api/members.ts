@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { OrgRole } from './org.js';
 import { InvitedRoleSchema } from './invitations.js';
 import type { OrgMembershipSource } from './org.js';
+import type { S3Region } from '../constants.js';
 
 /**
  * Member management: the org's roster, the role each member holds, removal, and
@@ -50,6 +51,54 @@ export interface UpdateMemberRoleResponse {
   role: OrgRole;
   /** The role they held before, so the console can narrate what changed. */
   previousRole: OrgRole;
+}
+
+/**
+ * One key a role change would revoke, as the confirmation dialog lists it.
+ *
+ * The id suffix rather than the whole access key id: the console shows four
+ * characters, and a full `AKIA…` in a response body is a credential half nobody
+ * needs to recognize a key by.
+ */
+export interface RevokedKeySummary {
+  /** The orchestrator's id for the key, which is what the row is addressed by. */
+  id: string;
+  keyName: string;
+  /** The characters of the access key id the console already shows. */
+  accessKeyIdSuffix?: string;
+  region: S3Region;
+  createdAt: string;
+  /**
+   * Why it goes: the new role cannot hold a key at all (`role_cannot_mint`),
+   * the row records no permission set (`permissions_unrecorded`), or the role
+   * could not grant what it carries (`exceeds_role`).
+   */
+  reason: 'role_cannot_mint' | 'permissions_unrecorded' | 'exceeds_role';
+  /** The permissions above the new role, named, when that is what condemned it. */
+  excess: string[];
+}
+
+/**
+ * `GET /api/org/members/{userId}/role-change-preview?role=` — what a role
+ * change would take away, before it happens.
+ *
+ * The admin sees the keys before confirming. What the change actually revoked
+ * comes back on the PATCH, and may differ: the commit revokes from a fresh
+ * read, so a key minted since the preview is included and a key revoked since
+ * is not.
+ */
+export interface RoleChangePreviewResponse {
+  /** The target's current role, so the dialog can name the move. */
+  currentRole: OrgRole;
+  role: OrgRole;
+  keys: RevokedKeySummary[];
+  /** The target's keys that stay live. */
+  survivingCount: number;
+  /**
+   * Keys in this org with no recorded owner, which no role change touches.
+   * Shown beside the list so a short list is not read as the whole story.
+   */
+  unattributedCount: number;
 }
 
 /**
