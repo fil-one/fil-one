@@ -1,5 +1,5 @@
-import { DELETION_CODE_TTL_MINUTES, Stage, senderAddress } from '@filone/shared';
-import { Resource } from 'sst';
+import { DELETION_CODE_TTL_MINUTES } from '@filone/shared';
+import { sendMail } from './mailer.js';
 
 /**
  * Send the account-deletion verification code. SendGrid direct: Auth0 already
@@ -12,18 +12,6 @@ export async function sendDeletionCodeEmail(params: {
   orgName: string;
   code: string;
 }): Promise<void> {
-  const stage = process.env.FILONE_STAGE;
-  const isProduction = stage === Stage.Production;
-
-  if (stage !== Stage.Production && stage !== Stage.Staging) {
-    console.warn('[deletion-email] No SendGrid key on this stage — code not emailed', {
-      to: params.to,
-      code: params.code,
-    });
-    return;
-  }
-
-  const fromAddress = senderAddress(isProduction);
   // The code stays out of the subject: subject lines surface on lock screens and
   // in mail-server logs, so leading with the OTP exposes a live code to anyone
   // who can see the notification without unlocking the device.
@@ -45,27 +33,30 @@ export async function sendDeletionCodeEmail(params: {
     <p>If you didn't request this, ignore this email and consider changing your password.</p>
   `;
 
-  const resp = await fetch('https://api.sendgrid.com/v3/mail/send', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${Resource.SendGridApiKey.value}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      personalizations: [{ to: [{ email: params.to }] }],
-      from: { email: fromAddress, name: 'Fil One' },
-      subject,
-      content: [
-        { type: 'text/plain', value: text },
-        { type: 'text/html', value: html },
-      ],
-    }),
-  });
+  const result = await sendMail(
+    { to: params.to, subject, text, html, fromName: 'Fil One' },
+    { source: 'deletion-email', logFields: { to: params.to } },
+  );
 
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(`SendGrid send failed (${resp.status}): ${body}`);
+  if (result.sent) return;
+  if (result.reason === 'stage_sends_no_mail') {
+    // The code, on a stage that sends no mail, so the deletion flow stays
+    // testable there. Nowhere else: an OTP in a log is a credential in a log.
+    console.warn('[deletion-email] No SendGrid key on this stage — code not emailed', {
+      to: params.to,
+      code: params.code,
+    });
+    return;
   }
+
+  // Unlike an invitation, nothing is committed yet: the caller has a challenge
+  // row and a caller waiting for a code that will never arrive, so the request
+  // fails and they try again.
+  throw new Error(
+    result.reason === 'rejected'
+      ? `SendGrid send failed (${result.status}): ${result.body}`
+      : 'SendGrid send failed',
+  );
 }
 
 function escapeHtml(value: string): string {
