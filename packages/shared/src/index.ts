@@ -153,8 +153,13 @@ export {
   ACCESS_KEY_PERMISSION_REQUIREMENT,
   GRANULAR_PERMISSION_REQUIREMENT,
   excessKeyPermissions,
+  keySurvival,
 } from './access-key-permissions.js';
-export type { ExcessKeyPermission } from './access-key-permissions.js';
+export type {
+  ExcessKeyPermission,
+  KeySurvival,
+  StampedKeyPermissions,
+} from './access-key-permissions.js';
 
 export { ROUTE_MANIFEST } from './route-manifest.js';
 export type {

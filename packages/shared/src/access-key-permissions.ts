@@ -4,7 +4,7 @@ import type {
   GranularPermission,
   ObjectPermission,
 } from './api/access-keys.js';
-import { permissionsForRole } from './permissions.js';
+import { permissionsForRole, roleHasPermission } from './permissions.js';
 import type { Permission } from './permissions.js';
 
 /**
@@ -129,4 +129,60 @@ function requirementFor(
   return Object.prototype.hasOwnProperty.call(table, keyPermission)
     ? table[keyPermission]
     : undefined;
+}
+
+/**
+ * What a key row records about the authority it carries.
+ *
+ * Both fields are optional because a row the console rebuilt after a vendor
+ * 409 carries neither: the retry answers 409 with no secret, so the credential
+ * was never handed to anyone and the console never learned what it holds.
+ */
+export interface StampedKeyPermissions {
+  permissions?: readonly string[] | undefined;
+  granularPermissions?: readonly string[] | undefined;
+}
+
+/**
+ * Whether a key survives a role, and when it does not, why.
+ *
+ * `role_cannot_mint`: the role holds no `keys.create`, so it can hold no key.
+ * `permissions_unrecorded`: the row records no permission set.
+ * `exceeds_role`: the role could not grant everything the row carries.
+ */
+export type KeySurvival =
+  | { survives: true }
+  | { survives: false; reason: 'role_cannot_mint' | 'permissions_unrecorded' }
+  | { survives: false; reason: 'exceeds_role'; excess: ExcessKeyPermission[] };
+
+/**
+ * Whether a key its holder already has survives that holder moving to `role`.
+ *
+ * One test, and the same one {@link excessKeyPermissions} applies at creation:
+ * a key survives when its holder could mint it today. A role without
+ * `keys.create` has an empty ceiling, so demotion to ReadOnly takes every key
+ * the member created; a survivor there would have a holder who can neither see
+ * nor revoke it, since `keys.manage_own` is what scopes the list and the
+ * delete.
+ *
+ * A row recording no permission set cannot be placed inside the new role, so it
+ * goes. Bucket scope is never compared: it is the creator's choice at mint time
+ * and no role caps it.
+ *
+ * The caller decides whose keys to ask about. A row with no `createdBy` belongs
+ * to nobody the console can name and is outside this rule entirely.
+ */
+export function keySurvival(role: string, key: StampedKeyPermissions): KeySurvival {
+  if (!roleHasPermission(role, 'keys.create')) {
+    return { survives: false, reason: 'role_cannot_mint' };
+  }
+  if (!key.permissions) return { survives: false, reason: 'permissions_unrecorded' };
+
+  const excess = excessKeyPermissions(role, {
+    permissions: key.permissions,
+    granularPermissions: key.granularPermissions,
+  });
+  return excess.length === 0
+    ? { survives: true }
+    : { survives: false, reason: 'exceeds_role', excess };
 }

@@ -9,6 +9,7 @@ import {
   ACCESS_KEY_PERMISSION_REQUIREMENT,
   GRANULAR_PERMISSION_REQUIREMENT,
   excessKeyPermissions,
+  keySurvival,
 } from './access-key-permissions.js';
 
 /** The two granulars a key may carry only with `privileged.grant`. */
@@ -167,5 +168,98 @@ describe('excessKeyPermissions', () => {
         (excess) => excess.keyPermission,
       ),
     ).toStrictEqual(['read']);
+  });
+});
+
+describe('keySurvival', () => {
+  // Every key a member could hold, described by what it carries, so one pass
+  // over a role answers the whole transition at once.
+  const KEYS = {
+    plainReadWrite: { permissions: ['read', 'write', 'list'] },
+    deletesBuckets: { permissions: ['read', 'DeleteBucket'] },
+    createsBuckets: { permissions: ['read', 'CreateBucket'] },
+    holdsRetention: {
+      permissions: ['read', 'write'],
+      granularPermissions: ['PutObjectRetention'],
+    },
+    holdsLegalHold: {
+      permissions: ['read', 'write'],
+      granularPermissions: ['PutObjectLegalHold'],
+    },
+    readsVersions: {
+      permissions: ['read', 'list'],
+      granularPermissions: ['GetObjectVersion', 'ListBucketVersions'],
+    },
+    recovered: {},
+  };
+
+  function survivors(role: string): string[] {
+    return Object.entries(KEYS)
+      .filter(([, key]) => keySurvival(role, key).survives)
+      .map(([name]) => name);
+  }
+
+  it('keeps every key for an Owner', () => {
+    expect(survivors(OrgRole.Owner)).toStrictEqual([
+      'plainReadWrite',
+      'deletesBuckets',
+      'createsBuckets',
+      'holdsRetention',
+      'holdsLegalHold',
+      'readsVersions',
+    ]);
+  });
+
+  it('takes the two privileged granulars from an Admin', () => {
+    expect(survivors(OrgRole.Admin)).toStrictEqual([
+      'plainReadWrite',
+      'deletesBuckets',
+      'createsBuckets',
+      'readsVersions',
+    ]);
+  });
+
+  it('takes DeleteBucket and the privileged granulars from a Member', () => {
+    expect(survivors(OrgRole.Member)).toStrictEqual([
+      'plainReadWrite',
+      'createsBuckets',
+      'readsVersions',
+    ]);
+  });
+
+  it('takes every key from ReadOnly, which can hold none', () => {
+    expect(survivors(OrgRole.ReadOnly)).toStrictEqual([]);
+  });
+
+  it('takes every key from a role that is not one of the four', () => {
+    expect(survivors('billing')).toStrictEqual([]);
+  });
+
+  it('names the permissions that put a key above the new role', () => {
+    expect(keySurvival(OrgRole.Member, KEYS.deletesBuckets)).toStrictEqual({
+      survives: false,
+      reason: 'exceeds_role',
+      excess: [{ keyPermission: 'DeleteBucket', requires: 'buckets.delete' }],
+    });
+  });
+
+  it('blames the role, not the key, when the role can mint nothing', () => {
+    expect(keySurvival(OrgRole.ReadOnly, KEYS.plainReadWrite)).toStrictEqual({
+      survives: false,
+      reason: 'role_cannot_mint',
+    });
+  });
+
+  it('refuses a row that records no permission set', () => {
+    // A row the console rebuilt after a vendor 409. Nothing places it inside
+    // the new role, and its secret was never returned to anyone.
+    expect(keySurvival(OrgRole.Owner, KEYS.recovered)).toStrictEqual({
+      survives: false,
+      reason: 'permissions_unrecorded',
+    });
+  });
+
+  it('reads an empty permission list as a recorded set, and keeps it', () => {
+    expect(keySurvival(OrgRole.Member, { permissions: [] })).toStrictEqual({ survives: true });
   });
 });
