@@ -44,6 +44,7 @@ vi.mock('sst', () =>
     DeletionChallengeTable: { name: 'DeletionChallengeTable' },
     DeletionCodeHmacKey: { value: 'test-deletion-hmac-key' },
     ForgeManagementApiToken: { value: 'test-forge-token' },
+    ForgeDevManagementApiToken: { value: 'test-forge-dev-token' },
     FthManagementApiToken: { value: 'test-fth-token' },
     RagIndexerTable: { name: 'RagIndexerTable' },
     RagVectorBucket: { name: 'RagVectorBucket' },

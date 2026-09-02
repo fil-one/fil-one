@@ -28,10 +28,17 @@ export async function saveBillingRecord(
 
   await updateSubscription(owner, {
     UpdateExpression:
-      'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now REMOVE trialEndsAt',
+      'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodStart = :periodStart, currentPeriodEnd = :periodEnd, paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now REMOVE trialEndsAt',
     ExpressionAttributeValues: {
       ':subId': { S: subscription.id },
       ':status': { S: mappedStatus },
+      // Both ends of the period, not just the far one: the trial's start was
+      // still standing here otherwise, so an account that had just activated
+      // reported a period beginning weeks before the one it was being billed
+      // for. The webhook writes both; this path has to agree with it.
+      ':periodStart': {
+        S: new Date(subscription.items.data[0].current_period_start * 1000).toISOString(),
+      },
       ':periodEnd': {
         S: new Date(subscription.items.data[0].current_period_end * 1000).toISOString(),
       },

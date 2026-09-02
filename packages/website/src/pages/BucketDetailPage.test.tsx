@@ -123,7 +123,11 @@ describe('BucketDetailPage — the API keys tab', () => {
   it('shows the tab and its count to a role that may list keys', async () => {
     renderPage(OrgRole.Owner);
 
-    expect(await screen.findByTestId('bucket-keys-tab')).toHaveTextContent('API Keys (1)');
+    // The tab mounts with the rest of the shell, before the keys land, so the
+    // count is what to wait on rather than the tab itself.
+    await waitFor(() =>
+      expect(screen.getByTestId('bucket-keys-tab')).toHaveTextContent('API Keys1'),
+    );
   });
 
   it('is absent for a role without keys.manage_own, and no request is made', async () => {
@@ -159,7 +163,11 @@ describe('BucketDetailPage — the API keys tab', () => {
     // mounted page is a live observer, so the key metadata and the count would
     // stay in the tab until a reload.
     const { client } = renderPage(OrgRole.Owner);
-    expect(await screen.findByTestId('bucket-keys-tab')).toHaveTextContent('API Keys (1)');
+    // The tab mounts with the rest of the shell, before the keys land, so the
+    // count is what to wait on rather than the tab itself.
+    await waitFor(() =>
+      expect(screen.getByTestId('bucket-keys-tab')).toHaveTextContent('API Keys1'),
+    );
 
     // What a /me refetch after a demotion does.
     act(() => seedPermissions(client, OrgRole.ReadOnly));
@@ -167,6 +175,44 @@ describe('BucketDetailPage — the API keys tab', () => {
     await waitFor(() => expect(screen.queryByTestId('bucket-keys-tab')).not.toBeInTheDocument());
     // The cached response is still there — the read is what changed.
     expect(client.getQueryData(queryKeys.bucketAccessKeys(BUCKET, REGION))).toBeDefined();
+  });
+});
+
+// FIL-1078 fixed this for the list pages; opening a bucket kept the old
+// behaviour, returning a centered spinner in front of the whole page.
+describe('BucketDetailPage — loading', () => {
+  it('keeps the page shell up while the listing loads, and never blanks it', async () => {
+    // The bucket metadata never resolves. The listing is gated on it, so both
+    // stay pending for the whole test rather than racing the assertions.
+    mockApiRequest.mockImplementation((path: string) =>
+      path.startsWith('/access-keys') || path.includes('/analytics')
+        ? respond(path)
+        : new Promise(() => {}),
+    );
+    renderPage(OrgRole.Owner);
+
+    // The bucket's name comes from the route, so it has no reason to wait on a
+    // request, and neither does the way back out.
+    expect(await screen.findByRole('heading', { name: BUCKET })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Buckets' })).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Loading objects' })).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Loading bucket details' })).toBeInTheDocument();
+    // A count of zero on a bucket whose listing has not arrived is a guess.
+    expect(screen.getByTestId('bucket-objects-tab')).toHaveTextContent(/^Objects$/);
+    // The placeholder mirrors the real table: column labels are known before any
+    // row is, so they are shown rather than pulsed.
+    for (const label of ['Name', 'Size', 'Last Modified']) {
+      expect(screen.getByRole('columnheader', { name: label })).toBeInTheDocument();
+    }
+  });
+
+  it('states the object count once the listing has actually arrived', async () => {
+    renderPage(OrgRole.Owner);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('bucket-objects-tab')).toHaveTextContent('Objects1'),
+    );
+    expect(screen.queryByRole('status', { name: 'Loading objects' })).not.toBeInTheDocument();
   });
 });
 

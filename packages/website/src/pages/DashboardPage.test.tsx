@@ -112,3 +112,42 @@ describe('DashboardPage — the plan panels', () => {
     expect(client.getQueryData(queryKeys.billing)).toBeDefined();
   });
 });
+
+describe('DashboardPage — quick setup', () => {
+  /** An account partway through onboarding: no objects yet, so the card applies. */
+  const ONBOARDING: UsageResponse = { ...USAGE, objects: { count: 0 } };
+
+  it('offers the setup steps while onboarding is unfinished', async () => {
+    mockGetUsage.mockResolvedValue(ONBOARDING);
+    renderPage(OrgRole.Owner);
+
+    expect(await screen.findByText('QUICK SETUP')).toBeInTheDocument();
+  });
+
+  it('drops the setup steps once every one of them is done', async () => {
+    renderPage(OrgRole.Owner);
+
+    await screen.findByText('STORAGE');
+    expect(screen.queryByText('QUICK SETUP')).not.toBeInTheDocument();
+  });
+
+  // None of the steps are available to a disabled account, and none of them is
+  // the step that restores it, so the card would only compete with the banner
+  // that names the one action that matters.
+  it('drops the setup steps on a disabled account, unfinished or not', async () => {
+    mockGetUsage.mockResolvedValue({ ...ONBOARDING, tenantStatus: 'disabled' });
+    renderPage(OrgRole.Owner);
+
+    await screen.findByText('STORAGE');
+    expect(screen.queryByText('QUICK SETUP')).not.toBeInTheDocument();
+  });
+
+  // Write-locked is a narrower state: reads still work and the account is not
+  // out of action, so onboarding still has something to say.
+  it('keeps the setup steps on a write-locked account', async () => {
+    mockGetUsage.mockResolvedValue({ ...ONBOARDING, tenantStatus: 'write-locked' });
+    renderPage(OrgRole.Owner);
+
+    expect(await screen.findByText('QUICK SETUP')).toBeInTheDocument();
+  });
+});

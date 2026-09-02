@@ -417,6 +417,7 @@ describe('get-billing baseHandler', () => {
       planId: PlanId.PayAsYouGo,
       status: SubscriptionStatus.Active,
       monthlyMinimumCents: 499,
+      pricePerTbCents: 499,
     });
     expect(mockSubscriptionsRetrieve).not.toHaveBeenCalled();
   });
@@ -536,6 +537,7 @@ describe('get-billing baseHandler', () => {
         planId: PlanId.PayAsYouGo,
         status: SubscriptionStatus.Active,
         currentPeriodEnd: '2026-04-01T00:00:00Z',
+        pricePerTbCents: 499,
       },
       paymentMethod: {
         id: 'pm_789',
@@ -573,6 +575,7 @@ describe('get-billing baseHandler', () => {
       subscription: {
         planId: PlanId.PayAsYouGo,
         status: SubscriptionStatus.Active,
+        pricePerTbCents: 499,
       },
       paymentMethod: {
         id: 'pm_cached',
@@ -705,6 +708,7 @@ describe('get-billing baseHandler', () => {
       planId: PlanId.PayAsYouGo,
       status: SubscriptionStatus.Active,
       monthlyMinimumCents: 499,
+      pricePerTbCents: 499,
     });
   });
 
@@ -768,6 +772,8 @@ describe('get-billing baseHandler', () => {
     const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
 
     const body = JSON.parse(String(result.body));
+    // Volume tiering picks one tier by total usage, so neither a minimum nor a
+    // single rate would be true of it.
     expect(body.subscription).toStrictEqual({
       planId: PlanId.PayAsYouGo,
       status: SubscriptionStatus.Active,
@@ -813,9 +819,12 @@ describe('get-billing baseHandler', () => {
     const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
 
     const body = JSON.parse(String(result.body));
+    // No minimum, but the per-unit rate is exact, so it is reported: this
+    // customer really is billed $4.99 a TB with no floor under it.
     expect(body.subscription).toStrictEqual({
       planId: PlanId.PayAsYouGo,
       status: SubscriptionStatus.Active,
+      pricePerTbCents: 499,
     });
   });
 
@@ -835,6 +844,7 @@ describe('get-billing baseHandler', () => {
       status: SubscriptionStatus.Trialing,
       trialEndsAt,
       monthlyMinimumCents: 499,
+      pricePerTbCents: 499,
     });
   });
 
@@ -846,6 +856,130 @@ describe('get-billing baseHandler', () => {
     await baseHandler(buildEvent({ userInfo: USER_INFO }));
 
     expect(storedStripePrice()).toStrictEqual(CACHED_TIERED_PRICE);
+  });
+
+  // -------------------------------------------------------------------------
+  // What the customer's plan is called, and what it charges
+  // -------------------------------------------------------------------------
+
+  /** The product as Stripe returns it once expanded. */
+  const EXPANDED_PRODUCT = { id: PRODUCT_ID, object: 'product', name: 'Business', active: true };
+
+  it('reports both ends of the billing period when the record holds them', async () => {
+    ddbMock.on(GetItemCommand).resolves(
+      activeRecordWith({
+        currentPeriodStart: '2026-03-01T00:00:00Z',
+        currentPeriodEnd: '2026-04-01T00:00:00Z',
+      }),
+    );
+    ddbMock.on(UpdateItemCommand).resolves({});
+    mockSubscriptionsRetrieve.mockResolvedValue(stripeSubscription(TIERED_PRICE));
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const body = JSON.parse(String(result.body));
+    expect(body.subscription.currentPeriodStart).toBe('2026-03-01T00:00:00Z');
+    expect(body.subscription.currentPeriodEnd).toBe('2026-04-01T00:00:00Z');
+  });
+
+  it('omits the period start for a record written before it was stored', async () => {
+    ddbMock.on(GetItemCommand).resolves(activeRecordWith());
+    ddbMock.on(UpdateItemCommand).resolves({});
+    mockSubscriptionsRetrieve.mockResolvedValue(stripeSubscription(TIERED_PRICE));
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const body = JSON.parse(String(result.body));
+    expect(body.subscription.currentPeriodStart).toBeUndefined();
+  });
+
+  it('reports the plan name from the expanded Stripe product', async () => {
+    ddbMock.on(GetItemCommand).resolves(activeRecordWith());
+    ddbMock.on(UpdateItemCommand).resolves({});
+    mockSubscriptionsRetrieve.mockResolvedValue(
+      stripeSubscription({ ...TIERED_PRICE, product: EXPANDED_PRODUCT }),
+    );
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const body = JSON.parse(String(result.body));
+    expect(body.subscription.planName).toBe('Business');
+  });
+
+  it('caches the product name, so an outage does not cost the customer their plan name', async () => {
+    ddbMock.on(GetItemCommand).resolves(activeRecordWith());
+    ddbMock.on(UpdateItemCommand).resolves({});
+    mockSubscriptionsRetrieve.mockResolvedValue(
+      stripeSubscription({ ...TIERED_PRICE, product: EXPANDED_PRODUCT }),
+    );
+
+    await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    expect(storedStripePrice()).toStrictEqual({ ...CACHED_TIERED_PRICE, product_name: 'Business' });
+  });
+
+  it('serves the cached product name when Stripe is unreachable', async () => {
+    ddbMock.on(GetItemCommand).resolves(
+      activeRecordWith({
+        stripePrice: { ...CACHED_TIERED_PRICE, product_name: 'Business' },
+      }),
+    );
+    mockSubscriptionsRetrieve.mockRejectedValue(new Error('Stripe unavailable'));
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const body = JSON.parse(String(result.body));
+    expect(body.subscription.planName).toBe('Business');
+  });
+
+  it('reports a negotiated per-unit rate rather than the list one', async () => {
+    ddbMock.on(GetItemCommand).resolves(activeRecordWith());
+    ddbMock.on(UpdateItemCommand).resolves({});
+    // $3.20 per TB, quoted per GB the way Stripe meters it.
+    mockSubscriptionsRetrieve.mockResolvedValue(
+      stripeSubscription({ ...GRANDFATHERED_PRICE, unit_amount_decimal: '0.32' }),
+    );
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const body = JSON.parse(String(result.body));
+    expect(body.subscription.pricePerTbCents).toBe(320);
+  });
+
+  it('reports no rate for a graduated price whose usage tiers step', async () => {
+    ddbMock.on(GetItemCommand).resolves(activeRecordWith());
+    ddbMock.on(UpdateItemCommand).resolves({});
+    // The shape a volume deal usually takes: cheaper the more you store, so no
+    // single number is the rate.
+    mockSubscriptionsRetrieve.mockResolvedValue(
+      stripeSubscription({
+        ...TIERED_PRICE,
+        tiers: [
+          TIERED_PRICE.tiers[0],
+          {
+            up_to: 50_000,
+            flat_amount: null,
+            flat_amount_decimal: null,
+            unit_amount: null,
+            unit_amount_decimal: '0.4',
+          },
+          {
+            up_to: null,
+            flat_amount: null,
+            flat_amount_decimal: null,
+            unit_amount: null,
+            unit_amount_decimal: '0.3',
+          },
+        ],
+      }),
+    );
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const body = JSON.parse(String(result.body));
+    expect(body.subscription.pricePerTbCents).toBeUndefined();
+    // The minimum is still a fact, and still reported.
+    expect(body.subscription.monthlyMinimumCents).toBe(499);
   });
 
   it('does not rewrite the cached price when the price is unchanged', async () => {
@@ -881,6 +1015,7 @@ describe('get-billing baseHandler', () => {
       planId: PlanId.PayAsYouGo,
       status: SubscriptionStatus.Active,
       monthlyMinimumCents: 499,
+      pricePerTbCents: 499,
     });
   });
 
@@ -917,6 +1052,7 @@ describe('get-billing baseHandler', () => {
       planId: PlanId.PayAsYouGo,
       status: SubscriptionStatus.Active,
       monthlyMinimumCents: 499,
+      pricePerTbCents: 499,
     });
   });
 
@@ -927,7 +1063,7 @@ describe('get-billing baseHandler', () => {
     await baseHandler(buildEvent({ userInfo: USER_INFO }));
 
     expect(mockSubscriptionsRetrieve).toHaveBeenCalledWith('sub_456', {
-      expand: ['default_payment_method', 'items.data.price.tiers'],
+      expand: ['default_payment_method', 'items.data.price.tiers', 'items.data.price.product'],
     });
   });
 

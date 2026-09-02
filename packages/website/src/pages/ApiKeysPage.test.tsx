@@ -5,9 +5,14 @@ import { OrgRole, S3Region } from '@filone/shared';
 import type { AccessKey } from '@filone/shared';
 
 const mockApiRequest = vi.fn();
+const mockGetUsage = vi.fn(() => Promise.resolve({ tenantStatus: 'active' }));
+
 vi.mock('../lib/api.js', () => ({
   apiRequest: (...args: unknown[]) => mockApiRequest(...args),
   getMe: vi.fn(() => new Promise(() => {})),
+  // `useAccountDisabled` reads /usage. Tests that care about the disabled state
+  // seed the query cache instead; this keeps the rest from calling undefined.
+  getUsage: () => mockGetUsage(),
 }));
 
 vi.mock('@tanstack/react-router', () => ({ useNavigate: () => vi.fn() }));
@@ -84,14 +89,14 @@ describe('ApiKeysPage — a mid-session downgrade', () => {
     const { client } = renderPage(OrgRole.Member);
 
     expect(await screen.findByText('my key')).toBeInTheDocument();
-    expect(screen.getByTestId('api-keys-tab')).toHaveTextContent('(1)');
+    expect(screen.getByTestId('api-keys-tab')).toHaveTextContent('API keys1');
 
     // What a /me refetch after a demotion does.
     act(() => seedPermissions(client, OrgRole.ReadOnly));
 
     await waitFor(() => expect(screen.getByTestId('api-keys-no-access')).toBeInTheDocument());
     expect(screen.queryByText('my key')).not.toBeInTheDocument();
-    expect(screen.getByTestId('api-keys-tab')).not.toHaveTextContent('(1)');
+    expect(screen.getByTestId('api-keys-tab')).not.toHaveTextContent('API keys1');
     // The cached response is still there — the read is what changed.
     expect(client.getQueryData(queryKeys.accessKeys)).toBeDefined();
   });
@@ -138,5 +143,33 @@ describe('ApiKeysPage — who may revoke', () => {
 
     expect(await screen.findByText('my key')).toBeInTheDocument();
     expect(mockApiRequest).toHaveBeenCalledWith('/access-keys');
+  });
+});
+
+describe('ApiKeysPage — a disabled account', () => {
+  const CANCELED = 'Your subscription has been canceled. Please reactivate to regain access.';
+
+  it('shows the state alone: no tabs, no Create action', async () => {
+    mockGetUsage.mockResolvedValue({ tenantStatus: 'disabled' });
+    mockApiRequest.mockRejectedValue(new Error(CANCELED));
+    renderPage(OrgRole.Owner);
+
+    expect(await screen.findByText(CANCELED)).toBeInTheDocument();
+    // Every key here is refused, and Connection details documents a way in that
+    // is not open, so neither tab is offered.
+    expect(screen.queryByTestId('api-keys-tab')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('connection-details-tab')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /create new key/i })).not.toBeInTheDocument();
+  });
+
+  // Narrower than isError on purpose: a transient failure is not a disabled
+  // account, and the static tab beside the keys still works.
+  it('keeps the tabs when the keys request merely fails', async () => {
+    mockGetUsage.mockResolvedValue({ tenantStatus: 'active' });
+    mockApiRequest.mockRejectedValue(new Error('Failed to load access keys'));
+    renderPage(OrgRole.Owner);
+
+    expect(await screen.findByText('Failed to load access keys')).toBeInTheDocument();
+    expect(screen.getByTestId('connection-details-tab')).toBeInTheDocument();
   });
 });
