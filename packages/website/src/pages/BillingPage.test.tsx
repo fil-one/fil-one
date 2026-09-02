@@ -392,3 +392,49 @@ describe('BillingPage — permissions', () => {
     expect(container.querySelector('#billing-plan-cta-button')).not.toBeNull();
   });
 });
+
+describe('BillingPage — a canceled account', () => {
+  // The cancellation is stated once, in the banner above the cards. The plan
+  // card under it carries the badge and the Reactivate button, not a second
+  // copy of the sentence, and the shell states the account's state over every
+  // page including this one.
+  const CANCELED = 'This subscription is canceled';
+
+  function canceledBilling(): BillingInfo {
+    return {
+      subscription: {
+        planId: PlanId.PayAsYouGo,
+        status: SubscriptionStatus.Canceled,
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetUsage.mockResolvedValue(USAGE);
+    mockGetBilling.mockResolvedValue(canceledBilling());
+    mockGetInvoices.mockResolvedValue({ invoices: [] });
+  });
+
+  it('states it once, in the banner that carries the Reactivate button', async () => {
+    const { container } = renderPage(OrgRole.Owner);
+
+    await screen.findByText(CANCELED);
+    expect(screen.getAllByText(CANCELED)).toHaveLength(1);
+    // Two Reactivate buttons, on purpose: the banner's and the plan card's open
+    // the same dialog, so they are named the same thing rather than two.
+    expect(screen.getAllByRole('button', { name: 'Reactivate' })).toHaveLength(2);
+    expect(container.querySelector('#billing-plan-cta-button')).toHaveTextContent('Reactivate');
+  });
+
+  // The banner is information and only its button is a permission: an Admin
+  // still reads the state and who to ask, without being offered either of the
+  // two controls that would 403.
+  it('states it without a control for a caller who cannot reactivate', async () => {
+    const { container } = renderPage(OrgRole.Admin);
+
+    await screen.findByText(CANCELED);
+    expect(screen.queryByRole('button', { name: 'Reactivate' })).not.toBeInTheDocument();
+    expect(container.querySelector('#billing-plan-cta-button')).toBeNull();
+  });
+});

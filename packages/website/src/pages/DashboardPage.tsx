@@ -162,8 +162,13 @@ export function DashboardPage() {
     ? `Expires ${formatDateTime(billing.subscription.trialEndsAt)}`
     : undefined;
 
+  // Quick setup is onboarding: it tells a new account what to do next. A
+  // disabled account cannot do any of it, and the steps it lists are not the
+  // step that gets the account back, so it competes with the banner that names
+  // the one action that matters. Restoring access is the only next step there.
   const showQuickSetup =
-    usage.buckets.count === 0 || usage.objects.count === 0 || usage.accessKeys.count === 0;
+    usage.tenantStatus !== 'disabled' &&
+    (usage.buckets.count === 0 || usage.objects.count === 0 || usage.accessKeys.count === 0);
 
   const badge = billing ? statusBadgeProps(billing.subscription.status) : null;
   const pricePerTbCents = billing?.subscription.planId === PlanId.PayAsYouGo ? 499 : 0;

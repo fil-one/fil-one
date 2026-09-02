@@ -243,7 +243,10 @@ export function HelpMenu({
   return (
     <div className="relative">
       {collapsed ? (
-        <Tooltip content="Help" side="right">
+        // `w-full` on the tooltip wrapper: it is an inline-block, so without it
+        // the button shrinks to the icon and sits against the left edge instead
+        // of centring under the collapsed rail like every other icon.
+        <Tooltip content="Help" side="right" className="w-full">
           <button
             ref={helpButtonRef}
             type="button"
