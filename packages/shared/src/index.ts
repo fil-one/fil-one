@@ -97,8 +97,19 @@ export type {
   UpdateMemberRoleResponse,
 } from './api/members.js';
 
-export type { AuditQueryFilters, AuditWindow, ListAuditEventsResponse } from './api/audit.js';
-export { AUDIT_EXPORT_MAX_BYTES, AUDIT_EXPORT_MAX_ROWS, AUDIT_PAGE_SIZE } from './api/audit.js';
+export type {
+  AuditQueryFilters,
+  AuditQueryRequest,
+  AuditWindow,
+  ListAuditEventsResponse,
+} from './api/audit.js';
+export {
+  AUDIT_EXPORT_MAX_BYTES,
+  AUDIT_EXPORT_MAX_ROWS,
+  AUDIT_PAGE_SIZE,
+  AuditQuerySchema,
+  MALFORMED_CURSOR,
+} from './api/audit.js';
 
 export {
   AUDIT_EVENT_TYPES,

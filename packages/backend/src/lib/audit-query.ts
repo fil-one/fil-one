@@ -128,7 +128,7 @@ export async function queryAuditEvents({
     cost.rows += page.Items?.length ?? 0;
 
     for (const item of page.Items ?? []) {
-      matched.push({ item, event: publicEvent(item) });
+      matched.push({ item, event: unmarshallAuditEvent(item) });
       if (matched.length > limit) break drain;
     }
 
@@ -148,7 +148,7 @@ export async function queryAuditEvents({
 }
 
 /**
- * One stored row as the API returns it.
+ * A stored row as the event it records.
  *
  * Named field by field rather than unmarshalled wholesale, for the reason
  * `auditItem` gives on the way in (`audit.ts`): `pk`, `sk`, `gsi1pk`, and
@@ -160,7 +160,7 @@ export async function queryAuditEvents({
  * The keys still have to arrive — the cursor is derived from them — so they are
  * dropped here rather than projected away at the query.
  */
-function publicEvent(item: Record<string, AttributeValue>): AuditEvent {
+function unmarshallAuditEvent(item: Record<string, AttributeValue>): AuditEvent {
   const row = unmarshall(item) as AuditEvent;
   const { phase, correlationId, outcome } = row;
 

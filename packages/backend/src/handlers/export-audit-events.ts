@@ -7,7 +7,7 @@ import { auditEvent, AuditSubjects, appendAuditEvent, userActor } from '../lib/a
 import { reportAuditQuery } from '../lib/audit-metrics.js';
 import { auditEventsToCsv } from '../lib/audit-csv.js';
 import { queryAllAuditEvents } from '../lib/audit-query.js';
-import { AuditFilterError, parseAuditFilters } from '../lib/audit-request.js';
+import { AuditFilterError, parseAuditRequest } from '../lib/audit-request.js';
 import { csvResponse, ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
@@ -40,7 +40,9 @@ export async function baseHandler(
 
   let filters;
   try {
-    filters = parseAuditFilters(event.queryStringParameters ?? {});
+    // The export reads the whole window, so a cursor on it means nothing; the
+    // shared parser still holds it to the same rules rather than ignoring it.
+    ({ filters } = parseAuditRequest(event.queryStringParameters ?? {}));
   } catch (err) {
     if (!(err instanceof AuditFilterError)) throw err;
     return new ResponseBuilder().status(400).body<ErrorResponse>({ message: err.message }).build();

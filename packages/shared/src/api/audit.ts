@@ -1,4 +1,6 @@
-import type { AuditEvent, AuditEventType } from '../audit.js';
+import { z } from 'zod';
+import { AUDIT_EVENT_TYPES } from '../audit.js';
+import type { AuditEvent } from '../audit.js';
 
 /**
  * The audit log read API: what the viewer asks for and what it gets back.
@@ -37,42 +39,90 @@ export const AUDIT_EXPORT_MAX_ROWS = 20_000;
 export const AUDIT_EXPORT_MAX_BYTES = 5 * 1024 * 1024;
 
 /**
- * The filters both routes take, as the handler reads them off the query string.
+ * A bound, in the exact form the sort key holds.
  *
- * `from` and `to` are ISO-8601 UTC instants, `from` inclusive and `to`
- * exclusive. The sort key is a lexicographic ISO string, so a date the user
- * picked has to be widened to an instant before it reaches DynamoDB; the
- * console does that when it builds the request.
- *
- * The org is never here. Both routes scope to the org resolved from the
- * caller's membership, so an org id in the query string could only be an
- * attempt to read someone else's history.
+ * `precision: 3` with no offset allowed is precisely what `toISOString()`
+ * produces, which is what `createdAt` is stored as. The strictness is the point:
+ * a date-only bound would compare against `2026-08-01T09:14:22.104Z#…` and
+ * quietly exclude the closing day, and an offset would compare wrong against
+ * every stored key. The console widens a picked date into an instant, where it
+ * knows which end it is widening.
  */
-export interface AuditQueryFilters {
-  /**
-   * Absent when the caller named no lower bound, which is not the same as
-   * naming the oldest instant retention holds: a caller who asked for
-   * everything has not asked for more than exists, and their window is not
-   * reported as clamped.
-   */
-  from?: string;
-  to: string;
-  /**
-   * One type, or none for all of them. One rather than several because the
-   * index answers a single-type query and a multi-type query would be one index
-   * read plus a filter for the rest.
-   */
-  eventType?: AuditEventType;
-  /**
-   * A member's `userId`, matched exactly against `actor.id`.
-   *
-   * Never an address. An id survives an address change, so a member who changes
-   * email keeps one history, and it stays distinct when an address is reused —
-   * someone re-invited at an old address gets a new id, and matching on email
-   * would merge two people's histories into one result.
-   */
-  actorId?: string;
-}
+const auditInstant = (field: 'from' | 'to') =>
+  z.iso.datetime({
+    precision: 3,
+    message: `"${field}" must be an ISO-8601 UTC instant, for example 2026-08-01T00:00:00.000Z.`,
+  });
+
+/** Every malformed cursor reads the same: none of them is the caller's to fix. */
+export const MALFORMED_CURSOR =
+  'The page cursor is not valid. Read the range again from the start.';
+
+/**
+ * What both routes accept on the query string.
+ *
+ * The org is never here. Both routes scope to the org resolved from the caller's
+ * membership, so an org id in the query string could only be an attempt to read
+ * someone else's history.
+ *
+ * What this cannot check is the half that needs the cursor decoded — that it
+ * carries a sort key, and that the key falls inside the window being read.
+ * Decoding needs `Buffer`, this package is bundled for the browser as well, and
+ * a cursor is server-only in any case: the console returns whichever one the API
+ * handed it. Those two checks live with the read path.
+ */
+export const AuditQuerySchema = z
+  .object({
+    /**
+     * Absent when the caller named no lower bound, which is not the same as
+     * naming the oldest instant retention holds: a caller who asked for
+     * everything has not asked for more than exists, and their window is not
+     * reported as clamped.
+     */
+    from: auditInstant('from').optional(),
+    /** Now, when the caller named no upper bound. */
+    to: auditInstant('to').default(() => new Date().toISOString()),
+    /**
+     * One type, or none for all of them. One rather than several because the
+     * index answers a single-type query and a multi-type query would be one
+     * index read plus a filter for the rest.
+     */
+    eventType: z
+      .enum(AUDIT_EVENT_TYPES, {
+        // Names the type it was given: a caller who mistyped one needs to see
+        // which, and the registry is closed so there is nothing to leak.
+        error: (issue) => `Unknown event type "${String(issue.input)}".`,
+      })
+      .optional(),
+    /**
+     * A member's `userId`, matched exactly against `actor.id`.
+     *
+     * Never an address. An id survives an address change, so a member who
+     * changes email keeps one history, and it stays distinct when an address is
+     * reused — someone re-invited at an old address gets a new id, and matching
+     * on email would merge two people's histories into one result.
+     *
+     * `guid` rather than `uuid`: the shape is the check. Ids are minted by
+     * `crypto.randomUUID()`, but refusing anything whose version and variant
+     * nibbles disagree with v4 would refuse an id this system stored.
+     */
+    actorId: z.guid({ message: 'The actor filter takes a member id.' }).optional(),
+    /** Opaque to the caller, and checked further by the read path. */
+    cursor: z.base64url({ message: MALFORMED_CURSOR }).optional(),
+  })
+  .refine((query) => query.from === undefined || query.from <= query.to, {
+    message: 'The start of the range must not be after its end.',
+    path: ['from'],
+  });
+
+export type AuditQueryRequest = z.infer<typeof AuditQuerySchema>;
+
+/**
+ * The filters a read is performed with — the request without its cursor.
+ *
+ * `from` inclusive, `to` exclusive.
+ */
+export type AuditQueryFilters = Omit<AuditQueryRequest, 'cursor'>;
 
 /**
  * The window a request was actually served over.
