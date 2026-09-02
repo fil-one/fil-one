@@ -219,13 +219,19 @@ async function recordMintedKey({
   } catch (err) {
     // The role check is item 0; `commitAudited` appends the audit Put last.
     if (!cancelledLabels(err, ['creatorRole', 'keyRow']).includes('creatorRole')) throw err;
-    await mint.complete({ outcome: 'failed' });
-    return discardKeyMintedUnderAStaleRole({
+    // The credential goes before the correlation closes. Closing first is
+    // fail-closed and can throw, and a process that stops there leaves a live
+    // key at the vendor with no local row and no record of it. A dangling
+    // intent is the better failure: it is visible, and an orphan credential is
+    // not.
+    const discarded = await discardKeyMintedUnderAStaleRole({
       tenantId,
       keyId,
       orchestrator,
       context: { orgId: creator.orgId, userId: creator.userId },
     });
+    await mint.complete({ outcome: 'failed' });
+    return discarded;
   }
 }
 

@@ -25,7 +25,7 @@ import {
 } from '../lib/audit.js';
 import { keysExceedingRole } from '../lib/member-keys.js';
 import { sendKeyRevocationEmail } from '../lib/key-revocation-email.js';
-import { revokeMemberKeys } from '../lib/revoke-member-keys.js';
+import { afterTheWrite, revokeMemberKeys } from '../lib/revoke-member-keys.js';
 import {
   pendingInvitationsFrom,
   planRevocations,
@@ -185,29 +185,7 @@ async function applyRoleChange({
   revokedInvitations,
   delta,
 }: RoleChange): Promise<APIGatewayProxyStructuredResultV2> {
-  const details = {
-    role: toRole,
-    previousRole: fromRole,
-    ...(revokedInvitations > 0 ? { revokedInvitations } : {}),
-  };
-  const write = (
-    event: Parameters<typeof commitAudited>[0]['event'],
-    revokedKeys: RevokedKeySummary[],
-  ) =>
-    writeRole({
-      items: changeItems({ orgId, targetUserId, fromRole, toRole, now: invitations.now }),
-      event,
-      failure: { orgId, delta, revocations: invitations.now.length, revokedKeys },
-    });
-  const singlePhase = () =>
-    auditEvent({
-      type: 'member.role_changed',
-      actor,
-      orgId,
-      subject: AuditSubjects.user(targetUserId),
-      details,
-    });
-
+  const details = roleChangedDetails({ fromRole, toRole, revokedInvitations });
   // A widening strands nothing: every key its holder could mint before, they
   // could mint after. Only a narrowing has to look at what they already hold.
   const narrows = roleNarrows(fromRole, toRole);
@@ -215,6 +193,25 @@ async function applyRoleChange({
   const review = narrows
     ? await keysExceedingRole(orgId, targetUserId, toRole)
     : { doomed: [], survivingCount: 0, unattributedCount: 0 };
+
+  const notify = (revoked: readonly RevokedKeySummary[]) =>
+    tellTheMember({ orgId, orgProfile, targetUserId, changedBy, revoked });
+  const write = (
+    event: Parameters<typeof commitAudited>[0]['event'],
+    revokedKeys: RevokedKeySummary[],
+  ) =>
+    writeRole({
+      items: changeItems({ orgId, targetUserId, fromRole, toRole, now: invitations.now }),
+      event,
+      failure: {
+        orgId,
+        delta,
+        revocations: invitations.now.length,
+        revokedKeys,
+        tellTheMember: () => notify(revokedKeys),
+      },
+    });
+  const singlePhase = () => auditEvent({ ...eventBase(actor, orgId, targetUserId), details });
   const secondPass = (alreadyRevoked: RevokedKeySummary[]) =>
     runSecondPass({
       orgId,
@@ -257,15 +254,15 @@ async function applyRoleChange({
   });
   if (first.failed.length > 0) {
     await change.complete({ outcome: 'failed', details: revokedKeyIds(first.revoked) });
+    // The role is unchanged, but the keys this pass did revoke are gone and the
+    // member's clients are already broken. They hear about it either way.
+    await notify(first.revoked);
     return vendorRefusedResponse(first.revoked, first.failed[0]!);
   }
 
   const failed = await write(
     auditEvent({
-      type: 'member.role_changed',
-      actor,
-      orgId,
-      subject: AuditSubjects.user(targetUserId),
+      ...eventBase(actor, orgId, targetUserId),
       details: { ...details, ...revokedKeyIds(first.revoked) },
       phase: 'completion',
       correlationId: change.correlationId,
@@ -277,6 +274,65 @@ async function applyRoleChange({
 
   await revokeDeferred(invitations.later);
   return await secondPass(first.revoked);
+}
+
+/** What both forms of `member.role_changed` carry. */
+function roleChangedDetails({
+  fromRole,
+  toRole,
+  revokedInvitations,
+}: Pick<RoleChange, 'fromRole' | 'toRole' | 'revokedInvitations'>) {
+  return {
+    role: toRole,
+    previousRole: fromRole,
+    ...(revokedInvitations > 0 ? { revokedInvitations } : {}),
+  };
+}
+
+/** The envelope both forms share, so only the details and the phase differ. */
+function eventBase(actor: AuditActor, orgId: string, targetUserId: string) {
+  return {
+    type: 'member.role_changed',
+    actor,
+    orgId,
+    subject: AuditSubjects.user(targetUserId),
+  } as const;
+}
+
+/**
+ * The member, told about keys that are gone even though the change is not.
+ *
+ * A revocation outlives the change that started it: the keys are deleted at the
+ * vendor before the role is written, so a refusal after that leaves the role
+ * where it was and the member's clients already broken. The admin sees it in
+ * the response; this is the only thing that reaches the member.
+ */
+async function tellTheMember({
+  orgId,
+  orgProfile,
+  targetUserId,
+  changedBy,
+  revoked,
+}: {
+  orgId: string;
+  orgProfile: OrgProfileItem | undefined;
+  targetUserId: string;
+  changedBy: string;
+  revoked: readonly RevokedKeySummary[];
+}): Promise<void> {
+  await sendKeyRevocationEmail({
+    userId: targetUserId,
+    orgName: orgProfile?.name?.S ?? 'your organization',
+    keys: revoked,
+    cause: { kind: 'change_failed' },
+    changedBy,
+  }).catch((error: unknown) => {
+    console.error('[update-member-role] Could not tell the member their keys went', {
+      orgId,
+      targetUserId,
+      error,
+    });
+  });
 }
 
 /**
@@ -297,7 +353,10 @@ async function writeRole({
     orgId: string;
     delta: ReturnType<typeof ownerCountDeltaFor>;
     revocations: number;
+    /** Already revoked and not coming back, whatever the role write did. */
     revokedKeys: RevokedKeySummary[];
+    /** Tells the member about keys that went before the write was refused. */
+    tellTheMember: () => Promise<void>;
   };
 }): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
   try {
@@ -312,6 +371,7 @@ async function writeRole({
         orgId: failure.orgId,
         revoked: failure.revokedKeys.length,
       });
+      await failure.tellTheMember();
     }
     return await changeFailureResponse(err, failure);
   }
@@ -345,53 +405,73 @@ async function runSecondPass({
   changedBy: string;
   alreadyRevoked: RevokedKeySummary[];
 }): Promise<APIGatewayProxyStructuredResultV2> {
-  // Skipping what the first pass took: its row delete rides the revocation's
-  // audit completion, and a completion that could not be written leaves the row
-  // listed for a credential that is already gone.
-  const alreadyGone = new Set(alreadyRevoked.map((key) => key.id));
-  const second = await revokeMemberKeys({
-    orgId,
-    orgProfile,
-    keys: (await keysExceedingRole(orgId, targetUserId, toRole)).doomed.filter(
-      (key) => !alreadyGone.has(key.id),
-    ),
-    actor,
-    reason: 'role_narrowing',
-  });
-
-  // The role is already written, and the same PATCH will not run this pass
-  // again: it answers a request for the role the member now holds without
-  // touching anything. A key the vendor refused here therefore has no automatic
-  // retry, and saying so is the whole remedy — an admin holding
-  // `keys.manage_all` revokes it from the keys page.
-  if (second.failed.length > 0) {
-    console.error('[update-member-role] Keys survived the narrowing', {
-      orgId,
-      targetUserId,
-      keyIdSuffixes: second.failed.map((key) => key.accessKeyIdSuffix),
-    });
-  }
-
-  const revokedKeys = [...alreadyRevoked, ...second.revoked];
-  // Only what actually stopped working. A key the vendor kept is still live,
-  // and telling the member it went would send them looking for a fault that is
-  // on our side.
-  await sendKeyRevocationEmail({
-    userId: targetUserId,
-    orgName: orgProfile?.name?.S ?? 'your organization',
-    keys: revokedKeys,
-    previousRole: fromRole,
-    role: toRole,
-    changedBy,
-  });
-
-  return roleResponse({
+  // The role is written by now, so nothing below may fail the request: a retry
+  // would find the role already where the caller wanted it and answer as a
+  // no-op, and both the listing and the email are things a transient failure
+  // can interrupt.
+  const written = roleResponse({
     userId: targetUserId,
     role: toRole,
     previousRole: fromRole,
-    ...(revokedKeys.length > 0 ? { revokedKeys } : {}),
-    ...(second.failed.length > 0 ? { failedKeys: second.failed } : {}),
+    ...(alreadyRevoked.length > 0 ? { revokedKeys: alreadyRevoked } : {}),
   });
+
+  return await afterTheWrite(
+    async () => {
+      // Skipping what the first pass took: its row delete rides the revocation's
+      // audit completion, and a completion that could not be written leaves the row
+      // listed for a credential that is already gone.
+      const alreadyGone = new Set(alreadyRevoked.map((key) => key.id));
+      const second = await revokeMemberKeys({
+        orgId,
+        orgProfile,
+        keys: (await keysExceedingRole(orgId, targetUserId, toRole)).doomed.filter(
+          (key) => !alreadyGone.has(key.id),
+        ),
+        actor,
+        reason: 'role_narrowing',
+        // The role is already written, so a key this pass gives up on is one the
+        // member holds above it. Stopping at the first refusal would leave the rest
+        // neither revoked nor named.
+        onFailure: 'continue',
+      });
+
+      // The role is already written, and the same PATCH will not run this pass
+      // again: it answers a request for the role the member now holds without
+      // touching anything. A key the vendor refused here therefore has no automatic
+      // retry, and saying so is the whole remedy — an admin holding
+      // `keys.manage_all` revokes it from the keys page.
+      if (second.failed.length > 0) {
+        console.error('[update-member-role] Keys survived the narrowing', {
+          orgId,
+          targetUserId,
+          keyIdSuffixes: second.failed.map((key) => key.accessKeyIdSuffix),
+        });
+      }
+
+      const revokedKeys = [...alreadyRevoked, ...second.revoked];
+      // Only what actually stopped working. A key the vendor kept is still live,
+      // and telling the member it went would send them looking for a fault that is
+      // on our side.
+      await sendKeyRevocationEmail({
+        userId: targetUserId,
+        orgName: orgProfile?.name?.S ?? 'your organization',
+        keys: revokedKeys,
+        cause: { kind: 'role_changed', previousRole: fromRole, role: toRole },
+        changedBy,
+      });
+
+      return roleResponse({
+        userId: targetUserId,
+        role: toRole,
+        previousRole: fromRole,
+        ...(revokedKeys.length > 0 ? { revokedKeys } : {}),
+        ...(second.failed.length > 0 ? { failedKeys: second.failed } : {}),
+      });
+    },
+    written,
+    { source: 'update-member-role', orgId },
+  );
 }
 
 /**

@@ -69,7 +69,12 @@ function dropFromRoster(client: QueryClient, userId: string): void {
  * longer exist rendered as active.
  */
 function settleRevokedKeys(client: QueryClient, revoked: readonly unknown[]): void {
-  if (revoked.length > 0) void client.invalidateQueries({ queryKey: queryKeys.accessKeys });
+  if (revoked.length === 0) return;
+  void client.invalidateQueries({ queryKey: queryKeys.accessKeys });
+  // The narrowing dialog stays open on a refusal, and its preview was read
+  // before any of this: left alone it goes on offering keys that no longer
+  // exist as keys the next attempt will revoke.
+  void client.invalidateQueries({ queryKey: ['role-change-preview'] });
 }
 
 function settleAfterChange(client: QueryClient, userId: string, selfUserId?: string): void {
