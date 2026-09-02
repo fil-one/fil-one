@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { S3Region, Stage } from '@filone/shared';
+import { S3Region, Stage, getRegionAccessModel } from '@filone/shared';
 
 // fth-orchestrator builds its FTH management client at import time, so satisfy
 // both inputs createInstrumentedFthClient() touches before the registry import
@@ -67,5 +67,22 @@ describe('getAvailableOrchestrators', () => {
     process.env.FILONE_STAGE = Stage.Staging;
     const orchestrators = getAvailableOrchestrators();
     expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'fth', 'forge', 'forgeDev']);
+  });
+
+  // Two answers to the same question: the console reads the region's model
+  // without an orchestrator in hand, handlers read it off the one they resolved.
+  it('agrees with getRegionAccessModel on every region', () => {
+    process.env.FILONE_STAGE = Stage.Staging;
+    const orchestrators = getAvailableOrchestrators();
+
+    expect(orchestrators.map((o) => [o.region, o.accessModel])).toStrictEqual(
+      orchestrators.map((o) => [o.region, getRegionAccessModel(o.region)]),
+    );
+    expect(orchestrators.map((o) => o.accessModel)).toStrictEqual([
+      'scoped-keys',
+      'scoped-keys',
+      'scoped-keys',
+      'scoped-keys',
+    ]);
   });
 });

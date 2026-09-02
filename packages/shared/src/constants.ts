@@ -102,6 +102,34 @@ export function supportsBucketManagement(region: S3Region): boolean {
 }
 
 /**
+ * How a backend decides what a credential may do.
+ *
+ * `scoped-keys`: the org is a tenant and an access key carries its own
+ * permission set and bucket list, stamped at creation and unchangeable
+ * afterwards. The member's role caps what a key may carry, and a role narrowing
+ * revokes the keys the holder could no longer mint.
+ *
+ * `iam`: each member is a principal at the storage system, an access key
+ * belongs to a member, and the key's authority is the member's as evaluated at
+ * request time. No region declares it yet.
+ */
+export type AccessModel = 'scoped-keys' | 'iam';
+
+/**
+ * The access model a region's backend serves. Every region is `scoped-keys`
+ * today: Aurora and FTH cannot model a principal, and the Forge integration
+ * issues flat-permission keys through the Management API, which is the same
+ * shape. A Forge region moves to `iam` when its Hilt network implements the
+ * principal-and-policy contract.
+ *
+ * Mirrored here rather than read off the orchestrator so the console can decide
+ * without one in hand.
+ */
+export function getRegionAccessModel(_region: S3Region): AccessModel {
+  return 'scoped-keys';
+}
+
+/**
  * Domain dedicated to user data (FIL-627). Reputation systems act on the
  * registrable domain, so one abusive upload under `fil.one` could flag the
  * console, website, docs and email with it. Nothing else is served from here.

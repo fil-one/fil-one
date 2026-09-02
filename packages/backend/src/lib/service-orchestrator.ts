@@ -1,5 +1,6 @@
 import type {
   AccessKeyPermission,
+  AccessModel,
   GranularPermission,
   RetentionDurationType,
   RetentionMode,
@@ -171,6 +172,14 @@ export interface ServiceOrchestrator {
    */
   readonly id: string;
   readonly region: S3Region;
+
+  /**
+   * How this backend decides what a credential may do, and therefore which
+   * rules the console applies to it. Every orchestrator serves `scoped-keys`
+   * today; see {@link getRegionAccessModel}, which answers the same question
+   * for callers holding a region rather than an orchestrator.
+   */
+  readonly accessModel: AccessModel;
 
   /**
    * Resolves the org's tenant on this orchestrator, provisioning it if needed

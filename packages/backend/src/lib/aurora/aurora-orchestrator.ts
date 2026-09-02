@@ -79,6 +79,7 @@ function toBucketProtection(data: BucketBucketResponse): BucketProtection {
 export const auroraOrchestrator = {
   id: 'aurora',
   region: S3Region.EuWest1 as S3RegionType,
+  accessModel: 'scoped-keys',
 
   async ensureTenantReady(orgId): Promise<string | null> {
     const result = await ensureAuroraTenantReady(orgId);
