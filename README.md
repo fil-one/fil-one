@@ -8,7 +8,6 @@ Full-stack prototype — pnpm workspaces monorepo deploying to AWS via [SST v3](
 hyperspace/
 ├── sst.config.ts  # SST v3 infrastructure (app stack — API, website, queues, etc.)
 ├── infra/         # SST v3 infrastructure (base infra — OIDC provider, IAM roles)
-├── contracts/     # Foundry smart contracts
 ├── packages/
 │   ├── shared/     # TypeScript interfaces shared between website and backend
 │   ├── aurora-backoffice-client/ # Generated TS client for Aurora Back Office API
@@ -77,19 +76,13 @@ You can verify it's working with:
 aws sts get-caller-identity
 ```
 
-**3. Initialize submodules**
-
-```bash
-git submodule update --init --recursive
-```
-
-**4. Install dependencies**
+**3. Install dependencies**
 
 ```bash
 pnpm install
 ```
 
-**5. Set SST secrets (one-time per stage)**
+**4. Set SST secrets (one-time per stage)**
 
 ```bash
 pnpx sst secret set Auth0ClientId <value> [--stage <stage>]
@@ -552,58 +545,4 @@ pnpx sst secret set GrafanaLokiAuth '<instanceId>:<apiKey>' [--stage <stage>]
 
 # Infra stack secrets (run from infra/ directory)
 cd infra && pnpx sst secret set GrafanaPrometheusAuth '<instanceId>:<apiKey>' --stage <stage>
-```
-
-## Contracts (`contracts/`)
-
-Foundry project for EVM smart contracts.
-
-**Prerequisites** — install Foundry if you haven't already:
-
-```bash
-curl -L https://foundry.paradigm.xyz | bash && foundryup
-```
-
-### Install / Update Dependencies
-
-```bash
-forge install                             # install from foundry.lock
-forge update                              # update all dependencies
-forge update contracts/lib/forge-std      # update a specific dependency
-```
-
-### Build
-
-```bash
-forge build
-```
-
-### Test
-
-```bash
-forge test
-```
-
-### Format
-
-```bash
-forge fmt
-```
-
-### Gas Snapshots
-
-```bash
-forge snapshot
-```
-
-### Anvil (local node)
-
-```bash
-anvil
-```
-
-### Deploy
-
-```bash
-forge script contracts/script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
 ```
