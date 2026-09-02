@@ -231,6 +231,15 @@ export interface AuditEventDetails {
     region?: string;
     /** The characters of the key the console shows — see {@link auditKeyIdSuffix}. */
     keyIdSuffix?: string;
+    /**
+     * Why the key went, when somebody other than its holder took it. Absent
+     * when a member revoked their own key, which is the request itself saying
+     * why. `role_narrowing` and `member_removed` are the two passes that revoke
+     * a key its holder did not ask about, and the per-key events are the record
+     * of those: a pass that fails midway would otherwise leave revoked
+     * credentials with nothing recording them.
+     */
+    reason?: 'role_narrowing' | 'member_removed';
   };
 }
 
