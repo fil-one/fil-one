@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { DownloadSimpleIcon } from '@phosphor-icons/react/dist/ssr';
 import { AUDIT_EVENT_TYPES, AUDIT_EVENT_TYPE_LABELS } from '@filone/shared';
 import type { AuditEventType } from '@filone/shared';
@@ -36,13 +36,26 @@ export function OrganizationAuditTab() {
   const [filters, setFilters] = useState<AuditFilterState>(EMPTY_AUDIT_FILTERS);
   const [expanded, setExpanded] = useState<string | null>(null);
 
+  // Paged rather than a single read: an org's history runs past one page, and an
+  // auditor's whole task is reaching an old event. The cursor is the page param
+  // and so stays out of the query key, which names the filters alone — changing
+  // a filter starts a new history rather than appending to the old one.
   const params = auditQueryParams(filters).toString();
-  const history = useQuery({
+  const history = useInfiniteQuery({
     queryKey: queryKeys.auditEvents(params),
-    queryFn: () => listAuditEvents(filters),
+    queryFn: ({ pageParam }) => listAuditEvents(filters, pageParam),
+    initialPageParam: undefined as string | undefined,
+    // The API offers a cursor only when it found a further event, so this never
+    // asks for a page that comes back empty.
+    getNextPageParam: (last) => last.nextCursor,
     staleTime: LIST_STALE_TIME,
     gcTime: LIST_GC_TIME,
   });
+
+  const events = history.data?.pages.flatMap((page) => page.events);
+  // The window is a property of the range asked for, not of a page, so the
+  // first answer speaks for all of them.
+  const window = history.data?.pages[0]?.window;
 
   // The picker names people; the request carries ids. Shares the roster query
   // the Members tab already fills, so opening this tab adds no request.
@@ -66,7 +79,7 @@ export function OrganizationAuditTab() {
         onClear={() => setFilters(EMPTY_AUDIT_FILTERS)}
       />
 
-      {history.data?.window.clamped && (
+      {window?.clamped && (
         <Alert
           variant="amber"
           assertive={false}
@@ -75,13 +88,16 @@ export function OrganizationAuditTab() {
       )}
 
       <AuditLogTable
-        events={history.data?.events}
+        events={events}
         isPending={history.isPending}
         error={history.isError ? history.error : undefined}
         filtered={hasAuditFilters(filters)}
         expanded={expanded}
         onToggleExpand={(eventId) => setExpanded((open) => (open === eventId ? null : eventId))}
         onFilterActor={(actorId) => update({ actorId })}
+        hasNextPage={history.hasNextPage}
+        isLoadingMore={history.isFetchingNextPage}
+        onLoadMore={() => void history.fetchNextPage()}
       />
     </div>
   );

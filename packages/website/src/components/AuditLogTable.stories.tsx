@@ -112,3 +112,20 @@ export const EmptyUnderFilters: Story = {
 export const Failed: Story = {
   args: { events: undefined, error: new Error('The service is temporarily unavailable.') },
 };
+
+/** Older events exist behind this page, so the control has something to load. */
+export const MorePagesAvailable: Story = {
+  args: { hasNextPage: true, onLoadMore: () => {} },
+};
+
+export const LoadingMorePages: Story = {
+  args: { hasNextPage: true, isLoadingMore: true, onLoadMore: () => {} },
+};
+
+/**
+ * A refetch failed with rows already on screen. The rows stay, and the notice is
+ * what stops them reading as current.
+ */
+export const StaleAfterFailedRefetch: Story = {
+  args: { error: new Error('the request did not complete') },
+};

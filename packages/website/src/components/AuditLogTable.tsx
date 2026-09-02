@@ -2,6 +2,8 @@ import { CaretDownIcon, CaretRightIcon, ScrollIcon } from '@phosphor-icons/react
 import { getAuditEventTypeLabel } from '@filone/shared';
 import type { AuditEvent } from '@filone/shared';
 
+import { Alert } from './Alert';
+import { Button } from './Button';
 import { EmptyStateCard } from './EmptyStateCard';
 import { StateCard } from './StateCard';
 import { Table } from './Table';
@@ -32,6 +34,10 @@ export interface AuditLogTableProps {
   expanded: string | null;
   onToggleExpand: (eventId: string) => void;
   onFilterActor: (actorId: string) => void;
+  /** Another page of older events exists behind this one. */
+  hasNextPage?: boolean;
+  isLoadingMore?: boolean;
+  onLoadMore?: () => void;
 }
 
 /**
@@ -48,6 +54,9 @@ export function AuditLogTable({
   expanded,
   onToggleExpand,
   onFilterActor,
+  hasNextPage = false,
+  isLoadingMore = false,
+  onLoadMore,
 }: AuditLogTableProps) {
   if (isPending) {
     return <TableSkeleton columns={COLUMNS} aria-label="Loading the audit log" />;
@@ -78,29 +87,61 @@ export function AuditLogTable({
   }
 
   return (
-    <Table>
-      <Table.Header>
-        <Table.Row>
-          <Table.Head className="w-8" />
-          {COLUMNS.map((column) => (
-            <Table.Head key={column.label} className={column.className}>
-              {column.label}
-            </Table.Head>
-          ))}
-        </Table.Row>
-      </Table.Header>
-      <Table.Body>
-        {events.map((event) => (
-          <AuditRow
-            key={event.eventId}
-            event={event}
-            expanded={expanded === event.eventId}
-            onToggleExpand={() => onToggleExpand(event.eventId)}
-            onFilterActor={onFilterActor}
+    <div className="flex flex-col gap-3">
+      {/* A failed refetch keeps the last answer on screen, so it has to say so.
+          Reading stale history as current is the mistake this surface can least
+          afford. Same shape as the members roster's stale notice. */}
+      {error !== undefined && (
+        <div data-testid="audit-stale">
+          <Alert
+            variant="amber"
+            assertive={false}
+            title="This history may be out of date"
+            description={`Refreshing failed: ${errorMessageOf(error, 'the request did not complete')}. The rows below are the last answer that arrived.`}
           />
-        ))}
-      </Table.Body>
-    </Table>
+        </div>
+      )}
+
+      <Table>
+        <Table.Header>
+          <Table.Row>
+            <Table.Head className="w-8" />
+            {COLUMNS.map((column) => (
+              <Table.Head key={column.label} className={column.className}>
+                {column.label}
+              </Table.Head>
+            ))}
+          </Table.Row>
+        </Table.Header>
+        <Table.Body>
+          {events.map((event) => (
+            <AuditRow
+              key={event.eventId}
+              event={event}
+              expanded={expanded === event.eventId}
+              onToggleExpand={() => onToggleExpand(event.eventId)}
+              onFilterActor={onFilterActor}
+            />
+          ))}
+        </Table.Body>
+      </Table>
+
+      {/* Offered only when the API found a further event, so this never loads an
+          empty page. */}
+      {hasNextPage && onLoadMore && (
+        <div className="flex justify-center">
+          <Button
+            variant="tertiary"
+            size="sm"
+            disabled={isLoadingMore}
+            onClick={onLoadMore}
+            data-testid="audit-load-more"
+          >
+            {isLoadingMore ? 'Loading' : 'Load more'}
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }
 

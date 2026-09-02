@@ -52,10 +52,11 @@ function auditEvent(overrides: Partial<AuditEvent> = {}): AuditEvent {
   } as AuditEvent;
 }
 
-function page(events: AuditEvent[], clamped = false): ListAuditEventsResponse {
+function page(events: AuditEvent[], clamped = false, nextCursor?: string): ListAuditEventsResponse {
   return {
     events,
     window: { from: '2026-05-17T12:00:00.000Z', to: '2026-08-15T12:00:00.000Z', clamped },
+    ...(nextCursor ? { nextCursor } : {}),
   };
 }
 
@@ -199,6 +200,64 @@ describe('OrganizationAuditTab', () => {
     fireEvent.click(await screen.findByTestId('audit-download-csv'));
 
     expect(await screen.findByText(/over the 20,000 row limit/)).toBeInTheDocument();
+  });
+
+  // The org's history runs past one page, and reaching an old event is the whole
+  // task. The API offers a cursor only when a further event exists, so the
+  // control appears exactly when there is something behind it.
+  it('loads the next page of history on request', async () => {
+    mockListAuditEvents
+      .mockResolvedValueOnce(page([auditEvent()], false, 'cursor-1'))
+      .mockResolvedValueOnce(page([auditEvent({ eventId: 'evt-2', subject: 'user:user-9' })]));
+
+    renderTab();
+    fireEvent.click(await screen.findByTestId('audit-load-more'));
+
+    expect(await screen.findByTestId('audit-row-evt-2')).toBeInTheDocument();
+    // Appended, not replaced: the first page stays on screen.
+    expect(screen.getByTestId('audit-row-evt-1')).toBeInTheDocument();
+    expect(mockListAuditEvents).toHaveBeenLastCalledWith(expect.anything(), 'cursor-1');
+  });
+
+  it('stops offering more once the history ends', async () => {
+    mockListAuditEvents
+      .mockResolvedValueOnce(page([auditEvent()], false, 'cursor-1'))
+      .mockResolvedValueOnce(page([auditEvent({ eventId: 'evt-2' })]));
+
+    renderTab();
+    fireEvent.click(await screen.findByTestId('audit-load-more'));
+    await screen.findByTestId('audit-row-evt-2');
+
+    expect(screen.queryByTestId('audit-load-more')).not.toBeInTheDocument();
+  });
+
+  it('offers nothing more when the first page is the whole history', async () => {
+    renderTab();
+    await screen.findByTestId('audit-row-evt-1');
+
+    expect(screen.queryByTestId('audit-load-more')).not.toBeInTheDocument();
+  });
+
+  // Reading stale history as current is the mistake this surface can least
+  // afford, and TanStack Query keeps the previous rows when a refetch fails.
+  it('says so when a refetch failed but rows are still on screen', async () => {
+    mockListAuditEvents
+      .mockResolvedValueOnce(page([auditEvent()], false, 'cursor-1'))
+      .mockRejectedValueOnce(new Error('Service unavailable'));
+
+    renderTab();
+    fireEvent.click(await screen.findByTestId('audit-load-more'));
+
+    expect(await screen.findByTestId('audit-stale')).toBeInTheDocument();
+    // The rows that did arrive stay, rather than the page going blank.
+    expect(screen.getByTestId('audit-row-evt-1')).toBeInTheDocument();
+  });
+
+  it('says nothing about staleness while the history is healthy', async () => {
+    renderTab();
+    await screen.findByTestId('audit-row-evt-1');
+
+    expect(screen.queryByTestId('audit-stale')).not.toBeInTheDocument();
   });
 
   // Admin holds audit.view and audit.export; the button is gated on the second.
