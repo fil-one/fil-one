@@ -154,6 +154,20 @@ describe('get-role-change-preview baseHandler', () => {
     });
   });
 
+  it('promises nothing for the role the member already holds', async () => {
+    // The PATCH short-circuits on an unchanged role, so the preview of one has
+    // to agree: a key already above its holder's current role is not about to
+    // be revoked by a change that does nothing.
+    stubMembershipRead(ddbMock, { orgId: ORG_ID, userId: TARGET, role: OrgRole.Member });
+    ddbMock.on(QueryCommand).resolves({ Items: [keyRow(), keyRow({ sk: 'ACCESSKEY#key-2' })] });
+
+    const body = bodyOf<RoleChangePreviewResponse>(
+      await baseHandler(previewEvent({ role: OrgRole.Member })),
+    );
+
+    expect(body).toMatchObject({ keys: [], survivingCount: 2 });
+  });
+
   it('refuses a caller who could not make the change', async () => {
     // An Admin reaches Admin and below. Demoting an Owner is `owners.manage`,
     // and the preview names that Owner's access keys.

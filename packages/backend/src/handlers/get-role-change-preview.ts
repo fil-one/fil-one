@@ -56,14 +56,21 @@ export async function baseHandler(
   }
 
   const review = await keysExceedingRole(orgId, targetUserId, role);
+  // The PATCH answers a request for the role somebody already holds without
+  // touching anything, so a preview of it has to promise the same. Otherwise a
+  // key that already exceeds its holder's current role, or one whose row records
+  // no permissions, reads as about to be revoked by a change that does nothing.
+  const unchanged = target.role === role;
 
   return new ResponseBuilder()
     .status(200)
     .body<RoleChangePreviewResponse>({
       currentRole: target.role,
       role,
-      keys: review.doomed.map(summarizeKey),
-      survivingCount: review.survivingCount,
+      keys: unchanged ? [] : review.doomed.map(summarizeKey),
+      survivingCount: unchanged
+        ? review.doomed.length + review.survivingCount
+        : review.survivingCount,
       unattributedCount: review.unattributedCount,
     })
     .build();
