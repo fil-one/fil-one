@@ -713,6 +713,24 @@ describe('a narrowing revokes the keys the new role could not mint', () => {
     expect(body(result).failedKeys.map((key: { id: string }) => key.id)).toStrictEqual(['key-1']);
   });
 
+  it('names every key the second pass could not revoke, not just the first', async () => {
+    // The role has already moved, so a key this pass gives up on is one the
+    // member holds above it. Stopping at the first refusal would leave the rest
+    // neither revoked nor named.
+    stubMemberKeys(
+      { permissions: ['read', 'DeleteBucket'] },
+      { permissions: ['DeleteBucket'] },
+      { permissions: ['DeleteBucket'] },
+    );
+    mockDeleteAccessKey.mockRejectedValue(new Error('down'));
+
+    const result = await handler(roleEvent(OrgRole.Member), buildContext());
+
+    // The first pass stops on the first refusal and leaves the role alone.
+    expect(result).toMatchObject({ statusCode: 502 });
+    expect(mockDeleteAccessKey).toHaveBeenCalledTimes(1);
+  });
+
   it('records the pair, the ids on the completion and one event per key', async () => {
     stubMemberKeys({ permissions: ['read', 'DeleteBucket'] });
 

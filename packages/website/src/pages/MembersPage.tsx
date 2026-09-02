@@ -60,6 +60,18 @@ function dropFromRoster(client: QueryClient, userId: string): void {
  * changed their own row keeps the permissions of the role they left until `/me`
  * is read again — a console offering buttons the server will now refuse.
  */
+/**
+ * The access keys list, after a change that revoked some.
+ *
+ * Its own invalidation because the roster and the key list are different
+ * queries with different stale windows: an admin who opened Access keys a
+ * moment ago would otherwise come back to it and see credentials that no
+ * longer exist rendered as active.
+ */
+function settleRevokedKeys(client: QueryClient, revoked: readonly unknown[]): void {
+  if (revoked.length > 0) void client.invalidateQueries({ queryKey: queryKeys.accessKeys });
+}
+
 function settleAfterChange(client: QueryClient, userId: string, selfUserId?: string): void {
   void client.invalidateQueries({ queryKey: queryKeys.members });
   void client.invalidateQueries({ queryKey: queryKeys.invitations });
@@ -135,6 +147,7 @@ function useRoleChange(ctx: MutationContext) {
     onSuccess: (result, { member, role }) => {
       patchRosterRole(ctx.client, member.userId, role);
       settleAfterChange(ctx.client, member.userId, ctx.selfUserId);
+      settleRevokedKeys(ctx.client, result.revokedKeys ?? []);
       ctx.notice.clear();
       ctx.toastSuccess(
         `${memberName(member)} is now ${ROLE_LABELS[role]}${revokedSuffix(result.revokedKeys)}`,
@@ -152,6 +165,9 @@ function useRoleChange(ctx: MutationContext) {
       // refusal has to carry them: a message about the role alone is half the
       // answer.
       const revoked = revokedKeysOf(err);
+      // Those keys are gone whatever the role now says, so the list they are
+      // listed on is stale either way.
+      settleRevokedKeys(ctx.client, revoked);
       const remedy = `That change would leave the organization without an owner.${revokedSuffix(revoked)}`;
       if (ctx.notice.capture(err, remedy)) return;
       ctx.toastError(

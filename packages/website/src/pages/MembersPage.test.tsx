@@ -511,6 +511,38 @@ describe('the role-narrowing confirmation', () => {
     expect(screen.getByText('Change this role?')).toBeInTheDocument();
   });
 
+  it('drops the cached access keys when a narrowing revoked some', async () => {
+    // The roster and the key list are different queries with different stale
+    // windows, so an admin coming back to Access keys would otherwise see
+    // credentials that no longer exist.
+    mockUpdateRole.mockResolvedValue({
+      userId: 'user-2',
+      role: OrgRole.Member,
+      previousRole: OrgRole.Admin,
+      revokedKeys: [
+        {
+          id: 'key-1',
+          keyName: 'nightly backup',
+          region: 'us-east-1',
+          createdAt: '2026-02-01T00:00:00.000Z',
+          reason: 'exceeds_role',
+          excess: ['DeleteBucket'],
+        },
+      ],
+    });
+    const { client } = renderPage();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+
+    fireEvent.change(await screen.findByLabelText('Role for grace@example.com'), {
+      target: { value: OrgRole.Member },
+    });
+    await confirmNarrowing();
+
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.accessKeys }),
+    );
+  });
+
   it('names the keys already revoked when the role write then failed', async () => {
     // Those credentials are gone whatever the role now says.
     mockUpdateRole.mockRejectedValue(

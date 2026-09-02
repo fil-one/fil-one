@@ -255,9 +255,9 @@ async function applyRoleChange({
     actor,
     reason: 'role_narrowing',
   });
-  if (first.failed) {
+  if (first.failed.length > 0) {
     await change.complete({ outcome: 'failed', details: revokedKeyIds(first.revoked) });
-    return vendorRefusedResponse(first.revoked, first.failed.key);
+    return vendorRefusedResponse(first.revoked, first.failed[0]!);
   }
 
   const failed = await write(
@@ -364,11 +364,11 @@ async function runSecondPass({
   // touching anything. A key the vendor refused here therefore has no automatic
   // retry, and saying so is the whole remedy — an admin holding
   // `keys.manage_all` revokes it from the keys page.
-  if (second.failed) {
-    console.error('[update-member-role] A key survived the narrowing', {
+  if (second.failed.length > 0) {
+    console.error('[update-member-role] Keys survived the narrowing', {
       orgId,
       targetUserId,
-      keyIdSuffix: second.failed.key.accessKeyIdSuffix,
+      keyIdSuffixes: second.failed.map((key) => key.accessKeyIdSuffix),
     });
   }
 
@@ -390,11 +390,20 @@ async function runSecondPass({
     role: toRole,
     previousRole: fromRole,
     ...(revokedKeys.length > 0 ? { revokedKeys } : {}),
-    ...(second.failed ? { failedKeys: [second.failed.key] } : {}),
+    ...(second.failed.length > 0 ? { failedKeys: second.failed } : {}),
   });
 }
 
-/** The summary half of the pair: ids, since each revocation is its own event. */
+/**
+ * The summary half of the pair: ids, since each revocation is its own event.
+ *
+ * Only the first pass's, because the completion rides the role transaction and
+ * that transaction commits before the second pass runs. Keeping the two
+ * together is what makes a membership change and its record atomic; the price
+ * is that a key the second pass revokes is missing from this summary. Nothing
+ * goes unrecorded either way — every revocation writes its own `key.deleted`
+ * with a `reason`, and those are the durable account of what happened.
+ */
 function revokedKeyIds(revoked: readonly RevokedKeySummary[]): { revokedKeys?: string[] } {
   return revoked.length > 0 ? { revokedKeys: revoked.map((key) => key.id) } : {};
 }

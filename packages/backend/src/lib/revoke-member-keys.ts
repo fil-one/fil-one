@@ -19,12 +19,23 @@ export interface RevocationOutcome {
   /** Revoked and delisted, in the order the pass ran. */
   revoked: RevokedKeySummary[];
   /**
-   * The key the pass stopped on, when a vendor refused. The caller leaves the
-   * role unchanged and says so; retrying finds fewer keys, since every
-   * completed revocation deleted its row.
+   * Still live, because a vendor refused. Under `stop` this holds the one key
+   * the pass halted on and the caller leaves the membership unchanged; under
+   * `continue` it holds every key the vendor refused, which is what an admin
+   * needs when the membership has already moved.
    */
-  failed?: { key: RevokedKeySummary; error: unknown };
+  failed: RevokedKeySummary[];
 }
+
+/**
+ * What a refusal means for the rest of the pass.
+ *
+ * `stop` before the membership write: the change will not commit, so there is
+ * nothing to be gained by revoking further and the retry is the same request.
+ * `continue` after it: the member already holds the narrower role, so every key
+ * still above it should go, and the ones that will not have to be named.
+ */
+export type OnRevocationFailure = 'stop' | 'continue';
 
 export async function revokeMemberKeys({
   orgId,
@@ -32,6 +43,7 @@ export async function revokeMemberKeys({
   keys,
   actor,
   reason,
+  onFailure = 'stop',
 }: {
   orgId: string;
   /** Read once, so several orchestrators resolve their tenant from one row. */
@@ -40,8 +52,10 @@ export async function revokeMemberKeys({
   /** Who asked. On a role change this is the admin, never the key's holder. */
   actor: AuditActor;
   reason: KeyRevocationReason;
+  onFailure?: OnRevocationFailure;
 }): Promise<RevocationOutcome> {
   const revoked: RevokedKeySummary[] = [];
+  const failed: RevokedKeySummary[] = [];
 
   for (const key of keys) {
     const summary = summarizeAccessKey(key);
@@ -65,16 +79,18 @@ export async function revokeMemberKeys({
       });
       revoked.push(summary);
     } catch (error) {
-      console.error('[revoke-member-keys] Revocation stopped', {
+      console.error('[revoke-member-keys] A key could not be revoked', {
         orgId,
         region: key.region,
         keyIdSuffix: summary.accessKeyIdSuffix,
         revoked: revoked.length,
+        stopping: onFailure === 'stop',
         error,
       });
-      return { revoked, failed: { key: summary, error } };
+      failed.push(summary);
+      if (onFailure === 'stop') break;
     }
   }
 
-  return { revoked };
+  return { revoked, failed };
 }

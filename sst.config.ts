@@ -1036,15 +1036,25 @@ export default $config({
       // just stopped working. So these routes reach every orchestrator and the
       // mail credential. `transfer-ownership` carries the same, below, beside
       // the Management API credentials its step-up already needs.
+      //
+      // Thirty seconds rather than the ten `addRoute` defaults to: a narrowing
+      // reads the org's key rows twice and revokes each doomed key in turn, and
+      // each revocation is a vendor call plus an audit write. A tenant may hold
+      // up to 300 keys, so this is a bound for ordinary orgs rather than for
+      // every org; a member holding hundreds needs a worker, which is FIL-1017
+      // follow-up work. A timeout during the first pass is safe by design — the
+      // role is unwritten and the retry finds fewer keys.
       'update-member-role': {
         extraEnv: orchestratorEnv,
         permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
         ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
+        timeout: '30 seconds',
       },
       'remove-member': {
         extraEnv: orchestratorEnv,
         permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
         ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
+        timeout: '30 seconds',
       },
 
       // ── RAG ────────────────────────────────────────────────────────
