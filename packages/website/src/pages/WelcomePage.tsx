@@ -7,36 +7,36 @@ import { Button } from '../components/Button';
 import { FormField } from '../components/FormField';
 import { Heading } from '../components/Heading/Heading';
 import { Input } from '../components/Input';
-import { UserAvatar } from '../components/UserAvatar';
-import { errorMessageOf, updateOrg } from '../lib/api.js';
+import { errorMessageOf, logout, updateOrg } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
 
 /**
- * The initials shown in the monogram, from the first two words of the name.
- *
- * Two letters rather than one because this stands for an organization rather
- * than a person, and "AC" tells two organizations apart where "A" does not.
- * Falls back to the first two characters for a single word, and to nothing at
- * all for an empty field, which is what keeps the monogram from flickering a
- * stale letter while somebody clears the input.
+ * Text buttons carry no chrome, so they need their own keyboard-only ring.
+ * Kept identical to the one on the verify page: the two gates sit back to back
+ * in the same flow, and a differently styled escape hatch on each would read as
+ * two different products.
  */
-export function orgInitials(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return '';
-  if (words.length === 1) return words[0]!.slice(0, 2).toUpperCase();
-  return (words[0]![0]! + words[1]![0]!).toUpperCase();
-}
+const textButton =
+  'rounded-xs font-medium text-brand-600 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600';
 
 type WelcomePageProps = {
   /** The derived name the account was created with, as the field's starting value. */
   suggestedName: string;
+  /** The signed-in address, so the footer can name the account being committed to. */
+  email?: string;
   /** Where to go once the name is saved. */
   onNamed: () => void;
 };
 
 /**
- * The one thing a new account is asked before it reaches the console: what its
- * organization is called.
+ * The one thing a new account is asked before it reaches the console.
+ *
+ * Framed as creation rather than naming. The organization row already exists,
+ * written at first login, but nothing the caller can see says so: the gate
+ * re-fires until this screen is finished, so from their side the organization
+ * is not real until they name it. Calling it creation is what introduces the
+ * concept that organizations are things you make, which is what the switcher
+ * and a second organization depend on later.
  *
  * The field starts filled with the name derived at signup rather than empty, so
  * the common answer is Continue and nobody faces a blank box. Saving is an
@@ -44,11 +44,11 @@ type WelcomePageProps = {
  * this page needs no endpoint of its own, and a caller who reaches it twice
  * simply renames again.
  *
- * The monogram beside the field is the organization's avatar, and it updates as
- * the name is typed. It is not asked for and cannot be uploaded here: it exists
- * so the name has something to be attached to, and so the field visibly matters.
+ * No avatar here. A monogram beside the field reads as a control and does
+ * nothing, which is worse than its absence; it belongs on this screen only once
+ * there is an upload behind it.
  */
-export function WelcomePage({ suggestedName, onNamed }: WelcomePageProps) {
+export function WelcomePage({ suggestedName, email, onNamed }: WelcomePageProps) {
   const queryClient = useQueryClient();
   const [name, setName] = useState(suggestedName);
   const [error, setError] = useState<string | null>(null);
@@ -78,33 +78,43 @@ export function WelcomePage({ suggestedName, onNamed }: WelcomePageProps) {
   }
 
   return (
-    <AuthCard>
+    <AuthCard
+      footer={
+        // Which account this organization is about to belong to, and the way
+        // out. Signing up on the wrong address is easiest to fix here, before
+        // anything is named after it.
+        email ? (
+          <div className="text-center">
+            <p className="text-xs text-(--color-paragraph-text)">Signed in as {email}</p>
+            <p className="mt-1 text-xs text-(--color-paragraph-text-subtle)">
+              Not your account?{' '}
+              <button type="button" onClick={logout} className={textButton}>
+                Sign out
+              </button>
+            </p>
+          </div>
+        ) : undefined
+      }
+    >
       <Heading tag="h1" size="lg" balance className="font-normal tracking-tight">
-        Name your organization
+        Create your organization
       </Heading>
       <p className="mt-2 text-sm text-(--color-paragraph-text)">
-        This is what your teammates see when you invite them, and what appears on your invoices. You
-        can change it later in settings.
+        Manage your storage and invite others to collaborate.
       </p>
 
       <form onSubmit={handleSubmit} noValidate className="mt-6">
-        {/* The monogram sits beside the input rather than beside the whole
-            field, so the label stays flush with the heading above it. */}
         <FormField label="Organization name" htmlFor="welcome-org-name" error={error}>
-          <div className="flex items-center gap-3">
-            <UserAvatar initial={orgInitials(name)} className="h-10 w-10 rounded-xl text-sm" />
-            <Input
-              id="welcome-org-name"
-              value={name}
-              onChange={setName}
-              invalid={!!error}
-              maxLength={ORG_NAME_MAX_LENGTH}
-              autoFocus
-              autoComplete="organization"
-              disabled={rename.isPending}
-              className="min-w-0 flex-1"
-            />
-          </div>
+          <Input
+            id="welcome-org-name"
+            value={name}
+            onChange={setName}
+            invalid={!!error}
+            maxLength={ORG_NAME_MAX_LENGTH}
+            autoFocus
+            autoComplete="organization"
+            disabled={rename.isPending}
+          />
         </FormField>
 
         <Button
@@ -113,7 +123,7 @@ export function WelcomePage({ suggestedName, onNamed }: WelcomePageProps) {
           disabled={rename.isPending || name.trim() === ''}
           className="mt-6 w-full justify-center py-3.5"
         >
-          {rename.isPending ? 'Saving...' : 'Continue'}
+          {rename.isPending ? 'Creating...' : 'Create organization'}
         </Button>
       </form>
     </AuthCard>

@@ -41,6 +41,7 @@ function WelcomeRoute() {
   return (
     <WelcomePage
       suggestedName={me?.orgName ?? ''}
+      email={me?.email}
       onNamed={() => void navigate({ to: '/dashboard' })}
     />
   );
