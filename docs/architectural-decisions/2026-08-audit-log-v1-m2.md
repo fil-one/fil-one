@@ -1,4 +1,4 @@
-# Audit log v1 (IAM M2, FIL-1022)
+# ADR: Audit log v1 (IAM M2, FIL-1022)
 
 **Status:** Proposed
 **Created:** 2026-08-26
