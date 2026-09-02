@@ -38,6 +38,13 @@ export const Route = createRoute({
     if (!me.emailVerified) {
       throw redirect({ to: '/verify-email' });
     }
+    // A new account has a derived organization name nobody has looked at. The
+    // naming step runs after verification so the two gates cannot both claim
+    // the page, and only ever for an organization created since the flag
+    // shipped: an absent value reads as confirmed.
+    if (!me.nameConfirmed) {
+      throw redirect({ to: '/welcome' });
+    }
   },
   component: AppWithOrgGuard,
 });

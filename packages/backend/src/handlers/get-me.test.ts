@@ -182,6 +182,7 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
+        nameConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         mfaEnrollments: [],
@@ -205,6 +206,7 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
+        nameConfirmed: true,
         emailVerified: false,
         email: MOCK_EMAIL,
         mfaEnrollments: [],
@@ -230,6 +232,7 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: '',
+        nameConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         mfaEnrollments: [],
@@ -273,6 +276,7 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
+        nameConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         mfaEnrollments: [
@@ -310,6 +314,7 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
+        nameConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         mfaEnrollments: [],
@@ -357,6 +362,7 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
+        nameConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         mfaEnrollments: [],

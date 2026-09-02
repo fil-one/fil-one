@@ -39,6 +39,16 @@ export interface MeResponse {
   /** Every org the caller belongs to, for the org switcher. */
   memberships?: OrgMembershipSummary[];
   /**
+   * Whether anyone has ever named this organization, as opposed to accepting the
+   * name derived for them at signup. False only for an organization created
+   * after this field shipped and never renamed since, which is what sends a new
+   * account through the naming step.
+   *
+   * Absent on the stored row reads as true, so every organization that predates
+   * the field is left alone rather than sent back through onboarding.
+   */
+  nameConfirmed: boolean;
+  /**
    * Whether the organizations beta is switched on for this caller — their own
    * allowlist row, or {@link MeResponse.orgId}'s. Computed server-side like
    * {@link MeResponse.ragAccess}, from the same predicate the invitation

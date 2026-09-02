@@ -830,6 +830,7 @@ describe('authMiddleware', () => {
               pk: { S: `ORG#${MOCK_ORG_ID}` },
               sk: { S: 'PROFILE' },
               name: { S: 'Alice Org' },
+              nameConfirmed: { BOOL: false },
               auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
               createdBy: { S: MOCK_USER_ID },
               createdAt: { S: expect.any(String) },
