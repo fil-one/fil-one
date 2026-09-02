@@ -6,7 +6,6 @@ import type { MeResponse } from '@filone/shared';
 
 import { seedPermissions } from '../lib/test-permissions.js';
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
-import { queryKeys } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
 // Mocks — the network boundary, plus the two panels this file is not about
@@ -73,11 +72,10 @@ function renderSettings(role: OrgRole) {
 }
 
 /** Type a new address and a new company name, then press Save. */
-async function saveEmailAndOrgName() {
+async function saveNewEmail() {
   fireEvent.change(await screen.findByLabelText('Email'), {
     target: { value: 'new@example.com' },
   });
-  fireEvent.change(screen.getByLabelText('Company name'), { target: { value: 'Acme Two' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 }
 
@@ -85,75 +83,16 @@ async function saveEmailAndOrgName() {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('SettingsPage — the company name field', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('is editable for a role that holds org.rename', async () => {
-    renderSettings(OrgRole.Admin);
-
-    const field = await screen.findByLabelText('Company name');
-    expect(field).not.toBeDisabled();
-  });
-
-  it.each([OrgRole.Member, OrgRole.ReadOnly])(
-    'stays visible but read-only for %s',
-    async (role) => {
-      // The org's name is worth showing — it names where the caller is working.
-      // Renaming it is PATCH /api/org, which the server refuses below Admin.
-      renderSettings(role);
-
-      const field = await screen.findByLabelText('Company name');
-      expect(field).toBeDisabled();
-      expect(field).toHaveValue('Acme');
-    },
-  );
-});
-
 describe('SettingsPage — saving a new email address', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUpdateProfile.mockResolvedValue({ name: 'Ada', email: 'new@example.com' });
-    mockUpdateOrg.mockResolvedValue({ name: 'Acme Two' });
   });
 
   it('sends the user to verify the address', async () => {
     renderSettings(OrgRole.Admin);
-    await saveEmailAndOrgName();
+    await saveNewEmail();
 
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith({ to: '/verify-email' }));
-  });
-
-  it('still sends them when the rename fails after the email landed', async () => {
-    // The profile PATCH runs first and the rename second, so a rename failure
-    // leaves the session holding an unverified address. Without the redirect the
-    // tab stays on Settings, emailVerified false, with no funnel until the next
-    // gated request.
-    mockUpdateOrg.mockRejectedValue(new Error('You cannot rename this organization'));
-
-    const { client } = renderSettings(OrgRole.Admin);
-    await saveEmailAndOrgName();
-
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith({ to: '/verify-email' }));
-    // The failure is still reported, and the half that landed still reaches the
-    // cache the rest of the app reads.
-    expect(await screen.findByText('You cannot rename this organization')).toBeInTheDocument();
-    expect(client.getQueryData<MeResponse>(queryKeys.me)).toMatchObject({
-      email: 'new@example.com',
-      emailVerified: false,
-    });
-  });
-
-  it('stays on the page when only the org name changed', async () => {
-    renderSettings(OrgRole.Admin);
-
-    fireEvent.change(await screen.findByLabelText('Company name'), {
-      target: { value: 'Acme Two' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-
-    expect(await screen.findByText('Profile updated')).toBeInTheDocument();
-    expect(mockNavigate).not.toHaveBeenCalled();
   });
 });

@@ -68,7 +68,7 @@ export async function baseHandler(
     const currentStatus = await evaluateStatusTransitions(billingRecord, storedStatus, owner);
     const response = buildBillingResponse(billingRecord, currentStatus, {
       paymentMethod: cachedPaymentMethod(billingRecord),
-      monthlyMinimumCents: deriveMonthlyMinimumCents(billingRecord.stripePrice),
+      ...describePrice(billingRecord.stripePrice),
     });
     return new ResponseBuilder().status(200).body(response).build();
   }
@@ -134,6 +134,80 @@ function inactiveResponse(
 interface StripeSubscriptionDetails {
   paymentMethod: BillingInfo['paymentMethod'];
   monthlyMinimumCents: number | undefined;
+  /** The Stripe product's name, when the price carries one. */
+  planName: string | undefined;
+  /** The per-TB monthly rate, when the price states one unambiguously. */
+  pricePerTbCents: number | undefined;
+}
+
+/** Everything the response says about the billed price, from one snapshot. */
+function describePrice(price: StripePriceDetails | undefined): {
+  monthlyMinimumCents: number | undefined;
+  planName: string | undefined;
+  pricePerTbCents: number | undefined;
+} {
+  return {
+    monthlyMinimumCents: deriveMonthlyMinimumCents(price),
+    planName: price?.product_name,
+    pricePerTbCents: derivePricePerTbCents(price),
+  };
+}
+
+/**
+ * The usage rate per TB per month, in cents, when the price states one and only
+ * one.
+ *
+ * Stripe meters this product in GB, so a TB is 1000 of its units. Two shapes
+ * give a single honest answer: a per-unit price, and a graduated price whose
+ * usage tiers all carry the same unit rate (self-serve's shape, where the first
+ * tier is a flat minimum and everything above it is charged at one rate).
+ * Anything else — volume tiering, graduated tiers that step — has no single
+ * rate, and returns undefined rather than the first one it finds.
+ */
+function derivePricePerTbCents(price: StripePriceDetails | undefined): number | undefined {
+  if (!price) return undefined;
+
+  if (price.billing_scheme === 'per_unit') {
+    return perTbCents(price.unit_amount, price.unit_amount_decimal);
+  }
+
+  if (price.billing_scheme !== 'tiered' || price.tiers_mode !== 'graduated') return undefined;
+
+  // The tiers that charge for usage, which is every tier carrying a rate above
+  // zero. The first tier of the self-serve price is the flat minimum at a zero
+  // rate, so it drops out here and the rate comes from the tiers above it.
+  const rates = (price.tiers ?? [])
+    .map((tier) => perTbCents(tier.unit_amount, tier.unit_amount_decimal))
+    .filter((rate): rate is number => rate !== undefined && rate > 0);
+  if (rates.length === 0) return undefined;
+
+  const [first] = rates;
+  return rates.every((rate) => rate === first) ? first : undefined;
+}
+
+/** Stripe meters this product per GB, and pricing is quoted per TB. */
+const GB_PER_TB = 1000;
+
+/**
+ * A per-GB Stripe amount as whole cents per TB.
+ *
+ * Scaled before rounding, which is the whole point of doing this here rather
+ * than through `amountToCents`: the self-serve rate is $0.00499 per GB, so
+ * rounding per GB first turns 0.499 cents into nothing and reports a plan as
+ * free. Multiplied first, it is 499 cents per TB, exactly what the price says.
+ */
+function perTbCents(
+  amount: number | null | undefined,
+  amountDecimal: string | null | undefined,
+): number | undefined {
+  if (amountDecimal != null) {
+    const parsed = Number(amountDecimal);
+    if (!Number.isFinite(parsed)) {
+      throw new Error(`Stripe amount decimal is not a number: ${JSON.stringify(amountDecimal)}`);
+    }
+    return Math.round(parsed * GB_PER_TB);
+  }
+  return amount == null ? undefined : amount * GB_PER_TB;
 }
 
 // Stripe SDK errors expose `code` on the error object; matches StripeInvalidRequestError 404s.
@@ -161,8 +235,9 @@ async function resolveStripeSubscriptionDetails(
     const stripe = getStripeClient();
     try {
       const subscription = await stripe.subscriptions.retrieve(billingRecord.subscriptionId, {
-        // Tiers carry the monthly minimum and are not returned by default.
-        expand: ['default_payment_method', 'items.data.price.tiers'],
+        // Tiers carry the monthly minimum and are not returned by default, and
+        // the product carries the name of the plan the customer is on.
+        expand: ['default_payment_method', 'items.data.price.tiers', 'items.data.price.product'],
       });
 
       paymentMethod = toPaymentMethod(subscription.default_payment_method);
@@ -181,7 +256,7 @@ async function resolveStripeSubscriptionDetails(
   return {
     // Use cached payment method from DB if Stripe fetch didn't return one
     paymentMethod: paymentMethod ?? cachedPaymentMethod(billingRecord),
-    monthlyMinimumCents: deriveMonthlyMinimumCents(price),
+    ...describePrice(price),
   };
 }
 
@@ -279,6 +354,9 @@ function toStripePriceDetails(price: Stripe.Price): StripePriceDetails {
   return {
     id: price.id,
     product: typeof price.product === 'string' ? price.product : price.product?.id,
+    ...(typeof price.product === 'object' && price.product && 'name' in price.product
+      ? { product_name: price.product.name }
+      : {}),
     currency: price.currency,
     billing_scheme: price.billing_scheme,
     tiers_mode: price.tiers_mode,
@@ -377,7 +455,7 @@ async function evaluateStatusTransitions(
 function buildBillingResponse(
   billingRecord: SubscriptionRecord,
   currentStatus: SubscriptionStatus,
-  { paymentMethod, monthlyMinimumCents }: StripeSubscriptionDetails,
+  { paymentMethod, monthlyMinimumCents, planName, pricePerTbCents }: StripeSubscriptionDetails,
 ): BillingInfo {
   const isActivePlan =
     currentStatus === SubscriptionStatus.Active ||
@@ -398,12 +476,17 @@ function buildBillingResponse(
       ...(billingRecord.trialEndsAt && currentStatus === SubscriptionStatus.GracePeriod
         ? { trialEndsAt: billingRecord.trialEndsAt }
         : {}),
+      ...(billingRecord.currentPeriodStart
+        ? { currentPeriodStart: billingRecord.currentPeriodStart }
+        : {}),
       currentPeriodEnd: billingRecord.currentPeriodEnd,
       ...(billingRecord.canceledAt ? { canceledAt: billingRecord.canceledAt } : {}),
       ...(billingRecord.gracePeriodEndsAt
         ? { gracePeriodEndsAt: billingRecord.gracePeriodEndsAt }
         : {}),
       ...(monthlyMinimumCents ? { monthlyMinimumCents } : {}),
+      ...(planName ? { planName } : {}),
+      ...(pricePerTbCents ? { pricePerTbCents } : {}),
     },
     paymentMethod,
   };

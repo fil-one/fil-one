@@ -139,6 +139,46 @@ describe('list-invoices baseHandler', () => {
     });
   });
 
+  it('lists an unpaid invoice, which is the one a failed payment is about', async () => {
+    ddbMock
+      .on(GetItemCommand)
+      .resolves(subscriptionItem({ stripeCustomerId: 'cus_456', subscriptionStatus: 'past_due' }));
+    mockInvoicesList.mockResolvedValue({
+      data: [
+        { id: 'in_open', amount_due: 2096, status: 'open', created: 1767225600, invoice_pdf: null },
+        { id: 'in_paid', amount_due: 1874, status: 'paid', created: 1764547200, invoice_pdf: null },
+      ],
+    });
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const body = JSON.parse(String(result.body));
+    expect(body.invoices.map((i: { id: string }) => i.id)).toEqual(['in_open', 'in_paid']);
+  });
+
+  it('leaves out a draft, which Stripe has not finalised into a bill', async () => {
+    ddbMock
+      .on(GetItemCommand)
+      .resolves(subscriptionItem({ stripeCustomerId: 'cus_456', subscriptionStatus: 'active' }));
+    mockInvoicesList.mockResolvedValue({
+      data: [
+        {
+          id: 'in_draft',
+          amount_due: 500,
+          status: 'draft',
+          created: 1767225600,
+          invoice_pdf: null,
+        },
+        { id: 'in_paid', amount_due: 1874, status: 'paid', created: 1764547200, invoice_pdf: null },
+      ],
+    });
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const body = JSON.parse(String(result.body));
+    expect(body.invoices.map((i: { id: string }) => i.id)).toEqual(['in_paid']);
+  });
+
   it('calls stripe.invoices.list with correct params', async () => {
     ddbMock.on(GetItemCommand).resolves(
       subscriptionItem({
@@ -154,8 +194,7 @@ describe('list-invoices baseHandler', () => {
 
     expect(mockInvoicesList).toHaveBeenCalledWith({
       customer: 'cus_456',
-      limit: 3,
-      status: 'paid',
+      limit: 12,
     });
   });
 });

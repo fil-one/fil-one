@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
-import { PlusIcon } from '@phosphor-icons/react/dist/ssr';
+import { EnvelopeIcon, UserPlusIcon } from '@phosphor-icons/react/dist/ssr';
 import { ApiErrorCode, MAX_PENDING_INVITATIONS_PER_ORG } from '@filone/shared';
 import type {
   CreateInvitationRequest,
@@ -12,6 +12,7 @@ import type {
 
 import { Alert } from '../components/Alert';
 import { Button } from '../components/Button';
+import { EmptyStateCard } from '../components/EmptyStateCard';
 import { Heading } from '../components/Heading/Heading';
 import { InvitationsTable } from '../components/InvitationsTable';
 import { InviteMemberForm } from '../components/InviteMemberForm';
@@ -224,7 +225,48 @@ function useRevokeInvitation(
  * permission rather than `members.read`, so for anybody else this whole section
  * would be a request the server refuses.
  */
-export function MembersInvitations() {
+/**
+ * Opens the invite dialog when the Organization page's own Invite member button
+ * asked for it.
+ *
+ * The request is cleared whether or not anything opened: a caller the beta gate
+ * refuses is told so by the section itself, and a request left standing would
+ * spring the dialog open on the next visit to this tab, which nobody asked for.
+ */
+function useRequestedInvite({
+  inviteRequested,
+  onInviteRequestHandled,
+  mayIssue,
+  atCap,
+  openInvite,
+}: {
+  inviteRequested: boolean;
+  onInviteRequestHandled?: () => void;
+  mayIssue: boolean;
+  atCap: boolean;
+  openInvite: () => void;
+}) {
+  useEffect(() => {
+    if (!inviteRequested) return;
+    onInviteRequestHandled?.();
+    if (mayIssue && !atCap) openInvite();
+  }, [inviteRequested, onInviteRequestHandled, mayIssue, atCap, openInvite]);
+}
+
+export function MembersInvitations({
+  inviteRequested = false,
+  onInviteRequestHandled,
+}: {
+  /**
+   * The Organization page's own Invite member button, asking this section to
+   * open its dialog. The page cannot open it directly: only the selected tab's
+   * panel is mounted, so the button selects this tab and the request is read
+   * here on the way in.
+   */
+  inviteRequested?: boolean;
+  /** Clears the request, so returning to this tab later does not reopen it. */
+  onInviteRequestHandled?: () => void;
+} = {}) {
   const client = useQueryClient();
   const scope = useMemberActionScope();
   const refusals = useInviteRefusals();
@@ -238,6 +280,15 @@ export function MembersInvitations() {
 
   const invitations = pending.data?.invitations ?? [];
   const atCap = refusals.capReached || invitations.length >= MAX_PENDING_INVITATIONS_PER_ORG;
+  /**
+   * Whether this caller can send one at all. Issuing needs the beta flag as well
+   * as the permission; withdrawing needs only the permission, so an org dropped
+   * from the beta keeps a list it can still revoke from.
+   */
+  const mayIssue = scope.mayInvite && !refusals.notEnabled;
+  const openInvite = () => setInviteOpen(true);
+
+  useRequestedInvite({ inviteRequested, onInviteRequestHandled, mayIssue, atCap, openInvite });
 
   // Both refusals leave the dialog with nothing it could do, so it goes and the
   // page states why. Closed once here rather than derived into `open`: a derived
@@ -249,35 +300,22 @@ export function MembersInvitations() {
 
   return (
     <section className="flex flex-col gap-4" data-testid="invitations-section">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Heading
-          tag="h2"
-          size="lg"
-          description="People who have been invited but haven't joined yet."
-        >
-          Invitations
-        </Heading>
+      {/* `md` with a tight description gap, the shape every tab panel labels
+          itself with: one step above body copy, so it leads its description
+          without reading as a second page title under the tabs.
 
-        {/* The form is a dialog rather than a permanently open block above the
-            list: inviting is the occasional job on this page and reading the
-            list is the frequent one, so the roster keeps the room.
-
-            Issuing needs the beta flag as well as the permission; withdrawing
-            needs only the permission. An org dropped from the beta keeps
-            invitations that are still redeemable, so the list below stays. */}
-        {scope.mayInvite && !refusals.notEnabled && (
-          <Button
-            id="invite-open-button"
-            variant="primary"
-            size="sm"
-            icon={PlusIcon}
-            disabled={atCap}
-            onClick={() => setInviteOpen(true)}
-          >
-            Invite member
-          </Button>
-        )}
-      </div>
+          No button beside it: sending an invitation is the page's own Add member
+          action now, in the header above the tabs, so it is reachable from every
+          tab rather than only this one. The dialog still lives here, because
+          this is the list it writes to. */}
+      <Heading
+        tag="h2"
+        size="md"
+        className="gap-0.5"
+        description="People who have been invited but haven't joined yet."
+      >
+        Invitations
+      </Heading>
 
       {scope.mayInvite && (
         <>
@@ -364,6 +402,7 @@ export function MembersInvitations() {
         hasData={pending.data !== undefined}
         errorMessage={pending.error?.message}
         mayManageTarget={scope.mayManageTarget}
+        onInvite={mayIssue ? openInvite : undefined}
         onRevoke={(invitation) => revoke.mutate(invitation)}
         onResend={(invitation) => create.mutate({ email: invitation.email, role: invitation.role })}
         pendingInviteIds={revoking.ids}
@@ -387,6 +426,7 @@ function InvitationsPanel({
   hasData,
   errorMessage,
   mayManageTarget,
+  onInvite,
   onRevoke,
   onResend,
   pendingInviteIds,
@@ -397,6 +437,8 @@ function InvitationsPanel({
   hasData: boolean;
   errorMessage?: string;
   mayManageTarget: (targetRole: string) => boolean;
+  /** Opens the invite dialog, when this caller may send one. Absent otherwise. */
+  onInvite?: () => void;
   onRevoke: (invitation: InvitationSummary) => void;
   onResend: (invitation: InvitationSummary) => void;
   pendingInviteIds: ReadonlySet<string>;
@@ -434,9 +476,32 @@ function InvitationsPanel({
     return (
       <div className="flex flex-col gap-3">
         {stale}
-        <p data-testid="invitations-empty" className="text-sm text-zinc-500">
-          Nothing outstanding. Invitations appear here until they are accepted or withdrawn.
-        </p>
+        {/* A card like every other empty list in the console, and the invitation
+            goes with the button: "Invite your first member" over a card a
+            ReadOnly caller cannot act on is a dead end, so that caller is told
+            what the list is for instead. */}
+        <div data-testid="invitations-empty">
+          <EmptyStateCard
+            icon={EnvelopeIcon}
+            title="No pending invitations"
+            description={
+              onInvite
+                ? 'Invite someone to this organization and they appear here until they accept.'
+                : 'Invitations appear here until they are accepted or withdrawn.'
+            }
+          >
+            {onInvite && (
+              <Button
+                id="invitations-empty-invite-button"
+                variant="primary"
+                icon={UserPlusIcon}
+                onClick={onInvite}
+              >
+                Invite member
+              </Button>
+            )}
+          </EmptyStateCard>
+        </div>
       </div>
     );
   }

@@ -15,6 +15,7 @@ import { AccessKeysTable } from './AccessKeysTable';
 import { Alert } from './Alert';
 import { Button } from './Button';
 import { ConfirmDialog } from './ConfirmDialog';
+import { Heading } from './Heading/Heading.js';
 import { Spinner } from './Spinner';
 
 /**
@@ -135,10 +136,17 @@ export function BucketAccessTab({
     <div className="mt-4">
       {/* API keys section */}
       <div className="mb-4 flex items-center justify-between">
-        <div>
-          <h2 className="text-base font-medium text-zinc-900">API keys</h2>
-          <p className="text-sm text-zinc-500">Keys with access to this bucket</p>
-        </div>
+        {/* `md` with a tight description gap: the shape every tab panel labels
+            itself with. One step above body copy, so the title leads its
+            description without competing with the page title above the tabs. */}
+        <Heading
+          tag="h2"
+          size="md"
+          className="gap-0.5"
+          description="Keys with access to this bucket"
+        >
+          API keys
+        </Heading>
         <RequirePermission permission="keys.create">
           <Button variant="ghost" size="sm" icon={PlusIcon} onClick={onCreateOpen}>
             Add key

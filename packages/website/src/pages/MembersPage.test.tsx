@@ -7,7 +7,7 @@ import type { MemberSummary, MeResponse } from '@filone/shared';
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
 import { queryKeys } from '../lib/query-client.js';
 import { seedPermissions } from '../lib/test-permissions.js';
-import { MembersPage } from './MembersPage.js';
+import { MembersRoster } from './MembersPage.js';
 
 // ---------------------------------------------------------------------------
 // Mocks — API client boundary
@@ -73,7 +73,7 @@ function renderPage(
     ...render(
       <QueryClientProvider client={client}>
         <ToastProvider>
-          <MembersPage />
+          <MembersRoster />
         </ToastProvider>
       </QueryClientProvider>,
     ),
@@ -131,8 +131,9 @@ describe('MembersPage', () => {
     expect(screen.getByText('Unnamed member')).toBeInTheDocument();
     expect(screen.getByText('user-3')).toBeInTheDocument();
 
+    // The count moved to the tab that names this panel, so the roster itself
+    // only answers for its rows. `OrganizationPage.test.tsx` covers the count.
     expect(screen.getAllByTestId('member-row')).toHaveLength(3);
-    expect(screen.getByText('3 members')).toBeInTheDocument();
   });
 
   it('marks the caller’s own row', async () => {
@@ -149,19 +150,6 @@ describe('MembersPage', () => {
     expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Actions for/ })).not.toBeInTheDocument();
-  });
-
-  it('offers the invitation form when the caller may invite and the org is in the beta', async () => {
-    renderPage(OrgRole.Owner);
-
-    expect(await screen.findByTestId('invitations-section')).toBeInTheDocument();
-  });
-
-  it('withholds the invitation form from a role that cannot manage members', async () => {
-    renderPage(OrgRole.Member);
-
-    expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
-    expect(screen.queryByTestId('invitations-section')).not.toBeInTheDocument();
   });
 
   it('lets an Admin manage members below them and not the Owner', async () => {
@@ -342,7 +330,7 @@ describe('MembersPage', () => {
     render(
       <QueryClientProvider client={client}>
         <ToastProvider>
-          <MembersPage />
+          <MembersRoster />
         </ToastProvider>
       </QueryClientProvider>,
     );
@@ -427,45 +415,6 @@ describe('MembersPage — a removal the roster is stale for', () => {
       await screen.findByText(/role changed while the removal was in flight/),
     ).toBeInTheDocument();
     await waitFor(() => expect(mockListMembers).toHaveBeenCalledTimes(2));
-  });
-});
-
-describe('MembersPage — the invitations section outside the beta', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    window.history.replaceState(null, '', '/members');
-  });
-
-  it('withholds the invitation form in an organization outside the beta and keeps the pending list', async () => {
-    mockListInvitations.mockResolvedValue({
-      invitations: [
-        {
-          inviteId: 'inv-1',
-          email: 'waiting@example.com',
-          role: OrgRole.Member,
-          invitedBy: 'user-1',
-          createdAt: '2026-08-01T00:00:00Z',
-          expiresAt: '2026-08-15T00:00:00Z',
-          status: 'pending',
-          expired: false,
-        },
-      ],
-    });
-    renderPage(OrgRole.Owner, [OWNER, ADMIN, PLAIN], { orgsBeta: false });
-
-    // The roster stays: a caller who belongs to a second org reaches this page
-    // in every one of them, and it is creating an invitation that the org's
-    // flag decides. Offering the form here would collect one 403 per attempt.
-    expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Email address')).not.toBeInTheDocument();
-
-    // The list and its revoke buttons stay on `members.manage`. Tokens issued
-    // before the flag was revoked are still redeemable, so taking this away
-    // would leave no way to withdraw them.
-    expect(await screen.findByTestId('invitations-section')).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Revoke invitation for waiting@example.com' }),
-    ).toBeInTheDocument();
   });
 });
 
@@ -622,5 +571,106 @@ describe('MembersPage — transferring the owner seat', () => {
 
     await screen.findByText('Ada Lovelace');
     expect(screen.queryByTestId('transfer-dialog')).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Search and role filter
+// ---------------------------------------------------------------------------
+
+/** A roster long enough for the table to offer its controls. */
+const LONG_ROSTER: MemberSummary[] = [
+  OWNER,
+  ADMIN,
+  PLAIN,
+  { userId: 'user-4', role: OrgRole.Member, name: 'Grete Hermann' },
+  { userId: 'user-5', role: OrgRole.ReadOnly, email: 'katherine@example.com' },
+];
+
+function searchBox() {
+  return screen.getByLabelText('Search members by name, email, or user ID');
+}
+
+function roleFilter() {
+  return screen.getByLabelText('Filter members by role');
+}
+
+describe('MembersPage search and role filter', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockListInvitations.mockResolvedValue({ invitations: [] });
+  });
+
+  it('leaves a short roster alone', async () => {
+    renderPage(OrgRole.Owner, [OWNER, ADMIN, PLAIN]);
+
+    await screen.findByText('Ada Lovelace');
+    expect(screen.queryByLabelText('Search members by name, email, or user ID')).toBeNull();
+    expect(screen.queryByLabelText('Filter members by role')).toBeNull();
+  });
+
+  it('narrows the roster by name, email, or user id', async () => {
+    renderPage(OrgRole.Owner, LONG_ROSTER);
+
+    await screen.findByText('Ada Lovelace');
+    expect(screen.getByText('5 members')).toBeInTheDocument();
+
+    fireEvent.change(searchBox(), { target: { value: 'lovelace' } });
+    expect(screen.getByText('Ada Lovelace')).toBeInTheDocument();
+    expect(screen.queryByText('Grete Hermann')).toBeNull();
+    expect(screen.getByText('1 of 5')).toBeInTheDocument();
+
+    // The row with neither a name nor an email is reachable by its id.
+    fireEvent.change(searchBox(), { target: { value: 'user-3' } });
+    expect(screen.getByText('user-3')).toBeInTheDocument();
+    expect(screen.queryByText('Ada Lovelace')).toBeNull();
+  });
+
+  it('narrows the roster by role, and combines the two', async () => {
+    renderPage(OrgRole.Owner, LONG_ROSTER);
+
+    await screen.findByText('Ada Lovelace');
+
+    fireEvent.change(roleFilter(), { target: { value: OrgRole.Member } });
+    expect(screen.getByText('Grete Hermann')).toBeInTheDocument();
+    expect(screen.queryByText('Ada Lovelace')).toBeNull();
+    expect(screen.getByText('2 of 5')).toBeInTheDocument();
+
+    fireEvent.change(searchBox(), { target: { value: 'hermann' } });
+    expect(screen.getByText('1 of 5')).toBeInTheDocument();
+  });
+
+  it('offers the roles the roster actually holds, and no filter when it holds one', async () => {
+    const { unmount } = renderPage(OrgRole.Owner, LONG_ROSTER);
+
+    await screen.findByText('Ada Lovelace');
+    const options = [...roleFilter().querySelectorAll('option')].map((o) => o.textContent);
+    // Every role, because this roster happens to hold all four.
+    expect(options).toEqual(['All roles', 'Owner', 'Admin', 'Member', 'Read only']);
+    unmount();
+
+    const oneRole = Array.from({ length: 5 }, (_, i) => ({
+      userId: `same-${i}`,
+      role: OrgRole.Member,
+    }));
+    renderPage(OrgRole.Owner, oneRole);
+
+    await screen.findByText('same-0');
+    expect(screen.getByLabelText('Search members by name, email, or user ID')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Filter members by role')).toBeNull();
+  });
+
+  it('says so when nothing matches, and clears back to the whole roster', async () => {
+    renderPage(OrgRole.Owner, LONG_ROSTER);
+
+    await screen.findByText('Ada Lovelace');
+    fireEvent.change(searchBox(), { target: { value: 'nobody' } });
+
+    expect(screen.getByText('No matching members')).toBeInTheDocument();
+    expect(screen.getByText('0 of 5')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
+    expect(screen.getByText('5 members')).toBeInTheDocument();
   });
 });

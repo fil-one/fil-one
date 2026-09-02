@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react';
+import { MagnifyingGlassIcon } from '@phosphor-icons/react/dist/ssr';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
 import type { ListMembersResponse, MemberSummary } from '@filone/shared';
 
 import { Alert } from '../components/Alert';
+import { Button } from '../components/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { EmptyStateCard } from '../components/EmptyStateCard';
 import { MembersTable } from '../components/MembersTable';
+import { MembersToolbar } from '../components/MembersToolbar';
 import { TransferOwnershipDialog } from '../components/TransferOwnershipDialog';
-import { PageLayout } from '../components/PageLayout.js';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
 import { errorCodeOf, errorMessageOf, errorStatusOf, getMe } from '../lib/api.js';
@@ -25,9 +28,14 @@ import {
   ROLE_LABELS,
   useMemberActionScope,
 } from '../lib/use-member-scope.js';
+import {
+  EMPTY_MEMBER_FILTERS,
+  filterMembers,
+  memberRoles,
+  shouldShowMemberControls,
+} from '../lib/member-table.js';
 import { usePendingRows } from '../lib/use-pending-rows.js';
 import type { PendingRows } from '../lib/use-pending-rows.js';
-import { MembersInvitations } from './MembersInvitations.js';
 
 // ---------------------------------------------------------------------------
 // Cache edits
@@ -429,7 +437,14 @@ function MemberDialogs({
 // Page
 // ---------------------------------------------------------------------------
 
-export function MembersPage() {
+/**
+ * The roster and everything that acts on it, without page chrome.
+ *
+ * A tab body rather than a page: `OrganizationPage` owns the heading and the
+ * tabs, and invitations are a tab of their own beside this one rather than a
+ * section under it.
+ */
+export function MembersRoster() {
   const { toast } = useToast();
   const client = useQueryClient();
   const scope = useMemberActionScope();
@@ -481,14 +496,7 @@ export function MembersPage() {
   }
 
   return (
-    <PageLayout
-      title="Members"
-      headingId="members-heading"
-      // Named rather than "this organization": the active org is stashed per
-      // tab, so two tabs can sit in different ones, and this is the page that
-      // removes people and hands over ownership.
-      description={`Everyone with access to ${me?.orgName || 'this organization'}.`}
-    >
+    <>
       <div className="flex flex-col gap-6">
         {notice.message && (
           <div data-testid="members-last-owner">
@@ -512,16 +520,6 @@ export function MembersPage() {
           onTransfer={setTransferTarget}
           pendingUserIds={pending.ids}
         />
-
-        {/* The section is `members.manage`, which is what the list and the
-            revoke endpoints ask. The beta flag gates only the form inside it:
-            revoking the flag stops new invitations, and the tokens already
-            issued stay redeemable — `accept-invitation` is never flagged — so
-            the pending list and its revoke buttons have to survive the revoke
-            or the only way to withdraw them goes with it. It arrives a moment
-            after the roster, which is what gating fail-closed on `/me`
-            costs. */}
-        {scope.mayManage && <MembersInvitations />}
       </div>
 
       <MemberDialogs
@@ -533,7 +531,7 @@ export function MembersPage() {
         onRemove={removal.mutateAsync}
         onTransfer={transfer.mutate}
       />
-    </PageLayout>
+    </>
   );
 }
 
@@ -624,20 +622,94 @@ function MembersPanel({
           />
         </div>
       )}
-      <p className="text-sm text-zinc-600">
-        {members.length === 1 ? '1 member' : `${members.length} members`}
-      </p>
-      <MembersTable
+      <MembersRosterList
         members={members}
-        currentUserId={scope.userId}
-        mayChangeRole={scope.mayChangeRole}
-        mayManageTarget={scope.mayManageTarget}
-        mayTransfer={scope.mayTransfer}
+        scope={scope}
         onChangeRole={onChangeRole}
         onRemove={onRemove}
         onTransfer={onTransfer}
         pendingUserIds={pendingUserIds}
       />
+    </div>
+  );
+}
+
+/**
+ * The roster, searchable and filterable by role once it is long enough to be
+ * worth it.
+ *
+ * The filters live here rather than in `MembersRoster` so they are dropped when
+ * the roster is: a caller who cannot read the list has nothing to narrow, and a
+ * filter surviving a reload of the tab would leave rows hidden by a control that
+ * is no longer on screen.
+ */
+function MembersRosterList({
+  members,
+  scope,
+  onChangeRole,
+  onRemove,
+  onTransfer,
+  pendingUserIds,
+}: {
+  members: MemberSummary[];
+  scope: ReturnType<typeof useMemberActionScope>;
+  onChangeRole?: (member: MemberSummary, role: OrgRole) => void;
+  onRemove?: (member: MemberSummary) => void;
+  onTransfer?: (member: MemberSummary) => void;
+  pendingUserIds: ReadonlySet<string>;
+}) {
+  const [filters, setFilters] = useState(EMPTY_MEMBER_FILTERS);
+
+  // Below the threshold the controls are gone, so the filters go with them: a
+  // roster that shrinks past it under an active search would otherwise hide rows
+  // with nothing on screen to explain why.
+  const showControls = shouldShowMemberControls(members.length);
+  const visible = showControls ? filterMembers(members, filters) : members;
+
+  // One block rather than a fragment: the panel above stacks its children with
+  // `gap-3`, and a fragment would put that gap between the toolbar and the table
+  // on top of the toolbar's own `mb-2.5` — 22px here against the buckets table's
+  // 10px, for the same pair of elements.
+  return (
+    <div>
+      {showControls && (
+        <MembersToolbar
+          filters={filters}
+          onChange={setFilters}
+          roles={memberRoles(members)}
+          matchCount={visible.length}
+          totalCount={members.length}
+        />
+      )}
+
+      {visible.length === 0 ? (
+        <EmptyStateCard
+          icon={MagnifyingGlassIcon}
+          iconColor="grey"
+          title="No matching members"
+          description="No member matches your search and filters."
+        >
+          <Button
+            id="members-clear-filters-button"
+            variant="ghost"
+            onClick={() => setFilters(EMPTY_MEMBER_FILTERS)}
+          >
+            Clear filters
+          </Button>
+        </EmptyStateCard>
+      ) : (
+        <MembersTable
+          members={visible}
+          currentUserId={scope.userId}
+          mayChangeRole={scope.mayChangeRole}
+          mayManageTarget={scope.mayManageTarget}
+          mayTransfer={scope.mayTransfer}
+          onChangeRole={onChangeRole}
+          onRemove={onRemove}
+          onTransfer={onTransfer}
+          pendingUserIds={pendingUserIds}
+        />
+      )}
     </div>
   );
 }
