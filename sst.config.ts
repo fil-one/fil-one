@@ -199,7 +199,15 @@ export default $config({
     // modify an audit entry and one that merely does not.
     //
     // TransactWriteItems needs the underlying PutItem on each item it writes,
-    // so commitAudited works unchanged. The index needs its own Query.
+    // so commitAudited works unchanged. No Scan: nothing reads this table
+    // without naming an org.
+    //
+    // Two statements because DynamoDB splits along the same line. A query may
+    // name the table or one of its indexes, so Query needs both ARNs; a write
+    // may only ever name the table, and granting PutItem on an index ARN would
+    // be a permission that can never match. The index is maintained by
+    // DynamoDB itself as the write lands, under its own permissions rather than
+    // the caller's.
     //
     // The one exception is the account deletion worker, which destroys an org's
     // partition and takes DeleteItem on top of this link.
@@ -207,8 +215,12 @@ export default $config({
       properties: { name: auditTable.name },
       include: [
         sst.aws.permission({
-          actions: ['dynamodb:PutItem', 'dynamodb:Query'],
+          actions: ['dynamodb:Query'],
           resources: [auditTable.arn, $interpolate`${auditTable.arn}/index/*`],
+        }),
+        sst.aws.permission({
+          actions: ['dynamodb:PutItem'],
+          resources: [auditTable.arn],
         }),
       ],
     });
