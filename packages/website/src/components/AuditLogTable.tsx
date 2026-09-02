@@ -6,7 +6,6 @@ import { Alert } from './Alert';
 import { Button } from './Button';
 import { EmptyStateCard } from './EmptyStateCard';
 import { StateCard } from './StateCard';
-import { Spinner } from './Spinner';
 import { Table } from './Table';
 import { TableSkeleton } from './Table/TableSkeleton.js';
 import { errorMessageOf } from '../lib/api.js';
@@ -137,31 +136,50 @@ export function AuditLogTable({
         </Table.Body>
       </Table>
 
-      {/* Present only when the API found a further event, so scrolling to the
-          end never asks for a page that comes back empty. */}
+      {/* Present only when the API found a further event, so neither scrolling
+          to the end nor pressing the button asks for a page that comes back
+          empty.
+
+          The button is not a fallback for the observer, it is the same action
+          reachable a second way. Scrolling is not something a keyboard reaches
+          reliably, and a list that only continues on scroll leaves the rest of
+          the history behind for anyone driving the page from the keyboard. It
+          also carries the loading and failed states, so there is one indicator
+          here rather than a spinner beside a control saying the same thing. */}
       {hasNextPage && onLoadMore && (
-        <div
-          ref={sentinel}
-          data-testid="audit-more"
-          className="flex min-h-9 items-center justify-center"
-        >
-          {isLoadingMore && <Spinner ariaLabel="Loading older events" size={20} />}
-          {/* The one case the reader has to drive: a page that failed. The
-              notice above says what went wrong. */}
-          {error !== undefined && !isLoadingMore && (
-            <Button
-              variant="tertiary"
-              size="sm"
-              onClick={onLoadMore}
-              data-testid="audit-load-more-retry"
-            >
-              Try again
-            </Button>
-          )}
+        <div ref={sentinel} data-testid="audit-more" className="flex justify-center">
+          <Button
+            variant="tertiary"
+            size="sm"
+            disabled={isLoadingMore}
+            onClick={onLoadMore}
+            data-testid="audit-load-more"
+          >
+            {loadMoreLabel({ isLoadingMore, failed: error !== undefined })}
+          </Button>
         </div>
       )}
     </div>
   );
+}
+
+/**
+ * What the control says, which is also the only place the three states are
+ * distinguished for the reader.
+ *
+ * "Try again" rather than "Load more" after a failure: the notice above says the
+ * rows are stale, and a control still reading "Load more" would suggest the
+ * history simply continues.
+ */
+function loadMoreLabel({
+  isLoadingMore,
+  failed,
+}: {
+  isLoadingMore: boolean;
+  failed: boolean;
+}): string {
+  if (isLoadingMore) return 'Loading';
+  return failed ? 'Try again' : 'Load more';
 }
 
 interface RowProps {

@@ -290,6 +290,56 @@ describe('OrganizationAuditTab', () => {
     await screen.findByTestId('audit-row-evt-1');
 
     expect(screen.queryByTestId('audit-more')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('audit-load-more')).not.toBeInTheDocument();
+  });
+
+  // Scrolling is not something a keyboard reaches reliably, so the same action
+  // is a control as well. Not a fallback for the observer — both are live.
+  it('loads the next page when the control is used instead of scrolling', async () => {
+    mockListAuditEvents
+      .mockResolvedValueOnce(page([auditEvent()], false, 'cursor-1'))
+      .mockResolvedValueOnce(page([auditEvent({ eventId: 'evt-2' })]));
+
+    renderTab();
+    fireEvent.click(await screen.findByTestId('audit-load-more'));
+
+    expect(await screen.findByTestId('audit-row-evt-2')).toBeInTheDocument();
+    expect(mockListAuditEvents).toHaveBeenLastCalledWith(expect.anything(), 'cursor-1');
+  });
+
+  it('names the control for what it does in each state', async () => {
+    mockListAuditEvents.mockResolvedValueOnce(page([auditEvent()], false, 'cursor-1'));
+
+    renderTab();
+
+    expect(await screen.findByTestId('audit-load-more')).toHaveTextContent('Load more');
+  });
+
+  // What keeps the control and the observer from both fetching the same page:
+  // one is disabled and the other held off for as long as a page is in flight.
+  it('holds the control while a page is in flight', async () => {
+    let deliver: (response: ListAuditEventsResponse) => void = () => {};
+    const inFlight = new Promise<ListAuditEventsResponse>((resolve) => {
+      deliver = resolve;
+    });
+    mockListAuditEvents
+      .mockResolvedValueOnce(page([auditEvent()], false, 'cursor-1'))
+      .mockReturnValueOnce(inFlight);
+
+    renderTab();
+    fireEvent.click(await screen.findByTestId('audit-load-more'));
+
+    await waitFor(() => expect(screen.getByTestId('audit-load-more')).toBeDisabled());
+    expect(screen.getByTestId('audit-load-more')).toHaveTextContent('Loading');
+    // Scrolling while it is in flight adds nothing.
+    await reachTheEnd();
+    expect(mockListAuditEvents).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      deliver(page([auditEvent({ eventId: 'evt-2' })]));
+    });
+
+    expect(await screen.findByTestId('audit-row-evt-2')).toBeInTheDocument();
   });
 
   it('asks for each page once, however far the reader scrolls', async () => {
@@ -319,7 +369,7 @@ describe('OrganizationAuditTab', () => {
     await reachTheEnd();
 
     expect(await screen.findByTestId('audit-stale')).toBeInTheDocument();
-    expect(screen.getByTestId('audit-load-more-retry')).toBeInTheDocument();
+    expect(screen.getByTestId('audit-load-more')).toHaveTextContent('Try again');
     // The rows that did arrive stay, rather than the page going blank.
     expect(screen.getByTestId('audit-row-evt-1')).toBeInTheDocument();
 
@@ -337,7 +387,7 @@ describe('OrganizationAuditTab', () => {
     renderTab();
     await screen.findByTestId('audit-row-evt-1');
     await reachTheEnd();
-    fireEvent.click(await screen.findByTestId('audit-load-more-retry'));
+    fireEvent.click(await screen.findByTestId('audit-load-more'));
 
     expect(await screen.findByTestId('audit-row-evt-2')).toBeInTheDocument();
     expect(screen.queryByTestId('audit-stale')).not.toBeInTheDocument();

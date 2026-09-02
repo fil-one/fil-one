@@ -114,21 +114,22 @@ export const Failed: Story = {
 };
 
 /**
- * Older events exist behind this page. There is no control: reaching the end of
- * the rows is what asks for the next page, so what sits below them is a sentinel
- * with nothing in it until a page is in flight.
+ * Older events exist behind this page. Reaching the end of the rows asks for the
+ * next one, and the control does the same thing for a reader who is not
+ * scrolling — the element it sits in is also the sentinel.
  */
 export const MorePagesAvailable: Story = {
   args: { hasNextPage: true, onLoadMore: () => {} },
 };
 
+/** Held, so neither a second press nor a scroll asks for the same page twice. */
 export const LoadingMorePages: Story = {
   args: { hasNextPage: true, isLoadingMore: true, onLoadMore: () => {} },
 };
 
 /**
- * A page failed. This is the one case the reader drives, because retrying on
- * scroll would put a failing request behind every wheel event.
+ * A page failed, so the control asks to be pressed rather than retrying on
+ * scroll, which would put a failing request behind every wheel event.
  */
 export const NextPageFailed: Story = {
   args: {
