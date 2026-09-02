@@ -3,9 +3,9 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { AUDIT_PAGE_SIZE } from '@filone/shared';
 import type { ErrorResponse, ListAuditEventsResponse } from '@filone/shared';
-import { queryAuditEvents } from '../lib/audit-query.js';
+import { queryAuditEvents, resolveWindow } from '../lib/audit-query.js';
 import { reportAuditQuery } from '../lib/audit-metrics.js';
-import { AuditFilterError, parseAuditFilters } from '../lib/audit-request.js';
+import { AuditFilterError, parseAuditCursor, parseAuditFilters } from '../lib/audit-request.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -31,8 +31,12 @@ export async function baseHandler(
   const { orgId } = getUserInfo(event);
 
   let filters;
+  let cursor;
   try {
     filters = parseAuditFilters(event.queryStringParameters ?? {});
+    // Checked against the window it will be read in, so a cursor kept across a
+    // filter change is refused here rather than becoming a 500 from DynamoDB.
+    cursor = parseAuditCursor(event.queryStringParameters?.cursor, resolveWindow(filters));
   } catch (err) {
     if (!(err instanceof AuditFilterError)) throw err;
     return new ResponseBuilder().status(400).body<ErrorResponse>({ message: err.message }).build();
@@ -43,7 +47,7 @@ export async function baseHandler(
     orgId,
     filters,
     limit: AUDIT_PAGE_SIZE,
-    ...(event.queryStringParameters?.cursor ? { cursor: event.queryStringParameters.cursor } : {}),
+    ...(cursor ? { cursor } : {}),
   });
 
   reportAuditQuery({

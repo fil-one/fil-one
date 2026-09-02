@@ -160,6 +160,47 @@ describe('GET /api/audit handler', () => {
     expect((await invoke({ from: '2026-08-01' })).statusCode).toBe(400);
   });
 
+  // The response body is the API contract, and the table and index layout are
+  // not part of it.
+  it('answers with no storage keys in the body', async () => {
+    ddbMock
+      .on(QueryCommand, { TableName: 'AuditTable' })
+      .resolves({ Items: [storedEvent('2026-08-10T00:00:00.000Z', 'evt-1')] });
+
+    const result = await invoke();
+
+    for (const key of ['pk', 'sk', 'gsi1pk', 'gsi1sk']) {
+      expect(result.body).not.toContain(`"${key}"`);
+    }
+    expect(body(result).events[0]).toMatchObject({ eventId: 'evt-1' });
+  });
+
+  // A client-supplied value that DynamoDB would refuse is the caller's mistake,
+  // not a server failure.
+  it.each([['!'], ['abc'], ['']])('refuses the malformed cursor %j with a 400', async (cursor) => {
+    const result = await invoke({ cursor });
+
+    expect(result.statusCode).toBe(400);
+    expect(JSON.parse(result.body!).message).toContain('cursor');
+  });
+
+  it('refuses a cursor from outside the window with a 400', async () => {
+    const stale = Buffer.from('2020-01-01T00:00:00.000Z#evt-1', 'utf8').toString('base64url');
+
+    const result = await invoke({ from: '2026-08-01T00:00:00.000Z', cursor: stale });
+
+    expect(result.statusCode).toBe(400);
+  });
+
+  it('resumes from a cursor it accepts', async () => {
+    const cursor = Buffer.from('2026-08-10T00:00:00.000Z#evt-1', 'utf8').toString('base64url');
+
+    const result = await invoke({ from: '2026-08-01T00:00:00.000Z', cursor });
+
+    expect(result.statusCode).toBe(200);
+    expect(auditQuery().ExclusiveStartKey).toBeDefined();
+  });
+
   it('reports a window clamped to retention, so the console can say so', async () => {
     const result = await invoke({ from: '2020-01-01T00:00:00.000Z' });
 

@@ -40,7 +40,7 @@ function auditTableName(): string {
 export interface AuditPage {
   events: AuditEvent[];
   window: AuditWindow;
-  /** Absent when the window ran out before the page filled. */
+  /** Absent when no further matching event exists in the window. */
   nextCursor?: string;
 }
 
@@ -93,8 +93,13 @@ export function resolveWindow(filters: Pick<AuditQueryFilters, 'from' | 'to'>): 
  * keeps going until the page is full or the window is exhausted, and answers
  * only then.
  *
- * A cursor comes back only when the page filled first. Its absence is the end
- * of the history rather than the end of a page.
+ * A cursor comes back only when a further matching event was actually seen, so
+ * following one always yields at least one event and its absence is the end of
+ * the history. That costs reading one event past the page: `LastEvaluatedKey`
+ * proves only that more items were *examined*, and under a filter the window can
+ * end on the page boundary, which would otherwise advertise a cursor whose page
+ * comes back empty. It is the same `+1` {@link queryAllAuditEvents} uses to tell
+ * reaching the export cap from landing on it exactly.
  */
 export async function queryAuditEvents({
   orgId,
@@ -108,12 +113,14 @@ export async function queryAuditEvents({
   cursor?: string;
 }): Promise<AuditQueryResult> {
   const window = resolveWindow(filters);
-  const events: AuditEvent[] = [];
   const cost: AuditQueryCost = { pages: 0, rows: 0 };
+  // The row travels beside the event because the cursor is built from the
+  // stored keys, which the event itself no longer carries.
+  const matched: { item: Record<string, AttributeValue>; event: AuditEvent }[] = [];
 
   let startKey = cursor ? decodeCursor(cursor, orgId, filters) : undefined;
 
-  do {
+  drain: do {
     const page = await getDynamoClient().send(
       new QueryCommand(queryInput({ orgId, filters, window, startKey })),
     );
@@ -121,19 +128,56 @@ export async function queryAuditEvents({
     cost.rows += page.Items?.length ?? 0;
 
     for (const item of page.Items ?? []) {
-      events.push(unmarshall(item) as AuditEvent);
-      if (events.length === limit) {
-        // Full, and the window may hold more. Resume from the event just taken
-        // rather than from the page's LastEvaluatedKey, which sits at the end of
-        // a page this response did not return in full.
-        return { events, window, nextCursor: encodeCursor(item, filters), cost };
-      }
+      matched.push({ item, event: publicEvent(item) });
+      if (matched.length > limit) break drain;
     }
 
     startKey = page.LastEvaluatedKey;
   } while (startKey);
 
+  const page = matched.slice(0, limit);
+  const events = page.map(({ event }) => event);
+  // The extra match is the proof another page exists; the cursor names the last
+  // event this response returned, and `ExclusiveStartKey` resumes after it.
+  if (matched.length > limit) {
+    const last = page[page.length - 1]!;
+    return { events, window, nextCursor: encodeCursor(last.item, filters), cost };
+  }
+
   return { events, window, cost };
+}
+
+/**
+ * One stored row as the API returns it.
+ *
+ * Named field by field rather than unmarshalled wholesale, for the reason
+ * `auditItem` gives on the way in (`audit.ts`): `pk`, `sk`, `gsi1pk`, and
+ * `gsi1sk` are where the row lives, not part of what it records, and they are
+ * absent from the envelope in shared. A bare `unmarshall` would put the table
+ * and index layout into every response and make the body disagree with
+ * `ListAuditEventsResponse`.
+ *
+ * The keys still have to arrive — the cursor is derived from them — so they are
+ * dropped here rather than projected away at the query.
+ */
+function publicEvent(item: Record<string, AttributeValue>): AuditEvent {
+  const row = unmarshall(item) as AuditEvent;
+  const { phase, correlationId, outcome } = row;
+
+  return {
+    eventId: row.eventId,
+    type: row.type,
+    actor: row.actor,
+    orgId: row.orgId,
+    subject: row.subject,
+    details: row.details,
+    createdAt: row.createdAt,
+    ttl: row.ttl,
+    ...(phase ? { phase, correlationId } : {}),
+    ...(outcome ? { outcome } : {}),
+    // Assembled from a union whose member TypeScript cannot pick without a
+    // literal `type`, the same cast `auditEvent` needs on the write side.
+  } as unknown as AuditEvent;
 }
 
 /**

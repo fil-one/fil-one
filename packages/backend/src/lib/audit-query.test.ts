@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
-import { marshall } from '@aws-sdk/util-dynamodb';
+import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { AUDIT_RETENTION_DAYS } from '@filone/shared';
 import type { AuditQueryFilters } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.js';
@@ -199,6 +199,94 @@ describe('queryAuditEvents', () => {
     expect(Buffer.from(page.nextCursor!, 'base64url').toString('utf8')).toBe(
       '2026-08-10T00:00:00.000Z#evt-1',
     );
+  });
+
+  // pk/sk/gsi1pk/gsi1sk are where the row lives, not part of what it records,
+  // and they are absent from the envelope in shared. A bare unmarshall would put
+  // the table and index layout into every response.
+  it('drops the storage keys from the events it returns', async () => {
+    ddbMock
+      .on(QueryCommand)
+      .resolves({ Items: [storedEvent('2026-08-10T00:00:00.000Z', 'evt-1')] });
+
+    const page = await queryAuditEvents({ orgId: ORG_ID, filters: WINDOW, limit: 50 });
+
+    expect(Object.keys(page.events[0]).sort()).toEqual([
+      'actor',
+      'createdAt',
+      'details',
+      'eventId',
+      'orgId',
+      'subject',
+      'ttl',
+      'type',
+    ]);
+  });
+
+  it('keeps the phase fields of a two-phase event', async () => {
+    const intent = marshall({
+      ...unmarshall(storedEvent('2026-08-10T00:00:00.000Z', 'evt-1', 'key.created')),
+      phase: 'intent',
+      correlationId: 'corr-1',
+    });
+    ddbMock.on(QueryCommand).resolves({ Items: [intent] });
+
+    const page = await queryAuditEvents({ orgId: ORG_ID, filters: WINDOW, limit: 50 });
+
+    expect(page.events[0]).toMatchObject({ phase: 'intent', correlationId: 'corr-1' });
+    expect(page.events[0]).not.toHaveProperty('gsi1pk');
+  });
+
+  // A cursor a client follows has to yield something. LastEvaluatedKey proves
+  // only that more items were examined, and under a filter the window can end
+  // exactly on the page boundary.
+  it('gives no cursor when the window holds exactly one page', async () => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        storedEvent('2026-08-10T00:00:00.000Z', 'evt-1'),
+        storedEvent('2026-08-09T00:00:00.000Z', 'evt-2'),
+      ],
+    });
+
+    const page = await queryAuditEvents({ orgId: ORG_ID, filters: WINDOW, limit: 2 });
+
+    expect(page.events).toHaveLength(2);
+    expect(page.nextCursor).toBeUndefined();
+  });
+
+  it('gives a cursor once a further match is actually seen', async () => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        storedEvent('2026-08-10T00:00:00.000Z', 'evt-1'),
+        storedEvent('2026-08-09T00:00:00.000Z', 'evt-2'),
+        storedEvent('2026-08-08T00:00:00.000Z', 'evt-3'),
+      ],
+    });
+
+    const page = await queryAuditEvents({ orgId: ORG_ID, filters: WINDOW, limit: 2 });
+
+    expect(page.events.map((event) => event.eventId)).toEqual(['evt-1', 'evt-2']);
+    // Names the last event returned, so ExclusiveStartKey resumes after it.
+    expect(Buffer.from(page.nextCursor!, 'base64url').toString('utf8')).toBe(
+      '2026-08-09T00:00:00.000Z#evt-2',
+    );
+  });
+
+  it('keeps draining pages until the extra match is found', async () => {
+    ddbMock
+      .on(QueryCommand)
+      .resolvesOnce({
+        Items: [storedEvent('2026-08-10T00:00:00.000Z', 'evt-1')],
+        LastEvaluatedKey: marshall({ pk: 'x', sk: 'y' }),
+      })
+      .resolvesOnce({ Items: [], LastEvaluatedKey: marshall({ pk: 'x', sk: 'z' }) })
+      .resolvesOnce({ Items: [storedEvent('2026-08-09T00:00:00.000Z', 'evt-2')] });
+
+    const page = await queryAuditEvents({ orgId: ORG_ID, filters: WINDOW, limit: 1 });
+
+    expect(page.events.map((event) => event.eventId)).toEqual(['evt-1']);
+    expect(page.cost.pages).toBe(3);
+    expect(page.nextCursor).toBeDefined();
   });
 
   it('gives no cursor when the window ran out before the page filled', async () => {

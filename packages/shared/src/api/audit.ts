@@ -92,8 +92,9 @@ export interface ListAuditEventsResponse {
   events: AuditEvent[];
   window: AuditWindow;
   /**
-   * Present only when the page filled before the window ran out. Its absence
-   * means the end of the history, not the end of a page.
+   * Where the next page resumes, present only when a further matching event was
+   * actually found. So following a cursor always yields at least one event, and
+   * its absence is the end of the history rather than the end of a page.
    */
   nextCursor?: string;
 }

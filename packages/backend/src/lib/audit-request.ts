@@ -1,5 +1,5 @@
 import { isAuditEventType } from '@filone/shared';
-import type { AuditQueryFilters } from '@filone/shared';
+import type { AuditQueryFilters, AuditWindow } from '@filone/shared';
 
 /** Both audit routes take the same filters; this is where they are read. */
 
@@ -61,6 +61,60 @@ export function parseAuditFilters(query: Record<string, string | undefined>): Au
     ...(actorId ? { actorId } : {}),
   };
 }
+
+/**
+ * The cursor a caller may resume from, checked before it can reach DynamoDB.
+ *
+ * A cursor is a client-supplied value that becomes an `ExclusiveStartKey`, and
+ * every malformed shape lands as a `ValidationException` the error middleware
+ * turns into a 500 — a server failure reported for a client mistake. Three ways
+ * it can be wrong, all of them refused here as a 400:
+ *
+ * - Not base64url. Node's decoder is permissive rather than strict: `!` decodes
+ *   to an empty buffer and `abc` to mojibake, so the round trip is the check.
+ * - Not a sort key. The stored form is `{createdAt}#{eventId}`, and anything
+ *   else either sorts outside the range or is not a key at all.
+ * - Outside the window. DynamoDB refuses a start key beyond the range its own
+ *   key condition names, which is what a cursor kept across a filter change is.
+ *
+ * Returns the cursor unchanged so the caller passes on what it was given; the
+ * decode back into a key belongs to the read path that builds the query.
+ */
+export function parseAuditCursor(
+  cursor: string | undefined,
+  window: Pick<AuditWindow, 'from' | 'to'>,
+): string | undefined {
+  if (cursor === undefined) return undefined;
+
+  const sortKey = Buffer.from(cursor, 'base64url').toString('utf8');
+  if (Buffer.from(sortKey, 'utf8').toString('base64url') !== cursor) {
+    throw new AuditFilterError(MALFORMED_CURSOR);
+  }
+
+  const separator = sortKey.indexOf('#');
+  if (separator === -1 || separator === sortKey.length - 1) {
+    throw new AuditFilterError(MALFORMED_CURSOR);
+  }
+
+  const createdAt = sortKey.slice(0, separator);
+  const parsed = new Date(createdAt);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString() !== createdAt) {
+    throw new AuditFilterError(MALFORMED_CURSOR);
+  }
+
+  // Compared as strings, the way the sort key itself is: the bounds carry no
+  // `#`, so a key at either instant still falls inside the range.
+  if (sortKey < window.from || sortKey > window.to) {
+    throw new AuditFilterError(
+      'That page is outside the range being read. Clear the cursor and read the range again.',
+    );
+  }
+
+  return cursor;
+}
+
+/** One message for every malformed shape: none of them is the caller's to fix. */
+const MALFORMED_CURSOR = 'The page cursor is not valid. Read the range again from the start.';
 
 /**
  * The canonical form `Date#toISOString` produces, which is what the sort key

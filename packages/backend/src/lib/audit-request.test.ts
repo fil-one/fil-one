@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { AuditFilterError, parseAuditFilters } from './audit-request.js';
+import { AuditFilterError, parseAuditCursor, parseAuditFilters } from './audit-request.js';
 
 const NOW = '2026-08-15T12:00:00.000Z';
 const USER_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
@@ -66,4 +66,52 @@ describe('parseAuditFilters', () => {
     expect(parseAuditFilters({})).not.toHaveProperty('eventType');
     expect(parseAuditFilters({})).not.toHaveProperty('actorId');
   });
+});
+
+describe('parseAuditCursor', () => {
+  const WINDOW = { from: '2026-08-01T00:00:00.000Z', to: '2026-08-15T12:00:00.000Z' };
+  const encode = (value: string) => Buffer.from(value, 'utf8').toString('base64url');
+
+  it('passes an absent cursor through', () => {
+    expect(parseAuditCursor(undefined, WINDOW)).toBeUndefined();
+  });
+
+  it('accepts a cursor inside the window and returns it unchanged', () => {
+    const cursor = encode('2026-08-10T00:00:00.000Z#evt-1');
+
+    expect(parseAuditCursor(cursor, WINDOW)).toBe(cursor);
+  });
+
+  it('accepts a cursor sitting exactly on a bound', () => {
+    // The bounds carry no `#`, so a key stamped at the instant still sorts in.
+    expect(() => parseAuditCursor(encode(`${WINDOW.from}#evt-1`), WINDOW)).not.toThrow();
+  });
+
+  // Node's base64url decoder is permissive: `!` yields an empty buffer and `abc`
+  // yields mojibake, either of which reaches DynamoDB as an invalid start key
+  // and comes back as a 500.
+  it.each([['!'], ['!!!'], ['abc'], ['']])('refuses %j, which is not a cursor', (cursor) => {
+    expect(() => parseAuditCursor(cursor, WINDOW)).toThrow(AuditFilterError);
+  });
+
+  it.each([
+    ['2026-08-10T00:00:00.000Z'],
+    ['2026-08-10T00:00:00.000Z#'],
+    ['#evt-1'],
+    ['2026-08-10#evt-1'],
+    ['not-a-date#evt-1'],
+  ])('refuses %j, which is not a sort key', (sortKey) => {
+    expect(() => parseAuditCursor(encode(sortKey), WINDOW)).toThrow(AuditFilterError);
+  });
+
+  // What a cursor kept across a filter change looks like. DynamoDB refuses a
+  // start key beyond the range its own key condition names.
+  it.each([['2026-07-01T00:00:00.000Z#evt-1'], ['2026-09-01T00:00:00.000Z#evt-1']])(
+    'refuses %j, which is outside the window',
+    (sortKey) => {
+      expect(() => parseAuditCursor(encode(sortKey), WINDOW)).toThrow(
+        'outside the range being read',
+      );
+    },
+  );
 });
