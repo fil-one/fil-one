@@ -3,7 +3,7 @@ import { MagnifyingGlassIcon } from '@phosphor-icons/react/dist/ssr';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 import { ApiErrorCode, OrgRole, roleNarrows } from '@filone/shared';
-import type { ListMembersResponse, MemberSummary } from '@filone/shared';
+import type { ListMembersResponse, MemberSummary, RevokedKeySummary } from '@filone/shared';
 
 import { Alert } from '../components/Alert';
 import { Button } from '../components/Button';
@@ -13,7 +13,7 @@ import { MembersToolbar } from '../components/MembersToolbar';
 import { MemberDialogs, useMemberDialogs } from '../components/MemberDialogs';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
-import { errorCodeOf, errorMessageOf, errorStatusOf, getMe } from '../lib/api.js';
+import { errorCodeOf, errorMessageOf, errorStatusOf, getMe, revokedKeysOf } from '../lib/api.js';
 import {
   listMembers,
   removeMember,
@@ -132,21 +132,49 @@ function useRoleChange(ctx: MutationContext) {
     onMutate: ({ member }: RoleChange) => {
       ctx.pending.add(member.userId);
     },
-    onSuccess: (_result, { member, role }) => {
+    onSuccess: (result, { member, role }) => {
       patchRosterRole(ctx.client, member.userId, role);
       settleAfterChange(ctx.client, member.userId, ctx.selfUserId);
       ctx.notice.clear();
-      ctx.toastSuccess(`${memberName(member)} is now ${ROLE_LABELS[role]}`);
+      ctx.toastSuccess(
+        `${memberName(member)} is now ${ROLE_LABELS[role]}${revokedSuffix(result.revokedKeys)}`,
+      );
+      // A key the vendor kept is still live and nothing here will try again, so
+      // it is said separately rather than folded into the success line.
+      if (result.failedKeys?.length) {
+        ctx.toastError(
+          `${namedKeys(result.failedKeys)} could not be revoked and still works. Revoke it from Access keys.`,
+        );
+      }
     },
     onError: (err) => {
-      const remedy = 'That change would leave the organization without an owner.';
+      // The keys named here are already gone whatever the role now says, so the
+      // refusal has to carry them: a message about the role alone is half the
+      // answer.
+      const revoked = revokedKeysOf(err);
+      const remedy = `That change would leave the organization without an owner.${revokedSuffix(revoked)}`;
       if (ctx.notice.capture(err, remedy)) return;
-      ctx.toastError(errorMessageOf(err, 'Failed to change that role'));
+      ctx.toastError(
+        `${errorMessageOf(err, 'Failed to change that role')}${revokedSuffix(revoked)}`,
+      );
     },
     onSettled: (_result, _err, { member }) => {
       ctx.pending.remove(member.userId);
     },
   });
+}
+
+/** Up to three key names, then a count, so a toast stays one line. */
+function namedKeys(keys: readonly RevokedKeySummary[]): string {
+  const named = keys.slice(0, 3).map((key) => key.keyName);
+  const rest = keys.length - named.length;
+  return rest > 0 ? `${named.join(', ')} and ${rest} more` : named.join(', ');
+}
+
+/** What a role change took away, appended to whatever it is being said beside. */
+function revokedSuffix(keys: readonly RevokedKeySummary[] | undefined): string {
+  if (!keys?.length) return '';
+  return ` ${keys.length === 1 ? 'This key was' : `These ${keys.length} keys were`} revoked: ${namedKeys(keys)}.`;
 }
 
 function useMemberRemoval(ctx: MutationContext) {

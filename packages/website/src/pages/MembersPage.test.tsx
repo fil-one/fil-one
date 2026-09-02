@@ -463,6 +463,81 @@ describe('the role-narrowing confirmation', () => {
     ).toBeInTheDocument();
   });
 
+  it('holds the confirm button down while the change is in flight', async () => {
+    // A bespoke dialog has to hold this itself: two clicks would otherwise be
+    // two revocations.
+    const finish = heldCalls(mockUpdateRole);
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText('Role for grace@example.com'), {
+      target: { value: OrgRole.Member },
+    });
+    await confirmNarrowing();
+
+    const confirm = screen.getByRole('button', { name: /^Chang/ });
+    await waitFor(() => expect(confirm).toBeDisabled());
+    fireEvent.click(confirm);
+    expect(mockUpdateRole).toHaveBeenCalledTimes(1);
+
+    await act(async () => finish());
+  });
+
+  it('closes once the change lands', async () => {
+    mockUpdateRole.mockResolvedValue({
+      userId: 'user-2',
+      role: OrgRole.Member,
+      previousRole: OrgRole.Admin,
+    });
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText('Role for grace@example.com'), {
+      target: { value: OrgRole.Member },
+    });
+    await confirmNarrowing();
+
+    await waitFor(() => expect(screen.queryByText('Change this role?')).not.toBeInTheDocument());
+  });
+
+  it('stays open when the change is refused, beside what it was about to do', async () => {
+    mockUpdateRole.mockRejectedValue(apiError('That member’s role changed', 409));
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText('Role for grace@example.com'), {
+      target: { value: OrgRole.Member },
+    });
+    await confirmNarrowing();
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Chang/ })).toBeEnabled());
+    expect(screen.getByText('Change this role?')).toBeInTheDocument();
+  });
+
+  it('names the keys already revoked when the role write then failed', async () => {
+    // Those credentials are gone whatever the role now says.
+    mockUpdateRole.mockRejectedValue(
+      Object.assign(new Error('That member’s role changed while you were editing it.'), {
+        status: 409,
+        revokedKeys: [
+          {
+            id: 'key-1',
+            keyName: 'nightly backup',
+            region: 'us-east-1',
+            createdAt: '2026-02-01T00:00:00.000Z',
+            reason: 'exceeds_role',
+            excess: ['DeleteBucket'],
+          },
+        ],
+      }),
+    );
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText('Role for grace@example.com'), {
+      target: { value: OrgRole.Member },
+    });
+    await confirmNarrowing();
+
+    expect(await screen.findByText(/This key was revoked: nightly backup/)).toBeInTheDocument();
+  });
+
   it('still offers the change when the preview cannot be read', async () => {
     mockRoleChangePreview.mockRejectedValue(apiError('Preview unavailable', 503));
     mockUpdateRole.mockResolvedValue({

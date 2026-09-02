@@ -82,6 +82,13 @@ export interface UpdateMemberRoleResponse {
    * a key minted since the preview and omit one revoked since.
    */
   revokedKeys?: RevokedKeySummary[];
+  /**
+   * A key the storage vendor refused to delete after the role was already
+   * written. The role change stands and the credential is still live, and this
+   * request will not try again: asking for the role the member now holds does
+   * nothing. Somebody holding `keys.manage_all` has to revoke it.
+   */
+  failedKeys?: RevokedKeySummary[];
 }
 
 /**

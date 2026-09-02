@@ -106,10 +106,28 @@ function RoleNarrowingPrompt({
   target: RoleChange | null;
   self: boolean;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: (change: RoleChange) => Promise<unknown>;
 }) {
   // Kept through the closing transition, so the copy does not blank mid-fade.
   const change = useClosingCopy(target);
+  // `ConfirmDialog` holds this state internally; a dialog built by hand has to
+  // hold it itself, or a second click sends a second destructive request and a
+  // successful change leaves the dialog naming a role nobody holds any more.
+  const [pending, setPending] = useState(false);
+
+  async function confirm() {
+    if (!target) return;
+    setPending(true);
+    try {
+      await onConfirm(target);
+      onClose();
+    } catch {
+      // Rendered by the mutation's onError, and the dialog stays open so the
+      // reason is read beside what it was about to do.
+    } finally {
+      setPending(false);
+    }
+  }
   const preview = useQuery({
     queryKey: change
       ? queryKeys.roleChangePreview(change.member.userId, change.role)
@@ -133,8 +151,9 @@ function RoleNarrowingPrompt({
       unattributedCount={preview.data?.unattributedCount ?? 0}
       loading={preview.isPending}
       error={preview.isError}
+      pending={pending}
       onClose={onClose}
-      onConfirm={onConfirm}
+      onConfirm={() => void confirm()}
     />
   );
 }
@@ -183,7 +202,7 @@ export function MemberDialogs({
         target={targets.narrowing}
         self={targets.narrowing?.member.userId === selfUserId}
         onClose={close.narrowing}
-        onConfirm={() => runQuietly(targets.narrowing, onChangeRole)}
+        onConfirm={onChangeRole}
       />
 
       <ConfirmDialog

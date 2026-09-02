@@ -120,8 +120,17 @@ export async function baseHandler(
   // key is touched, since a revocation cannot be undone. The last-Owner guard
   // is the decrement's own condition, so it is read here rather than waited
   // for: a sole Owner demoting themselves must be refused with their keys
-  // intact.
-  if (delta === 'decrement' && (await readOwnerCount(orgId)) === 1) return lastOwnerResponse();
+  // intact. A counter that cannot be read refuses too. The decrement conditions
+  // on `ownerCount`, so a missing META row cancels the transaction just the
+  // same, and the change would end with the role unchanged and the keys gone.
+  if (delta === 'decrement') {
+    const owners = await readOwnerCount(orgId);
+    if (owners === 1) return lastOwnerResponse();
+    if (owners === undefined) {
+      console.error('[update-member-role] ownerCount missing — role change refused', { orgId });
+      return ownerCountUnavailableResponse();
+    }
+  }
 
   return await applyRoleChange({
     orgId,
@@ -350,7 +359,23 @@ async function runSecondPass({
     reason: 'role_narrowing',
   });
 
+  // The role is already written, and the same PATCH will not run this pass
+  // again: it answers a request for the role the member now holds without
+  // touching anything. A key the vendor refused here therefore has no automatic
+  // retry, and saying so is the whole remedy — an admin holding
+  // `keys.manage_all` revokes it from the keys page.
+  if (second.failed) {
+    console.error('[update-member-role] A key survived the narrowing', {
+      orgId,
+      targetUserId,
+      keyIdSuffix: second.failed.key.accessKeyIdSuffix,
+    });
+  }
+
   const revokedKeys = [...alreadyRevoked, ...second.revoked];
+  // Only what actually stopped working. A key the vendor kept is still live,
+  // and telling the member it went would send them looking for a fault that is
+  // on our side.
   await sendKeyRevocationEmail({
     userId: targetUserId,
     orgName: orgProfile?.name?.S ?? 'your organization',
@@ -365,6 +390,7 @@ async function runSecondPass({
     role: toRole,
     previousRole: fromRole,
     ...(revokedKeys.length > 0 ? { revokedKeys } : {}),
+    ...(second.failed ? { failedKeys: [second.failed.key] } : {}),
   });
 }
 
