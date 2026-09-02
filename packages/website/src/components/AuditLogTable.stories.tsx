@@ -113,13 +113,29 @@ export const Failed: Story = {
   args: { events: undefined, error: new Error('The service is temporarily unavailable.') },
 };
 
-/** Older events exist behind this page, so the control has something to load. */
+/**
+ * Older events exist behind this page. There is no control: reaching the end of
+ * the rows is what asks for the next page, so what sits below them is a sentinel
+ * with nothing in it until a page is in flight.
+ */
 export const MorePagesAvailable: Story = {
   args: { hasNextPage: true, onLoadMore: () => {} },
 };
 
 export const LoadingMorePages: Story = {
   args: { hasNextPage: true, isLoadingMore: true, onLoadMore: () => {} },
+};
+
+/**
+ * A page failed. This is the one case the reader drives, because retrying on
+ * scroll would put a failing request behind every wheel event.
+ */
+export const NextPageFailed: Story = {
+  args: {
+    hasNextPage: true,
+    onLoadMore: () => {},
+    error: new Error('the request did not complete'),
+  },
 };
 
 /**

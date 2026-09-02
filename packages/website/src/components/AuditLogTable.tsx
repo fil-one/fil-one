@@ -6,10 +6,12 @@ import { Alert } from './Alert';
 import { Button } from './Button';
 import { EmptyStateCard } from './EmptyStateCard';
 import { StateCard } from './StateCard';
+import { Spinner } from './Spinner';
 import { Table } from './Table';
 import { TableSkeleton } from './Table/TableSkeleton.js';
 import { errorMessageOf } from '../lib/api.js';
 import { formatDateTime } from '../lib/time.js';
+import { useInView } from '../lib/use-in-view.js';
 
 /**
  * The columns, shared with the loading skeleton so the placeholder drops the
@@ -37,6 +39,7 @@ export interface AuditLogTableProps {
   /** Another page of older events exists behind this one. */
   hasNextPage?: boolean;
   isLoadingMore?: boolean;
+  /** Asked for as the reader reaches the end of the rows. */
   onLoadMore?: () => void;
 }
 
@@ -58,6 +61,14 @@ export function AuditLogTable({
   isLoadingMore = false,
   onLoadMore,
 }: AuditLogTableProps) {
+  // Continues on scroll rather than on a click: an auditor looking for one old
+  // event should not have to ask for each page of the way there. Held off while
+  // a page is in flight, and after a failure — retrying on scroll would put a
+  // failing request behind every wheel event, so that case asks instead.
+  const sentinel = useInView<HTMLDivElement>(() => onLoadMore?.(), {
+    enabled: hasNextPage && !isLoadingMore && error === undefined && onLoadMore !== undefined,
+  });
+
   if (isPending) {
     return <TableSkeleton columns={COLUMNS} aria-label="Loading the audit log" />;
   }
@@ -126,19 +137,27 @@ export function AuditLogTable({
         </Table.Body>
       </Table>
 
-      {/* Offered only when the API found a further event, so this never loads an
-          empty page. */}
+      {/* Present only when the API found a further event, so scrolling to the
+          end never asks for a page that comes back empty. */}
       {hasNextPage && onLoadMore && (
-        <div className="flex justify-center">
-          <Button
-            variant="tertiary"
-            size="sm"
-            disabled={isLoadingMore}
-            onClick={onLoadMore}
-            data-testid="audit-load-more"
-          >
-            {isLoadingMore ? 'Loading' : 'Load more'}
-          </Button>
+        <div
+          ref={sentinel}
+          data-testid="audit-more"
+          className="flex min-h-9 items-center justify-center"
+        >
+          {isLoadingMore && <Spinner ariaLabel="Loading older events" size={20} />}
+          {/* The one case the reader has to drive: a page that failed. The
+              notice above says what went wrong. */}
+          {error !== undefined && !isLoadingMore && (
+            <Button
+              variant="tertiary"
+              size="sm"
+              onClick={onLoadMore}
+              data-testid="audit-load-more-retry"
+            >
+              Try again
+            </Button>
+          )}
         </div>
       )}
     </div>

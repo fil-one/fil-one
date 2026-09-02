@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole } from '@filone/shared';
 import type { AuditEvent, ListAuditEventsResponse, MemberSummary } from '@filone/shared';
@@ -32,6 +32,57 @@ vi.mock('../lib/download.js', () => ({
   downloadBlob: (...args: unknown[]) => mockDownloadBlob(...args),
   downloadText: vi.fn(),
 }));
+
+/**
+ * jsdom implements no `IntersectionObserver`, and the table continues on scroll.
+ * A no-op stand-in would leave the paging untestable, so this one keeps the live
+ * observers and lets a test put the sentinel on screen.
+ *
+ * `disconnect` really removes the entry, so a sentinel the component has
+ * unmounted cannot be scrolled into view a second time.
+ */
+interface LiveObserver {
+  callback: IntersectionObserverCallback;
+  observer: IntersectionObserver;
+}
+
+const liveObservers = new Set<LiveObserver>();
+
+class TestIntersectionObserver {
+  private readonly entry: LiveObserver;
+
+  constructor(callback: IntersectionObserverCallback) {
+    this.entry = { callback, observer: this as unknown as IntersectionObserver };
+  }
+
+  observe(): void {
+    liveObservers.add(this.entry);
+  }
+
+  unobserve(): void {
+    liveObservers.delete(this.entry);
+  }
+
+  disconnect(): void {
+    liveObservers.delete(this.entry);
+  }
+
+  takeRecords(): IntersectionObserverEntry[] {
+    return [];
+  }
+}
+
+globalThis.IntersectionObserver =
+  TestIntersectionObserver as unknown as typeof IntersectionObserver;
+
+/** Scroll to the end of the rows, which is what asks for the next page. */
+async function reachTheEnd() {
+  await act(async () => {
+    for (const { callback, observer } of [...liveObservers]) {
+      callback([{ isIntersecting: true } as IntersectionObserverEntry], observer);
+    }
+  });
+}
 
 const MEMBERS: MemberSummary[] = [
   { userId: 'user-1', role: OrgRole.Owner, name: 'Ada Lovelace', email: 'ada@example.com' },
@@ -81,6 +132,7 @@ function lastFilters() {
 describe('OrganizationAuditTab', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    liveObservers.clear();
     mockListMembers.mockResolvedValue({ members: MEMBERS });
     mockListAuditEvents.mockResolvedValue(page([auditEvent()]));
   });
@@ -204,14 +256,15 @@ describe('OrganizationAuditTab', () => {
 
   // The org's history runs past one page, and reaching an old event is the whole
   // task. The API offers a cursor only when a further event exists, so the
-  // control appears exactly when there is something behind it.
-  it('loads the next page of history on request', async () => {
+  // sentinel is there exactly when there is something behind it.
+  it('loads the next page as the reader reaches the end', async () => {
     mockListAuditEvents
       .mockResolvedValueOnce(page([auditEvent()], false, 'cursor-1'))
       .mockResolvedValueOnce(page([auditEvent({ eventId: 'evt-2', subject: 'user:user-9' })]));
 
     renderTab();
-    fireEvent.click(await screen.findByTestId('audit-load-more'));
+    await screen.findByTestId('audit-row-evt-1');
+    await reachTheEnd();
 
     expect(await screen.findByTestId('audit-row-evt-2')).toBeInTheDocument();
     // Appended, not replaced: the first page stays on screen.
@@ -219,38 +272,75 @@ describe('OrganizationAuditTab', () => {
     expect(mockListAuditEvents).toHaveBeenLastCalledWith(expect.anything(), 'cursor-1');
   });
 
-  it('stops offering more once the history ends', async () => {
+  it('stops looking for more once the history ends', async () => {
     mockListAuditEvents
       .mockResolvedValueOnce(page([auditEvent()], false, 'cursor-1'))
       .mockResolvedValueOnce(page([auditEvent({ eventId: 'evt-2' })]));
 
     renderTab();
-    fireEvent.click(await screen.findByTestId('audit-load-more'));
+    await screen.findByTestId('audit-row-evt-1');
+    await reachTheEnd();
     await screen.findByTestId('audit-row-evt-2');
 
-    expect(screen.queryByTestId('audit-load-more')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('audit-more')).not.toBeInTheDocument();
   });
 
-  it('offers nothing more when the first page is the whole history', async () => {
+  it('looks for nothing more when the first page is the whole history', async () => {
     renderTab();
     await screen.findByTestId('audit-row-evt-1');
 
-    expect(screen.queryByTestId('audit-load-more')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('audit-more')).not.toBeInTheDocument();
   });
 
-  // Reading stale history as current is the mistake this surface can least
-  // afford, and TanStack Query keeps the previous rows when a refetch fails.
-  it('says so when a refetch failed but rows are still on screen', async () => {
+  it('asks for each page once, however far the reader scrolls', async () => {
+    mockListAuditEvents
+      .mockResolvedValueOnce(page([auditEvent()], false, 'cursor-1'))
+      .mockResolvedValueOnce(page([auditEvent({ eventId: 'evt-2' })], false, 'cursor-2'));
+
+    renderTab();
+    await screen.findByTestId('audit-row-evt-1');
+    await reachTheEnd();
+    await screen.findByTestId('audit-row-evt-2');
+
+    // Two reads: the first page and the one the scroll asked for. A sentinel
+    // still on screen must not re-ask for a page already in hand.
+    expect(mockListAuditEvents).toHaveBeenCalledTimes(2);
+  });
+
+  // Retrying on scroll would put a failing request behind every wheel event, so
+  // a failed page is the one case the reader drives.
+  it('asks rather than retries when a page fails, and says the rows are stale', async () => {
     mockListAuditEvents
       .mockResolvedValueOnce(page([auditEvent()], false, 'cursor-1'))
       .mockRejectedValueOnce(new Error('Service unavailable'));
 
     renderTab();
-    fireEvent.click(await screen.findByTestId('audit-load-more'));
+    await screen.findByTestId('audit-row-evt-1');
+    await reachTheEnd();
 
     expect(await screen.findByTestId('audit-stale')).toBeInTheDocument();
+    expect(screen.getByTestId('audit-load-more-retry')).toBeInTheDocument();
     // The rows that did arrive stay, rather than the page going blank.
     expect(screen.getByTestId('audit-row-evt-1')).toBeInTheDocument();
+
+    // And scrolling again changes nothing until it is asked for.
+    await reachTheEnd();
+    expect(mockListAuditEvents).toHaveBeenCalledTimes(2);
+  });
+
+  it('takes the failed page again when asked', async () => {
+    mockListAuditEvents
+      .mockResolvedValueOnce(page([auditEvent()], false, 'cursor-1'))
+      .mockRejectedValueOnce(new Error('Service unavailable'))
+      .mockResolvedValueOnce(page([auditEvent({ eventId: 'evt-2' })]));
+
+    renderTab();
+    await screen.findByTestId('audit-row-evt-1');
+    await reachTheEnd();
+    fireEvent.click(await screen.findByTestId('audit-load-more-retry'));
+
+    expect(await screen.findByTestId('audit-row-evt-2')).toBeInTheDocument();
+    expect(screen.queryByTestId('audit-stale')).not.toBeInTheDocument();
   });
 
   it('says nothing about staleness while the history is healthy', async () => {
