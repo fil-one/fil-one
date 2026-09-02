@@ -52,6 +52,7 @@ import { ToastProvider } from '../components/Toast/ToastProvider.js';
 const ME: MeResponse = {
   orgId: 'org-1',
   orgName: 'Acme',
+  nameConfirmed: true,
   emailVerified: true,
   email: 'user@example.com',
   name: 'User',

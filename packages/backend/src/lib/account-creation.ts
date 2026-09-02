@@ -232,6 +232,9 @@ function accountRows({
           pk: { S: `ORG#${orgId}` },
           sk: { S: 'PROFILE' },
           name: { S: orgName },
+          // The name here is derived, not chosen. False sends the account
+          // through the naming step; `PATCH /api/org` flips it.
+          nameConfirmed: { BOOL: false },
           auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
           createdBy: { S: userId },
           createdAt: { S: now },

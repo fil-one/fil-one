@@ -188,7 +188,9 @@ async function renameOrg({
         Update: {
           TableName: Resource.UserInfoTable.name,
           Key: key,
-          UpdateExpression: 'SET #name = :name',
+          // Naming it is what confirms it, so the flag rides the same write
+          // rather than needing a request field of its own.
+          UpdateExpression: 'SET #name = :name, nameConfirmed = :confirmed',
           // An org created before naming shipped has no name to match, so the
           // two cases condition on absence and on the value respectively.
           ConditionExpression:
@@ -198,6 +200,7 @@ async function renameOrg({
           ExpressionAttributeNames: { '#name': 'name' },
           ExpressionAttributeValues: {
             ':name': { S: name },
+            ':confirmed': { BOOL: true },
             ...(previousName === undefined ? {} : { ':previousName': { S: previousName } }),
           },
         },
