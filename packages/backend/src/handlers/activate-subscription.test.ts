@@ -112,7 +112,8 @@ function mockSubscriptionResponse(overrides?: Record<string, unknown>) {
       id: 'pm_test_789',
       card: { last4: '4242', brand: 'visa', exp_month: 12, exp_year: 2027 },
     },
-    items: { data: [{ current_period_end: 1701209600 }] },
+    // Both ends of the period, the way Stripe returns them.
+    items: { data: [{ current_period_start: 1698531200, current_period_end: 1701209600 }] },
     ...overrides,
   };
 }

@@ -87,6 +87,12 @@ export function keyAttribution({
 export interface StripePriceDetails {
   id: string;
   product?: string;
+  /**
+   * The product's display name, cached alongside the price so a Stripe outage
+   * does not cost the customer the name of their own plan. Snake_case with the
+   * rest of this interface, which mirrors Stripe's field names.
+   */
+  product_name?: string;
   currency?: string;
   billing_scheme?: 'per_unit' | 'tiered';
   tiers_mode?: 'graduated' | 'volume' | null;

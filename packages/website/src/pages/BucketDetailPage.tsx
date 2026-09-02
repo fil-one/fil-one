@@ -484,17 +484,22 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               array: "Objects (0)" on a bucket that turns out to hold hundreds is
               a worse answer than no number yet, and it is the same rule the API
               Keys tab beside it already follows. */}
-          <Tab testId="bucket-objects-tab">
+          <Tab
+            testId="bucket-objects-tab"
+            count={
+              objectsQuery.isPending
+                ? undefined
+                : displayObjectCount(analyticsData, versions, isTruncated)
+            }
+          >
             Objects
-            {!objectsQuery.isPending &&
-              ` (${displayObjectCount(analyticsData, versions, isTruncated).toLocaleString()})`}
           </Tab>
           {/* Absent, not empty, for a role that cannot list keys: an "API Keys
               (0)" tab reads as an org with no keys rather than a view this
               caller does not get. */}
           {mayListKeys && (
-            <Tab testId="bucket-keys-tab">
-              API Keys{!accessKeysLoading && ` (${accessKeys.length.toLocaleString()})`}
+            <Tab testId="bucket-keys-tab" count={accessKeysLoading ? undefined : accessKeys.length}>
+              API Keys
             </Tab>
           )}
         </TabList>

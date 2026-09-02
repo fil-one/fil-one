@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ApiErrorCode, MAX_PENDING_INVITATIONS_PER_ORG, OrgRole } from '@filone/shared';
 import type { InvitationSummary, MeResponse } from '@filone/shared';
@@ -41,6 +42,28 @@ function invitation(over: Partial<InvitationSummary> = {}): InvitationSummary {
   };
 }
 
+/**
+ * Asks the section to open its dialog the way the Organization page's Add member
+ * button does. Set by the harness below on every render, because the section has
+ * no trigger of its own once the list has rows: the button lives in the page
+ * header, above the tabs.
+ */
+let requestInviteFromPage: () => void = () => {
+  throw new Error('renderSection has not run yet');
+};
+
+/** The page's half of the invite request: the flag, and clearing it once read. */
+function InvitationsHarness() {
+  const [requested, setRequested] = useState(false);
+  requestInviteFromPage = () => setRequested(true);
+  return (
+    <MembersInvitations
+      inviteRequested={requested}
+      onInviteRequestHandled={() => setRequested(false)}
+    />
+  );
+}
+
 function renderSection(
   role = OrgRole.Owner,
   invitations: InvitationSummary[] = [],
@@ -54,11 +77,18 @@ function renderSection(
     ...render(
       <QueryClientProvider client={client}>
         <ToastProvider>
-          <MembersInvitations />
+          <InvitationsHarness />
         </ToastProvider>
       </QueryClientProvider>,
     ),
   };
+}
+
+/** Ask for the dialog the way the page's Add member button does. */
+function requestInvite() {
+  act(() => {
+    requestInviteFromPage();
+  });
 }
 
 /** An error shaped the way `apiRequest` throws one. */
@@ -66,9 +96,16 @@ function apiError(message: string, status: number, code?: string): Error {
   return Object.assign(new Error(message), { status, code });
 }
 
-/** Open the invite dialog, which is where the form lives. */
+/**
+ * Open the invite dialog, which is where the form lives. Through the empty
+ * state's own button when the list has none, and otherwise the way the page
+ * header's Add member button does.
+ */
 async function openInviteDialog() {
-  fireEvent.click(await screen.findByRole('button', { name: 'Invite member' }));
+  const card = screen.queryByTestId('invitations-empty');
+  const cta = card && within(card).queryByRole('button', { name: 'Invite member' });
+  if (cta) fireEvent.click(cta);
+  else requestInvite();
   return screen.findByTestId('invite-form');
 }
 
@@ -100,9 +137,52 @@ describe('MembersInvitations', () => {
     vi.clearAllMocks();
   });
 
-  it('says nothing is outstanding when nothing is', async () => {
+  it('says nothing is outstanding when nothing is, and offers the invite', async () => {
     renderSection();
+
     expect(await screen.findByTestId('invitations-empty')).toBeInTheDocument();
+    expect(screen.getByText('No pending invitations')).toBeInTheDocument();
+
+    // The card's own call to action opens the same dialog the header button does.
+    const card = screen.getByTestId('invitations-empty');
+    fireEvent.click(within(card).getByRole('button', { name: 'Invite member' }));
+    expect(await screen.findByTestId('invite-dialog')).toBeInTheDocument();
+  });
+
+  it('drops the empty state call to action for a caller who cannot invite', async () => {
+    renderSection(OrgRole.ReadOnly);
+
+    const card = await screen.findByTestId('invitations-empty');
+    expect(within(card).queryByRole('button', { name: 'Invite member' })).toBeNull();
+    expect(
+      within(card).getByText('Invitations appear here until they are accepted or withdrawn.'),
+    ).toBeInTheDocument();
+  });
+
+  it('offers the invite from the empty card only, the page header carrying it otherwise', async () => {
+    const { unmount } = renderSection();
+
+    // Empty: the card holds the only button in the section.
+    const card = await screen.findByTestId('invitations-empty');
+    expect(within(card).getByRole('button', { name: 'Invite member' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Invite member' })).toHaveLength(1);
+    unmount();
+
+    renderSection(OrgRole.Owner, [invitation({ email: 'waiting@example.com' })]);
+
+    // With rows, the section holds none: the page header's Add member button is
+    // the way in, and it opens this same dialog.
+    await screen.findAllByTestId('invitation-row');
+    expect(screen.queryByTestId('invitations-empty')).toBeNull();
+    expect(screen.queryAllByRole('button', { name: 'Invite member' })).toHaveLength(0);
+    expect(await openInviteDialog()).toBeInTheDocument();
+  });
+
+  it('drops the empty state call to action outside the beta', async () => {
+    renderSection(OrgRole.Owner, [], { orgsBeta: false });
+
+    const card = await screen.findByTestId('invitations-empty');
+    expect(within(card).queryByRole('button', { name: 'Invite member' })).toBeNull();
   });
 
   it('withdraws the form outside the beta and keeps the list that revokes', async () => {
@@ -281,7 +361,8 @@ describe('MembersInvitations — when the server refuses or the list goes stale'
 
     const state = await screen.findByTestId('invite-not-enabled');
     expect(state).toHaveTextContent('not enabled for this organization yet');
-    // The section says so and stops offering the dialog at all.
+    // The section says so and stops opening the dialog at all.
+    requestInvite();
     expect(screen.queryByRole('button', { name: 'Invite member' })).not.toBeInTheDocument();
     // The dialog goes with it: nothing on that form would work.
     await waitFor(() => expect(screen.queryByTestId('invite-form')).not.toBeInTheDocument());
@@ -330,18 +411,19 @@ describe('MembersInvitations — when the server refuses or the list goes stale'
     await typeEmail('new@example.com');
     fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
     await screen.findByTestId('invite-cap-reached');
-    // The trigger is what goes inert: a dialog that could only refuse is worse
-    // than a button that says why it cannot be pressed.
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Invite member' })).toBeDisabled(),
-    );
+    // The refusal closes the dialog, and asking again at the cap does not
+    // reopen it: a form that could only refuse is worse than the alert saying
+    // which slot to free.
+    await waitFor(() => expect(screen.queryByTestId('invite-form')).not.toBeInTheDocument());
+    requestInvite();
+    expect(screen.queryByTestId('invite-form')).not.toBeInTheDocument();
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Revoke invitation for waiting@example.com' }),
     );
 
     await waitFor(() => expect(screen.queryByTestId('invite-cap-reached')).not.toBeInTheDocument());
-    expect(screen.getByRole('button', { name: 'Invite member' })).toBeEnabled();
+    expect(await openInviteDialog()).toBeInTheDocument();
   });
 
   it('says which field a validation failure is about, and goes back to it', async () => {

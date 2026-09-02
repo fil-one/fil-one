@@ -89,14 +89,14 @@ describe('ApiKeysPage — a mid-session downgrade', () => {
     const { client } = renderPage(OrgRole.Member);
 
     expect(await screen.findByText('my key')).toBeInTheDocument();
-    expect(screen.getByTestId('api-keys-tab')).toHaveTextContent('(1)');
+    expect(screen.getByTestId('api-keys-tab')).toHaveTextContent('API keys1');
 
     // What a /me refetch after a demotion does.
     act(() => seedPermissions(client, OrgRole.ReadOnly));
 
     await waitFor(() => expect(screen.getByTestId('api-keys-no-access')).toBeInTheDocument());
     expect(screen.queryByText('my key')).not.toBeInTheDocument();
-    expect(screen.getByTestId('api-keys-tab')).not.toHaveTextContent('(1)');
+    expect(screen.getByTestId('api-keys-tab')).not.toHaveTextContent('API keys1');
     // The cached response is still there — the read is what changed.
     expect(client.getQueryData(queryKeys.accessKeys)).toBeDefined();
   });

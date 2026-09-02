@@ -126,7 +126,7 @@ describe('BucketDetailPage — the API keys tab', () => {
     // The tab mounts with the rest of the shell, before the keys land, so the
     // count is what to wait on rather than the tab itself.
     await waitFor(() =>
-      expect(screen.getByTestId('bucket-keys-tab')).toHaveTextContent('API Keys (1)'),
+      expect(screen.getByTestId('bucket-keys-tab')).toHaveTextContent('API Keys1'),
     );
   });
 
@@ -166,7 +166,7 @@ describe('BucketDetailPage — the API keys tab', () => {
     // The tab mounts with the rest of the shell, before the keys land, so the
     // count is what to wait on rather than the tab itself.
     await waitFor(() =>
-      expect(screen.getByTestId('bucket-keys-tab')).toHaveTextContent('API Keys (1)'),
+      expect(screen.getByTestId('bucket-keys-tab')).toHaveTextContent('API Keys1'),
     );
 
     // What a /me refetch after a demotion does.
@@ -210,7 +210,7 @@ describe('BucketDetailPage — loading', () => {
     renderPage(OrgRole.Owner);
 
     await waitFor(() =>
-      expect(screen.getByTestId('bucket-objects-tab')).toHaveTextContent('Objects (1)'),
+      expect(screen.getByTestId('bucket-objects-tab')).toHaveTextContent('Objects1'),
     );
     expect(screen.queryByRole('status', { name: 'Loading objects' })).not.toBeInTheDocument();
   });
