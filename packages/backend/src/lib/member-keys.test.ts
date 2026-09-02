@@ -58,7 +58,7 @@ describe('listOrgAccessKeys', () => {
     expect(await listOrgAccessKeys(ORG_ID)).toStrictEqual([key()]);
   });
 
-  it('queries the access-key rows of that org alone', async () => {
+  it('queries the access-key rows of that org alone, consistently', async () => {
     ddbMock.on(QueryCommand).resolves({ Items: [] });
     await listOrgAccessKeys(ORG_ID);
 
@@ -69,6 +69,9 @@ describe('listOrgAccessKeys', () => {
         ':pk': { S: `ORG#${ORG_ID}` },
         ':skPrefix': { S: 'ACCESSKEY#' },
       },
+      // A default Query may not yet show a key minted moments before a role
+      // change, and that key is exactly the one the pass exists to catch.
+      ConsistentRead: true,
     });
   });
 
@@ -84,9 +87,10 @@ describe('listOrgAccessKeys', () => {
     const keys = await listOrgAccessKeys(ORG_ID);
 
     expect(keys.map((k) => k.id)).toStrictEqual(['key-1', 'key-2']);
-    expect(ddbMock.commandCalls(QueryCommand)[1]!.args[0].input.ExclusiveStartKey).toStrictEqual(
-      page,
-    );
+    expect(ddbMock.commandCalls(QueryCommand)[1]!.args[0].input).toMatchObject({
+      ExclusiveStartKey: page,
+      ConsistentRead: true,
+    });
   });
 
   it('reads a row with no region as Aurora, which is what predates the attribute', async () => {

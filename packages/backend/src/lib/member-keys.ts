@@ -55,7 +55,8 @@ export interface KeyReview {
  *
  * The revocation pass has to see all of them: a key it misses is a credential
  * that outlives the authority to mint it, which is the whole thing this
- * prevents.
+ * prevents. That is also why the read is strongly consistent rather than the
+ * cheaper default.
  */
 export async function listOrgAccessKeys(orgId: string): Promise<MemberKey[]> {
   const rows: MemberKey[] = [];
@@ -70,6 +71,11 @@ export async function listOrgAccessKeys(orgId: string): Promise<MemberKey[]> {
           ':pk': { S: AccessKeyKeys.orgPk(orgId) },
           ':skPrefix': { S: AccessKeyKeys.keySkPrefix() },
         },
+        // Strongly consistent, on every page. This listing decides what gets
+        // revoked, and a default Query may not yet show a key minted moments
+        // before the change: the row would survive both passes, leaving a
+        // credential above the role that authorized it.
+        ConsistentRead: true,
         ...(startKey ? { ExclusiveStartKey: startKey } : {}),
       }),
     );
