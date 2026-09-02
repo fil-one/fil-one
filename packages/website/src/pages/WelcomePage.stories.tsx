@@ -8,6 +8,7 @@ const meta: Meta<typeof WelcomePage> = {
   parameters: { fullBleed: true, layout: 'fullscreen' },
   args: {
     suggestedName: 'Acme',
+    email: 'jane@acme.com',
     onNamed: () => {},
   },
 };
@@ -17,11 +18,6 @@ type Story = StoryObj<typeof WelcomePage>;
 
 /** The common case: the derived name is already right, so Continue is the answer. */
 export const Default: Story = {};
-
-/** Two words give the monogram two letters, which is what tells organizations apart. */
-export const TwoWordName: Story = {
-  args: { suggestedName: 'Acme Storage' },
-};
 
 /**
  * The fallback name, for an account whose identity provider offered neither a
