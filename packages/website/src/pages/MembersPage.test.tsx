@@ -129,6 +129,21 @@ async function confirmNarrowing() {
   fireEvent.click(confirm);
 }
 
+/**
+ * Type the org name and confirm the transfer, once its preview has arrived.
+ *
+ * The button is held while the preview loads, for the same reason the narrowing
+ * dialog holds its own: it was added to disclose what the change revokes.
+ */
+async function confirmTransfer(orgName = 'Acme') {
+  fireEvent.change(await screen.findByLabelText(`Type ${orgName} to confirm`), {
+    target: { value: orgName },
+  });
+  const confirm = screen.getByRole('button', { name: 'Transfer ownership' });
+  await waitFor(() => expect(confirm).toBeEnabled());
+  fireEvent.click(confirm);
+}
+
 /** The actions a row offers, or null when it offers no menu at all. */
 function rowMenuFor(member: string): HTMLElement | null {
   return screen.queryByRole('button', { name: `Actions for ${member}` });
@@ -243,8 +258,9 @@ describe('MembersPage', () => {
     await chooseRowAction('grace@example.com', 'Remove');
 
     expect(await screen.findByText('Remove this member?')).toBeInTheDocument();
-    // The dialog says what removal does not do, because it does not do it.
-    expect(screen.getByText(/Access keys they already created keep working/)).toBeInTheDocument();
+    // Removal is the narrowing to nothing: a key does not outlive the
+    // membership that created it, and the dialog says so before the click.
+    expect(screen.getByText(/every access key they created is revoked/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove member' }));
     await waitFor(() => expect(mockRemove).toHaveBeenCalledWith('user-2'));
@@ -667,6 +683,61 @@ describe('MembersPage — transferring the owner seat', () => {
     expect(screen.queryByRole('button', { name: /^Transfer ownership/ })).not.toBeInTheDocument();
   });
 
+  it('names the caller’s own keys the transfer revokes', async () => {
+    // The outgoing Owner becomes an Admin, and an Admin cannot hold a key
+    // carrying the two privileged granulars.
+    mockRoleChangePreview.mockResolvedValue({
+      currentRole: OrgRole.Owner,
+      role: OrgRole.Admin,
+      keys: [
+        {
+          id: 'key-9',
+          keyName: 'compliance writer',
+          region: 'eu-west-1',
+          createdAt: '2026-05-14T00:00:00.000Z',
+          reason: 'exceeds_role',
+          excess: ['PutObjectRetention'],
+        },
+      ],
+      survivingCount: 0,
+      unattributedCount: 0,
+    });
+    renderPage();
+
+    await chooseRowAction('grace@example.com', 'Transfer ownership');
+
+    expect(await screen.findByText('One of your access keys is revoked')).toBeInTheDocument();
+    expect(screen.getByText(/compliance writer/)).toBeInTheDocument();
+    expect(mockRoleChangePreview).toHaveBeenCalledWith('user-1', OrgRole.Admin);
+  });
+
+  it('will not transfer before the preview has answered', async () => {
+    // Otherwise "still loading" and "nothing to revoke" look identical, and the
+    // disclosure this preview was added for never happens.
+    mockRoleChangePreview.mockImplementation(() => new Promise(() => {}));
+    renderPage();
+
+    await chooseRowAction('grace@example.com', 'Transfer ownership');
+
+    fireEvent.change(await screen.findByLabelText('Type Acme to confirm'), {
+      target: { value: 'Acme' },
+    });
+    expect(screen.getByRole('button', { name: 'Transfer ownership' })).toBeDisabled();
+  });
+
+  it('says so when the transfer preview cannot be read', async () => {
+    mockRoleChangePreview.mockRejectedValue(apiError('Preview unavailable', 503));
+    renderPage();
+
+    await chooseRowAction('grace@example.com', 'Transfer ownership');
+
+    expect(await screen.findByText('The affected keys could not be listed')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Type Acme to confirm'), { target: { value: 'Acme' } });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Transfer ownership' })).toBeEnabled(),
+    );
+  });
+
   it('holds the transfer until the organization’s name is typed', async () => {
     renderPage();
 
@@ -683,7 +754,8 @@ describe('MembersPage — transferring the owner seat', () => {
     expect(confirm).toBeDisabled();
 
     fireEvent.change(screen.getByLabelText('Type Acme to confirm'), { target: { value: 'Acme' } });
-    expect(confirm).toBeEnabled();
+    // Also held until the preview of the caller's own keys answers.
+    await waitFor(() => expect(confirm).toBeEnabled());
 
     fireEvent.click(confirm);
     await waitFor(() =>
@@ -711,8 +783,7 @@ describe('MembersPage — transferring the owner seat', () => {
     renderPage();
 
     await chooseRowAction('grace@example.com', 'Transfer ownership');
-    fireEvent.change(screen.getByLabelText('Type Acme to confirm'), { target: { value: 'Acme' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Transfer ownership' }));
+    await confirmTransfer();
 
     await waitFor(() => {
       const rows = screen.getAllByTestId('member-row');
@@ -727,8 +798,7 @@ describe('MembersPage — transferring the owner seat', () => {
     renderPage();
 
     await chooseRowAction('grace@example.com', 'Transfer ownership');
-    fireEvent.change(screen.getByLabelText('Type Acme to confirm'), { target: { value: 'Acme' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Transfer ownership' }));
+    await confirmTransfer();
 
     // Left open, it offers a destructive button to a caller who is now an
     // Admin, and the server answers the second click with a refusal.

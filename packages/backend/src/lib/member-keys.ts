@@ -137,6 +137,35 @@ export function reviewAccessKeysForRole(
   return review;
 }
 
+/**
+ * Every key the member created, all of them condemned.
+ *
+ * Removal is the narrowing to nothing: somebody who is not in the org holds no
+ * role, and a key does not outlive the membership that created it. Rows with no
+ * recorded creator are outside this rule, as they are outside every other.
+ */
+export async function keysOfRemovedMember(
+  orgId: string,
+  userId: string,
+): Promise<AccessKeyRoleChangeReview> {
+  const review: AccessKeyRoleChangeReview = {
+    keysToRevoke: [],
+    retainedKeyCount: 0,
+    unattributedKeyCount: 0,
+  };
+
+  for (const accessKey of await listOrgAccessKeys(orgId)) {
+    if (!accessKey.createdBy) {
+      review.unattributedKeyCount += 1;
+      continue;
+    }
+    if (accessKey.createdBy !== userId) continue;
+    review.keysToRevoke.push({ ...accessKey, reason: 'role_cannot_mint', excess: [] });
+  }
+
+  return review;
+}
+
 /** {@link listOrgAccessKeys} and {@link reviewAccessKeysForRole} in one call. */
 export async function reviewMemberAccessKeysForRole(
   orgId: string,

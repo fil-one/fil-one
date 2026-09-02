@@ -215,6 +215,14 @@ export function MemberDialogs({
   const removal = useLastNonNull(targets.removal);
   const transfer = useLastNonNull(targets.transfer);
 
+  // The outgoing Owner becomes an Admin, so the transfer runs the same pass a
+  // demotion does. The preview is about the caller's own keys, not the target's.
+  const outgoing = useQuery({
+    queryKey: queryKeys.roleChangePreview(selfUserId ?? '', OrgRole.Admin),
+    queryFn: () => getRoleChangePreview(selfUserId!, OrgRole.Admin),
+    enabled: targets.transfer !== null && selfUserId !== undefined,
+  });
+
   return (
     <>
       <ConfirmDialog
@@ -244,7 +252,7 @@ export function MemberDialogs({
         title="Remove this member?"
         description={
           removal
-            ? `${memberName(removal)} loses access to this organization in the console. Access keys they already created keep working until somebody revokes them.`
+            ? `${memberName(removal)} loses access to this organization, and every access key they created is revoked. Anything still using one stops working straight away.`
             : ''
         }
         confirmLabel="Remove member"
@@ -253,6 +261,9 @@ export function MemberDialogs({
       <TransferOwnershipDialog
         open={targets.transfer !== null}
         orgName={orgName}
+        revokedKeys={outgoing.data?.keys}
+        previewLoading={targets.transfer !== null && outgoing.isPending}
+        previewError={outgoing.isError}
         memberName={transfer ? memberName(transfer) : ''}
         pending={transferring}
         onClose={close.transfer}
