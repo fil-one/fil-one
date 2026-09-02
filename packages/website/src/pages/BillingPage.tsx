@@ -23,6 +23,22 @@ import { useHasPermission } from '../lib/use-permissions.js';
 // ---------------------------------------------------------------------------
 
 /**
+ * Where the billing surface is rendering, which is the only thing that differs
+ * between the two: a page owns the `h1` and the shell's gutters, and a tab panel
+ * sits inside both already, so it labels itself with the `h2` its neighbours use
+ * and adds no padding of its own.
+ *
+ * Both exist because `/organization` does not. An org with no members surface
+ * has no Organization page to hold a Billing tab, and billing is the one thing
+ * on that page such an org still needs — so `/billing` stays a page of its own
+ * there. See `routes/_app/billing.tsx`.
+ */
+export type BillingChrome = 'page' | 'tab';
+
+/** Said under the heading in both chromes, so it is written once. */
+const BILLING_DESCRIPTION = 'Manage your plan, usage, and payment methods';
+
+/**
  * Money is Owner-and-Admin territory: `billing.view` reads usage and invoices,
  * `billing.manage` changes the plan or the card. A Member or ReadOnly holds
  * neither, and every query on this page would 403, so the page says so instead
@@ -33,12 +49,12 @@ export function BillingPage() {
     <RequirePermission
       permission="billing.view"
       pending={
-        <PageLayout title="Billing" description="Manage your plan, usage, and payment methods">
+        <PageLayout title="Billing" description={BILLING_DESCRIPTION}>
           <BillingSkeleton />
         </PageLayout>
       }
       fallback={
-        <PageLayout title="Billing" description="Manage your plan, usage, and payment methods">
+        <PageLayout title="Billing" description={BILLING_DESCRIPTION}>
           <div className="rounded-xl border border-zinc-200 bg-white p-6 text-sm text-zinc-600">
             Billing is managed by your organization&rsquo;s owners and admins. Ask one of them for
             plan or invoice details.
@@ -46,20 +62,51 @@ export function BillingPage() {
         </PageLayout>
       }
     >
-      <BillingDetails />
+      <BillingDetails chrome="page" />
     </RequirePermission>
   );
 }
 
 /**
- * The Billing tab's own chrome: the section heading, and nothing else.
+ * The chrome around the cards, in whichever of the two the caller reached.
  *
- * `PageLayout` used to sit here, which put an `h1` and a second set of page
- * gutters inside a tab panel — a page title under a page title. The heading is
- * the `md` every other tab panel labels itself with, and the shape matches the
- * Invitations tab beside it.
+ * Both put the same row of cards under the same sentence; only the heading and
+ * the gutters differ. As a tab, `PageLayout` used to sit here, which put an
+ * `h1` and a second set of page gutters inside a tab panel — a page title under
+ * a page title.
  */
-function BillingSection({ children, rail }: { children: React.ReactNode; rail?: React.ReactNode }) {
+function BillingSection({
+  chrome,
+  children,
+  rail,
+}: {
+  chrome: BillingChrome;
+  children: React.ReactNode;
+  rail?: React.ReactNode;
+}) {
+  const cards = (
+    <div className="flex flex-col gap-8 lg:flex-row lg:gap-10">
+      {/* Capped, unlike the table tabs beside it. Every row here is a label on
+          the left and a figure on the right, and on a wide screen an uncapped
+          card put 1700px between the two: the eye loses the pair. Tables earn
+          the full width because their columns fill it; a settings surface does
+          not. */}
+      <div className="flex max-w-4xl min-w-0 flex-1 flex-col gap-4">{children}</div>
+
+      {/* After the figures in the source, so the cards come first on a phone
+          where the rail stacks under them. */}
+      {rail}
+    </div>
+  );
+
+  if (chrome === 'page') {
+    return (
+      <PageLayout title="Billing" headingId="billing-heading" description={BILLING_DESCRIPTION}>
+        {cards}
+      </PageLayout>
+    );
+  }
+
   return (
     <section className="flex flex-col gap-4">
       {/* Above the row rather than inside its left column: as a sibling of the
@@ -70,23 +117,12 @@ function BillingSection({ children, rail }: { children: React.ReactNode; rail?: 
         tag="h2"
         size="md"
         className="gap-0.5"
-        description="Manage your plan, usage, and payment methods"
+        description={BILLING_DESCRIPTION}
       >
         Billing
       </Heading>
 
-      <div className="flex flex-col gap-8 lg:flex-row lg:gap-10">
-        {/* Capped, unlike the table tabs beside it. Every row here is a label on
-            the left and a figure on the right, and on a wide screen an uncapped
-            card put 1700px between the two: the eye loses the pair. Tables earn
-            the full width because their columns fill it; a settings surface does
-            not. */}
-        <div className="flex max-w-4xl min-w-0 flex-1 flex-col gap-4">{children}</div>
-
-        {/* After the figures in the source, so the cards come first on a phone
-            where the rail stacks under them. */}
-        {rail}
-      </div>
+      {cards}
     </section>
   );
 }
@@ -110,10 +146,11 @@ function BillingSkeleton() {
 }
 
 /**
- * Everything billing, without page chrome.
+ * Everything billing, in either chrome.
  *
- * Exported for the Organization page's Billing tab; `BillingPage` keeps it as
- * a page for the `/billing` path that still points here.
+ * Exported for the Organization page's Billing tab, which is where an org with
+ * a members surface reads it. `BillingPage` renders the same cards as a page of
+ * their own, for an org that has no Organization page to put them in.
  *
  * One column of cards, each answering one question: what plan is this, what has
  * it used, how does it pay, what has it been billed. Every number comes from
@@ -122,7 +159,7 @@ function BillingSkeleton() {
  * the self-serve price and wrong for every customer whose price came from a
  * quote.
  */
-export function BillingDetails() {
+export function BillingDetails({ chrome = 'tab' }: { chrome?: BillingChrome } = {}) {
   const mayManage = useHasPermission('billing.manage');
   const { billing, usage, invoices, loading, error, invoicesPending, invoicesFailed } =
     useBillingData();
@@ -130,7 +167,7 @@ export function BillingDetails() {
 
   if (loading && !billing) {
     return (
-      <BillingSection>
+      <BillingSection chrome={chrome}>
         <BillingSkeleton />
       </BillingSection>
     );
@@ -138,7 +175,7 @@ export function BillingDetails() {
 
   if (error && !billing) {
     return (
-      <BillingSection>
+      <BillingSection chrome={chrome}>
         <Alert variant="red" title="Unable to load billing" description={error} />
       </BillingSection>
     );
@@ -150,6 +187,7 @@ export function BillingDetails() {
 
   return (
     <BillingSection
+      chrome={chrome}
       rail={<BillingHelpRail status={status} onContactSales={flows.openContactSales} />}
     >
       <StatusBanner

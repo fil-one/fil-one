@@ -217,9 +217,66 @@ describe('SidebarNav — the Members entry', () => {
     });
 
     expect(container.querySelectorAll('[data-testid="nav-organization"]')).toHaveLength(0);
-    // Billing is a tab of that page now, so it hides with it.
-    expect(container.querySelectorAll('[data-testid="nav-billing"]')).toHaveLength(0);
     expect(container.querySelectorAll('[data-testid="nav-settings"]')).toHaveLength(1);
+  });
+});
+
+describe('SidebarNav — the Billing entry', () => {
+  // Billing is a tab of the Organization page, so it earns a top-level entry in
+  // exactly the org that has no Organization page: a solo org outside the beta.
+  // Both mounts at once, for the reason the Members entry checks both.
+  function billingEntries(role: OrgRole, overrides: Partial<MeResponse>) {
+    const { container } = renderBothSidebars(role, overrides);
+    return container.querySelectorAll('[data-testid="nav-billing"]');
+  }
+
+  it('renders for a solo org outside the beta, which has no Organization page', () => {
+    expect(billingEntries(OrgRole.Owner, { memberships: SOLO, orgsBeta: false })).toHaveLength(1);
+  });
+
+  it('is absent where the Organization page holds it as a tab', () => {
+    expect(billingEntries(OrgRole.Owner, { memberships: SOLO, orgsBeta: true })).toHaveLength(0);
+    expect(billingEntries(OrgRole.Owner, { memberships: TWO_ORGS, orgsBeta: false })).toHaveLength(
+      0,
+    );
+  });
+
+  // Never both: the two entries are one surface seen from two orgs, and a nav
+  // offering Organization and Billing side by side would open the same cards
+  // from two places.
+  it('is never shown beside the Organization entry', () => {
+    for (const overrides of [
+      { memberships: SOLO, orgsBeta: false },
+      { memberships: SOLO, orgsBeta: true },
+      { memberships: TWO_ORGS, orgsBeta: true },
+    ]) {
+      const { container, unmount } = renderBothSidebars(OrgRole.Owner, overrides);
+      const shown = ['nav-organization', 'nav-billing'].filter(
+        (testId) => container.querySelectorAll(`[data-testid="${testId}"]`).length > 0,
+      );
+      expect(shown).toHaveLength(1);
+      unmount();
+    }
+  });
+
+  it('is absent for a role without billing.view, beta or not', () => {
+    // The gate decides whether the entry exists; the permission still decides
+    // who sees it. A Member holds no `billing.view` either way.
+    expect(billingEntries(OrgRole.Member, { memberships: SOLO, orgsBeta: false })).toHaveLength(0);
+  });
+
+  it('is absent while /me has not answered', () => {
+    // Neither side of the gate is known yet, so neither entry appears rather
+    // than one showing and being swapped for the other.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container } = render(
+      <QueryClientProvider client={client}>
+        <SidebarNav collapsed={false} onToggle={() => {}} showTestIds={true} />
+      </QueryClientProvider>,
+    );
+
+    expect(container.querySelectorAll('[data-testid="nav-billing"]')).toHaveLength(0);
+    expect(container.querySelectorAll('[data-testid="nav-organization"]')).toHaveLength(0);
   });
 });
 

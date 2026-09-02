@@ -13,6 +13,7 @@ import {
   ChatTeardropDotsIcon,
   RobotIcon,
   UsersIcon,
+  CreditCardIcon,
 } from '@phosphor-icons/react/dist/ssr';
 import { Link, useMatchRoute } from '@tanstack/react-router';
 
@@ -48,11 +49,16 @@ type NavItem = {
   /** What the destination needs. Omitted, every member sees the entry. */
   permission?: Permission;
   /**
-   * Whether the entry belongs to the members surface, which a solo org outside
-   * the organizations beta does not have. A permission cannot express it: all
-   * four roles hold `members.read`.
+   * Which side of the members-surface gate this entry sits on, for the two that
+   * swap. A solo org outside the organizations beta has no members surface, so
+   * `Organization` is not there — and `Billing`, which is a tab of that page
+   * for everybody else, is a top-level entry instead.
+   *
+   * A permission cannot express it: all four roles hold `members.read`, and
+   * `billing.view` is held by the same two roles on both sides of the gate.
+   * Absent, the entry does not care either way.
    */
-  membersSurface?: boolean;
+  membersSurface?: 'with' | 'without';
 };
 
 type NavGroup = {
@@ -163,12 +169,16 @@ function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps
   );
 }
 
-// Billing is a tab of Organization now, so it is not an entry here. Settings is
-// every member's own account. Organization is declared with the permission it
-// needs even though all four roles hold it, so the entry stays hidden while
+// Organization and Billing are the same entry seen from two orgs: where there
+// is a members surface, billing is a tab of Organization and gets no entry of
+// its own; where there is not, Organization is not a page and billing is all
+// that would have been on it. Settings is every member's own account.
+//
+// Both are declared with the permission the destination needs — even
+// `members.read`, which all four roles hold — so an entry stays hidden while
 // `/me` is in flight rather than appearing for a caller whose role turns out
-// not to reach it. `members.read` is not what decides whether the entry exists
-// at all — see `membersSurface`.
+// not to reach it. The permission is not what decides whether the entry exists
+// at all: see `membersSurface`.
 const utilityNavItems: NavItem[] = [
   {
     path: '/organization',
@@ -176,7 +186,15 @@ const utilityNavItems: NavItem[] = [
     label: 'Organization',
     testId: 'nav-organization',
     permission: 'members.read',
-    membersSurface: true,
+    membersSurface: 'with',
+  },
+  {
+    path: '/billing',
+    icon: CreditCardIcon,
+    label: 'Billing',
+    testId: 'nav-billing',
+    permission: 'billing.view',
+    membersSurface: 'without',
   },
   { path: '/settings', icon: GearIcon, label: 'Settings', testId: 'nav-settings' },
 ];
@@ -188,7 +206,15 @@ function UtilityNavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLin
     <div className="p-2 flex flex-col gap-0.5">
       {utilityNavItems
         .filter((item) => !item.permission || has(item.permission))
-        .filter((item) => !item.membersSurface || membersSurface.visible)
+        // Neither side of the gate is known while `/me` is in flight or after it
+        // failed, so neither entry appears. Guessing would show one and then
+        // swap it for the other, which is worse than a nav that fills in a
+        // moment late.
+        .filter((item) => {
+          if (!item.membersSurface) return true;
+          if (membersSurface.isPending || membersSurface.isError) return false;
+          return item.membersSurface === (membersSurface.visible ? 'with' : 'without');
+        })
         .map(({ path, icon: Icon, label, testId }) => {
           const isActive = Boolean(matchRoute({ to: path }));
           const link = (

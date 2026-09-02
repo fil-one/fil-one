@@ -1,10 +1,24 @@
+import z from 'zod';
 import { createRoute } from '@tanstack/react-router';
 
 import { Route as appRoute } from '../_app';
-import { OrganizationPage } from '../../pages/OrganizationPage';
+import { OrganizationPage, type OrganizationTabId } from '../../pages/OrganizationPage';
 import { PageLayout } from '../../components/PageLayout';
 import { RequirePermissionPage } from '../../components/RequirePermissionPage';
 import { useMembersSurface } from '../../lib/use-members-surface';
+
+/**
+ * `tab` names which of the page's tabs opens, for the links that have a
+ * particular one in mind: `/billing` redirects here with `tab=billing`, and
+ * that is where the shell's Upgrade banner and Stripe's portal return land.
+ *
+ * `portal_return` rides along from `/billing` on the same trip —
+ * `use-billing` reads it to know the plan or the card may have changed.
+ */
+const organizationSearchSchema = z.object({
+  tab: z.enum(['members', 'invitations', 'billing']).optional(),
+  portal_return: z.string().optional(),
+});
 
 /**
  * `/organization`, behind the surface gate first and the permission second.
@@ -18,8 +32,12 @@ import { useMembersSurface } from '../../lib/use-members-surface';
  * The refusal renders rather than redirecting, for the reason
  * `RequirePermissionPage` gives: a redirect costs `/me` on every navigation and
  * hands the caller no explanation.
+ *
+ * Split from the route's own component so the gate can be rendered on its own:
+ * everything it decides comes from `/me` and a tab name, and standing a router
+ * up to hand it that tab name would test the router.
  */
-function OrganizationRoute() {
+export function OrganizationGate({ tab }: { tab?: OrganizationTabId }) {
   const { visible, isPending, isError } = useMembersSurface();
 
   // The heading is true in every state, so it goes up while `/me` is in flight.
@@ -49,13 +67,19 @@ function OrganizationRoute() {
       title="Organization"
       deniedMessage="Reading this organization is not part of your role."
     >
-      <OrganizationPage />
+      <OrganizationPage tab={tab} />
     </RequirePermissionPage>
   );
+}
+
+function OrganizationRoute() {
+  const { tab } = Route.useSearch();
+  return <OrganizationGate tab={tab} />;
 }
 
 export const Route = createRoute({
   path: '/organization',
   getParentRoute: () => appRoute,
   component: OrganizationRoute,
+  validateSearch: organizationSearchSchema,
 });

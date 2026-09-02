@@ -18,7 +18,15 @@ import { BillingDetails } from './BillingPage.js';
 import { MembersRoster } from './MembersPage.js';
 import { MembersInvitations } from './MembersInvitations.js';
 
+/**
+ * Which tab, in a URL. `/billing` redirects here for an org whose billing is a
+ * tab, and the shell's Upgrade banner and Stripe's portal both aim at that
+ * path, so the redirect has to be able to name its destination.
+ */
+export type OrganizationTabId = 'members' | 'invitations' | 'billing';
+
 interface OrganizationTab {
+  id: OrganizationTabId;
   label: string;
   testId: string;
   /** Omitted, every role reaches it. */
@@ -53,6 +61,7 @@ interface TabContext {
  */
 const ORGANIZATION_TABS: OrganizationTab[] = [
   {
+    id: 'members',
     label: 'Members',
     testId: 'org-tab-members',
     permission: 'members.read',
@@ -60,6 +69,7 @@ const ORGANIZATION_TABS: OrganizationTab[] = [
     render: () => <MembersRoster />,
   },
   {
+    id: 'invitations',
     label: 'Invitations',
     testId: 'org-tab-invitations',
     countOf: 'invitations',
@@ -74,6 +84,7 @@ const ORGANIZATION_TABS: OrganizationTab[] = [
     ),
   },
   {
+    id: 'billing',
     label: 'Billing',
     testId: 'org-tab-billing',
     // Owner and Admin hold `billing.view`; for everybody else the tab is not
@@ -100,28 +111,57 @@ const ORGANIZATION_TABS: OrganizationTab[] = [
   },
 ];
 
-export function OrganizationPage() {
-  const { has, isPending } = usePermissions();
-  const scope = useMemberActionScope();
-  const [editing, setEditing] = useState(false);
-  // Which tab is showing, driven here rather than by the tab group: the Invite
-  // member button has to bring the caller to Invitations, since that panel owns
-  // the dialog and only the selected panel is mounted.
-  const [selectedTab, setSelectedTab] = useState(0);
-  const [inviteRequested, setInviteRequested] = useState(false);
-  const { data: me } = useQuery({
-    queryKey: queryKeys.me,
-    queryFn: () => getMe(),
-    staleTime: ME_STALE_TIME,
-  });
+/**
+ * Which tabs this role gets, and which of them is open.
+ *
+ * The selection is held as an id rather than an index because the list is
+ * filtered by role: index 2 is Billing for an Owner and does not exist for a
+ * Member, and the list can shrink under a live `/me` refetch after a demotion.
+ * An index would then point at a different tab than the one the caller chose.
+ */
+function useOrganizationTabs(initialTab: OrganizationTabId | undefined, ready: boolean) {
+  const { has } = usePermissions();
+  const [selectedTabId, setSelectedTabId] = useState<OrganizationTabId>(initialTab ?? 'members');
 
   // Filtered the way `SidebarNav` filters its entries, and fail-closed for the
   // same reason: `has` answers false while `/me` is in flight, so a tab stays
   // out rather than appearing and then vanishing for a role that cannot reach
   // it. Hiding is not the guard — each panel still gates its own request.
-  const tabs = isPending
-    ? []
-    : ORGANIZATION_TABS.filter((tab) => !tab.permission || has(tab.permission));
+  const tabs = ready ? ORGANIZATION_TABS.filter((t) => !t.permission || has(t.permission)) : [];
+
+  return {
+    tabs,
+    // Falls back to the first tab rather than the last one that fits: a caller
+    // who loses `billing.view` mid-session should land on Members, not on
+    // whatever now sits at Billing's old index.
+    selectedIndex: Math.max(0, indexOfTab(tabs, selectedTabId)),
+    selectTabAt: (index: number) => setSelectedTabId(tabs[index]!.id),
+    // The Add member button has nowhere to send the caller without this tab,
+    // and the dialog it opens lives in that panel.
+    hasInvitationsTab: indexOfTab(tabs, 'invitations') >= 0,
+    openInvitations: () => setSelectedTabId('invitations'),
+  };
+}
+
+function indexOfTab(tabs: OrganizationTab[], id: OrganizationTabId): number {
+  return tabs.findIndex((tab) => tab.id === id);
+}
+
+export function OrganizationPage({ tab }: { tab?: OrganizationTabId } = {}) {
+  const { has, isPending } = usePermissions();
+  const scope = useMemberActionScope();
+  const [editing, setEditing] = useState(false);
+  const [inviteRequested, setInviteRequested] = useState(false);
+  // Which tab is showing, driven here rather than by the tab group: the Invite
+  // member button has to bring the caller to Invitations, since that panel owns
+  // the dialog and only the selected panel is mounted.
+  const { tabs, selectedIndex, selectTabAt, hasInvitationsTab, openInvitations } =
+    useOrganizationTabs(tab, !isPending);
+  const { data: me } = useQuery({
+    queryKey: queryKeys.me,
+    queryFn: () => getMe(),
+    staleTime: ME_STALE_TIME,
+  });
 
   // Same query keys the panels use, so these share their cache rather than
   // adding requests. Each is asked only by a caller whose role may read it.
@@ -146,10 +186,8 @@ export function OrganizationPage() {
     onInviteRequestHandled: () => setInviteRequested(false),
   };
 
-  const invitationsIndex = tabs.findIndex((tab) => tab.label === 'Invitations');
-
   function requestInvite() {
-    if (invitationsIndex >= 0) setSelectedTab(invitationsIndex);
+    if (hasInvitationsTab) openInvitations();
     setInviteRequested(true);
   }
 
@@ -186,7 +224,7 @@ export function OrganizationPage() {
               `mayInvite` covers the beta flag as well as the permission, so an
               org outside the beta is not offered a dialog its first submit would
               be refused. */}
-          {scope.mayInvite && invitationsIndex >= 0 && (
+          {scope.mayInvite && hasInvitationsTab && (
             <Button
               variant="primary"
               size="sm"
@@ -207,7 +245,7 @@ export function OrganizationPage() {
       />
 
       {tabs.length > 0 && (
-        <Tabs selectedIndex={Math.min(selectedTab, tabs.length - 1)} onChange={setSelectedTab}>
+        <Tabs selectedIndex={selectedIndex} onChange={selectTabAt}>
           <TabList>
             {tabs.map((tab) => (
               <Tab

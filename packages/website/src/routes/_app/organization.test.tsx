@@ -16,10 +16,8 @@ vi.mock('../../pages/OrganizationPage', () => ({
 
 vi.mock('../../lib/api.js', () => ({ getMe: vi.fn() }));
 
-import { Route } from './organization';
+import { OrganizationGate } from './organization';
 import { seedPermissions } from '../../lib/test-permissions.js';
-
-const OrganizationRoute = Route.options.component as () => React.ReactElement | null;
 
 const SOLO = [{ orgId: 'org-1', orgName: 'Acme', role: OrgRole.Owner }];
 const TWO_ORGS = [
@@ -32,7 +30,7 @@ function renderRoute(role: OrgRole, overrides: Partial<MeResponse>) {
   seedPermissions(client, role, overrides);
   return render(
     <QueryClientProvider client={client}>
-      <OrganizationRoute />
+      <OrganizationGate />
     </QueryClientProvider>,
   );
 }
@@ -78,7 +76,7 @@ describe('the /organization route, reached by URL', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={client}>
-        <OrganizationRoute />
+        <OrganizationGate />
       </QueryClientProvider>,
     );
 

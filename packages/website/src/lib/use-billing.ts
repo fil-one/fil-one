@@ -163,7 +163,16 @@ export function useBillingFlows(
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('portal_return') !== 'true') return;
-    window.history.replaceState({}, '', window.location.pathname);
+    // Only Stripe's own parameter comes off. It used to replace the URL with
+    // the bare pathname, which also dropped the `tab=billing` that put the
+    // caller on this tab — so a portal return bounced them back to Members.
+    params.delete('portal_return');
+    const query = params.toString();
+    window.history.replaceState(
+      {},
+      '',
+      query ? `${window.location.pathname}?${query}` : window.location.pathname,
+    );
     void queryClient.invalidateQueries({ queryKey: queryKeys.billing });
     void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
   }, [queryClient]);
