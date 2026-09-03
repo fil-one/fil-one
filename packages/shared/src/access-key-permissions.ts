@@ -138,30 +138,47 @@ function requirementFor(
  * 409 carries neither: the retry answers 409 with no secret, so the credential
  * was never handed to anyone and the console never learned what it holds.
  */
-export interface StampedKeyPermissions {
+export interface AccessKeyPermissions {
   permissions?: readonly string[] | undefined;
   granularPermissions?: readonly string[] | undefined;
 }
 
 /**
- * Whether a key survives a role, and when it does not, why.
+ * Why a role cannot keep a key, and therefore why the key is revoked.
  *
  * `role_cannot_mint`: the role holds no `keys.create`, so it can hold no key.
  * `permissions_unrecorded`: the row records no permission set.
  * `exceeds_role`: the role could not grant everything the row carries.
+ *
+ * This is about one key against one role. `RevocationTrigger` (`audit.ts`) is
+ * the other question — what made anybody look.
  */
-export type KeySurvival =
-  | { survives: true }
-  | { survives: false; reason: 'role_cannot_mint' | 'permissions_unrecorded' }
-  | { survives: false; reason: 'exceeds_role'; excess: ExcessKeyPermission[] };
+export type AccessKeyRevocationReason =
+  | 'role_cannot_mint'
+  | 'permissions_unrecorded'
+  | 'exceeds_role';
 
 /**
- * Whether a key its holder already has survives that holder moving to `role`.
+ * Whether a role may keep a key, and when it may not, why.
+ *
+ * The refusing arms partition {@link AccessKeyRevocationReason} and are written
+ * out rather than derived from it: which arm a reason belongs to is a decision
+ * about whether it can name an excess, and a fourth reason should have to be
+ * placed deliberately rather than fall into whichever arm a subtraction leaves.
+ */
+export type KeyRetentionResult =
+  | { retained: true }
+  | { retained: false; reason: 'role_cannot_mint' | 'permissions_unrecorded' }
+  | { retained: false; reason: 'exceeds_role'; excess: ExcessKeyPermission[] };
+
+/**
+ * Whether a key its holder already has may be kept once that holder moves to
+ * `role`.
  *
  * One test, and the same one {@link excessKeyPermissions} applies at creation:
- * a key survives when its holder could mint it today. A role without
+ * a key is kept when its holder could mint it today. A role without
  * `keys.create` has an empty ceiling, so demotion to ReadOnly takes every key
- * the member created; a survivor there would have a holder who can neither see
+ * the member created; one kept there would have a holder who can neither see
  * nor revoke it, since `keys.manage_own` is what scopes the list and the
  * delete.
  *
@@ -172,17 +189,17 @@ export type KeySurvival =
  * The caller decides whose keys to ask about. A row with no `createdBy` belongs
  * to nobody the console can name and is outside this rule entirely.
  */
-export function keySurvival(role: string, key: StampedKeyPermissions): KeySurvival {
+export function canRetainAccessKey(role: string, key: AccessKeyPermissions): KeyRetentionResult {
   if (!roleHasPermission(role, 'keys.create')) {
-    return { survives: false, reason: 'role_cannot_mint' };
+    return { retained: false, reason: 'role_cannot_mint' };
   }
-  if (!key.permissions) return { survives: false, reason: 'permissions_unrecorded' };
+  if (!key.permissions) return { retained: false, reason: 'permissions_unrecorded' };
 
   const excess = excessKeyPermissions(role, {
     permissions: key.permissions,
     granularPermissions: key.granularPermissions,
   });
   return excess.length === 0
-    ? { survives: true }
-    : { survives: false, reason: 'exceeds_role', excess };
+    ? { retained: true }
+    : { retained: false, reason: 'exceeds_role', excess };
 }

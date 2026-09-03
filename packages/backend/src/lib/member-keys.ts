@@ -1,8 +1,8 @@
 import { QueryCommand } from '@aws-sdk/client-dynamodb';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
-import { S3Region, keySurvival } from '@filone/shared';
-import type { ExcessKeyPermission, OrgRole } from '@filone/shared';
+import { S3Region, canRetainAccessKey } from '@filone/shared';
+import type { ExcessKeyPermission, AccessKeyRevocationReason, OrgRole } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.js';
 import { AccessKeyKeys } from './dynamo-records.js';
@@ -17,8 +17,8 @@ import type { AccessKeyRecord } from './dynamo-records.js';
  * The region on the row decides which orchestrator revokes it, nothing else.
  */
 
-/** One key row, as the revocation pass and the preview both read it. */
-export interface MemberKey {
+/** One access-key row, as the revocation pass and the preview both read it. */
+export interface MemberAccessKey {
   /** The orchestrator's id for the key, which is what `deleteAccessKey` takes. */
   id: string;
   keyName: string;
@@ -32,22 +32,22 @@ export interface MemberKey {
 }
 
 /** A key the member could no longer mint, and why. */
-export interface DoomedKey extends MemberKey {
-  reason: 'role_cannot_mint' | 'permissions_unrecorded' | 'exceeds_role';
+export interface AccessKeyToRevoke extends MemberAccessKey {
+  reason: AccessKeyRevocationReason;
   /** The permissions above the new role, when that is what condemned it. */
   excess: ExcessKeyPermission[];
 }
 
-export interface KeyReview {
+export interface AccessKeyRoleChangeReview {
   /** Revoked when the change goes through, in the order the partition returned. */
-  doomed: DoomedKey[];
+  keysToRevoke: AccessKeyToRevoke[];
   /** The member's keys that stay live. */
-  survivingCount: number;
+  retainedKeyCount: number;
   /**
    * Rows in the org with no recorded creator, which no role change touches.
    * Reported so an admin reading a short list knows what it leaves out.
    */
-  unattributedCount: number;
+  unattributedKeyCount: number;
 }
 
 /**
@@ -57,9 +57,11 @@ export interface KeyReview {
  * that outlives the authority to mint it, which is the whole thing this
  * prevents. That is also why the read is strongly consistent rather than the
  * cheaper default.
+ *
+ * Internal to this module; exported for direct testing.
  */
-export async function listOrgAccessKeys(orgId: string): Promise<MemberKey[]> {
-  const rows: MemberKey[] = [];
+export async function listOrgAccessKeys(orgId: string): Promise<MemberAccessKey[]> {
+  const accessKeys: MemberAccessKey[] = [];
   let startKey: Record<string, AttributeValue> | undefined;
 
   do {
@@ -81,11 +83,11 @@ export async function listOrgAccessKeys(orgId: string): Promise<MemberKey[]> {
     );
 
     for (const item of result.Items ?? [])
-      rows.push(toMemberKey(unmarshall(item) as Partial<AccessKeyRecord>));
+      accessKeys.push(toMemberAccessKey(unmarshall(item) as Partial<AccessKeyRecord>));
     startKey = result.LastEvaluatedKey;
   } while (startKey);
 
-  return rows;
+  return accessKeys;
 }
 
 /**
@@ -94,46 +96,52 @@ export async function listOrgAccessKeys(orgId: string): Promise<MemberKey[]> {
  * Attribution is `createdBy` alone. `withinScope` answers a different question,
  * who may see a key, and its `recovered` clause would hide from this pass
  * exactly the rows that have to be revoked.
+ *
+ * Internal to this module; exported for direct testing.
  */
-export function reviewKeysForRole(
-  rows: readonly MemberKey[],
+export function reviewAccessKeysForRole(
+  accessKeys: readonly MemberAccessKey[],
   userId: string,
   role: OrgRole,
-): KeyReview {
-  const review: KeyReview = { doomed: [], survivingCount: 0, unattributedCount: 0 };
+): AccessKeyRoleChangeReview {
+  const review: AccessKeyRoleChangeReview = {
+    keysToRevoke: [],
+    retainedKeyCount: 0,
+    unattributedKeyCount: 0,
+  };
 
-  for (const row of rows) {
-    if (!row.createdBy) {
-      review.unattributedCount += 1;
+  for (const accessKey of accessKeys) {
+    if (!accessKey.createdBy) {
+      review.unattributedKeyCount += 1;
       continue;
     }
-    if (row.createdBy !== userId) continue;
+    if (accessKey.createdBy !== userId) continue;
 
-    const survival = keySurvival(role, row);
-    if (survival.survives) {
-      review.survivingCount += 1;
+    const retention = canRetainAccessKey(role, accessKey);
+    if (retention.retained) {
+      review.retainedKeyCount += 1;
       continue;
     }
-    review.doomed.push({
-      ...row,
-      reason: survival.reason,
-      excess: survival.reason === 'exceeds_role' ? survival.excess : [],
+    review.keysToRevoke.push({
+      ...accessKey,
+      reason: retention.reason,
+      excess: retention.reason === 'exceeds_role' ? retention.excess : [],
     });
   }
 
   return review;
 }
 
-/** {@link listOrgAccessKeys} and {@link reviewKeysForRole} in one call. */
-export async function keysExceedingRole(
+/** {@link listOrgAccessKeys} and {@link reviewAccessKeysForRole} in one call. */
+export async function reviewMemberAccessKeysForRole(
   orgId: string,
   userId: string,
   role: OrgRole,
-): Promise<KeyReview> {
-  return reviewKeysForRole(await listOrgAccessKeys(orgId), userId, role);
+): Promise<AccessKeyRoleChangeReview> {
+  return reviewAccessKeysForRole(await listOrgAccessKeys(orgId), userId, role);
 }
 
-function toMemberKey(record: Partial<AccessKeyRecord>): MemberKey {
+function toMemberAccessKey(record: Partial<AccessKeyRecord>): MemberAccessKey {
   const sk = record.sk ?? '';
   return {
     id: sk.slice(AccessKeyKeys.keySkPrefix().length),

@@ -9,7 +9,7 @@ import {
   ACCESS_KEY_PERMISSION_REQUIREMENT,
   GRANULAR_PERMISSION_REQUIREMENT,
   excessKeyPermissions,
-  keySurvival,
+  canRetainAccessKey,
 } from './access-key-permissions.js';
 
 /** The two granulars a key may carry only with `privileged.grant`. */
@@ -171,7 +171,7 @@ describe('excessKeyPermissions', () => {
   });
 });
 
-describe('keySurvival', () => {
+describe('canRetainAccessKey', () => {
   // Every key a member could hold, described by what it carries, so one pass
   // over a role answers the whole transition at once.
   const KEYS = {
@@ -195,7 +195,7 @@ describe('keySurvival', () => {
 
   function survivors(role: string): string[] {
     return Object.entries(KEYS)
-      .filter(([, key]) => keySurvival(role, key).survives)
+      .filter(([, key]) => canRetainAccessKey(role, key).retained)
       .map(([name]) => name);
   }
 
@@ -236,16 +236,16 @@ describe('keySurvival', () => {
   });
 
   it('names the permissions that put a key above the new role', () => {
-    expect(keySurvival(OrgRole.Member, KEYS.deletesBuckets)).toStrictEqual({
-      survives: false,
+    expect(canRetainAccessKey(OrgRole.Member, KEYS.deletesBuckets)).toStrictEqual({
+      retained: false,
       reason: 'exceeds_role',
       excess: [{ keyPermission: 'DeleteBucket', requires: 'buckets.delete' }],
     });
   });
 
   it('blames the role, not the key, when the role can mint nothing', () => {
-    expect(keySurvival(OrgRole.ReadOnly, KEYS.plainReadWrite)).toStrictEqual({
-      survives: false,
+    expect(canRetainAccessKey(OrgRole.ReadOnly, KEYS.plainReadWrite)).toStrictEqual({
+      retained: false,
       reason: 'role_cannot_mint',
     });
   });
@@ -253,13 +253,15 @@ describe('keySurvival', () => {
   it('refuses a row that records no permission set', () => {
     // A row the console rebuilt after a vendor 409. Nothing places it inside
     // the new role, and its secret was never returned to anyone.
-    expect(keySurvival(OrgRole.Owner, KEYS.recovered)).toStrictEqual({
-      survives: false,
+    expect(canRetainAccessKey(OrgRole.Owner, KEYS.recovered)).toStrictEqual({
+      retained: false,
       reason: 'permissions_unrecorded',
     });
   });
 
   it('reads an empty permission list as a recorded set, and keeps it', () => {
-    expect(keySurvival(OrgRole.Member, { permissions: [] })).toStrictEqual({ survives: true });
+    expect(canRetainAccessKey(OrgRole.Member, { permissions: [] })).toStrictEqual({
+      retained: true,
+    });
   });
 });

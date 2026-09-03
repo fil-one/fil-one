@@ -9,8 +9,12 @@ vi.mock('sst', () => sstResourceMock());
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { keysExceedingRole, listOrgAccessKeys, reviewKeysForRole } from './member-keys.js';
-import type { MemberKey } from './member-keys.js';
+import {
+  reviewMemberAccessKeysForRole,
+  listOrgAccessKeys,
+  reviewAccessKeysForRole,
+} from './member-keys.js';
+import type { MemberAccessKey } from './member-keys.js';
 
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
 const MEMBER = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
@@ -38,7 +42,7 @@ function row(overrides: Record<string, unknown> = {}) {
   );
 }
 
-function key(overrides: Partial<MemberKey> = {}): MemberKey {
+function key(overrides: Partial<MemberAccessKey> = {}): MemberAccessKey {
   return {
     id: 'key-1',
     keyName: 'ci',
@@ -109,8 +113,8 @@ describe('listOrgAccessKeys', () => {
   });
 });
 
-describe('reviewKeysForRole', () => {
-  const ROWS: MemberKey[] = [
+describe('reviewAccessKeysForRole', () => {
+  const ROWS: MemberAccessKey[] = [
     key({ id: 'plain', permissions: ['read', 'write'] }),
     key({ id: 'deletes-buckets', permissions: ['read', 'DeleteBucket'] }),
     key({
@@ -124,62 +128,62 @@ describe('reviewKeysForRole', () => {
   ];
 
   it('condemns the keys the new role could not mint, and nobody else’s', () => {
-    const review = reviewKeysForRole(ROWS, MEMBER, OrgRole.Member);
+    const review = reviewAccessKeysForRole(ROWS, MEMBER, OrgRole.Member);
 
-    expect(review.doomed.map((k) => [k.id, k.reason])).toStrictEqual([
+    expect(review.keysToRevoke.map((k) => [k.id, k.reason])).toStrictEqual([
       ['deletes-buckets', 'exceeds_role'],
       ['holds-retention', 'exceeds_role'],
       ['recovered', 'permissions_unrecorded'],
     ]);
-    expect(review.survivingCount).toBe(1);
-    expect(review.unattributedCount).toBe(1);
+    expect(review.retainedKeyCount).toBe(1);
+    expect(review.unattributedKeyCount).toBe(1);
   });
 
   it('names what put a key above the new role', () => {
-    const review = reviewKeysForRole(ROWS, MEMBER, OrgRole.Member);
+    const review = reviewAccessKeysForRole(ROWS, MEMBER, OrgRole.Member);
 
-    expect(review.doomed[0]!.excess).toStrictEqual([
+    expect(review.keysToRevoke[0]!.excess).toStrictEqual([
       { keyPermission: 'DeleteBucket', requires: 'buckets.delete' },
     ]);
   });
 
   it('takes every attributed key of theirs on a demotion to ReadOnly', () => {
-    const review = reviewKeysForRole(ROWS, MEMBER, OrgRole.ReadOnly);
+    const review = reviewAccessKeysForRole(ROWS, MEMBER, OrgRole.ReadOnly);
 
-    expect(review.doomed.map((k) => [k.id, k.reason])).toStrictEqual([
+    expect(review.keysToRevoke.map((k) => [k.id, k.reason])).toStrictEqual([
       ['plain', 'role_cannot_mint'],
       ['deletes-buckets', 'role_cannot_mint'],
       ['holds-retention', 'role_cannot_mint'],
       ['recovered', 'role_cannot_mint'],
     ]);
-    expect(review.survivingCount).toBe(0);
+    expect(review.retainedKeyCount).toBe(0);
   });
 
   it('condemns nothing on a promotion', () => {
-    const review = reviewKeysForRole(ROWS, MEMBER, OrgRole.Owner);
+    const review = reviewAccessKeysForRole(ROWS, MEMBER, OrgRole.Owner);
 
-    expect(review.doomed.map((k) => k.id)).toStrictEqual(['recovered']);
-    expect(review.survivingCount).toBe(3);
+    expect(review.keysToRevoke.map((k) => k.id)).toStrictEqual(['recovered']);
+    expect(review.retainedKeyCount).toBe(3);
   });
 
   it('counts an org with no keys as nothing to do', () => {
-    expect(reviewKeysForRole([], MEMBER, OrgRole.ReadOnly)).toStrictEqual({
-      doomed: [],
-      survivingCount: 0,
-      unattributedCount: 0,
+    expect(reviewAccessKeysForRole([], MEMBER, OrgRole.ReadOnly)).toStrictEqual({
+      keysToRevoke: [],
+      retainedKeyCount: 0,
+      unattributedKeyCount: 0,
     });
   });
 });
 
-describe('keysExceedingRole', () => {
+describe('reviewMemberAccessKeysForRole', () => {
   it('reads the partition and reviews it in one call', async () => {
     ddbMock
       .on(QueryCommand)
       .resolves({ Items: [row(), row({ sk: 'ACCESSKEY#key-2', permissions: ['DeleteBucket'] })] });
 
-    const review = await keysExceedingRole(ORG_ID, MEMBER, OrgRole.Member);
+    const review = await reviewMemberAccessKeysForRole(ORG_ID, MEMBER, OrgRole.Member);
 
-    expect(review.doomed.map((k) => k.id)).toStrictEqual(['key-2']);
-    expect(review.survivingCount).toBe(1);
+    expect(review.keysToRevoke.map((k) => k.id)).toStrictEqual(['key-2']);
+    expect(review.retainedKeyCount).toBe(1);
   });
 });
