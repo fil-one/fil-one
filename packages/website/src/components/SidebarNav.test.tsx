@@ -86,10 +86,9 @@ function renderBothSidebars(role: OrgRole = OrgRole.Owner, overrides: Partial<Me
   return render(
     <QueryClientProvider client={client}>
       <ToastProvider>
-        <SidebarNav collapsed={false} onToggle={() => {}} showTestIds={true} />
+        <SidebarNav collapsed={false} showTestIds={true} />
         <SidebarNav
           collapsed={false}
-          onToggle={() => {}}
           onClose={() => {}}
           showUserProfile={false}
           showTestIds={false}
@@ -111,7 +110,7 @@ function renderOneSidebar(role = OrgRole.Owner, overrides: Partial<MeResponse> =
   return render(
     <QueryClientProvider client={client}>
       <ToastProvider>
-        <SidebarNav collapsed={false} onToggle={() => {}} showTestIds={true} />
+        <SidebarNav collapsed={false} showTestIds={true} />
       </ToastProvider>
     </QueryClientProvider>,
   );
@@ -218,7 +217,7 @@ describe('SidebarNav user identity accessible names', () => {
     const { getByTestId } = render(
       <QueryClientProvider client={client}>
         <ToastProvider>
-          <SidebarNav collapsed={collapsed} onToggle={() => {}} showTestIds={true} />
+          <SidebarNav collapsed={collapsed} showTestIds={true} />
         </ToastProvider>
       </QueryClientProvider>,
     );
@@ -231,7 +230,7 @@ describe('SidebarNav user identity accessible names', () => {
     const { getByTestId } = render(
       <QueryClientProvider client={client}>
         <ToastProvider>
-          <SidebarNav collapsed={collapsed} onToggle={() => {}} showTestIds={true} />
+          <SidebarNav collapsed={collapsed} showTestIds={true} />
         </ToastProvider>
       </QueryClientProvider>,
     );

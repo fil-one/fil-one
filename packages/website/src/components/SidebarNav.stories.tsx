@@ -69,12 +69,13 @@ export const Interactive: Story = {
   render: () => {
     const [collapsed, setCollapsed] = useState(false);
     return (
-      <div style={{ height: 600, width: collapsed ? 80 : 240 }}>
-        <SidebarNav
-          collapsed={collapsed}
-          onToggle={() => setCollapsed((c) => !c)}
-          showTestIds={true}
-        />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <button type="button" onClick={() => setCollapsed((c) => !c)}>
+          Toggle collapse
+        </button>
+        <div style={{ height: 600, width: collapsed ? 80 : 240 }}>
+          <SidebarNav collapsed={collapsed} showTestIds={true} />
+        </div>
       </div>
     );
   },
