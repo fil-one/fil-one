@@ -16,6 +16,7 @@ const ddbMock = mockClient(DynamoDBClient);
 
 import { userActor } from './audit.js';
 import { revokeAccessKey } from './key-revocation.js';
+import type { RevokeAccessKeyArgs } from './key-revocation.js';
 
 const ORG_ID = 'org-1';
 const KEY_ID = 'key-1';
@@ -28,7 +29,7 @@ beforeEach(() => {
   ddbMock.on(TransactWriteItemsCommand).resolves({});
 });
 
-function revoke(overrides: Record<string, unknown> = {}) {
+function revoke(overrides: Partial<RevokeAccessKeyArgs> = {}) {
   return revokeAccessKey({
     orgId: ORG_ID,
     keyId: KEY_ID,
@@ -39,6 +40,9 @@ function revoke(overrides: Record<string, unknown> = {}) {
     tenantId: 'fth:org-1',
     actor: userActor({ userId: 'admin-1', email: 'admin@example.test' }),
     ...overrides,
+    // Last, and never undefined: `reason` is required, and a bare `revoke()`
+    // stands for the member revoking their own key.
+    reason: overrides.reason ?? 'user_requested',
   });
 }
 
@@ -90,10 +94,10 @@ describe('revokeAccessKey', () => {
     );
   });
 
-  it('leaves the reason out when the holder revoked their own key', async () => {
+  it('names the request itself when the holder revoked their own key', async () => {
     await revoke();
 
-    expect(standaloneEvents()[0]!.details).not.toHaveProperty('reason');
+    expect(standaloneEvents()[0]!.details).toMatchObject({ reason: 'user_requested' });
   });
 
   it('names the actor who asked, who need not be the holder', async () => {

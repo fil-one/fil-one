@@ -1,13 +1,10 @@
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { auditKeyIdSuffix } from '@filone/shared';
-import type { AuditActor, S3Region } from '@filone/shared';
+import type { AuditActor, RevocationTrigger, S3Region } from '@filone/shared';
 import { Resource } from 'sst';
 import { AuditSubjects, twoPhaseAudit } from './audit.js';
 import { AccessKeyKeys } from './dynamo-records.js';
 import type { ServiceOrchestrator } from './service-orchestrator.js';
-
-/** Why a key was revoked, when something other than its owner asked for it. */
-export type KeyRevocationReason = 'role_narrowing' | 'member_removed';
 
 export interface RevokeAccessKeyArgs {
   orgId: string;
@@ -21,7 +18,8 @@ export interface RevokeAccessKeyArgs {
   tenantId: string;
   /** Who asked. On a role change this is the admin, never the key's holder. */
   actor: AuditActor;
-  reason?: KeyRevocationReason | undefined;
+  /** What took the key. Required, so no revocation goes unexplained. */
+  reason: RevocationTrigger;
 }
 
 /**
@@ -67,7 +65,7 @@ export async function revokeAccessKey({
       region,
       ...(keyName ? { keyName } : {}),
       ...(accessKeyId ? { keyIdSuffix: auditKeyIdSuffix('s3', accessKeyId) } : {}),
-      ...(reason ? { reason } : {}),
+      reason,
     },
   });
 

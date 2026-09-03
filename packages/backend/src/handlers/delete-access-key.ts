@@ -67,8 +67,9 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   const tenantId = orchestrator.isTenantReady(orgProfile);
   if (!tenantId) return tenantNotReadyResponse();
 
-  // No reason: a member revoking their own key is the request saying why. The
-  // passes that revoke a key its holder did not ask about carry one.
+  // The member is revoking their own key, which is the one revocation somebody
+  // asked for directly. The passes that take a key its holder did not ask about
+  // name themselves instead.
   await revokeAccessKey({
     orgId,
     keyId,
@@ -78,6 +79,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     orchestrator,
     tenantId,
     actor: userActor({ userId, email: getVerifiedEmail(event) }),
+    reason: 'user_requested',
   });
 
   return { statusCode: 204, body: '' };

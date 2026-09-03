@@ -129,6 +129,7 @@ export type {
   AuditIntentPhase,
   AuditKeyKind,
   AuditOutcome,
+  RevocationTrigger,
   AuditPhaseFields,
   AuditSinglePhase,
   AuditSubject,

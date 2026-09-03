@@ -153,6 +153,21 @@ export type AuditDetailValue =
 export type AuditDetailRecord = { [field: string]: AuditDetailValue | undefined };
 
 /**
+ * What took a key: the request that asked for it, or the pass that found it.
+ *
+ * Every revocation names one, so no reading of this field turns on its absence.
+ * `user_requested` is a member revoking their own key; the rest are revocations
+ * nobody asked for directly, where the key's holder is not the actor. Each
+ * revocation writes its own `key.deleted` carrying this, and those per-key
+ * events are the durable account: a pass that fails midway would otherwise
+ * leave revoked credentials with nothing recording them.
+ *
+ * Distinct from `AccessKeyRevocationReason`, which says why one key could not
+ * be kept under one role. This says what made anybody look.
+ */
+export type RevocationTrigger = 'user_requested' | 'role_narrowing' | 'member_removed';
+
+/**
  * The payload each event type carries, keyed by type.
  *
  * Deliberately small. The envelope records what changed and who changed it, not
@@ -232,14 +247,10 @@ export interface AuditEventDetails {
     /** The characters of the key the console shows — see {@link auditKeyIdSuffix}. */
     keyIdSuffix?: string;
     /**
-     * Why the key went, when somebody other than its holder took it. Absent
-     * when a member revoked their own key, which is the request itself saying
-     * why. `role_narrowing` and `member_removed` are the two passes that revoke
-     * a key its holder did not ask about, and the per-key events are the record
-     * of those: a pass that fails midway would otherwise leave revoked
-     * credentials with nothing recording them.
+     * What took the key. Optional only for rows written before every
+     * revocation named one; `revokeAccessKey` requires it of every caller.
      */
-    reason?: 'role_narrowing' | 'member_removed';
+    reason?: RevocationTrigger;
   };
 }
 
