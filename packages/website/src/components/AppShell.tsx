@@ -7,6 +7,7 @@ import { Banner } from './Banner';
 import { UserAvatar } from './UserAvatar';
 import { OrgSwitcher } from './OrgSwitcher';
 import { getUsage, getBilling, getMe, logout } from '../lib/api';
+import { monogramFromName } from '../lib/monogram.js';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { useHasPermission } from '../lib/use-permissions.js';
 import { daysUntil, pluralizeDays } from '../lib/time.js';
@@ -18,7 +19,7 @@ function MobileUserMenu() {
   const { data: me } = useQuery({ queryKey: queryKeys.me, queryFn: () => getMe() });
 
   const displayName = me?.name || me?.email || 'User';
-  const initial = displayName.charAt(0).toUpperCase();
+  const initial = monogramFromName(displayName);
 
   useEffect(() => {
     if (!open) return;
