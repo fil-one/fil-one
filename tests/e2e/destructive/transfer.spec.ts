@@ -90,7 +90,7 @@ test.describe('trial owner transfers the organization', () => {
   test('trial owner hands the organization to another member', async ({ page }) => {
     test.setTimeout(TRANSFER_TEST_TIMEOUT_MS);
 
-    await page.goto('/organization');
+    await page.goto('/members');
     const successorRow = memberRow(page, successorUserId);
     await expect(successorRow).toHaveAttribute('data-member-role', 'admin');
 
