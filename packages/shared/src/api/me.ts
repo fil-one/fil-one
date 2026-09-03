@@ -53,9 +53,11 @@ export interface MeResponse {
    * account through the naming step.
    *
    * Absent on the stored row reads as true, so every organization that predates
-   * the field is left alone rather than sent back through onboarding.
+   * the field is left alone rather than sent back through onboarding. Optional
+   * here for the same reason: a payload that omits it is a confirmed org, and
+   * only an explicit `false` sends the caller through the naming step.
    */
-  nameConfirmed: boolean;
+  nameConfirmed?: boolean;
   /**
    * Whether the organizations beta is switched on for this caller — their own
    * allowlist row, or {@link MeResponse.orgId}'s. Computed server-side like
