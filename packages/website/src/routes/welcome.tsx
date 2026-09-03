@@ -33,7 +33,10 @@ function WelcomeRoute() {
     staleTime: ME_STALE_TIME,
   });
 
-  if (me?.nameConfirmed) {
+  // Anything but an explicit `false` is already confirmed (an absent value is a
+  // pre-flag org), so a caller who lands here without needing the step is sent
+  // straight on rather than shown a naming gate they have no reason to see.
+  if (me && me.nameConfirmed !== false) {
     void navigate({ href: me.slug ? `/${me.slug}/dashboard` : '/dashboard' });
     return null;
   }
