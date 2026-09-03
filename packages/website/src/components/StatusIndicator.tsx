@@ -7,7 +7,7 @@ import { Tooltip } from './Tooltip.js';
 
 const STATUS_REFETCH_MS = 60_000;
 
-const dotColorStyles = {
+export const dotColorStyles = {
   green: 'bg-green-500',
   red: 'bg-red-500',
   blue: 'bg-brand-500',
@@ -15,7 +15,7 @@ const dotColorStyles = {
   grey: 'bg-zinc-400',
 } as const;
 
-const textColorStyles = {
+export const textColorStyles = {
   green: 'text-green-700',
   red: 'text-red-700',
   blue: 'text-brand-700',

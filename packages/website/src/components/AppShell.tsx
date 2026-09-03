@@ -6,6 +6,8 @@ import { SidebarNav } from './SidebarNav';
 import { Banner } from './Banner';
 import { UserAvatar } from './UserAvatar';
 import { OrgSwitcher } from './OrgSwitcher';
+import { ReportBugButton } from './ReportBugButton';
+import { SystemStatusPill } from './SystemStatusPill';
 import { getUsage, getBilling, getMe, logout } from '../lib/api';
 import { monogramFromName } from '../lib/monogram.js';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
@@ -309,7 +311,7 @@ export function AppShell({ children }: AppShellProps) {
             outside it (Linear's layout). The `lg:` insets and card chrome are
             desktop-only; on mobile the content stays edge to edge. The panel is
             the scroll container, so its rounded corners clip the content. */}
-        <main className="flex flex-1 flex-col overflow-hidden lg:p-2">
+        <main className="flex flex-1 flex-col overflow-hidden lg:px-2 lg:pt-2">
           <div className="flex flex-1 flex-col overflow-auto bg-zinc-50 lg:rounded-xl lg:border lg:border-zinc-200 lg:shadow-sm">
             {/* Mobile top bar */}
             <div className="sticky top-0 z-20 flex h-14 flex-shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-3 lg:hidden">
@@ -330,6 +332,14 @@ export function AppShell({ children }: AppShellProps) {
 
             {children}
             <div className="h-10 shrink-0" aria-hidden="true" />
+          </div>
+
+          {/* Utility bar under the content window (desktop only): quiet controls
+              that belong to the app rather than the page, at the right the way
+              Linear places them. */}
+          <div className="hidden h-10 flex-shrink-0 items-center justify-end gap-1 px-1 lg:flex">
+            <ReportBugButton />
+            <SystemStatusPill />
           </div>
         </main>
       </div>

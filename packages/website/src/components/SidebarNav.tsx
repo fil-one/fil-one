@@ -244,7 +244,9 @@ export function SidebarNav({
           isInactive={isInactive}
         />
 
-        {/* Footer: user identity (also carries Documentation/Support now) + System status */}
+        {/* Footer: user identity (also carries Documentation/Support now). System
+            status has moved to the content window's bottom bar on desktop; it
+            stays here only in the mobile drawer, which has no such bar. */}
         <div className="p-2 flex flex-col gap-0.5">
           {showUserProfile && (
             <UserMenu
@@ -255,7 +257,7 @@ export function SidebarNav({
               testId={showTestIds ? 'user-menu-button' : undefined}
             />
           )}
-          <StatusIndicator collapsed={collapsed} />
+          {!showUserProfile && <StatusIndicator collapsed={collapsed} />}
         </div>
       </nav>
     </div>
