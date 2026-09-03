@@ -53,14 +53,6 @@ function dropFromRoster(client: QueryClient, userId: string): void {
 }
 
 /**
- * What a membership change invalidates besides the roster.
- *
- * A demotion revokes that member's pending invitations the new role could not
- * have issued, so the list beside this one may have shrunk. And a caller who
- * changed their own row keeps the permissions of the role they left until `/me`
- * is read again — a console offering buttons the server will now refuse.
- */
-/**
  * The access keys list, after a change that revoked some.
  *
  * Its own invalidation because the roster and the key list are different
@@ -68,16 +60,28 @@ function dropFromRoster(client: QueryClient, userId: string): void {
  * moment ago would otherwise come back to it and see credentials that no
  * longer exist rendered as active.
  */
-function settleRevokedKeys(client: QueryClient, revoked: readonly unknown[]): void {
-  if (revoked.length === 0) return;
+function invalidateRevokedKeyViews(client: QueryClient, revokedCount: number): void {
+  if (revokedCount === 0) return;
   void client.invalidateQueries({ queryKey: queryKeys.accessKeys });
   // The narrowing dialog stays open on a refusal, and its preview was read
   // before any of this: left alone it goes on offering keys that no longer
   // exist as keys the next attempt will revoke.
-  void client.invalidateQueries({ queryKey: ['role-change-preview'] });
+  void client.invalidateQueries({ queryKey: queryKeys.roleChangePreviews });
 }
 
-function settleAfterChange(client: QueryClient, userId: string, selfUserId?: string): void {
+/**
+ * What a membership change invalidates besides the roster.
+ *
+ * A demotion revokes that member's pending invitations the new role could not
+ * have issued, so the list beside this one may have shrunk. And a caller who
+ * changed their own row keeps the permissions of the role they left until `/me`
+ * is read again — a console offering buttons the server will now refuse.
+ */
+function invalidateAfterMembershipChange(
+  client: QueryClient,
+  userId: string,
+  selfUserId?: string,
+): void {
   void client.invalidateQueries({ queryKey: queryKeys.members });
   void client.invalidateQueries({ queryKey: queryKeys.invitations });
   if (userId === selfUserId) void client.invalidateQueries({ queryKey: queryKeys.me });
@@ -151,8 +155,8 @@ function useRoleChange(ctx: MutationContext) {
     },
     onSuccess: (result, { member, role }) => {
       patchRosterRole(ctx.client, member.userId, role);
-      settleAfterChange(ctx.client, member.userId, ctx.selfUserId);
-      settleRevokedKeys(ctx.client, result.revokedKeys ?? []);
+      invalidateAfterMembershipChange(ctx.client, member.userId, ctx.selfUserId);
+      invalidateRevokedKeyViews(ctx.client, result.revokedKeys?.length ?? 0);
       ctx.notice.clear();
       ctx.toastSuccess(
         `${memberName(member)} is now ${ROLE_LABELS[role]}${revokedSuffix(result.revokedKeys)}`,
@@ -165,7 +169,7 @@ function useRoleChange(ctx: MutationContext) {
       const revoked = revokedKeysOf(err);
       // Those keys are gone whatever the role now says, so the list they are
       // listed on is stale either way.
-      settleRevokedKeys(ctx.client, revoked);
+      invalidateRevokedKeyViews(ctx.client, revoked.length);
       const remedy = `That change would leave the organization without an owner.${revokedSuffix(revoked)}`;
       if (ctx.notice.capture(err, remedy)) return;
       ctx.toastError(
@@ -179,7 +183,7 @@ function useRoleChange(ctx: MutationContext) {
 }
 
 /** Up to three key names, then a count, so a toast stays one line. */
-function namedKeys(keys: readonly AccessKeySummary[]): string {
+function keyNameList(keys: readonly AccessKeySummary[]): string {
   const named = keys.slice(0, 3).map((key) => key.keyName);
   const rest = keys.length - named.length;
   return rest > 0 ? `${named.join(', ')} and ${rest} more` : named.join(', ');
@@ -188,7 +192,7 @@ function namedKeys(keys: readonly AccessKeySummary[]): string {
 /** What a role change took away, appended to whatever it is being said beside. */
 function revokedSuffix(keys: readonly AccessKeySummary[] | undefined): string {
   if (!keys?.length) return '';
-  return ` ${keys.length === 1 ? 'This key was' : `These ${keys.length} keys were`} revoked: ${namedKeys(keys)}.`;
+  return ` ${keys.length === 1 ? 'This key was' : `These ${keys.length} keys were`} revoked: ${keyNameList(keys)}.`;
 }
 
 function useMemberRemoval(ctx: MutationContext) {
@@ -199,7 +203,7 @@ function useMemberRemoval(ctx: MutationContext) {
     },
     onSuccess: (_result, member) => {
       dropFromRoster(ctx.client, member.userId);
-      settleAfterChange(ctx.client, member.userId, ctx.selfUserId);
+      invalidateAfterMembershipChange(ctx.client, member.userId, ctx.selfUserId);
       ctx.notice.clear();
       ctx.toastSuccess(`${memberName(member)} was removed from the organization`);
     },
@@ -267,7 +271,7 @@ function useOwnershipTransfer(ctx: MutationContext, onDone: () => void) {
       // before they click anything else.
       patchRosterRole(ctx.client, result.userId, OrgRole.Owner);
       patchRosterRole(ctx.client, result.previousOwnerUserId, OrgRole.Admin);
-      settleAfterChange(ctx.client, result.previousOwnerUserId, ctx.selfUserId);
+      invalidateAfterMembershipChange(ctx.client, result.previousOwnerUserId, ctx.selfUserId);
       ctx.notice.clear();
       // The dialog goes with the seat. Left open, it offers a destructive button
       // to a caller who is now an Admin, and the server answers the second click

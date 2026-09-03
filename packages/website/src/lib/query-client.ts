@@ -94,6 +94,9 @@ export const queryClient = new QueryClient({
   },
 });
 
+/** The prefix every preview shares, so one invalidation reaches them all. */
+const ROLE_CHANGE_PREVIEWS = ['role-change-preview'] as const;
+
 export const queryKeys = {
   me: ['me'] as const,
   meWithMfa: ['me', 'mfa'] as const,
@@ -127,8 +130,9 @@ export const queryKeys = {
   // Its own prefix rather than under ['members']: the roster is invalidated on
   // every change, and a preview of what a change would revoke is about a role
   // nobody holds yet, so refetching it after the change asks a stale question.
+  roleChangePreviews: ROLE_CHANGE_PREVIEWS,
   roleChangePreview: (userId: string, role: OrgRole) =>
-    ['role-change-preview', userId, role] as const,
+    [...ROLE_CHANGE_PREVIEWS, userId, role] as const,
   invitations: ['invitations'] as const,
   instatusSummary: ['instatus-summary'] as const,
   preferences: ['preferences'] as const,

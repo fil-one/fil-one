@@ -61,8 +61,10 @@ export function useMemberDialogs(transferTarget: MemberSummary | null, closeTran
  * off the live target becomes a sentence about nobody for the length of the
  * fade, on the dialogs whose whole job is naming who the change is about.
  */
-function useClosingCopy<T>(target: T | null): T | null {
+function useLastNonNull<T>(target: T | null): T | null {
   const [last, setLast] = useState<T | null>(null);
+  // Set during render on purpose: React restarts the render with the new value
+  // before committing, so no frame shows the previous target.
   if (target !== null && target !== last) setLast(target);
   return target ?? last;
 }
@@ -90,12 +92,8 @@ function selfChangeDescription({ member, role }: RoleChange): string {
 }
 
 /**
- * The narrowing dialog, and the preview it reads.
- *
- * The query is keyed on the target and the role being asked about, and only
- * runs while the dialog is open: it names another member's access keys, and
- * asking about a role nobody holds yet is a question that goes stale the moment
- * the change lands.
+ * The narrowing dialog: who it is about, kept through the closing transition,
+ * and whether a confirmation is in flight.
  */
 function RoleNarrowingPrompt({
   target,
@@ -109,7 +107,7 @@ function RoleNarrowingPrompt({
   onConfirm: (change: RoleChange) => Promise<unknown>;
 }) {
   // Kept through the closing transition, so the copy does not blank mid-fade.
-  const change = useClosingCopy(target);
+  const change = useLastNonNull(target);
   // `ConfirmDialog` holds this state internally; a dialog built by hand has to
   // hold it itself, or a second click sends a second destructive request and a
   // successful change leaves the dialog naming a role nobody holds any more.
@@ -128,19 +126,53 @@ function RoleNarrowingPrompt({
       setPending(false);
     }
   }
-  const preview = useQuery({
-    queryKey: change
-      ? queryKeys.roleChangePreview(change.member.userId, change.role)
-      : queryKeys.roleChangePreview('', OrgRole.Member),
-    queryFn: () => getRoleChangePreview(change!.member.userId, change!.role),
-    enabled: target !== null && change !== null,
-  });
-
   if (!change) return null;
 
   return (
-    <RoleNarrowingDialog
+    <RoleNarrowingPreview
+      change={change}
       open={target !== null}
+      self={self}
+      pending={pending}
+      onClose={onClose}
+      onConfirm={() => void confirm()}
+    />
+  );
+}
+
+/**
+ * The dialog and the preview it reads.
+ *
+ * Rendered only once there is a change to ask about, so the query is keyed on
+ * a real member and role rather than a placeholder. It only runs while the
+ * dialog is open: it names another member's access keys, and asking about a
+ * role nobody holds yet is a question that goes stale the moment the change
+ * lands.
+ */
+function RoleNarrowingPreview({
+  change,
+  open,
+  self,
+  pending,
+  onClose,
+  onConfirm,
+}: {
+  change: RoleChange;
+  open: boolean;
+  self: boolean;
+  pending: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const preview = useQuery({
+    queryKey: queryKeys.roleChangePreview(change.member.userId, change.role),
+    queryFn: () => getRoleChangePreview(change.member.userId, change.role),
+    enabled: open,
+  });
+
+  return (
+    <RoleNarrowingDialog
+      open={open}
       memberName={memberName(change.member)}
       self={self}
       fromRole={ROLE_LABELS[change.member.role]}
@@ -153,7 +185,7 @@ function RoleNarrowingPrompt({
       error={preview.isError}
       pending={pending}
       onClose={onClose}
-      onConfirm={() => void confirm()}
+      onConfirm={onConfirm}
     />
   );
 }
@@ -179,9 +211,9 @@ export function MemberDialogs({
   onRemove: (member: MemberSummary) => Promise<unknown>;
   onTransfer: (member: MemberSummary) => void;
 }) {
-  const promotion = useClosingCopy(targets.promotion);
-  const removal = useClosingCopy(targets.removal);
-  const transfer = useClosingCopy(targets.transfer);
+  const promotion = useLastNonNull(targets.promotion);
+  const removal = useLastNonNull(targets.removal);
+  const transfer = useLastNonNull(targets.transfer);
 
   return (
     <>

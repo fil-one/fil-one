@@ -58,7 +58,7 @@ export function RoleNarrowingDialog({
   onClose,
   onConfirm,
 }: RoleNarrowingDialogProps) {
-  const revoked = keys ?? [];
+  const keysToRevoke = keys ?? [];
   const subject = self ? 'You go' : `${memberName} goes`;
 
   return (
@@ -81,7 +81,7 @@ export function RoleNarrowingDialog({
             loading={loading}
             error={error}
             self={self}
-            revoked={revoked}
+            keysToRevoke={keysToRevoke}
             survivingCount={survivingCount}
             unattributedCount={unattributedCount}
           />
@@ -100,7 +100,7 @@ export function RoleNarrowingDialog({
         <ConfirmButton
           pending={pending}
           loading={loading}
-          count={revoked.length}
+          count={keysToRevoke.length}
           onClick={onConfirm}
         />
       </ModalFooter>
@@ -112,14 +112,14 @@ function PreviewBody({
   loading,
   error,
   self,
-  revoked,
+  keysToRevoke,
   survivingCount,
   unattributedCount,
 }: {
   loading: boolean;
   error: boolean;
   self: boolean;
-  revoked: AccessKeySummary[];
+  keysToRevoke: AccessKeySummary[];
   survivingCount: number;
   unattributedCount: number;
 }) {
@@ -136,7 +136,7 @@ function PreviewBody({
     );
   }
 
-  if (revoked.length === 0) {
+  if (keysToRevoke.length === 0) {
     return (
       <p className="text-ui text-zinc-600">
         {self ? 'None of your' : 'None of their'} access keys carry more than the new role allows,
@@ -148,13 +148,13 @@ function PreviewBody({
   return (
     <>
       <p className="text-ui text-zinc-600">
-        {revoked.length === 1
+        {keysToRevoke.length === 1
           ? 'This access key stops working straight away:'
-          : `These ${revoked.length} access keys stop working straight away:`}
+          : `These ${keysToRevoke.length} access keys stop working straight away:`}
       </p>
       <ul className="flex flex-col gap-2 rounded-lg border border-zinc-200 p-3">
-        {revoked.map((key) => (
-          <RevokedKey key={key.id} revoked={key} />
+        {keysToRevoke.map((key) => (
+          <AccessKeyRow key={key.id} accessKey={key} />
         ))}
       </ul>
       <Alert
@@ -167,21 +167,21 @@ function PreviewBody({
   );
 }
 
-function RevokedKey({ revoked }: { revoked: AccessKeySummary }) {
-  const carries = revoked.excess.length > 0 ? ` · carries ${revoked.excess.join(', ')}` : '';
+function AccessKeyRow({ accessKey }: { accessKey: AccessKeySummary }) {
+  const carries = accessKey.excess.length > 0 ? ` · carries ${accessKey.excess.join(', ')}` : '';
 
   return (
     <li className="flex items-start gap-2">
       <KeyIcon width={16} height={16} className="mt-0.5 shrink-0 text-zinc-400" />
       <span className="flex flex-col">
         <span className="text-ui font-medium text-zinc-900">
-          {revoked.keyName}
-          {revoked.accessKeyIdSuffix && (
-            <span className="font-normal text-zinc-500"> …{revoked.accessKeyIdSuffix}</span>
+          {accessKey.keyName}
+          {accessKey.accessKeyIdSuffix && (
+            <span className="font-normal text-zinc-500"> …{accessKey.accessKeyIdSuffix}</span>
           )}
         </span>
         <span className="text-xs text-zinc-500">
-          {formatRegion(revoked.region)} · created {revoked.createdAt.slice(0, 10)}
+          {formatRegion(accessKey.region)} · created {accessKey.createdAt.slice(0, 10)}
           {carries}
         </span>
       </span>

@@ -543,7 +543,7 @@ describe('the role-narrowing confirmation', () => {
     );
     // And the preview, which was read before any of this and would otherwise go
     // on offering deleted keys as keys the next attempt will revoke.
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['role-change-preview'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.roleChangePreviews });
   });
 
   it('names the keys already revoked when the role write then failed', async () => {
