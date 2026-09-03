@@ -145,7 +145,7 @@ export function OnboardingPage({ hasBucket, hasKey }: OnboardingPageProps) {
             icon={UserPlusIcon}
             title="Invite your team"
             description="Give teammates a seat in this organization."
-            href="/members"
+            href="/organization?tab=invitations"
             action="Invite people"
           />
           <ExploreItem
