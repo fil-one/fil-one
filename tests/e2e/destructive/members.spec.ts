@@ -79,7 +79,7 @@ test.describe('paid owner manages members', () => {
   });
 
   test('owner changes a member role through the picker', async ({ page }) => {
-    await page.goto('/organization');
+    await page.goto('/members');
     const row = memberRow(page, memberUserId);
     await expect(row).toHaveAttribute('data-member-role', 'member');
 
@@ -109,7 +109,7 @@ test.describe('paid owner manages members', () => {
   });
 
   test('the last owner cannot demote themselves', async ({ page }) => {
-    await page.goto('/organization');
+    await page.goto('/members');
     const ownRow = memberRow(page, ownerUserId);
     await expect(ownRow).toHaveAttribute('data-member-role', 'owner');
 
@@ -149,7 +149,7 @@ test.describe('paid owner manages members', () => {
       await expect(memberPage.getByTestId('user-profile')).toContainText(orgName);
       await expect.poll(() => activeOrgStash(memberPage)).toBe(orgId);
 
-      await page.goto('/organization');
+      await page.goto('/members');
       const row = memberRow(page, memberUserId);
       const removed = page.waitForResponse(
         (response) =>

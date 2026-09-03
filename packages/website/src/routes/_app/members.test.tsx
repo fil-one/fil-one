@@ -17,16 +17,16 @@ function runBeforeLoad(): Promise<unknown> {
   return (Route.options.beforeLoad as () => Promise<void>)().catch((err: unknown) => err);
 }
 
-// The roster is a tab of `/organization` now (FIL-1094), and this path is kept
-// as a redirect for the bookmarks and links that still name it. The E2E specs
-// go straight to `/organization`, so this is the only thing holding it.
+// The roster is its own org-scoped page (`/$orgSlug/members`) again, and this
+// flat path is kept as a redirect for the bookmarks and links that still name
+// it.
 describe('the /members redirect', () => {
   beforeEach(() => {
     queryClient.clear();
     vi.mocked(getMe).mockReset();
   });
 
-  it('sends the caller to their active org’s Organization page, replacing the entry', async () => {
+  it('sends the caller to their active org’s Members page, replacing the entry', async () => {
     vi.mocked(getMe).mockResolvedValue({
       orgId: 'org-1',
       memberships: [{ orgId: 'org-1', orgName: 'Acme', role: OrgRole.Owner, slug: 'acme' }],
@@ -36,7 +36,7 @@ describe('the /members redirect', () => {
     expect(isRedirect(thrown)).toBe(true);
 
     const { href, replace } = (thrown as { options: { href?: string; replace?: boolean } }).options;
-    expect({ href, replace }).toEqual({ href: '/acme/organization', replace: true });
+    expect({ href, replace }).toEqual({ href: '/acme/members', replace: true });
   });
 
   it('is a not-found for a caller with no resolvable org', async () => {
