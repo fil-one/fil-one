@@ -1,6 +1,7 @@
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
 import {
   BookOpenIcon,
+  CaretUpDownIcon,
   ChatCircleIcon,
   GearIcon,
   SignOutIcon,
@@ -49,11 +50,20 @@ export function UserMenu({ src, initial, displayName, collapsed, testId }: UserM
           collapsed ? 'w-full justify-center' : 'w-full gap-2.5 px-2',
         ].join(' ')}
       >
-        <UserAvatar src={src} initial={initial} />
+        {/* Smaller than the 11px token floor on purpose: two initials in a 20px
+            circle. `text-white` is re-asserted so the size override cannot drop
+            the base colour. */}
+        <UserAvatar src={src} initial={initial} className="h-5 w-5 text-[10px] text-white" />
         {!collapsed && (
-          <span className="min-w-0 flex-1 truncate text-left text-xs leading-tight">
-            {displayName}
-          </span>
+          <>
+            <span className="min-w-0 flex-1 truncate text-left text-xs leading-tight">
+              {displayName}
+            </span>
+            {/* The button carries no other chrome; the chevron is what says it
+                opens a menu rather than navigating. Up-down because the menu
+                opens upward from the footer. */}
+            <CaretUpDownIcon size={14} className="flex-shrink-0 text-zinc-400" />
+          </>
         )}
       </MenuButton>
       <MenuItems
