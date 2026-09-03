@@ -156,7 +156,7 @@ jobs:
           output: trivy-deps.sarif
           severity: CRITICAL,HIGH,MEDIUM
           trivyignores: .trivyignore
-          skip-dirs: packages/aurora-backoffice-client,packages/aurora-portal-client,contracts/lib,.sst,node_modules
+          skip-dirs: packages/aurora-backoffice-client,packages/aurora-portal-client,.sst,node_modules
         continue-on-error: true
 
       - name: Upload Trivy dependency results
@@ -224,7 +224,7 @@ jobs:
           format: sarif
           output: trivy-iac.sarif
           severity: CRITICAL,HIGH,MEDIUM
-          skip-dirs: contracts/lib,.sst,node_modules
+          skip-dirs: .sst,node_modules
         continue-on-error: true
 
       - name: Upload Trivy IaC results
@@ -270,7 +270,7 @@ jobs:
           format: table
           scanners: license
           severity: CRITICAL,HIGH
-          skip-dirs: packages/aurora-backoffice-client,packages/aurora-portal-client,contracts/lib,.sst,node_modules
+          skip-dirs: packages/aurora-backoffice-client,packages/aurora-portal-client,.sst,node_modules
         continue-on-error: true # Advisory — review output before blocking
 
   # ──────────────────────────────────────────────────
