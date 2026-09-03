@@ -48,12 +48,12 @@ describe('service-orchestrator registry', () => {
     expect(orchestrator.region).toBe(S3Region.EuCentral3);
   });
 
-  it('routes us-east-9 to the Forge dev sandbox orchestrator', () => {
-    process.env.FILONE_STAGE = Stage.Staging;
-    const orchestrator = getOrchestratorForRegion(S3Region.UsEast9);
-    expect(orchestrator.id).toBe('forgeDev');
-    expect(orchestrator.region).toBe(S3Region.UsEast9);
-  });
+  // it('routes us-east-9 to the Forge dev sandbox orchestrator', () => {
+  //   process.env.FILONE_STAGE = Stage.Staging;
+  //   const orchestrator = getOrchestratorForRegion(S3Region.UsEast9);
+  //   expect(orchestrator.id).toBe('forgeDev');
+  //   expect(orchestrator.region).toBe(S3Region.UsEast9);
+  // });
 });
 
 describe('getAvailableOrchestrators', () => {
@@ -66,6 +66,7 @@ describe('getAvailableOrchestrators', () => {
   it('includes both Forge orchestrators on non-production stages', () => {
     process.env.FILONE_STAGE = Stage.Staging;
     const orchestrators = getAvailableOrchestrators();
-    expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'fth', 'forge', 'forgeDev']);
+    // expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'fth', 'forge', 'forgeDev']);
+    expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'fth', 'forge']);
   });
 });

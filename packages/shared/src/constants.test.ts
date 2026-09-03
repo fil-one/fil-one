@@ -240,7 +240,7 @@ describe('getAvailableRegions', () => {
       S3Region.EuWest1,
       S3Region.UsEast1,
       S3Region.EuCentral3,
-      S3Region.UsEast9,
+      // S3Region.UsEast9,
     ]);
   });
 
@@ -253,10 +253,9 @@ describe('getAvailableRegions', () => {
       S3Region.EuWest1,
       S3Region.UsEast1,
       S3Region.EuCentral3,
-      S3Region.UsEast9,
+      // S3Region.UsEast9,
     ]);
     expect(getAvailableRegions('dev-pr-123')).toContain(S3Region.EuCentral3);
-    expect(getAvailableRegions('dev-pr-123')).toContain(S3Region.UsEast9);
   });
 });
 
@@ -272,11 +271,11 @@ describe('isSupportedRegion', () => {
     expect(isSupportedRegion('eu-central-3', 'unknown')).toBe(true);
   });
 
-  it('gates us-east-9 to non-production stages', () => {
-    expect(isSupportedRegion('us-east-9', Stage.Production)).toBe(false);
-    expect(isSupportedRegion('us-east-9', Stage.Staging)).toBe(true);
-    expect(isSupportedRegion('us-east-9', 'unknown')).toBe(true);
-  });
+  for (const stage of [Stage.Production, Stage.Staging, 'unknown']) {
+    it(`rejects the temporarily disabled us-east-9 region in stage ${stage}`, () => {
+      expect(isSupportedRegion('us-east-9', stage)).toEqual(false);
+    });
+  }
 
   it('rejects unknown regions', () => {
     expect(isSupportedRegion('mars-1', Stage.Staging)).toBe(false);
