@@ -55,6 +55,13 @@ const DETAILS: { [T in AuditEventType]: AuditEventDetails[T] } = {
   'ownership.transferred': { fromUserId: USER_ID, toUserId: 'user-2' },
   'key.created': { keyKind: 's3', keyName: 'ci', region: 'eu-west-1', keyIdSuffix: 'AMPL' },
   'key.deleted': { keyKind: 's3', keyName: 'ci', region: 'eu-west-1' },
+  'audit.exported': {
+    from: '2026-05-17T12:00:00.000Z',
+    to: NOW,
+    eventType: 'member.removed',
+    actorId: USER_ID,
+    rowCount: 12,
+  },
 };
 
 function renamed(): AuditEventRecord<'org.renamed'> {

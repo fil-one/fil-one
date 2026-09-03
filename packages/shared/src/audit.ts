@@ -45,6 +45,7 @@ export const AUDIT_EVENT_TYPES = [
   'ownership.transferred',
   'key.created',
   'key.deleted',
+  'audit.exported',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -232,6 +233,26 @@ export interface AuditEventDetails {
     /** The characters of the key the console shows — see {@link auditKeyIdSuffix}. */
     keyIdSuffix?: string;
   };
+  /**
+   * The one event written on a read path, and the highest-signal action the log
+   * records: it is the one that takes an org's security history out of the
+   * system. The filters travel with it, because who exported everything and who
+   * exported one member's week are different acts.
+   *
+   * It means an export was produced, not that the bytes arrived. A client that
+   * disconnects mid-transfer leaves a record of an export nobody received.
+   * Nothing acts on the distinction, so the type stays single-phase.
+   */
+  'audit.exported': {
+    /** The effective window, after clamping to {@link AUDIT_RETENTION_DAYS}. */
+    from: string;
+    to: string;
+    /** Absent when the export was not filtered to one type. */
+    eventType?: AuditEventType;
+    /** The actor filtered on, which is a user id and never an address. */
+    actorId?: string;
+    rowCount: number;
+  };
 }
 
 /**
@@ -356,6 +377,67 @@ export type CommittableAuditEvent = Exclude<AuditEvent, VendorBackedKeyEvent & A
  */
 export type TwoPhaseAuditEvent = Extract<AuditEvent, { type: TwoPhaseAuditEventType }> &
   (AuditIntentPhase | AuditCompletionPhase);
+
+/**
+ * An event that rides no local transaction — what `appendAuditEvent` accepts.
+ *
+ * Two shapes qualify, for opposite reasons. A phase half has no mutation to
+ * travel with by construction: the `intent` precedes the vendor call, and a
+ * `completion` may close a request that changed nothing. `audit.exported`
+ * describes a read, so there is no mutation for it to be atomic with at all.
+ *
+ * Everything else goes through `commitAudited`, because everything else records
+ * a local write that must not be able to land unrecorded.
+ */
+export type StandaloneAuditEvent =
+  | TwoPhaseAuditEvent
+  | (Extract<AuditEvent, { type: 'audit.exported' }> & AuditSinglePhase);
+
+/**
+ * What each event type reads as in the viewer and the CSV.
+ *
+ * Exhaustive over {@link AUDIT_EVENT_TYPES}, so adding a type without deciding
+ * what it says to a reader is a compile error rather than a blank cell. The
+ * envelope's own docblock makes the same point: an event nothing can label is
+ * an event nobody reads.
+ *
+ * The subject and the actor are rendered beside the label, so the label carries
+ * only what happened. It follows `ACTIVITY_ACTION_LABELS`
+ * (`api/dashboard.ts`), which does the same for the dashboard feed.
+ *
+ * `retention_override.signed` is not here yet, but when FIL-1019 adds it the
+ * label has to read as a signing: the event records that a URL was minted, and
+ * it is redeemed at the vendor where its use cannot be logged.
+ */
+export const AUDIT_EVENT_TYPE_LABELS: Record<AuditEventType, string> = {
+  'org.created': 'Organization created',
+  'org.renamed': 'Organization renamed',
+  'member.invited': 'Member invited',
+  'invite.revoked': 'Invitation revoked',
+  'invite.accepted': 'Invitation accepted',
+  'member.role_changed': 'Role changed',
+  'member.removed': 'Member removed',
+  'ownership.transferred': 'Ownership transferred',
+  'key.created': 'Key created',
+  'key.deleted': 'Key deleted',
+  'audit.exported': 'Audit log exported',
+};
+
+/**
+ * The label for a stored event's type.
+ *
+ * The fallback humanizes the verb after the last dot, so a console running
+ * behind a backend that has learned a new type renders something rather than an
+ * empty cell. A stored event outlives the code that wrote it, and the viewer is
+ * the last place that should go blank when the two disagree.
+ */
+export function getAuditEventTypeLabel(type: string): string {
+  const label = AUDIT_EVENT_TYPE_LABELS[type as AuditEventType];
+  if (label) return label;
+
+  const verb = type.split('.').pop() ?? '';
+  return verb ? verb.charAt(0).toUpperCase() + verb.slice(1).replaceAll('_', ' ') : 'Audit event';
+}
 
 /**
  * How long an event survives: the IAM PRD's 90-day audit retention, carried

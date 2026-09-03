@@ -35,6 +35,7 @@ const MATRIX: Record<Permission, OrgRole[]> = {
   'keys.manage_own': [OrgRole.Owner, OrgRole.Admin, OrgRole.Member],
   'keys.manage_all': [OrgRole.Owner, OrgRole.Admin],
   'audit.view': [OrgRole.Owner, OrgRole.Admin],
+  'audit.export': [OrgRole.Owner, OrgRole.Admin],
   'privileged.grant': [OrgRole.Owner],
 };
 
