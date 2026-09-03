@@ -37,6 +37,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { requireOrgMembershipMiddleware, requirePermission } from '../middleware/authorize.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+import { rateLimitMiddleware } from '../middleware/rate-limit.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
 
 const PRESIGN_EXPIRY_SECONDS = 300;
@@ -309,4 +310,5 @@ export const handler = middy(baseHandler)
   .use(requireOrgMembershipMiddleware())
   .use(csrfMiddleware())
   .use(subscriptionGuardMiddleware(AccessLevel.Read))
+  .use(rateLimitMiddleware())
   .use(errorHandlerMiddleware());
