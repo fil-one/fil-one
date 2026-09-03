@@ -830,6 +830,7 @@ describe('authMiddleware', () => {
               pk: { S: `ORG#${MOCK_ORG_ID}` },
               sk: { S: 'PROFILE' },
               name: { S: 'Alice Org' },
+              slug: { S: 'alice-org' },
               nameConfirmed: { BOOL: false },
               auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
               createdBy: { S: MOCK_USER_ID },
@@ -873,9 +874,22 @@ describe('authMiddleware', () => {
             },
           },
         },
-        // The org.created event, seventh item and the one after the six rows an
-        // account is: an org cannot come into existence unrecorded, because the
-        // rows that create it and the row that records it are the same
+        // The org's slug reservation — the claim row `reserveOrgSlug` plans,
+        // landing in the same transaction as the rows it names.
+        {
+          Put: {
+            TableName: 'OrgTable',
+            Item: {
+              pk: { S: 'SLUG#alice-org' },
+              sk: { S: 'LOOKUP' },
+              orgId: { S: MOCK_ORG_ID },
+            },
+            ConditionExpression: 'attribute_not_exists(pk)',
+          },
+        },
+        // The org.created event, the last item and the one after the seven rows
+        // an account is: an org cannot come into existence unrecorded, because
+        // the rows that create it and the row that records it are the same
         // transaction.
         {
           Put: {
@@ -948,7 +962,7 @@ describe('authMiddleware', () => {
             message: 'cancelled',
             $metadata: {},
             CancellationReasons: [
-              ...Array.from({ length: 6 }, () => ({ Code: 'None' })),
+              ...Array.from({ length: 7 }, () => ({ Code: 'None' })),
               { Code: 'TransactionConflict' },
             ],
           }),
@@ -972,7 +986,7 @@ describe('authMiddleware', () => {
       const calls = ddbMock.commandCalls(TransactWriteItemsCommand);
       expect(calls).toHaveLength(2);
       expect(hasAuditItem(calls[1].args[0].input.TransactItems)).toBe(false);
-      expect(calls[1].args[0].input.TransactItems).toHaveLength(6);
+      expect(calls[1].args[0].input.TransactItems).toHaveLength(7);
     });
 
     it('signs an existing user in without claiming an entitlement', async () => {

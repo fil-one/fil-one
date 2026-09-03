@@ -4,9 +4,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole } from '@filone/shared';
 import type { MeResponse } from '@filone/shared';
 
-// The route's parent is the whole app layout; the gate under test does not need
-// it, and importing it would drag the router in.
-vi.mock('../_app', () => ({ Route: {} }));
+// The route's parent resolves `$orgSlug` and renders the whole app shell; the
+// gate under test does not need it, and importing it would drag the router in.
+vi.mock('./$orgSlug', () => ({ Route: {} }));
 
 // The page itself is covered by BillingPage.test.tsx. Here it only has to be
 // distinguishable from the redirect.
@@ -17,21 +17,34 @@ vi.mock('../../pages/BillingPage', () => ({
 // `Navigate` renders nothing and navigates, which is the whole thing being
 // asserted — so it reports where it was sent instead.
 vi.mock('@tanstack/react-router', () => ({
-  Navigate: ({ to, search }: { to: string; search?: Record<string, unknown> }) => (
-    <div data-testid="navigate" data-to={to} data-search={JSON.stringify(search ?? {})} />
+  Navigate: ({
+    to,
+    params,
+    search,
+  }: {
+    to: string;
+    params?: Record<string, unknown>;
+    search?: Record<string, unknown>;
+  }) => (
+    <div
+      data-testid="navigate"
+      data-to={to}
+      data-params={JSON.stringify(params ?? {})}
+      data-search={JSON.stringify(search ?? {})}
+    />
   ),
   createRoute: (options: unknown) => ({ options }),
 }));
 
 vi.mock('../../lib/api.js', () => ({ getMe: vi.fn() }));
 
-import { BillingGate } from './billing';
+import { BillingGate } from './$orgSlug.billing';
 import { seedPermissions } from '../../lib/test-permissions.js';
 
-const SOLO = [{ orgId: 'org-1', orgName: 'Acme', role: OrgRole.Owner }];
+const SOLO = [{ orgId: 'org-1', orgName: 'Acme', slug: 'acme', role: OrgRole.Owner }];
 const TWO_ORGS = [
-  { orgId: 'org-1', orgName: 'Acme', role: OrgRole.Owner },
-  { orgId: 'org-2', orgName: 'Globex', role: OrgRole.Member },
+  { orgId: 'org-1', orgName: 'Acme', slug: 'acme', role: OrgRole.Owner },
+  { orgId: 'org-2', orgName: 'Globex', slug: 'globex', role: OrgRole.Member },
 ];
 
 function renderGate(overrides: Partial<MeResponse>, portalReturn?: string) {
@@ -39,16 +52,17 @@ function renderGate(overrides: Partial<MeResponse>, portalReturn?: string) {
   seedPermissions(client, OrgRole.Owner, overrides);
   return render(
     <QueryClientProvider client={client}>
-      <BillingGate portalReturn={portalReturn} />
+      <BillingGate portalReturn={portalReturn} orgSlug="acme" />
     </QueryClientProvider>,
   );
 }
 
-/** Where the redirect said to go, as `to` plus its search params. */
+/** Where the redirect said to go, as `to`/`params` plus its search params. */
 function destination() {
   const nav = screen.getByTestId('navigate');
   return {
     to: nav.getAttribute('data-to'),
+    params: JSON.parse(nav.getAttribute('data-params') ?? '{}'),
     search: JSON.parse(nav.getAttribute('data-search') ?? '{}'),
   };
 }
@@ -68,14 +82,18 @@ describe('the /billing route', () => {
   it('redirects to the Organization page’s Billing tab for an org in the beta', () => {
     renderGate({ memberships: SOLO, orgsBeta: true });
 
-    expect(destination()).toEqual({ to: '/organization', search: { tab: 'billing' } });
+    expect(destination()).toEqual({
+      to: '/$orgSlug/organization',
+      params: { orgSlug: 'acme' },
+      search: { tab: 'billing' },
+    });
     expect(screen.queryByTestId('billing-page')).toBeNull();
   });
 
   it('redirects for a caller in more than one org, beta or not', () => {
     renderGate({ memberships: TWO_ORGS, orgsBeta: false });
 
-    expect(destination().to).toBe('/organization');
+    expect(destination().to).toBe('/$orgSlug/organization');
   });
 
   // Stripe's portal returns to `/billing?portal_return=true`, and `use-billing`
@@ -91,7 +109,7 @@ describe('the /billing route', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={client}>
-        <BillingGate />
+        <BillingGate orgSlug="acme" />
       </QueryClientProvider>,
     );
 
@@ -111,7 +129,7 @@ describe('the /billing route', () => {
 
     render(
       <QueryClientProvider client={client}>
-        <BillingGate />
+        <BillingGate orgSlug="acme" />
       </QueryClientProvider>,
     );
 

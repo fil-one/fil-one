@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, fireEvent } from '@testing-library/react';
+import { render, fireEvent, screen, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole } from '@filone/shared';
 import type { MeResponse } from '@filone/shared';
@@ -15,6 +15,9 @@ vi.mock('@tanstack/react-router', () => ({
     </a>
   ),
   useMatchRoute: () => () => false,
+  // `useOrgPath` reads the active org's slug through this; no org context
+  // here, so nav links render with their unprefixed paths.
+  useParams: () => ({}),
 }));
 
 // Force both status banners to render so their button ids are present, and give
@@ -28,8 +31,18 @@ vi.mock('./use-sidebar-data.js', () => ({
       orgName: 'Acme',
       orgId: '11111111-1111-1111-1111-111111111111',
       memberships: [
-        { orgId: '11111111-1111-1111-1111-111111111111', orgName: 'Acme', role: 'owner' },
-        { orgId: '22222222-2222-2222-2222-222222222222', orgName: 'Globex', role: 'member' },
+        {
+          orgId: '11111111-1111-1111-1111-111111111111',
+          orgName: 'Acme',
+          slug: 'acme',
+          role: 'owner',
+        },
+        {
+          orgId: '22222222-2222-2222-2222-222222222222',
+          orgName: 'Globex',
+          slug: 'globex',
+          role: 'member',
+        },
       ],
     },
     displayName: 'Ada',
@@ -83,6 +96,22 @@ function renderBothSidebars(role: OrgRole = OrgRole.Owner, overrides: Partial<Me
   );
 }
 
+// A single mount, for cases that open a menu and inspect its contents. The
+// second (mobile drawer) copy `renderBothSidebars` also mounts is irrelevant
+// to these — its own `showUserProfile={false}` means it has no org switcher
+// or user menu of its own — and Headless UI's anchored `MenuItems` (used by
+// both) is measurably slower to commit when a second unrelated subtree is
+// mounted alongside it, which these tests otherwise have no reason to wait on.
+function renderOneSidebar(role = OrgRole.Owner, overrides: Partial<MeResponse> = {}) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  seedPermissions(client, role, overrides);
+  return render(
+    <QueryClientProvider client={client}>
+      <SidebarNav collapsed={false} onToggle={() => {}} showTestIds={true} />
+    </QueryClientProvider>,
+  );
+}
+
 const UNIQUE_IDS = [
   'sidebar-upgrade-button',
   'sidebar-update-payment-button',
@@ -93,17 +122,17 @@ const UNIQUE_TESTIDS = [
   'nav-buckets',
   'nav-api-keys',
   'nav-organization',
-  'nav-settings',
-  'user-profile',
+  'org-switcher-button',
+  'user-menu-button',
 ];
 
 /** One membership, which is what a solo org has. */
-const SOLO = [{ orgId: 'org-1', orgName: 'Acme', role: OrgRole.Owner }];
+const SOLO = [{ orgId: 'org-1', orgName: 'Acme', slug: 'acme', role: OrgRole.Owner }];
 
 /** Two, which is the other way to have a members surface. */
 const TWO_ORGS = [
-  { orgId: 'org-1', orgName: 'Acme', role: OrgRole.Owner },
-  { orgId: 'org-2', orgName: 'Globex', role: OrgRole.Member },
+  { orgId: 'org-1', orgName: 'Acme', slug: 'acme', role: OrgRole.Owner },
+  { orgId: 'org-2', orgName: 'Globex', slug: 'globex', role: OrgRole.Member },
 ];
 
 describe('SidebarNav e2e selector uniqueness (desktop + drawer mounted)', () => {
@@ -117,39 +146,46 @@ describe('SidebarNav e2e selector uniqueness (desktop + drawer mounted)', () => 
     expect(container.querySelectorAll(`[data-testid="${testId}"]`)).toHaveLength(1);
   });
 
-  it('renders #user-menu-logout-button exactly once after opening the menu', () => {
-    const { container } = renderBothSidebars();
-    // Only the desktop sidebar has a user-profile trigger; the drawer omits it.
-    const triggers = container.querySelectorAll('[data-testid="user-profile"]');
-    expect(triggers).toHaveLength(1);
-    fireEvent.click(triggers[0]);
-    expect(container.querySelectorAll('#user-menu-logout-button')).toHaveLength(1);
+  it('renders #user-menu-logout-button once the menu is opened', () => {
+    // Single mount: see `renderOneSidebar`'s comment.
+    const { getByTestId } = renderOneSidebar();
+    fireEvent.click(getByTestId('user-menu-button'));
+    // Headless UI's anchored `MenuItems` (floating-ui positioning) portals its
+    // panel to `document.body` rather than rendering it inside RTL's own
+    // `container` — `screen`, which queries the whole document, is what finds
+    // it; `container.querySelectorAll` never will, open or not.
+    expect(screen.getAllByText('Log out')).toHaveLength(1);
   });
 });
 
 describe('SidebarNav — the org switcher', () => {
-  function openUserMenu() {
-    const rendered = renderBothSidebars();
-    fireEvent.click(rendered.container.querySelectorAll('[data-testid="user-profile"]')[0]);
+  function openOrgSwitcher() {
+    const rendered = renderOneSidebar();
+    fireEvent.click(rendered.getByTestId('org-switcher-button'));
     return rendered;
   }
 
-  it('mounts in the user menu with the active org marked', () => {
-    const { container } = openUserMenu();
+  it('mounts in the org switcher menu with the active org marked', () => {
+    openOrgSwitcher();
 
     // The props are the mount point's to get right — `activeOrgId={me.userId}`
-    // compiles and would leave every org unmarked.
-    expect(container.querySelectorAll('[data-testid="org-switcher"]')).toHaveLength(1);
-    const active = container.querySelector(`button[aria-current="true"]`);
+    // compiles and would leave every org unmarked. Queried via `screen`: see
+    // the comment on the user-menu test above — the panel is portalled.
+    expect(screen.getAllByTestId('org-switcher')).toHaveLength(1);
+    // `inMenu` marks the active row with `aria-checked`, not `aria-current` —
+    // see `OrgSwitcher`'s own comment on the two mount shapes.
+    const active = screen.getByTestId('org-switcher').querySelector(`[aria-checked="true"]`);
     expect(active?.textContent).toBe('Acme');
   });
 
   it('offers the caller’s other org', () => {
-    const { container } = openUserMenu();
+    openOrgSwitcher();
 
-    const names = [...container.querySelectorAll('[data-testid="org-switcher"] button')].map(
-      (b) => b.textContent,
-    );
+    // `inMenu` (this mount point) gives each row `role="menuitemradio"`
+    // rather than a plain button role — see `OrgSwitcher`'s own comment.
+    const names = within(screen.getByTestId('org-switcher'))
+      .getAllByRole('menuitemradio')
+      .map((b) => b.textContent);
     expect(names).toEqual(['Acme', 'Globex']);
   });
 });
@@ -217,7 +253,9 @@ describe('SidebarNav — the Members entry', () => {
     });
 
     expect(container.querySelectorAll('[data-testid="nav-organization"]')).toHaveLength(0);
-    expect(container.querySelectorAll('[data-testid="nav-settings"]')).toHaveLength(1);
+    // Billing is the other side of the same gate — a solo org outside the beta
+    // has no Organization page, so Billing is the top-level entry left.
+    expect(container.querySelectorAll('[data-testid="nav-billing"]')).toHaveLength(1);
   });
 });
 
@@ -303,8 +341,8 @@ describe('SidebarNav — the API Keys entry', () => {
 
 // Collapsed mode hides the display name and the avatar is decorative, so the
 // button's own label is the only accessible name left.
-describe('SidebarNav user profile accessible name', () => {
-  it.each([true, false])('names the user-profile button when collapsed=%s', (collapsed) => {
+describe('SidebarNav user identity accessible names', () => {
+  it.each([true, false])('names the user menu button when collapsed=%s', (collapsed) => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     seedPermissions(client, OrgRole.Owner);
     const { getByTestId } = render(
@@ -312,6 +350,19 @@ describe('SidebarNav user profile accessible name', () => {
         <SidebarNav collapsed={collapsed} onToggle={() => {}} showTestIds={true} />
       </QueryClientProvider>,
     );
-    expect(getByTestId('user-profile')).toHaveAccessibleName('User menu for Ada');
+    expect(getByTestId('user-menu-button')).toHaveAccessibleName('User menu for Ada');
+  });
+
+  it.each([true, false])('names the org switcher button when collapsed=%s', (collapsed) => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seedPermissions(client, OrgRole.Owner);
+    const { getByTestId } = render(
+      <QueryClientProvider client={client}>
+        <SidebarNav collapsed={collapsed} onToggle={() => {}} showTestIds={true} />
+      </QueryClientProvider>,
+    );
+    expect(getByTestId('org-switcher-button')).toHaveAccessibleName(
+      'Switch organization, current: Acme',
+    );
   });
 });

@@ -45,11 +45,17 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       userId,
       activeOrgId: orgId,
       activeRole: membership?.role,
-      activeOrgName: activeOrgProfile.then((profile) => profile?.name?.S ?? ''),
+      activeOrgSummary: activeOrgProfile.then((profile) => ({
+        name: profile?.name?.S ?? '',
+        slug: profile?.slug?.S ?? '',
+        ...(profile?.logoUrl?.S ? { logoUrl: profile.logoUrl.S } : {}),
+      })),
     }),
   ]);
 
   const orgName = orgProfile?.name?.S ?? '';
+  const slug = orgProfile?.slug?.S ?? '';
+  const orgLogoUrl = orgProfile?.logoUrl?.S;
   // Absent means an organization that predates the field, which is treated as
   // named: only an explicit false sends the caller through the naming step.
   const nameConfirmed = orgProfile?.nameConfirmed?.BOOL !== false;
@@ -57,6 +63,8 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   const body: MeResponse = {
     orgId,
     orgName,
+    slug,
+    ...(orgLogoUrl ? { logoUrl: orgLogoUrl } : {}),
     nameConfirmed,
     emailVerified,
     email,

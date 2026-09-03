@@ -34,7 +34,7 @@ function WelcomeRoute() {
   });
 
   if (me?.nameConfirmed) {
-    void navigate({ to: '/dashboard' });
+    void navigate({ href: me.slug ? `/${me.slug}/dashboard` : '/dashboard' });
     return null;
   }
 
@@ -42,7 +42,10 @@ function WelcomeRoute() {
     <WelcomePage
       suggestedName={me?.orgName ?? ''}
       email={me?.email}
-      onNamed={() => void navigate({ to: '/new' })}
+      // The org has had a slug since it was created, well before naming — so
+      // this can go straight to the org-scoped page rather than through the
+      // `/new` legacy stub's extra redirect hop.
+      onNamed={() => void navigate({ href: me?.slug ? `/${me.slug}/new` : '/new' })}
     />
   );
 }

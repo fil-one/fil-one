@@ -25,6 +25,7 @@ export function sstResourceMock(resources: Record<string, unknown> = {}): {
       // carries is the table's own, which is what every TableName assertion
       // matches on.
       AuditLog: { name: 'AuditTable' },
+      OrgLogoBucket: { name: 'OrgLogoBucket' },
       Auth0ClientId: { value: 'test-client-id' },
       Auth0ClientSecret: { value: 'test-client-secret' },
       Auth0MgmtClientId: { value: 'test-mgmt-client-id' },

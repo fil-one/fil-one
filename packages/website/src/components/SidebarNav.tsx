@@ -1,15 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
 import {
   SquaresFourIcon,
   DatabaseIcon,
   KeyIcon,
-  GearIcon,
   CaretLeftIcon,
   CaretRightIcon,
-  BookOpenIcon,
-  ChatCircleIcon,
-  SignOutIcon,
-  QuestionIcon,
   ChatTeardropDotsIcon,
   RobotIcon,
   UsersIcon,
@@ -17,18 +11,17 @@ import {
 } from '@phosphor-icons/react/dist/ssr';
 import { Link, useMatchRoute } from '@tanstack/react-router';
 
-import { DOCS_URL } from '@filone/shared';
 import type { Permission } from '@filone/shared';
-import { logout } from '../lib/api.js';
 import { usePermissions } from '../lib/use-permissions.js';
 import { useMembersSurface } from '../lib/use-members-surface.js';
+import { useOrgPath } from '../lib/use-org-path.js';
 import { useSidebarData } from './use-sidebar-data.js';
 
-import { OrgSwitcher } from './OrgSwitcher.js';
+import { OrgSwitcherMenu } from './OrgSwitcherMenu.js';
 import { StatusBanners } from './SidebarStatusBanners.js';
 import { StatusIndicator } from './StatusIndicator.js';
 import { Tooltip } from './Tooltip.js';
-import { UserAvatar } from './UserAvatar.js';
+import { UserMenu } from './UserMenu.js';
 
 type SidebarNavProps = {
   collapsed: boolean;
@@ -117,6 +110,7 @@ type NavLinksProps = {
 
 function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps) {
   const { has } = usePermissions();
+  const orgPath = useOrgPath();
   return (
     <div className="flex flex-col p-2">
       {navGroups.map((group, gi) => (
@@ -130,11 +124,13 @@ function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps
             {group.items
               .filter((item) => !item.permission || has(item.permission))
               .map(({ path, icon: Icon, label, testId }) => {
-                const isActive = Boolean(matchRoute({ to: path, fuzzy: path === '/buckets' }));
+                const isActive = Boolean(
+                  matchRoute({ to: orgPath(path), fuzzy: path === '/buckets' }),
+                );
                 const link = (
                   <Link
                     key={path}
-                    to={path}
+                    to={orgPath(path)}
                     data-testid={showTestIds ? testId : undefined}
                     aria-label={label}
                     onClick={onClose}
@@ -172,7 +168,11 @@ function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps
 // Organization and Billing are the same entry seen from two orgs: where there
 // is a members surface, billing is a tab of Organization and gets no entry of
 // its own; where there is not, Organization is not a page and billing is all
-// that would have been on it. Settings is every member's own account.
+// that would have been on it. Settings has no entry here at all: it's the
+// caller's own account, reachable from `UserMenu` now that the sidebar splits
+// org identity (this nav) from user identity (the menu under the name at the
+// bottom) — a second way to reach it here would just be the same destination
+// listed twice.
 //
 // Both are declared with the permission the destination needs — even
 // `members.read`, which all four roles hold — so an entry stays hidden while
@@ -196,12 +196,12 @@ const utilityNavItems: NavItem[] = [
     permission: 'billing.view',
     membersSurface: 'without',
   },
-  { path: '/settings', icon: GearIcon, label: 'Settings', testId: 'nav-settings' },
 ];
 
 function UtilityNavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps) {
   const { has } = usePermissions();
   const membersSurface = useMembersSurface();
+  const orgPath = useOrgPath();
   return (
     <div className="p-2 flex flex-col gap-0.5">
       {utilityNavItems
@@ -216,11 +216,11 @@ function UtilityNavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLin
           return item.membersSurface === (membersSurface.visible ? 'with' : 'without');
         })
         .map(({ path, icon: Icon, label, testId }) => {
-          const isActive = Boolean(matchRoute({ to: path }));
+          const isActive = Boolean(matchRoute({ to: orgPath(path) }));
           const link = (
             <Link
               key={path}
-              to={path}
+              to={orgPath(path)}
               data-testid={showTestIds ? testId : undefined}
               aria-label={label}
               onClick={onClose}
@@ -249,80 +249,6 @@ function UtilityNavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLin
   );
 }
 
-export type HelpMenuProps = {
-  collapsed: boolean;
-  helpMenuOpen: boolean;
-  helpMenuRef: React.RefObject<HTMLDivElement | null>;
-  helpButtonRef: React.RefObject<HTMLButtonElement | null>;
-  onToggle: () => void;
-  onClose?: () => void;
-};
-
-export function HelpMenu({
-  collapsed,
-  helpMenuOpen,
-  helpMenuRef,
-  helpButtonRef,
-  onToggle,
-  onClose,
-}: HelpMenuProps) {
-  return (
-    <div className="relative">
-      {collapsed ? (
-        // `w-full` on the tooltip wrapper: it is an inline-block, so without it
-        // the button shrinks to the icon and sits against the left edge instead
-        // of centring under the collapsed rail like every other icon.
-        <Tooltip content="Help" side="right" className="w-full">
-          <button
-            ref={helpButtonRef}
-            type="button"
-            onClick={onToggle}
-            aria-label="Help"
-            className="flex w-full items-center justify-center rounded-lg py-2 text-zinc-600 transition-colors hover:bg-zinc-100"
-          >
-            <QuestionIcon size={18} className="text-zinc-400" />
-          </button>
-        </Tooltip>
-      ) : (
-        <button
-          ref={helpButtonRef}
-          type="button"
-          onClick={onToggle}
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-xs text-zinc-500 transition-colors hover:bg-zinc-100"
-        >
-          <QuestionIcon size={16} className="flex-shrink-0 text-zinc-400" />
-          Help
-        </button>
-      )}
-      {helpMenuOpen && (
-        <div
-          ref={helpMenuRef}
-          className="absolute bottom-full left-2 z-50 mb-1 w-52 rounded-lg border border-zinc-200 bg-white p-1 shadow-lg"
-        >
-          <a
-            href={DOCS_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={onClose}
-            className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
-          >
-            <BookOpenIcon size={18} className="flex-shrink-0 text-zinc-400" />
-            Documentation
-          </a>
-          <Link
-            to="/support"
-            onClick={onClose}
-            className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
-          >
-            <ChatCircleIcon size={18} className="flex-shrink-0 text-zinc-400" />
-            Talk to an expert
-          </Link>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export function SidebarNav({
   collapsed,
   onToggle,
@@ -331,12 +257,6 @@ export function SidebarNav({
   showTestIds,
 }: SidebarNavProps) {
   const matchRoute = useMatchRoute();
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const userMenuRef = useRef<HTMLDivElement>(null);
-  const userButtonRef = useRef<HTMLButtonElement>(null);
-  const [helpMenuOpen, setHelpMenuOpen] = useState(false);
-  const helpMenuRef = useRef<HTMLDivElement>(null);
-  const helpButtonRef = useRef<HTMLButtonElement>(null);
 
   const {
     me,
@@ -355,32 +275,6 @@ export function SidebarNav({
     egressPct,
     limitsKnown,
   } = useSidebarData();
-
-  useEffect(() => {
-    if (!userMenuOpen && !helpMenuOpen) return;
-    function handleMouseDown(e: MouseEvent) {
-      if (
-        userMenuOpen &&
-        userMenuRef.current &&
-        !userMenuRef.current.contains(e.target as Node) &&
-        userButtonRef.current &&
-        !userButtonRef.current.contains(e.target as Node)
-      ) {
-        setUserMenuOpen(false);
-      }
-      if (
-        helpMenuOpen &&
-        helpMenuRef.current &&
-        !helpMenuRef.current.contains(e.target as Node) &&
-        helpButtonRef.current &&
-        !helpButtonRef.current.contains(e.target as Node)
-      ) {
-        setHelpMenuOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleMouseDown);
-    return () => document.removeEventListener('mousedown', handleMouseDown);
-  }, [userMenuOpen, helpMenuOpen]);
 
   return (
     <div className="h-full">
@@ -403,32 +297,17 @@ export function SidebarNav({
           </div>
         )}
 
-        {/* User profile + collapse toggle (desktop only) */}
+        {/* Org switcher + collapse toggle (desktop only) */}
         {showUserProfile && (
           <div className="relative flex h-14 flex-shrink-0 items-center px-2">
-            <button
-              ref={userButtonRef}
-              type="button"
-              data-testid="user-profile"
-              aria-label={`User menu for ${displayName}`}
-              onClick={() => setUserMenuOpen((o) => !o)}
-              className={[
-                'flex items-center rounded-lg hover:bg-zinc-100',
-                collapsed ? 'w-full justify-center py-1.5' : 'gap-2.5 px-2 py-1.5',
-              ].join(' ')}
-            >
-              <UserAvatar src={me?.picture} initial={initial} />
-              {!collapsed && (
-                <div className="min-w-0 overflow-hidden text-left">
-                  <p className="truncate text-sm font-medium leading-tight text-zinc-900">
-                    {displayName}
-                  </p>
-                  {me?.orgName && (
-                    <p className="truncate text-xs leading-tight text-zinc-500">{me.orgName}</p>
-                  )}
-                </div>
-              )}
-            </button>
+            <OrgSwitcherMenu
+              orgName={me?.orgName ?? 'Organization'}
+              logoUrl={me?.logoUrl}
+              memberships={me?.memberships}
+              activeOrgId={me?.orgId}
+              collapsed={collapsed}
+              testId={showTestIds ? 'org-switcher-button' : undefined}
+            />
 
             {/* Spacer + collapse toggle (expanded) */}
             {!collapsed && (
@@ -445,29 +324,6 @@ export function SidebarNav({
                   </button>
                 </Tooltip>
               </>
-            )}
-
-            {/* User dropdown */}
-            {userMenuOpen && (
-              <div
-                ref={userMenuRef}
-                className="absolute left-2 top-14 z-50 w-52 rounded-lg border border-zinc-200 bg-white p-1 shadow-lg"
-              >
-                <OrgSwitcher
-                  memberships={me?.memberships}
-                  activeOrgId={me?.orgId}
-                  testId={showTestIds ? 'org-switcher' : undefined}
-                />
-                <button
-                  type="button"
-                  id="user-menu-logout-button"
-                  onClick={logout}
-                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
-                >
-                  <SignOutIcon size={18} className="flex-shrink-0 text-zinc-400" />
-                  Log out
-                </button>
-              </div>
             )}
           </div>
         )}
@@ -509,16 +365,17 @@ export function SidebarNav({
           isInactive={isInactive}
         />
 
-        {/* Footer: Help + System status */}
+        {/* Footer: user identity (also carries Documentation/Support now) + System status */}
         <div className="border-t border-zinc-200 p-2 flex flex-col gap-0.5">
-          <HelpMenu
-            collapsed={collapsed}
-            helpMenuOpen={helpMenuOpen}
-            helpMenuRef={helpMenuRef}
-            helpButtonRef={helpButtonRef}
-            onToggle={() => setHelpMenuOpen((o) => !o)}
-            onClose={onClose}
-          />
+          {showUserProfile && (
+            <UserMenu
+              src={me?.picture}
+              initial={initial}
+              displayName={displayName}
+              collapsed={collapsed}
+              testId={showTestIds ? 'user-menu-button' : undefined}
+            />
+          )}
           <StatusIndicator collapsed={collapsed} />
         </div>
       </nav>

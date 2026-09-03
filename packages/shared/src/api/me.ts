@@ -6,12 +6,20 @@ import type { Permission } from '../permissions.ts';
 export interface OrgMembershipSummary {
   orgId: string;
   orgName: string;
+  /** URL-safe identifier for this org, unique across the platform — what routes are scoped by. */
+  slug: string;
   role: OrgRole;
+  /** Uploaded logo, if any. Absent falls back to a generated monogram, same as `MeResponse.picture` does for the user. */
+  logoUrl?: string;
 }
 
 export interface MeResponse {
   orgId: string;
   orgName: string;
+  /** URL-safe identifier for the active org — what routes are scoped by. */
+  slug: string;
+  /** The active org's uploaded logo, if any. Falls back to a generated monogram. */
+  logoUrl?: string;
   emailVerified: boolean;
   email?: string;
   name?: string;

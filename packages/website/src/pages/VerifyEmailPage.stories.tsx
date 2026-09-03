@@ -6,6 +6,7 @@ import { VerifyEmailPage } from './VerifyEmailPage';
 const me: MeResponse = {
   orgId: 'org_acme',
   orgName: 'Acme Inc.',
+  slug: 'acme-inc',
   nameConfirmed: true,
   emailVerified: false,
   email: 'jane@acme.com',
