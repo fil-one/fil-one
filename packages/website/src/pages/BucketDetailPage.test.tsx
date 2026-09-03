@@ -28,6 +28,7 @@ vi.mock('@tanstack/react-router', () => ({
   Link: ({ to, children }: { to: string; children: React.ReactNode }) => (
     <a href={to}>{children}</a>
   ),
+  useParams: () => ({}),
 }));
 
 vi.mock('../lib/use-object-actions.js', () => ({

@@ -17,6 +17,7 @@ import type { BrowseEntry } from '../lib/object-grouping.js';
 import { getEntriesAtPrefix, groupVersionsByKey } from '../lib/object-grouping.js';
 import type { ObjectSelection, SelectableVersion } from '../lib/object-selection.js';
 import { descendantSelectionIds, useObjectSelection } from '../lib/object-selection.js';
+import { useOrgSlug } from '../lib/use-org-path.js';
 
 export { countObjects } from '../lib/object-grouping.js';
 
@@ -108,6 +109,7 @@ function EmptyBucketState({
   canUpload: boolean;
 }) {
   const navigate = useNavigate();
+  const orgSlug = useOrgSlug();
   return (
     <div className="mt-4">
       <EmptyStateCard
@@ -127,8 +129,8 @@ function EmptyBucketState({
             variant="primary"
             onClick={() =>
               void navigate({
-                to: '/buckets/$bucketName/upload',
-                params: { bucketName },
+                to: '/$orgSlug/buckets/$bucketName/upload',
+                params: { orgSlug, bucketName },
                 search: { region },
               })
             }
@@ -280,6 +282,7 @@ export function ObjectBrowser({
   totalObjectCount,
 }: ObjectBrowserProps) {
   const navigate = useNavigate();
+  const orgSlug = useOrgSlug();
   const [confirmDelete, setConfirmDelete] = useState<{
     key: string;
     versionId?: string;
@@ -310,8 +313,8 @@ export function ObjectBrowser({
     ...(onDelete && { onRequestDelete: requestDelete }),
     onNavigate: (key, versionId) => {
       void navigate({
-        to: '/buckets/$bucketName/objects',
-        params: { bucketName },
+        to: '/$orgSlug/buckets/$bucketName/objects',
+        params: { orgSlug, bucketName },
         search: { key, region, ...(versionId && { versionId }) },
       });
     },

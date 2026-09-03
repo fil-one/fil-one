@@ -11,6 +11,7 @@ import { IconButton } from '../components/IconButton.js';
 import { SaveCredentialsModal } from '../components/SaveCredentialsModal.js';
 import { SlowOperationIndicator } from '../components/SlowOperationIndicator.js';
 import { useAccessKeyForm } from '../lib/use-access-key-form.js';
+import { useOrgSlug } from '../lib/use-org-path.js';
 
 // ---------------------------------------------------------------------------
 // Page
@@ -18,6 +19,7 @@ import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 
 export function CreateApiKeyPage() {
   const navigate = useNavigate();
+  const orgSlug = useOrgSlug();
   const [credentials, setCredentials] = useState<{
     accessKeyId: string;
     secretAccessKey: string;
@@ -35,7 +37,7 @@ export function CreateApiKeyPage() {
   });
 
   function handleCredentialsDone() {
-    void navigate({ to: '/api-keys' });
+    void navigate({ to: '/$orgSlug/api-keys', params: { orgSlug } });
   }
 
   return (
@@ -46,7 +48,7 @@ export function CreateApiKeyPage() {
           <IconButton
             icon={ArrowLeftIcon}
             aria-label="Back to API keys"
-            onClick={() => void navigate({ to: '/api-keys' })}
+            onClick={() => void navigate({ to: '/$orgSlug/api-keys', params: { orgSlug } })}
           />
           <div>
             <Heading id="create-api-key-heading" tag="h1">

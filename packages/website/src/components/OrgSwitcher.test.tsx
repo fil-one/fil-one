@@ -5,12 +5,20 @@ import type { OrgMembershipSummary } from '@filone/shared';
 
 import { OrgSwitcher } from './OrgSwitcher';
 
+// `switchToOrg` imports the router dynamically to resolve a slug and
+// navigate; these cases are about the stash and the latch, not the real
+// router, so this is a controllable stand-in.
+const routerNavigate = vi.fn();
+vi.mock('../router.js', () => ({
+  router: { navigate: (...args: unknown[]) => routerNavigate(...args) },
+}));
+
 const ORG_A = '11111111-1111-1111-1111-111111111111';
 const ORG_B = '22222222-2222-2222-2222-222222222222';
 
 const memberships: OrgMembershipSummary[] = [
-  { orgId: ORG_A, orgName: 'Acme', role: OrgRole.Owner },
-  { orgId: ORG_B, orgName: 'Globex', role: OrgRole.Member },
+  { orgId: ORG_A, orgName: 'Acme', slug: 'acme', role: OrgRole.Owner },
+  { orgId: ORG_B, orgName: 'Globex', slug: 'globex', role: OrgRole.Member },
 ];
 
 const assign = vi.fn();
@@ -21,6 +29,11 @@ describe('OrgSwitcher', () => {
     sessionStorage.clear();
     assign.mockClear();
     reload.mockClear();
+    routerNavigate.mockReset();
+    // Pending forever by default: the switcher's rows only re-enable once the
+    // navigation settles, and these cases are about the window while it has
+    // not.
+    routerNavigate.mockImplementation(() => new Promise(() => {}));
     // Only `assign` and `reload` are read on these paths, so the stub carries
     // nothing else.
     vi.stubGlobal('location', { assign, reload });
@@ -56,8 +69,8 @@ describe('OrgSwitcher', () => {
     render(
       <OrgSwitcher
         memberships={[
-          { orgId: ORG_A, orgName: 'Zenith', role: OrgRole.Owner },
-          { orgId: ORG_B, orgName: 'Acme', role: OrgRole.Member },
+          { orgId: ORG_A, orgName: 'Zenith', slug: 'zenith', role: OrgRole.Owner },
+          { orgId: ORG_B, orgName: 'Acme', slug: 'acme', role: OrgRole.Member },
         ]}
         activeOrgId={ORG_A}
       />,
@@ -100,28 +113,31 @@ describe('OrgSwitcher', () => {
     );
   });
 
-  it('stashes the chosen org and loads the console root', () => {
+  it('stashes the chosen org and navigates into it', async () => {
     render(<OrgSwitcher memberships={memberships} activeOrgId={ORG_A} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Globex' }));
 
     expect(sessionStorage.getItem('filone:activeOrgId')).toBe(ORG_B);
     // Not the current URL: bucket names and key ids are org-scoped, so
-    // reloading in place would greet the user with a not-found page.
-    expect(assign).toHaveBeenCalledWith('/');
+    // navigating in place would greet the user with a not-found page.
+    // `switchToOrg` resolves the router dynamically, a microtask past the
+    // click, before calling it.
+    await vi.waitFor(() => expect(routerNavigate).toHaveBeenCalled());
   });
 
-  it('goes inert once a switch is under way', () => {
+  it('goes inert once a switch is under way', async () => {
     render(<OrgSwitcher memberships={memberships} activeOrgId={ORG_A} />);
     const target = screen.getByRole('button', { name: 'Globex' });
 
     fireEvent.click(target);
     fireEvent.click(screen.getByRole('button', { name: 'Acme' }));
 
-    // The load takes as long as it takes, and a second click in that window
-    // would stash a third org while the second one's load is in flight.
+    // The navigation takes as long as it takes, and a second click in that
+    // window would stash a third org while the second one's navigation is in
+    // flight.
     expect(target).toHaveAttribute('aria-busy', 'true');
-    expect(assign).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(routerNavigate).toHaveBeenCalledTimes(1));
     expect(sessionStorage.getItem('filone:activeOrgId')).toBe(ORG_B);
   });
 
@@ -130,13 +146,16 @@ describe('OrgSwitcher', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Acme' }));
 
-    expect(assign).not.toHaveBeenCalled();
+    expect(routerNavigate).not.toHaveBeenCalled();
   });
 
   it('names an org whose profile would not read', () => {
     render(
       <OrgSwitcher
-        memberships={[memberships[0], { orgId: ORG_B, orgName: '', role: OrgRole.Member }]}
+        memberships={[
+          memberships[0],
+          { orgId: ORG_B, orgName: '', slug: 'org-b', role: OrgRole.Member },
+        ]}
         activeOrgId={ORG_A}
       />,
     );

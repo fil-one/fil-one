@@ -45,7 +45,13 @@ function renderDrawer(
   // Stop indexing is gated on the bucket permissions, so the caller's role has
   // to be in the cache before the drawer renders.
   seedPermissions(client, role);
-  const rootRoute = createRootRoute({
+  // Org-scoped like every other real route now: the drawer's sources link
+  // through `$orgSlug`, so that ancestor needs registering too.
+  const rootRoute = createRootRoute();
+  const orgSlugRoute = createRoute({ getParentRoute: () => rootRoute, path: '$orgSlug' });
+  const hostRoute = createRoute({
+    getParentRoute: () => orgSlugRoute,
+    path: '/host',
     component: () => (
       <ToastProvider>
         <BucketDrawer bucket={bucket} onClose={onClose} onStopIndexing={onStopIndexing} />
@@ -53,13 +59,13 @@ function renderDrawer(
     ),
   });
   const objectsRoute = createRoute({
-    getParentRoute: () => rootRoute,
+    getParentRoute: () => orgSlugRoute,
     path: '/buckets/$bucketName/objects',
     component: () => null,
   });
   const router = createRouter({
-    routeTree: rootRoute.addChildren([objectsRoute]),
-    history: createMemoryHistory({ initialEntries: ['/'] }),
+    routeTree: rootRoute.addChildren([orgSlugRoute.addChildren([hostRoute, objectsRoute])]),
+    history: createMemoryHistory({ initialEntries: ['/acme/host'] }),
   });
   return render(
     <QueryClientProvider client={client}>

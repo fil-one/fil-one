@@ -477,15 +477,29 @@ const IN_HANDLER_PROBES: {
  * claim those cannot: the same caller, the same route, a different body, a
  * different answer.
  */
+/**
+ * In-handler routes that gate on membership alone, with no further per-body
+ * permission a role can be refused on. Creating an additional org, and
+ * presigning a home for its logo before that org exists, are every member's
+ * to do — the manifest still marks them `in-handler` rather than `self`
+ * because they carry the membership gate every other `in-handler` route
+ * carries, not because a body picks between two permissions the way presign's
+ * operations do. See the `'in-handler'` doc comment in route-manifest.ts.
+ */
+const MEMBERSHIP_ONLY_IN_HANDLER = ['create-org', 'presign-org-logo'];
+
 describe('what the in-handler routes enforce', () => {
   quietDenialOutput();
   withActiveSubscription();
 
   it('probes every route the manifest marks in-handler', () => {
-    // A route added to the manifest as in-handler with no probe here would
-    // otherwise be checked for membership alone, which is the gap this suite
-    // exists to close.
-    const probed = new Set(IN_HANDLER_PROBES.map((probe) => probe.handler));
+    // A route added to the manifest as in-handler with no probe here, and not
+    // named in MEMBERSHIP_ONLY_IN_HANDLER, would otherwise be checked for
+    // membership alone, which is the gap this suite exists to close.
+    const probed = new Set([
+      ...IN_HANDLER_PROBES.map((probe) => probe.handler),
+      ...MEMBERSHIP_ONLY_IN_HANDLER,
+    ]);
     expect(inHandler.filter((handler) => !probed.has(handler))).toStrictEqual([]);
   });
 

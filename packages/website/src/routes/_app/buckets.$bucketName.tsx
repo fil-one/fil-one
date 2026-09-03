@@ -1,23 +1,10 @@
-import z from 'zod';
 import { createRoute } from '@tanstack/react-router';
-import { S3Region } from '@filone/shared';
 import { Route as appRoute } from '../_app';
-import { BucketDetailPage } from '../../pages/BucketDetailPage';
+import { redirectToActiveOrgPath } from '../../lib/legacy-route-redirect.js';
 
-const bucketSearchSchema = z.object({
-  prefix: z.string().optional(),
-  region: z.enum(S3Region),
-});
-
-function BucketDetailRoute() {
-  const { bucketName } = Route.useParams();
-  const { prefix, region } = Route.useSearch();
-  return <BucketDetailPage bucketName={bucketName} prefix={prefix} region={region} />;
-}
-
+/** The pre-org-scoping URL. See `dashboard.tsx` for why this stays. */
 export const Route = createRoute({
   path: '/buckets/$bucketName',
   getParentRoute: () => appRoute,
-  component: BucketDetailRoute,
-  validateSearch: bucketSearchSchema,
+  beforeLoad: ({ location }) => redirectToActiveOrgPath(location.href),
 });

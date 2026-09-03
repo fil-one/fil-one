@@ -44,6 +44,15 @@ export type RouteCategory =
  * invited address, both checked in the handler; a membership gate in the chain
  * would refuse every invitation there is. Deliberately not `'self'`, which is
  * for routes that touch no org state at all — accepting creates a membership.
+ *
+ * Two `'in-handler'` routes carry no per-body permission at all: creating an
+ * additional org, and presigning a home for its logo before that org exists.
+ * Both are still membership-gated in the chain — the caller must belong to
+ * *some* org, their own active one — but nothing about the request body picks
+ * between two permissions the way presign's operations do, so their handlers
+ * check nothing further. They are `'in-handler'` rather than `'self'` because
+ * `'self'` is for routes that carry no org gate whatsoever, and these still
+ * ask that the caller be a member of something.
  */
 export type RouteRequirement = Permission | 'self' | 'in-handler' | 'invite-token';
 
@@ -273,6 +282,25 @@ const MANIFEST = [
     handler: 'transfer-ownership',
     category: 'authenticated',
     requires: 'org.transfer',
+  },
+  // Creating an additional org: the caller holds no role in it yet, so there
+  // is nothing for a permission to check. See the `'in-handler'` doc comment
+  // above.
+  {
+    method: 'POST',
+    path: '/api/org',
+    handler: 'create-org',
+    category: 'authenticated',
+    requires: 'in-handler',
+  },
+  // A place to put an org logo before the org it belongs to exists. Same
+  // reasoning as create-org, and used by the same dialog just ahead of it.
+  {
+    method: 'POST',
+    path: '/api/org/logo-upload-url',
+    handler: 'presign-org-logo',
+    category: 'authenticated',
+    requires: 'in-handler',
   },
 
   // ── Members ──────────────────────────────────────────────────────

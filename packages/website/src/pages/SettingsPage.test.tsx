@@ -31,7 +31,10 @@ vi.mock('../components/MfaSettings', () => ({ MfaSettings: () => null }));
 
 const mockNavigate = vi.fn();
 
-vi.mock('@tanstack/react-router', () => ({ useNavigate: () => mockNavigate }));
+vi.mock('@tanstack/react-router', () => ({
+  useNavigate: () => mockNavigate,
+  useParams: () => ({}),
+}));
 
 import { SettingsPage } from './SettingsPage.js';
 
@@ -43,6 +46,7 @@ function me(role: OrgRole): MeResponse {
   return {
     orgId: 'org-1',
     orgName: 'Acme',
+    slug: 'acme',
     nameConfirmed: true,
     emailVerified: true,
     email: 'user@example.com',

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../lib/query-client.js';
@@ -31,6 +31,8 @@ import { useToast } from '../components/Toast/index.js';
 import { useFileUpload } from '../lib/use-file-upload.js';
 import type { FileEntry, FileUploadStatus } from '../lib/use-file-upload.js';
 import { resolveDropItems } from '../lib/drop-helpers.js';
+import { useOrgSlug } from '../lib/use-org-path.js';
+import { useWarnBeforeUnload } from '../lib/use-warn-before-unload.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -371,6 +373,7 @@ export type UploadObjectPageProps = {
 
 export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) {
   const navigate = useNavigate();
+  const orgSlug = useOrgSlug();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
@@ -389,29 +392,25 @@ export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) 
         queryKey: queryKeys.bucketAnalytics(bucketName, region),
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
-      void navigate({ to: '/buckets/$bucketName', params: { bucketName }, search: { region } });
+      void navigate({
+        to: '/$orgSlug/buckets/$bucketName',
+        params: { orgSlug, bucketName },
+        search: { region },
+      });
     },
   });
 
-  // An upload in flight dies with the page, and every way out of this page is a
-  // navigation: closing the tab, logging out, switching organizations. One
-  // guard here covers all of them, and it is the only place that knows an
-  // upload is running.
   const isUploading = upload.uploadStep === 'uploading';
-  useEffect(() => {
-    if (!isUploading) return;
-    const warn = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      // `preventDefault` is the current trigger; older Chromium and Safari
-      // builds key the confirmation dialog off this instead.
-      e.returnValue = '';
-    };
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [isUploading]);
+  // Every way out of this page while an upload is running — closing the tab,
+  // logging out, switching organizations — is covered by one guard here.
+  useWarnBeforeUnload(isUploading);
 
   const goToBucket = () =>
-    void navigate({ to: '/buckets/$bucketName', params: { bucketName }, search: { region } });
+    void navigate({
+      to: '/$orgSlug/buckets/$bucketName',
+      params: { orgSlug, bucketName },
+      search: { region },
+    });
 
   const toggleFolder = (root: string) => {
     setExpandedFolders((prev) => {

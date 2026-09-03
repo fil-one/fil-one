@@ -5,6 +5,15 @@ import { apiRequest, ForbiddenRoleError, getMe, NotAMemberError } from './api.js
 import { setActiveOrgId } from './active-org.js';
 import { acceptInvitation } from './members-api.js';
 
+// `switchToOrg` imports the router dynamically to resolve a slug and navigate;
+// the "switch in flight" cases below only care about the stash/latch side of
+// it, so the navigation itself is a controllable stand-in rather than the real
+// router.
+const routerNavigate = vi.fn();
+vi.mock('../router.js', () => ({
+  router: { navigate: (...args: unknown[]) => routerNavigate(...args) },
+}));
+
 /**
  * How `apiRequest` renders a denial. The role codes get their own error types
  * because a component may want to tell the two states apart; every other 403
@@ -284,13 +293,16 @@ describe('apiRequest — a switch in flight', () => {
 
   beforeEach(() => {
     sessionStorage.clear();
-    vi.useFakeTimers();
     vi.stubGlobal('fetch', vi.fn());
     vi.stubGlobal('location', { hostname: 'localhost', assign: vi.fn(), reload: vi.fn() });
+    routerNavigate.mockReset();
+    // Pending forever by default: `switchToOrg`'s own latch only comes down
+    // when the navigation settles, and these cases are about the window while
+    // it has not.
+    routerNavigate.mockImplementation(() => new Promise(() => {}));
   });
 
   afterEach(() => {
-    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -309,11 +321,12 @@ describe('apiRequest — a switch in flight', () => {
   });
 
   it('sends a held request in the org still on screen once the switch rolls back', async () => {
-    // The switch was cancelled — a `beforeunload` guard, and a user who
-    // answered "stay on this page". A request handed out inside that window has
+    // The navigation was blocked or failed — a `beforeLoad` redirect thrown
+    // somewhere unexpected, say. A request handed out inside that window has
     // no other resolution path: React Query starts no second fetch for a key
     // whose fetch is still in flight, so the panel would spin until a reload.
     vi.spyOn(console, 'warn').mockImplementation(() => {});
+    routerNavigate.mockRejectedValue(new Error('navigation blocked'));
     const { api, stash } = await freshApi();
     stash.setActiveOrgId(ORG_A);
     vi.mocked(fetch).mockResolvedValue(
@@ -325,8 +338,6 @@ describe('apiRequest — a switch in flight', () => {
 
     stash.switchToOrg(ORG_B);
     const held = api.apiRequest('/buckets');
-
-    await vi.runAllTimersAsync();
 
     await expect(held).resolves.toStrictEqual({ buckets: [] });
     // The rollback put ORG_A back before the request read the stash, so the
