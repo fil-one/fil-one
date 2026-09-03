@@ -12,6 +12,7 @@ import {
   isSupportedRegion,
 } from '@filone/shared';
 import type {
+  AuditActor,
   CreateAccessKeyRequest,
   CreateAccessKeyResponse,
   ErrorResponse,
@@ -20,6 +21,8 @@ import type {
 } from '@filone/shared';
 import { Resource } from 'sst';
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.js';
+import { revokeAccessKey } from '../lib/key-revocation.js';
+import { resolveMembership } from '../lib/org-membership.js';
 import type { AuditCorrelation } from '../lib/audit.js';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.js';
@@ -61,8 +64,8 @@ export async function baseHandler(
 
   const { orgId, userId, membership } = getUserInfo(event);
   // The role the cap above was evaluated against. The key row's write asserts
-  // it is still the role on file.
-  const creatorRole = membership!.role;
+  // it is still the role on file, and the read after that write asks again.
+  const creator = { orgId, userId, role: membership!.role };
   const creatorEmail = getVerifiedEmail(event);
   const attribution = keyAttribution({ userId, creatorEmail });
   const actor = userActor({ userId, email: creatorEmail });
@@ -104,36 +107,26 @@ export async function baseHandler(
       expiresAt,
     });
   } catch (err) {
-    if (err instanceof AccessKeyAlreadyExistsError) {
-      await recoverDuplicateKey({
-        orgId,
-        tenantId,
-        keyName,
-        region,
-        orchestrator,
-        attribution,
-        mint,
-        creator: { orgId, userId, role: creatorRole },
-      });
-      return new ResponseBuilder()
-        .status(409)
-        .body<ErrorResponse>({ message: 'An access key with this name already exists' })
-        .build();
-    }
-    if (err instanceof AccessKeyValidationError) {
-      // The vendor refused the request. Closing the correlation is what says so:
-      // an intent with no completion means the process died mid-flight.
-      await mint.complete({ outcome: 'failed' });
-      return new ResponseBuilder()
-        .status(400)
-        .body<ErrorResponse>({ message: err.message })
-        .build();
-    }
-    // Left dangling on purpose: an unhandled vendor error is the case where
-    // nobody knows whether a credential exists, and that is what the operator
-    // needs to see.
-    throw err;
+    return await vendorRefusedTheMint(err, {
+      orgId,
+      tenantId,
+      keyName,
+      region,
+      orchestrator,
+      attribution,
+      mint,
+      creator,
+    });
   }
+
+  const minted = {
+    keyId: accessKey.id,
+    accessKeyId: accessKey.accessKeyId,
+    keyName,
+    region,
+    orchestrator,
+    tenantId,
+  };
 
   const stale = await recordMintedKey({
     row: {
@@ -152,11 +145,14 @@ export async function baseHandler(
     accessKeyId: accessKey.accessKeyId,
     keyId: accessKey.id,
     mint,
-    creator: { orgId, userId, role: creatorRole },
+    creator,
     orchestrator,
     tenantId,
   });
   if (stale) return stale;
+
+  const narrowed = await discardIfTheRoleNarrowed({ ...minted, creator, actor });
+  if (narrowed) return narrowed;
 
   return new ResponseBuilder()
     .status(201)
@@ -236,6 +232,34 @@ async function recordMintedKey({
 }
 
 /**
+ * The vendor would not mint it, and each refusal means something different.
+ *
+ * A duplicate name is the one that may have created a credential anyway, on an
+ * earlier attempt whose row never landed, so it goes through the recovery. A
+ * validation error is the vendor rejecting the request, and closing the
+ * correlation is what records that. Anything else leaves the intent dangling on
+ * purpose: nobody knows whether a credential exists, which is what the operator
+ * needs to see.
+ */
+async function vendorRefusedTheMint(
+  err: unknown,
+  params: RecoverDuplicateKeyParams,
+): Promise<APIGatewayProxyStructuredResultV2> {
+  if (err instanceof AccessKeyAlreadyExistsError) {
+    await recoverDuplicateKey(params);
+    return new ResponseBuilder()
+      .status(409)
+      .body<ErrorResponse>({ message: 'An access key with this name already exists' })
+      .build();
+  }
+  if (err instanceof AccessKeyValidationError) {
+    await params.mint.complete({ outcome: 'failed' });
+    return new ResponseBuilder().status(400).body<ErrorResponse>({ message: err.message }).build();
+  }
+  throw err;
+}
+
+/**
  * The attributes a key row carries only when the form asked for them, so an
  * absent one reads as "not requested" rather than as an empty list.
  */
@@ -283,6 +307,83 @@ async function discardKeyMintedUnderAStaleRole({
     });
   }
 
+  return roleChangedUnderneathResponse();
+}
+
+/**
+ * The same narrowing, found one moment later.
+ *
+ * The row's own `ConditionCheck` refuses a key whose creator was demoted before
+ * it landed. It cannot refuse one that landed first: at that instant the
+ * creator did still hold the role the cap ran against, so the condition is
+ * satisfied and correctly so. The key only becomes excessive when the role
+ * write follows, and by then the narrowing's listing has already been taken
+ * without it.
+ *
+ * So the mint looks once more. It is the request that created the problem and
+ * the only one holding the credential, and undoing its own work is cheaper than
+ * anything that has to go looking for it afterwards. A demotion landing between
+ * the write above and this read is the one ordering neither check sees.
+ *
+ * Costs one consistent `GetItem` on the path of every mint, which is the price
+ * of not needing a second revocation pass.
+ */
+async function discardIfTheRoleNarrowed({
+  creator,
+  keyId,
+  accessKeyId,
+  keyName,
+  region,
+  orchestrator,
+  tenantId,
+  actor,
+}: {
+  /** Who minted it, and the role the permission cap ran against. */
+  creator: { orgId: string; userId: string; role: OrgRole };
+  keyId: string;
+  accessKeyId: string;
+  keyName: string;
+  region: S3Region;
+  orchestrator: ServiceOrchestrator;
+  tenantId: string;
+  actor: AuditActor;
+}): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
+  const { orgId, userId, role } = creator;
+  const membership = await resolveMembership(orgId, userId);
+  if (membership?.role === role) return undefined;
+
+  // Both halves this time: the row landed, unlike the path above. Through
+  // `revokeAccessKey` so the removal is audited like any other, and so the row
+  // delete rides its completion rather than being a second write nobody records.
+  try {
+    await revokeAccessKey({
+      orgId,
+      keyId,
+      accessKeyId,
+      keyName,
+      region,
+      orchestrator,
+      tenantId,
+      actor,
+      reason: 'stale_role_at_mint',
+    });
+  } catch (err) {
+    // The row survives, listing a credential that may or may not still exist.
+    // Left for the operator rather than retried: a second delete against a
+    // vendor that just refused one is not the thing to do on a request path.
+    console.error('[create-access-key] Could not discard a key whose creator was demoted', {
+      orgId,
+      userId,
+      keyIdSuffix: auditKeyIdSuffix('s3', accessKeyId),
+      error: err,
+    });
+  }
+
+  return roleChangedUnderneathResponse();
+}
+
+/** The answer both discard paths give: try again under the role you now hold. */
+function roleChangedUnderneathResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(409)
     .body<ErrorResponse>({

@@ -96,15 +96,15 @@ export async function revokeMemberKeys({
 }
 
 /**
- * Everything after the membership write, which may not fail the request.
+ * Work whose failure must not become the caller's failure.
  *
- * The change has landed. Answering with an error would send the caller into a
- * retry that finds the work already done — the role where they wanted it, the
- * member gone, the seat moved — and the second pass and the email are both
- * things a transient DynamoDB or SendGrid failure can interrupt. So the tail
- * is logged and swallowed, and the response reflects the write that committed.
+ * Used for the tail of a membership change, after the write has committed:
+ * answering with an error there would send the caller into a retry that finds
+ * the work already done — the role where they wanted it, the member gone, the
+ * seat moved — while the thing that actually failed was a notification. So it
+ * is logged and swallowed, and the response reflects the write.
  */
-export async function afterTheWrite<T>(
+export async function bestEffort<T>(
   what: () => Promise<T>,
   fallback: T,
   context: { source: string; orgId: string },

@@ -25,7 +25,7 @@ import {
 } from '../lib/audit.js';
 import { keysExceedingRole } from '../lib/member-keys.js';
 import { sendKeyRevocationEmail } from '../lib/key-revocation-email.js';
-import { afterTheWrite, revokeMemberKeys } from '../lib/revoke-member-keys.js';
+import { bestEffort, revokeMemberKeys } from '../lib/revoke-member-keys.js';
 import {
   pendingInvitationsFrom,
   planRevocations,
@@ -146,7 +146,7 @@ export async function baseHandler(
 }
 
 /**
- * Revoke, write the role, revoke again, and say what happened.
+ * Revoke, write the role, and say what happened.
  *
  * The order is the whole of it. An access key carries its own permission set,
  * fixed when it was minted, and nothing at Aurora or FTH evaluates it against
@@ -154,11 +154,11 @@ export async function baseHandler(
  * revoked at the vendor BEFORE the role is written: a member is never wider at
  * a storage vendor than the role the console records for them.
  *
- * The second pass exists because the first reads a list. A key minted by a
- * request that read the old role can land between the listing and the role
- * write; the mint path's own `ConditionCheck` (`create-access-key.ts`) refuses
- * a row written after the role changed, and this pass catches one written just
- * before it. Neither guard covers the other's window.
+ * The pass reads a list, and a key minted after that reading is not on it. Both
+ * ends of that window belong to the mint rather than here: its key row carries
+ * a `ConditionCheck` on the creator's role, and it reads the role once more
+ * after the row lands (`create-access-key.ts`). A key that outlives this pass
+ * is discarded by the request that created it.
  */
 interface RoleChange {
   orgId: string;
@@ -212,17 +212,6 @@ async function applyRoleChange({
       },
     });
   const singlePhase = () => auditEvent({ ...eventBase(actor, orgId, targetUserId), details });
-  const secondPass = (alreadyRevoked: RevokedKeySummary[]) =>
-    runSecondPass({
-      orgId,
-      orgProfile,
-      targetUserId,
-      fromRole,
-      toRole,
-      actor,
-      changedBy,
-      alreadyRevoked,
-    });
 
   // A change that revokes no key touches no vendor, so it stays one transaction
   // and one event, the form every membership change took in M1.
@@ -230,10 +219,7 @@ async function applyRoleChange({
     const failed = await write(singlePhase(), []);
     if (failed) return failed;
     await revokeDeferred(invitations.later);
-    if (!narrows) {
-      return roleResponse({ userId: targetUserId, role: toRole, previousRole: fromRole });
-    }
-    return await secondPass([]);
+    return roleResponse({ userId: targetUserId, role: toRole, previousRole: fromRole });
   }
 
   const change = await twoPhaseAudit({
@@ -273,7 +259,29 @@ async function applyRoleChange({
   if (failed) return failed;
 
   await revokeDeferred(invitations.later);
-  return await secondPass(first.revoked);
+
+  // The role is written. Telling the member cannot fail the request now: they
+  // would be sent into a retry that finds the role already where they wanted it
+  // and answers as a no-op.
+  await bestEffort(
+    () =>
+      sendKeyRevocationEmail({
+        userId: targetUserId,
+        orgName: orgProfile?.name?.S ?? 'your organization',
+        keys: first.revoked,
+        cause: { kind: 'role_changed', previousRole: fromRole, role: toRole },
+        changedBy,
+      }),
+    undefined,
+    { source: 'update-member-role', orgId },
+  );
+
+  return roleResponse({
+    userId: targetUserId,
+    role: toRole,
+    previousRole: fromRole,
+    revokedKeys: first.revoked,
+  });
 }
 
 /** What both forms of `member.role_changed` carry. */
@@ -375,103 +383,6 @@ async function writeRole({
     }
     return await changeFailureResponse(err, failure);
   }
-}
-
-/**
- * The pass after the role is written.
- *
- * The first pass reads a list, and a key minted by a request that read the old
- * role can land between that listing and the role write. The mint path's own
- * `ConditionCheck` (`create-access-key.ts`) refuses a row written after the
- * role changed; this catches one written just before it. Neither guard covers
- * the other's window.
- */
-async function runSecondPass({
-  orgId,
-  orgProfile,
-  targetUserId,
-  fromRole,
-  toRole,
-  actor,
-  changedBy,
-  alreadyRevoked,
-}: {
-  orgId: string;
-  orgProfile: OrgProfileItem | undefined;
-  targetUserId: string;
-  fromRole: OrgRole;
-  toRole: OrgRole;
-  actor: AuditActor;
-  changedBy: string;
-  alreadyRevoked: RevokedKeySummary[];
-}): Promise<APIGatewayProxyStructuredResultV2> {
-  // The role is written by now, so nothing below may fail the request: a retry
-  // would find the role already where the caller wanted it and answer as a
-  // no-op, and both the listing and the email are things a transient failure
-  // can interrupt.
-  const written = roleResponse({
-    userId: targetUserId,
-    role: toRole,
-    previousRole: fromRole,
-    ...(alreadyRevoked.length > 0 ? { revokedKeys: alreadyRevoked } : {}),
-  });
-
-  return await afterTheWrite(
-    async () => {
-      // Skipping what the first pass took: its row delete rides the revocation's
-      // audit completion, and a completion that could not be written leaves the row
-      // listed for a credential that is already gone.
-      const alreadyGone = new Set(alreadyRevoked.map((key) => key.id));
-      const second = await revokeMemberKeys({
-        orgId,
-        orgProfile,
-        keys: (await keysExceedingRole(orgId, targetUserId, toRole)).doomed.filter(
-          (key) => !alreadyGone.has(key.id),
-        ),
-        actor,
-        reason: 'role_narrowing',
-        // The role is already written, so a key this pass gives up on is one the
-        // member holds above it. Stopping at the first refusal would leave the rest
-        // neither revoked nor named.
-        onFailure: 'continue',
-      });
-
-      // The role is already written, and the same PATCH will not run this pass
-      // again: it answers a request for the role the member now holds without
-      // touching anything. A key the vendor refused here therefore has no automatic
-      // retry, and saying so is the whole remedy — an admin holding
-      // `keys.manage_all` revokes it from the keys page.
-      if (second.failed.length > 0) {
-        console.error('[update-member-role] Keys survived the narrowing', {
-          orgId,
-          targetUserId,
-          keyIdSuffixes: second.failed.map((key) => key.accessKeyIdSuffix),
-        });
-      }
-
-      const revokedKeys = [...alreadyRevoked, ...second.revoked];
-      // Only what actually stopped working. A key the vendor kept is still live,
-      // and telling the member it went would send them looking for a fault that is
-      // on our side.
-      await sendKeyRevocationEmail({
-        userId: targetUserId,
-        orgName: orgProfile?.name?.S ?? 'your organization',
-        keys: revokedKeys,
-        cause: { kind: 'role_changed', previousRole: fromRole, role: toRole },
-        changedBy,
-      });
-
-      return roleResponse({
-        userId: targetUserId,
-        role: toRole,
-        previousRole: fromRole,
-        ...(revokedKeys.length > 0 ? { revokedKeys } : {}),
-        ...(second.failed.length > 0 ? { failedKeys: second.failed } : {}),
-      });
-    },
-    written,
-    { source: 'update-member-role', orgId },
-  );
 }
 
 /**

@@ -157,13 +157,6 @@ function useRoleChange(ctx: MutationContext) {
       ctx.toastSuccess(
         `${memberName(member)} is now ${ROLE_LABELS[role]}${revokedSuffix(result.revokedKeys)}`,
       );
-      // A key the vendor kept is still live and nothing here will try again, so
-      // it is said separately rather than folded into the success line.
-      if (result.failedKeys?.length) {
-        ctx.toastError(
-          `${namedKeys(result.failedKeys)} could not be revoked and still works. Revoke it from Access keys.`,
-        );
-      }
     },
     onError: (err) => {
       // The keys named here are already gone whatever the role now says, so the

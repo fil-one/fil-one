@@ -661,58 +661,6 @@ describe('a narrowing revokes the keys the new role could not mint', () => {
     expect(mockDeleteAccessKey).not.toHaveBeenCalled();
   });
 
-  it('names a key the second pass could not revoke, since nothing retries it', async () => {
-    // The role is written by now, and the same PATCH answers a request for the
-    // role the member already holds without touching anything.
-    stubMemberKeys({ permissions: ['read', 'DeleteBucket'] });
-    mockDeleteAccessKey.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('down'));
-    // The stub cannot delete rows, so the second pass sees a second key.
-    ddbMock
-      .on(QueryCommand, {
-        TableName: 'UserInfoTable',
-        ExpressionAttributeValues: {
-          ':pk': { S: `ORG#${ORG_ID}` },
-          ':skPrefix': { S: 'ACCESSKEY#' },
-        },
-      })
-      .resolvesOnce({
-        Items: [
-          marshall({
-            pk: `ORG#${ORG_ID}`,
-            sk: 'ACCESSKEY#key-0',
-            keyName: 'key 0',
-            accessKeyId: 'AKIAEXAMPLE0000',
-            createdAt: '2026-02-01T00:00:00.000Z',
-            status: 'active',
-            region: S3Region.UsEast1,
-            createdBy: TARGET_ID,
-            permissions: ['read', 'DeleteBucket'],
-          }),
-        ],
-      })
-      .resolves({
-        Items: [
-          marshall({
-            pk: `ORG#${ORG_ID}`,
-            sk: 'ACCESSKEY#key-1',
-            keyName: 'raced in',
-            accessKeyId: 'AKIAEXAMPLE0001',
-            createdAt: '2026-02-02T00:00:00.000Z',
-            status: 'active',
-            region: S3Region.UsEast1,
-            createdBy: TARGET_ID,
-            permissions: ['DeleteBucket'],
-          }),
-        ],
-      });
-
-    const result = await handler(roleEvent(OrgRole.Member), buildContext());
-
-    expect(result).toMatchObject({ statusCode: 200 });
-    expect(body(result).revokedKeys.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
-    expect(body(result).failedKeys.map((key: { id: string }) => key.id)).toStrictEqual(['key-1']);
-  });
-
   it('tells the member about keys that went before the change was refused', async () => {
     // The role is unchanged, but those credentials are gone and their clients
     // are already broken. Nothing else reaches them.
@@ -737,59 +685,6 @@ describe('a narrowing revokes the keys the new role could not mint', () => {
     // Not a role change, because the role did not change.
     expect(sent.content[0]!.value).not.toContain('changed from');
     expect(sent.content[0]!.value).toContain('did not complete');
-  });
-
-  it('answers with the change when the pass after it cannot finish', async () => {
-    // The role is written. A retry would find it already where the caller
-    // wanted it, so a transient failure in the tail must not read as a refusal.
-    stubMemberKeys({ permissions: ['read', 'DeleteBucket'] });
-    ddbMock
-      .on(QueryCommand, {
-        TableName: 'UserInfoTable',
-        ExpressionAttributeValues: {
-          ':pk': { S: `ORG#${ORG_ID}` },
-          ':skPrefix': { S: 'ACCESSKEY#' },
-        },
-      })
-      .resolvesOnce({
-        Items: [
-          marshall({
-            pk: `ORG#${ORG_ID}`,
-            sk: 'ACCESSKEY#key-0',
-            keyName: 'key 0',
-            accessKeyId: 'AKIAEXAMPLE0000',
-            createdAt: '2026-02-01T00:00:00.000Z',
-            status: 'active',
-            region: S3Region.UsEast1,
-            createdBy: TARGET_ID,
-            permissions: ['read', 'DeleteBucket'],
-          }),
-        ],
-      })
-      .rejects(new Error('DynamoDB unavailable'));
-
-    const result = await handler(roleEvent(OrgRole.Member), buildContext());
-
-    expect(result).toMatchObject({ statusCode: 200 });
-    expect(body(result).revokedKeys.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
-  });
-
-  it('names every key the second pass could not revoke, not just the first', async () => {
-    // The role has already moved, so a key this pass gives up on is one the
-    // member holds above it. Stopping at the first refusal would leave the rest
-    // neither revoked nor named.
-    stubMemberKeys(
-      { permissions: ['read', 'DeleteBucket'] },
-      { permissions: ['DeleteBucket'] },
-      { permissions: ['DeleteBucket'] },
-    );
-    mockDeleteAccessKey.mockRejectedValue(new Error('down'));
-
-    const result = await handler(roleEvent(OrgRole.Member), buildContext());
-
-    // The first pass stops on the first refusal and leaves the role alone.
-    expect(result).toMatchObject({ statusCode: 502 });
-    expect(mockDeleteAccessKey).toHaveBeenCalledTimes(1);
   });
 
   it('records the pair, the ids on the completion and one event per key', async () => {
