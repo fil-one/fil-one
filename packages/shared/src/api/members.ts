@@ -3,6 +3,7 @@ import { OrgRole } from './org.js';
 import { InvitedRoleSchema } from './invitations.js';
 import type { OrgMembershipSource } from './org.js';
 import type { S3Region } from '../constants.js';
+import type { AccessKeyRevocationReason } from '../access-key-permissions.js';
 
 /**
  * Member management: the org's roster, the role each member holds, removal, and
@@ -54,13 +55,16 @@ export interface UpdateMemberRoleResponse {
 }
 
 /**
- * One key a role change would revoke, as the confirmation dialog lists it.
+ * One access key as the console lists it around a membership change. Named
+ * for the key rather than its fate because the same shape serves three states:
+ * the preview's forecast of what a change would revoke, what a change did
+ * revoke, and a key a vendor refused to revoke.
  *
  * The id suffix rather than the whole access key id: the console shows four
  * characters, and a full `AKIA…` in a response body is a credential half nobody
  * needs to recognize a key by.
  */
-export interface RevokedKeySummary {
+export interface AccessKeySummary {
   /** The orchestrator's id for the key, which is what the row is addressed by. */
   id: string;
   keyName: string;
@@ -68,12 +72,8 @@ export interface RevokedKeySummary {
   accessKeyIdSuffix?: string;
   region: S3Region;
   createdAt: string;
-  /**
-   * Why it goes: the new role cannot hold a key at all (`role_cannot_mint`),
-   * the row records no permission set (`permissions_unrecorded`), or the role
-   * could not grant what it carries (`exceeds_role`).
-   */
-  reason: 'role_cannot_mint' | 'permissions_unrecorded' | 'exceeds_role';
+  /** Why it goes, when it does. */
+  reason: AccessKeyRevocationReason;
   /** The permissions above the new role, named, when that is what condemned it. */
   excess: string[];
 }
@@ -91,14 +91,14 @@ export interface RoleChangePreviewResponse {
   /** The target's current role, so the dialog can name the move. */
   currentRole: OrgRole;
   role: OrgRole;
-  keys: RevokedKeySummary[];
+  keys: AccessKeySummary[];
   /** The target's keys that stay live. */
-  survivingCount: number;
+  retainedKeyCount: number;
   /**
    * Keys in this org with no recorded owner, which no role change touches.
    * Shown beside the list so a short list is not read as the whole story.
    */
-  unattributedCount: number;
+  unattributedKeyCount: number;
 }
 
 /**

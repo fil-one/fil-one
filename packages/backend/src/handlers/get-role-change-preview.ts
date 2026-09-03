@@ -1,19 +1,13 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { ApiErrorCode, auditKeyIdSuffix, canChangeRole, isOrgRole } from '@filone/shared';
-import type {
-  ErrorResponse,
-  OrgRole,
-  RevokedKeySummary,
-  RoleChangePreviewResponse,
-} from '@filone/shared';
-import { keysExceedingRole } from '../lib/member-keys.js';
-import type { DoomedKey } from '../lib/member-keys.js';
-import { resolveMembership } from '../lib/org-membership.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
+import { auditKeyIdSuffix, isOrgRole } from '@filone/shared';
+import type { AccessKeySummary, RoleChangePreviewResponse } from '@filone/shared';
+import { requireManageableMember } from '../lib/manageable-member.js';
+import { reviewMemberAccessKeysForRole } from '../lib/member-keys.js';
+import type { AccessKeyToRevoke } from '../lib/member-keys.js';
+import { ResponseBuilder, badRequestResponse } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { authorize } from '../middleware/authorize.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
@@ -39,41 +33,41 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const targetUserId = event.pathParameters?.userId;
-  if (!targetUserId) return badRequestResponse('Missing userId in path');
-
   const role = event.queryStringParameters?.role;
   if (!role || !isOrgRole(role)) return badRequestResponse('Ask about one of the org roles.');
 
-  const { orgId, membership } = getUserInfo(event);
+  const gate = await requireManageableMember(event, { kind: 'role-change', toRole: role });
+  if (!gate.ok) return gate.refusal;
+  const target = gate.value;
 
-  const target = await resolveMembership(orgId, targetUserId);
-  if (!target) return notAMemberResponse();
+  const review = await reviewMemberAccessKeysForRole(target.orgId, target.userId, role);
 
-  // `authorize('members.manage')` refused every caller without a membership row.
-  if (!canChangeRole(membership!.role, target.role, role)) {
-    return beyondCeilingResponse(target.role, role);
-  }
-
-  const review = await keysExceedingRole(orgId, targetUserId, role);
   // The PATCH answers a request for the role somebody already holds without
-  // touching anything, so a preview of it has to promise the same. Otherwise a
-  // key that already exceeds its holder's current role, or one whose row records
-  // no permissions, reads as about to be revoked by a change that does nothing.
-  const unchanged = target.role === role;
-
-  return new ResponseBuilder()
-    .status(200)
-    .body<RoleChangePreviewResponse>({
+  // touching anything, so a preview of it promises the same: nothing revoked,
+  // every key kept. Otherwise a key that already exceeds its holder's current
+  // role, or one whose row records no permissions, would read as about to go by
+  // a change that does nothing.
+  if (target.role === role) {
+    return previewResponse({
       currentRole: target.role,
       role,
-      keys: unchanged ? [] : review.doomed.map(summarizeKey),
-      survivingCount: unchanged
-        ? review.doomed.length + review.survivingCount
-        : review.survivingCount,
-      unattributedCount: review.unattributedCount,
-    })
-    .build();
+      keys: [],
+      retainedKeyCount: review.keysToRevoke.length + review.retainedKeyCount,
+      unattributedKeyCount: review.unattributedKeyCount,
+    });
+  }
+
+  return previewResponse({
+    currentRole: target.role,
+    role,
+    keys: review.keysToRevoke.map(summarizeAccessKey),
+    retainedKeyCount: review.retainedKeyCount,
+    unattributedKeyCount: review.unattributedKeyCount,
+  });
+}
+
+function previewResponse(body: RoleChangePreviewResponse): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder().status(200).body<RoleChangePreviewResponse>(body).build();
 }
 
 /**
@@ -81,7 +75,7 @@ export async function baseHandler(
  * characters the console already shows, so a response that names somebody
  * else's credentials carries no more of them than the key list does.
  */
-function summarizeKey(key: DoomedKey): RevokedKeySummary {
+function summarizeAccessKey(key: AccessKeyToRevoke): AccessKeySummary {
   return {
     id: key.id,
     keyName: key.keyName,
@@ -91,30 +85,6 @@ function summarizeKey(key: DoomedKey): RevokedKeySummary {
     reason: key.reason,
     excess: key.excess.map(({ keyPermission }) => keyPermission),
   };
-}
-
-function badRequestResponse(message: string): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder().status(400).body<ErrorResponse>({ message }).build();
-}
-
-function notAMemberResponse(): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder()
-    .status(404)
-    .body<ErrorResponse>({ message: 'That person is not a member of this organization.' })
-    .build();
-}
-
-function beyondCeilingResponse(
-  fromRole: OrgRole,
-  toRole: OrgRole,
-): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder()
-    .status(403)
-    .body<ErrorResponse>({
-      message: `Your role in this organization cannot change a ${fromRole} to ${toRole}.`,
-      code: ApiErrorCode.FORBIDDEN_ROLE,
-    })
-    .build();
 }
 
 export const handler = middy(baseHandler)

@@ -92,7 +92,7 @@ export { TransferOwnershipSchema, UpdateMemberRoleSchema } from './api/members.j
 export type {
   ListMembersResponse,
   MemberSummary,
-  RevokedKeySummary,
+  AccessKeySummary,
   RoleChangePreviewResponse,
   TransferOwnershipRequest,
   TransferOwnershipResponse,

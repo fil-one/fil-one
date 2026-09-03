@@ -97,8 +97,8 @@ describe('get-role-change-preview baseHandler', () => {
           excess: ['DeleteBucket'],
         },
       ],
-      survivingCount: 1,
-      unattributedCount: 1,
+      retainedKeyCount: 1,
+      unattributedKeyCount: 1,
     });
   });
 
@@ -128,7 +128,7 @@ describe('get-role-change-preview baseHandler', () => {
       ['key-1', 'role_cannot_mint'],
       ['key-2', 'role_cannot_mint'],
     ]);
-    expect(body.survivingCount).toBe(0);
+    expect(body.retainedKeyCount).toBe(0);
   });
 
   it('condemns nothing on a promotion', async () => {
@@ -139,7 +139,7 @@ describe('get-role-change-preview baseHandler', () => {
       await baseHandler(previewEvent({ role: OrgRole.Admin })),
     );
 
-    expect(body).toMatchObject({ keys: [], survivingCount: 1 });
+    expect(body).toMatchObject({ keys: [], retainedKeyCount: 1 });
   });
 
   it('answers the same shape when the org holds no keys at all', async () => {
@@ -149,8 +149,8 @@ describe('get-role-change-preview baseHandler', () => {
       currentRole: OrgRole.Admin,
       role: OrgRole.Member,
       keys: [],
-      survivingCount: 0,
-      unattributedCount: 0,
+      retainedKeyCount: 0,
+      unattributedKeyCount: 0,
     });
   });
 
@@ -165,7 +165,7 @@ describe('get-role-change-preview baseHandler', () => {
       await baseHandler(previewEvent({ role: OrgRole.Member })),
     );
 
-    expect(body).toMatchObject({ keys: [], survivingCount: 2 });
+    expect(body).toMatchObject({ keys: [], retainedKeyCount: 2 });
   });
 
   it('refuses a caller who could not make the change', async () => {
