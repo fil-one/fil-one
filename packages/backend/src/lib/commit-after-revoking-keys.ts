@@ -56,7 +56,7 @@ export type RevocationAuditEventType = {
  * The retry is the same request, which finds fewer keys: every completed
  * revocation deleted its row.
  */
-export async function commitAfterRevoking<T extends RevocationAuditEventType>({
+export async function commitAfterRevokingKeys<T extends RevocationAuditEventType>({
   items,
   keys,
   orgId,
@@ -89,20 +89,25 @@ export async function commitAfterRevoking<T extends RevocationAuditEventType>({
    * the org-deletion fence has no remedy and leaves through the shared error.
    */
   onCancelled: (err: unknown, revoked: AccessKeySummary[]) => Promise<Response> | Response;
-  /** A vendor refused, so nothing was written and these keys are gone regardless. */
-  onRefused: (refused: AccessKeySummary, revoked: AccessKeySummary[]) => Response;
+  /** Vendors refused these, so nothing was written; the revoked ones are gone regardless. */
+  onRefused: (refused: AccessKeySummary[], revoked: AccessKeySummary[]) => Response;
   /** Omitted by the flow whose key holder IS the caller, already answered. */
   notifyMember?: (revoked: AccessKeySummary[]) => Promise<void>;
 }): Promise<{ revoked: AccessKeySummary[] } | { response: Response }> {
-  // `onCancelled` runs outside any `try` here: a thrown `OrgDeletingError` is
-  // the fence's 410 and must reach the error handler unwrapped.
+  // `onCancelled` runs outside every `try` here: a thrown `OrgDeletingError` is
+  // the fence's 410 and must reach the error handler unwrapped. So each write
+  // only captures what it threw, and the answer follows the block. Wrapped
+  // rather than bare, so a thrown `undefined` still counts as a cancellation.
   if (keys.length === 0) {
-    const cancelled = await attempt(() =>
-      commitAudited({
+    let cancelled: { error: unknown } | undefined;
+    try {
+      await commitAudited({
         items,
         event: auditEvent({ type, actor, orgId, subject, details }),
-      }),
-    );
+      });
+    } catch (error) {
+      cancelled = { error };
+    }
     if (cancelled) return { response: await onCancelled(cancelled.error, []) };
     return { revoked: [] };
   }
@@ -126,15 +131,18 @@ export async function commitAfterRevoking<T extends RevocationAuditEventType>({
     pass.revoked.length > 0 ? { revokedKeys: pass.revoked.map((key) => key.id) } : {}
   ) as Partial<AuditEventDetails[T]>;
 
-  if (pass.refused) {
+  if (pass.refused.length > 0) {
     await correlation.complete({ outcome: 'failed', details: revokedIds });
     await notifyMember?.(pass.revoked);
     return { response: onRefused(pass.refused, pass.revoked) };
   }
 
-  const cancelled = await attempt(() =>
-    correlation.complete({ outcome: 'succeeded', details: revokedIds, items }),
-  );
+  let cancelled: { error: unknown } | undefined;
+  try {
+    await correlation.complete({ outcome: 'succeeded', details: revokedIds, items });
+  } catch (error) {
+    cancelled = { error };
+  }
   if (cancelled) {
     console.error(`[${source}] The write cancelled after revoking keys`, {
       orgId,
@@ -145,14 +153,4 @@ export async function commitAfterRevoking<T extends RevocationAuditEventType>({
   }
 
   return { revoked: pass.revoked };
-}
-
-/** The error a write threw, as a value, so what answers it runs outside the `try`. */
-async function attempt(write: () => Promise<void>): Promise<{ error: unknown } | undefined> {
-  try {
-    await write();
-    return undefined;
-  } catch (error) {
-    return { error };
-  }
 }

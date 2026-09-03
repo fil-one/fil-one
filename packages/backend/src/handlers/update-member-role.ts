@@ -5,7 +5,6 @@ import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import {
   ApiErrorCode,
   UpdateMemberRoleSchema,
-  canChangeRole,
   canManageTargetRole,
   roleNarrows,
 } from '@filone/shared';
@@ -16,7 +15,7 @@ import type {
   UpdateMemberRoleResponse,
 } from '@filone/shared';
 import { AuditSubjects, userActor } from '../lib/audit.js';
-import { commitAfterRevoking } from '../lib/commit-after-revoking.js';
+import { commitAfterRevokingKeys } from '../lib/commit-after-revoking-keys.js';
 import { reviewMemberAccessKeysForRole } from '../lib/member-keys.js';
 import type { AccessKeyToRevoke } from '../lib/member-keys.js';
 import { notifyRevokedKeys } from '../lib/key-revocation-email.js';
@@ -78,7 +77,7 @@ const SOURCE = 'update-member-role';
  * leaves the rest alone.
  *
  * The keys the new role could not mint go the same way, at the vendor and
- * before the role is written (`lib/commit-after-revoking.ts`).
+ * before the role is written (`lib/commit-after-revoking-keys.ts`).
  */
 export async function baseHandler(
   event: AuthenticatedEvent,
@@ -92,10 +91,7 @@ export async function baseHandler(
 
   // After the body: the ceiling is asked about the role requested as well as
   // the one held.
-  const gate = await requireManageableMember(event, {
-    allows: (actorRole, targetRole) => canChangeRole(actorRole, targetRole, role),
-    verb: (targetRole) => `change a ${targetRole} to ${role}`,
-  });
+  const gate = await requireManageableMember(event, { kind: 'role-change', toRole: role });
   if (!gate.ok) return gate.refusal;
   const target = gate.value;
   const targetUserId = target.userId;
@@ -111,24 +107,24 @@ export async function baseHandler(
     (invitation) => !canManageTargetRole(role, invitation.role),
   );
   const delta = ownerCountDeltaFor(target.role, role);
-  // The fence and both membership rows, plus the counter when the owner set
-  // moves.
-  const { now, later } = planRevocations(invitationsToRevoke, delta === 'unchanged' ? 3 : 4);
+  const base = roleChangeBase({ orgId, targetUserId, fromRole: target.role, toRole: role });
+  const { now, later } = planRevocations(invitationsToRevoke, base.items.length);
+  const change = withInvitationRevocations(base, now);
 
-  const refused = await refuseBeforeRevoking(orgId, delta);
+  const refused = await refuseBeforeRevokingKeys(orgId, delta);
   if (refused) return refused;
 
-  const { orgProfile, keysToRevoke } = await reviewNarrowing(
+  const { orgProfile, keysToRevoke } = await reviewAccessKeysForNarrowing(
     orgId,
     targetUserId,
     target.role,
     role,
   );
   const changedBy = actorEmail ?? userId;
-  const failure = { orgId, delta, revocations: now.length };
+  const failure = { orgId, delta, labels: change.labels };
 
-  const committed = await commitAfterRevoking({
-    items: changeItems({ orgId, targetUserId, fromRole: target.role, toRole: role, now }),
+  const committed = await commitAfterRevokingKeys({
+    items: change.items,
     keys: keysToRevoke,
     orgId,
     orgProfile,
@@ -227,7 +223,7 @@ async function finishRoleChange({
  * a missing META row cancels the transaction just the same, and the change
  * would end with the role unchanged and the keys gone.
  */
-async function refuseBeforeRevoking(
+async function refuseBeforeRevokingKeys(
   orgId: string,
   delta: ReturnType<typeof ownerCountDeltaFor>,
 ): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
@@ -248,7 +244,7 @@ async function refuseBeforeRevoking(
  * mint before, they could mint after. Only a narrowing has to look at what they
  * already hold, so a promotion reads neither.
  */
-async function reviewNarrowing(
+async function reviewAccessKeysForNarrowing(
   orgId: string,
   targetUserId: string,
   fromRole: OrgRole,
@@ -261,47 +257,60 @@ async function reviewNarrowing(
   return { orgProfile, keysToRevoke: review.keysToRevoke };
 }
 
-function changeItems({
+/**
+ * The transaction's items with a label per position, so a cancellation names
+ * what failed rather than an index.
+ *
+ * Built together rather than as two lists kept in step by hand: DynamoDB
+ * reports cancellations positionally, so a label list one item out of line
+ * would answer a genuine last-Owner refusal with "an invitation changed". An
+ * item and its label are added or omitted in the same expression, and the item
+ * count is read off the list rather than counted.
+ */
+interface LabelledItems {
+  items: TransactWriteItem[];
+  labels: string[];
+}
+
+function labelled(
+  entries: ReadonlyArray<readonly [label: string, item: TransactWriteItem]>,
+): LabelledItems {
+  return {
+    items: entries.map(([, item]) => item),
+    labels: entries.map(([label]) => label),
+  };
+}
+
+/** The fence, both membership rows, and the counter when the owner set moves. */
+function roleChangeBase({
   orgId,
   targetUserId,
   fromRole,
   toRole,
-  now,
 }: {
   orgId: string;
   targetUserId: string;
   fromRole: OrgRole;
   toRole: OrgRole;
-  now: InvitationRecord[];
-}): TransactWriteItem[] {
+}): LabelledItems {
   const delta = ownerCountDeltaFor(fromRole, toRole);
+  const [membership, inverse] = roleChangeItems({ orgId, userId: targetUserId, fromRole, toRole });
 
-  return [
-    orgNotDeletingCheck(orgId),
-    ...roleChangeItems({ orgId, userId: targetUserId, fromRole, toRole }),
-    ...(delta === 'unchanged' ? [] : [ownerCountItem(orgId, delta)]),
-    ...now.flatMap((invitation) => retireInvitationItems(invitation, 'revoked')),
-  ];
+  return labelled([
+    ['org', orgNotDeletingCheck(orgId)],
+    ['membership', membership],
+    ['inverse', inverse],
+    ...(delta === 'unchanged' ? [] : [['ownerCount', ownerCountItem(orgId, delta)] as const]),
+  ]);
 }
 
-/**
- * The labels for those items, in the same order, so a cancellation names what
- * failed rather than a position.
- */
-function changeLabels({
-  delta,
-  revocations,
-}: {
-  delta: ReturnType<typeof ownerCountDeltaFor>;
-  revocations: number;
-}): string[] {
-  return [
-    'org',
-    'membership',
-    'inverse',
-    ...(delta === 'unchanged' ? [] : ['ownerCount']),
-    ...Array.from({ length: revocations * 2 }, () => 'invitation'),
-  ];
+/** The base plus the invitations that fit beside it, two items each. */
+function withInvitationRevocations(base: LabelledItems, now: InvitationRecord[]): LabelledItems {
+  const items = now.flatMap((invitation) => retireInvitationItems(invitation, 'revoked'));
+  return {
+    items: [...base.items, ...items],
+    labels: [...base.labels, ...items.map(() => 'invitation')],
+  };
 }
 
 /**
@@ -314,7 +323,7 @@ async function changeFailureResponse(
   context: {
     orgId: string;
     delta: ReturnType<typeof ownerCountDeltaFor>;
-    revocations: number;
+    labels: string[];
     revokedKeys: AccessKeySummary[];
   },
 ): Promise<APIGatewayProxyStructuredResultV2> {
@@ -322,7 +331,7 @@ async function changeFailureResponse(
   // no remedy, so it leaves through the shared error rather than a 409.
   if (isGuardRejection(err)) throw new OrgDeletingError(context.orgId);
 
-  const failed = cancelledLabels(err, changeLabels(context));
+  const failed = cancelledLabels(err, context.labels);
   if (failed.length === 0) throw err;
 
   const revoked = { revokedKeys: context.revokedKeys };
@@ -355,14 +364,18 @@ function roleResponse(body: UpdateMemberRoleResponse): APIGatewayProxyStructured
  */
 function vendorRefusedResponse(
   revokedKeys: AccessKeySummary[],
-  failedKey: AccessKeySummary,
+  failedKeys: AccessKeySummary[],
 ): APIGatewayProxyStructuredResultV2 {
+  const named = failedKeys.map((key) => `"${key.keyName}"`).join(', ');
+  const subject =
+    failedKeys.length === 1 ? `The key ${named}` : `${failedKeys.length} keys (${named})`;
+
   return new ResponseBuilder()
     .status(502)
     .body<UpdateMemberRoleFailure>({
-      message: `The key "${failedKey.keyName}" could not be revoked, so the role is unchanged. Try again.`,
+      message: `${subject} could not be revoked, so the role is unchanged. Try again.`,
       revokedKeys,
-      failedKey,
+      failedKeys,
     })
     .build();
 }

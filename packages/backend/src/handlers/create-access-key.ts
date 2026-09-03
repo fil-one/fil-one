@@ -318,6 +318,7 @@ async function discardUnrecordedKey({
     console.error('[create-access-key] Could not discard a key minted under a stale role', {
       orgId: creator.orgId,
       userId: creator.userId,
+      keyIdSuffix: auditKeyIdSuffix('s3', minted.accessKeyId),
       error: err,
     });
   }

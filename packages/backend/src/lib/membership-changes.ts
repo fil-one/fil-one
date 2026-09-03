@@ -118,7 +118,7 @@ export function roleChangeItems({
   userId: string;
   fromRole: OrgRole;
   toRole: OrgRole;
-}): TransactWriteItem[] {
+}): [membership: TransactWriteItem, inverse: TransactWriteItem] {
   const tableName = Resource.OrgTable.name;
 
   return [

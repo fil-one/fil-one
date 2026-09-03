@@ -94,8 +94,8 @@ export interface UpdateMemberRoleResponse {
 export interface UpdateMemberRoleFailure {
   message: string;
   revokedKeys: AccessKeySummary[];
-  /** The key a vendor refused, when that is what stopped the change. */
-  failedKey?: AccessKeySummary;
+  /** The keys a vendor refused, when that is what stopped the change. */
+  failedKeys?: AccessKeySummary[];
 }
 
 /**

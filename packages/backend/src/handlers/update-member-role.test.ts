@@ -621,7 +621,7 @@ describe('a narrowing revokes the keys the new role could not mint', () => {
 
     expect(result).toMatchObject({ statusCode: 502 });
     expect(body(result).revokedKeys.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
-    expect(body(result).failedKey.id).toBe('key-1');
+    expect(body(result).failedKeys.map((key: { id: string }) => key.id)).toStrictEqual(['key-1']);
     // The role write never ran: the only transactions are the completed
     // revocation's own.
     expect(

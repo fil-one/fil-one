@@ -22,7 +22,7 @@ vi.mock('./revoke-member-keys.js', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 import { AuditSubjects, userActor } from './audit.js';
-import { commitAfterRevoking } from './commit-after-revoking.js';
+import { commitAfterRevokingKeys } from './commit-after-revoking-keys.js';
 import type { AccessKeyToRevoke } from './member-keys.js';
 
 const ORG_ID = 'org-1';
@@ -64,7 +64,7 @@ const onRefused = vi.fn();
 const notifyMember = vi.fn();
 
 function commit(overrides: Record<string, unknown> = {}) {
-  return commitAfterRevoking({
+  return commitAfterRevokingKeys({
     items: ITEMS,
     keys: KEYS,
     orgId: ORG_ID,
@@ -103,13 +103,13 @@ beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
   ddbMock.on(PutItemCommand).resolves({});
   ddbMock.on(TransactWriteItemsCommand).resolves({});
-  mockRevokeMemberKeys.mockResolvedValue({ revoked: REVOKED });
+  mockRevokeMemberKeys.mockResolvedValue({ revoked: REVOKED, refused: [] });
   onCancelled.mockResolvedValue({ statusCode: 409 });
   onRefused.mockReturnValue({ statusCode: 502 });
   notifyMember.mockResolvedValue(undefined);
 });
 
-describe('commitAfterRevoking', () => {
+describe('commitAfterRevokingKeys', () => {
   it('stays one transaction and one event when there is no key to revoke', async () => {
     const outcome = await commit({ keys: [] });
 
@@ -170,7 +170,7 @@ describe('commitAfterRevoking', () => {
 
   it('writes nothing when a vendor refuses, tells the member, and answers with the refusal', async () => {
     const [went] = REVOKED;
-    mockRevokeMemberKeys.mockResolvedValue({ revoked: [went], refused: summary('0002') });
+    mockRevokeMemberKeys.mockResolvedValue({ revoked: [went], refused: [summary('0002')] });
 
     const outcome = await commit();
 
@@ -179,19 +179,19 @@ describe('commitAfterRevoking', () => {
     const completion = standaloneEvents().find((event) => event.phase === 'completion');
     expect(completion).toMatchObject({ outcome: 'failed', details: { revokedKeys: ['0001'] } });
     expect(notifyMember).toHaveBeenCalledWith([went]);
-    expect(onRefused).toHaveBeenCalledWith(summary('0002'), [went]);
+    expect(onRefused).toHaveBeenCalledWith([summary('0002')], [went]);
     expect(onCancelled).not.toHaveBeenCalled();
   });
 
   it('tells nobody when the caller has no member to tell', async () => {
     // The flow whose key holder is the caller answers them in the response.
-    mockRevokeMemberKeys.mockResolvedValue({ revoked: [], refused: summary('0001') });
+    mockRevokeMemberKeys.mockResolvedValue({ revoked: [], refused: [summary('0001')] });
 
     const outcome = await commit({ notifyMember: undefined });
 
     expect(outcome).toStrictEqual({ response: { statusCode: 502 } });
     expect(notifyMember).not.toHaveBeenCalled();
-    expect(onRefused).toHaveBeenCalledWith(summary('0001'), []);
+    expect(onRefused).toHaveBeenCalledWith([summary('0001')], []);
   });
 
   it('names what went when the write cancels after the revocation', async () => {

@@ -1,16 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { S3Region } from '@filone/shared';
+import type { AccessKeySummary } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.js';
 
 vi.mock('sst', () => sstResourceMock());
 
-let tenantReady = true;
+let regionsWithoutTenant: S3Region[] = [];
 vi.mock('./service-orchestrator-registry.js', () => ({
-  getOrchestratorForRegion: (region: string) => ({
+  getOrchestratorForRegion: (region: S3Region) => ({
     id: 'aurora',
     region,
     accessModel: 'scoped-keys',
-    isTenantReady: () => (tenantReady ? `tenant:${region}` : null),
+    isTenantReady: () => (regionsWithoutTenant.includes(region) ? null : `tenant:${region}`),
     deleteAccessKey: vi.fn(),
   }),
 }));
@@ -27,12 +28,12 @@ import type { AccessKeyToRevoke } from './member-keys.js';
 const ORG_ID = 'org-1';
 const ACTOR = userActor({ userId: 'admin-1' });
 
-function keyToRevoke(id: string): AccessKeyToRevoke {
+function keyToRevoke(id: string, region = S3Region.UsEast1): AccessKeyToRevoke {
   return {
     id,
     keyName: `key ${id}`,
     accessKeyId: `AKIAEXAMPLE${id}`,
-    region: S3Region.UsEast1,
+    region,
     createdAt: '2026-02-01T00:00:00.000Z',
     createdBy: 'member-1',
     reason: 'exceeds_role',
@@ -40,7 +41,7 @@ function keyToRevoke(id: string): AccessKeyToRevoke {
   };
 }
 
-const KEYS = [keyToRevoke('0001'), keyToRevoke('0002'), keyToRevoke('0003')];
+const KEYS = [keyToRevoke('0001'), keyToRevoke('0002', S3Region.EuWest1), keyToRevoke('0003')];
 
 function revoke() {
   return revokeMemberKeys({
@@ -52,42 +53,63 @@ function revoke() {
   });
 }
 
+/** The vendor refuses these keys and revokes every other. */
+function vendorRefuses(...keyIds: string[]) {
+  mockRevokeAccessKey.mockImplementation(({ keyId }: { keyId: string }) =>
+    keyIds.includes(keyId) ? Promise.reject(new Error('down')) : Promise.resolve(),
+  );
+}
+
+const ids = (keys: AccessKeySummary[]) => keys.map((key) => key.id);
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
   mockRevokeAccessKey.mockResolvedValue(undefined);
-  tenantReady = true;
+  regionsWithoutTenant = [];
 });
 
 describe('revokeMemberKeys', () => {
-  it('revokes every key in order when nothing refuses', async () => {
-    // `refused` is absent rather than undefined, like every other optional
-    // field a pass builds.
+  it('revokes every key, in the order given, when nothing refuses', async () => {
     expect(await revoke()).toStrictEqual({
       revoked: KEYS.map((key) => expect.objectContaining({ id: key.id })),
+      refused: [],
     });
   });
 
-  it('stops at the first refusal', async () => {
-    // Nothing has committed yet, so the caller leaves the role alone and the
-    // retry is the same request. Revoking further buys nothing.
-    mockRevokeAccessKey.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('down'));
+  it('attempts every key past a refusal, and names the one refused', async () => {
+    // Nothing has committed, so the caller leaves the role alone either way.
+    // Going on costs a key for a change that will not land, and buys the caller
+    // every failure at once and a retry with less left to do.
+    vendorRefuses('0002');
 
     const outcome = await revoke();
 
-    expect(outcome.revoked.map((key) => key.id)).toStrictEqual(['0001']);
-    expect(outcome.refused?.id).toBe('0002');
-    expect(mockRevokeAccessKey).toHaveBeenCalledTimes(2);
+    expect(ids(outcome.revoked)).toStrictEqual(['0001', '0003']);
+    expect(ids(outcome.refused)).toStrictEqual(['0002']);
+    expect(mockRevokeAccessKey).toHaveBeenCalledTimes(3);
   });
 
-  it('treats a region with no tenant as a refusal rather than a crash', async () => {
-    // Nothing to revoke at, which is a key still live like any other refusal.
-    tenantReady = false;
+  it('names every refusal, in the order the keys were given', async () => {
+    vendorRefuses('0003', '0001');
 
     const outcome = await revoke();
 
-    expect(outcome.revoked).toStrictEqual([]);
-    expect(outcome.refused?.id).toBe('0001');
-    expect(mockRevokeAccessKey).not.toHaveBeenCalled();
+    expect(ids(outcome.revoked)).toStrictEqual(['0002']);
+    expect(ids(outcome.refused)).toStrictEqual(['0001', '0003']);
+  });
+
+  it('treats a region with no tenant as a refusal rather than a crash, and the rest proceed', async () => {
+    // Nothing to revoke at, which is a key still live like any other refusal.
+    regionsWithoutTenant = [S3Region.EuWest1];
+
+    const outcome = await revoke();
+
+    expect(ids(outcome.revoked)).toStrictEqual(['0001', '0003']);
+    expect(ids(outcome.refused)).toStrictEqual(['0002']);
+    expect(mockRevokeAccessKey).toHaveBeenCalledTimes(2);
+    expect(mockRevokeAccessKey).not.toHaveBeenCalledWith(
+      expect.objectContaining({ keyId: '0002' }),
+    );
   });
 });
