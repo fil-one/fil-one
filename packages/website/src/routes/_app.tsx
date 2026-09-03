@@ -46,7 +46,10 @@ export const Route = createRoute({
     // naming step runs after verification so the two gates cannot both claim
     // the page, and only ever for an organization created since the flag
     // shipped: an absent value reads as confirmed.
-    if (!me.nameConfirmed) {
+    // Only an explicit `false` is unconfirmed; an absent value is a pre-flag
+    // organization and reads as confirmed, so `!me.nameConfirmed` would wrongly
+    // send every such account back through naming.
+    if (me.nameConfirmed === false) {
       throw redirect({ to: '/welcome' });
     }
   },
