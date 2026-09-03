@@ -2,7 +2,6 @@ import {
   SquaresFourIcon,
   DatabaseIcon,
   KeyIcon,
-  SidebarSimpleIcon,
   ChatTeardropDotsIcon,
   RobotIcon,
 } from '@phosphor-icons/react/dist/ssr';
@@ -21,7 +20,6 @@ import { UserMenu } from './UserMenu.js';
 
 type SidebarNavProps = {
   collapsed: boolean;
-  onToggle: () => void;
   onClose?: () => void;
   showUserProfile?: boolean;
   // When false, omit page-unique e2e identifiers (ids/data-testids) so the
@@ -152,7 +150,6 @@ function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps
 
 export function SidebarNav({
   collapsed,
-  onToggle,
   onClose,
   showUserProfile = true,
   showTestIds,
@@ -185,25 +182,10 @@ export function SidebarNav({
         // chrome now). The mobile drawer supplies its own white background.
         className="relative flex h-full flex-col"
       >
-        {/* Header (desktop only): a slim toolbar row carrying the collapse
-            toggle, above the full-width org switcher. The toggle sits here
-            rather than in the org row so the org button can own the full width;
-            the `SidebarSimple` glyph reads as "toggle panel" in both states, so
-            it needs no direction and no floating edge treatment. */}
+        {/* Header (desktop only): the full-width org switcher. The collapse
+            toggle now lives in the utility bar under the content window. */}
         {showUserProfile && (
           <div className="flex flex-shrink-0 flex-col gap-1 px-2 pt-2 pb-1">
-            <div className={collapsed ? 'flex justify-center' : 'flex justify-end'}>
-              <Tooltip content={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} side="right">
-                <button
-                  type="button"
-                  onClick={onToggle}
-                  aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
-                >
-                  <SidebarSimpleIcon size={18} />
-                </button>
-              </Tooltip>
-            </div>
             <OrgSwitcherMenu
               orgName={me?.orgName ?? 'Organization'}
               logoUrl={me?.logoUrl}
