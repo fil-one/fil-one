@@ -877,6 +877,7 @@ export default $config({
         ragVectorBucket,
         stripeSecretKey,
         stripePriceId,
+        orgTable,
         ...managementApiTokens,
         ...mgmtRuntimeResources,
       ],
