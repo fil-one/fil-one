@@ -28,6 +28,7 @@ import { RequirePermission } from '../components/RequirePermission';
 import { useHasPermission } from '../lib/use-permissions.js';
 import { useKeyActionScope } from '../lib/use-key-scope.js';
 import { useAccountDisabled } from '../lib/use-account-disabled.js';
+import { useOrgSlug } from '../lib/use-org-path.js';
 
 // ---------------------------------------------------------------------------
 // Tab 1: Access Keys
@@ -484,6 +485,7 @@ function CreateKeyAction({ onCreate }: { onCreate: () => void }) {
 export function ApiKeysPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const orgSlug = useOrgSlug();
   const queryClient = useQueryClient();
   const mayCreate = useHasPermission('keys.create');
   // Listing is `keys.manage_own` and the server narrows the response to the
@@ -492,7 +494,8 @@ export function ApiKeysPage() {
   const { mayList, mayRevoke } = useKeyActionScope();
   const accountDisabled = useAccountDisabled();
 
-  const openCreateKey = () => void navigate({ to: '/api-keys/create' });
+  const openCreateKey = () =>
+    void navigate({ to: '/$orgSlug/api-keys/create', params: { orgSlug } });
 
   const { data, isPending, isError, error } = useQuery({
     queryKey: queryKeys.accessKeys,

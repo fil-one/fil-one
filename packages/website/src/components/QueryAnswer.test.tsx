@@ -31,16 +31,24 @@ const base = {
   result: undefined as QueryBucketResponse | undefined,
 };
 
+// Org-scoped like every other real route now: the sources this renders link
+// through `$orgSlug`, so that ancestor needs registering too.
 function renderWithRouter(ui: () => React.JSX.Element) {
-  const rootRoute = createRootRoute({ component: ui });
+  const rootRoute = createRootRoute();
+  const orgSlugRoute = createRoute({ getParentRoute: () => rootRoute, path: '$orgSlug' });
+  const hostRoute = createRoute({
+    getParentRoute: () => orgSlugRoute,
+    path: '/host',
+    component: ui,
+  });
   const objectsRoute = createRoute({
-    getParentRoute: () => rootRoute,
+    getParentRoute: () => orgSlugRoute,
     path: '/buckets/$bucketName/objects',
     component: () => null,
   });
   const router = createRouter({
-    routeTree: rootRoute.addChildren([objectsRoute]),
-    history: createMemoryHistory({ initialEntries: ['/'] }),
+    routeTree: rootRoute.addChildren([orgSlugRoute.addChildren([hostRoute, objectsRoute])]),
+    history: createMemoryHistory({ initialEntries: ['/acme/host'] }),
   });
   return render(<RouterProvider router={router} />);
 }

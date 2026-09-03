@@ -136,13 +136,43 @@ export function isGuardRejection(err: unknown): boolean {
  * so the read failure is logged and swallowed here rather than raised.
  */
 export async function resolveOrgName(orgId: string): Promise<string> {
+  return (await resolveOrgSummary(orgId)).name;
+}
+
+/**
+ * The identity fields the org switcher and `/me` need for one org: name, slug,
+ * and logo. `name` and `slug` default to `''` for an unreadable or missing
+ * profile — the same "named empty rather than failing the response" contract
+ * {@link resolveOrgName} has always made — and `logoUrl` is left absent rather
+ * than defaulted, since a caller with no logo and a caller whose read failed
+ * both fall back to the generated monogram identically.
+ */
+export interface OrgProfileSummary {
+  name: string;
+  slug: string;
+  logoUrl?: string;
+}
+
+/**
+ * {@link resolveOrgName}'s fuller sibling, for callers naming orgs the user is
+ * not acting in — the switcher's list — that also need the org's slug and
+ * logo. One unreadable profile costs that entry its identity, not the whole
+ * response, so the read failure is logged and swallowed here rather than
+ * raised.
+ */
+export async function resolveOrgSummary(orgId: string): Promise<OrgProfileSummary> {
   try {
-    return (await getOrgProfile(orgId))?.name?.S ?? '';
+    const profile = await getOrgProfile(orgId);
+    return {
+      name: profile?.name?.S ?? '',
+      slug: profile?.slug?.S ?? '',
+      ...(profile?.logoUrl?.S ? { logoUrl: profile.logoUrl.S } : {}),
+    };
   } catch (err) {
     console.error('[org-profile] Org profile read failed — naming the org empty', {
       orgId,
       error: err,
     });
-    return '';
+    return { name: '', slug: '' };
   }
 }

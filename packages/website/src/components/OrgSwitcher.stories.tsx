@@ -32,8 +32,8 @@ const meta: Meta<typeof OrgSwitcher> = {
   args: {
     activeOrgId: ORG_A,
     memberships: [
-      { orgId: ORG_A, orgName: 'Acme', role: OrgRole.Owner },
-      { orgId: ORG_B, orgName: 'Globex', role: OrgRole.Member },
+      { orgId: ORG_A, orgName: 'Acme', slug: 'acme', role: OrgRole.Owner },
+      { orgId: ORG_B, orgName: 'Globex', slug: 'globex', role: OrgRole.Member },
     ],
   },
 };
@@ -49,9 +49,14 @@ export const ManyOrgs: Story = {
   args: {
     activeOrgId: ORG_C,
     memberships: [
-      { orgId: ORG_A, orgName: 'Acme', role: OrgRole.Owner },
-      { orgId: ORG_B, orgName: 'Globex Manufacturing Holdings', role: OrgRole.Admin },
-      { orgId: ORG_C, orgName: 'Initech', role: OrgRole.ReadOnly },
+      { orgId: ORG_A, orgName: 'Acme', slug: 'acme', role: OrgRole.Owner },
+      {
+        orgId: ORG_B,
+        orgName: 'Globex Manufacturing Holdings',
+        slug: 'globex',
+        role: OrgRole.Admin,
+      },
+      { orgId: ORG_C, orgName: 'Initech', slug: 'initech', role: OrgRole.ReadOnly },
     ],
   },
 };
@@ -59,7 +64,7 @@ export const ManyOrgs: Story = {
 /** One membership renders nothing, which is every account today. */
 export const SoleMembership: Story = {
   args: {
-    memberships: [{ orgId: ORG_A, orgName: 'Acme', role: OrgRole.Owner }],
+    memberships: [{ orgId: ORG_A, orgName: 'Acme', slug: 'acme', role: OrgRole.Owner }],
   },
 };
 
@@ -67,8 +72,8 @@ export const SoleMembership: Story = {
 export const UnnamedOrg: Story = {
   args: {
     memberships: [
-      { orgId: ORG_A, orgName: 'Acme', role: OrgRole.Owner },
-      { orgId: ORG_B, orgName: '', role: OrgRole.Member },
+      { orgId: ORG_A, orgName: 'Acme', slug: 'acme', role: OrgRole.Owner },
+      { orgId: ORG_B, orgName: '', slug: 'org-b', role: OrgRole.Member },
     ],
   },
 };

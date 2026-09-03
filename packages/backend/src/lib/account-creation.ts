@@ -6,6 +6,7 @@ import { getDynamoClient } from './ddb-client.js';
 import { OrgKeys } from './org-membership.js';
 import type { OrgMembership } from './org-membership.js';
 import { OrgSetupStatus } from './org-setup-status.js';
+import { reserveOrgSlug } from './org-slug.js';
 
 export interface NewAccountParams {
   sub: string;
@@ -43,6 +44,7 @@ export async function createNewUserAndOrg({
   name,
 }: NewAccountParams): Promise<OrgMembership> {
   const now = new Date().toISOString();
+  const { slug, reservationItem } = await reserveOrgSlug({ orgId, name: orgName });
 
   // Spans three tables: identity and profiles in UserInfoTable, membership and
   // the owner count in OrgTable, the event in AuditTable. The event rides the
@@ -53,7 +55,7 @@ export async function createNewUserAndOrg({
   // auth middleware, so an AuditTable outage that cancelled the transaction
   // would fail every new customer's first login as a 401 and send them round the
   // auth loop again — an unrecorded org is recoverable, an account nobody can
-  // create is not. The retry lands the six rows and counts the dropped event.
+  // create is not. The retry lands the seven rows and counts the dropped event.
   await commitAudited({
     onAuditFailure: 'retry-without-audit',
     event: auditEvent({
@@ -63,10 +65,120 @@ export async function createNewUserAndOrg({
       subject: AuditSubjects.org(orgId),
       details: { orgName, source: 'signup' },
     }),
-    items: accountRows({ sub, userId, orgId, orgName, email, name, now }),
+    items: accountRows({ sub, userId, orgId, orgName, slug, email, name, now, reservationItem }),
   });
 
   return { orgId, userId, role: OrgRole.Owner, joinedAt: now, source: 'signup' };
+}
+
+/**
+ * Create an additional organization for an account that already exists — the
+ * console's "Create organization" action, once an account may own more than
+ * one. Sibling to {@link createNewUserAndOrg}, reusing its row shapes minus the
+ * `SUB#`/`USER#PROFILE` identity rows, which already exist for this caller.
+ *
+ * `source: 'manual'` on both the membership row and the audit event, distinct
+ * from `'signup'`: this org did not come with the account, the account asked
+ * for it.
+ */
+export interface CreateAdditionalOrgParams {
+  userId: string;
+  orgName: string;
+  logoUrl?: string;
+  email?: string;
+}
+
+export interface CreatedOrg {
+  orgId: string;
+  orgName: string;
+  slug: string;
+  logoUrl?: string;
+}
+
+export async function createAdditionalOrg({
+  userId,
+  orgName,
+  logoUrl,
+  email,
+}: CreateAdditionalOrgParams): Promise<CreatedOrg> {
+  const orgId = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const { slug, reservationItem } = await reserveOrgSlug({ orgId, name: orgName });
+
+  const userInfoTableName = Resource.UserInfoTable.name;
+  const orgTableName = Resource.OrgTable.name;
+
+  const items: TransactWriteItem[] = [
+    {
+      // Create-only, the same guard `accountRows` puts on the identity row:
+      // `orgId` is a fresh UUID, so a collision here would mean the id was
+      // reused, not that the org already existed.
+      Put: {
+        TableName: userInfoTableName,
+        Item: {
+          pk: { S: `ORG#${orgId}` },
+          sk: { S: 'PROFILE' },
+          name: { S: orgName },
+          slug: { S: slug },
+          // Named on the way in, unlike signup's derived name — there is no
+          // naming step to send this org through.
+          nameConfirmed: { BOOL: true },
+          auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
+          createdBy: { S: userId },
+          createdAt: { S: now },
+          ...(logoUrl ? { logoUrl: { S: logoUrl } } : {}),
+        },
+        ConditionExpression: 'attribute_not_exists(pk)',
+      },
+    },
+    {
+      Put: {
+        TableName: orgTableName,
+        Item: {
+          pk: { S: OrgKeys.orgPk(orgId) },
+          sk: { S: OrgKeys.orgMetaSk() },
+          ownerCount: { N: '1' },
+        },
+      },
+    },
+    {
+      Put: {
+        TableName: orgTableName,
+        Item: {
+          pk: { S: OrgKeys.orgPk(orgId) },
+          sk: { S: OrgKeys.memberSk(userId) },
+          role: { S: OrgRole.Owner },
+          joinedAt: { S: now },
+          source: { S: 'manual' },
+        },
+      },
+    },
+    {
+      Put: {
+        TableName: orgTableName,
+        Item: {
+          pk: { S: OrgKeys.userPk(userId) },
+          sk: { S: OrgKeys.membershipSk(orgId) },
+          role: { S: OrgRole.Owner },
+          joinedAt: { S: now },
+        },
+      },
+    },
+    reservationItem,
+  ];
+
+  await commitAudited({
+    items,
+    event: auditEvent({
+      type: 'org.created',
+      actor: userActor({ userId, email }),
+      orgId,
+      subject: AuditSubjects.org(orgId),
+      details: { orgName, source: 'manual' },
+    }),
+  });
+
+  return { orgId, orgName, slug, ...(logoUrl ? { logoUrl } : {}) };
 }
 
 /**
@@ -164,9 +276,10 @@ export async function stampVerifiedEmail({
 }
 
 /**
- * The six rows an account is: identity, both profiles, the owner count, the
- * membership, and its inverse item. Spans two tables, and travels as one
- * transaction so no half of an account can exist without the other.
+ * The seven rows an account is: identity, both profiles, the owner count, the
+ * membership, its inverse item, and the org's slug reservation. Spans two
+ * tables, and travels as one transaction so no half of an account can exist
+ * without the other.
  *
  * `email` is stamped on the user profile only when Auth0 has verified it, and
  * `name` carries no such gate. The identity row records what the profile was
@@ -177,6 +290,37 @@ function accountRows({
   userId,
   orgId,
   orgName,
+  slug,
+  email,
+  name,
+  now,
+  reservationItem,
+}: {
+  sub: string;
+  userId: string;
+  orgId: string;
+  orgName: string;
+  slug: string;
+  email?: string;
+  name?: string;
+  now: string;
+  reservationItem: TransactWriteItem;
+}): TransactWriteItem[] {
+  return [
+    ...identityAndUserProfileRows({ sub, userId, orgId, email, name, now }),
+    ...orgAndMembershipRows({ orgId, orgName, slug, userId, now }),
+    reservationItem,
+  ];
+}
+
+/**
+ * The identity row and the user profile: what a `SUB#{sub}` maps to, and the
+ * `USER#{userId}` row it maps to it. Both live in UserInfoTable.
+ */
+function identityAndUserProfileRows({
+  sub,
+  userId,
+  orgId,
   email,
   name,
   now,
@@ -184,13 +328,11 @@ function accountRows({
   sub: string;
   userId: string;
   orgId: string;
-  orgName: string;
   email?: string;
   name?: string;
   now: string;
 }): TransactWriteItem[] {
   const tableName = Resource.UserInfoTable.name;
-  const orgTableName = Resource.OrgTable.name;
 
   return [
     {
@@ -225,13 +367,39 @@ function accountRows({
         },
       },
     },
+  ];
+}
+
+/**
+ * The org's own rows: its profile (UserInfoTable), and its owner count,
+ * membership, and inverse membership item (OrgTable). The slug reservation
+ * rides separately — `accountRows` appends it, since `createAdditionalOrg`
+ * below builds the identical shape without going through this helper at all.
+ */
+function orgAndMembershipRows({
+  orgId,
+  orgName,
+  slug,
+  userId,
+  now,
+}: {
+  orgId: string;
+  orgName: string;
+  slug: string;
+  userId: string;
+  now: string;
+}): TransactWriteItem[] {
+  const orgTableName = Resource.OrgTable.name;
+
+  return [
     {
       Put: {
-        TableName: tableName,
+        TableName: Resource.UserInfoTable.name,
         Item: {
           pk: { S: `ORG#${orgId}` },
           sk: { S: 'PROFILE' },
           name: { S: orgName },
+          slug: { S: slug },
           // The name here is derived, not chosen. False sends the account
           // through the naming step; `PATCH /api/org` flips it.
           nameConfirmed: { BOOL: false },

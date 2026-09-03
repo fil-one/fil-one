@@ -6,7 +6,7 @@ import type { MeResponse } from '@filone/shared';
 
 // The route's parent is the whole app layout; the gate under test does not need
 // it, and importing it would drag the router in.
-vi.mock('../_app', () => ({ Route: {} }));
+vi.mock('./$orgSlug', () => ({ Route: {} }));
 
 // The page itself is covered by OrganizationPage.test.tsx. Here it only has to
 // be distinguishable from the two refusals.
@@ -16,13 +16,13 @@ vi.mock('../../pages/OrganizationPage', () => ({
 
 vi.mock('../../lib/api.js', () => ({ getMe: vi.fn() }));
 
-import { OrganizationGate } from './organization';
+import { OrganizationGate } from './$orgSlug.organization';
 import { seedPermissions } from '../../lib/test-permissions.js';
 
-const SOLO = [{ orgId: 'org-1', orgName: 'Acme', role: OrgRole.Owner }];
+const SOLO = [{ orgId: 'org-1', orgName: 'Acme', slug: 'acme', role: OrgRole.Owner }];
 const TWO_ORGS = [
-  { orgId: 'org-1', orgName: 'Acme', role: OrgRole.Owner },
-  { orgId: 'org-2', orgName: 'Globex', role: OrgRole.Member },
+  { orgId: 'org-1', orgName: 'Acme', slug: 'acme', role: OrgRole.Owner },
+  { orgId: 'org-2', orgName: 'Globex', slug: 'globex', role: OrgRole.Member },
 ];
 
 function renderRoute(role: OrgRole, overrides: Partial<MeResponse>) {

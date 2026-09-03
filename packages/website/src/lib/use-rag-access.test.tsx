@@ -24,6 +24,7 @@ function meWith(ragAccess: boolean): MeResponse {
   return {
     orgId: 'org-1',
     orgName: 'Example Corp',
+    slug: 'example-corp',
     nameConfirmed: true,
     emailVerified: true,
     email: 'user@example.com',
