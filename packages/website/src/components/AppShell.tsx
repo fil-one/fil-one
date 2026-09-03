@@ -243,7 +243,7 @@ export function AppShell({ children }: AppShellProps) {
         isGracePeriod={isGracePeriod}
         graceDays={graceDays}
       />
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden bg-white">
         {/* Desktop sidebar — unchanged */}
         <div
           className={`hidden flex-shrink-0 transition-all duration-200 lg:block ${collapsed ? 'w-20' : 'w-60'}`}
@@ -304,26 +304,33 @@ export function AppShell({ children }: AppShellProps) {
           </div>
         </div>
 
-        <main className="flex-1 overflow-auto bg-zinc-50">
-          {/* Mobile top bar */}
-          <div className="sticky top-0 z-20 flex h-14 flex-shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-3 lg:hidden">
-            <MobileUserMenu />
-            <button
-              ref={hamburgerButtonRef}
-              id="mobile-nav-toggle-button"
-              type="button"
-              onClick={() => setMobileOpen(true)}
-              aria-label="Open navigation menu"
-              aria-expanded={mobileOpen}
-              aria-controls={drawerId}
-              className="-mr-1 flex h-11 w-11 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100"
-            >
-              <ListIcon size={20} />
-            </button>
-          </div>
+        {/* On desktop the content sits in an inset "window": a rounded, bordered,
+            softly shadowed panel floating on the white canvas, with the sidebar
+            outside it (Linear's layout). The `lg:` insets and card chrome are
+            desktop-only; on mobile the content stays edge to edge. The panel is
+            the scroll container, so its rounded corners clip the content. */}
+        <main className="flex flex-1 flex-col overflow-hidden lg:p-2">
+          <div className="flex flex-1 flex-col overflow-auto bg-zinc-50 lg:rounded-xl lg:border lg:border-zinc-200 lg:shadow-sm">
+            {/* Mobile top bar */}
+            <div className="sticky top-0 z-20 flex h-14 flex-shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-3 lg:hidden">
+              <MobileUserMenu />
+              <button
+                ref={hamburgerButtonRef}
+                id="mobile-nav-toggle-button"
+                type="button"
+                onClick={() => setMobileOpen(true)}
+                aria-label="Open navigation menu"
+                aria-expanded={mobileOpen}
+                aria-controls={drawerId}
+                className="-mr-1 flex h-11 w-11 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100"
+              >
+                <ListIcon size={20} />
+              </button>
+            </div>
 
-          {children}
-          <div className="h-10 shrink-0" aria-hidden="true" />
+            {children}
+            <div className="h-10 shrink-0" aria-hidden="true" />
+          </div>
         </main>
       </div>
     </div>
