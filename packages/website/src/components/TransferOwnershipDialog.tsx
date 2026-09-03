@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import type { RevokedKeySummary } from '@filone/shared';
+import type { AccessKeySummary } from '@filone/shared';
 
 import { Alert } from './Alert';
 import { Button } from './Button';
@@ -12,10 +12,11 @@ import { Skeleton } from './Skeleton';
 export type TransferOwnershipDialogProps = {
   open: boolean;
   /**
-   * The caller's own access keys an Admin could not mint, which the transfer
-   * revokes. Undefined while the preview loads or after it failed.
+   * The caller's own access keys an Admin could not mint, which confirming
+   * would revoke — a forecast, not a record. Undefined while the preview loads
+   * or after it failed.
    */
-  revokedKeys?: RevokedKeySummary[] | undefined;
+  affectedKeys?: AccessKeySummary[] | undefined;
   /** The preview has not answered yet, so nothing below is the whole story. */
   previewLoading?: boolean;
   /** The preview could not be read. The transfer still revokes what it must. */
@@ -47,7 +48,7 @@ export function TransferOwnershipDialog({
   open,
   orgName,
   memberName,
-  revokedKeys,
+  affectedKeys,
   previewLoading = false,
   previewError = false,
   pending = false,
@@ -83,18 +84,18 @@ export function TransferOwnershipDialog({
               assertive={false}
             />
           )}
-          {revokedKeys && revokedKeys.length > 0 && (
+          {affectedKeys && affectedKeys.length > 0 && (
             <Alert
               variant="amber"
               title={
-                revokedKeys.length === 1
+                affectedKeys.length === 1
                   ? 'One of your access keys is revoked'
-                  : `${revokedKeys.length} of your access keys are revoked`
+                  : `${affectedKeys.length} of your access keys are revoked`
               }
               // An access key carries its own permission set, fixed when it was
               // minted, so a key an Admin could not mint cannot survive the seat
               // moving.
-              description={`An admin cannot hold ${revokedKeys.map((key) => key.keyName).join(', ')}. Anything using ${revokedKeys.length === 1 ? 'it' : 'them'} stops working straight away.`}
+              description={`An admin cannot hold ${affectedKeys.map((key) => key.keyName).join(', ')}. Anything using ${affectedKeys.length === 1 ? 'it' : 'them'} stops working straight away.`}
               assertive={false}
             />
           )}
