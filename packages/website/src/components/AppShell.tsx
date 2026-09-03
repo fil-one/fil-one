@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { ListIcon, XIcon, SignOutIcon } from '@phosphor-icons/react/dist/ssr';
+import { ListIcon, XIcon, SignOutIcon, SidebarSimpleIcon } from '@phosphor-icons/react/dist/ssr';
 import { useQuery } from '@tanstack/react-query';
 import { SubscriptionStatus } from '@filone/shared';
 import { SidebarNav } from './SidebarNav';
@@ -8,6 +8,7 @@ import { UserAvatar } from './UserAvatar';
 import { OrgSwitcher } from './OrgSwitcher';
 import { ReportBugButton } from './ReportBugButton';
 import { SystemStatusPill } from './SystemStatusPill';
+import { Tooltip } from './Tooltip';
 import { getUsage, getBilling, getMe, logout } from '../lib/api';
 import { monogramFromName } from '../lib/monogram.js';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
@@ -250,11 +251,7 @@ export function AppShell({ children }: AppShellProps) {
         <div
           className={`hidden flex-shrink-0 transition-all duration-200 lg:block ${collapsed ? 'w-20' : 'w-60'}`}
         >
-          <SidebarNav
-            collapsed={collapsed}
-            onToggle={() => setCollapsed((c) => !c)}
-            showTestIds={true}
-          />
+          <SidebarNav collapsed={collapsed} showTestIds={true} />
         </div>
 
         {/* Mobile drawer backdrop */}
@@ -298,7 +295,6 @@ export function AppShell({ children }: AppShellProps) {
           <div className="flex-1 overflow-y-auto">
             <SidebarNav
               collapsed={false}
-              onToggle={() => {}}
               onClose={closeDrawer}
               showUserProfile={false}
               showTestIds={false}
@@ -335,11 +331,25 @@ export function AppShell({ children }: AppShellProps) {
           </div>
 
           {/* Utility bar under the content window (desktop only): quiet controls
-              that belong to the app rather than the page, at the right the way
+              that belong to the app rather than the page. The sidebar collapse
+              toggle sits at the left since it acts on the sidebar beside it;
+              bug report and system status stay grouped at the right the way
               Linear places them. */}
-          <div className="hidden h-10 flex-shrink-0 items-center justify-end gap-1 px-1 lg:flex">
-            <ReportBugButton />
-            <SystemStatusPill />
+          <div className="hidden h-10 flex-shrink-0 items-center justify-between gap-1 px-1 lg:flex">
+            <Tooltip content={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} side="right">
+              <button
+                type="button"
+                onClick={() => setCollapsed((c) => !c)}
+                aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+              >
+                <SidebarSimpleIcon size={18} />
+              </button>
+            </Tooltip>
+            <div className="flex items-center gap-1">
+              <ReportBugButton />
+              <SystemStatusPill />
+            </div>
           </div>
         </main>
       </div>
