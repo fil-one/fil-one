@@ -58,7 +58,6 @@ paths = [
   '''packages/aurora-backoffice-client/src/generated''',
   '''packages/aurora-portal-client/src/generated''',
   # External dependencies — not under our control
-  '''contracts/lib/''',
   '''node_modules/''',
   '''.sst/''',
 
