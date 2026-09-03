@@ -2,18 +2,14 @@ import {
   SquaresFourIcon,
   DatabaseIcon,
   KeyIcon,
-  CaretLeftIcon,
-  CaretRightIcon,
+  SidebarSimpleIcon,
   ChatTeardropDotsIcon,
   RobotIcon,
-  UsersIcon,
-  CreditCardIcon,
 } from '@phosphor-icons/react/dist/ssr';
 import { Link, useMatchRoute } from '@tanstack/react-router';
 
 import type { Permission } from '@filone/shared';
 import { usePermissions } from '../lib/use-permissions.js';
-import { useMembersSurface } from '../lib/use-members-surface.js';
 import { useOrgPath } from '../lib/use-org-path.js';
 import { useSidebarData } from './use-sidebar-data.js';
 
@@ -41,17 +37,6 @@ type NavItem = {
   testId: string;
   /** What the destination needs. Omitted, every member sees the entry. */
   permission?: Permission;
-  /**
-   * Which side of the members-surface gate this entry sits on, for the two that
-   * swap. A solo org outside the organizations beta has no members surface, so
-   * `Organization` is not there — and `Billing`, which is a tab of that page
-   * for everybody else, is a top-level entry instead.
-   *
-   * A permission cannot express it: all four roles hold `members.read`, and
-   * `billing.view` is held by the same two roles on both sides of the gate.
-   * Absent, the entry does not care either way.
-   */
-  membersSurface?: 'with' | 'without';
 };
 
 type NavGroup = {
@@ -165,90 +150,6 @@ function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps
   );
 }
 
-// Organization and Billing are the same entry seen from two orgs: where there
-// is a members surface, billing is a tab of Organization and gets no entry of
-// its own; where there is not, Organization is not a page and billing is all
-// that would have been on it. Settings has no entry here at all: it's the
-// caller's own account, reachable from `UserMenu` now that the sidebar splits
-// org identity (this nav) from user identity (the menu under the name at the
-// bottom) — a second way to reach it here would just be the same destination
-// listed twice.
-//
-// Both are declared with the permission the destination needs — even
-// `members.read`, which all four roles hold — so an entry stays hidden while
-// `/me` is in flight rather than appearing for a caller whose role turns out
-// not to reach it. The permission is not what decides whether the entry exists
-// at all: see `membersSurface`.
-const utilityNavItems: NavItem[] = [
-  {
-    path: '/organization',
-    icon: UsersIcon,
-    label: 'Organization',
-    testId: 'nav-organization',
-    permission: 'members.read',
-    membersSurface: 'with',
-  },
-  {
-    path: '/billing',
-    icon: CreditCardIcon,
-    label: 'Billing',
-    testId: 'nav-billing',
-    permission: 'billing.view',
-    membersSurface: 'without',
-  },
-];
-
-function UtilityNavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps) {
-  const { has } = usePermissions();
-  const membersSurface = useMembersSurface();
-  const orgPath = useOrgPath();
-  return (
-    <div className="p-2 flex flex-col gap-0.5">
-      {utilityNavItems
-        .filter((item) => !item.permission || has(item.permission))
-        // Neither side of the gate is known while `/me` is in flight or after it
-        // failed, so neither entry appears. Guessing would show one and then
-        // swap it for the other, which is worse than a nav that fills in a
-        // moment late.
-        .filter((item) => {
-          if (!item.membersSurface) return true;
-          if (membersSurface.isPending || membersSurface.isError) return false;
-          return item.membersSurface === (membersSurface.visible ? 'with' : 'without');
-        })
-        .map(({ path, icon: Icon, label, testId }) => {
-          const isActive = Boolean(matchRoute({ to: orgPath(path) }));
-          const link = (
-            <Link
-              key={path}
-              to={orgPath(path)}
-              data-testid={showTestIds ? testId : undefined}
-              aria-label={label}
-              onClick={onClose}
-              className={[
-                'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
-                collapsed ? 'justify-center' : '',
-                isActive ? 'bg-brand-50 text-brand-700' : 'text-zinc-600 hover:bg-zinc-100',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-            >
-              <Icon size={18} className={`flex-shrink-0 ${isActive ? '' : 'text-zinc-400'}`} />
-              {!collapsed && <span>{label}</span>}
-            </Link>
-          );
-          if (collapsed) {
-            return (
-              <Tooltip key={path} content={label} side="right">
-                {link}
-              </Tooltip>
-            );
-          }
-          return <div key={path}>{link}</div>;
-        })}
-    </div>
-  );
-}
-
 export function SidebarNav({
   collapsed,
   onToggle,
@@ -281,25 +182,25 @@ export function SidebarNav({
       <nav
         className={`relative flex h-full flex-col border-zinc-200 bg-white ${showUserProfile ? 'border-r' : 'border-l'}`}
       >
-        {/* Expand toggle (collapsed) — desktop only */}
-        {showUserProfile && collapsed && (
-          <div className="absolute -right-3 top-7 z-10 hidden -translate-y-1/2 lg:block">
-            <Tooltip content="Expand sidebar" side="right">
-              <button
-                type="button"
-                onClick={onToggle}
-                aria-label="Expand sidebar"
-                className="flex h-6 w-6 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-400 shadow-sm hover:text-zinc-600"
-              >
-                <CaretRightIcon size={14} />
-              </button>
-            </Tooltip>
-          </div>
-        )}
-
-        {/* Org switcher + collapse toggle (desktop only) */}
+        {/* Header (desktop only): a slim toolbar row carrying the collapse
+            toggle, above the full-width org switcher. The toggle sits here
+            rather than in the org row so the org button can own the full width;
+            the `SidebarSimple` glyph reads as "toggle panel" in both states, so
+            it needs no direction and no floating edge treatment. */}
         {showUserProfile && (
-          <div className="relative flex h-14 flex-shrink-0 items-center px-2">
+          <div className="flex flex-shrink-0 flex-col gap-1 px-2 pt-2 pb-1">
+            <div className={collapsed ? 'flex justify-center' : 'flex justify-end'}>
+              <Tooltip content={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} side="right">
+                <button
+                  type="button"
+                  onClick={onToggle}
+                  aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+                >
+                  <SidebarSimpleIcon size={18} />
+                </button>
+              </Tooltip>
+            </div>
             <OrgSwitcherMenu
               orgName={me?.orgName ?? 'Organization'}
               logoUrl={me?.logoUrl}
@@ -308,23 +209,6 @@ export function SidebarNav({
               collapsed={collapsed}
               testId={showTestIds ? 'org-switcher-button' : undefined}
             />
-
-            {/* Spacer + collapse toggle (expanded) */}
-            {!collapsed && (
-              <>
-                <div className="flex-1" />
-                <Tooltip content="Collapse sidebar" side="right">
-                  <button
-                    type="button"
-                    onClick={onToggle}
-                    aria-label="Collapse sidebar"
-                    className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
-                  >
-                    <CaretLeftIcon size={16} />
-                  </button>
-                </Tooltip>
-              </>
-            )}
           </div>
         )}
 
@@ -338,14 +222,6 @@ export function SidebarNav({
 
         {/* Spacer */}
         <div className="flex-1" />
-
-        {/* Bottom utility nav */}
-        <UtilityNavLinks
-          collapsed={collapsed}
-          matchRoute={matchRoute}
-          onClose={onClose}
-          showTestIds={showTestIds}
-        />
 
         {/* Status banners */}
         <StatusBanners
@@ -366,7 +242,7 @@ export function SidebarNav({
         />
 
         {/* Footer: user identity (also carries Documentation/Support now) + System status */}
-        <div className="border-t border-zinc-200 p-2 flex flex-col gap-0.5">
+        <div className="p-2 flex flex-col gap-0.5">
           {showUserProfile && (
             <UserMenu
               src={me?.picture}

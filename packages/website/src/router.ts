@@ -17,7 +17,9 @@ import { Route as uploadObjectRoute } from './routes/_app/$orgSlug.buckets.$buck
 import { Route as apiKeysRoute } from './routes/_app/$orgSlug.api-keys.js';
 import { Route as createApiKeyRoute } from './routes/_app/$orgSlug.api-keys.create.js';
 import { Route as billingRoute } from './routes/_app/$orgSlug.billing.js';
+import { Route as auditRoute } from './routes/_app/$orgSlug.audit.js';
 import { Route as membersRoute } from './routes/_app/members.js';
+import { Route as orgMembersRoute } from './routes/_app/$orgSlug.members.js';
 import { Route as organizationRoute } from './routes/_app/$orgSlug.organization.js';
 import { Route as settingsRoute } from './routes/_app/$orgSlug.settings.js';
 import { Route as supportRoute } from './routes/_app/$orgSlug.support.js';
@@ -65,6 +67,8 @@ const routeTree = rootRoute.addChildren([
       apiKeysRoute,
       createApiKeyRoute,
       billingRoute,
+      auditRoute,
+      orgMembersRoute,
       organizationRoute,
       settingsRoute,
       supportRoute,
