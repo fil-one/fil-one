@@ -200,6 +200,15 @@ export function roleNarrows(fromRole: string, toRole: string): boolean {
   return permissionsForRole(fromRole).some((permission) => !after.has(permission));
 }
 
+/**
+ * The role of somebody who holds none: not a member, or a membership row with
+ * no role on it. This names the convention already in use — the handlers spell
+ * it `membership?.role ?? ''` — rather than introducing one, so
+ * {@link permissionsForRole} fails closed for it exactly as it always has, and
+ * {@link roleNarrows} reads a lost membership as the narrowing to nothing.
+ */
+export const NO_ROLE = '';
+
 export function canChangeRole(actorRole: string, fromRole: string, toRole: string): boolean {
   return canManageTargetRole(actorRole, fromRole) && canManageTargetRole(actorRole, toRole);
 }

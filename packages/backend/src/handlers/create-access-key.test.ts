@@ -958,10 +958,11 @@ describe('create-access-key baseHandler', () => {
   });
   /**
    * The permission cap runs against a role read before the vendor call, and the
-   * vendor call is slow. Two checks cover a demotion landing in that gap: the
-   * key row's own `ConditionCheck`, and a read after the row lands.
+   * vendor call is slow. Two checks cover a role change landing in that gap:
+   * the key row's own `ConditionCheck`, and a read after the row lands. Only a
+   * narrowing costs the key; a widening covers it.
    */
-  describe('a demotion during the mint', () => {
+  describe('a role change during the mint', () => {
     beforeEach(() => {
       vi.spyOn(console, 'error').mockImplementation(() => {});
       stubWrites();
@@ -980,6 +981,22 @@ describe('create-access-key baseHandler', () => {
 
     it('keeps the key when the role is the one the cap ran against', async () => {
       const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
+
+      expect((await baseHandler(event)).statusCode).toBe(201);
+      expect(mockDeleteAccessKey).not.toHaveBeenCalled();
+    });
+
+    it('keeps the key when the role widened underneath it', async () => {
+      // Every key a Member could mint, an Admin can: the key is valid under the
+      // role they now hold, and a 409 would destroy it for nothing.
+      stubCreatorRole(OrgRole.Admin);
+      const event = buildEvent({
+        body: validBody({ keyName: 'My Key' }),
+        userInfo: {
+          ...USER_INFO,
+          membership: membershipFor(USER_INFO.orgId, USER_INFO.userId, OrgRole.Member),
+        },
+      });
 
       expect((await baseHandler(event)).statusCode).toBe(201);
       expect(mockDeleteAccessKey).not.toHaveBeenCalled();

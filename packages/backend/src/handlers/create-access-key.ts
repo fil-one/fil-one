@@ -6,10 +6,12 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import {
   ApiErrorCode,
   CreateAccessKeySchema,
+  NO_ROLE,
   S3Region,
   auditKeyIdSuffix,
   excessKeyPermissions,
   isSupportedRegion,
+  roleNarrows,
 } from '@filone/shared';
 import type {
   AuditActor,
@@ -37,7 +39,7 @@ import {
   unsupportedRegionResponse,
 } from '../lib/response-builder.js';
 import { AccessKeyKeys, keyAttribution } from '../lib/dynamo-records.js';
-import { cancelledLabels, memberRoleCheck } from '../lib/membership-changes.js';
+import { cancelledLabels, creatorRoleStillMintsCheck } from '../lib/membership-changes.js';
 import type { AccessKeyRecord } from '../lib/dynamo-records.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
@@ -64,7 +66,8 @@ export async function baseHandler(
 
   const { orgId, userId, membership } = getUserInfo(event);
   // The role the cap above was evaluated against. The key row's write asserts
-  // it is still the role on file, and the read after that write asks again.
+  // the role on file has not narrowed from it, and the read after that write
+  // asks again.
   const creator = { orgId, userId, role: membership!.role };
   const creatorEmail = getVerifiedEmail(event);
   const attribution = keyAttribution({ userId, creatorEmail });
@@ -107,7 +110,7 @@ export async function baseHandler(
       expiresAt,
     });
   } catch (err) {
-    return await vendorRefusedTheMint(err, {
+    return await handleMintRefusal(err, {
       orgId,
       tenantId,
       keyName,
@@ -119,7 +122,7 @@ export async function baseHandler(
     });
   }
 
-  const minted = {
+  const minted: MintedKey = {
     keyId: accessKey.id,
     accessKeyId: accessKey.accessKeyId,
     keyName,
@@ -128,7 +131,7 @@ export async function baseHandler(
     tenantId,
   };
 
-  const stale = await recordMintedKey({
+  const record = await recordMintedKey({
     row: {
       pk: AccessKeyKeys.orgPk(orgId),
       sk: AccessKeyKeys.keySk(accessKey.id),
@@ -139,20 +142,22 @@ export async function baseHandler(
       region,
       permissions,
       bucketScope,
-      ...stampedScope({ granularPermissions, buckets, expiresAt }),
+      ...optionalKeyAttributes({ granularPermissions, buckets, expiresAt }),
       ...attribution,
     },
-    accessKeyId: accessKey.accessKeyId,
-    keyId: accessKey.id,
+    minted,
     mint,
     creator,
-    orchestrator,
-    tenantId,
   });
-  if (stale) return stale;
+  if (!record.recorded) {
+    await discardUnrecordedKey({ minted, mint, creator });
+    return creatorRoleChangedResponse();
+  }
 
-  const narrowed = await discardIfTheRoleNarrowed({ ...minted, creator, actor });
-  if (narrowed) return narrowed;
+  if (await roleNarrowedSinceCap(creator)) {
+    await discardRecordedKey({ minted, creator, actor });
+    return creatorRoleChangedResponse();
+  }
 
   return new ResponseBuilder()
     .status(201)
@@ -166,6 +171,27 @@ export async function baseHandler(
     .build();
 }
 
+/** The credential the vendor handed back, and where it lives. */
+interface MintedKey {
+  /** The orchestrator's id for the key, which is what `deleteAccessKey` takes. */
+  keyId: string;
+  accessKeyId: string;
+  keyName: string;
+  region: S3Region;
+  orchestrator: ServiceOrchestrator;
+  tenantId: string;
+}
+
+/** Whose role the cap was evaluated against, and the role it read. */
+interface KeyCreator {
+  orgId: string;
+  userId: string;
+  role: OrgRole;
+}
+
+/** Whether the key row landed. When it did not, the credential is still live at the vendor. */
+type MintRecord = { recorded: true } | { recorded: false; reason: 'creator_role_changed' };
+
 /**
  * Write the key's row and the completion event as one transaction, so the
  * record of a live credential cannot be the half that fails.
@@ -173,61 +199,46 @@ export async function baseHandler(
  * Both mint paths land here — the ordinary one and the duplicate recovery — so
  * a key row and its event are written the same way whichever attempt produced
  * the credential.
+ *
+ * A row the creator's role no longer covers does not land, and the intent
+ * stays open: the caller takes the credential back with
+ * {@link discardUnrecordedKey}, which is what closes it.
  */
 async function recordMintedKey({
   row,
-  accessKeyId,
-  keyId,
+  minted,
   mint,
   creator,
-  orchestrator,
-  tenantId,
   recovered,
 }: {
   row: Record<string, unknown>;
-  accessKeyId: string;
-  /** The orchestrator's id for the key, in case the write has to undo it. */
-  keyId: string;
+  minted: MintedKey;
   mint: AuditCorrelation<'key.created'>;
-  /** Whose role the cap was evaluated against, and the role it read. */
-  creator: { orgId: string; userId: string; role: OrgRole };
-  orchestrator: ServiceOrchestrator;
-  tenantId: string;
+  creator: KeyCreator;
   recovered?: true;
-}): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
+}): Promise<MintRecord> {
   try {
     await mint.complete({
       outcome: 'succeeded',
       details: {
         // The id the console shows, by its last characters only.
-        keyIdSuffix: auditKeyIdSuffix('s3', accessKeyId),
+        keyIdSuffix: auditKeyIdSuffix('s3', minted.accessKeyId),
         ...(recovered ? { recovered } : {}),
       },
       // The cap ran against a role read before the vendor call. A narrowing
       // that commits in between revokes the keys it can see, and this row is
-      // not one of them yet, so the row refuses to land at all.
+      // not one of them yet, so the row refuses to land at all. A widening
+      // strands nothing, so it is admitted.
       items: [
-        memberRoleCheck(creator),
+        creatorRoleStillMintsCheck(creator),
         { Put: { TableName: Resource.UserInfoTable.name, Item: marshall(row) } },
       ],
     });
-    return undefined;
+    return { recorded: true };
   } catch (err) {
     // The role check is item 0; `commitAudited` appends the audit Put last.
     if (!cancelledLabels(err, ['creatorRole', 'keyRow']).includes('creatorRole')) throw err;
-    // The credential goes before the correlation closes. Closing first is
-    // fail-closed and can throw, and a process that stops there leaves a live
-    // key at the vendor with no local row and no record of it. A dangling
-    // intent is the better failure: it is visible, and an orphan credential is
-    // not.
-    const discarded = await discardKeyMintedUnderAStaleRole({
-      tenantId,
-      keyId,
-      orchestrator,
-      context: { orgId: creator.orgId, userId: creator.userId },
-    });
-    await mint.complete({ outcome: 'failed' });
-    return discarded;
+    return { recorded: false, reason: 'creator_role_changed' };
   }
 }
 
@@ -241,19 +252,19 @@ async function recordMintedKey({
  * purpose: nobody knows whether a credential exists, which is what the operator
  * needs to see.
  */
-async function vendorRefusedTheMint(
+async function handleMintRefusal(
   err: unknown,
-  params: RecoverDuplicateKeyParams,
+  attempt: MintAttempt,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   if (err instanceof AccessKeyAlreadyExistsError) {
-    await recoverDuplicateKey(params);
+    await recoverDuplicateKey(attempt);
     return new ResponseBuilder()
       .status(409)
       .body<ErrorResponse>({ message: 'An access key with this name already exists' })
       .build();
   }
   if (err instanceof AccessKeyValidationError) {
-    await params.mint.complete({ outcome: 'failed' });
+    await attempt.mint.complete({ outcome: 'failed' });
     return new ResponseBuilder().status(400).body<ErrorResponse>({ message: err.message }).build();
   }
   throw err;
@@ -263,7 +274,7 @@ async function vendorRefusedTheMint(
  * The attributes a key row carries only when the form asked for them, so an
  * absent one reads as "not requested" rather than as an empty list.
  */
-function stampedScope({
+function optionalKeyAttributes({
   granularPermissions,
   buckets,
   expiresAt,
@@ -271,7 +282,7 @@ function stampedScope({
   granularPermissions: GranularPermission[] | undefined;
   buckets: string[] | undefined;
   expiresAt: string | null;
-}): Record<string, unknown> {
+}): Pick<AccessKeyRecord, 'granularPermissions' | 'buckets' | 'expiresAt'> {
   return {
     ...(granularPermissions?.length ? { granularPermissions } : {}),
     ...(buckets ? { buckets } : {}),
@@ -280,34 +291,37 @@ function stampedScope({
 }
 
 /**
- * The creator's role narrowed while the key was being minted.
+ * The creator's role narrowed while the key was being minted, and the row
+ * refused to land.
  *
  * The credential exists at the vendor and nothing local records it, so it is
  * deleted here rather than left for the non-conforming-key review: the secret
- * has not been returned to anybody, and a 409 says to try again under the role
- * they now hold.
+ * has not been returned to anybody.
+ *
+ * The credential goes before the correlation closes. Closing first is
+ * fail-closed and can throw, and a process that stops there leaves a live key
+ * at the vendor with no local row and no record of it. A dangling intent is the
+ * better failure: it is visible, and an orphan credential is not.
  */
-async function discardKeyMintedUnderAStaleRole({
-  tenantId,
-  keyId,
-  orchestrator,
-  context,
+async function discardUnrecordedKey({
+  minted,
+  mint,
+  creator,
 }: {
-  tenantId: string;
-  keyId: string;
-  orchestrator: ServiceOrchestrator;
-  context: { orgId: string; userId: string };
-}): Promise<APIGatewayProxyStructuredResultV2> {
+  minted: MintedKey;
+  mint: AuditCorrelation<'key.created'>;
+  creator: Pick<KeyCreator, 'orgId' | 'userId'>;
+}): Promise<void> {
   try {
-    await orchestrator.deleteAccessKey(tenantId, keyId);
+    await minted.orchestrator.deleteAccessKey(minted.tenantId, minted.keyId);
   } catch (err) {
     console.error('[create-access-key] Could not discard a key minted under a stale role', {
-      ...context,
+      orgId: creator.orgId,
+      userId: creator.userId,
       error: err,
     });
   }
-
-  return roleChangedUnderneathResponse();
+  await mint.complete({ outcome: 'failed' });
 }
 
 /**
@@ -315,7 +329,7 @@ async function discardKeyMintedUnderAStaleRole({
  *
  * The row's own `ConditionCheck` refuses a key whose creator was demoted before
  * it landed. It cannot refuse one that landed first: at that instant the
- * creator did still hold the role the cap ran against, so the condition is
+ * creator did still hold a role that covers the key, so the condition is
  * satisfied and correctly so. The key only becomes excessive when the role
  * write follows, and by then the narrowing's listing has already been taken
  * without it.
@@ -325,65 +339,50 @@ async function discardKeyMintedUnderAStaleRole({
  * anything that has to go looking for it afterwards. A demotion landing between
  * the write above and this read is the one ordering neither check sees.
  *
+ * Only a narrowing counts. A widening strands nothing, so a member promoted
+ * mid-mint keeps the key their new role covers; and an absent membership is
+ * the narrowing to nothing, so a member removed mid-mint does not.
+ *
  * Costs one consistent `GetItem` on the path of every mint, which is the price
  * of not needing a second revocation pass.
  */
-async function discardIfTheRoleNarrowed({
+async function roleNarrowedSinceCap({ orgId, userId, role }: KeyCreator): Promise<boolean> {
+  const current = (await resolveMembership(orgId, userId))?.role ?? NO_ROLE;
+  return roleNarrows(role, current);
+}
+
+/**
+ * Both halves this time: the row landed, unlike {@link discardUnrecordedKey}'s
+ * path. Through `revokeAccessKey` so the removal is audited like any other,
+ * and so the row delete rides its completion rather than being a second write
+ * nobody records.
+ */
+async function discardRecordedKey({
+  minted,
   creator,
-  keyId,
-  accessKeyId,
-  keyName,
-  region,
-  orchestrator,
-  tenantId,
   actor,
 }: {
-  /** Who minted it, and the role the permission cap ran against. */
-  creator: { orgId: string; userId: string; role: OrgRole };
-  keyId: string;
-  accessKeyId: string;
-  keyName: string;
-  region: S3Region;
-  orchestrator: ServiceOrchestrator;
-  tenantId: string;
+  minted: MintedKey;
+  creator: Pick<KeyCreator, 'orgId' | 'userId'>;
   actor: AuditActor;
-}): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
-  const { orgId, userId, role } = creator;
-  const membership = await resolveMembership(orgId, userId);
-  if (membership?.role === role) return undefined;
-
-  // Both halves this time: the row landed, unlike the path above. Through
-  // `revokeAccessKey` so the removal is audited like any other, and so the row
-  // delete rides its completion rather than being a second write nobody records.
+}): Promise<void> {
   try {
-    await revokeAccessKey({
-      orgId,
-      keyId,
-      accessKeyId,
-      keyName,
-      region,
-      orchestrator,
-      tenantId,
-      actor,
-      reason: 'stale_role_at_mint',
-    });
+    await revokeAccessKey({ orgId: creator.orgId, ...minted, actor, reason: 'stale_role_at_mint' });
   } catch (err) {
     // The row survives, listing a credential that may or may not still exist.
     // Left for the operator rather than retried: a second delete against a
     // vendor that just refused one is not the thing to do on a request path.
     console.error('[create-access-key] Could not discard a key whose creator was demoted', {
-      orgId,
-      userId,
-      keyIdSuffix: auditKeyIdSuffix('s3', accessKeyId),
+      orgId: creator.orgId,
+      userId: creator.userId,
+      keyIdSuffix: auditKeyIdSuffix('s3', minted.accessKeyId),
       error: err,
     });
   }
-
-  return roleChangedUnderneathResponse();
 }
 
 /** The answer both discard paths give: try again under the role you now hold. */
-function roleChangedUnderneathResponse(): APIGatewayProxyStructuredResultV2 {
+function creatorRoleChangedResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(409)
     .body<ErrorResponse>({
@@ -424,7 +423,8 @@ function checkCreatorAuthority(
     .build();
 }
 
-interface RecoverDuplicateKeyParams {
+/** What one attempt to mint had in hand when the vendor refused it. */
+interface MintAttempt {
   orgId: string;
   tenantId: string;
   keyName: string;
@@ -433,8 +433,7 @@ interface RecoverDuplicateKeyParams {
   attribution: Pick<AccessKeyRecord, 'createdBy' | 'creatorEmail' | 'policyVersion'>;
   /** The intent this attempt already wrote — every exit here closes it. */
   mint: AuditCorrelation<'key.created'>;
-  /** Whose role the cap was evaluated against, and the role it read. */
-  creator: { orgId: string; userId: string; role: OrgRole };
+  creator: KeyCreator;
 }
 
 async function recoverDuplicateKey({
@@ -446,7 +445,7 @@ async function recoverDuplicateKey({
   attribution,
   mint,
   creator,
-}: RecoverDuplicateKeyParams): Promise<void> {
+}: MintAttempt): Promise<void> {
   // Check if we already have a DynamoDB record for this key
   const { Items: existingKeys } = await getDynamoClient().send(
     new QueryCommand({
@@ -484,10 +483,19 @@ async function recoverDuplicateKey({
     return;
   }
 
+  const minted: MintedKey = {
+    keyId: recovered.id,
+    accessKeyId: recovered.accessKeyId,
+    keyName,
+    region,
+    orchestrator,
+    tenantId,
+  };
+
   // The completion the earlier attempt never got to write. It closes this
   // request's intent, and `recovered` says the credential it names was minted
   // by a request whose own intent is still dangling.
-  await recordMintedKey({
+  const record = await recordMintedKey({
     row: {
       pk: AccessKeyKeys.orgPk(orgId),
       sk: AccessKeyKeys.keySk(recovered.id),
@@ -505,17 +513,14 @@ async function recoverDuplicateKey({
       ...attribution,
       recovered: true,
     },
-    accessKeyId: recovered.accessKeyId,
-    keyId: recovered.id,
+    minted,
     mint,
     creator,
-    orchestrator,
-    tenantId,
     recovered: true,
   });
-  // Its answer is dropped: this path is a 409 either way, and a role that went
-  // stale leaves no row and no credential, which is the same outcome by a
-  // different name.
+  // This path answers 409 either way; a role that narrowed just leaves no row
+  // and no credential behind it.
+  if (!record.recorded) await discardUnrecordedKey({ minted, mint, creator });
 
   console.warn(
     `Recovered DynamoDB record for access key "${keyName}" (id=${recovered.id}) for org ${orgId} using ${orchestrator.id} orchestrator`,

@@ -151,6 +151,7 @@ export {
   canManageTargetRole,
   canChangeRole,
   roleNarrows,
+  NO_ROLE,
 } from './permissions.js';
 export type { Permission } from './permissions.js';
 

@@ -8,6 +8,7 @@ vi.mock('sst', () => sstResourceMock());
 import { OrgKeys } from './org-membership.js';
 import {
   cancelledLabels,
+  creatorRoleStillMintsCheck,
   inviterAuthorityCheck,
   membershipDeleteItems,
   membershipRows,
@@ -186,6 +187,58 @@ describe('inviterAuthorityCheck', () => {
       });
     },
   );
+});
+
+describe('creatorRoleStillMintsCheck', () => {
+  it('admits only Owners when the cap ran against an Owner', () => {
+    const check = creatorRoleStillMintsCheck({
+      orgId: ORG_ID,
+      userId: 'creator-id',
+      role: OrgRole.Owner,
+    });
+
+    expect(check.ConditionCheck).toMatchObject({
+      Key: { pk: { S: OrgKeys.orgPk(ORG_ID) }, sk: { S: OrgKeys.memberSk('creator-id') } },
+      ConditionExpression: 'attribute_exists(pk) AND #role IN (:role0)',
+      ExpressionAttributeNames: { '#role': 'role' },
+      ExpressionAttributeValues: { ':role0': { S: OrgRole.Owner } },
+    });
+  });
+
+  it('admits a promotion and refuses a demotion when the cap ran against a Member', () => {
+    const check = creatorRoleStillMintsCheck({
+      orgId: ORG_ID,
+      userId: 'creator-id',
+      role: OrgRole.Member,
+    });
+
+    expect(check.ConditionCheck?.ConditionExpression).toBe(
+      'attribute_exists(pk) AND #role IN (:role0, :role1, :role2)',
+    );
+    expect(check.ConditionCheck?.ExpressionAttributeValues).toStrictEqual({
+      ':role0': { S: OrgRole.Owner },
+      ':role1': { S: OrgRole.Admin },
+      ':role2': { S: OrgRole.Member },
+    });
+  });
+
+  it('admits every role when the cap ran against ReadOnly, which nothing narrows', () => {
+    const check = creatorRoleStillMintsCheck({
+      orgId: ORG_ID,
+      userId: 'creator-id',
+      role: OrgRole.ReadOnly,
+    });
+
+    expect(check.ConditionCheck?.ConditionExpression).toBe(
+      'attribute_exists(pk) AND #role IN (:role0, :role1, :role2, :role3)',
+    );
+    expect(check.ConditionCheck?.ExpressionAttributeValues).toStrictEqual({
+      ':role0': { S: OrgRole.Owner },
+      ':role1': { S: OrgRole.Admin },
+      ':role2': { S: OrgRole.Member },
+      ':role3': { S: OrgRole.ReadOnly },
+    });
+  });
 });
 
 describe('cancelledLabels', () => {

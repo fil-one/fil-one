@@ -1,7 +1,7 @@
 import { TransactionCanceledException } from '@aws-sdk/client-dynamodb';
 import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
-import { OrgRole, canManageTargetRole } from '@filone/shared';
+import { OrgRole, canManageTargetRole, roleNarrows } from '@filone/shared';
 import type { OrgMembershipSource } from '@filone/shared';
 import { OrgKeys } from './org-membership.js';
 
@@ -298,52 +298,71 @@ export function inviterAuthorityCheck({
   invitedBy: string;
   invitedRole: OrgRole;
 }): TransactWriteItem {
-  const admissible = Object.values(OrgRole).filter((role) =>
-    canManageTargetRole(role, invitedRole),
-  );
-  const values = Object.fromEntries(
-    admissible.map((role, index) => [`:role${index}`, { S: role }]),
-  );
-
   return {
     ConditionCheck: {
       TableName: Resource.OrgTable.name,
       Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: OrgKeys.memberSk(invitedBy) } },
-      ConditionExpression: `attribute_exists(pk) AND #role IN (${Object.keys(values).join(', ')})`,
-      ExpressionAttributeNames: { '#role': 'role' },
-      ExpressionAttributeValues: values,
+      ...roleIsOneOf((role) => canManageTargetRole(role, invitedRole)),
     },
   };
 }
 
 /**
- * Assert, inside the transaction, that a member still holds the role a decision
- * was made against.
+ * Assert, inside the transaction, that the creator still holds a role that
+ * mints what the cap allowed.
  *
  * The mint path evaluates its permission cap against the creator's role and
  * then writes the key row, and a role narrowing between the two would leave a
  * key above the role that authorized it. The narrowing revokes what it finds,
  * so this closes the window where a row lands after its listing: the row cannot
- * be written unless the role the cap was checked against is still the one on
- * file.
+ * be written unless the role on file still holds everything the cap ran
+ * against. A widening strands nothing, so a promotion landing in the same gap
+ * is admitted rather than made to cancel a key the new role covers.
+ *
+ * The admissible roles are asked of `roleNarrows` one by one, the way
+ * {@link inviterAuthorityCheck} asks the registry, so the permission sets stay
+ * the single answer to what a role may mint.
  */
-export function memberRoleCheck({
+export function creatorRoleStillMintsCheck({
   orgId,
   userId,
   role,
 }: {
   orgId: string;
   userId: string;
+  /** The role the cap was evaluated against. */
   role: OrgRole;
 }): TransactWriteItem {
   return {
     ConditionCheck: {
       TableName: Resource.OrgTable.name,
       Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: OrgKeys.memberSk(userId) } },
-      ConditionExpression: 'attribute_exists(pk) AND #role = :role',
-      ExpressionAttributeNames: { '#role': 'role' },
-      ExpressionAttributeValues: { ':role': { S: role } },
+      ...roleIsOneOf((current) => !roleNarrows(role, current)),
     },
+  };
+}
+
+/**
+ * The condition that a membership row exists and its role is one a predicate
+ * admits, as an `IN` set in registry order: `:role0`, `:role1`, and so on.
+ *
+ * A predicate admitting nothing would build `#role IN ()`, which DynamoDB
+ * rejects as a malformed expression rather than reporting an unmet condition —
+ * so a caller must always admit at least one role. Both do, structurally rather
+ * than by luck: no role narrows relative to itself, and every invitable role
+ * has some role that may invite it.
+ */
+function roleIsOneOf(admits: (role: OrgRole) => boolean) {
+  const values = Object.fromEntries(
+    Object.values(OrgRole)
+      .filter(admits)
+      .map((role, index) => [`:role${index}`, { S: role }]),
+  );
+
+  return {
+    ConditionExpression: `attribute_exists(pk) AND #role IN (${Object.keys(values).join(', ')})`,
+    ExpressionAttributeNames: { '#role': 'role' },
+    ExpressionAttributeValues: values,
   };
 }
 
