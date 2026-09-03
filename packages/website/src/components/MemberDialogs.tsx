@@ -147,8 +147,8 @@ function RoleNarrowingPrompt({
       toRole={ROLE_LABELS[change.role]}
       note={self ? selfChangeDescription(change) : undefined}
       keys={preview.data?.keys}
-      survivingCount={preview.data?.survivingCount ?? 0}
-      unattributedCount={preview.data?.unattributedCount ?? 0}
+      survivingCount={preview.data?.retainedKeyCount ?? 0}
+      unattributedCount={preview.data?.unattributedKeyCount ?? 0}
       loading={preview.isPending}
       error={preview.isError}
       pending={pending}

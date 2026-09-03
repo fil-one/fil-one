@@ -81,7 +81,7 @@ export interface UpdateMemberRoleResponse {
    * the preview offered: the commit revokes from a fresh read, so this can name
    * a key minted since the preview and omit one revoked since.
    */
-  revokedKeys?: RevokedKeySummary[];
+  revokedKeys?: AccessKeySummary[];
 }
 
 /**
@@ -93,9 +93,9 @@ export interface UpdateMemberRoleResponse {
  */
 export interface UpdateMemberRoleFailure {
   message: string;
-  revokedKeys: RevokedKeySummary[];
+  revokedKeys: AccessKeySummary[];
   /** The key a vendor refused, when that is what stopped the change. */
-  failedKey?: RevokedKeySummary;
+  failedKey?: AccessKeySummary;
 }
 
 /**

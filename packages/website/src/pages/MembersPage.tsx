@@ -3,7 +3,7 @@ import { MagnifyingGlassIcon } from '@phosphor-icons/react/dist/ssr';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 import { ApiErrorCode, OrgRole, roleNarrows } from '@filone/shared';
-import type { ListMembersResponse, MemberSummary, RevokedKeySummary } from '@filone/shared';
+import type { ListMembersResponse, MemberSummary, AccessKeySummary } from '@filone/shared';
 
 import { Alert } from '../components/Alert';
 import { Button } from '../components/Button';
@@ -179,14 +179,14 @@ function useRoleChange(ctx: MutationContext) {
 }
 
 /** Up to three key names, then a count, so a toast stays one line. */
-function namedKeys(keys: readonly RevokedKeySummary[]): string {
+function namedKeys(keys: readonly AccessKeySummary[]): string {
   const named = keys.slice(0, 3).map((key) => key.keyName);
   const rest = keys.length - named.length;
   return rest > 0 ? `${named.join(', ')} and ${rest} more` : named.join(', ');
 }
 
 /** What a role change took away, appended to whatever it is being said beside. */
-function revokedSuffix(keys: readonly RevokedKeySummary[] | undefined): string {
+function revokedSuffix(keys: readonly AccessKeySummary[] | undefined): string {
   if (!keys?.length) return '';
   return ` ${keys.length === 1 ? 'This key was' : `These ${keys.length} keys were`} revoked: ${namedKeys(keys)}.`;
 }

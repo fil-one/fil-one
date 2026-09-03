@@ -1,8 +1,7 @@
-import type { AuditActor, RevokedKeySummary } from '@filone/shared';
+import type { AuditActor, AccessKeySummary, RevocationTrigger } from '@filone/shared';
 import { revokeAccessKey } from './key-revocation.js';
-import type { KeyRevocationReason } from './key-revocation.js';
 import { summarizeAccessKey } from './member-keys.js';
-import type { DoomedKey } from './member-keys.js';
+import type { AccessKeyToRevoke } from './member-keys.js';
 import type { OrgProfileItem } from './org-profile.js';
 import { getOrchestratorForRegion } from './service-orchestrator-registry.js';
 
@@ -17,14 +16,14 @@ import { getOrchestratorForRegion } from './service-orchestrator-registry.js';
  */
 export interface RevocationOutcome {
   /** Revoked and delisted, in the order the pass ran. */
-  revoked: RevokedKeySummary[];
+  revoked: AccessKeySummary[];
   /**
    * Still live, because a vendor refused. Under `stop` this holds the one key
    * the pass halted on and the caller leaves the membership unchanged; under
    * `continue` it holds every key the vendor refused, which is what an admin
    * needs when the membership has already moved.
    */
-  failed: RevokedKeySummary[];
+  failed: AccessKeySummary[];
 }
 
 /**
@@ -48,14 +47,14 @@ export async function revokeMemberKeys({
   orgId: string;
   /** Read once, so several orchestrators resolve their tenant from one row. */
   orgProfile: OrgProfileItem | undefined;
-  keys: readonly DoomedKey[];
+  keys: readonly AccessKeyToRevoke[];
   /** Who asked. On a role change this is the admin, never the key's holder. */
   actor: AuditActor;
-  reason: KeyRevocationReason;
+  reason: RevocationTrigger;
   onFailure?: OnRevocationFailure;
 }): Promise<RevocationOutcome> {
-  const revoked: RevokedKeySummary[] = [];
-  const failed: RevokedKeySummary[] = [];
+  const revoked: AccessKeySummary[] = [];
+  const failed: AccessKeySummary[] = [];
 
   for (const key of keys) {
     const summary = summarizeAccessKey(key);

@@ -36,8 +36,8 @@ const NO_KEYS_AT_RISK = {
   currentRole: OrgRole.Owner,
   role: OrgRole.Admin,
   keys: [],
-  survivingCount: 0,
-  unattributedCount: 0,
+  retainedKeyCount: 0,
+  unattributedKeyCount: 0,
 };
 
 // ---------------------------------------------------------------------------
@@ -431,8 +431,8 @@ describe('the role-narrowing confirmation', () => {
           excess: ['DeleteBucket'],
         },
       ],
-      survivingCount: 2,
-      unattributedCount: 1,
+      retainedKeyCount: 2,
+      unattributedKeyCount: 1,
     });
     renderPage();
 

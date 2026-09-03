@@ -1,6 +1,6 @@
 import { API_URL } from '../env.js';
 import { ApiErrorCode, CSRF_COOKIE_NAME, ORG_ID_HEADER } from '@filone/shared';
-import type { RevokedKeySummary, StepUpRequiredResponse } from '@filone/shared';
+import type { AccessKeySummary, StepUpRequiredResponse } from '@filone/shared';
 import {
   clearActiveOrgAfterRefusal,
   clearActiveOrgOnNavigation,
@@ -130,9 +130,9 @@ export function errorStatusOf(error: unknown): number | undefined {
  * Those credentials are gone whatever the role now says, so a refusal that
  * mentions only the role is telling the admin half of what happened.
  */
-export function revokedKeysOf(error: unknown): RevokedKeySummary[] {
+export function revokedKeysOf(error: unknown): AccessKeySummary[] {
   const keys = (error as { revokedKeys?: unknown } | null | undefined)?.revokedKeys;
-  return Array.isArray(keys) ? (keys as RevokedKeySummary[]) : [];
+  return Array.isArray(keys) ? (keys as AccessKeySummary[]) : [];
 }
 
 /** An error's message, or a fallback for anything that is not an `Error`. */
@@ -393,7 +393,7 @@ export async function apiRequest<T>(
       message?: string;
       code?: ApiErrorCode;
       resendAvailableAt?: string;
-      revokedKeys?: RevokedKeySummary[];
+      revokedKeys?: AccessKeySummary[];
     };
     // Carry the backend's error code through so callers can render specific copy
     // (e.g. BUCKET_NOT_EMPTY), or honour a server-set cooldown (the deletion 429

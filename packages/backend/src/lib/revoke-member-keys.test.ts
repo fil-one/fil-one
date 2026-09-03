@@ -22,12 +22,12 @@ vi.mock('./key-revocation.js', () => ({
 
 import { userActor } from './audit.js';
 import { revokeMemberKeys } from './revoke-member-keys.js';
-import type { DoomedKey } from './member-keys.js';
+import type { AccessKeyToRevoke } from './member-keys.js';
 
 const ORG_ID = 'org-1';
 const ACTOR = userActor({ userId: 'admin-1' });
 
-function doomed(id: string): DoomedKey {
+function keyToRevoke(id: string): AccessKeyToRevoke {
   return {
     id,
     keyName: `key ${id}`,
@@ -40,7 +40,7 @@ function doomed(id: string): DoomedKey {
   };
 }
 
-const KEYS = [doomed('0001'), doomed('0002'), doomed('0003')];
+const KEYS = [keyToRevoke('0001'), keyToRevoke('0002'), keyToRevoke('0003')];
 
 function revoke(onFailure?: 'stop' | 'continue') {
   return revokeMemberKeys({

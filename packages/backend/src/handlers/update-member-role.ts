@@ -12,7 +12,7 @@ import {
 import type {
   ErrorResponse,
   OrgRole,
-  RevokedKeySummary,
+  AccessKeySummary,
   UpdateMemberRoleFailure,
   UpdateMemberRoleResponse,
 } from '@filone/shared';
@@ -23,7 +23,7 @@ import {
   twoPhaseAudit,
   userActor,
 } from '../lib/audit.js';
-import { keysExceedingRole } from '../lib/member-keys.js';
+import { reviewMemberAccessKeysForRole } from '../lib/member-keys.js';
 import { sendKeyRevocationEmail } from '../lib/key-revocation-email.js';
 import { bestEffort, revokeMemberKeys } from '../lib/revoke-member-keys.js';
 import {
@@ -191,14 +191,14 @@ async function applyRoleChange({
   const narrows = roleNarrows(fromRole, toRole);
   const orgProfile = narrows ? await getOrgProfile(orgId) : undefined;
   const review = narrows
-    ? await keysExceedingRole(orgId, targetUserId, toRole)
-    : { doomed: [], survivingCount: 0, unattributedCount: 0 };
+    ? await reviewMemberAccessKeysForRole(orgId, targetUserId, toRole)
+    : { keysToRevoke: [], retainedKeyCount: 0, unattributedKeyCount: 0 };
 
-  const notify = (revoked: readonly RevokedKeySummary[]) =>
+  const notify = (revoked: readonly AccessKeySummary[]) =>
     tellTheMember({ orgId, orgProfile, targetUserId, changedBy, revoked });
   const write = (
     event: Parameters<typeof commitAudited>[0]['event'],
-    revokedKeys: RevokedKeySummary[],
+    revokedKeys: AccessKeySummary[],
   ) =>
     writeRole({
       items: changeItems({ orgId, targetUserId, fromRole, toRole, now: invitations.now }),
@@ -215,7 +215,7 @@ async function applyRoleChange({
 
   // A change that revokes no key touches no vendor, so it stays one transaction
   // and one event, the form every membership change took in M1.
-  if (review.doomed.length === 0) {
+  if (review.keysToRevoke.length === 0) {
     const failed = await write(singlePhase(), []);
     if (failed) return failed;
     await revokeDeferred(invitations.later);
@@ -234,7 +234,7 @@ async function applyRoleChange({
   const first = await revokeMemberKeys({
     orgId,
     orgProfile,
-    keys: review.doomed,
+    keys: review.keysToRevoke,
     actor,
     reason: 'role_narrowing',
   });
@@ -326,7 +326,7 @@ async function tellTheMember({
   orgProfile: OrgProfileItem | undefined;
   targetUserId: string;
   changedBy: string;
-  revoked: readonly RevokedKeySummary[];
+  revoked: readonly AccessKeySummary[];
 }): Promise<void> {
   await sendKeyRevocationEmail({
     userId: targetUserId,
@@ -362,7 +362,7 @@ async function writeRole({
     delta: ReturnType<typeof ownerCountDeltaFor>;
     revocations: number;
     /** Already revoked and not coming back, whatever the role write did. */
-    revokedKeys: RevokedKeySummary[];
+    revokedKeys: AccessKeySummary[];
     /** Tells the member about keys that went before the write was refused. */
     tellTheMember: () => Promise<void>;
   };
@@ -395,7 +395,7 @@ async function writeRole({
  * goes unrecorded either way — every revocation writes its own `key.deleted`
  * with a `reason`, and those are the durable account of what happened.
  */
-function revokedKeyIds(revoked: readonly RevokedKeySummary[]): { revokedKeys?: string[] } {
+function revokedKeyIds(revoked: readonly AccessKeySummary[]): { revokedKeys?: string[] } {
   return revoked.length > 0 ? { revokedKeys: revoked.map((key) => key.id) } : {};
 }
 
@@ -449,7 +449,7 @@ async function changeFailureResponse(
     delta: ReturnType<typeof ownerCountDeltaFor>;
     revocations: number;
     /** Already revoked and not coming back, whatever the role write did. */
-    revokedKeys: RevokedKeySummary[];
+    revokedKeys: AccessKeySummary[];
   },
 ): Promise<APIGatewayProxyStructuredResultV2> {
   // The fence, at its own index. A role change into an org being torn down has
@@ -488,8 +488,8 @@ function roleResponse(body: UpdateMemberRoleResponse): APIGatewayProxyStructured
  * revoked are named. Retrying is the same PATCH, which finds fewer keys.
  */
 function vendorRefusedResponse(
-  revokedKeys: RevokedKeySummary[],
-  failedKey: RevokedKeySummary,
+  revokedKeys: AccessKeySummary[],
+  failedKey: AccessKeySummary,
 ): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(502)
@@ -529,11 +529,11 @@ function beyondCeilingResponse(
 }
 
 function lastOwnerResponse(
-  revoked: { revokedKeys: RevokedKeySummary[] } = { revokedKeys: [] },
+  revoked: { revokedKeys: AccessKeySummary[] } = { revokedKeys: [] },
 ): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(409)
-    .body<ErrorResponse & { revokedKeys: RevokedKeySummary[] }>({
+    .body<ErrorResponse & { revokedKeys: AccessKeySummary[] }>({
       message:
         'This organization would be left without an owner. Promote another member to owner first.',
       code: ApiErrorCode.LAST_OWNER,
@@ -543,11 +543,11 @@ function lastOwnerResponse(
 }
 
 function ownerCountUnavailableResponse(
-  revoked: { revokedKeys: RevokedKeySummary[] } = { revokedKeys: [] },
+  revoked: { revokedKeys: AccessKeySummary[] } = { revokedKeys: [] },
 ): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(409)
-    .body<ErrorResponse & { revokedKeys: RevokedKeySummary[] }>({
+    .body<ErrorResponse & { revokedKeys: AccessKeySummary[] }>({
       message: 'The organization’s owner count could not be updated. Please contact support.',
       ...revoked,
     })
@@ -555,11 +555,11 @@ function ownerCountUnavailableResponse(
 }
 
 function invitationRaceResponse(
-  revoked: { revokedKeys: RevokedKeySummary[] } = { revokedKeys: [] },
+  revoked: { revokedKeys: AccessKeySummary[] } = { revokedKeys: [] },
 ): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(409)
-    .body<ErrorResponse & { revokedKeys: RevokedKeySummary[] }>({
+    .body<ErrorResponse & { revokedKeys: AccessKeySummary[] }>({
       message: 'An invitation from that member changed while this was in flight — try again.',
       ...revoked,
     })
@@ -567,11 +567,11 @@ function invitationRaceResponse(
 }
 
 function concurrentChangeResponse(
-  revoked: { revokedKeys: RevokedKeySummary[] } = { revokedKeys: [] },
+  revoked: { revokedKeys: AccessKeySummary[] } = { revokedKeys: [] },
 ): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(409)
-    .body<ErrorResponse & { revokedKeys: RevokedKeySummary[] }>({
+    .body<ErrorResponse & { revokedKeys: AccessKeySummary[] }>({
       message: 'That member’s role changed while you were editing it.',
       ...revoked,
     })

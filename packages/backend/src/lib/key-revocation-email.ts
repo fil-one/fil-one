@@ -1,5 +1,5 @@
 import { REGION_LABELS, formatRegion } from '@filone/shared';
-import type { OrgRole, RevokedKeySummary } from '@filone/shared';
+import type { OrgRole, AccessKeySummary } from '@filone/shared';
 import validator from 'validator';
 import { sendMail } from './mailer.js';
 import { readUserProfile } from './user-profile.js';
@@ -43,7 +43,7 @@ export async function sendKeyRevocationEmail({
 }: {
   userId: string;
   orgName: string;
-  keys: readonly RevokedKeySummary[];
+  keys: readonly AccessKeySummary[];
   cause: RevocationCause;
   /** The admin who made the change, by verified email or by id. */
   changedBy: string;
@@ -105,7 +105,7 @@ function nextStep(cause: RevocationCause): string {
 }
 
 /** A key as both bodies name it: what it was called, which one it was, and where. */
-function describeKey(key: RevokedKeySummary): string {
+function describeKey(key: AccessKeySummary): string {
   const suffix = key.accessKeyIdSuffix ? ` (…${key.accessKeyIdSuffix})` : '';
   const region = REGION_LABELS[key.region] ? formatRegion(key.region) : key.region;
   return `${key.keyName}${suffix} — ${region}, created ${key.createdAt.slice(0, 10)}`;
@@ -118,7 +118,7 @@ interface BodyLines {
   nextStep: string;
 }
 
-function textBody(lines: BodyLines, keys: readonly RevokedKeySummary[]): string {
+function textBody(lines: BodyLines, keys: readonly AccessKeySummary[]): string {
   return [
     lines.opening,
     '',
@@ -131,7 +131,7 @@ function textBody(lines: BodyLines, keys: readonly RevokedKeySummary[]): string 
   ].join('\n');
 }
 
-function htmlBody(lines: BodyLines, keys: readonly RevokedKeySummary[]): string {
+function htmlBody(lines: BodyLines, keys: readonly AccessKeySummary[]): string {
   const esc = (value: string) => validator.escape(value);
   return [
     `<p>${esc(lines.opening)}</p>`,

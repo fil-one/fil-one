@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { S3Region, type RevokedKeySummary } from '@filone/shared';
+import { S3Region, type AccessKeySummary } from '@filone/shared';
 
 import { Button } from './Button';
 import { RoleNarrowingDialog } from './RoleNarrowingDialog';
@@ -14,7 +14,7 @@ const meta: Meta<typeof RoleNarrowingDialog> = {
 export default meta;
 type Story = StoryObj<typeof RoleNarrowingDialog>;
 
-const KEYS: RevokedKeySummary[] = [
+const KEYS: AccessKeySummary[] = [
   {
     id: 'key-1',
     keyName: 'nightly backup',

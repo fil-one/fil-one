@@ -1,5 +1,5 @@
 import { KeyIcon } from '@phosphor-icons/react/dist/ssr';
-import { formatRegion, type RevokedKeySummary } from '@filone/shared';
+import { formatRegion, type AccessKeySummary } from '@filone/shared';
 
 import { Alert } from './Alert';
 import { Button } from './Button';
@@ -17,7 +17,7 @@ export type RoleNarrowingDialogProps = {
   /** What else the change costs, when the caller is changing their own row. */
   note?: string | undefined;
   /** The preview, or undefined while it loads or after it failed. */
-  keys: RevokedKeySummary[] | undefined;
+  keys: AccessKeySummary[] | undefined;
   /** Keys of theirs the new role still allows. */
   survivingCount: number;
   /** Keys in this org with no recorded owner, which no role change touches. */
@@ -119,7 +119,7 @@ function PreviewBody({
   loading: boolean;
   error: boolean;
   self: boolean;
-  revoked: RevokedKeySummary[];
+  revoked: AccessKeySummary[];
   survivingCount: number;
   unattributedCount: number;
 }) {
@@ -167,7 +167,7 @@ function PreviewBody({
   );
 }
 
-function RevokedKey({ revoked }: { revoked: RevokedKeySummary }) {
+function RevokedKey({ revoked }: { revoked: AccessKeySummary }) {
   const carries = revoked.excess.length > 0 ? ` · carries ${revoked.excess.join(', ')}` : '';
 
   return (
