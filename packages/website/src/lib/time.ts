@@ -55,6 +55,19 @@ const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
   timeZoneName: 'short',
 });
 
+const monthDayFormatter = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+});
+
+/**
+ * Month and day, e.g. "Aug 15" — for the near end of a range whose year is
+ * stated once, at the far end.
+ */
+export function formatMonthDay(isoString: string): string {
+  return monthDayFormatter.format(new Date(isoString));
+}
+
 /** Locale-aware date string, e.g. "Mar 27, 2026". */
 export function formatDate(isoString: string): string {
   return dateFormatter.format(new Date(isoString));

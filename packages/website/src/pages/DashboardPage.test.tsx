@@ -51,6 +51,20 @@ function payAsYouGoBilling(): BillingInfo {
       planId: PlanId.PayAsYouGo,
       status: SubscriptionStatus.Active,
       monthlyMinimumCents: 0,
+      planName: 'Pay as you go',
+      pricePerTbCents: 499,
+    },
+  };
+}
+
+/** An org billed on a price sales quoted: a name, and no single per-TB rate. */
+function contractedBilling(): BillingInfo {
+  return {
+    subscription: {
+      planId: PlanId.PayAsYouGo,
+      status: SubscriptionStatus.Active,
+      planName: 'Business',
+      monthlyMinimumCents: 250_000,
     },
   };
 }
@@ -86,6 +100,32 @@ describe('DashboardPage — the plan panels', () => {
     expect(screen.getByText('Est. monthly cost')).toBeInTheDocument();
   });
 
+  it('names the plan what Stripe calls it', async () => {
+    mockGetBilling.mockResolvedValue(contractedBilling());
+    renderPage(OrgRole.Owner);
+
+    expect(await screen.findByText('Business')).toBeInTheDocument();
+  });
+
+  it('states the rate the org is billed on', async () => {
+    renderPage(OrgRole.Owner);
+
+    // 2 TB at $4.99 a TB, from the price the API reported.
+    expect(await screen.findByText('Est. monthly cost')).toBeInTheDocument();
+    expect(screen.getByText('$4.99/TB per month · no egress fees')).toBeInTheDocument();
+  });
+
+  it('withholds an estimate from an org whose price states no rate', async () => {
+    // The card used to multiply by a hardcoded $4.99, so a contracted org was
+    // shown an estimate for a rate it does not pay.
+    mockGetBilling.mockResolvedValue(contractedBilling());
+    renderPage(OrgRole.Owner);
+
+    await screen.findByText('Business');
+    expect(screen.queryByText('Est. monthly cost')).not.toBeInTheDocument();
+    expect(screen.getByText('Custom pricing · no egress fees')).toBeInTheDocument();
+  });
+
   it('never asks for billing on behalf of a role that cannot read it', async () => {
     renderPage(OrgRole.Member);
 
@@ -110,5 +150,44 @@ describe('DashboardPage — the plan panels', () => {
     expect(screen.queryByText('Est. monthly cost')).not.toBeInTheDocument();
     // The cached response is still there — the read is what changed.
     expect(client.getQueryData(queryKeys.billing)).toBeDefined();
+  });
+});
+
+describe('DashboardPage — quick setup', () => {
+  /** An account partway through onboarding: no objects yet, so the card applies. */
+  const ONBOARDING: UsageResponse = { ...USAGE, objects: { count: 0 } };
+
+  it('offers the setup steps while onboarding is unfinished', async () => {
+    mockGetUsage.mockResolvedValue(ONBOARDING);
+    renderPage(OrgRole.Owner);
+
+    expect(await screen.findByText('QUICK SETUP')).toBeInTheDocument();
+  });
+
+  it('drops the setup steps once every one of them is done', async () => {
+    renderPage(OrgRole.Owner);
+
+    await screen.findByText('STORAGE');
+    expect(screen.queryByText('QUICK SETUP')).not.toBeInTheDocument();
+  });
+
+  // None of the steps are available to a disabled account, and none of them is
+  // the step that restores it, so the card would only compete with the banner
+  // that names the one action that matters.
+  it('drops the setup steps on a disabled account, unfinished or not', async () => {
+    mockGetUsage.mockResolvedValue({ ...ONBOARDING, tenantStatus: 'disabled' });
+    renderPage(OrgRole.Owner);
+
+    await screen.findByText('STORAGE');
+    expect(screen.queryByText('QUICK SETUP')).not.toBeInTheDocument();
+  });
+
+  // Write-locked is a narrower state: reads still work and the account is not
+  // out of action, so onboarding still has something to say.
+  it('keeps the setup steps on a write-locked account', async () => {
+    mockGetUsage.mockResolvedValue({ ...ONBOARDING, tenantStatus: 'write-locked' });
+    renderPage(OrgRole.Owner);
+
+    expect(await screen.findByText('QUICK SETUP')).toBeInTheDocument();
   });
 });

@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CopySimpleIcon, DatabaseIcon, PlusIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { AccessKeysTable } from '../components/AccessKeysTable';
+import { Alert } from '../components/Alert';
 import { Button } from '../components/Button';
 import { Heading } from '../components/Heading/Heading';
 import { PageLayout } from '../components/PageLayout.js';
@@ -26,6 +27,7 @@ import { LIST_GC_TIME, LIST_STALE_TIME, queryKeys } from '../lib/query-client.js
 import { RequirePermission } from '../components/RequirePermission';
 import { useHasPermission } from '../lib/use-permissions.js';
 import { useKeyActionScope } from '../lib/use-key-scope.js';
+import { useAccountDisabled } from '../lib/use-account-disabled.js';
 
 // ---------------------------------------------------------------------------
 // Tab 1: Access Keys
@@ -135,8 +137,8 @@ function AccessKeysPanel({
 
   if (isError) {
     return (
-      <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-        {errorMessage ?? 'Failed to load access keys'}
+      <div className="mt-4">
+        <Alert variant="red" description={errorMessage ?? 'Failed to load access keys'} />
       </div>
     );
   }
@@ -488,6 +490,7 @@ export function ApiKeysPage() {
   // caller's own keys; `keys.manage_all` lifts that narrowing server-side and
   // asks nothing extra of this request. Revoking is per row.
   const { mayList, mayRevoke } = useKeyActionScope();
+  const accountDisabled = useAccountDisabled();
 
   const openCreateKey = () => void navigate({ to: '/api-keys/create' });
 
@@ -535,6 +538,31 @@ export function ApiKeysPage() {
     }
   }
 
+  // A disabled account gets the state and nothing else, the way the Buckets page
+  // already does it: one Alert, no Create action, no tabs. Every key on this page
+  // is refused while the account is disabled, and Connection details documents
+  // how to connect with credentials that currently cannot connect. Offering
+  // either is offering a way in that is not there. Restoring the account is the
+  // only move, and the shell's banner is already pointing at it.
+  //
+  // Deliberately narrower than `isError`: a transient keys failure keeps the
+  // behaviour below, where the panel carries the error and the static
+  // Connection details tab beside it survives.
+  if (accountDisabled) {
+    return (
+      <PageLayout
+        title="API Keys"
+        headingId="api-keys-heading"
+        description="Manage credentials and connect via S3-compatible API"
+      >
+        <Alert
+          variant="red"
+          description="Your subscription has been canceled. Please reactivate to regain access."
+        />
+      </PageLayout>
+    );
+  }
+
   // The whole page used to be replaced by a spinner or an error card. Both
   // states now live in the keys panel: the Connection details tab is static
   // documentation that works whatever the keys request did, and the action slot
@@ -548,8 +576,8 @@ export function ApiKeysPage() {
     >
       <Tabs>
         <TabList>
-          <Tab testId="api-keys-tab">
-            API keys {!isPending && keys.length > 0 && `(${keys.length})`}
+          <Tab testId="api-keys-tab" count={isPending ? undefined : keys.length}>
+            API keys
           </Tab>
           <Tab testId="connection-details-tab">Connection details</Tab>
         </TabList>

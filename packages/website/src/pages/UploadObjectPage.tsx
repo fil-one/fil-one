@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
+import { useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '../lib/query-client.js';
 import {
   ArrowLeftIcon,
   CloudArrowUpIcon,
@@ -369,6 +371,7 @@ export type UploadObjectPageProps = {
 
 export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { toast } = useToast();
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
 
@@ -376,6 +379,16 @@ export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) 
     bucketName,
     region,
     onSuccess: () => {
+      // The bucket this just wrote to now has a listing and a size that are one
+      // upload out of date, so say so before navigating back onto them. This
+      // used to ride on the objects query being stale on arrival by default;
+      // that is not something the destination page should have to guarantee for
+      // a write that happened here.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.bucketAnalytics(bucketName, region),
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
       void navigate({ to: '/buckets/$bucketName', params: { bucketName }, search: { region } });
     },
   });

@@ -15,6 +15,7 @@
 // Usage:
 //   node bin/fth-console-key.ts rotate <stage> [--org <orgId>] [--dry-run]
 //   node bin/fth-console-key.ts prune  <stage> [--org <orgId>] [--dry-run]
+//   node bin/fth-console-key.ts repair <stage> [--org <orgId>] [--dry-run]
 //
 //   node bin/fth-console-key.ts rotate staging --dry-run
 //   node bin/fth-console-key.ts rotate staging
@@ -37,10 +38,39 @@
 // `rotate` skips an org whose SSM-referenced key already carries the three
 // actions, so re-runs and tenants provisioned after the change are cheap.
 //
+// `rotate` writes SSM only after the new key answers a GET on its id and signs
+// an S3 ListBuckets. FTH answering the create with a 201 is not evidence the
+// key exists (see `repair` below), and a tenant whose verification fails keeps
+// signing with the key it already has.
+//
+// Every create carries an idempotency key that is fresh for the attempt. The
+// first version of this command derived one from the tenant id, and a re-run
+// then had FTH replay the stored 201 of the earlier create, handing back the
+// accessKeyId of a key the re-run had just deleted. A create FTH already
+// committed comes back as a name conflict, so nothing is lost by giving up the
+// replay.
+//
 // `prune` deletes v1 only for a tenant whose SSM-referenced key exists in FTH
 // and carries the three actions. Any other state means the rotation has not
 // landed for that tenant: it keeps its working v1 key, is reported, and makes
 // the command exit non-zero.
+//
+// `repair` handles one specific failure, seen in production on 2026-09-01: FTH
+// answered the create with a 201 and an accessKeyId, `rotate` wrote those
+// credentials to SSM, and the key does not exist. It is absent from the
+// tenant's key listing, a GET on the id returns 404, and it cannot sign an S3
+// request. The console keeps working only until the Lambda containers that
+// cached the pre-rotation credentials recycle.
+//
+// The v1 secret cannot be recovered (FTH returns a secret only on create), so
+// the repair is a new key. `repair` acts only on a tenant whose SSM-referenced
+// id FTH answers with a 404, creates a key named
+// `filone-console-v2-fix-<random>` under a matching idempotency key, and writes
+// SSM only after the new key answers a GET and signs an S3 ListBuckets. The
+// random suffix keeps the name off whatever state the failed create left behind
+// at FTH, which is what `rotate` cannot get past for such a tenant: it always
+// asks for the name `filone-console-v2`. `CreateAccessKeySchema` reserves the
+// whole `filone-console` prefix, so no customer key can hold either name.
 //
 // Environment:
 //   FTH_MANAGEMENT_API_URL    base URL of the FTH management API
@@ -59,11 +89,19 @@ import {
   ScanCommand,
   type AttributeValue,
 } from '@aws-sdk/client-dynamodb';
+import { ListBucketsCommand, S3Client } from '@aws-sdk/client-s3';
 import { PutParameterCommand, GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
-import { execFileSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+import { setTimeout as sleep } from 'node:timers/promises';
+import {
+  createFthManagementApi,
+  type FthAccessKey,
+  type FthAccessKeyWithSecret,
+} from './lib/fth-management.ts';
+import { findTable } from './lib/sst-state.ts';
 
 const USAGE =
-  'Usage: node bin/fth-console-key.ts <rotate|prune> <stage> [--org <orgId>] [--dry-run]';
+  'Usage: node bin/fth-console-key.ts <rotate|prune|repair> <stage> [--org <orgId>] [--dry-run]';
 
 // Inlined from packages/backend/src/lib/fth/fth-tenant-setup.ts — bin scripts
 // must not import from the backend or @filone/shared. Keep in sync with
@@ -104,26 +142,12 @@ const CONSOLE_KEY_NAME_V1 = 'filone-console';
 const CONSOLE_KEY_NAME_V2 = 'filone-console-v2';
 const CONSOLE_USER_CODE = 'filone-console';
 
-interface FthStorageUser {
-  id: string;
-  userCode: string;
-}
-
-interface FthAccessKey {
-  id?: string;
-  accessKeyId: string;
-  name: string;
-  permissions: string[];
-}
-
-interface FthAccessKeyWithSecret extends FthAccessKey {
-  secretAccessKey: string;
-}
-
 const command = process.argv[2];
 const stage = process.argv[3];
 
-if (command !== 'rotate' && command !== 'prune') usage(`Unknown command: ${command ?? '(none)'}`);
+if (command !== 'rotate' && command !== 'prune' && command !== 'repair') {
+  usage(`Unknown command: ${command ?? '(none)'}`);
+}
 if (!stage || stage.startsWith('--')) usage('Missing <stage>.');
 
 const orgFilter = readFlag('org');
@@ -156,7 +180,7 @@ console.error(`Command: ${command}${dryRun ? ' (dry run)' : ''}`);
 console.error(`Stage: ${stage}`);
 console.error(`FTH API: ${fthBaseUrl}`);
 
-const { tableName, region } = findUserInfoTable(stage);
+const { tableName, region } = findTable(stage, '::UserInfoTableTable');
 
 // `sst state export --stage X` is the only thing that ties this run to a stage,
 // so assert the resolved name matches rather than trusting the flag.
@@ -167,6 +191,7 @@ if (!tableName.includes(`filone-${stage}-`)) {
 
 console.error(`UserInfoTable: ${tableName} (region ${region})`);
 
+const fth = createFthManagementApi({ baseUrl: fthBaseUrl, token: fthToken });
 const dynamo = new DynamoDBClient({ region });
 const ssm = new SSMClient({ region });
 
@@ -182,7 +207,9 @@ for (const { orgId, tenantId } of tenants) {
     const didChange =
       command === 'rotate'
         ? await rotateTenant(orgId, tenantId)
-        : await pruneTenant(orgId, tenantId);
+        : command === 'prune'
+          ? await pruneTenant(orgId, tenantId)
+          : await repairTenant(orgId, tenantId);
     if (didChange) changed++;
     else skipped++;
   } catch (err) {
@@ -200,11 +227,7 @@ process.exit(failed > 0 ? 1 : 0);
 async function rotateTenant(orgId: string, tenantId: string): Promise<boolean> {
   const label = `org ${orgId} (tenant ${tenantId})`;
   const currentAccessKeyId = await readSsmAccessKeyId(tenantId);
-  const keys = await fthRequest<{ items?: FthAccessKey[] }>(
-    'GET',
-    `/management/v1/clients/${encodeURIComponent(tenantId)}/access-keys`,
-  );
-  const existingKeys = keys.items ?? [];
+  const existingKeys = await fth.listAccessKeys(tenantId);
   const currentKey = existingKeys.find((k) => k.accessKeyId === currentAccessKeyId);
 
   if (currentKey && hasMultipartActions(currentKey)) {
@@ -236,15 +259,15 @@ async function rotateTenant(orgId: string, tenantId: string): Promise<boolean> {
       `${label}: ${CONSOLE_KEY_NAME_V2} exists (${staleV2.accessKeyId}) but SSM points elsewhere — ` +
         'its secret is unrecoverable, deleting it.',
     );
-    if (!dryRun) await deleteAccessKey(tenantId, staleV2);
+    if (!dryRun) await fth.deleteAccessKey(tenantId, staleV2.accessKeyId);
   }
 
   const userId = await findConsoleStorageUserId(tenantId);
 
   if (dryRun) {
     console.error(
-      `${label}: [dry-run] would create ${CONSOLE_KEY_NAME_V2} on storage user ${userId} ` +
-        `and repoint ${ssmParameterName(tenantId)}`,
+      `${label}: [dry-run] would create ${CONSOLE_KEY_NAME_V2} on storage user ${userId}, ` +
+        `verify it, and repoint ${ssmParameterName(tenantId)}`,
     );
     return true;
   }
@@ -255,17 +278,17 @@ async function rotateTenant(orgId: string, tenantId: string): Promise<boolean> {
   // once the customer has freed a slot.
   const created = await createV2Key(tenantId, userId);
 
-  // A replayed idempotency key would hand back the key just deleted, and
-  // writing that to SSM would point the console at a dead credential.
+  // The create sends a fresh idempotency key, so FTH has nothing to replay
+  // here. Getting the just-deleted id back anyway names the problem better
+  // than the 404 `verifyNewKey` would report a moment later.
   if (staleV2 && created.accessKeyId === staleV2.accessKeyId) {
     throw new Error(
-      `FTH replayed the deleted key ${staleV2.accessKeyId} for the idempotency key. ` +
+      `FTH returned the deleted key ${staleV2.accessKeyId} for a create under a new idempotency key. ` +
         'SSM was not written; the tenant needs a key created by hand.',
     );
   }
-  if (!created.accessKeyId || !created.secretAccessKey) {
-    throw new Error('FTH returned no credentials for the new key; SSM was not written.');
-  }
+
+  await verifyNewKey(tenantId, CONSOLE_KEY_NAME_V2, created);
 
   await ssm.send(
     new PutParameterCommand({
@@ -280,8 +303,9 @@ async function rotateTenant(orgId: string, tenantId: string): Promise<boolean> {
   );
 
   console.error(
-    `${label}: created ${CONSOLE_KEY_NAME_V2} (${created.accessKeyId}) and repointed SSM. ` +
-      'Warm Lambda containers keep using the old key until they recycle.',
+    `${label}: created ${CONSOLE_KEY_NAME_V2} (${created.accessKeyId}), verified it against the ` +
+      'management API and S3, and repointed SSM. Warm Lambda containers keep using the old key ' +
+      'until they recycle.',
   );
   return true;
 }
@@ -290,11 +314,7 @@ async function rotateTenant(orgId: string, tenantId: string): Promise<boolean> {
 async function pruneTenant(orgId: string, tenantId: string): Promise<boolean> {
   const label = `org ${orgId} (tenant ${tenantId})`;
   const currentAccessKeyId = await readSsmAccessKeyId(tenantId);
-  const keys = await fthRequest<{ items?: FthAccessKey[] }>(
-    'GET',
-    `/management/v1/clients/${encodeURIComponent(tenantId)}/access-keys`,
-  );
-  const existingKeys = keys.items ?? [];
+  const existingKeys = await fth.listAccessKeys(tenantId);
   const v1 = existingKeys.find((k) => k.name === CONSOLE_KEY_NAME_V1);
 
   if (!v1) {
@@ -337,19 +357,97 @@ async function pruneTenant(orgId: string, tenantId: string): Promise<boolean> {
     return true;
   }
 
-  await deleteAccessKey(tenantId, v1);
+  await fth.deleteAccessKey(tenantId, v1.accessKeyId);
   console.error(`${label}: deleted ${CONSOLE_KEY_NAME_V1} (${v1.accessKeyId}).`);
+  return true;
+}
+
+/**
+ * Returns true when a replacement key was created for this tenant.
+ *
+ * Narrow on purpose: the only state it acts on is SSM naming a key FTH answers
+ * with a 404. Every other shape of "not rotated" is `rotate`'s job, and the v1
+ * key still works in all of them.
+ */
+async function repairTenant(orgId: string, tenantId: string): Promise<boolean> {
+  const label = `org ${orgId} (tenant ${tenantId})`;
+  const currentAccessKeyId = await readSsmAccessKeyId(tenantId);
+  if (!currentAccessKeyId) {
+    console.error(
+      `${label}: ${ssmParameterName(tenantId)} holds no accessKeyId — run \`rotate\` for this tenant.`,
+    );
+    return false;
+  }
+
+  const existingKeys = await fth.listAccessKeys(tenantId);
+  const currentKey = existingKeys.find((k) => k.accessKeyId === currentAccessKeyId);
+  if (currentKey) {
+    console.error(
+      hasMultipartActions(currentKey)
+        ? `${label}: SSM points at ${currentKey.name} (${currentAccessKeyId}), which FTH lists — nothing to repair.`
+        : `${label}: SSM points at ${currentKey.name} (${currentAccessKeyId}), which lacks the multipart actions — run \`rotate\` for this tenant.`,
+    );
+    return false;
+  }
+
+  // Absence from the listing is not enough on its own — a truncated page looks
+  // the same. Only a 404 on the id says FTH has no such key.
+  if (await fth.accessKeyExists(tenantId, currentAccessKeyId)) {
+    console.error(
+      `${label}: FTH has ${currentAccessKeyId} but leaves it out of the tenant's listing. ` +
+        'The console credential works, so nothing is repaired here; `prune` cannot verify this tenant.',
+    );
+    return false;
+  }
+
+  if (dryRun) {
+    console.error(
+      `${label}: [dry-run] SSM points at ${currentAccessKeyId}, which FTH does not have. Would create ` +
+        `${CONSOLE_KEY_NAME_V2}-fix-<random>, verify it, and repoint ${ssmParameterName(tenantId)}.`,
+    );
+    return true;
+  }
+
+  const keyName = `${CONSOLE_KEY_NAME_V2}-fix-${randomBytes(3).toString('hex')}`;
+  const userId = await findConsoleStorageUserId(tenantId);
+  const created = await createRepairKey(tenantId, userId, keyName);
+
+  await verifyNewKey(tenantId, keyName, created);
+
+  await ssm.send(
+    new PutParameterCommand({
+      Name: ssmParameterName(tenantId),
+      Value: JSON.stringify({
+        accessKeyId: created.accessKeyId,
+        secretAccessKey: created.secretAccessKey,
+      }),
+      Type: 'SecureString',
+      Overwrite: true,
+    }),
+  );
+
+  console.error(
+    `${label}: created ${keyName} (${created.accessKeyId}), verified it against the management API ` +
+      'and S3, and repointed SSM. Warm Lambda containers keep using their cached credentials until they recycle.',
+  );
+
+  // `prune` matches the SSM-referenced key against the listing, so a key FTH
+  // holds but does not list leaves this tenant unprunable.
+  const relisted = await fth.listAccessKeys(tenantId);
+  if (!relisted.some((k) => k.accessKeyId === created.accessKeyId)) {
+    console.error(
+      `${label}: the new key is missing from the tenant's key listing. The console works; ` +
+        '`prune` will refuse this tenant until FTH lists it.',
+    );
+  }
   return true;
 }
 
 // ── FTH API ─────────────────────────────────────────────────────
 
 async function findConsoleStorageUserId(tenantId: string): Promise<string> {
-  const users = await fthRequest<{ items?: FthStorageUser[] }>(
-    'GET',
-    `/management/v1/clients/${encodeURIComponent(tenantId)}/storage-users`,
-  );
-  const user = (users.items ?? []).find((u) => u.userCode === CONSOLE_USER_CODE);
+  const users = await fth.listStorageUsers(tenantId);
+  const user = users.find((u) => u.userCode === CONSOLE_USER_CODE);
   if (!user) {
     throw new Error(`No storage user with userCode "${CONSOLE_USER_CODE}" on tenant ${tenantId}`);
   }
@@ -360,25 +458,17 @@ async function findConsoleStorageUserId(tenantId: string): Promise<string> {
 // failed and what the operator does about it.
 async function createV2Key(tenantId: string, userId: string): Promise<FthAccessKeyWithSecret> {
   try {
-    return await fthRequest<FthAccessKeyWithSecret>(
-      'POST',
-      `/management/v1/clients/${encodeURIComponent(tenantId)}/storage-users/` +
-        `${encodeURIComponent(userId)}/access-keys`,
-      {
-        body: {
-          name: CONSOLE_KEY_NAME_V2,
-          permissions: FTH_FULL_PERMISSIONS,
-          buckets: [],
-          expiresAt: null,
-        },
-        // Not the key tenant setup sent for this tenant: that one is bound to
-        // the payload of the original create, so replaying it with the v2 name
-        // and actions would 409. FTH client ids are unique across the
-        // deployment all non-production stages share, so the tenant id alone
-        // pins the target.
-        idempotencyKey: `console-key-v2-${tenantId}`,
-      },
-    );
+    return await fth.createAccessKey(tenantId, userId, {
+      name: CONSOLE_KEY_NAME_V2,
+      permissions: FTH_FULL_PERMISSIONS,
+      // Fresh on every attempt. A key reused across runs made FTH replay the
+      // stored 201 of an earlier create — including the accessKeyId of a key
+      // this command had since deleted, which is how production ended up
+      // pointing at credentials nobody holds. Nothing needs the replay:
+      // access-key names are unique within a tenant, so a create FTH already
+      // committed comes back as a name conflict instead of a second key.
+      idempotencyKey: `console-key-v2-${tenantId}-${randomBytes(4).toString('hex')}`,
+    });
   } catch (err) {
     throw new Error(
       `could not create ${CONSOLE_KEY_NAME_V2} — ${formatError(err)}. ` +
@@ -387,40 +477,89 @@ async function createV2Key(tenantId: string, userId: string): Promise<FthAccessK
   }
 }
 
-async function deleteAccessKey(tenantId: string, key: FthAccessKey): Promise<void> {
-  // FTH addresses a key by its accessKeyId; `id` is present on some responses
-  // and is the same value.
-  await fthRequest<void>(
-    'DELETE',
-    `/management/v1/clients/${encodeURIComponent(tenantId)}/access-keys/` +
-      `${encodeURIComponent(key.accessKeyId)}`,
-  );
+async function createRepairKey(
+  tenantId: string,
+  userId: string,
+  keyName: string,
+): Promise<FthAccessKeyWithSecret> {
+  try {
+    return await fth.createAccessKey(tenantId, userId, {
+      name: keyName,
+      permissions: FTH_FULL_PERMISSIONS,
+      // Derived from the random name, so no repair run can replay another
+      // one's response. `console-key-v2-<tenantId>` is the record that hands
+      // back the phantom key and must not be reused here.
+      idempotencyKey: `console-key-repair-${keyName}`,
+    });
+  } catch (err) {
+    throw new Error(`could not create ${keyName} — ${formatError(err)}. SSM was not written.`);
+  }
 }
 
-async function fthRequest<T>(
-  method: string,
-  path: string,
-  opts: { body?: unknown; idempotencyKey?: string } = {},
-): Promise<T> {
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${fthToken}`,
-    Accept: 'application/json',
-  };
-  if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
-  if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
+/**
+ * Throws unless the key FTH says it created is real and can sign. A create that
+ * reports success and persists nothing is the production failure of
+ * 2026-09-01, and a 201 is not evidence on its own: the id has to answer a GET
+ * and the credentials have to sign an S3 request before the console is pointed
+ * at them.
+ */
+async function verifyNewKey(
+  tenantId: string,
+  keyName: string,
+  created: FthAccessKeyWithSecret,
+): Promise<void> {
+  if (!created.accessKeyId || !created.secretAccessKey) {
+    throw new Error('FTH returned no credentials for the new key; SSM was not written.');
+  }
+  if (!(await fth.accessKeyExists(tenantId, created.accessKeyId))) {
+    throw new Error(
+      `FTH created ${keyName} (${created.accessKeyId}) and then 404s on it. SSM was not written; ` +
+        'the tenant keeps signing with the key it has. Report the id to FTH before retrying ' +
+        'this tenant.',
+    );
+  }
+  await verifyS3Access(keyName, created);
+}
 
-  const response = await fetch(`${fthBaseUrl}${path}`, {
-    method,
-    headers,
-    body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+// ── S3 data plane ───────────────────────────────────────────────
+
+/**
+ * Signs one request with the new credentials. The management API answering a
+ * GET is not proof the key reached the S3 gateway, and a key that cannot sign
+ * is the whole failure this verification exists for.
+ */
+async function verifyS3Access(keyName: string, key: FthAccessKeyWithSecret): Promise<void> {
+  const s3 = new S3Client({
+    region: 'us-east-1',
+    endpoint: getFthS3Endpoint(stage),
+    credentials: { accessKeyId: key.accessKeyId, secretAccessKey: key.secretAccessKey },
   });
 
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`FTH ${method} ${path} → ${response.status}: ${text.slice(0, 500)}`);
+  // A fresh key takes a moment to propagate to the gateway; a valid key lists
+  // buckets, an unknown one is denied.
+  const attempts = 5;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await s3.send(new ListBucketsCommand({}));
+      return;
+    } catch (err) {
+      if (attempt === attempts) {
+        throw new Error(
+          `${keyName} (${key.accessKeyId}) cannot sign an S3 request after ${attempts} attempts — ` +
+            `${formatError(err)}. SSM was not written.`,
+        );
+      }
+      await sleep(2000);
+    }
   }
-  if (!text) return undefined as T;
-  return JSON.parse(text) as T;
+}
+
+// Mirrors getS3Endpoint(S3Region.UsEast1, stage) in
+// packages/shared/src/constants.ts, as bin/fth-s3-env.ts does.
+function getFthS3Endpoint(stage: string): string {
+  return stage === 'production'
+    ? 'https://us-east-1.s3.filonecontent.com'
+    : 'https://us-east-1.fortilyx.com';
 }
 
 // ── AWS lookups ─────────────────────────────────────────────────
@@ -515,44 +654,6 @@ async function readSsmAccessKeyId(tenantId: string): Promise<string | undefined>
 
 function ssmParameterName(tenantId: string): string {
   return `/filone/${stage}/fth-s3/access-key/${tenantId}`;
-}
-
-function findUserInfoTable(stage: string): { tableName: string; region: string } {
-  // The SST `UserInfoTable` Dynamo component creates a single underlying table
-  // whose URN ends with `::UserInfoTableTable`.
-  const json = execFileSync('pnpm', ['exec', 'sst', 'state', 'export', '--stage', stage], {
-    encoding: 'utf8',
-    maxBuffer: 256 * 1024 * 1024,
-    stdio: ['ignore', 'pipe', 'inherit'],
-  });
-
-  const resources: Array<{ type: string; urn: string; outputs?: { name?: string; arn?: string } }> =
-    JSON.parse(json).latest?.resources ?? [];
-
-  const table = resources.find(
-    (r) => r.type === 'aws:dynamodb/table:Table' && r.urn.endsWith('::UserInfoTableTable'),
-  );
-
-  if (!table?.outputs?.name) {
-    console.error(`Could not find UserInfoTable in SST state for stage "${stage}".`);
-    process.exit(1);
-  }
-
-  return { tableName: table.outputs.name, region: resolveRegion(stage, table.outputs.arn) };
-}
-
-function resolveRegion(stage: string, tableArn: string | undefined): string {
-  // The deployment home region is fixed for production/staging (see
-  // sst.config.ts); dev stages can deploy anywhere, so read the region from
-  // the table ARN (arn:aws:dynamodb:<region>:<account>:table/<name>).
-  if (stage === 'production' || stage === 'staging') return 'us-east-2';
-
-  const region = tableArn?.split(':')[3];
-  if (!region) {
-    console.error(`Could not parse the region from the table ARN: ${tableArn}`);
-    process.exit(1);
-  }
-  return region;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────

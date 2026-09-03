@@ -22,17 +22,12 @@ import { IconBox } from '../components/IconBox';
 import { ProgressBar } from '../components/ProgressBar';
 import { formatBytes } from '@filone/shared';
 
-import {
-  getActivityActionLabel,
-  PlanId,
-  SubscriptionStatus,
-  TB_BYTES,
-  getUsageLimits,
-} from '@filone/shared';
+import { getActivityActionLabel, PlanId, SubscriptionStatus, getUsageLimits } from '@filone/shared';
 import type { RecentActivity } from '@filone/shared';
 
 import { getUsage, getBilling, getActivity } from '../lib/api.js';
 import { daysUntil, formatDateTime, timeAgo } from '../lib/time.js';
+import { costDisclosure, formatCents, planTitle, pricingLine } from '../lib/billing-view.js';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { RequirePermission } from '../components/RequirePermission';
 import { useHasPermission } from '../lib/use-permissions.js';
@@ -40,19 +35,6 @@ import { useHasPermission } from '../lib/use-permissions.js';
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function planDisplayName(planId: PlanId): string {
-  switch (planId) {
-    case PlanId.FreeTrial:
-      return 'Free trial';
-    case PlanId.PayAsYouGo:
-      return 'Pay as you go';
-    case PlanId.None:
-      return 'No plan';
-    default:
-      return 'Unknown';
-  }
-}
 
 function statusBadgeProps(status: SubscriptionStatus): { label: string; color: BadgeColor } {
   switch (status) {
@@ -75,12 +57,6 @@ function statusBadgeProps(status: SubscriptionStatus): { label: string; color: B
       return { label: String(_never), color: 'grey' };
     }
   }
-}
-
-function estimateMonthlyCost(usedBytes: number, pricePerTbCents: number, minimumCents = 0): string {
-  const tb = usedBytes / TB_BYTES;
-  const cents = Math.max(minimumCents, Math.round(tb * pricePerTbCents));
-  return `$${(cents / 100).toFixed(2)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -162,14 +138,19 @@ export function DashboardPage() {
     ? `Expires ${formatDateTime(billing.subscription.trialEndsAt)}`
     : undefined;
 
+  // Quick setup is onboarding: it tells a new account what to do next. A
+  // disabled account cannot do any of it, and the steps it lists are not the
+  // step that gets the account back, so it competes with the banner that names
+  // the one action that matters. Restoring access is the only next step there.
   const showQuickSetup =
-    usage.buckets.count === 0 || usage.objects.count === 0 || usage.accessKeys.count === 0;
+    usage.tenantStatus !== 'disabled' &&
+    (usage.buckets.count === 0 || usage.objects.count === 0 || usage.accessKeys.count === 0);
 
   const badge = billing ? statusBadgeProps(billing.subscription.status) : null;
-  const pricePerTbCents = billing?.subscription.planId === PlanId.PayAsYouGo ? 499 : 0;
-  // Per-org monthly minimum from the backend; 0 for grandfathered accounts and
-  // trial/free plans, so their estimate is never floored.
-  const monthlyMinimumCents = billing?.subscription.monthlyMinimumCents ?? 0;
+  // The rate comes from the price the org is billed on. This card used to
+  // multiply by a hardcoded $4.99 per TB, so an org on a quoted price was shown
+  // an estimate for a rate it does not pay.
+  const cost = billing ? costDisclosure(billing.subscription, usage.storage.usedBytes) : null;
 
   const limits = getUsageLimits(isActivePaid);
   const storagePct =
@@ -324,7 +305,7 @@ export function DashboardPage() {
                 </span>
               </div>
               <span className="text-xl font-medium text-zinc-900">
-                {planDisplayName(billing.subscription.planId)}
+                {planTitle(billing.subscription)}
               </span>
               {isTrialing && (
                 <p className="mt-0.5 text-[11px] text-zinc-500">
@@ -337,8 +318,10 @@ export function DashboardPage() {
                   Choose a plan to start storing data
                 </p>
               )}
-              {isPayAsYouGo && (
-                <p className="mt-0.5 text-[11px] text-zinc-500">$4.99/TB · no egress fees</p>
+              {isPayAsYouGo && billing && (
+                <p className="mt-0.5 text-[11px] text-zinc-500">
+                  {pricingLine(billing.subscription)} · no egress fees
+                </p>
               )}
             </div>
             <div>
@@ -369,11 +352,13 @@ export function DashboardPage() {
             </div>
           </div>
           {isTrialing && <ProgressBar value={storagePct} size="sm" label="Storage usage" />}
-          {isPayAsYouGo && (
+          {/* Only where the price states a rate. A quoted price has no single
+              per-TB number, and the Billing tab is where that total lives. */}
+          {cost?.kind === 'estimate' && (
             <div className="flex items-center justify-between border-t border-zinc-200 pt-3">
               <span className="text-[11px] text-zinc-500">Est. monthly cost</span>
               <span className="text-[13px] font-medium text-zinc-900">
-                {estimateMonthlyCost(usage.storage.usedBytes, pricePerTbCents, monthlyMinimumCents)}
+                {formatCents(cost.cents)}
               </span>
             </div>
           )}
