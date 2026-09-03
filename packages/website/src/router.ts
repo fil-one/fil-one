@@ -7,6 +7,7 @@ import { Route as signUpRoute } from './routes/_auth/sign-up.js';
 import { Route as loginErrorRoute } from './routes/_auth/login-error.js';
 import { Route as appRoute } from './routes/_app.js';
 import { Route as dashboardRoute } from './routes/_app/dashboard.js';
+import { Route as newOrgRoute } from './routes/_app/new.js';
 import { Route as bucketsRoute } from './routes/_app/buckets.js';
 import { Route as createBucketRoute } from './routes/_app/buckets.create.js';
 import { Route as bucketDetailRoute } from './routes/_app/buckets.$bucketName.js';
@@ -36,6 +37,7 @@ const routeTree = rootRoute.addChildren([
   authRoute.addChildren([signInRoute, signUpRoute, loginErrorRoute]),
   appRoute.addChildren([
     dashboardRoute,
+    newOrgRoute,
     bucketsRoute,
     createBucketRoute,
     bucketDetailRoute,

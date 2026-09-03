@@ -42,7 +42,7 @@ function WelcomeRoute() {
     <WelcomePage
       suggestedName={me?.orgName ?? ''}
       email={me?.email}
-      onNamed={() => void navigate({ to: '/dashboard' })}
+      onNamed={() => void navigate({ to: '/new' })}
     />
   );
 }
