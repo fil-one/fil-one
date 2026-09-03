@@ -180,7 +180,10 @@ export function SidebarNav({
   return (
     <div className="h-full">
       <nav
-        className={`relative flex h-full flex-col border-zinc-200 bg-white ${showUserProfile ? 'border-r' : 'border-l'}`}
+        // No background or border of its own: on desktop it sits on the app's
+        // white canvas beside the inset content panel (the panel carries the
+        // chrome now). The mobile drawer supplies its own white background.
+        className="relative flex h-full flex-col"
       >
         {/* Header (desktop only): a slim toolbar row carrying the collapse
             toggle, above the full-width org switcher. The toggle sits here
