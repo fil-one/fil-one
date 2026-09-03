@@ -1,3 +1,4 @@
+import validator from 'validator';
 import { DELETION_CODE_TTL_MINUTES } from '@filone/shared';
 import { sendMail } from './mailer.js';
 
@@ -26,7 +27,7 @@ export async function sendDeletionCodeEmail(params: {
     "If you didn't request this, ignore this email and consider changing your password.",
   ].join('\n');
   const html = `
-    <p>You requested to permanently delete your Fil One account and organization <strong>${escapeHtml(params.orgName)}</strong>.</p>
+    <p>You requested to permanently delete your Fil One account and organization <strong>${validator.escape(params.orgName)}</strong>.</p>
     <p>Your verification code is:</p>
     <p style="font-size:28px;font-weight:bold;letter-spacing:6px;font-family:monospace">${params.code}</p>
     <p>This code expires in ${DELETION_CODE_TTL_MINUTES} minutes.</p>
@@ -57,13 +58,4 @@ export async function sendDeletionCodeEmail(params: {
       ? `SendGrid send failed (${result.status}): ${result.body}`
       : 'SendGrid send failed',
   );
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
 }
