@@ -13,28 +13,17 @@ import { getOrchestratorForRegion } from './service-orchestrator-registry.js';
  * key it did revoke recorded. The caller writes the role only after this
  * returns clean, which is what keeps a member's authority from ever being wider
  * at a storage vendor than the role that authorized it.
+ *
+ * The pass halts at the first refusal. Nothing has committed yet, so the change
+ * will not either, and revoking further buys nothing: the retry is the same
+ * request, which finds fewer keys.
  */
 export interface RevocationOutcome {
   /** Revoked and delisted, in the order the pass ran. */
   revoked: AccessKeySummary[];
-  /**
-   * Still live, because a vendor refused. Under `stop` this holds the one key
-   * the pass halted on and the caller leaves the membership unchanged; under
-   * `continue` it holds every key the vendor refused, which is what an admin
-   * needs when the membership has already moved.
-   */
-  failed: AccessKeySummary[];
+  /** The key a vendor refused, which halted the pass. Absent when all went. */
+  refused?: AccessKeySummary;
 }
-
-/**
- * What a refusal means for the rest of the pass.
- *
- * `stop` before the membership write: the change will not commit, so there is
- * nothing to be gained by revoking further and the retry is the same request.
- * `continue` after it: the member already holds the narrower role, so every key
- * still above it should go, and the ones that will not have to be named.
- */
-export type OnRevocationFailure = 'stop' | 'continue';
 
 export async function revokeMemberKeys({
   orgId,
@@ -42,7 +31,6 @@ export async function revokeMemberKeys({
   keys,
   actor,
   reason,
-  onFailure = 'stop',
 }: {
   orgId: string;
   /** Read once, so several orchestrators resolve their tenant from one row. */
@@ -51,10 +39,9 @@ export async function revokeMemberKeys({
   /** Who asked. On a role change this is the admin, never the key's holder. */
   actor: AuditActor;
   reason: RevocationTrigger;
-  onFailure?: OnRevocationFailure;
 }): Promise<RevocationOutcome> {
   const revoked: AccessKeySummary[] = [];
-  const failed: AccessKeySummary[] = [];
+  let refused: AccessKeySummary | undefined;
 
   for (const key of keys) {
     const summary = summarizeAccessKey(key);
@@ -83,38 +70,12 @@ export async function revokeMemberKeys({
         region: key.region,
         keyIdSuffix: summary.accessKeyIdSuffix,
         revoked: revoked.length,
-        stopping: onFailure === 'stop',
         error,
       });
-      failed.push(summary);
-      if (onFailure === 'stop') break;
+      refused = summary;
+      break;
     }
   }
 
-  return { revoked, failed };
-}
-
-/**
- * Work whose failure must not become the caller's failure.
- *
- * Used for the tail of a membership change, after the write has committed:
- * answering with an error there would send the caller into a retry that finds
- * the work already done — the role where they wanted it, the member gone, the
- * seat moved — while the thing that actually failed was a notification. So it
- * is logged and swallowed, and the response reflects the write.
- */
-export async function bestEffort<T>(
-  what: () => Promise<T>,
-  fallback: T,
-  context: { source: string; orgId: string },
-): Promise<T> {
-  try {
-    return await what();
-  } catch (error) {
-    console.error(`[${context.source}] The pass after the write did not finish`, {
-      orgId: context.orgId,
-      error,
-    });
-    return fallback;
-  }
+  return { revoked, ...(refused ? { refused } : {}) };
 }

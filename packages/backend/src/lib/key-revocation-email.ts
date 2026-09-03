@@ -1,8 +1,10 @@
-import { REGION_LABELS, formatRegion } from '@filone/shared';
+import { formatRegion } from '@filone/shared';
 import type { OrgRole, AccessKeySummary } from '@filone/shared';
 import validator from 'validator';
 import { sendMail } from './mailer.js';
+import type { OrgProfileItem } from './org-profile.js';
 import { readUserProfile } from './user-profile.js';
+import { withFallback } from './with-fallback.js';
 
 /**
  * Tell a member which of their access keys stopped working.
@@ -34,6 +36,46 @@ export type RevocationCause =
   /** The change was refused after these keys had already gone. */
   | { kind: 'change_failed' };
 
+/**
+ * The form every membership change tells the member through. The send cannot
+ * fail the request, since everything it reports has already happened; and the
+ * org is named from the profile row the change already read, falling back when
+ * that row is missing rather than leaving a hole in the sentence.
+ */
+export async function notifyRevokedKeys({
+  orgId,
+  orgProfile,
+  userId,
+  changedBy,
+  revoked,
+  cause,
+  source,
+}: {
+  orgId: string;
+  orgProfile: OrgProfileItem | undefined;
+  /** The member whose keys went. */
+  userId: string;
+  /** The admin who made the change, by verified email or by id. */
+  changedBy: string;
+  revoked: readonly AccessKeySummary[];
+  cause: RevocationCause;
+  /** The caller's log prefix, so a failed send is filed under the change. */
+  source: string;
+}): Promise<void> {
+  await withFallback(
+    () =>
+      sendKeyRevocationEmail({
+        userId,
+        orgName: orgProfile?.name?.S ?? 'your organization',
+        keys: revoked,
+        cause,
+        changedBy,
+      }),
+    undefined,
+    { source, orgId },
+  );
+}
+
 export async function sendKeyRevocationEmail({
   userId,
   orgName,
@@ -64,17 +106,17 @@ export async function sendKeyRevocationEmail({
       keys.length === 1
         ? `An access key of yours in ${orgName} was revoked and has stopped working.`
         : `${keys.length} access keys of yours in ${orgName} were revoked and have stopped working.`,
-    why: why(cause, orgName),
+    cause: causeSentence(cause, orgName),
     changedBy: `Changed by ${changedBy}.`,
-    nextStep: nextStep(cause),
+    nextStep: nextStepSentence(cause),
   };
 
   await sendMail(
     {
       to: email,
       subject: `Your access keys in ${orgName} were revoked`,
-      text: textBody(lines, keys),
-      html: htmlBody(lines, keys),
+      text: buildTextBody(lines, keys),
+      html: buildHtmlBody(lines, keys),
       fromName: 'Fil One',
     },
     {
@@ -84,7 +126,7 @@ export async function sendKeyRevocationEmail({
   );
 }
 
-function why(cause: RevocationCause, orgName: string): string {
+function causeSentence(cause: RevocationCause, orgName: string): string {
   switch (cause.kind) {
     case 'role_changed':
       return `Your role in ${orgName} changed from ${cause.previousRole} to ${cause.role}, and an access key cannot carry more than the role that holds it.`;
@@ -98,7 +140,7 @@ function why(cause: RevocationCause, orgName: string): string {
   }
 }
 
-function nextStep(cause: RevocationCause): string {
+function nextStepSentence(cause: RevocationCause): string {
   return cause.kind === 'removed'
     ? 'Ask an owner or admin of that organization if you still need access.'
     : 'Create a new key with the permissions your role allows, then point your client at it.';
@@ -107,38 +149,37 @@ function nextStep(cause: RevocationCause): string {
 /** A key as both bodies name it: what it was called, which one it was, and where. */
 function describeKey(key: AccessKeySummary): string {
   const suffix = key.accessKeyIdSuffix ? ` (…${key.accessKeyIdSuffix})` : '';
-  const region = REGION_LABELS[key.region] ? formatRegion(key.region) : key.region;
-  return `${key.keyName}${suffix} — ${region}, created ${key.createdAt.slice(0, 10)}`;
+  return `${key.keyName}${suffix} — ${formatRegion(key.region)}, created ${key.createdAt.slice(0, 10)}`;
 }
 
 interface BodyLines {
   opening: string;
-  why: string;
+  cause: string;
   changedBy: string;
   nextStep: string;
 }
 
-function textBody(lines: BodyLines, keys: readonly AccessKeySummary[]): string {
+function buildTextBody(lines: BodyLines, keys: readonly AccessKeySummary[]): string {
   return [
     lines.opening,
     '',
     ...keys.map((key) => `  - ${describeKey(key)}`),
     '',
-    lines.why,
+    lines.cause,
     lines.changedBy,
     '',
     lines.nextStep,
   ].join('\n');
 }
 
-function htmlBody(lines: BodyLines, keys: readonly AccessKeySummary[]): string {
-  const esc = (value: string) => validator.escape(value);
+function buildHtmlBody(lines: BodyLines, keys: readonly AccessKeySummary[]): string {
+  const esc = validator.escape;
   return [
     `<p>${esc(lines.opening)}</p>`,
     '<ul>',
     ...keys.map((key) => `<li>${esc(describeKey(key))}</li>`),
     '</ul>',
-    `<p>${esc(lines.why)} ${esc(lines.changedBy)}</p>`,
+    `<p>${esc(lines.cause)} ${esc(lines.changedBy)}</p>`,
     `<p>${esc(lines.nextStep)}</p>`,
   ].join('\n');
 }

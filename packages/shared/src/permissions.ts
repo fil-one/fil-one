@@ -182,12 +182,6 @@ export function canManageTargetRole(actorRole: string, targetRole: string): bool
 }
 
 /**
- * Whether an actor may move a member from one role to another. A role change is
- * two reaches — at the member as they are and at the member as they would be —
- * so both must clear the ceiling: an Admin can neither demote an Owner nor
- * promote anyone to Owner.
- */
-/**
  * Whether moving from one role to another takes a permission away.
  *
  * A widening can strand nothing: every key its holder could mint before, they
@@ -209,6 +203,12 @@ export function roleNarrows(fromRole: string, toRole: string): boolean {
  */
 export const NO_ROLE = '';
 
+/**
+ * Whether an actor may move a member from one role to another. A role change is
+ * two reaches — at the member as they are and at the member as they would be —
+ * so both must clear the ceiling: an Admin can neither demote an Owner nor
+ * promote anyone to Owner.
+ */
 export function canChangeRole(actorRole: string, fromRole: string, toRole: string): boolean {
   return canManageTargetRole(actorRole, fromRole) && canManageTargetRole(actorRole, toRole);
 }

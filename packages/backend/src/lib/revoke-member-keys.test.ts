@@ -42,14 +42,13 @@ function keyToRevoke(id: string): AccessKeyToRevoke {
 
 const KEYS = [keyToRevoke('0001'), keyToRevoke('0002'), keyToRevoke('0003')];
 
-function revoke(onFailure?: 'stop' | 'continue') {
+function revoke() {
   return revokeMemberKeys({
     orgId: ORG_ID,
     orgProfile: undefined,
     keys: KEYS,
     actor: ACTOR,
     reason: 'role_narrowing',
-    ...(onFailure ? { onFailure } : {}),
   });
 }
 
@@ -62,47 +61,33 @@ beforeEach(() => {
 
 describe('revokeMemberKeys', () => {
   it('revokes every key in order when nothing refuses', async () => {
+    // `refused` is absent rather than undefined, like every other optional
+    // field a pass builds.
     expect(await revoke()).toStrictEqual({
       revoked: KEYS.map((key) => expect.objectContaining({ id: key.id })),
-      failed: [],
     });
   });
 
-  it('stops at the first refusal before the membership write', async () => {
+  it('stops at the first refusal', async () => {
     // Nothing has committed yet, so the caller leaves the role alone and the
     // retry is the same request. Revoking further buys nothing.
     mockRevokeAccessKey.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('down'));
 
-    const outcome = await revoke('stop');
+    const outcome = await revoke();
 
     expect(outcome.revoked.map((key) => key.id)).toStrictEqual(['0001']);
-    expect(outcome.failed.map((key) => key.id)).toStrictEqual(['0002']);
+    expect(outcome.refused?.id).toBe('0002');
     expect(mockRevokeAccessKey).toHaveBeenCalledTimes(2);
-  });
-
-  it('carries on past a refusal after the membership write, and names them all', async () => {
-    // The member already holds the narrower role, so every key still above it
-    // should go and the ones that will not have to be named.
-    mockRevokeAccessKey
-      .mockRejectedValueOnce(new Error('down'))
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error('down'));
-
-    const outcome = await revoke('continue');
-
-    expect(outcome.revoked.map((key) => key.id)).toStrictEqual(['0002']);
-    expect(outcome.failed.map((key) => key.id)).toStrictEqual(['0001', '0003']);
-    expect(mockRevokeAccessKey).toHaveBeenCalledTimes(3);
   });
 
   it('treats a region with no tenant as a refusal rather than a crash', async () => {
     // Nothing to revoke at, which is a key still live like any other refusal.
     tenantReady = false;
 
-    const outcome = await revoke('continue');
+    const outcome = await revoke();
 
     expect(outcome.revoked).toStrictEqual([]);
-    expect(outcome.failed.map((key) => key.id)).toStrictEqual(['0001', '0002', '0003']);
+    expect(outcome.refused?.id).toBe('0001');
     expect(mockRevokeAccessKey).not.toHaveBeenCalled();
   });
 });

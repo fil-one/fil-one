@@ -10,22 +10,16 @@ import {
   roleNarrows,
 } from '@filone/shared';
 import type {
-  ErrorResponse,
   OrgRole,
   AccessKeySummary,
   UpdateMemberRoleFailure,
   UpdateMemberRoleResponse,
 } from '@filone/shared';
-import {
-  AuditSubjects,
-  auditEvent,
-  commitAudited,
-  twoPhaseAudit,
-  userActor,
-} from '../lib/audit.js';
+import { AuditSubjects, userActor } from '../lib/audit.js';
+import { commitAfterRevoking } from '../lib/commit-after-revoking.js';
 import { reviewMemberAccessKeysForRole } from '../lib/member-keys.js';
-import { sendKeyRevocationEmail } from '../lib/key-revocation-email.js';
-import { bestEffort, revokeMemberKeys } from '../lib/revoke-member-keys.js';
+import type { AccessKeyToRevoke } from '../lib/member-keys.js';
+import { notifyRevokedKeys } from '../lib/key-revocation-email.js';
 import {
   pendingInvitationsFrom,
   planRevocations,
@@ -33,29 +27,32 @@ import {
   revokeDeferred,
 } from '../lib/invitations.js';
 import type { InvitationRecord } from '../lib/invitations.js';
+import { requireManageableMember } from '../lib/manageable-member.js';
 import {
   cancelledLabels,
   ownerCountDeltaFor,
   ownerCountItem,
   roleChangeItems,
 } from '../lib/membership-changes.js';
-import { readOwnerCount, resolveMembership } from '../lib/org-membership.js';
+import { readOwnerCount } from '../lib/org-membership.js';
 import {
   OrgDeletingError,
   getOrgProfile,
   isGuardRejection,
   orgNotDeletingCheck,
 } from '../lib/org-profile.js';
+import type { OrgProfileItem } from '../lib/org-profile.js';
 import { parseJsonBody } from '../lib/parse-json-body.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
-import type { AuditActor } from '@filone/shared';
-import type { OrgProfileItem } from '../lib/org-profile.js';
+import type { ErrorWithRevokedKeys } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { authorize } from '../middleware/authorize.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+
+const SOURCE = 'update-member-role';
 
 /**
  * PATCH /api/org/members/{userId} — move a member to another role.
@@ -79,27 +76,29 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
  * issuer's authority. Only the ones the NEW role could not have issued are
  * revoked, so demoting an Owner to Admin retires their Owner invitations and
  * leaves the rest alone.
+ *
+ * The keys the new role could not mint go the same way, at the vendor and
+ * before the role is written (`lib/commit-after-revoking.ts`).
  */
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const targetUserId = event.pathParameters?.userId;
-  if (!targetUserId) return badRequestResponse();
-
-  const { orgId, userId, membership } = getUserInfo(event);
+  const { orgId, userId } = getUserInfo(event);
   const actorEmail = getVerifiedEmail(event);
 
   const parsed = parseJsonBody(event.body, UpdateMemberRoleSchema);
   if ('error' in parsed) return parsed.error;
   const { role } = parsed.data;
 
-  const target = await resolveMembership(orgId, targetUserId);
-  if (!target) return notAMemberResponse();
-
-  // `authorize('members.manage')` refused every caller without a membership row.
-  if (!canChangeRole(membership!.role, target.role, role)) {
-    return beyondCeilingResponse(target.role, role);
-  }
+  // After the body: the ceiling is asked about the role requested as well as
+  // the one held.
+  const gate = await requireManageableMember(event, {
+    allows: (actorRole, targetRole) => canChangeRole(actorRole, targetRole, role),
+    verb: (targetRole) => `change a ${targetRole} to ${role}`,
+  });
+  if (!gate.ok) return gate.refusal;
+  const target = gate.value;
+  const targetUserId = target.userId;
 
   // The console submits the form whether or not the select changed, and an
   // event saying a member went from Admin to Admin is noise in a log a customer
@@ -108,295 +107,158 @@ export async function baseHandler(
     return roleResponse({ userId: targetUserId, role, previousRole: role });
   }
 
-  const doomed = (await pendingInvitationsFrom(orgId, targetUserId)).filter(
+  const invitationsToRevoke = (await pendingInvitationsFrom(orgId, targetUserId)).filter(
     (invitation) => !canManageTargetRole(role, invitation.role),
   );
   const delta = ownerCountDeltaFor(target.role, role);
   // The fence and both membership rows, plus the counter when the owner set
   // moves.
-  const { now, later } = planRevocations(doomed, delta === 'unchanged' ? 3 : 4);
+  const { now, later } = planRevocations(invitationsToRevoke, delta === 'unchanged' ? 3 : 4);
 
-  // Every local precondition that can refuse this change is checked before a
-  // key is touched, since a revocation cannot be undone. The last-Owner guard
-  // is the decrement's own condition, so it is read here rather than waited
-  // for: a sole Owner demoting themselves must be refused with their keys
-  // intact. A counter that cannot be read refuses too. The decrement conditions
-  // on `ownerCount`, so a missing META row cancels the transaction just the
-  // same, and the change would end with the role unchanged and the keys gone.
-  if (delta === 'decrement') {
-    const owners = await readOwnerCount(orgId);
-    if (owners === 1) return lastOwnerResponse();
-    if (owners === undefined) {
-      console.error('[update-member-role] ownerCount missing — role change refused', { orgId });
-      return ownerCountUnavailableResponse();
-    }
-  }
+  const refused = await refuseBeforeRevoking(orgId, delta);
+  if (refused) return refused;
 
-  return await applyRoleChange({
+  const { orgProfile, keysToRevoke } = await reviewNarrowing(
     orgId,
+    targetUserId,
+    target.role,
+    role,
+  );
+  const changedBy = actorEmail ?? userId;
+  const failure = { orgId, delta, revocations: now.length };
+
+  const committed = await commitAfterRevoking({
+    items: changeItems({ orgId, targetUserId, fromRole: target.role, toRole: role, now }),
+    keys: keysToRevoke,
+    orgId,
+    orgProfile,
+    actor: userActor({ userId, email: actorEmail }),
+    trigger: 'role_narrowing',
+    type: 'member.role_changed',
+    subject: AuditSubjects.user(targetUserId),
+    details: {
+      role,
+      previousRole: target.role,
+      ...(invitationsToRevoke.length > 0 ? { revokedInvitations: invitationsToRevoke.length } : {}),
+    },
+    source: SOURCE,
+    onCancelled: (err, revokedKeys) => changeFailureResponse(err, { ...failure, revokedKeys }),
+    onRefused: (refused, revoked) => vendorRefusedResponse(revoked, refused),
+    notifyMember: (revoked) =>
+      notifyRevokedKeys({
+        orgId,
+        orgProfile,
+        userId: targetUserId,
+        changedBy,
+        revoked,
+        cause: { kind: 'change_failed' },
+        source: SOURCE,
+      }),
+  });
+  if ('response' in committed) return committed.response;
+
+  return await finishRoleChange({
+    orgId,
+    orgProfile,
     targetUserId,
     fromRole: target.role,
     toRole: role,
-    actor: userActor({ userId, email: actorEmail }),
-    changedBy: actorEmail ?? userId,
-    invitations: { now, later },
-    revokedInvitations: doomed.length,
-    delta,
+    changedBy,
+    later,
+    revoked: committed.revoked,
   });
 }
 
 /**
- * Revoke, write the role, and say what happened.
+ * The tail once the role is written: the invitations that did not fit the
+ * transaction, the member's email, and the answer.
  *
- * The order is the whole of it. An access key carries its own permission set,
- * fixed when it was minted, and nothing at Aurora or FTH evaluates it against
- * the role its holder now has. So the keys the new role could not mint are
- * revoked at the vendor BEFORE the role is written: a member is never wider at
- * a storage vendor than the role the console records for them.
- *
- * The pass reads a list, and a key minted after that reading is not on it. Both
- * ends of that window belong to the mint rather than here: its key row carries
- * a `ConditionCheck` on the creator's role, and it reads the role once more
- * after the row lands (`create-access-key.ts`). A key that outlives this pass
- * is discarded by the request that created it.
+ * Nothing here can fail the request. The role is where the caller wanted it,
+ * and an error now would send them into a retry that finds it there and answers
+ * as a no-op, while the thing that failed was a notification.
  */
-interface RoleChange {
-  orgId: string;
-  targetUserId: string;
-  fromRole: OrgRole;
-  toRole: OrgRole;
-  actor: AuditActor;
-  /** The admin, by verified email or by id, for the member's email. */
-  changedBy: string;
-  /** The target's pending invitations the new role could not have issued. */
-  invitations: { now: InvitationRecord[]; later: InvitationRecord[] };
-  revokedInvitations: number;
-  delta: ReturnType<typeof ownerCountDeltaFor>;
-}
-
-async function applyRoleChange({
-  orgId,
-  targetUserId,
-  fromRole,
-  toRole,
-  actor,
-  changedBy,
-  invitations,
-  revokedInvitations,
-  delta,
-}: RoleChange): Promise<APIGatewayProxyStructuredResultV2> {
-  const details = roleChangedDetails({ fromRole, toRole, revokedInvitations });
-  // A widening strands nothing: every key its holder could mint before, they
-  // could mint after. Only a narrowing has to look at what they already hold.
-  const narrows = roleNarrows(fromRole, toRole);
-  const orgProfile = narrows ? await getOrgProfile(orgId) : undefined;
-  const review = narrows
-    ? await reviewMemberAccessKeysForRole(orgId, targetUserId, toRole)
-    : { keysToRevoke: [], retainedKeyCount: 0, unattributedKeyCount: 0 };
-
-  const notify = (revoked: readonly AccessKeySummary[]) =>
-    tellTheMember({ orgId, orgProfile, targetUserId, changedBy, revoked });
-  const write = (
-    event: Parameters<typeof commitAudited>[0]['event'],
-    revokedKeys: AccessKeySummary[],
-  ) =>
-    writeRole({
-      items: changeItems({ orgId, targetUserId, fromRole, toRole, now: invitations.now }),
-      event,
-      failure: {
-        orgId,
-        delta,
-        revocations: invitations.now.length,
-        revokedKeys,
-        tellTheMember: () => notify(revokedKeys),
-      },
-    });
-  const singlePhase = () => auditEvent({ ...eventBase(actor, orgId, targetUserId), details });
-
-  // A change that revokes no key touches no vendor, so it stays one transaction
-  // and one event, the form every membership change took in M1.
-  if (review.keysToRevoke.length === 0) {
-    const failed = await write(singlePhase(), []);
-    if (failed) return failed;
-    await revokeDeferred(invitations.later);
-    return roleResponse({ userId: targetUserId, role: toRole, previousRole: fromRole });
-  }
-
-  const change = await twoPhaseAudit({
-    type: 'member.role_changed',
-    mode: 'fail-closed',
-    actor,
-    orgId,
-    subject: AuditSubjects.user(targetUserId),
-    details,
-  });
-
-  const first = await revokeMemberKeys({
-    orgId,
-    orgProfile,
-    keys: review.keysToRevoke,
-    actor,
-    reason: 'role_narrowing',
-  });
-  if (first.failed.length > 0) {
-    await change.complete({ outcome: 'failed', details: revokedKeyIds(first.revoked) });
-    // The role is unchanged, but the keys this pass did revoke are gone and the
-    // member's clients are already broken. They hear about it either way.
-    await notify(first.revoked);
-    return vendorRefusedResponse(first.revoked, first.failed[0]!);
-  }
-
-  const failed = await write(
-    auditEvent({
-      ...eventBase(actor, orgId, targetUserId),
-      details: { ...details, ...revokedKeyIds(first.revoked) },
-      phase: 'completion',
-      correlationId: change.correlationId,
-      outcome: 'succeeded',
-    }),
-    first.revoked,
-  );
-  if (failed) return failed;
-
-  await revokeDeferred(invitations.later);
-
-  // The role is written. Telling the member cannot fail the request now: they
-  // would be sent into a retry that finds the role already where they wanted it
-  // and answers as a no-op.
-  await bestEffort(
-    () =>
-      sendKeyRevocationEmail({
-        userId: targetUserId,
-        orgName: orgProfile?.name?.S ?? 'your organization',
-        keys: first.revoked,
-        cause: { kind: 'role_changed', previousRole: fromRole, role: toRole },
-        changedBy,
-      }),
-    undefined,
-    { source: 'update-member-role', orgId },
-  );
-
-  return roleResponse({
-    userId: targetUserId,
-    role: toRole,
-    previousRole: fromRole,
-    revokedKeys: first.revoked,
-  });
-}
-
-/** What both forms of `member.role_changed` carry. */
-function roleChangedDetails({
-  fromRole,
-  toRole,
-  revokedInvitations,
-}: Pick<RoleChange, 'fromRole' | 'toRole' | 'revokedInvitations'>) {
-  return {
-    role: toRole,
-    previousRole: fromRole,
-    ...(revokedInvitations > 0 ? { revokedInvitations } : {}),
-  };
-}
-
-/** The envelope both forms share, so only the details and the phase differ. */
-function eventBase(actor: AuditActor, orgId: string, targetUserId: string) {
-  return {
-    type: 'member.role_changed',
-    actor,
-    orgId,
-    subject: AuditSubjects.user(targetUserId),
-  } as const;
-}
-
-/**
- * The member, told about keys that are gone even though the change is not.
- *
- * A revocation outlives the change that started it: the keys are deleted at the
- * vendor before the role is written, so a refusal after that leaves the role
- * where it was and the member's clients already broken. The admin sees it in
- * the response; this is the only thing that reaches the member.
- */
-async function tellTheMember({
+async function finishRoleChange({
   orgId,
   orgProfile,
   targetUserId,
+  fromRole,
+  toRole,
   changedBy,
+  later,
   revoked,
 }: {
   orgId: string;
   orgProfile: OrgProfileItem | undefined;
   targetUserId: string;
+  fromRole: OrgRole;
+  toRole: OrgRole;
+  /** The admin, by verified email or by id, for the member's email. */
   changedBy: string;
-  revoked: readonly AccessKeySummary[];
-}): Promise<void> {
-  await sendKeyRevocationEmail({
+  /** The revoked invitations the transaction had no room for. */
+  later: InvitationRecord[];
+  revoked: AccessKeySummary[];
+}): Promise<APIGatewayProxyStructuredResultV2> {
+  await revokeDeferred(later);
+  await notifyRevokedKeys({
+    orgId,
+    orgProfile,
     userId: targetUserId,
-    orgName: orgProfile?.name?.S ?? 'your organization',
-    keys: revoked,
-    cause: { kind: 'change_failed' },
     changedBy,
-  }).catch((error: unknown) => {
-    console.error('[update-member-role] Could not tell the member their keys went', {
-      orgId,
-      targetUserId,
-      error,
-    });
+    revoked,
+    cause: { kind: 'role_changed', previousRole: fromRole, role: toRole },
+    source: SOURCE,
+  });
+
+  return roleResponse({
+    userId: targetUserId,
+    role: toRole,
+    previousRole: fromRole,
+    // Named only when there are any, so a widening and a no-op read alike.
+    ...(revoked.length > 0 ? { revokedKeys: revoked } : {}),
   });
 }
 
 /**
- * The role transaction, and the answer when it cancels.
- *
- * Returns undefined when the role is written. Anything else is the response:
- * the keys named in `revokedKeys` are already gone whatever the role now says,
- * so the caller reports them rather than treating the request as a no-op.
+ * Every local precondition that can refuse this change is checked before a key
+ * is touched, since a revocation cannot be undone. The last-Owner guard is the
+ * decrement's own condition, so it is read here rather than waited for: a sole
+ * Owner demoting themselves must be refused with their keys intact. A counter
+ * that cannot be read refuses too. The decrement conditions on `ownerCount`, so
+ * a missing META row cancels the transaction just the same, and the change
+ * would end with the role unchanged and the keys gone.
  */
-async function writeRole({
-  items,
-  event,
-  failure,
-}: {
-  items: TransactWriteItem[];
-  event: Parameters<typeof commitAudited>[0]['event'];
-  failure: {
-    orgId: string;
-    delta: ReturnType<typeof ownerCountDeltaFor>;
-    revocations: number;
-    /** Already revoked and not coming back, whatever the role write did. */
-    revokedKeys: AccessKeySummary[];
-    /** Tells the member about keys that went before the write was refused. */
-    tellTheMember: () => Promise<void>;
-  };
-}): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
-  try {
-    await commitAudited({ items, event });
-    return undefined;
-  } catch (err) {
-    if (failure.revokedKeys.length > 0) {
-      // The keys are gone and the role is not written. The retry is the same
-      // PATCH, which finds fewer keys: every completed revocation deleted its
-      // row.
-      console.error('[update-member-role] Role write failed after revoking keys', {
-        orgId: failure.orgId,
-        revoked: failure.revokedKeys.length,
-      });
-      await failure.tellTheMember();
-    }
-    return await changeFailureResponse(err, failure);
+async function refuseBeforeRevoking(
+  orgId: string,
+  delta: ReturnType<typeof ownerCountDeltaFor>,
+): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
+  if (delta !== 'decrement') return undefined;
+
+  const owners = await readOwnerCount(orgId);
+  if (owners === 1) return lastOwnerResponse();
+  if (owners === undefined) {
+    console.error('[update-member-role] ownerCount missing — role change refused', { orgId });
+    return ownerCountUnavailableResponse();
   }
+  return undefined;
 }
 
 /**
- * The summary half of the pair: ids, since each revocation is its own event.
- *
- * Only the first pass's, because the completion rides the role transaction and
- * that transaction commits before the second pass runs. Keeping the two
- * together is what makes a membership change and its record atomic; the price
- * is that a key the second pass revokes is missing from this summary. Nothing
- * goes unrecorded either way — every revocation writes its own `key.deleted`
- * with a `reason`, and those are the durable account of what happened.
+ * The keys the new role could not mint, and the profile row their revocation
+ * resolves tenants from. A widening strands nothing: every key its holder could
+ * mint before, they could mint after. Only a narrowing has to look at what they
+ * already hold, so a promotion reads neither.
  */
-function revokedKeyIds(revoked: readonly AccessKeySummary[]): { revokedKeys?: string[] } {
-  return revoked.length > 0 ? { revokedKeys: revoked.map((key) => key.id) } : {};
+async function reviewNarrowing(
+  orgId: string,
+  targetUserId: string,
+  fromRole: OrgRole,
+  toRole: OrgRole,
+): Promise<{ orgProfile: OrgProfileItem | undefined; keysToRevoke: AccessKeyToRevoke[] }> {
+  if (!roleNarrows(fromRole, toRole)) return { orgProfile: undefined, keysToRevoke: [] };
+
+  const orgProfile = await getOrgProfile(orgId);
+  const review = await reviewMemberAccessKeysForRole(orgId, targetUserId, toRole);
+  return { orgProfile, keysToRevoke: review.keysToRevoke };
 }
 
 function changeItems({
@@ -442,13 +304,17 @@ function changeLabels({
   ];
 }
 
+/**
+ * The answer when the role transaction cancels. The keys named in `revokedKeys`
+ * are already gone whatever the role now says, so every answer carries them
+ * rather than treating the request as a no-op.
+ */
 async function changeFailureResponse(
   err: unknown,
   context: {
     orgId: string;
     delta: ReturnType<typeof ownerCountDeltaFor>;
     revocations: number;
-    /** Already revoked and not coming back, whatever the role write did. */
     revokedKeys: AccessKeySummary[];
   },
 ): Promise<APIGatewayProxyStructuredResultV2> {
@@ -501,39 +367,12 @@ function vendorRefusedResponse(
     .build();
 }
 
-function badRequestResponse(): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder()
-    .status(400)
-    .body<ErrorResponse>({ message: 'Missing userId in path' })
-    .build();
-}
-
-function notAMemberResponse(): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder()
-    .status(404)
-    .body<ErrorResponse>({ message: 'That person is not a member of this organization.' })
-    .build();
-}
-
-function beyondCeilingResponse(
-  fromRole: OrgRole,
-  toRole: OrgRole,
-): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder()
-    .status(403)
-    .body<ErrorResponse>({
-      message: `Your role in this organization cannot change a ${fromRole} to ${toRole}.`,
-      code: ApiErrorCode.FORBIDDEN_ROLE,
-    })
-    .build();
-}
-
 function lastOwnerResponse(
   revoked: { revokedKeys: AccessKeySummary[] } = { revokedKeys: [] },
 ): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(409)
-    .body<ErrorResponse & { revokedKeys: AccessKeySummary[] }>({
+    .body<ErrorWithRevokedKeys>({
       message:
         'This organization would be left without an owner. Promote another member to owner first.',
       code: ApiErrorCode.LAST_OWNER,
@@ -547,7 +386,7 @@ function ownerCountUnavailableResponse(
 ): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(409)
-    .body<ErrorResponse & { revokedKeys: AccessKeySummary[] }>({
+    .body<ErrorWithRevokedKeys>({
       message: 'The organization’s owner count could not be updated. Please contact support.',
       ...revoked,
     })
@@ -559,7 +398,7 @@ function invitationRaceResponse(
 ): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(409)
-    .body<ErrorResponse & { revokedKeys: AccessKeySummary[] }>({
+    .body<ErrorWithRevokedKeys>({
       message: 'An invitation from that member changed while this was in flight — try again.',
       ...revoked,
     })
@@ -571,7 +410,7 @@ function concurrentChangeResponse(
 ): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(409)
-    .body<ErrorResponse & { revokedKeys: AccessKeySummary[] }>({
+    .body<ErrorWithRevokedKeys>({
       message: 'That member’s role changed while you were editing it.',
       ...revoked,
     })
