@@ -218,7 +218,7 @@ describe('PATCH /api/org handler', () => {
 
     expect(result).toMatchObject({
       statusCode: 200,
-      body: JSON.stringify({ name: 'New Corp' }),
+      body: JSON.stringify({ name: 'New Corp', slug: 'new-corp' }),
     });
     expect(updateInput()).toMatchObject({
       TableName: 'UserInfoTable',
@@ -465,6 +465,20 @@ describe('PATCH /api/org handler', () => {
       });
     });
 
+    it("carries the org's existing slug through a logo-only save", async () => {
+      orgProfileNamed('Old Corp', 'old-corp');
+
+      const result = await handler(
+        renameEvent({ name: 'Old Corp', logoUrl: LOGO_URL }),
+        buildContext(),
+      );
+
+      expect(result).toMatchObject({
+        statusCode: 200,
+        body: JSON.stringify({ name: 'Old Corp', slug: 'old-corp', logoUrl: LOGO_URL }),
+      });
+    });
+
     it('records the previous logo when replacing one that already existed', async () => {
       orgProfileNamed('Old Corp', undefined, 'https://cdn.example.com/old.png');
 
@@ -499,7 +513,7 @@ describe('PATCH /api/org handler', () => {
 
       expect(result).toMatchObject({
         statusCode: 200,
-        body: JSON.stringify({ name: 'New Corp', logoUrl: LOGO_URL }),
+        body: JSON.stringify({ name: 'New Corp', slug: 'new-corp', logoUrl: LOGO_URL }),
       });
       expect(updateInput()).toMatchObject({
         UpdateExpression:
@@ -519,7 +533,7 @@ describe('PATCH /api/org handler', () => {
 
       expect(result).toMatchObject({
         statusCode: 200,
-        body: JSON.stringify({ name: 'New Corp', logoUrl: LOGO_URL }),
+        body: JSON.stringify({ name: 'New Corp', slug: 'new-corp', logoUrl: LOGO_URL }),
       });
       // Untouched by this save, so the rename's own write never sets it again.
       expect(updateInput().UpdateExpression).not.toContain('logoUrl');
