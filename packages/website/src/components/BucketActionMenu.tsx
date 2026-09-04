@@ -110,7 +110,7 @@ export function BucketActionMenu({ actions, onDisable }: BucketActionMenuProps) 
                 }}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-xs whitespace-nowrap text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-zinc-400"
               >
-                <Icon size={13} aria-hidden="true" />
+                <Icon size={13} className="flex-shrink-0 text-zinc-400" aria-hidden="true" />
                 {item.label}
                 {item.hint && <span className="ml-auto pl-3 text-zinc-400">{item.hint}</span>}
               </button>

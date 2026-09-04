@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { CheckIcon } from '@phosphor-icons/react/dist/ssr';
 import type { OrgMembershipSummary } from '@filone/shared';
 
+import { OrgAvatar } from './OrgAvatar';
 import { Overline } from './Overline';
 import { onSwitchingOrgChange, switchToOrg } from '../lib/active-org.js';
 
@@ -95,9 +96,9 @@ export function OrgSwitcher({ memberships, activeOrgId, inMenu, testId }: OrgSwi
                   }
             }
             className={[
-              // `py-2` and `rounded-lg` to match `Log out`, the row directly
+              // `py-1.5` and `rounded-lg` to match `Log out`, the row directly
               // below it in the same menu.
-              'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors',
+              'flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-xs transition-colors',
               'focus-visible:brand-outline',
               isActive ? 'font-medium text-zinc-900' : 'text-zinc-600',
               isInert ? '' : 'hover:bg-zinc-100 hover:text-zinc-900',
@@ -105,10 +106,15 @@ export function OrgSwitcher({ memberships, activeOrgId, inMenu, testId }: OrgSwi
               .filter(Boolean)
               .join(' ')}
           >
+            <OrgAvatar
+              name={membership.orgName || 'Untitled organization'}
+              logoUrl={membership.logoUrl}
+              size="xs"
+            />
             <span className="min-w-0 flex-1 truncate">
               {membership.orgName || 'Untitled organization'}
             </span>
-            {isActive && <CheckIcon size={14} weight="bold" className="shrink-0 text-brand-600" />}
+            {isActive && <CheckIcon size={13} weight="bold" className="shrink-0 text-brand-600" />}
           </button>
         );
       })}
