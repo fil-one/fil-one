@@ -82,6 +82,7 @@ const upsertCalls = () => mockUpsertContact.mock.calls.map(([args]) => args);
 const scanInput = () => ddbMock.commandCalls(ScanCommand)[0]!.args[0].input;
 const stampedKeys = () =>
   ddbMock.commandCalls(UpdateItemCommand).map((call) => call.args[0].input.Key?.pk?.S);
+const stampInput = () => ddbMock.commandCalls(UpdateItemCommand)[0]!.args[0].input;
 const profileKeysRequested = () =>
   ddbMock
     .commandCalls(BatchGetItemCommand)
@@ -168,20 +169,40 @@ describe('hubspot-contact-sync', () => {
     expect(input.Key).toEqual({ pk: { S: 'ORG#org-1' }, sk: { S: 'SUBSCRIPTION' } });
     expect(input.ExpressionAttributeValues![':status']).toEqual({ S: SubscriptionStatus.Active });
     expect(input.ExpressionAttributeValues![':syncedAt']!.S).toBeTruthy();
+    expect(input.UpdateExpression).toBe(
+      'SET hubspotSubscriptionStatus = :status, hubspotSyncedAt = :syncedAt',
+    );
     expect(input.ConditionExpression).toBe('attribute_exists(pk)');
   });
 
-  it('does not stamp a contact HubSpot could not match', async () => {
+  it('records the attempt on a contact HubSpot could not match, claiming no status', async () => {
     setupScan(subRow());
     mockUpsertContact.mockResolvedValue('unmatched');
 
     const summary = await syncAllContacts();
 
-    expect(stampedKeys()).toEqual([]);
+    // Recorded, or this row is eligible on every future run and a hundred like
+    // it fill the per-run cap while the rest of the backlog goes untouched.
+    expect(stampedKeys()).toEqual(['ORG#org-1']);
+    const input = stampInput();
+    expect(input.UpdateExpression).toBe(
+      'SET hubspotSyncedAt = :syncedAt REMOVE hubspotSubscriptionStatus',
+    );
+    expect(Object.keys(input.ExpressionAttributeValues!)).toEqual([':syncedAt']);
     expect(summary).toEqual({ ...NOTHING, total: 1, unmatched: 1 });
   });
 
-  it('does not stamp a contact whose write failed', async () => {
+  it('clears a stale status claim when HubSpot no longer holds the contact', async () => {
+    setupScan(subRow({ hubspotSubscriptionStatus: SubscriptionStatus.Trialing }));
+    mockUpsertContact.mockResolvedValue('unmatched');
+
+    await syncAllContacts();
+
+    // Left standing, the disagreeing-status clause re-selects this row forever.
+    expect(stampInput().UpdateExpression).toContain('REMOVE hubspotSubscriptionStatus');
+  });
+
+  it('records nothing when the write threw, so the next run retries it', async () => {
     setupScan(subRow());
     mockUpsertContact.mockRejectedValue(new Error('HubSpot 503'));
 
@@ -269,16 +290,18 @@ describe('hubspot-contact-sync', () => {
     expect(summary.missingEmail).toBe(0);
   });
 
-  it('selects on a stale stamp as well as a disagreeing one', async () => {
+  it('gates on the attempt marker, the staleness window and a disagreeing status', async () => {
     setupScan(subRow());
 
     await syncAllContacts();
 
     const input = scanInput();
-    expect(input.FilterExpression).toContain('attribute_not_exists(hubspotSubscriptionStatus)');
-    expect(input.FilterExpression).toContain('hubspotSubscriptionStatus <> subscriptionStatus');
+    expect(input.FilterExpression).toContain('attribute_not_exists(hubspotSyncedAt)');
     expect(input.FilterExpression).toContain('hubspotSyncedAt < :staleBefore');
+    expect(input.FilterExpression).toContain('hubspotSubscriptionStatus <> subscriptionStatus');
     expect(input.FilterExpression).toContain('attribute_not_exists(deletedAt)');
+    // Gating on the success marker would re-select an unmatchable contact for ever.
+    expect(input.FilterExpression).not.toContain('attribute_not_exists(hubspotSubscriptionStatus)');
 
     const staleBefore = Date.parse(input.ExpressionAttributeValues![':staleBefore']!.S!);
     expect(Date.now() - staleBefore).toBeCloseTo(30 * 24 * 60 * 60 * 1000, -4);

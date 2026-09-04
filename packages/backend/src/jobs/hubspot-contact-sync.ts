@@ -39,24 +39,30 @@ const PROFILE_SK = 'PROFILE';
 const dynamo = getDynamoClient();
 
 /**
- * A row qualifies when no HubSpot stamp exists for it, when the stamp disagrees
- * with the row's status, or when the stamp is old enough to re-verify.
+ * A row qualifies when the job has never attempted it, when its last attempt is
+ * old enough to re-verify, or when its status has moved since HubSpot last
+ * confirmed one.
  *
- * The first two are the work: a bootstrap and a dropped live write. The third is
- * what keeps the counters meaningful. Since the job stopped reading HubSpot back,
- * "in sync" means "our stamp matches our status" — so a contact whose property
- * was edited or cleared inside HubSpot would otherwise never be looked at again,
- * and `unmatched` would stop answering "how many customers is this silently
- * missing" the moment the backlog drained.
+ * The gate is `hubspotSyncedAt`, the attempt marker, NOT
+ * `hubspotSubscriptionStatus`, the success marker. Selecting on a missing
+ * success marker starves the job: a contact HubSpot cannot match — no id on any
+ * contact and no address to bootstrap one — never gets a status written, so it
+ * stays eligible for every future run, and a hundred of those fill the per-run
+ * cap forever while the rest of the backlog goes untouched.
+ *
+ * The staleness clause is also what keeps the counters meaningful. Since the job
+ * stopped reading HubSpot back, "in sync" means "our stamp matches our status",
+ * so a contact whose property was edited or cleared inside HubSpot would
+ * otherwise never be looked at again, and `unmatched` would stop answering "how
+ * many customers is this silently missing" once the backlog drained.
  */
 const PENDING_FILTER = `sk = :sk
   AND attribute_exists(subscriptionStatus)
   AND attribute_not_exists(deletedAt)
   AND (
-    attribute_not_exists(hubspotSubscriptionStatus)
-    OR hubspotSubscriptionStatus <> subscriptionStatus
-    OR attribute_not_exists(hubspotSyncedAt)
+    attribute_not_exists(hubspotSyncedAt)
     OR hubspotSyncedAt < :staleBefore
+    OR hubspotSubscriptionStatus <> subscriptionStatus
   )`;
 
 /**
@@ -117,7 +123,9 @@ export async function syncAllContacts(): Promise<ContactSyncSummary> {
   for (const candidate of candidates) {
     summary.total += 1;
     const outcome = await reconcile(candidate, summary);
-    if (outcome === 'updated' || outcome === 'bootstrapped') await markSynced(candidate);
+    // A throw records nothing: a HubSpot outage should be retried on the next
+    // run, not held off for the whole re-verify window.
+    if (outcome) await recordAttempt(candidate, outcome);
   }
 
   return summary;
@@ -168,20 +176,32 @@ async function reconcile(
 }
 
 /**
- * Records what HubSpot now holds, so the next run's filter passes this row over.
+ * Records that this row was attempted, and what HubSpot now holds if anything.
+ *
+ * Two attributes, because "we looked" and "HubSpot holds this" are different
+ * facts and the filter needs them apart. `hubspotSyncedAt` always moves, which
+ * is what stops an unmatchable contact monopolising every future run.
+ * `hubspotSubscriptionStatus` is the value HubSpot confirmed holding, so an
+ * `unmatched` outcome REMOVES it rather than leaving a claim standing: HubSpot
+ * holds no contact for this user, and a stale value left behind would keep the
+ * row eligible on the disagreeing-status clause and starve the job anyway.
  *
  * Goes through `updateSubscriptionByUser` for the key: the row is addressed
  * `ORG#{orgId}` and `UpdateItem` creates whatever key it is given, so writing
  * this to any other one both loses the progress mark and leaves a phantom
  * billing row behind.
  */
-async function markSynced(candidate: Candidate): Promise<void> {
+async function recordAttempt(candidate: Candidate, outcome: ContactWriteOutcome): Promise<void> {
+  const confirmed = outcome !== 'unmatched';
+
   await updateSubscriptionByUser(
     { orgId: candidate.orgId, userId: candidate.userId },
     {
-      UpdateExpression: 'SET hubspotSubscriptionStatus = :status, hubspotSyncedAt = :syncedAt',
+      UpdateExpression: confirmed
+        ? 'SET hubspotSubscriptionStatus = :status, hubspotSyncedAt = :syncedAt'
+        : 'SET hubspotSyncedAt = :syncedAt REMOVE hubspotSubscriptionStatus',
       ExpressionAttributeValues: {
-        ':status': { S: candidate.subscriptionStatus },
+        ...(confirmed ? { ':status': { S: candidate.subscriptionStatus } } : {}),
         ':syncedAt': { S: new Date().toISOString() },
       },
       // A row deleted between the scan and here is a no-op, not a failed run.

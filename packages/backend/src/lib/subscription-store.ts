@@ -566,6 +566,8 @@ export async function scanSubscriptions<T extends ScannedSubscription>({
   } while (lastEvaluatedKey && (limit === undefined || selected.length < limit));
 
   // Sliced after the de-dupe, and after the loop: a page is kept whole, so
-  // `selected` can pass `limit` before the condition is next evaluated.
-  return assertOneRowPerOrg(selected, job).slice(0, limit);
+  // `selected` can pass `limit` before the condition is next evaluated. A
+  // caller that named no cap is handed the array itself, not a copy of it.
+  const rows = assertOneRowPerOrg(selected, job);
+  return limit === undefined ? rows : rows.slice(0, limit);
 }
