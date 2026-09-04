@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { ArrowUpRightIcon } from '@phosphor-icons/react/dist/ssr';
 import clsx from 'clsx';
 
 import { INSTATUS_PAGE_URL, fetchInstatusSummary, getStatusDisplay } from '../lib/instatus.js';
@@ -74,12 +75,18 @@ export function StatusIndicator({ collapsed }: StatusIndicatorProps) {
       rel="noopener noreferrer"
       data-testid="system-status"
       className={clsx(
-        'flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-xs transition-colors hover:bg-zinc-100',
+        'group flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-xs transition-colors hover:bg-zinc-100',
         textColorStyles[display.color],
       )}
     >
       {dot}
       {display.label}
+      <ArrowUpRightIcon
+        className="ml-auto opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+        width={12}
+        height={12}
+        aria-hidden="true"
+      />
     </a>
   );
 }

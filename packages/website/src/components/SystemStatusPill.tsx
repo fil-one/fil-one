@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { ArrowUpRightIcon } from '@phosphor-icons/react/dist/ssr';
 import clsx from 'clsx';
 
 import { INSTATUS_PAGE_URL, fetchInstatusSummary, getStatusDisplay } from '../lib/instatus.js';
@@ -57,6 +58,17 @@ export function SystemStatusPill() {
       >
         {display.label}
       </span>
+      <ArrowUpRightIcon
+        className={clsx(
+          'ml-1 max-w-0 flex-shrink-0 overflow-hidden opacity-0 transition-all duration-200',
+          'group-hover:max-w-4 group-hover:opacity-100',
+          'group-focus-visible:max-w-4 group-focus-visible:opacity-100',
+          textColorStyles[display.color],
+        )}
+        width={12}
+        height={12}
+        aria-hidden="true"
+      />
     </a>
   );
 }
