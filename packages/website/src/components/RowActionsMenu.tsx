@@ -74,7 +74,7 @@ export function RowActionsMenu({
         anchor="bottom end"
         // Sized to match `BucketActionMenu` — the console's canonical
         // dropdown size (DESIGN.md rule 4a).
-        className="z-50 mt-1 min-w-36 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg focus:outline-none"
+        className="z-50 mt-1 min-w-36 rounded-lg border border-zinc-200 bg-white py-1 shadow-md focus:outline-none"
       >
         {actions.map((action) => (
           <MenuItem key={action.label} disabled={action.disabled}>

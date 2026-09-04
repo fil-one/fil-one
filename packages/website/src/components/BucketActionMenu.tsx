@@ -93,7 +93,7 @@ export function BucketActionMenu({ actions, onDisable }: BucketActionMenuProps) 
           data-testid="bucket-action-menu-list"
           role="menu"
           style={{ top: pos.top, right: pos.right }}
-          className="fixed z-50 w-auto min-w-36 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg"
+          className="fixed z-50 w-auto min-w-36 rounded-lg border border-zinc-200 bg-white py-1 shadow-md"
         >
           {items.map((item) => {
             const Icon = item.icon;
