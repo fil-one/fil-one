@@ -32,6 +32,13 @@
 
   --tracking-tight: -1%;
 
+  /* Console-specific steps between Tailwind's xs (12px) and sm (14px), named
+     for their role per DESIGN.md rule 4 rather than their size. */
+  --text-meta: 11px;
+  --text-meta--line-height: 16px;
+  --text-ui: 13px;
+  --text-ui--line-height: 19.5px;
+
   --shadow-xs: 0px 1px 2px 0px rgba(20, 24, 31, 0.03);
 }
 
