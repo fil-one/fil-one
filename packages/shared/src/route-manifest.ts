@@ -326,6 +326,12 @@ const MANIFEST = [
     requires: 'members.manage',
     capsInHandler: true,
   },
+  // `members.manage` is what removing someone ELSE costs, capped the same way
+  // update-member-role's is. A caller targeting their own `userId` is a
+  // different verb — leaving — and needs no permission at all: the handler's
+  // gate is membership alone, and it waives `members.manage` for that one
+  // case rather than the manifest naming a `members.leave` permission
+  // nothing else would ever check.
   {
     method: 'DELETE',
     path: '/api/org/members/{userId}',
