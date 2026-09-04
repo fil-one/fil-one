@@ -460,6 +460,8 @@ import type {
   CreateOrgResponse,
   DeleteAccountRequest,
   MeResponse,
+  PresignAvatarRequest,
+  PresignAvatarResponse,
   PresignOrgLogoRequest,
   PresignOrgLogoResponse,
   RegenerateRecoveryCodeResponse,
@@ -519,6 +521,18 @@ export async function getMe(options?: {
 export function updateProfile(data: UpdateProfileRequest): Promise<UpdateProfileResponse> {
   return apiRequest<UpdateProfileResponse>('/me/profile', {
     method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+/**
+ * Ask for a place to put a personal avatar. The upload happens against the
+ * URL this returns, and `pictureUrl` from the result is what gets passed to
+ * {@link updateProfile}.
+ */
+export function presignAvatarUpload(data: PresignAvatarRequest): Promise<PresignAvatarResponse> {
+  return apiRequest<PresignAvatarResponse>('/me/avatar-upload-url', {
+    method: 'POST',
     body: JSON.stringify(data),
   });
 }

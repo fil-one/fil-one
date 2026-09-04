@@ -1225,6 +1225,12 @@ export default $config({
       'presign-org-logo': {
         extraLink: [orgLogoBucket],
       },
+      // Presigns a PUT into OrgLogoBucket too, under an `avatars/` prefix -
+      // see avatar-storage.ts for why this reuses the org logo bucket rather
+      // than standing up one of its own.
+      'presign-avatar': {
+        extraLink: [orgLogoBucket],
+      },
 
       // ── Invitations ────────────────────────────────────────────────
       // The only route that sends mail. `SendGridApiKey` exists on staging and

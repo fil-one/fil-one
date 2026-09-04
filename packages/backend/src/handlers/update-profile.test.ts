@@ -154,6 +154,24 @@ describe('PATCH /api/me/profile handler', () => {
     expect(mockUpdateAuth0User).toHaveBeenCalledWith(MOCK_SUB, { name: 'New Name' });
   });
 
+  it('updates the avatar via Auth0 with only pictureUrl in the body', async () => {
+    // The schema's refine accepts pictureUrl alone: `POST
+    // /api/me/avatar-upload-url` already put the file, so this call carries
+    // nothing but the URL to persist.
+    const pictureUrl = 'https://cdn.example.com/avatar.png';
+
+    const result = await handler(profileEvent({ pictureUrl }), buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 200,
+      body: JSON.stringify({ picture: pictureUrl }),
+    });
+    expect(mockUpdateAuth0User).toHaveBeenCalledWith(MOCK_SUB, { picture: pictureUrl });
+    // Neither name nor email path ran: no verification email, no claim-flag clear.
+    expect(mockSendVerificationEmail).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+  });
+
   it('updates email via Auth0 and sends verification email', async () => {
     const result = await handler(profileEvent({ email: 'new@example.com' }), buildContext());
 

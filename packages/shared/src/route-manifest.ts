@@ -418,6 +418,16 @@ const MANIFEST = [
     category: 'authenticated',
     requires: 'self',
   },
+  // A place to put a personal avatar before PATCH /api/me/profile persists it.
+  // Same shape as the org logo's own presign step, `self` rather than
+  // `in-handler` because the caller's own identity is the whole requirement.
+  {
+    method: 'POST',
+    path: '/api/me/avatar-upload-url',
+    handler: 'presign-avatar',
+    category: 'authenticated',
+    requires: 'self',
+  },
   {
     method: 'POST',
     path: '/api/me/change-password',
