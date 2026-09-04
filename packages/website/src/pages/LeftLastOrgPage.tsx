@@ -1,6 +1,7 @@
 import { AuthCard } from '../components/AuthCard';
 import { Button } from '../components/Button';
 import { Heading } from '../components/Heading/Heading';
+import { logout } from '../lib/api.js';
 
 /**
  * Text buttons carry no chrome, so they need their own keyboard-only ring.
@@ -33,7 +34,19 @@ export function LeftLastOrgPage({ email }: LeftLastOrgPageProps) {
   return (
     <AuthCard
       footer={
-        email ? <p className="text-xs text-(--color-paragraph-text-subtle)">{email}</p> : undefined
+        // Which account this is about, and the way out - same shape as
+        // WelcomePage's own footer, since the two gates sit in the same flow.
+        email ? (
+          <div className="text-center">
+            <p className="text-xs text-(--color-paragraph-text)">Signed in as {email}</p>
+            <p className="mt-1 text-xs text-(--color-paragraph-text-subtle)">
+              Not your account?{' '}
+              <button type="button" onClick={logout} className={textButton}>
+                Sign out
+              </button>
+            </p>
+          </div>
+        ) : undefined
       }
     >
       <Heading tag="h1" size="lg" balance className="font-normal tracking-tight">
