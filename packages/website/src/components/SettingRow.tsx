@@ -8,10 +8,10 @@ export function SettingRow({
   action: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between py-1">
+    <div className="flex items-center justify-between gap-4 py-1">
       <div>
         <p className="text-sm font-medium text-zinc-900">{label}</p>
-        <p className="text-xs text-zinc-500">{description}</p>
+        <p className="max-w-md text-xs text-zinc-500">{description}</p>
       </div>
       {action}
     </div>
