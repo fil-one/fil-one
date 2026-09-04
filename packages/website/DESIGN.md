@@ -195,17 +195,23 @@ repeated at call sites.
 **Check:** A story placing a button, an input, and a select in one `flex` row. Their tops
 and bottoms line up exactly.
 
-## 8. Use four radii
+## 8. Use four radii (plus one sanctioned exception)
 
 | Radius              | Use for                                                                |
 | ------------------- | ---------------------------------------------------------------------- |
 | `rounded-md` (6px)  | Buttons, inputs, selects, menu items, icon buttons, all small controls |
 | `rounded-lg` (8px)  | Toasts, table containers, small inline panels                          |
 | `rounded-xl` (12px) | Cards, modals, drawers, page-level panels                              |
-| `rounded-full`      | Pills, badges, avatars, status dots                                    |
+| `rounded-full`      | Pills, badges, status dots, `UserAvatar` (people are circles)          |
 
-Nothing else. Not bare `rounded`, not `rounded-sm`, `rounded-2xl`, `rounded-3xl`, or
-`rounded-[6px]`.
+Nothing else. Not bare `rounded`, not `rounded-2xl`, `rounded-3xl`, or `rounded-[6px]`.
+
+**The one exception:** `OrgAvatar` is a rounded square, not a circle, so an org is
+distinguishable from a person at a glance rather than only by color (`OrgAvatar.tsx`).
+Its `sm` (28px) and `lg` (64px) sizes nest inside the four radii above (`rounded-md`,
+`rounded-xl`) same as anything else, but its `xs` size (16px, the org switcher's list
+rows) is small enough that even `rounded-md` reads closer to round than square, so it
+steps down to `rounded-sm` (4px) — the one place in the console that class is allowed.
 
 **Why:** Radius is where a system leaks most visibly, because mismatches show up as
 optically wrong corners when elements nest. These four keep nesting correct: a 6px control
