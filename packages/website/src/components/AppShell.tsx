@@ -306,8 +306,15 @@ export function AppShell({ children }: AppShellProps) {
             softly shadowed panel floating on the white canvas, with the sidebar
             outside it (Linear's layout). The `lg:` insets and card chrome are
             desktop-only; on mobile the content stays edge to edge. The panel is
-            the scroll container, so its rounded corners clip the content. */}
-        <main className="flex flex-1 flex-col overflow-hidden lg:px-2 lg:pt-2">
+            the scroll container, so its rounded corners clip the content.
+
+            `bg-zinc-50` here too, not just on the panel below: on mobile there
+            is no gutter around the panel, so an elastic overscroll bounce past
+            its top or bottom edge reveals this element's own background
+            rather than the panel's, and it needs to match. `lg:bg-white`
+            switches it back once the `lg:` gutter appears, so that white
+            margin around the panel stays white rather than turning zinc-50. */}
+        <main className="flex flex-1 flex-col overflow-hidden bg-zinc-50 lg:bg-white lg:px-2 lg:pt-2">
           <div className="flex flex-1 flex-col overflow-auto bg-zinc-50 lg:rounded-xl lg:border lg:border-zinc-200 lg:shadow-xs">
             {/* Mobile top bar */}
             <div className="sticky top-0 z-20 flex h-14 flex-shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-3 lg:hidden">
