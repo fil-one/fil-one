@@ -308,7 +308,7 @@ export function AppShell({ children }: AppShellProps) {
             desktop-only; on mobile the content stays edge to edge. The panel is
             the scroll container, so its rounded corners clip the content. */}
         <main className="flex flex-1 flex-col overflow-hidden lg:px-2 lg:pt-2">
-          <div className="flex flex-1 flex-col overflow-auto bg-zinc-50 lg:rounded-xl lg:border lg:border-zinc-200 lg:shadow-sm">
+          <div className="flex flex-1 flex-col overflow-auto bg-zinc-50 lg:rounded-xl lg:border lg:border-zinc-200 lg:shadow-xs">
             {/* Mobile top bar */}
             <div className="sticky top-0 z-20 flex h-14 flex-shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-3 lg:hidden">
               <MobileUserMenu />
