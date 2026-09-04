@@ -1,12 +1,14 @@
 import { UpdateItemCommand, type TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
 import { OrgRole } from '@filone/shared';
+import type { AuditEvent } from '@filone/shared';
 import { AuditSubjects, auditEvent, commitAudited, userActor } from './audit.js';
 import { getDynamoClient } from './ddb-client.js';
 import { OrgKeys } from './org-membership.js';
 import type { OrgMembership } from './org-membership.js';
 import { OrgSetupStatus } from './org-setup-status.js';
 import { reserveOrgSlug } from './org-slug.js';
+import { deriveOrgName } from './suggest-org-name.js';
 
 export interface NewAccountParams {
   sub: string;
@@ -179,6 +181,150 @@ export async function createAdditionalOrg({
   });
 
   return { orgId, orgName, slug, ...(logoUrl ? { logoUrl } : {}) };
+}
+
+export interface FloorOrgPreparation {
+  orgId: string;
+  orgName: string;
+  slug: string;
+  /**
+   * The rows this org needs, plus the two `Update`s that repoint the account's
+   * home-org pointers onto it — not committed here. The caller (a membership
+   * removal that would otherwise leave the account with zero orgs) merges
+   * these into its own transaction: a repointed identity naming an org that
+   * was never created, or an org nobody's identity points at, are each a
+   * broken account on their own, so the two must land together.
+   */
+  items: TransactWriteItem[];
+  /**
+   * The `org.created` event, for the caller to append via {@link auditPut}
+   * alongside its own event — `commitAudited` takes only one.
+   */
+  event: AuditEvent;
+}
+
+/**
+ * Prepare (but do not commit) a brand-new organization to catch an account a
+ * membership removal would otherwise leave with nowhere to log in.
+ *
+ * Reuses {@link createAdditionalOrg}'s row shapes — this account asked for
+ * this org exactly as little as it asked for the removal that necessitated
+ * it, so its membership is stamped `source: 'manual'`, the same value that
+ * path uses for "this org did not come with the account."
+ *
+ * The name is derived the same way signup derives one (unconfirmed, so
+ * `/create-organization` gate fires the next time this account logs in),
+ * since there is no naming step to send an involuntary org through.
+ */
+export async function prepareFloorOrg({
+  userId,
+  sub,
+  leavingOrgId,
+  name,
+  email,
+}: {
+  userId: string;
+  sub: string;
+  /** The org the removal is taking this account out of — the repoint's guard. */
+  leavingOrgId: string;
+  name?: string;
+  email?: string;
+}): Promise<FloorOrgPreparation> {
+  const orgId = crypto.randomUUID();
+  const orgName = deriveOrgName(name, email);
+  const now = new Date().toISOString();
+  const { slug, reservationItem } = await reserveOrgSlug({ orgId, name: orgName });
+
+  const userInfoTableName = Resource.UserInfoTable.name;
+  const orgTableName = Resource.OrgTable.name;
+
+  const items: TransactWriteItem[] = [
+    {
+      Put: {
+        TableName: userInfoTableName,
+        Item: {
+          pk: { S: `ORG#${orgId}` },
+          sk: { S: 'PROFILE' },
+          name: { S: orgName },
+          slug: { S: slug },
+          nameConfirmed: { BOOL: false },
+          auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
+          createdBy: { S: userId },
+          createdAt: { S: now },
+        },
+        ConditionExpression: 'attribute_not_exists(pk)',
+      },
+    },
+    {
+      Put: {
+        TableName: orgTableName,
+        Item: {
+          pk: { S: OrgKeys.orgPk(orgId) },
+          sk: { S: OrgKeys.orgMetaSk() },
+          ownerCount: { N: '1' },
+        },
+      },
+    },
+    {
+      Put: {
+        TableName: orgTableName,
+        Item: {
+          pk: { S: OrgKeys.orgPk(orgId) },
+          sk: { S: OrgKeys.memberSk(userId) },
+          role: { S: OrgRole.Owner },
+          joinedAt: { S: now },
+          source: { S: 'manual' },
+        },
+      },
+    },
+    {
+      Put: {
+        TableName: orgTableName,
+        Item: {
+          pk: { S: OrgKeys.userPk(userId) },
+          sk: { S: OrgKeys.membershipSk(orgId) },
+          role: { S: OrgRole.Owner },
+          joinedAt: { S: now },
+        },
+      },
+    },
+    reservationItem,
+    // Repoint both home-org pointers so the next login (and every fresh
+    // request in flight right now, per `attachIdentity`) resolves this org
+    // rather than the one the account is being removed from. Conditioned on
+    // still naming the org being left, the same guard `deletion-scrub.ts`'s
+    // `repointRow` puts on the identical update, so a retry after a partial
+    // failure is safe to resend rather than clobbering a row something else
+    // has since repointed.
+    {
+      Update: {
+        TableName: userInfoTableName,
+        Key: { pk: { S: `SUB#${sub}` }, sk: { S: 'IDENTITY' } },
+        UpdateExpression: 'SET orgId = :orgId',
+        ConditionExpression: 'attribute_exists(pk) AND orgId = :leaving',
+        ExpressionAttributeValues: { ':orgId': { S: orgId }, ':leaving': { S: leavingOrgId } },
+      },
+    },
+    {
+      Update: {
+        TableName: userInfoTableName,
+        Key: { pk: { S: `USER#${userId}` }, sk: { S: 'PROFILE' } },
+        UpdateExpression: 'SET orgId = :orgId',
+        ConditionExpression: 'attribute_exists(pk) AND orgId = :leaving',
+        ExpressionAttributeValues: { ':orgId': { S: orgId }, ':leaving': { S: leavingOrgId } },
+      },
+    },
+  ];
+
+  const event = auditEvent({
+    type: 'org.created',
+    actor: userActor({ userId, email }),
+    orgId,
+    subject: AuditSubjects.org(orgId),
+    details: { orgName, source: 'manual' },
+  });
+
+  return { orgId, orgName, slug, items, event };
 }
 
 /**
