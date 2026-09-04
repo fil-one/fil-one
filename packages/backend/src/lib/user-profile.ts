@@ -68,6 +68,40 @@ export async function readUserProfile(
 }
 
 /**
+ * The Auth0 subject behind a user id, or undefined when the profile row
+ * carries none or cannot be read.
+ *
+ * Split out from {@link readUserProfile} because almost nothing needs `sub` —
+ * it names the `SUB#{sub}/IDENTITY` row a caller repoints, today only a
+ * removal that leaves the account with a floor org to log in to.
+ *
+ * `consistentRead` matters here for the same reason it does on
+ * {@link readUserProfile}: a caller about to repoint this row from inside its
+ * own transaction must not miss a write from moments ago.
+ */
+export async function readUserSub(
+  userId: string,
+  options: { consistentRead?: boolean } = {},
+): Promise<string | undefined> {
+  try {
+    const { Item } = await getDynamoClient().send(
+      new GetItemCommand({
+        TableName: Resource.UserInfoTable.name,
+        Key: { pk: { S: `USER#${userId}` }, sk: { S: 'PROFILE' } },
+        // `sub` is a DynamoDB reserved word, hence #sub.
+        ProjectionExpression: '#sub',
+        ExpressionAttributeNames: { '#sub': 'sub' },
+        ...(options.consistentRead ? { ConsistentRead: true } : {}),
+      }),
+    );
+    return Item?.sub?.S;
+  } catch (err) {
+    console.error('[user-profile] Sub read failed', { userId, error: err });
+    return undefined;
+  }
+}
+
+/**
  * Record the address a session proved it holds.
  *
  * Removal sweeps the invitations addressed TO the member it removes, and it

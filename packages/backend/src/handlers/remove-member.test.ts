@@ -217,14 +217,52 @@ function stubOwnerCount(ownerCount: number | undefined) {
     );
 }
 
-/** The `USER#{userId}/PROFILE` row, which is where a member's address lives. */
-function stubTargetProfile(email: string | undefined, userId = TARGET_ID) {
+/**
+ * The `USER#{userId}/PROFILE` row: where a member's address lives, and also
+ * their `sub` — the row {@link readUserSub} projects for the floor-org repoint,
+ * so one stub serves both reads. `sub` defaults to absent, matching every test
+ * that never asks the floor-org path to run; the tests that do pass one.
+ */
+function stubTargetProfile(
+  email: string | undefined,
+  userId = TARGET_ID,
+  sub: string | undefined = undefined,
+) {
   ddbMock
     .on(GetItemCommand, {
       TableName: 'UserInfoTable',
       Key: { pk: { S: `USER#${userId}` }, sk: { S: 'PROFILE' } },
     })
-    .resolves(email ? { Item: { email: { S: email } } } : {});
+    .resolves({
+      Item: {
+        ...(email ? { email: { S: email } } : {}),
+        ...(sub ? { sub: { S: sub } } : {}),
+      },
+    });
+}
+
+/**
+ * How many orgs `listMemberships` reports for the departing member. Defaults
+ * (in `beforeEach`) to more than one, so the floor-org path stays off for
+ * every test that does not ask for it — the tests that do call this directly
+ * with `1`.
+ */
+function stubMembershipCount(count: number, userId = TARGET_ID) {
+  const items = Array.from({ length: count }, (_unused, index) => ({
+    pk: { S: OrgKeys.userPk(userId) },
+    sk: { S: OrgKeys.membershipSk(`other-org-${index}`) },
+    role: { S: OrgRole.Member },
+    joinedAt: { S: '2026-01-01T00:00:00.000Z' },
+  }));
+  ddbMock
+    .on(QueryCommand, {
+      TableName: 'OrgTable',
+      ExpressionAttributeValues: {
+        ':pk': { S: OrgKeys.userPk(userId) },
+        ':skPrefix': { S: 'MEMBERSHIP#' },
+      },
+    })
+    .resolves({ Items: items });
 }
 
 /** The membership transaction, which is the last one a removal writes. */
@@ -281,6 +319,24 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     // Two Owners by default: the handler reads the counter before it revokes
     // anything, so a sole Owner is refused before a key is touched.
     stubOwnerCount(2);
+    // Broad default so every removed userId — not just TARGET_ID — reads as
+    // having somewhere else to log in; the narrower stub right after takes
+    // over for TARGET_ID specifically, and a test that self-removes (userId
+    // === USER_ID) falls back to this one.
+    ddbMock
+      .on(QueryCommand, {
+        TableName: 'OrgTable',
+        ExpressionAttributeValues: { ':skPrefix': { S: 'MEMBERSHIP#' } },
+      })
+      .resolves({
+        Items: ['other-org-a', 'other-org-b'].map((otherOrgId) => ({
+          pk: { S: 'placeholder' },
+          sk: { S: OrgKeys.membershipSk(otherOrgId) },
+          role: { S: OrgRole.Member },
+          joinedAt: { S: '2026-01-01T00:00:00.000Z' },
+        })),
+      });
+    stubMembershipCount(2);
     callerHolds(OrgRole.Owner);
     targetHolds(OrgRole.Member);
   });
@@ -796,5 +852,75 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     const result = await handler(removeEvent(null), buildContext());
 
     expect(result).toMatchObject({ statusCode: 400 });
+  });
+
+  describe('the floor org', () => {
+    it('is created, and the account repointed onto it, when the removal leaves zero memberships', async () => {
+      stubMembershipCount(1);
+      stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target');
+
+      const result = await handler(removeEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 200 });
+      const items = transactItems();
+
+      const identityRepoint = items.find((item) => item.Update?.Key?.pk?.S === 'SUB#auth0|target');
+      expect(identityRepoint?.Update).toMatchObject({
+        UpdateExpression: 'SET orgId = :orgId',
+        ConditionExpression: 'attribute_exists(pk) AND orgId = :leaving',
+        ExpressionAttributeValues: { ':leaving': { S: ORG_ID } },
+      });
+
+      const profileRepoint = items.find(
+        (item) =>
+          item.Update?.Key?.pk?.S === `USER#${TARGET_ID}` && item.Update.Key?.sk?.S === 'PROFILE',
+      );
+      expect(profileRepoint?.Update).toMatchObject({
+        UpdateExpression: 'SET orgId = :orgId',
+        ConditionExpression: 'attribute_exists(pk) AND orgId = :leaving',
+        ExpressionAttributeValues: { ':leaving': { S: ORG_ID } },
+      });
+
+      const auditTypes = items
+        .filter((item) => item.Put?.TableName === 'AuditTable')
+        .map((item) => unmarshall(item.Put!.Item!).type as string)
+        .sort((a, b) => a.localeCompare(b));
+      expect(auditTypes).toStrictEqual(['member.removed', 'org.created']);
+    });
+
+    it('is skipped, loudly, when the removed account has no sub to repoint', async () => {
+      stubMembershipCount(1);
+
+      const result = await handler(removeEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 200 });
+      const items = transactItems();
+      expect(items.some((item) => item.Update?.Key?.pk?.S?.startsWith('SUB#'))).toBe(false);
+      expect(items.filter((item) => item.Put?.TableName === 'AuditTable')).toHaveLength(1);
+      expect(JSON.stringify(vi.mocked(console.error).mock.calls)).toContain('no sub');
+    });
+
+    it('is left uncreated when another membership already gives the account somewhere to log in', async () => {
+      stubMembershipCount(2);
+
+      await handler(removeEvent(), buildContext());
+
+      const items = transactItems();
+      expect(items.some((item) => item.Update?.Key?.pk?.S?.startsWith('SUB#'))).toBe(false);
+    });
+
+    it('returns 409 when creating it loses a race', async () => {
+      stubMembershipCount(1);
+      stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target');
+      // membership delete pair (2), floor org's 7 items, its own audit Put (1),
+      // then commitAudited's member.removed event (1) — 11 in total. Index 2 is
+      // the floor org's first item.
+      ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(2, 11));
+
+      const result = await handler(removeEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 409 });
+      expect(body(result).message).toContain('try again');
+    });
   });
 });
