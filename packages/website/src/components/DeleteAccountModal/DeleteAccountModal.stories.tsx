@@ -8,6 +8,7 @@ const meta: Meta<typeof DeleteAccountModal> = {
   args: {
     open: true,
     orgName: 'Acme Corp',
+    soleMembership: true,
     onClose: () => {},
     onDeleted: () => {},
   },
@@ -25,6 +26,11 @@ type Story = StoryObj<typeof DeleteAccountModal>;
  * before an irreversible action with no grace period and no restore.
  */
 export const Warning: Story = {};
+
+/** Belonging to another org too changes the warning: the account survives. */
+export const WarningWithOtherOrgs: Story = {
+  args: { soleMembership: false },
+};
 
 /** A long org name must wrap in the header description and in the typed-to-confirm label. */
 export const LongOrgName: Story = {
