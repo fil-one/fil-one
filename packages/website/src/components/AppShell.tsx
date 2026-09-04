@@ -315,7 +315,13 @@ export function AppShell({ children }: AppShellProps) {
             switches it back once the `lg:` gutter appears, so that white
             margin around the panel stays white rather than turning zinc-50. */}
         <main className="flex flex-1 flex-col overflow-hidden bg-zinc-50 lg:bg-white lg:px-2 lg:pt-2">
-          <div className="flex flex-1 flex-col overflow-auto bg-zinc-50 lg:rounded-xl lg:border lg:border-zinc-200 lg:shadow-xs">
+          {/* `overscroll-contain`: a fast fling can overshoot the panel's own
+              scroll bounds and chain onto the document's scroll, which
+              briefly reveals `<body>`'s background (unset, so browser-default
+              white) instead of anything this app styles. Containing the
+              overscroll here keeps the bounce inside the panel, where its own
+              background already matches. */}
+          <div className="flex flex-1 flex-col overflow-auto overscroll-contain bg-zinc-50 lg:rounded-xl lg:border lg:border-zinc-200 lg:shadow-xs">
             {/* Mobile top bar */}
             <div className="sticky top-0 z-20 flex h-14 flex-shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-3 lg:hidden">
               <MobileUserMenu />
