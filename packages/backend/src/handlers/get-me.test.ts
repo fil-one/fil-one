@@ -48,6 +48,7 @@ import {
   stubAbsentMembershipRead,
   stubMembershipList,
   stubMembershipRead,
+  STUB_JOINED_AT,
 } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
@@ -90,7 +91,9 @@ function ownerTail(orgName: string) {
     userId: MOCK_USER_ID,
     role: OrgRole.Owner,
     permissions: [...ROLE_PERMISSIONS[OrgRole.Owner]],
-    memberships: [{ orgId: MOCK_ORG_ID, orgName, slug: '', role: OrgRole.Owner }],
+    memberships: [
+      { orgId: MOCK_ORG_ID, orgName, slug: '', role: OrgRole.Owner, joinedAt: STUB_JOINED_AT },
+    ],
     orgsBeta: false,
   };
 }
@@ -445,7 +448,13 @@ describe('GET /api/me handler', () => {
         userId: string;
         role: OrgRole;
         permissions: string[];
-        memberships: Array<{ orgId: string; orgName: string; slug: string; role: OrgRole }>;
+        memberships: Array<{
+          orgId: string;
+          orgName: string;
+          slug: string;
+          role: OrgRole;
+          joinedAt?: string;
+        }>;
       };
     }
 
@@ -467,7 +476,13 @@ describe('GET /api/me handler', () => {
       expect(body.role).toBe(OrgRole.ReadOnly);
       expect(body.permissions).toStrictEqual([...ROLE_PERMISSIONS[OrgRole.ReadOnly]]);
       expect(body.memberships).toStrictEqual([
-        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', slug: '', role: OrgRole.ReadOnly },
+        {
+          orgId: MOCK_ORG_ID,
+          orgName: 'Example Corp',
+          slug: '',
+          role: OrgRole.ReadOnly,
+          joinedAt: STUB_JOINED_AT,
+        },
       ]);
     });
 
@@ -486,8 +501,20 @@ describe('GET /api/me handler', () => {
       const body = parseBody(await handler(authenticatedEvent(), buildContext()));
 
       expect(body.memberships).toStrictEqual([
-        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', slug: '', role: OrgRole.Owner },
-        { orgId: secondOrgId, orgName: 'Second Corp', slug: '', role: OrgRole.Member },
+        {
+          orgId: MOCK_ORG_ID,
+          orgName: 'Example Corp',
+          slug: '',
+          role: OrgRole.Owner,
+          joinedAt: STUB_JOINED_AT,
+        },
+        {
+          orgId: secondOrgId,
+          orgName: 'Second Corp',
+          slug: '',
+          role: OrgRole.Member,
+          joinedAt: STUB_JOINED_AT,
+        },
       ]);
     });
 
@@ -528,8 +555,20 @@ describe('GET /api/me handler', () => {
 
       expect((result as { statusCode: number }).statusCode).toBe(200);
       expect(parseBody(result).memberships).toStrictEqual([
-        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', slug: '', role: OrgRole.Owner },
-        { orgId: secondOrgId, orgName: '', slug: '', role: OrgRole.Member },
+        {
+          orgId: MOCK_ORG_ID,
+          orgName: 'Example Corp',
+          slug: '',
+          role: OrgRole.Owner,
+          joinedAt: STUB_JOINED_AT,
+        },
+        {
+          orgId: secondOrgId,
+          orgName: '',
+          slug: '',
+          role: OrgRole.Member,
+          joinedAt: STUB_JOINED_AT,
+        },
       ]);
       consoleError.mockRestore();
     });

@@ -11,6 +11,8 @@ export interface OrgMembershipSummary {
   role: OrgRole;
   /** Uploaded logo, if any. Absent falls back to a generated monogram, same as `MeResponse.picture` does for the user. */
   logoUrl?: string;
+  /** When this membership began. Absent for a row that predates the field. */
+  joinedAt?: string;
 }
 
 export interface MeResponse {

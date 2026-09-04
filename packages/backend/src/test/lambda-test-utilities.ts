@@ -15,7 +15,7 @@ import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.js';
 /** What `mockClient(DynamoDBClient)` returns. */
 type DynamoMock = AwsStub<ServiceInputTypes, ServiceOutputTypes, DynamoDBClientResolvedConfig>;
 
-const STUB_JOINED_AT = '2026-01-01T00:00:00.000Z';
+export const STUB_JOINED_AT = '2026-01-01T00:00:00.000Z';
 
 // The `sst` resource mock lives in ./sst-resource-mock.js, which imports
 // nothing: a `vi.mock('sst', …)` factory reaching this module would read a
