@@ -5,6 +5,7 @@ import { OrgNameSchema } from '@filone/shared';
 import type { MeResponse } from '@filone/shared';
 
 import { AvatarPicker, useOrgLogoUpload } from '../components/OrgLogoPicker.js';
+import { Button } from '../components/Button';
 import { FormField } from '../components/FormField';
 import { Input } from '../components/Input';
 import { Link } from '../components/Link';
@@ -48,9 +49,10 @@ function applyOrgUpdate(client: QueryClient, orgName: string, logoUrl?: string):
 }
 
 /**
- * The name autosaves on blur, the way Settings' own name field does; the
- * logo autosaves the moment a file lands (`onUploaded` below). Neither field
- * needs a Save button once both save themselves.
+ * The logo autosaves the moment a file lands (`onUploaded` below); the name
+ * needs an explicit Save. Unlike the personal name field on Settings, a
+ * rename here re-slugifies the org - its URL changes with it - which is
+ * enough of a consequence that it shouldn't fire on a stray blur.
  */
 function IdentitySection({ me }: { me: MeResponse }) {
   const { toast } = useToast();
@@ -90,20 +92,17 @@ function IdentitySection({ me }: { me: MeResponse }) {
     },
     onError: (err) => {
       setError(errorMessageOf(err, 'Failed to save the organization'));
-      setName(me.orgName);
     },
   });
 
-  function commit() {
-    // Against the trimmed value, because trimmed is what gets sent:
-    // otherwise a trailing space alone counts as a change.
-    const trimmed = name.trim();
-    if (trimmed === me.orgName) return;
+  // Against the trimmed value, because trimmed is what gets sent: otherwise a
+  // trailing space alone counts as a change and the Save button never goes away.
+  const changed = name.trim() !== me.orgName;
 
-    const parsed = OrgNameSchema.safeParse(trimmed);
+  function save() {
+    const parsed = OrgNameSchema.safeParse(name.trim());
     if (!parsed.success) {
       setError(parsed.error.issues[0].message);
-      setName(me.orgName);
       return;
     }
     setError(null);
@@ -119,20 +118,34 @@ function IdentitySection({ me }: { me: MeResponse }) {
           disabled={logo.uploading || logoMutation.isPending}
           layout="row"
         />
-        <FormField label="Organization name" htmlFor="org-name" error={error ?? undefined}>
-          <Input
-            id="org-name"
-            value={name}
-            invalid={!!error}
-            disabled={nameMutation.isPending}
-            onChange={(value) => {
-              setName(value);
-              if (error) setError(null);
-            }}
-            onBlur={commit}
-            placeholder="Your organization"
-          />
-        </FormField>
+        <div className="flex items-end gap-3">
+          <FormField
+            label="Organization name"
+            htmlFor="org-name"
+            error={error ?? undefined}
+            className="flex-1"
+          >
+            <Input
+              id="org-name"
+              value={name}
+              invalid={!!error}
+              disabled={nameMutation.isPending}
+              onChange={(value) => {
+                setName(value);
+                if (error) setError(null);
+              }}
+              placeholder="Your organization"
+            />
+          </FormField>
+          {changed && (
+            // `lg`'s `py-2.5` is what actually lines up with Input `md`'s own
+            // vertical padding - `md` (`py-2`) sits 4px shorter, the same
+            // Button/Input drift DESIGN.md's control-height rule calls out.
+            <Button size="lg" variant="primary" onClick={save} disabled={nameMutation.isPending}>
+              {nameMutation.isPending ? 'Saving...' : 'Save'}
+            </Button>
+          )}
+        </div>
       </div>
     </SectionCard>
   );
