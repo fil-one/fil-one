@@ -1,5 +1,5 @@
 import { Fragment, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowsLeftRightIcon, SignOutIcon } from '@phosphor-icons/react/dist/ssr';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
 import type { MeResponse, OrgMembershipSummary } from '@filone/shared';
@@ -14,7 +14,7 @@ import { RowActionsMenu } from '../components/RowActionsMenu';
 import { useToast } from '../components/Toast';
 import { switchToOrg } from '../lib/active-org.js';
 import { errorCodeOf, errorMessageOf } from '../lib/api.js';
-import { removeMember } from '../lib/members-api.js';
+import { listMembers, removeMember } from '../lib/members-api.js';
 import { queryKeys } from '../lib/query-client.js';
 import { formatDate } from '../lib/time.js';
 import { ROLE_LABELS } from '../lib/use-member-scope.js';
@@ -89,6 +89,18 @@ export function OrganizationsSection({ me }: { me: MeResponse }) {
   const client = useQueryClient();
   const [leaveTarget, setLeaveTarget] = useState<OrgMembershipSummary | null>(null);
 
+  // Only an Owner can ever be refused for LAST_OWNER, so the roster is asked
+  // for only then — every other role's "Leave" always succeeds, and the
+  // dialog below never needs to second-guess it.
+  const { data: membersData } = useQuery({
+    queryKey: queryKeys.members,
+    queryFn: listMembers,
+    enabled: me.role === OrgRole.Owner,
+  });
+  const isLastOwner =
+    me.role === OrgRole.Owner &&
+    (membersData?.members.filter((m) => m.role === OrgRole.Owner).length ?? 1) <= 1;
+
   const leave = useMutation({
     // `userId` is only absent for a caller with no membership row at all, and
     // this section never renders a row (so `onLeave` never fires) unless
@@ -153,10 +165,13 @@ export function OrganizationsSection({ me }: { me: MeResponse }) {
         title="Leave this organization?"
         description={
           leaveTarget
-            ? `You will lose access to ${leaveTarget.orgName} and everything in it. Anything you can rejoin only through a new invitation.`
+            ? isLastOwner
+              ? `${leaveTarget.orgName} has no other owner, so the server won't let you leave. Promote someone else to Owner from Members first, or delete the organization instead.`
+              : `You will lose access to ${leaveTarget.orgName} and everything in it. You can only rejoin with a new invitation.`
             : ''
         }
         confirmLabel="Leave"
+        confirmDisabled={isLastOwner}
       />
     </div>
   );

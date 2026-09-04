@@ -9,9 +9,11 @@ import { OrganizationsSection } from './OrganizationsSection.js';
 
 const mockRemoveMember = vi.fn();
 const mockSwitchToOrg = vi.fn();
+const mockListMembers = vi.fn();
 
 vi.mock('../lib/members-api.js', () => ({
   removeMember: (...args: unknown[]) => mockRemoveMember(...args),
+  listMembers: (...args: unknown[]) => mockListMembers(...args),
 }));
 
 vi.mock('../lib/active-org.js', () => ({
@@ -69,6 +71,14 @@ function renderSection(account: MeResponse = me()) {
 describe('OrganizationsSection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Two owners by default, so the "am I the last owner" check the Leave
+    // dialog runs stays out of the way of tests that are not about it.
+    mockListMembers.mockResolvedValue({
+      members: [
+        { userId: USER_ID, role: OrgRole.Owner },
+        { userId: 'user-2', role: OrgRole.Owner },
+      ],
+    });
   });
 
   it('renders nothing for an account with no memberships', () => {
@@ -124,10 +134,34 @@ describe('OrganizationsSection', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Acme' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Leave organization' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Leave' }));
+    const confirmButton = await screen.findByRole('button', { name: 'Leave' });
+    await waitFor(() => expect(confirmButton).toBeEnabled());
+    fireEvent.click(confirmButton);
 
     await waitFor(() => expect(mockRemoveMember).toHaveBeenCalledWith(USER_ID));
     expect(await screen.findByText('You left Acme')).toBeInTheDocument();
+  });
+
+  it("blocks leaving, with a remedy, when the caller is the org's only owner", async () => {
+    mockListMembers.mockResolvedValue({ members: [{ userId: USER_ID, role: OrgRole.Owner }] });
+    renderSection();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Acme' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Leave organization' }));
+
+    expect(await screen.findByText(/no other owner/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Leave' })).toBeDisabled());
+    expect(mockRemoveMember).not.toHaveBeenCalled();
+  });
+
+  it('never checks ownership for a non-Owner, who cannot hit LAST_OWNER', async () => {
+    renderSection(me({ role: OrgRole.Member }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Acme' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Leave organization' }));
+
+    expect(await screen.findByRole('button', { name: 'Leave' })).toBeEnabled();
+    expect(mockListMembers).not.toHaveBeenCalled();
   });
 
   it('shows the last-owner remedy instead of a generic failure', async () => {
@@ -140,7 +174,9 @@ describe('OrganizationsSection', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Acme' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Leave organization' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Leave' }));
+    const confirmButton = await screen.findByRole('button', { name: 'Leave' });
+    await waitFor(() => expect(confirmButton).toBeEnabled());
+    fireEvent.click(confirmButton);
 
     expect(
       await screen.findByText('This organization would be left without an owner.'),
