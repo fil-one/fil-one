@@ -15,15 +15,20 @@ const mockGetMe = vi.fn();
 const mockGetPreferences = vi.fn();
 const mockUpdateProfile = vi.fn();
 const mockUpdateOrg = vi.fn();
+const mockPresignAvatarUpload = vi.fn();
 
-vi.mock('../lib/api.js', () => ({
+vi.mock('../lib/api.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/api.js')>()),
   changePassword: vi.fn(),
   getMe: (...args: unknown[]) => mockGetMe(...args),
   getPreferences: (...args: unknown[]) => mockGetPreferences(...args),
   updateOrg: (...args: unknown[]) => mockUpdateOrg(...args),
   updatePreferences: vi.fn(),
   updateProfile: (...args: unknown[]) => mockUpdateProfile(...args),
+  presignAvatarUpload: (...args: unknown[]) => mockPresignAvatarUpload(...args),
 }));
+
+global.fetch = vi.fn(() => Promise.resolve(new Response(null, { status: 200 })));
 
 // MFA pulls in enrollment flows and WebAuthn; the company-name field is what
 // this file is about.
@@ -151,5 +156,47 @@ describe('SettingsPage — the name field', () => {
     fireEvent.blur(nameField);
 
     expect(mockUpdateProfile).not.toHaveBeenCalled();
+  });
+});
+
+describe('SettingsPage — the avatar picker', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('uploads the picked file and saves it, with no extra Save step', async () => {
+    mockPresignAvatarUpload.mockResolvedValue({
+      uploadUrl: 'https://upload.example/put',
+      pictureUrl: 'https://cdn.example/avatars/new.png',
+    });
+    mockUpdateProfile.mockResolvedValue({ picture: 'https://cdn.example/avatars/new.png' });
+    renderSettings(OrgRole.Admin);
+
+    const trigger = await screen.findByLabelText('Change avatar');
+    const input = trigger.parentElement!.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['data'], 'avatar.png', { type: 'image/png' });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() =>
+      expect(mockPresignAvatarUpload).toHaveBeenCalledWith({ contentType: 'image/png' }),
+    );
+    await waitFor(() =>
+      expect(mockUpdateProfile).toHaveBeenCalledWith({
+        pictureUrl: 'https://cdn.example/avatars/new.png',
+      }),
+    );
+    expect(await screen.findByText('Avatar updated')).toBeInTheDocument();
+  });
+
+  it('rejects a file that is too large before uploading anything', async () => {
+    renderSettings(OrgRole.Admin);
+
+    const trigger = await screen.findByLabelText('Change avatar');
+    const input = trigger.parentElement!.querySelector('input[type="file"]') as HTMLInputElement;
+    const tooBig = new File([new Uint8Array(3 * 1024 * 1024)], 'huge.png', { type: 'image/png' });
+    fireEvent.change(input, { target: { files: [tooBig] } });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('under 2MB');
+    expect(mockPresignAvatarUpload).not.toHaveBeenCalled();
   });
 });

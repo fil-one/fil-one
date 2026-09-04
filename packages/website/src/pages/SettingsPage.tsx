@@ -13,6 +13,7 @@ import { Link } from '../components/Link';
 import { MfaSettings } from '../components/MfaSettings';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '../components/Modal';
 import { OrganizationsSection } from './OrganizationsSection.js';
+import { ProfileAvatarPicker } from '../components/ProfileAvatarPicker.js';
 import { SettingRow } from '../components/SettingRow';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
@@ -26,6 +27,7 @@ import {
 import { getProvider, isSocialConnection, UpdateProfileSchema } from '@filone/shared';
 import type { ConnectionProvider, MeResponse, PreferencesResponse } from '@filone/shared';
 import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
+import { usePatchProfileCache } from '../lib/profile-cache.js';
 
 // ---------------------------------------------------------------------------
 // Section card wrapper
@@ -131,33 +133,8 @@ function ProviderManagedField({
 // Profile section
 // ---------------------------------------------------------------------------
 
-function applyProfileUpdate(result: {
-  name?: string;
-  email?: string;
-}): (old: MeResponse | undefined) => MeResponse | undefined {
-  return (old) => {
-    if (!old) return old;
-    return {
-      ...old,
-      ...(result.name !== undefined ? { name: result.name } : {}),
-      // An email change always resets verification — reflect it immediately so
-      // the verify-email gate in _app.tsx re-triggers without a /me round-trip.
-      ...(result.email !== undefined ? { email: result.email, emailVerified: false } : {}),
-    };
-  };
-}
-
 function messageFor(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
-}
-
-function usePatchProfileCache() {
-  const queryClient = useQueryClient();
-  return (saved: { name?: string; email?: string }) => {
-    const update = applyProfileUpdate(saved);
-    queryClient.setQueryData<MeResponse>(queryKeys.me, update);
-    queryClient.setQueryData<MeResponse>(queryKeys.meWithMfa, update);
-  };
 }
 
 /**
@@ -328,6 +305,8 @@ function ProfileSection({ me }: { me: MeResponse }) {
   return (
     <SectionCard title="Profile">
       <div className="flex flex-col gap-4">
+        <ProfileAvatarPicker me={me} />
+
         <FormField label="Name" htmlFor="profile-name">
           {social ? (
             <ProviderManagedField id="profile-name" value={nameForm.name} provider={provider} />

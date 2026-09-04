@@ -106,8 +106,10 @@ export const UpdateProfileSchema = z
       .max(PROFILE_NAME_MAX_LENGTH, `Name must be at most ${PROFILE_NAME_MAX_LENGTH} characters`)
       .optional(),
     email: z.string().trim().email('Please provide a valid email address').optional(),
+    /** Must already point at a file `POST /api/me/avatar-upload-url` put there. */
+    pictureUrl: z.string().url().optional(),
   })
-  .refine((data) => data.name || data.email, {
+  .refine((data) => data.name || data.email || data.pictureUrl, {
     message: 'At least one field is required.',
   });
 
@@ -116,6 +118,30 @@ export type UpdateProfileRequest = z.infer<typeof UpdateProfileSchema>;
 export interface UpdateProfileResponse {
   name?: string;
   email?: string;
+  /** Named to match {@link MeResponse.picture}, which this patches once saved. */
+  picture?: string;
+}
+
+/** Accepted image types for an avatar upload, and the size ceiling for one. */
+export const AVATAR_CONTENT_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
+export const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+
+/**
+ * `POST /api/me/avatar-upload-url` — a place to put a personal avatar before
+ * `PATCH /api/me/profile` persists it, same shape as the org logo's own
+ * presign step (`PresignOrgLogoSchema` in `org.ts`).
+ */
+export const PresignAvatarSchema = z.object({
+  contentType: z.enum(AVATAR_CONTENT_TYPES),
+});
+
+export type PresignAvatarRequest = z.infer<typeof PresignAvatarSchema>;
+
+export interface PresignAvatarResponse {
+  /** Where the client PUTs the file. */
+  uploadUrl: string;
+  /** The public URL to read it back from afterward, and what gets sent to `UpdateProfileRequest.pictureUrl`. */
+  pictureUrl: string;
 }
 
 export interface RegenerateRecoveryCodeResponse {

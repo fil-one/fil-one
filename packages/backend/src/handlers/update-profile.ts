@@ -32,7 +32,8 @@ function isDisposableDomain(domain: string): boolean {
 }
 
 /**
- * PATCH /api/me/profile — the caller's own name and email, and nothing else.
+ * PATCH /api/me/profile — the caller's own name, email, and avatar, and
+ * nothing else.
  *
  * A `self` route in the manifest: an authenticated session is the whole
  * requirement. No role gates it, and neither does membership — a user whose
@@ -76,7 +77,16 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     response.email = parsed.data.email;
   }
 
-  if (response.name !== undefined || response.email !== undefined) {
+  if (parsed.data.pictureUrl !== undefined) {
+    await updateAuth0User(sub, { picture: parsed.data.pictureUrl });
+    response.picture = parsed.data.pictureUrl;
+  }
+
+  if (
+    response.name !== undefined ||
+    response.email !== undefined ||
+    response.picture !== undefined
+  ) {
     requestTokenRefresh(event);
   }
 
