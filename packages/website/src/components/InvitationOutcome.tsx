@@ -1,17 +1,13 @@
 import { useEffect, useRef } from 'react';
 import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
-import {
-  CheckCircleIcon,
-  EnvelopeIcon,
-  WarningCircleIcon,
-  WarningIcon,
-} from '@phosphor-icons/react/dist/ssr';
+import { EnvelopeIcon, WarningCircleIcon, WarningIcon } from '@phosphor-icons/react/dist/ssr';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
 import type { AcceptInvitationResponse } from '@filone/shared';
 
 import { Badge } from './Badge';
 import { Button } from './Button';
 import { IconBox, type IconBoxColor } from './IconBox';
+import { OrgAvatar } from './OrgAvatar';
 import { Spinner } from './Spinner';
 import { errorCodeOf, errorMessageOf } from '../lib/api.js';
 import { ROLE_CAPABILITIES_SELF, ROLE_LABELS } from '../lib/use-member-scope.js';
@@ -46,6 +42,7 @@ function Panel({
   title,
   icon,
   iconColor = 'blue',
+  leading,
   children,
   testId,
   takeFocus = false,
@@ -53,6 +50,8 @@ function Panel({
   title: string;
   icon?: PhosphorIcon;
   iconColor?: IconBoxColor;
+  /** Overrides `icon`'s IconBox with something else - the org avatar, for the accepted panel. */
+  leading?: React.ReactNode;
   children: React.ReactNode;
   testId: string;
   takeFocus?: boolean;
@@ -65,19 +64,19 @@ function Panel({
 
   return (
     <div data-testid={testId} className={PANEL_SHELL_CLASSES}>
-      {icon && (
-        <div className="mb-3 flex justify-start">
-          <IconBox icon={icon} color={iconColor} size="md" />
+      {(leading || icon) && (
+        <div className="mb-5 flex justify-center">
+          {leading ?? <IconBox icon={icon!} color={iconColor} size="md" />}
         </div>
       )}
       <h1
         ref={heading}
         tabIndex={-1}
-        className="text-left text-base font-medium text-zinc-900 outline-none"
+        className="text-center text-base font-medium text-zinc-900 outline-none"
       >
         {title}
       </h1>
-      <div className="mt-2 flex flex-col items-stretch gap-4 text-left text-sm text-zinc-600">
+      <div className="mt-3 flex flex-col items-stretch gap-5 text-center text-sm text-zinc-600">
         {children}
       </div>
     </div>
@@ -188,8 +187,7 @@ function Accepted({
   return (
     <Panel
       title={result.alreadyMember ? `You're already in ${orgName}` : `Welcome to ${orgName}`}
-      icon={CheckCircleIcon}
-      iconColor="blue"
+      leading={<OrgAvatar name={orgName} logoUrl={result.logoUrl} size="md" />}
       testId="accept-success"
       takeFocus
     >
@@ -209,6 +207,7 @@ function Accepted({
       <Button
         id="accept-continue-button"
         variant="primary"
+        className="self-center"
         onClick={() => onContinue(result.orgId)}
       >
         Continue to {orgName}

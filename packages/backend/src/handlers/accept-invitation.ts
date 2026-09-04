@@ -23,7 +23,7 @@ import {
   OrgDeletingError,
   isGuardRejection,
   orgNotDeletingCheck,
-  resolveOrgName,
+  resolveOrgSummary,
 } from '../lib/org-profile.js';
 import { parseJsonBody } from '../lib/parse-json-body.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
@@ -333,13 +333,17 @@ async function acceptedResponse({
   role: OrgRole;
   alreadyMember: boolean;
 }): Promise<APIGatewayProxyStructuredResultV2> {
+  // The console sets the active org from this response and reloads, so it
+  // needs the name (and logo, for the accepted panel's avatar) it is
+  // switching to, as well as the id.
+  const { name: orgName, logoUrl } = await resolveOrgSummary(invitation.orgId);
+
   return new ResponseBuilder()
     .status(200)
     .body<AcceptInvitationResponse>({
       orgId: invitation.orgId,
-      // The console sets the active org from this response and reloads, so it
-      // needs the name it is switching to as well as the id.
-      orgName: await resolveOrgName(invitation.orgId),
+      orgName,
+      ...(logoUrl ? { logoUrl } : {}),
       // A member who was already in the org keeps the role they hold: the
       // invitation is marked accepted, and accepting an invitation is not a way
       // to give somebody a role change nobody authorized.

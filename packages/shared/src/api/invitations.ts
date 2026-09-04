@@ -142,6 +142,8 @@ export type AcceptInvitationRequest = z.infer<typeof AcceptInvitationSchema>;
 export interface AcceptInvitationResponse {
   orgId: string;
   orgName: string;
+  /** The org's uploaded logo, if any. Falls back to a generated monogram, same as elsewhere. */
+  logoUrl?: string;
   role: OrgRole;
   /** The caller was already a member, so accepting changed only the invitation. */
   alreadyMember: boolean;
