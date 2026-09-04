@@ -158,6 +158,57 @@ Like `rag-access.ts`, this talks to AWS directly with your ambient credentials
 rather than through `sst shell`, which cannot evaluate pulumi providers against
 production. Set `AWS_PROFILE` first.
 
+## Resetting one region's provisioning
+
+`reset-region-provisioning.ts` clears every account's pointer into one region,
+so the next console request re-runs tenant setup from scratch. Run it after the
+upstream orchestrator behind a region has been wiped or re-deployed, or when a
+pilot region is retired.
+
+```bash
+node bin/reset-region-provisioning.ts --stage $USER --region eu-central-3 --dry-run
+node bin/reset-region-provisioning.ts --stage staging --region eu-central-3
+node bin/reset-region-provisioning.ts --stage production --region us-east-9
+```
+
+**Production allows the pilot regions only.** `eu-central-3` and `us-east-9`
+are resettable there; `eu-west-1` (Aurora) and `us-east-1` (FTH) are refused by
+name, because they are generally available and carry real customer data, so
+clearing their tenant pointers would cut off every production customer at once.
+Every other stage allows all four. The check runs before the first AWS call.
+
+**Scan, plan, confirm.** The run prints one line per account — its tenant id,
+its access-key count, its RAG buckets with the S3 Vectors index behind each,
+and its SSM parameters — then asks for the literal `yes` on stdin. `--dry-run`
+prints the plan and exits, `--yes` applies without prompting, and a run
+carrying both stays a dry run. An account that `AccountDeletionWorker` is
+already tearing down is marked in its plan line and reset like any other:
+clearing the attribute is what lets that teardown finish once the upstream
+tenant is gone.
+
+**Every run writes a backup.** A JSON file, `--dry-run` included, holding the
+stored rows the run is about to delete: the tenant id, the profile attributes
+and their prior values, the `ACCESSKEY#` rows, the RAG rows with their index
+names, and the SSM parameter names. It refuses to overwrite an existing file,
+and `--backup <path>` names it. A restore re-creates the upstream tenant under
+the recorded tenant id, re-writes the profile attributes, and mints fresh access
+keys from the recorded names, permissions, bucket scopes and expiries. Minting
+new keys is the one step it cannot avoid: the file carries no secret material
+and never the SSM values. RAG indexes come back by re-enabling RAG and letting
+the indexer sync.
+
+**What the reset leaves in place.** The orchestrators are never called, so
+upstream tenants, buckets and access keys stay where they are — the reset
+assumes they are already gone. `OrgTable` holds membership only and is not
+read. There is no DynamoDB PITR, so the printed plan is the only audit trail;
+capture stdout with `| tee reset-region.log`.
+
+Applying needs a role that can write UserInfoTable and RagIndexerTable, delete
+SSM parameters, and call `s3vectors:GetVectorBucket` and
+`s3vectors:DeleteIndex`. A read-only profile that can read the vector bucket
+gets as far as the plan and the backup, then fails on the first write; one that
+cannot stops before the scan.
+
 ## Other Scripts
 
 | Script                         | Purpose                                                                                                                                                                |
@@ -172,7 +223,7 @@ production. Set `AWS_PROFILE` first.
 | `tail-logs.sh`                 | Tail CloudWatch logs for a Lambda function                                                                                                                             |
 | `tail-tenant-setup-logs.sh`    | Tail logs for the Aurora tenant setup Lambda                                                                                                                           |
 | `reset-db.ts`                  | Reset the Aurora database for a stage                                                                                                                                  |
-| `reset-region-provisioning.ts` | Un-provision one region for every org in a stage                                                                                                                       |
+| `reset-region-provisioning.ts` | Un-provision one region for every account in a stage, in production too (see above)                                                                                    |
 | `aurora-s3-env.ts`             | Print Aurora S3 environment variables                                                                                                                                  |
 | `aurora-preview-url.ts`        | Pre-signed GetObject URL for an Aurora object, plus a billing report for the owning account (deletion state, Stripe dashboard link, subscription status, latest usage) |
 | `aurora-demo.ts`               | Demo script for Aurora S3 operations                                                                                                                                   |
@@ -192,3 +243,4 @@ production. Set `AWS_PROFILE` first.
 | `billing-rekey.ts`  | What to do with each subscription row, and the exact items that carry it out               |
 | `billing-verify.ts` | The checks behind `backfill-billing-to-org.ts --verify` — the flip PR's merge gate         |
 | `org-conversion.ts` | The same, for the org membership conversion                                                |
+| `region-reset.ts`   | What un-provisioning one region deletes, per account, and the plan the operator reads      |
