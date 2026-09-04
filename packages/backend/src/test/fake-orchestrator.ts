@@ -17,6 +17,7 @@ export interface FakeOrchestrator {
   getTenantInfo: ReturnType<typeof vi.fn>;
   getBucketUsageMetrics: ReturnType<typeof vi.fn>;
   getBucket: ReturnType<typeof vi.fn>;
+  listBuckets: ReturnType<typeof vi.fn>;
 }
 
 export interface FakeOrchestratorOpts {
@@ -36,7 +37,9 @@ export interface FakeOrchestratorOpts {
   bucketMetrics?: StorageUsageSample[] | Error;
   /** Bucket resolved by `getBucket`; `null` = not found. Defaults to `null`. */
   bucket?: BucketDetails | null;
-  /** When true, both `getTenantUsageMetrics` and `getTenantInfo` reject. */
+  /** Bucket names returned by `listBuckets`. Defaults to none. */
+  buckets?: string[];
+  /** When true, `getTenantUsageMetrics`, `getTenantInfo` and `listBuckets` reject. */
   failUsage?: boolean;
 }
 
@@ -77,6 +80,9 @@ export function fakeOrchestrator(id: string, opts: FakeOrchestratorOpts = {}): F
         ? vi.fn().mockRejectedValue(bucketMetrics)
         : vi.fn().mockResolvedValue(bucketMetrics),
     getBucket: vi.fn().mockResolvedValue(opts.bucket ?? null),
+    listBuckets: failUsage
+      ? vi.fn().mockRejectedValue(new Error('region down'))
+      : vi.fn().mockResolvedValue((opts.buckets ?? []).map((bucketName) => ({ bucketName }))),
   };
 }
 
