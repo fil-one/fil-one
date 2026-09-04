@@ -151,6 +151,15 @@ export interface SubscriptionRecord {
    */
   deletedAt?: string;
   lastPaymentFailedAt?: string;
+  /**
+   * The status `hubspot-contact-sync` last wrote onto the HubSpot contact, and
+   * when. The job selects on the first disagreeing with `subscriptionStatus`,
+   * so it is the progress mark that stops each run re-reconciling the same
+   * rows; the second bounds how stale a reconciled row may get before it is
+   * re-verified anyway.
+   */
+  hubspotSubscriptionStatus?: SubscriptionStatus;
+  hubspotSyncedAt?: string;
   paymentMethodId?: string;
   paymentMethodLast4?: string;
   paymentMethodBrand?: string;

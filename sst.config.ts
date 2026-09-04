@@ -1205,9 +1205,6 @@ export default $config({
         ],
       },
       'stripe-webhook': {
-        // HubSpot key: the webhook mirrors subscription status onto the contact
-        // so lifecycle sequences can tell a paying customer from a trial (FIL-828).
-        extraLink: [hubSpotServiceKey],
         extraEnv: {
           ...orchestratorEnv,
           STRIPE_WEBHOOK_SECRET_SSM_PATH: $interpolate`/filone/${$app.stage}/stripe-webhook-secret`,
@@ -1350,19 +1347,22 @@ export default $config({
     // webhook writes, and counts contacts HubSpot cannot match at all.
     const hubSpotContactSync = createFn('HubSpotContactSync', {
       handler: 'packages/backend/src/jobs/hubspot-contact-sync.handler',
-      // stripePriceId is unused here but getBillingSecrets() reads both keys in
-      // one literal, so omitting it throws on the first getStripeClient() call.
-      link: [billingTable, hubSpotServiceKey, stripeSecretKey, stripePriceId],
+      // The addresses it bootstraps contacts on come off UserInfoTable's PROFILE
+      // rows; Stripe is no longer read, so its secrets are no longer linked.
+      link: [billingTable, userInfoTable, hubSpotServiceKey],
       timeout: '300 seconds',
       memory: '256 MB',
     });
 
     new sst.aws.CronV2('HubSpotContactSyncCron', {
-      // Every 6 hours at :30 (00:30, 06:30, 12:30, 18:30 UTC) — offset from the
-      // other BillingTable scanners (usage 07/19, grace 08/20, drift 10/22) so
-      // the full-table Scans do not overlap. This 6h period is the worst-case
-      // propagation lag documented for ops on the HubSpot property itself.
-      schedule: 'cron(30 0/6 * * ? *)',
+      // Hourly at :30 — offset from the other BillingTable scanners (usage
+      // 07/19, grace 08/20, drift 10/22, all on the hour) so the full-table
+      // Scans do not overlap. `rate(1 hour)` would fire at whatever offset the
+      // deploy landed on and collide with them. This 1h period is the worst-case
+      // propagation lag for ops on the HubSpot property; each run reconciles at
+      // most MAX_CONTACTS_PER_RUN rows, so the frequency is also what sets how
+      // fast a backfill backlog drains.
+      schedule: 'cron(30 * * * ? *)',
       function: hubSpotContactSync.arn,
     });
 

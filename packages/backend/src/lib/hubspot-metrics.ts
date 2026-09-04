@@ -22,7 +22,10 @@ export function emitHubSpotLiveWriteFailed(reason: string): void {
 }
 
 export interface ContactSyncSummary {
-  /** Billing records evaluated this run. */
+  /**
+   * Billing records evaluated this run — a capped slice of the population, not
+   * all of it. Read it with `truncated` or it says nothing about coverage.
+   */
   total: number;
   /** Resolved to a HubSpot contact — already in sync, or written. */
   matched: number;
@@ -32,6 +35,22 @@ export interface ContactSyncSummary {
   writeFailed: number;
   /** Drift corrected — a standing count of dropped live writes. */
   repaired: number;
+  /**
+   * 1 when the run hit its per-run cap and left rows for the next one.
+   *
+   * The one number that tells a backlog draining from one that is not: every
+   * other counter looks the same whether the job is converging or permanently
+   * saturated. Alarm on it holding 1 across consecutive runs.
+   */
+  truncated: number;
+  /**
+   * Candidates whose profile row carried no address, so a contact HubSpot does
+   * not already hold could not be bootstrapped. Without this the coverage of
+   * the profile-row address is indistinguishable from HubSpot failing to match.
+   */
+  missingEmail: number;
+  /** Candidates dropped for naming no user — no id to address a contact by. */
+  missingUserId: number;
 }
 
 /**
@@ -53,6 +72,9 @@ export function emitContactSyncSummary(summary: ContactSyncSummary): void {
             { Name: 'HubSpotContactUnmatched', Unit: 'Count' },
             { Name: 'HubSpotContactWriteFailed', Unit: 'Count' },
             { Name: 'HubSpotContactRepaired', Unit: 'Count' },
+            { Name: 'HubSpotContactSyncTruncated', Unit: 'Count' },
+            { Name: 'HubSpotContactMissingEmail', Unit: 'Count' },
+            { Name: 'HubSpotContactMissingUserId', Unit: 'Count' },
           ],
         },
       ],
@@ -62,5 +84,8 @@ export function emitContactSyncSummary(summary: ContactSyncSummary): void {
     HubSpotContactUnmatched: summary.unmatched,
     HubSpotContactWriteFailed: summary.writeFailed,
     HubSpotContactRepaired: summary.repaired,
+    HubSpotContactSyncTruncated: summary.truncated,
+    HubSpotContactMissingEmail: summary.missingEmail,
+    HubSpotContactMissingUserId: summary.missingUserId,
   });
 }
