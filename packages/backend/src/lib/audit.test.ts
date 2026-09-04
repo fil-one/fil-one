@@ -47,6 +47,7 @@ const ACTOR = { kind: 'user', id: USER_ID, email: 'owner@example.com' } as const
 const DETAILS: { [T in AuditEventType]: AuditEventDetails[T] } = {
   'org.created': { orgName: 'Acme', source: 'signup' },
   'org.renamed': { name: 'Acme Two', previousName: 'Acme' },
+  'org.logo_updated': { logoUrl: 'https://cdn.example.com/logo.png' },
   'member.invited': { inviteId: 'inv-1', email: 'invitee@example.com', role: OrgRole.Member },
   'invite.revoked': { inviteId: 'inv-1', email: 'invitee@example.com' },
   'invite.accepted': { inviteId: 'inv-1', email: 'invitee@example.com', role: OrgRole.Member },

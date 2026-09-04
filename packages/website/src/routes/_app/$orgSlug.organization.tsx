@@ -2,11 +2,12 @@ import z from 'zod';
 import { createRoute, redirect } from '@tanstack/react-router';
 
 import { Route as orgSlugRoute } from './$orgSlug';
+import { OrganizationPage } from '../../pages/OrganizationPage.js';
 
 /**
  * `tab` is what the old unified Organization page used to open on, and
  * `portal_return` rides along from Stripe's billing return. Both are still
- * accepted so the redirect below can route on them.
+ * accepted so the redirects below can route on them.
  */
 const organizationSearchSchema = z.object({
   tab: z.enum(['members', 'invitations', 'audit', 'billing']).optional(),
@@ -14,17 +15,19 @@ const organizationSearchSchema = z.object({
 });
 
 /**
- * `/organization` is gone as a page: it split into `/members` and `/billing`,
- * reached from the org switcher, with the org's own identity and rename living
- * in the switcher itself (was FIL-1094's unified page).
+ * `/organization` split into `/members`, `/billing`, and `/audit` under
+ * FIL-1094, with the org's own identity and rename folded into a quick dialog
+ * on the org switcher. That dialog has since grown into its own page — a
+ * permanent home for Delete organization rather than a spot inside a rename
+ * dialog — so `/organization` is a real page again: `OrganizationPage`.
  *
- * Kept as a redirect rather than deleted, because the old path and its `tab` are
- * in bookmarks, in Stripe's billing return URL, and behind the shell's Upgrade
- * and Manage account banners:
+ * The old `tab` values that name a *different* page still redirect, because
+ * they are in bookmarks, in Stripe's billing return URL, and behind the
+ * shell's Upgrade and Manage account banners:
  *   - `tab=billing`      → `/billing` (carrying `portal_return` for the return trip)
  *   - `tab=invitations`  → `/members?tab=invitations`
  *   - `tab=audit`        → `/audit`
- *   - anything else      → `/members`
+ *   - anything else (including no `tab` at all) → this page
  */
 export const Route = createRoute({
   path: '/organization',
@@ -46,11 +49,14 @@ export const Route = createRoute({
         replace: true,
       });
     }
-    throw redirect({
-      to: '/$orgSlug/members',
-      params,
-      search: search.tab === 'invitations' ? { tab: 'invitations' } : {},
-      replace: true,
-    });
+    if (search.tab === 'invitations') {
+      throw redirect({
+        to: '/$orgSlug/members',
+        params,
+        search: { tab: 'invitations' },
+        replace: true,
+      });
+    }
   },
+  component: OrganizationPage,
 });

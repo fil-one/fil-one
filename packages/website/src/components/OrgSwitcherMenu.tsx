@@ -12,7 +12,6 @@ import type { OrgMembershipSummary } from '@filone/shared';
 
 import { BaseLink } from './BaseLink.js';
 import { CreateOrganizationDialog } from './CreateOrganizationDialog.js';
-import { EditOrganizationDialog } from './EditOrganizationDialog.js';
 import { OrgAvatar } from './OrgAvatar.js';
 import { OrgSwitcher } from './OrgSwitcher.js';
 import { usePermissions } from '../lib/use-permissions.js';
@@ -28,20 +27,21 @@ type OrgSwitcherMenuProps = {
 
 /** One row's worth of chrome, shared by every item and link in the panel. */
 const itemClassName =
-  'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-zinc-600 transition-colors data-focus:bg-zinc-100 data-focus:text-zinc-900';
+  'flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-xs text-zinc-600 transition-colors data-focus:bg-zinc-100 data-focus:text-zinc-900';
 
 /**
  * The org identity control, pinned at the top of the sidebar, separate from
  * `UserMenu` at the bottom, following the Vercel/Resend pattern of two distinct
  * controls rather than one combined user+org button.
  *
- * The menu is where the organization itself lives now that there is no
- * Organization page: the name at the top is the org's identity, Edit renames it
- * (the same dialog that page's header used to open), and Members, Billing, and
- * Audit log are the surfaces that page split into. Below a divider the switcher
- * lists the caller's other orgs, and Create organization sits at the foot. Each
- * org action is gated on the permission its destination needs, so a role is
- * never offered a page the server would refuse it.
+ * The name at the top is the org's identity; Edit organization, Members,
+ * Billing, and Audit log are the surfaces that name governs, each its own page
+ * (Edit organization also carries the danger zone, gated separately on
+ * `org.delete` since Owner and Admin can rename but only Owner can delete).
+ * Below a divider the switcher lists the caller's other orgs, and Create
+ * organization sits at the foot. Each org action is gated on the permission
+ * its destination needs, so a role is never offered a page the server would
+ * refuse it.
  *
  * Built on Headless UI's `Menu` rather than a hand-rolled popover, matching
  * `RowActionsMenu`'s reasoning: a hand-rolled panel gets Escape and focus
@@ -60,7 +60,6 @@ export function OrgSwitcherMenu({
   testId,
 }: OrgSwitcherMenuProps) {
   const [createOpen, setCreateOpen] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
   const { has } = usePermissions();
 
   return (
@@ -88,44 +87,32 @@ export function OrgSwitcherMenu({
           anchor="bottom start"
           className="z-50 mt-1 w-60 rounded-lg border border-zinc-200 bg-white p-1 shadow-md focus:outline-none"
         >
-          {/* Which organization this menu is about. Not a menu item: it names the
-              org the actions below act on rather than being one of them. */}
-          <div className="flex items-center gap-2.5 px-3 py-2">
-            <OrgAvatar name={orgName} logoUrl={logoUrl} />
-            <span className="min-w-0 flex-1 truncate text-sm font-medium text-zinc-900">
-              {orgName}
-            </span>
-          </div>
-          <div className="my-1 border-t border-zinc-100" />
-
           {has('org.rename') && (
-            <MenuItem>
-              <button
-                type="button"
-                data-testid="org-menu-edit"
-                onClick={() => setEditOpen(true)}
-                className={itemClassName}
-              >
-                <PencilSimpleIcon size={16} className="flex-shrink-0 text-zinc-400" />
-                Edit organization
-              </button>
+            <MenuItem
+              as={BaseLink}
+              href="/organization"
+              data-testid="org-menu-edit"
+              className={itemClassName}
+            >
+              <PencilSimpleIcon size={13} className="flex-shrink-0 text-zinc-400" />
+              Edit organization
             </MenuItem>
           )}
           {has('members.read') && (
             <MenuItem as={BaseLink} href="/members" className={itemClassName}>
-              <UsersIcon size={16} className="flex-shrink-0 text-zinc-400" />
+              <UsersIcon size={13} className="flex-shrink-0 text-zinc-400" />
               Members
             </MenuItem>
           )}
           {has('billing.view') && (
             <MenuItem as={BaseLink} href="/billing" className={itemClassName}>
-              <CreditCardIcon size={16} className="flex-shrink-0 text-zinc-400" />
+              <CreditCardIcon size={13} className="flex-shrink-0 text-zinc-400" />
               Billing
             </MenuItem>
           )}
           {has('audit.view') && (
             <MenuItem as={BaseLink} href="/audit" className={itemClassName}>
-              <ClockCounterClockwiseIcon size={16} className="flex-shrink-0 text-zinc-400" />
+              <ClockCounterClockwiseIcon size={13} className="flex-shrink-0 text-zinc-400" />
               Audit log
             </MenuItem>
           )}
@@ -139,18 +126,13 @@ export function OrgSwitcherMenu({
           />
           <MenuItem>
             <button type="button" onClick={() => setCreateOpen(true)} className={itemClassName}>
-              <PlusIcon size={16} className="flex-shrink-0 text-zinc-400" />
+              <PlusIcon size={13} className="flex-shrink-0 text-zinc-400" />
               Create organization
             </button>
           </MenuItem>
         </MenuItems>
       </Menu>
       <CreateOrganizationDialog open={createOpen} onClose={() => setCreateOpen(false)} />
-      <EditOrganizationDialog
-        open={editOpen}
-        onClose={() => setEditOpen(false)}
-        orgName={orgName}
-      />
     </>
   );
 }
