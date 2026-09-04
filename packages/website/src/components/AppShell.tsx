@@ -334,8 +334,10 @@ export function AppShell({ children }: AppShellProps) {
               that belong to the app rather than the page. The sidebar collapse
               toggle sits at the left since it acts on the sidebar beside it;
               bug report and system status stay grouped at the right the way
-              Linear places them. */}
-          <div className="hidden h-10 flex-shrink-0 items-center justify-between gap-1 px-1 lg:flex">
+              Linear places them. h-12 (not h-10) matches the sidebar footer's
+              total height (p-2 around a py-1.5 button = 48px) so both bars,
+              bottom-anchored side by side, land on the same vertical center. */}
+          <div className="hidden h-12 flex-shrink-0 items-center justify-between gap-1 px-1 lg:flex">
             <Tooltip content={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} side="right">
               <button
                 type="button"
