@@ -6,6 +6,7 @@ import type { MeResponse } from '@filone/shared';
 import { UserAvatar } from './UserAvatar.js';
 import { useToast } from './Toast';
 import { errorMessageOf, presignAvatarUpload, updateProfile } from '../lib/api.js';
+import { monogramFromName } from '../lib/monogram.js';
 import { usePatchProfileCache } from '../lib/profile-cache.js';
 
 const ACCEPT = AVATAR_CONTENT_TYPES.join(',');
@@ -72,7 +73,9 @@ function useProfileAvatarUpload(me: MeResponse) {
 export function ProfileAvatarPicker({ me }: { me: MeResponse }) {
   const avatar = useProfileAvatarUpload(me);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const initial = (me.name || me.email || '?').trim().charAt(0).toUpperCase();
+  // Same source and helper AppShell's sidebar avatar uses, so the two always
+  // show the same monogram for the same account.
+  const initial = monogramFromName(me.name || me.email || 'User');
 
   return (
     <div className="flex items-center gap-3">
