@@ -8,7 +8,7 @@ import { Route as loginErrorRoute } from './routes/_auth/login-error.js';
 import { Route as appRoute } from './routes/_app.js';
 import { Route as orgSlugRoute } from './routes/_app/$orgSlug.js';
 import { Route as dashboardRoute } from './routes/_app/$orgSlug.dashboard.js';
-import { Route as newOrgRoute } from './routes/_app/$orgSlug.new.js';
+import { Route as getStartedRoute } from './routes/_app/$orgSlug.get-started.js';
 import { Route as bucketsRoute } from './routes/_app/$orgSlug.buckets.js';
 import { Route as createBucketRoute } from './routes/_app/$orgSlug.buckets.create.js';
 import { Route as bucketDetailRoute } from './routes/_app/$orgSlug.buckets.$bucketName.js';
@@ -47,7 +47,6 @@ import { Route as legacySettingsRoute } from './routes/_app/settings.js';
 import { Route as legacySupportRoute } from './routes/_app/support.js';
 import { Route as legacyBucketIntelligenceRoute } from './routes/_app/bucket-intelligence.js';
 import { Route as legacyAiAgentToolkitRoute } from './routes/_app/ai-agent-toolkit.js';
-import { Route as legacyNewRoute } from './routes/_app/new.js';
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
@@ -74,7 +73,7 @@ const routeTree = rootRoute.addChildren([
       supportRoute,
       bucketIntelligenceRoute,
       aiAgentToolkitRoute,
-      newOrgRoute,
+      getStartedRoute,
     ]),
     membersRoute,
     legacyDashboardRoute,
@@ -91,7 +90,6 @@ const routeTree = rootRoute.addChildren([
     legacySupportRoute,
     legacyBucketIntelligenceRoute,
     legacyAiAgentToolkitRoute,
-    legacyNewRoute,
   ]),
 ]);
 
