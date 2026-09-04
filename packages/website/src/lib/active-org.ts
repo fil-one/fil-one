@@ -212,15 +212,21 @@ export function clearActiveOrgOnNavigation(): void {
  * so a static import back here would be resolved before either side's module
  * body has finished running.
  *
- * The slug comes from this tab's own cached `/me`, not from the caller
- * (`OrgSwitcher` only ever had the org id to give): a target org without a
- * slug yet — a real possibility until the backend's slug backfill has run for
- * this stage — falls back to the unscoped `/dashboard`, which resolves the
- * same org id into a slugged URL itself once it exists.
+ * The slug comes from this tab's own cached `/me` unless `knownSlug` is
+ * given. `OrgSwitcher` only ever has the org id, so it falls to the cache —
+ * fine there, since a membership already in `/me`'s list is exactly what a
+ * row in that switcher is. A caller switching into an org that was *not* in
+ * any cache a moment ago (accepting an invitation, creating a new org) has
+ * to pass the slug its own response just carried: the cache lookup would
+ * otherwise always miss for that org specifically, and the unscoped
+ * `/dashboard` fallback it misses into is not a dead end (it resolves the
+ * org id into a slugged URL itself, once `/me` is fetched fresh) but it is a
+ * second, avoidable redirect. A target org with no slug backfilled yet still
+ * falls back the same way regardless of which source came up empty.
  */
-export function switchToOrg(orgId: string): void {
+export function switchToOrg(orgId: string, knownSlug?: string): void {
   const previousOrgId = getActiveOrgId();
-  const targetSlug = resolveOrgSlug(orgId);
+  const targetSlug = knownSlug ?? resolveOrgSlug(orgId);
   setActiveOrgId(orgId);
   setSwitching(true);
   queryClient.clear();

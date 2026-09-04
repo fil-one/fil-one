@@ -122,6 +122,7 @@ describe('AcceptInvitationPage', () => {
     mockAccept.mockResolvedValue({
       orgId: 'org-9',
       orgName: 'Acme',
+      slug: 'acme',
       role: OrgRole.Admin,
       alreadyMember: false,
     });
@@ -132,7 +133,11 @@ describe('AcceptInvitationPage', () => {
     expect(panel).toHaveTextContent('Admin');
 
     fireEvent.click(screen.getByRole('button', { name: 'Continue to Acme' }));
-    expect(mockSwitchToOrg).toHaveBeenCalledWith('org-9');
+    // The slug rides along: this org was never in any cache before this
+    // moment, so switchToOrg has to be told directly rather than resolving
+    // it from `/me`, which would find nothing and fall back to the unscoped
+    // `/dashboard`.
+    expect(mockSwitchToOrg).toHaveBeenCalledWith('org-9', 'acme');
   });
 
   it('treats a second acceptance as the success it is', async () => {

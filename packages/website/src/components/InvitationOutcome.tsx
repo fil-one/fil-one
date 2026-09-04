@@ -180,7 +180,7 @@ function Accepted({
   onContinue,
 }: {
   result: AcceptInvitationResponse;
-  onContinue: (orgId: string) => void;
+  onContinue: (orgId: string, slug?: string) => void;
 }) {
   const orgName = result.orgName || 'your organization';
 
@@ -207,8 +207,7 @@ function Accepted({
       <Button
         id="accept-continue-button"
         variant="primary"
-        className="self-center"
-        onClick={() => onContinue(result.orgId)}
+        onClick={() => onContinue(result.orgId, result.slug)}
       >
         Continue to {orgName}
       </Button>
@@ -223,7 +222,7 @@ export type InvitationOutcomeProps = {
   error?: unknown;
   /** The address this session carries, for the refusal that is about which account it is. */
   sessionEmail?: string;
-  onContinue: (orgId: string) => void;
+  onContinue: (orgId: string, slug?: string) => void;
   onLogOut: () => void;
 };
 

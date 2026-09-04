@@ -116,6 +116,21 @@ describe('the active org stash', () => {
       expect(reload).not.toHaveBeenCalled();
     });
 
+    it('navigates by a known slug even when the target org is not in any cache yet', async () => {
+      // No `/me` seeded at all - the state right after accepting an
+      // invitation or creating an org, where the target was never in this
+      // tab's cache to begin with. The caller's own response already named
+      // the slug, so there is no need to fall back to the unscoped dashboard.
+      switchToOrg(ORG_B, 'org-b');
+
+      await vi.waitFor(() => {
+        expect(navigate).toHaveBeenCalledWith({
+          to: '/$orgSlug/dashboard',
+          params: { orgSlug: 'org-b' },
+        });
+      });
+    });
+
     it('falls back to the unscoped dashboard when the target org has no slug yet', async () => {
       // No `/me` cached at all — the state before the backend's slug backfill
       // has run for this stage, or simply before the first `/me` of the
