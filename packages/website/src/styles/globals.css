@@ -8,6 +8,16 @@
 
 @plugin '@tailwindcss/typography';
 
+/* Browsers default a bare <button> to the arrow cursor, not the hand — Tailwind
+   stopped papering over that in v3.3. `.button` (button.css) already opts in
+   itself; this covers every other raw <button> in the console (icon buttons,
+   dialog and menu triggers) in one place instead of per component. */
+@layer base {
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
 @theme {
   /* Blue scale — hue transitions from cyan-blue (252°) in lights to pure blue (264°) in darks.
      brand-600 and brand-700 are designed to pass WCAG AA (4.5:1) with white text. */
