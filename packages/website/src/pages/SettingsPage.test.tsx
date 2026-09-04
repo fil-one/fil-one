@@ -200,3 +200,13 @@ describe('SettingsPage — the avatar picker', () => {
     expect(mockPresignAvatarUpload).not.toHaveBeenCalled();
   });
 });
+
+describe('SettingsPage — the danger zone', () => {
+  it('points at support rather than opening a deletion flow that does not exist yet', async () => {
+    renderSettings(OrgRole.Admin);
+
+    expect(await screen.findByText('Danger zone')).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: 'support@fil.one' });
+    expect(link).toHaveAttribute('href', 'mailto:support@fil.one');
+  });
+});

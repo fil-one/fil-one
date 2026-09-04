@@ -448,6 +448,37 @@ function SecuritySection({ me }: { me: MeResponse }) {
 }
 
 // ---------------------------------------------------------------------------
+// Danger zone
+// ---------------------------------------------------------------------------
+
+/**
+ * Not self-serve yet: deleting a personal account (as opposed to an
+ * organization, which `OrganizationPage`'s own danger zone already handles)
+ * needs to resolve every org membership the caller holds first - leave some,
+ * destroy others, and decide the ones where they're the only Owner. Until
+ * that flow exists, this points to support rather than opening a modal with
+ * nothing behind it.
+ */
+function DangerZoneSection() {
+  return (
+    <SectionCard title="Danger zone" bare>
+      <div className="flex flex-col gap-3 px-5 pt-4 pb-4">
+        <div className="py-1">
+          <p className="text-sm font-medium text-zinc-900">Delete account</p>
+          <p className="text-xs text-zinc-500">
+            To delete your account, please email{' '}
+            <Link href="mailto:support@fil.one" variant="accent">
+              support@fil.one
+            </Link>
+            .
+          </p>
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -477,6 +508,7 @@ export function SettingsPage() {
         <OrganizationsSection me={me} />
         <NotificationsSection />
         <SecuritySection me={me} />
+        <DangerZoneSection />
       </div>
     </PageLayout>
   );
