@@ -20,7 +20,7 @@ import { queryKeys } from '../../lib/query-client.js';
  */
 export const Route = createRoute({
   getParentRoute: () => orgSlugRoute,
-  path: 'new',
+  path: 'get-started',
   component: OnboardingRoute,
 });
 
