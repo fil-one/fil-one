@@ -106,7 +106,7 @@ export function ProfileAvatarPicker({ me }: { me: MeResponse }) {
         className="hidden"
       />
       <div className="flex flex-col gap-0.5">
-        <p className="text-sm font-medium text-zinc-900">Avatar</p>
+        <p className="text-xs font-medium text-zinc-900">Avatar</p>
         <p className="text-xs text-zinc-500">PNG, JPEG, or WebP. Up to {AVATAR_MAX_MB}MB.</p>
         {avatar.error && (
           <p role="alert" className="text-xs text-red-600">
