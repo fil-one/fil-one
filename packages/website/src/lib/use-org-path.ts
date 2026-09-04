@@ -20,10 +20,12 @@ function orgSlugParam(): string | undefined {
 /**
  * Paths that live outside `$orgSlug`, reached before an org context exists at
  * all: signing in, verifying an email, accepting an invite, or naming the org
- * on `/welcome` (before that org's slug is worth putting in a URL for a caller
- * who hasn't seen it yet). `/get-started` is NOT here — the org already has a slug by
- * then, same as every other real page. `prefixWithOrg` leaves these exactly as
- * written rather than stapling a slug onto them.
+ * on `/create-organization` (before that org's slug is worth putting in a URL
+ * for a caller who hasn't seen it yet). `/welcome` is the old name for that
+ * same step, still here as the redirect stub that keeps it working.
+ * `/get-started` is NOT here — the org already has a slug by then, same as
+ * every other real page. `prefixWithOrg` leaves these exactly as written
+ * rather than stapling a slug onto them.
  */
 const UNSCOPED_PATHS = new Set([
   '/',
@@ -32,6 +34,7 @@ const UNSCOPED_PATHS = new Set([
   '/sign-in',
   '/sign-up',
   '/verify-email',
+  '/create-organization',
   '/welcome',
   '/invite/accept',
   '/account-deleted',
