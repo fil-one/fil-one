@@ -36,6 +36,7 @@ const UNSCOPED_PATHS = new Set([
   '/verify-email',
   '/create-organization',
   '/welcome',
+  '/left-organization',
   '/invite/accept',
   '/account-deleted',
 ]);
