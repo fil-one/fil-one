@@ -239,7 +239,12 @@ export function AppShell({ children }: AppShellProps) {
   }, [mobileOpen, closeDrawer]);
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
+    // The console's own default background: zinc-50 everywhere, so anything
+    // not explicitly given a different color (the sidebar and the frame
+    // around the content window, both bg-white below) reads as the same
+    // soft grey as the content window itself, whatever gets revealed by a
+    // short page, a resize, or a scroll bounce overshooting its bounds.
+    <div className="flex h-screen flex-col overflow-hidden bg-zinc-50">
       <TenantBanners
         tenantStatus={tenantStatus}
         mayReadBilling={mayReadBilling}
@@ -307,14 +312,11 @@ export function AppShell({ children }: AppShellProps) {
             outside it (Linear's layout). The `lg:` insets and card chrome are
             desktop-only; on mobile the content stays edge to edge. The panel is
             the scroll container, so its rounded corners clip the content.
-
-            `bg-zinc-50` here too, not just on the panel below: on mobile there
-            is no gutter around the panel, so an elastic overscroll bounce past
-            its top or bottom edge reveals this element's own background
-            rather than the panel's, and it needs to match. `lg:bg-white`
-            switches it back once the `lg:` gutter appears, so that white
-            margin around the panel stays white rather than turning zinc-50. */}
-        <main className="flex flex-1 flex-col overflow-hidden bg-zinc-50 lg:bg-white lg:px-2 lg:pt-2">
+            `main` itself stays transparent: on mobile it sits directly on the
+            grey root with nothing to override, and on desktop its `lg:`
+            padding sits inside the white frame above, so either way it already
+            shows the right color without needing its own. */}
+        <main className="flex flex-1 flex-col overflow-hidden lg:px-2 lg:pt-2">
           {/* `overscroll-contain`: a fast fling can overshoot the panel's own
               scroll bounds and chain onto the document's scroll, which
               briefly reveals `<body>`'s background (unset, so browser-default
