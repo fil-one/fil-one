@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
+import { useNavigate } from '@tanstack/react-router';
 import { OrgNameSchema } from '@filone/shared';
 import type { MeResponse } from '@filone/shared';
 
@@ -26,19 +27,31 @@ import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
  *
  * Both `/me` keys, because Settings reads the one with MFA included and the
  * rest of the console reads the other, and `memberships` alongside `orgName`/
- * `logoUrl`: the switcher reads both from the list, so patching only the top
- * level renames the org in the header and leaves the switcher stale.
+ * `slug`/`logoUrl`: the switcher reads all three from the list, so patching
+ * only the top level renames the org in the header and leaves the switcher
+ * (and the URL, see `IdentitySection` below) stale.
  */
-function applyOrgUpdate(client: QueryClient, orgName: string, logoUrl?: string): void {
+function applyOrgUpdate(
+  client: QueryClient,
+  orgName: string,
+  slug?: string,
+  logoUrl?: string,
+): void {
   const patch = (old: MeResponse | undefined): MeResponse | undefined =>
     old
       ? {
           ...old,
           orgName,
+          ...(slug !== undefined ? { slug } : {}),
           ...(logoUrl !== undefined ? { logoUrl } : {}),
           memberships: old.memberships?.map((membership) =>
             membership.orgId === old.orgId
-              ? { ...membership, orgName, ...(logoUrl !== undefined ? { logoUrl } : {}) }
+              ? {
+                  ...membership,
+                  orgName,
+                  ...(slug !== undefined ? { slug } : {}),
+                  ...(logoUrl !== undefined ? { logoUrl } : {}),
+                }
               : membership,
           ),
         }
@@ -57,6 +70,7 @@ function applyOrgUpdate(client: QueryClient, orgName: string, logoUrl?: string):
 function IdentitySection({ me }: { me: MeResponse }) {
   const { toast } = useToast();
   const client = useQueryClient();
+  const navigate = useNavigate();
 
   const [name, setName] = useState(me.orgName);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +78,7 @@ function IdentitySection({ me }: { me: MeResponse }) {
   const logoMutation = useMutation({
     mutationFn: (logoUrl: string) => updateOrg({ name: me.orgName, logoUrl }),
     onSuccess: (result) => {
-      applyOrgUpdate(client, result.name, result.logoUrl);
+      applyOrgUpdate(client, result.name, result.slug, result.logoUrl);
       toast.success('Organization logo updated');
     },
     onError: (err) => {
@@ -86,9 +100,19 @@ function IdentitySection({ me }: { me: MeResponse }) {
   const nameMutation = useMutation({
     mutationFn: (next: string) => updateOrg({ name: next }),
     onSuccess: (result) => {
-      applyOrgUpdate(client, result.name, result.logoUrl);
+      applyOrgUpdate(client, result.name, result.slug, result.logoUrl);
       setName(result.name);
       toast.success(`This organization is called ${result.name} now`);
+      // The rename re-slugified the org, so the URL this page is sitting on
+      // just went stale — carry it forward rather than leaving the caller on
+      // a slug that is about to stop resolving to anything.
+      if (result.slug && result.slug !== me.slug) {
+        void navigate({
+          to: '/$orgSlug/organization',
+          params: { orgSlug: result.slug },
+          replace: true,
+        });
+      }
     },
     onError: (err) => {
       setError(errorMessageOf(err, 'Failed to save the organization'));

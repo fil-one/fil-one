@@ -66,6 +66,8 @@ export type UpdateOrgRequest = z.infer<typeof UpdateOrgSchema>;
 
 export interface UpdateOrgResponse {
   name: string;
+  /** Re-derived from `name` on every rename, so a caller that changed the name needs this to update its own URL. */
+  slug?: string;
   logoUrl?: string;
 }
 

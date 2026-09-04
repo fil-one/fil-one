@@ -72,7 +72,11 @@ export async function baseHandler(
   if (!nameChanged && !logoChanged) {
     return new ResponseBuilder()
       .status(200)
-      .body<UpdateOrgResponse>({ name, ...(previous.logoUrl ? { logoUrl: previous.logoUrl } : {}) })
+      .body<UpdateOrgResponse>({
+        name,
+        ...(previous.slug ? { slug: previous.slug } : {}),
+        ...(previous.logoUrl ? { logoUrl: previous.logoUrl } : {}),
+      })
       .build();
   }
 
@@ -86,6 +90,7 @@ export async function baseHandler(
       profileKey,
       orgId,
       name,
+      slug: previous.slug,
       logoUrl: logoUrl as string,
       previousLogoUrl: previous.logoUrl,
       actor,
@@ -119,7 +124,11 @@ export async function baseHandler(
   const responseLogoUrl = logoChanged ? logoUrl : previous.logoUrl;
   return new ResponseBuilder()
     .status(200)
-    .body<UpdateOrgResponse>({ name, ...(responseLogoUrl ? { logoUrl: responseLogoUrl } : {}) })
+    .body<UpdateOrgResponse>({
+      name,
+      slug,
+      ...(responseLogoUrl ? { logoUrl: responseLogoUrl } : {}),
+    })
     .build();
 }
 
@@ -358,6 +367,7 @@ async function saveLogoOnly({
   profileKey,
   orgId,
   name,
+  slug,
   logoUrl,
   previousLogoUrl,
   actor,
@@ -365,6 +375,7 @@ async function saveLogoOnly({
   profileKey: OrgProfileKey;
   orgId: string;
   name: string;
+  slug?: string;
   logoUrl: string;
   previousLogoUrl?: string;
   actor: AuditActor;
@@ -375,7 +386,10 @@ async function saveLogoOnly({
     if (renameConditionFailed(err)) return await renameConflictResponse(profileKey);
     throw err;
   }
-  return new ResponseBuilder().status(200).body<UpdateOrgResponse>({ name, logoUrl }).build();
+  return new ResponseBuilder()
+    .status(200)
+    .body<UpdateOrgResponse>({ name, ...(slug ? { slug } : {}), logoUrl })
+    .build();
 }
 
 export const handler = middy(baseHandler)
