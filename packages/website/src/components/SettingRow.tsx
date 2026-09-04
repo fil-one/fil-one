@@ -4,7 +4,7 @@ export function SettingRow({
   action,
 }: {
   label: string;
-  description: string;
+  description: React.ReactNode;
   action: React.ReactNode;
 }) {
   return (

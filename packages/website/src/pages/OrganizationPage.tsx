@@ -1,57 +1,24 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
-import { BuildingsIcon } from '@phosphor-icons/react/dist/ssr';
 import { OrgNameSchema } from '@filone/shared';
 import type { MeResponse } from '@filone/shared';
 
 import { AvatarPicker, useOrgLogoUpload } from '../components/OrgLogoPicker.js';
 import { Button } from '../components/Button';
-import { Card } from '../components/Card';
 import { DeleteAccountModal } from '../components/DeleteAccountModal';
 import { FormField } from '../components/FormField';
-import { Heading } from '../components/Heading/Heading.js';
-import { IconBox } from '../components/IconBox';
 import { Input } from '../components/Input';
 import { Link } from '../components/Link';
 import { PageLayout } from '../components/PageLayout.js';
 import { RequirePermission } from '../components/RequirePermission';
+import { SectionCard } from '../components/SectionCard.js';
+import { SettingRow } from '../components/SettingRow';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
 import { ACCOUNT_DELETION_ENABLED } from '../lib/account-deletion.js';
 import { errorMessageOf, getMe, updateOrg } from '../lib/api.js';
 import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
-
-const PAGE_DESCRIPTION = "Your organization's name, logo, and deletion";
-
-// ---------------------------------------------------------------------------
-// Section card wrapper (page-local: the one in SettingsPage.tsx isn't shared)
-// ---------------------------------------------------------------------------
-
-function SectionCard({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <Card padding="none">
-      <div className="flex items-center gap-2.5 p-5 pb-0">
-        <IconBox icon={BuildingsIcon} color="blue" size="md" />
-        <div>
-          <Heading tag="h2" size="sm">
-            {title}
-          </Heading>
-          <p className="text-sm text-zinc-500">{description}</p>
-        </div>
-      </div>
-      <div className="p-5">{children}</div>
-    </Card>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Identity: logo and name
@@ -140,7 +107,7 @@ function IdentitySection({ me }: { me: MeResponse }) {
   const busy = rename.isPending || logo.uploading;
 
   return (
-    <SectionCard title="Identity" description="How this organization appears across the console">
+    <SectionCard title="Identity">
       <div className="flex flex-col gap-4">
         <AvatarPicker name={name} logo={logo} disabled={busy} />
         <FormField label="Organization name" htmlFor="org-name" error={error ?? undefined}>
@@ -177,12 +144,12 @@ function DangerSection({ me }: { me: MeResponse }) {
   const soleMembership = (me.memberships?.length ?? 1) <= 1;
 
   return (
-    <Card>
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-sm font-medium text-zinc-900">Delete organization</p>
-          <p className="text-xs text-zinc-500 mt-1">
-            {ACCOUNT_DELETION_ENABLED ? (
+    <SectionCard title="Danger zone" bare>
+      <div className="flex flex-col gap-3 px-5 pt-4 pb-4">
+        <SettingRow
+          label="Delete organization"
+          description={
+            ACCOUNT_DELETION_ENABLED ? (
               <>Permanently deletes {me.orgName} and everything in it. This cannot be undone.</>
             ) : (
               <>
@@ -191,16 +158,18 @@ function DangerSection({ me }: { me: MeResponse }) {
                   support@fil.one
                 </Link>
               </>
-            )}
-          </p>
-        </div>
-        <Button
-          variant="destructive"
-          disabled={!ACCOUNT_DELETION_ENABLED}
-          onClick={() => setModalOpen(true)}
-        >
-          Delete
-        </Button>
+            )
+          }
+          action={
+            <Button
+              variant="destructive"
+              disabled={!ACCOUNT_DELETION_ENABLED}
+              onClick={() => setModalOpen(true)}
+            >
+              Delete
+            </Button>
+          }
+        />
       </div>
 
       <DeleteAccountModal
@@ -214,7 +183,7 @@ function DangerSection({ me }: { me: MeResponse }) {
           window.location.href = '/account-deleted';
         }}
       />
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -264,21 +233,21 @@ export function OrganizationPage() {
     <RequirePermission
       permission="org.rename"
       pending={
-        <PageLayout title="Edit organization" description={PAGE_DESCRIPTION}>
+        <PageLayout title="Edit organization">
           <div className="flex items-center justify-center p-16">
             <Spinner ariaLabel="Loading organization" />
           </div>
         </PageLayout>
       }
       fallback={
-        <PageLayout title="Edit organization" description={PAGE_DESCRIPTION}>
+        <PageLayout title="Edit organization">
           <div className="rounded-xl border border-zinc-200 bg-white p-6 text-sm text-zinc-600">
             Organization details are managed by your organization&rsquo;s owners and admins.
           </div>
         </PageLayout>
       }
     >
-      <PageLayout title="Edit organization" description={PAGE_DESCRIPTION}>
+      <PageLayout title="Edit organization">
         <OrganizationDetails />
       </PageLayout>
     </RequirePermission>

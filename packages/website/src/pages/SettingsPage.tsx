@@ -3,10 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { PencilSimpleIcon } from '@phosphor-icons/react/dist/ssr';
 
-import { Heading } from '../components/Heading/Heading';
 import { PageLayout } from '../components/PageLayout.js';
 import { Button } from '../components/Button';
-import { Card } from '../components/Card';
 import { FormField } from '../components/FormField';
 import { Input } from '../components/Input';
 import { Link } from '../components/Link';
@@ -14,6 +12,7 @@ import { MfaSettings } from '../components/MfaSettings';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '../components/Modal';
 import { OrganizationsSection } from './OrganizationsSection.js';
 import { ProfileAvatarPicker } from '../components/ProfileAvatarPicker.js';
+import { SectionCard } from '../components/SectionCard.js';
 import { SettingRow } from '../components/SettingRow';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
@@ -28,30 +27,6 @@ import { getProvider, isSocialConnection, UpdateProfileSchema } from '@filone/sh
 import type { ConnectionProvider, MeResponse, PreferencesResponse } from '@filone/shared';
 import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
 import { usePatchProfileCache } from '../lib/profile-cache.js';
-
-// ---------------------------------------------------------------------------
-// Section card wrapper
-// ---------------------------------------------------------------------------
-
-function SectionCard({
-  title,
-  bare,
-  children,
-}: {
-  title: string;
-  /** Skips `Card`'s own padding, for a section that manages its own to keep its edges symmetric. */
-  bare?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-2">
-      <Heading tag="h2" size="sm">
-        {title}
-      </Heading>
-      <Card padding={bare ? 'none' : 'md'}>{children}</Card>
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Toggle row (for notifications)
