@@ -74,19 +74,21 @@ describe('OrganizationPage', () => {
     vi.unstubAllGlobals();
   });
 
-  it('opens on the org name it already has', async () => {
+  it('opens on the org name it already has, with nothing to save', async () => {
     renderPage(OrgRole.Owner);
 
     expect(await screen.findByLabelText('Organization name')).toHaveValue('Acme');
-    expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
   });
 
-  it('saves a rename on blur and writes it into every cache that reads the name', async () => {
+  it('shows a Save button once the name changes, and saves on click', async () => {
     const { client } = renderPage(OrgRole.Owner);
 
     const nameField = await screen.findByLabelText('Organization name');
     fireEvent.change(nameField, { target: { value: 'Acme Two' } });
-    fireEvent.blur(nameField);
+    expect(mockUpdateOrg).not.toHaveBeenCalled();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(mockUpdateOrg).toHaveBeenCalledWith({ name: 'Acme Two' }));
     await waitFor(() =>
@@ -95,14 +97,7 @@ describe('OrganizationPage', () => {
         memberships: [{ orgId: ORG_ID, orgName: 'Acme Two' }],
       }),
     );
-  });
-
-  it('does nothing on blur when the name did not change', async () => {
-    renderPage(OrgRole.Owner);
-
-    fireEvent.blur(await screen.findByLabelText('Organization name'));
-
-    expect(mockUpdateOrg).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
   });
 
   it('refuses a name the schema will not take, without asking the server', async () => {
@@ -110,7 +105,7 @@ describe('OrganizationPage', () => {
 
     const nameField = await screen.findByLabelText('Organization name');
     fireEvent.change(nameField, { target: { value: 'no/slashes' } });
-    fireEvent.blur(nameField);
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
     expect(mockUpdateOrg).not.toHaveBeenCalled();
