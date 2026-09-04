@@ -37,6 +37,7 @@ import { RAG_KEY_DISPLAY_PREFIX_LENGTH } from './api/rag-api-keys.ts';
 export const AUDIT_EVENT_TYPES = [
   'org.created',
   'org.renamed',
+  'org.logo_updated',
   'member.invited',
   'invite.revoked',
   'invite.accepted',
@@ -200,7 +201,18 @@ export type RevocationTrigger =
  */
 export interface AuditEventDetails {
   'org.created': { orgName: string; source?: OrgMembershipSource };
-  'org.renamed': { name: string; previousName?: string };
+  /**
+   * The logo fields are optional and only present when the same `PATCH /org`
+   * call also changed the logo — a rename-only save carries neither. A
+   * logo-only save (the name unchanged) is `org.logo_updated` instead.
+   */
+  'org.renamed': {
+    name: string;
+    previousName?: string;
+    logoUrl?: string;
+    previousLogoUrl?: string;
+  };
+  'org.logo_updated': { logoUrl: string; previousLogoUrl?: string };
   'member.invited': {
     inviteId: string;
     email: string;
@@ -464,6 +476,7 @@ export type StandaloneAuditEvent =
 export const AUDIT_EVENT_TYPE_LABELS: Record<AuditEventType, string> = {
   'org.created': 'Organization created',
   'org.renamed': 'Organization renamed',
+  'org.logo_updated': 'Organization logo updated',
   'member.invited': 'Member invited',
   'invite.revoked': 'Invitation revoked',
   'invite.accepted': 'Invitation accepted',

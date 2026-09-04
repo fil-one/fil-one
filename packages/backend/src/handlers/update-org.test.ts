@@ -137,7 +137,7 @@ function onlyTheLeaderHasTheProfileRow() {
  * the rename gives it one for the first time rather than releasing a
  * reservation that was never made.
  */
-function orgProfileNamed(name?: string, slug?: string) {
+function orgProfileNamed(name?: string, slug?: string, logoUrl?: string) {
   ddbMock
     .on(GetItemCommand, {
       TableName: 'UserInfoTable',
@@ -146,7 +146,13 @@ function orgProfileNamed(name?: string, slug?: string) {
     .resolves(
       name === undefined
         ? {}
-        : { Item: { name: { S: name }, ...(slug ? { slug: { S: slug } } : {}) } },
+        : {
+            Item: {
+              name: { S: name },
+              ...(slug ? { slug: { S: slug } } : {}),
+              ...(logoUrl ? { logoUrl: { S: logoUrl } } : {}),
+            },
+          },
     );
 }
 
@@ -426,6 +432,98 @@ describe('PATCH /api/org handler', () => {
       expect(updateInput().ExpressionAttributeValues).toMatchObject({
         ':slug': { S: 'new-corp-2' },
       });
+    });
+  });
+
+  describe('the logo', () => {
+    const LOGO_URL = 'https://cdn.example.com/logo.png';
+
+    it('updates only the logo when the name is unchanged', async () => {
+      const result = await handler(
+        renameEvent({ name: 'Old Corp', logoUrl: LOGO_URL }),
+        buildContext(),
+      );
+
+      expect(result).toMatchObject({
+        statusCode: 200,
+        body: JSON.stringify({ name: 'Old Corp', logoUrl: LOGO_URL }),
+      });
+      // No slug work: just the profile update and the audit event.
+      expect(transactItems()).toHaveLength(2);
+      expect(updateInput()).toMatchObject({
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+        UpdateExpression: 'SET logoUrl = :logoUrl',
+        ConditionExpression: 'attribute_exists(pk)',
+        ExpressionAttributeValues: { ':logoUrl': { S: LOGO_URL } },
+      });
+      expect(auditedEvent()).toMatchObject({
+        type: 'org.logo_updated',
+        orgId: MOCK_ORG_ID,
+        subject: `org:${MOCK_ORG_ID}`,
+        details: { logoUrl: LOGO_URL },
+      });
+    });
+
+    it('records the previous logo when replacing one that already existed', async () => {
+      orgProfileNamed('Old Corp', undefined, 'https://cdn.example.com/old.png');
+
+      await handler(renameEvent({ name: 'Old Corp', logoUrl: LOGO_URL }), buildContext());
+
+      expect(auditedEvent().details).toStrictEqual({
+        logoUrl: LOGO_URL,
+        previousLogoUrl: 'https://cdn.example.com/old.png',
+      });
+    });
+
+    it('writes nothing when the submitted logo is the one already stored', async () => {
+      orgProfileNamed('Old Corp', undefined, LOGO_URL);
+
+      const result = await handler(
+        renameEvent({ name: 'Old Corp', logoUrl: LOGO_URL }),
+        buildContext(),
+      );
+
+      expect(result).toMatchObject({
+        statusCode: 200,
+        body: JSON.stringify({ name: 'Old Corp', logoUrl: LOGO_URL }),
+      });
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+    });
+
+    it('carries the logo into the rename write when both change together', async () => {
+      const result = await handler(
+        renameEvent({ name: 'New Corp', logoUrl: LOGO_URL }),
+        buildContext(),
+      );
+
+      expect(result).toMatchObject({
+        statusCode: 200,
+        body: JSON.stringify({ name: 'New Corp', logoUrl: LOGO_URL }),
+      });
+      expect(updateInput()).toMatchObject({
+        UpdateExpression:
+          'SET #name = :name, slug = :slug, nameConfirmed = :confirmed, logoUrl = :logoUrl',
+        ExpressionAttributeValues: { ':logoUrl': { S: LOGO_URL } },
+      });
+      expect(auditedEvent()).toMatchObject({
+        type: 'org.renamed',
+        details: { name: 'New Corp', previousName: 'Old Corp', logoUrl: LOGO_URL },
+      });
+    });
+
+    it('carries the existing logo over when only the name changes', async () => {
+      orgProfileNamed('Old Corp', undefined, LOGO_URL);
+
+      const result = await handler(renameEvent({ name: 'New Corp' }), buildContext());
+
+      expect(result).toMatchObject({
+        statusCode: 200,
+        body: JSON.stringify({ name: 'New Corp', logoUrl: LOGO_URL }),
+      });
+      // Untouched by this save, so the rename's own write never sets it again.
+      expect(updateInput().UpdateExpression).not.toContain('logoUrl');
+      expect(auditedEvent().details).toStrictEqual({ name: 'New Corp', previousName: 'Old Corp' });
     });
   });
 

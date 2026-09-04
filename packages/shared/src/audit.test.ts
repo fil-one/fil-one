@@ -26,6 +26,7 @@ import { RAG_KEY_DISPLAY_PREFIX_LENGTH } from './api/rag-api-keys.ts';
 const ADR_EVENT_TYPES = [
   'org.created',
   'org.renamed',
+  'org.logo_updated',
   'member.invited',
   'invite.revoked',
   'invite.accepted',
