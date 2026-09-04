@@ -10,6 +10,7 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from 'recharts';
+import { ChartLineUpIcon } from '@phosphor-icons/react/dist/ssr';
 import { useQuery } from '@tanstack/react-query';
 
 import type { UsageTrendsResponse } from '@filone/shared';
@@ -20,6 +21,18 @@ import { getUsageTrends } from '../lib/api.js';
 import { formatDate } from '../lib/time.js';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { Card } from '../components/Card';
+import { IconBox } from '../components/IconBox';
+
+/** In place of a chart with nothing to plot yet, matching the height of the
+    chart it stands in for so the card doesn't jump once data lands. */
+function ChartEmptyState({ label }: { label: string }) {
+  return (
+    <div className="flex h-[160px] flex-col items-center justify-center gap-2">
+      <IconBox icon={ChartLineUpIcon} color="grey" />
+      <p className="text-xs text-zinc-500">{label}</p>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Custom tooltip
@@ -48,6 +61,131 @@ function ChartTooltip({ active, payload, label, valueLabel, formatValue }: Chart
 }
 
 // ---------------------------------------------------------------------------
+// Chart cards
+// ---------------------------------------------------------------------------
+
+function StorageChartCard({
+  series,
+  latest,
+}: {
+  series: UsageTrendsResponse['storage'];
+  latest: number;
+}) {
+  const isEmpty = series.every((p) => p.value === 0);
+  return (
+    <Card>
+      <div className="mb-3 flex items-center justify-between">
+        <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">STORAGE</span>
+        <span className="text-[13px] font-semibold text-zinc-900">{formatBytes(latest)}</span>
+      </div>
+      {isEmpty ? (
+        <ChartEmptyState label="Your storage usage will appear here" />
+      ) : (
+        <ResponsiveContainer width="100%" height={160}>
+          <AreaChart data={series} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
+            <defs>
+              <linearGradient id="storageGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#0080FF" stopOpacity={0.15} />
+                <stop offset="95%" stopColor="#0080FF" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid
+              horizontal={true}
+              vertical={false}
+              strokeDasharray="3 3"
+              stroke="var(--color-zinc-200)"
+              strokeOpacity={0.6}
+            />
+            <XAxis
+              dataKey="date"
+              tick={{ fontSize: 10, fill: '#677183' }}
+              axisLine={false}
+              tickLine={false}
+              tickFormatter={formatDate}
+            />
+            <YAxis
+              tick={{ fontSize: 10, fill: '#677183' }}
+              axisLine={false}
+              tickLine={false}
+              width={40}
+              tickCount={5}
+              tickFormatter={formatBytesShort}
+              domain={['dataMin', 'dataMax']}
+            />
+            <Tooltip
+              content={<ChartTooltip valueLabel="Storage" formatValue={formatBytes} />}
+              cursor={{ stroke: 'var(--color-zinc-200)', strokeWidth: 1 }}
+            />
+            <Area
+              type="monotone"
+              dataKey="value"
+              fill="url(#storageGradient)"
+              stroke="#0080FF"
+              strokeWidth={2}
+              dot={false}
+            />
+          </AreaChart>
+        </ResponsiveContainer>
+      )}
+    </Card>
+  );
+}
+
+function ObjectsChartCard({
+  series,
+  latest,
+}: {
+  series: UsageTrendsResponse['objects'];
+  latest: number;
+}) {
+  const isEmpty = series.every((p) => p.value === 0);
+  return (
+    <Card>
+      <div className="mb-3 flex items-center justify-between">
+        <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">OBJECTS</span>
+        <span className="text-[13px] font-semibold text-zinc-900">{latest} total</span>
+      </div>
+      {isEmpty ? (
+        <ChartEmptyState label="Your objects will appear here" />
+      ) : (
+        <ResponsiveContainer width="100%" height={160}>
+          <BarChart data={series} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
+            <CartesianGrid
+              horizontal={true}
+              vertical={false}
+              strokeDasharray="3 3"
+              stroke="var(--color-zinc-200)"
+              strokeOpacity={0.6}
+            />
+            <XAxis
+              dataKey="date"
+              tick={{ fontSize: 10, fill: '#677183' }}
+              axisLine={false}
+              tickLine={false}
+              tickFormatter={formatDate}
+            />
+            <YAxis
+              tick={{ fontSize: 10, fill: '#677183' }}
+              axisLine={false}
+              tickLine={false}
+              width={30}
+              tickCount={6}
+              allowDecimals={false}
+              domain={['dataMin', 'dataMax']}
+            />
+            <Tooltip
+              content={<ChartTooltip valueLabel="Objects" formatValue={(v) => v.toString()} />}
+              cursor={{ fill: 'var(--color-zinc-100)', opacity: 0.6 }}
+            />
+            <Bar dataKey="value" fill="#0080FF" radius={[2, 2, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      )}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -62,9 +200,10 @@ export function UsageTrends() {
 
   const trends: UsageTrendsResponse | null = data ?? null;
   const storageSeries = trends?.storage ?? [];
+  const objectsSeries = trends?.objects ?? [];
   const latestStorage =
     storageSeries.length > 0 ? storageSeries[storageSeries.length - 1].value : 0;
-  const latestObjects = trends?.objects.reduce((sum, p) => sum + p.value, 0) ?? 0;
+  const latestObjects = objectsSeries.reduce((sum, p) => sum + p.value, 0);
 
   return (
     <div className="mb-6">
@@ -106,110 +245,8 @@ export function UsageTrends() {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {/* Storage chart — AreaChart */}
-          <Card>
-            <div className="mb-3 flex items-center justify-between">
-              <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">
-                STORAGE
-              </span>
-              <span className="text-[13px] font-semibold text-zinc-900">
-                {formatBytes(latestStorage)}
-              </span>
-            </div>
-            <ResponsiveContainer width="100%" height={160}>
-              <AreaChart
-                data={trends?.storage ?? []}
-                margin={{ top: 4, right: 0, left: 0, bottom: 0 }}
-              >
-                <defs>
-                  <linearGradient id="storageGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#0080FF" stopOpacity={0.15} />
-                    <stop offset="95%" stopColor="#0080FF" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid
-                  horizontal={true}
-                  vertical={false}
-                  strokeDasharray="3 3"
-                  stroke="var(--color-zinc-200)"
-                  strokeOpacity={0.6}
-                />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fontSize: 10, fill: '#677183' }}
-                  axisLine={false}
-                  tickLine={false}
-                  tickFormatter={formatDate}
-                />
-                <YAxis
-                  tick={{ fontSize: 10, fill: '#677183' }}
-                  axisLine={false}
-                  tickLine={false}
-                  width={40}
-                  tickCount={5}
-                  tickFormatter={formatBytesShort}
-                  domain={['dataMin', 'dataMax']}
-                />
-                <Tooltip
-                  content={<ChartTooltip valueLabel="Storage" formatValue={formatBytes} />}
-                  cursor={{ stroke: 'var(--color-zinc-200)', strokeWidth: 1 }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  fill="url(#storageGradient)"
-                  stroke="#0080FF"
-                  strokeWidth={2}
-                  dot={false}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </Card>
-
-          {/* Objects chart — BarChart */}
-          <Card>
-            <div className="mb-3 flex items-center justify-between">
-              <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">
-                OBJECTS
-              </span>
-              <span className="text-[13px] font-semibold text-zinc-900">{latestObjects} total</span>
-            </div>
-            <ResponsiveContainer width="100%" height={160}>
-              <BarChart
-                data={trends?.objects ?? []}
-                margin={{ top: 4, right: 0, left: 0, bottom: 0 }}
-              >
-                <CartesianGrid
-                  horizontal={true}
-                  vertical={false}
-                  strokeDasharray="3 3"
-                  stroke="var(--color-zinc-200)"
-                  strokeOpacity={0.6}
-                />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fontSize: 10, fill: '#677183' }}
-                  axisLine={false}
-                  tickLine={false}
-                  tickFormatter={formatDate}
-                />
-                <YAxis
-                  tick={{ fontSize: 10, fill: '#677183' }}
-                  axisLine={false}
-                  tickLine={false}
-                  width={30}
-                  tickCount={6}
-                  allowDecimals={false}
-                  domain={['dataMin', 'dataMax']}
-                />
-                <Tooltip
-                  content={<ChartTooltip valueLabel="Objects" formatValue={(v) => v.toString()} />}
-                  cursor={{ fill: 'var(--color-zinc-100)', opacity: 0.6 }}
-                />
-                <Bar dataKey="value" fill="#0080FF" radius={[2, 2, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </Card>
+          <StorageChartCard series={storageSeries} latest={latestStorage} />
+          <ObjectsChartCard series={objectsSeries} latest={latestObjects} />
         </div>
       )}
     </div>
