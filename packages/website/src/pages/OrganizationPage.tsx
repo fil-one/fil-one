@@ -5,18 +5,14 @@ import { OrgNameSchema } from '@filone/shared';
 import type { MeResponse } from '@filone/shared';
 
 import { AvatarPicker, useOrgLogoUpload } from '../components/OrgLogoPicker.js';
-import { Button } from '../components/Button';
-import { DeleteAccountModal } from '../components/DeleteAccountModal';
 import { FormField } from '../components/FormField';
 import { Input } from '../components/Input';
 import { Link } from '../components/Link';
 import { PageLayout } from '../components/PageLayout.js';
 import { RequirePermission } from '../components/RequirePermission';
 import { SectionCard } from '../components/SectionCard.js';
-import { SettingRow } from '../components/SettingRow';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
-import { ACCOUNT_DELETION_ENABLED } from '../lib/account-deletion.js';
 import { errorMessageOf, getMe, updateOrg } from '../lib/api.js';
 import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
 
@@ -51,20 +47,29 @@ function applyOrgUpdate(client: QueryClient, orgName: string, logoUrl?: string):
   client.setQueryData<MeResponse>(queryKeys.meWithMfa, patch);
 }
 
-/** The name is what most saves are about; a logo-only save gets its own toast. */
-function saveMessage(newName: string, previousName: string): string {
-  return newName !== previousName
-    ? `This organization is called ${newName} now`
-    : 'Organization logo updated';
-}
-
+/**
+ * The name autosaves on blur, the way Settings' own name field does; the
+ * logo autosaves the moment a file lands (`onUploaded` below). Neither field
+ * needs a Save button once both save themselves.
+ */
 function IdentitySection({ me }: { me: MeResponse }) {
   const { toast } = useToast();
   const client = useQueryClient();
 
   const [name, setName] = useState(me.orgName);
   const [error, setError] = useState<string | null>(null);
-  const logo = useOrgLogoUpload(me.logoUrl);
+
+  const logoMutation = useMutation({
+    mutationFn: (logoUrl: string) => updateOrg({ name: me.orgName, logoUrl }),
+    onSuccess: (result) => {
+      applyOrgUpdate(client, result.name, result.logoUrl);
+      toast.success('Organization logo updated');
+    },
+    onError: (err) => {
+      toast.error(errorMessageOf(err, 'Failed to update the logo'));
+    },
+  });
+  const logo = useOrgLogoUpload(me.logoUrl, (logoUrl) => logoMutation.mutate(logoUrl));
 
   // `me.orgName`/`me.logoUrl` land once `/me` resolves — this syncs the form
   // to them the same way a reopened dialog would, without needing an `open`
@@ -76,58 +81,58 @@ function IdentitySection({ me }: { me: MeResponse }) {
     // (name, logo) is what this effect resyncs to.
   }, [me.orgName, me.logoUrl]);
 
-  const rename = useMutation({
-    mutationFn: (next: string) => updateOrg({ name: next, logoUrl: logo.logoUrl }),
+  const nameMutation = useMutation({
+    mutationFn: (next: string) => updateOrg({ name: next }),
     onSuccess: (result) => {
       applyOrgUpdate(client, result.name, result.logoUrl);
-      toast.success(saveMessage(result.name, me.orgName));
+      setName(result.name);
+      toast.success(`This organization is called ${result.name} now`);
     },
     onError: (err) => {
       setError(errorMessageOf(err, 'Failed to save the organization'));
+      setName(me.orgName);
     },
   });
 
-  // Against the trimmed value, because trimmed is what gets sent: otherwise a
-  // trailing space alone counts as a change and the save renames the org to
-  // the name it already has.
-  const nameChanged = name.trim() !== me.orgName;
-  const logoChanged = logo.logoUrl !== me.logoUrl;
-  const changed = nameChanged || logoChanged;
+  function commit() {
+    // Against the trimmed value, because trimmed is what gets sent:
+    // otherwise a trailing space alone counts as a change.
+    const trimmed = name.trim();
+    if (trimmed === me.orgName) return;
 
-  function save() {
-    const parsed = OrgNameSchema.safeParse(name);
+    const parsed = OrgNameSchema.safeParse(trimmed);
     if (!parsed.success) {
       setError(parsed.error.issues[0].message);
+      setName(me.orgName);
       return;
     }
     setError(null);
-    rename.mutate(parsed.data);
+    nameMutation.mutate(parsed.data);
   }
 
-  const busy = rename.isPending || logo.uploading;
-
   return (
-    <SectionCard title="Identity">
+    <SectionCard title="General">
       <div className="flex flex-col gap-4">
-        <AvatarPicker name={name} logo={logo} disabled={busy} />
+        <AvatarPicker
+          name={me.orgName}
+          logo={logo}
+          disabled={logo.uploading || logoMutation.isPending}
+          layout="row"
+        />
         <FormField label="Organization name" htmlFor="org-name" error={error ?? undefined}>
           <Input
             id="org-name"
             value={name}
             invalid={!!error}
-            disabled={busy}
+            disabled={nameMutation.isPending}
             onChange={(value) => {
               setName(value);
               if (error) setError(null);
             }}
+            onBlur={commit}
             placeholder="Your organization"
           />
         </FormField>
-        <div className="flex items-center gap-3">
-          <Button id="org-save-button" variant="primary" onClick={save} disabled={busy || !changed}>
-            {busy ? 'Saving...' : 'Save changes'}
-          </Button>
-        </div>
       </div>
     </SectionCard>
   );
@@ -137,52 +142,27 @@ function IdentitySection({ me }: { me: MeResponse }) {
 // Danger zone
 // ---------------------------------------------------------------------------
 
+/**
+ * No self-serve deletion yet (FIL-1135 covers what that flow needs to
+ * account for across a caller's other memberships), so this points at
+ * support the same way Settings' own Danger zone does, rather than a
+ * disabled button in front of a modal nothing can open yet.
+ */
 function DangerSection({ me }: { me: MeResponse }) {
-  const [modalOpen, setModalOpen] = useState(false);
-  // Deleting an org always destroys its data; it only takes the caller's
-  // login down with it when they have nowhere else to land.
-  const soleMembership = (me.memberships?.length ?? 1) <= 1;
-
   return (
     <SectionCard title="Danger zone" bare>
       <div className="flex flex-col gap-3 px-5 pt-4 pb-4">
-        <SettingRow
-          label="Delete organization"
-          description={
-            ACCOUNT_DELETION_ENABLED ? (
-              <>Permanently deletes {me.orgName} and everything in it. This cannot be undone.</>
-            ) : (
-              <>
-                Not available yet. To delete {me.orgName}, email{' '}
-                <Link href="mailto:support@fil.one" variant="accent">
-                  support@fil.one
-                </Link>
-              </>
-            )
-          }
-          action={
-            <Button
-              variant="destructive"
-              disabled={!ACCOUNT_DELETION_ENABLED}
-              onClick={() => setModalOpen(true)}
-            >
-              Delete
-            </Button>
-          }
-        />
+        <div className="py-1">
+          <p className="text-sm font-medium text-zinc-900">Delete organization</p>
+          <p className="text-xs text-zinc-500">
+            To delete {me.orgName}, please email{' '}
+            <Link href="mailto:support@fil.one" variant="accent">
+              support@fil.one
+            </Link>
+            .
+          </p>
+        </div>
       </div>
-
-      <DeleteAccountModal
-        open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        orgName={me.orgName}
-        soleMembership={soleMembership}
-        // A full document load, not a router navigation: the session is dead, so
-        // every cached query would refetch into a 410 on the way out.
-        onDeleted={() => {
-          window.location.href = '/account-deleted';
-        }}
-      />
     </SectionCard>
   );
 }

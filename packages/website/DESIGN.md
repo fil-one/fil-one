@@ -213,8 +213,8 @@ Nothing else. Not bare `rounded`, not `rounded-2xl`, `rounded-3xl`, or `rounded-
 
 **The one exception:** `OrgAvatar` is a rounded square, not a circle, so an org is
 distinguishable from a person at a glance rather than only by color (`OrgAvatar.tsx`).
-Its `sm` (28px) and `lg` (64px) sizes nest inside the four radii above (`rounded-md`,
-`rounded-xl`) same as anything else, but its `xs` size (16px, the org switcher's list
+Its `sm` (28px), `md` (56px) and `lg` (64px) sizes nest inside the four radii above
+(`rounded-md`, `rounded-xl`) same as anything else, but its `xs` size (16px, the org switcher's list
 rows) is small enough that even `rounded-md` reads closer to round than square, so it
 steps down to `rounded-sm` (4px) — the one place in the console that class is allowed.
 
