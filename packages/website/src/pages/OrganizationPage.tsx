@@ -108,7 +108,7 @@ function IdentitySection({ me }: { me: MeResponse }) {
       // a slug that is about to stop resolving to anything.
       if (result.slug && result.slug !== me.slug) {
         void navigate({
-          to: '/$orgSlug/organization',
+          to: '/$orgSlug/edit-organization',
           params: { orgSlug: result.slug },
           replace: true,
         });

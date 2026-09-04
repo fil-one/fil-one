@@ -119,7 +119,7 @@ describe('OrganizationPage', () => {
       expect(client.getQueryData<MeResponse>(queryKeys.me)).toMatchObject({ slug: 'acme-two' }),
     );
     expect(mockNavigate).toHaveBeenCalledWith({
-      to: '/$orgSlug/organization',
+      to: '/$orgSlug/edit-organization',
       params: { orgSlug: 'acme-two' },
       replace: true,
     });
