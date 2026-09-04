@@ -53,8 +53,7 @@ export function LeftLastOrgPage({ email }: LeftLastOrgPageProps) {
         You&rsquo;ve left your last organization
       </Heading>
       <p className="mt-2 text-sm text-(--color-paragraph-text)">
-        Every account needs somewhere to store data. Create a new organization to keep using Fil
-        One.
+        Create a new organization to keep storing and sharing data on Fil One.
       </p>
 
       <Button
