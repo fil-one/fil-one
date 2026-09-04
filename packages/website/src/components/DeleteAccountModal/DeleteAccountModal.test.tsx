@@ -15,7 +15,15 @@ const ORG = 'Acme Corp';
 const CODE = '1'.repeat(DELETION_CODE_LENGTH);
 
 function renderModal(onDeleted = vi.fn(), onClose = vi.fn()) {
-  render(<DeleteAccountModal open onClose={onClose} orgName={ORG} onDeleted={onDeleted} />);
+  render(
+    <DeleteAccountModal
+      open
+      onClose={onClose}
+      orgName={ORG}
+      soleMembership
+      onDeleted={onDeleted}
+    />,
+  );
   return { onDeleted, onClose };
 }
 
@@ -145,6 +153,26 @@ describe('DeleteAccountModal', () => {
     fireEvent.click(sendButton());
 
     await waitFor(() => expect(screen.getByText('A code was sent recently.')).toBeInTheDocument());
+  });
+
+  it('warns that sign-in stops working when this is the only org', () => {
+    renderModal();
+
+    expect(screen.getByText(/your sign-in stops working too/)).toBeInTheDocument();
+  });
+
+  it('says the account survives when the caller belongs to other orgs too', () => {
+    render(
+      <DeleteAccountModal
+        open
+        onClose={vi.fn()}
+        orgName={ORG}
+        soleMembership={false}
+        onDeleted={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/you keep your account and sign-in/i)).toBeInTheDocument();
   });
 
   it('clears its state when closed, so a reopen starts at the warning', async () => {
