@@ -72,7 +72,9 @@ export function RowActionsMenu({
       />
       <MenuItems
         anchor="bottom end"
-        className="z-50 mt-1 min-w-48 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg focus:outline-none"
+        // Sized to match `BucketActionMenu` — the console's canonical
+        // dropdown size (DESIGN.md rule 4a).
+        className="z-50 mt-1 min-w-36 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg focus:outline-none"
       >
         {actions.map((action) => (
           <MenuItem key={action.label} disabled={action.disabled}>
@@ -82,7 +84,7 @@ export function RowActionsMenu({
               onClick={action.onSelect}
               disabled={action.disabled}
               className={clsx(
-                'flex w-full items-center gap-2 px-3 py-2 text-left text-sm whitespace-nowrap',
+                'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs whitespace-nowrap',
                 // `data-focus` rather than `hover`: the menu moves focus with
                 // the arrow keys, and a hover-only highlight leaves a keyboard
                 // caller with no idea which item they are on.
@@ -92,7 +94,7 @@ export function RowActionsMenu({
                 'disabled:cursor-not-allowed disabled:opacity-50',
               )}
             >
-              {action.icon && <Icon component={action.icon} size={14} />}
+              {action.icon && <Icon component={action.icon} size={13} />}
               {action.label}
             </button>
           </MenuItem>
