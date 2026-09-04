@@ -22,10 +22,7 @@ vi.mock('../lib/api.js', async (importOriginal) => {
   };
 });
 
-// The Delete button is disabled while self-serve deletion is withheld
-// (FIL-919) — on in this file so the danger zone's own behavior, not the
-// unrelated flag, is what these tests exercise.
-vi.mock('../lib/account-deletion.js', () => ({ ACCOUNT_DELETION_ENABLED: true }));
+global.fetch = vi.fn(() => Promise.resolve(new Response(null, { status: 200 })));
 
 import { OrganizationPage } from './OrganizationPage.js';
 
@@ -77,20 +74,19 @@ describe('OrganizationPage', () => {
     vi.unstubAllGlobals();
   });
 
-  it('opens on the org name it already has, with nothing to save', async () => {
+  it('opens on the org name it already has', async () => {
     renderPage(OrgRole.Owner);
 
     expect(await screen.findByLabelText('Organization name')).toHaveValue('Acme');
-    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument();
   });
 
-  it('saves a rename and writes it into every cache that reads the name', async () => {
+  it('saves a rename on blur and writes it into every cache that reads the name', async () => {
     const { client } = renderPage(OrgRole.Owner);
 
-    fireEvent.change(await screen.findByLabelText('Organization name'), {
-      target: { value: 'Acme Two' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    const nameField = await screen.findByLabelText('Organization name');
+    fireEvent.change(nameField, { target: { value: 'Acme Two' } });
+    fireEvent.blur(nameField);
 
     await waitFor(() => expect(mockUpdateOrg).toHaveBeenCalledWith({ name: 'Acme Two' }));
     await waitFor(() =>
@@ -101,13 +97,20 @@ describe('OrganizationPage', () => {
     );
   });
 
+  it('does nothing on blur when the name did not change', async () => {
+    renderPage(OrgRole.Owner);
+
+    fireEvent.blur(await screen.findByLabelText('Organization name'));
+
+    expect(mockUpdateOrg).not.toHaveBeenCalled();
+  });
+
   it('refuses a name the schema will not take, without asking the server', async () => {
     renderPage(OrgRole.Owner);
 
-    fireEvent.change(await screen.findByLabelText('Organization name'), {
-      target: { value: 'no/slashes' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    const nameField = await screen.findByLabelText('Organization name');
+    fireEvent.change(nameField, { target: { value: 'no/slashes' } });
+    fireEvent.blur(nameField);
 
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
     expect(mockUpdateOrg).not.toHaveBeenCalled();
@@ -122,11 +125,41 @@ describe('OrganizationPage', () => {
     expect(screen.queryByLabelText('Organization name')).not.toBeInTheDocument();
   });
 
+  describe('the avatar picker', () => {
+    it('uploads the picked file and saves it, with no extra Save step', async () => {
+      mockPresignOrgLogoUpload.mockResolvedValue({
+        uploadUrl: 'https://upload.example/put',
+        logoUrl: 'https://cdn.example/logos/new.png',
+      });
+      mockUpdateOrg.mockResolvedValue({
+        name: 'Acme',
+        logoUrl: 'https://cdn.example/logos/new.png',
+      });
+      renderPage(OrgRole.Owner);
+
+      const trigger = await screen.findByLabelText('Change avatar');
+      const input = trigger.parentElement!.querySelector('input[type="file"]') as HTMLInputElement;
+      const file = new File(['data'], 'logo.png', { type: 'image/png' });
+      fireEvent.change(input, { target: { files: [file] } });
+
+      await waitFor(() =>
+        expect(mockUpdateOrg).toHaveBeenCalledWith({
+          name: 'Acme',
+          logoUrl: 'https://cdn.example/logos/new.png',
+        }),
+      );
+      expect(await screen.findByText('Organization logo updated')).toBeInTheDocument();
+    });
+  });
+
   describe('the danger zone', () => {
-    it('shows Delete organization to an Owner', async () => {
+    it('shows Delete organization to an Owner, pointed at support', async () => {
       renderPage(OrgRole.Owner);
 
       expect(await screen.findByText('Delete organization')).toBeInTheDocument();
+      const link = screen.getByRole('link', { name: 'support@fil.one' });
+      expect(link).toHaveAttribute('href', 'mailto:support@fil.one');
+      expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
     });
 
     it('hides Delete organization from an Admin, who can rename but not delete', async () => {
@@ -135,27 +168,6 @@ describe('OrganizationPage', () => {
       // The rename form is there — org.rename holds — but not the danger zone.
       expect(await screen.findByLabelText('Organization name')).toBeInTheDocument();
       expect(screen.queryByText('Delete organization')).not.toBeInTheDocument();
-    });
-
-    it("warns about losing sign-in when this is the caller's only org", async () => {
-      renderPage(OrgRole.Owner, [
-        { orgId: ORG_ID, orgName: 'Acme', slug: 'acme', role: OrgRole.Owner },
-      ]);
-
-      fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
-
-      expect(await screen.findByText(/your sign-in stops working too/)).toBeInTheDocument();
-    });
-
-    it('says the account survives when the caller belongs to other orgs too', async () => {
-      renderPage(OrgRole.Owner, [
-        { orgId: ORG_ID, orgName: 'Acme', slug: 'acme', role: OrgRole.Owner },
-        { orgId: 'org-2', orgName: 'Globex', slug: 'globex', role: OrgRole.Member },
-      ]);
-
-      fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
-
-      expect(await screen.findByText(/you keep your account and sign-in/i)).toBeInTheDocument();
     });
   });
 });
