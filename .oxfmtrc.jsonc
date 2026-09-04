@@ -1,12 +1,5 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "singleQuote": true,
-  "ignorePatterns": [
-    ".sst",
-    "contracts/lib",
-    "packages/ui",
-    "**/dist",
-    "**/sst-env.d.ts",
-    "pnpm-lock.yaml",
-  ],
+  "ignorePatterns": [".sst", "packages/ui", "**/dist", "**/sst-env.d.ts", "pnpm-lock.yaml"],
 }
