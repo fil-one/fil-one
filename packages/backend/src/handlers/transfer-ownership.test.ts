@@ -7,8 +7,8 @@ import {
   TransactionCanceledException,
   TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
-import { unmarshall } from '@aws-sdk/util-dynamodb';
-import { ApiErrorCode, OrgRole } from '@filone/shared';
+import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
+import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.js';
 import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.js';
 
@@ -33,7 +33,25 @@ vi.mock('jose', () => ({
   createRemoteJWKSet: vi.fn((_url: unknown) => 'mock-jwks'),
 }));
 
+// The transfer revokes the outgoing Owner's keys at whichever orchestrator
+// holds them, and the registry builds the FTH client at import time from a
+// secret this suite has no reason to stand up.
+const mockDeleteAccessKey = vi.fn();
+vi.mock('../lib/service-orchestrator-registry.js', () => ({
+  getOrchestratorForRegion: (region: string) => ({
+    id: region === 'us-east-1' ? 'fth' : 'aurora',
+    region,
+    accessModel: 'scoped-keys',
+    isTenantReady: () => `tenant:${region}`,
+    deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
+  }),
+}));
+
 const ddbMock = mockClient(DynamoDBClient);
+
+// The revocation email is the only thing here that leaves over HTTP.
+const mockFetch = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
+vi.stubGlobal('fetch', mockFetch);
 
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
@@ -151,6 +169,61 @@ function stubInvitationRows(items: Record<string, { S: string }>[]) {
     .resolves({ Items: items });
 }
 
+/**
+ * The org's META row. The transfer bumps `ownerCount` by nothing, and that
+ * update conditions on the attribute existing, so a counter that cannot be read
+ * refuses the transfer before anything is revoked.
+ */
+function stubOwnerCount(ownerCount: number | undefined) {
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'OrgTable',
+      Key: { pk: { S: OrgKeys.orgPk(ORG_ID) }, sk: { S: 'META' } },
+    })
+    .resolves(
+      ownerCount === undefined
+        ? {}
+        : {
+            Item: {
+              pk: { S: OrgKeys.orgPk(ORG_ID) },
+              sk: { S: 'META' },
+              ownerCount: { N: String(ownerCount) },
+            },
+          },
+    );
+}
+
+/** The outgoing Owner's access keys, as the org partition holds them. */
+function stubMemberKeys(...keys: Array<Record<string, unknown>>) {
+  ddbMock
+    .on(QueryCommand, {
+      TableName: 'UserInfoTable',
+      ExpressionAttributeValues: {
+        ':pk': { S: `ORG#${ORG_ID}` },
+        ':skPrefix': { S: 'ACCESSKEY#' },
+      },
+    })
+    .resolves({
+      Items: keys.map((key, index) =>
+        marshall(
+          {
+            pk: `ORG#${ORG_ID}`,
+            sk: `ACCESSKEY#key-${index}`,
+            keyName: `key ${index}`,
+            accessKeyId: `AKIAEXAMPLE000${index}`,
+            createdAt: '2026-02-01T00:00:00.000Z',
+            status: 'active',
+            region: S3Region.UsEast1,
+            createdBy: USER_ID,
+            permissions: ['read', 'write'],
+            ...key,
+          },
+          { removeUndefinedValues: true },
+        ),
+      ),
+    });
+}
+
 function transactItems() {
   const calls = ddbMock.commandCalls(TransactWriteItemsCommand);
   expect(calls).toHaveLength(1);
@@ -184,6 +257,9 @@ describe('POST /api/org/transfer handler', () => {
     mockGetMfaEnrollments.mockResolvedValue([]);
 
     ddbMock.on(GetItemCommand).resolves({});
+    // The org partition the revocation pass reads. Most cases hold no keys.
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+    stubOwnerCount(1);
     ddbMock
       .on(GetItemCommand, {
         TableName: 'UserInfoTable',
@@ -202,6 +278,67 @@ describe('POST /api/org/transfer handler', () => {
     stubInvitationRows([]);
     callerHolds(OrgRole.Owner);
     targetHolds(OrgRole.Admin);
+  });
+
+  it('moves the seat even when the pass after it cannot finish', async () => {
+    // The transaction has committed by then: the target is Owner and the caller
+    // is Admin. An error would send them into a retry that answers already-owner.
+    stubMemberKeys({ granularPermissions: ['PutObjectRetention'] });
+    ddbMock
+      .on(QueryCommand, {
+        TableName: 'UserInfoTable',
+        ExpressionAttributeValues: {
+          ':pk': { S: `ORG#${ORG_ID}` },
+          ':skPrefix': { S: 'ACCESSKEY#' },
+        },
+      })
+      .resolvesOnce({
+        Items: [
+          marshall({
+            pk: `ORG#${ORG_ID}`,
+            sk: 'ACCESSKEY#key-0',
+            keyName: 'key 0',
+            accessKeyId: 'AKIAEXAMPLE0000',
+            createdAt: '2026-02-01T00:00:00.000Z',
+            status: 'active',
+            region: S3Region.UsEast1,
+            createdBy: USER_ID,
+            permissions: ['write'],
+            granularPermissions: ['PutObjectRetention'],
+          }),
+        ],
+      })
+      .rejects(new Error('DynamoDB unavailable'));
+
+    expect(await handler(transferEvent(), buildContext())).toMatchObject({ statusCode: 200 });
+  });
+
+  it('names the keys already revoked when a vendor refuses a later one', async () => {
+    stubMemberKeys(
+      { granularPermissions: ['PutObjectRetention'] },
+      { granularPermissions: ['PutObjectLegalHold'] },
+    );
+    mockDeleteAccessKey.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('down'));
+
+    const result = await handler(transferEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 502 });
+    expect(body(result).revokedKeys.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
+  });
+
+  it('refuses a transfer with no counter to read, before a key is touched', async () => {
+    // The transaction bumps `ownerCount` by nothing, and that update conditions
+    // on the attribute existing, so a missing META row cancels the transfer
+    // either way. Revoking first would leave the caller Owner with their
+    // credentials gone.
+    stubOwnerCount(undefined);
+    stubMemberKeys({ granularPermissions: ['PutObjectRetention'] });
+
+    const result = await handler(transferEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 409 });
+    expect(body(result).message).toContain('owner count');
+    expect(mockDeleteAccessKey).not.toHaveBeenCalled();
   });
 
   it('promotes the target and demotes the caller in one transaction', async () => {

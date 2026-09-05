@@ -3,6 +3,8 @@ import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
 import { OrgRole, canManageTargetRole, roleNarrows } from '@filone/shared';
 import type { OrgMembershipSource } from '@filone/shared';
+import { retireInvitationItems } from './invitations.js';
+import type { InvitationRecord } from './invitations.js';
 import { OrgKeys } from './org-membership.js';
 
 /**
@@ -399,3 +401,39 @@ export function cancelledLabels(err: unknown, labels: readonly string[]): string
 
 /** The one cancellation reason that means a condition we wrote was not met. */
 const CONDITION_FAILED = 'ConditionalCheckFailed';
+
+/**
+ * A transaction's items with a label per position, so a cancellation names
+ * what failed rather than an index.
+ *
+ * Built together rather than as two lists kept in step by hand: DynamoDB
+ * reports cancellations positionally, so a label list one item out of line
+ * would answer a genuine last-Owner refusal with "an invitation changed". An
+ * item and its label are added or omitted in the same expression, and the item
+ * count is read off the list rather than counted.
+ */
+export interface LabelledItems {
+  items: TransactWriteItem[];
+  labels: string[];
+}
+
+export function labelled(
+  entries: ReadonlyArray<readonly [label: string, item: TransactWriteItem]>,
+): LabelledItems {
+  return {
+    items: entries.map(([, item]) => item),
+    labels: entries.map(([label]) => label),
+  };
+}
+
+/** The base plus the invitations that fit beside it, two items each. */
+export function withInvitationRevocations(
+  base: LabelledItems,
+  now: InvitationRecord[],
+): LabelledItems {
+  const items = now.flatMap((invitation) => retireInvitationItems(invitation, 'revoked'));
+  return {
+    items: [...base.items, ...items],
+    labels: [...base.labels, ...items.map(() => 'invitation')],
+  };
+}

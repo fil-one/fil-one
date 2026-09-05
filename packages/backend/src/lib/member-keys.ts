@@ -1,7 +1,7 @@
 import { QueryCommand } from '@aws-sdk/client-dynamodb';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
-import { S3Region, auditKeyIdSuffix, canRetainAccessKey } from '@filone/shared';
+import { NO_ROLE, S3Region, auditKeyIdSuffix, canRetainAccessKey } from '@filone/shared';
 import type {
   AccessKeyRevocationReason,
   AccessKeySummary,
@@ -107,7 +107,7 @@ export async function listOrgAccessKeys(orgId: string): Promise<MemberAccessKey[
 export function reviewAccessKeysForRole(
   accessKeys: readonly MemberAccessKey[],
   userId: string,
-  role: OrgRole,
+  role: OrgRole | typeof NO_ROLE,
 ): AccessKeyRoleChangeReview {
   const review: AccessKeyRoleChangeReview = {
     keysToRevoke: [],
@@ -141,9 +141,26 @@ export function reviewAccessKeysForRole(
 export async function reviewMemberAccessKeysForRole(
   orgId: string,
   userId: string,
-  role: OrgRole,
+  role: OrgRole | typeof NO_ROLE,
 ): Promise<AccessKeyRoleChangeReview> {
   return reviewAccessKeysForRole(await listOrgAccessKeys(orgId), userId, role);
+}
+
+/**
+ * Every key the member created, all of them condemned.
+ *
+ * Removal is the narrowing to nothing: somebody who is not in the org holds no
+ * role, and a key does not outlive the membership that created it. So it is the
+ * same review as any other role change, asked about `NO_ROLE` — which
+ * `canRetainAccessKey` answers `role_cannot_mint` for every key, since no
+ * `keys.create` is left to hold one under. Rows with no recorded creator are
+ * outside this rule, as they are outside every other.
+ */
+export async function reviewRemovedMemberAccessKeys(
+  orgId: string,
+  userId: string,
+): Promise<AccessKeyRoleChangeReview> {
+  return reviewMemberAccessKeysForRole(orgId, userId, NO_ROLE);
 }
 
 /**

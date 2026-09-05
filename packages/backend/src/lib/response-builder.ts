@@ -138,6 +138,20 @@ export function badRequestResponse(message: string): APIGatewayProxyStructuredRe
  * The person a member verb names is not in the org. About the target, not the
  * caller: `authorize` answers for a caller without a membership, with a 403.
  */
+/**
+ * How a vendor-refusal message names what is still live: `The key "nightly"`, or
+ * `3 keys ("a", "b", "c")`.
+ *
+ * The consequence differs per verb — the role is unchanged, the member is still
+ * here, ownership has not moved — but every one of them opens this way, and a
+ * plural form that drifted between them would be a worse answer in whichever
+ * handler was not updated.
+ */
+export function refusedKeysSubject(failedKeys: readonly AccessKeySummary[]): string {
+  const named = failedKeys.map((key) => `"${key.keyName}"`).join(', ');
+  return failedKeys.length === 1 ? `The key ${named}` : `${failedKeys.length} keys (${named})`;
+}
+
 export function notAMemberResponse(
   revokedKeys?: AccessKeySummary[],
 ): APIGatewayProxyStructuredResultV2 {
@@ -161,6 +175,85 @@ export function beyondCeilingResponse(verbPhrase: string): APIGatewayProxyStruct
     .body<ErrorResponse>({
       message: `Your role in this organization cannot ${verbPhrase}.`,
       code: ApiErrorCode.FORBIDDEN_ROLE,
+    })
+    .build();
+}
+
+/**
+ * The 409s a membership transaction cancels with. Each one reads a condition
+ * the transaction carried as a statement about the org, and each may land after
+ * a revocation, so `revokedKeys` rides along when the caller has any to report:
+ * those keys are gone whatever the roster now says, and an answer that named
+ * only the roster would hide half of what happened.
+ */
+
+/**
+ * The decrement's own condition fired: the org is at one Owner. `remedy` is the
+ * caller's way out, and it differs by verb — an Owner being removed can also be
+ * replaced by transferring the seat, which a demotion cannot offer.
+ */
+export function lastOwnerResponse(
+  remedy: string,
+  revokedKeys?: AccessKeySummary[],
+): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(409)
+    .body<ErrorResponse | ErrorWithRevokedKeys>({
+      message: `This organization would be left without an owner. ${remedy}`,
+      code: ApiErrorCode.LAST_OWNER,
+      ...(revokedKeys ? { revokedKeys } : {}),
+    })
+    .build();
+}
+
+/**
+ * The org has membership rows and no counter, so the last-Owner invariant is
+ * unenforceable for it until somebody repairs the META row — which the drift
+ * checker does within a day. "Contact support" is true and "you are the last
+ * Owner" would not be. `attempted` is what the request could not do to the
+ * counter: `updated` when its write cancelled or would have, `read` when the
+ * refusal came from looking at it before anything was revoked.
+ */
+export function ownerCountUnavailableResponse(
+  attempted: 'updated' | 'read',
+  revokedKeys?: AccessKeySummary[],
+): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(409)
+    .body<ErrorResponse | ErrorWithRevokedKeys>({
+      message: `The organization’s owner count could not be ${attempted}. Please contact support.`,
+      ...(revokedKeys ? { revokedKeys } : {}),
+    })
+    .build();
+}
+
+/** An invitation the change retires was accepted or revoked underneath it. */
+export function invitationRaceResponse(
+  revokedKeys?: AccessKeySummary[],
+): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(409)
+    .body<ErrorResponse | ErrorWithRevokedKeys>({
+      message: 'An invitation from that member changed while this was in flight — try again.',
+      ...(revokedKeys ? { revokedKeys } : {}),
+    })
+    .build();
+}
+
+/**
+ * The target's row no longer carries the role the transaction conditioned on:
+ * somebody changed it while this request was in flight. `during` finishes the
+ * sentence, since a PATCH and a DELETE each name what was interrupted.
+ */
+export function memberRoleChangedResponse(
+  during: string,
+  revokedKeys?: AccessKeySummary[],
+): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(409)
+    .body<ErrorResponse | ErrorWithRevokedKeys>({
+      message: `That member’s role changed ${during}.`,
+      ...(revokedKeys ? { revokedKeys } : {}),
     })
     .build();
 }

@@ -11,6 +11,7 @@ const ddbMock = mockClient(DynamoDBClient);
 
 import {
   reviewMemberAccessKeysForRole,
+  reviewRemovedMemberAccessKeys,
   listOrgAccessKeys,
   reviewAccessKeysForRole,
 } from './member-keys.js';
@@ -185,5 +186,33 @@ describe('reviewMemberAccessKeysForRole', () => {
 
     expect(review.keysToRevoke.map((k) => k.id)).toStrictEqual(['key-2']);
     expect(review.retainedKeyCount).toBe(1);
+  });
+});
+
+describe('reviewRemovedMemberAccessKeys', () => {
+  it('condemns every attributed key of theirs as unmintable, and nobody else’s', async () => {
+    // Removal is the narrowing to nothing, so a key an Owner could hold goes the
+    // same way as one nobody could: no role is left to mint under.
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        row({ sk: 'ACCESSKEY#plain', permissions: ['read', 'write'] }),
+        row({ sk: 'ACCESSKEY#deletes-buckets', permissions: ['read', 'DeleteBucket'] }),
+        row({ sk: 'ACCESSKEY#recovered', permissions: undefined }),
+        row({ sk: 'ACCESSKEY#somebody-elses', createdBy: SOMEBODY_ELSE }),
+        row({ sk: 'ACCESSKEY#unattributed', createdBy: undefined }),
+      ],
+    });
+
+    const review = await reviewRemovedMemberAccessKeys(ORG_ID, MEMBER);
+
+    expect(review).toStrictEqual({
+      keysToRevoke: [
+        expect.objectContaining({ id: 'plain', reason: 'role_cannot_mint', excess: [] }),
+        expect.objectContaining({ id: 'deletes-buckets', reason: 'role_cannot_mint', excess: [] }),
+        expect.objectContaining({ id: 'recovered', reason: 'role_cannot_mint', excess: [] }),
+      ],
+      retainedKeyCount: 0,
+      unattributedKeyCount: 1,
+    });
   });
 });
