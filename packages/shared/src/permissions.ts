@@ -193,6 +193,28 @@ export function canManageTargetRole(actorRole: string, targetRole: string): bool
 }
 
 /**
+ * Whether moving from one role to another takes a permission away.
+ *
+ * A widening can strand nothing: every key its holder could mint before, they
+ * could mint after. A narrowing is the change that has to look at what they
+ * already hold. Asked of the permission sets rather than of {@link ROLE_RANK},
+ * so the registry stays the single answer to what a role may do.
+ */
+export function roleNarrows(fromRole: string, toRole: string): boolean {
+  const after = new Set<Permission>(permissionsForRole(toRole));
+  return permissionsForRole(fromRole).some((permission) => !after.has(permission));
+}
+
+/**
+ * The role of somebody who holds none: not a member, or a membership row with
+ * no role on it. This names the convention already in use — the handlers spell
+ * it `membership?.role ?? ''` — rather than introducing one, so
+ * {@link permissionsForRole} fails closed for it exactly as it always has, and
+ * {@link roleNarrows} reads a lost membership as the narrowing to nothing.
+ */
+export const NO_ROLE = '';
+
+/**
  * Whether an actor may move a member from one role to another. A role change is
  * two reaches — at the member as they are and at the member as they would be —
  * so both must clear the ceiling: an Admin can neither demote an Owner nor

@@ -65,8 +65,16 @@ describe('the event-type registry', () => {
     expect([...AUDIT_EVENT_PHASES]).toStrictEqual(['intent', 'completion']);
   });
 
-  it('marks only the vendor-backed key flows as two-phase', () => {
-    expect([...TWO_PHASE_AUDIT_EVENT_TYPES]).toStrictEqual(['key.created', 'key.deleted']);
+  it('marks the flows that reach a vendor before they write as two-phase', () => {
+    // The key flows always, and the three membership flows because a narrowing
+    // revokes keys at the vendor before it writes the role.
+    expect([...TWO_PHASE_AUDIT_EVENT_TYPES]).toStrictEqual([
+      'key.created',
+      'key.deleted',
+      'member.role_changed',
+      'member.removed',
+      'ownership.transferred',
+    ]);
     for (const type of TWO_PHASE_AUDIT_EVENT_TYPES) {
       expect(AUDIT_EVENT_TYPES).toContain(type);
     }

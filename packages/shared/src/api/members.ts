@@ -42,18 +42,6 @@ export interface ListMembersResponse {
   members: MemberSummary[];
 }
 
-/** `PATCH /api/org/members/{userId}` — move one member to another role. */
-export const UpdateMemberRoleSchema = z.object({ role: InvitedRoleSchema });
-
-export type UpdateMemberRoleRequest = z.infer<typeof UpdateMemberRoleSchema>;
-
-export interface UpdateMemberRoleResponse {
-  userId: string;
-  role: OrgRole;
-  /** The role they held before, so the console can narrate what changed. */
-  previousRole: OrgRole;
-}
-
 /**
  * One access key as the console lists it around a membership change. Named
  * for the key rather than its fate because the same shape serves three states:
@@ -76,6 +64,38 @@ export interface AccessKeySummary {
   reason: AccessKeyRevocationReason;
   /** The permissions above the new role, named, when that is what condemned it. */
   excess: string[];
+}
+
+/** `PATCH /api/org/members/{userId}` — move one member to another role. */
+export const UpdateMemberRoleSchema = z.object({ role: InvitedRoleSchema });
+
+export type UpdateMemberRoleRequest = z.infer<typeof UpdateMemberRoleSchema>;
+
+export interface UpdateMemberRoleResponse {
+  userId: string;
+  role: OrgRole;
+  /** The role they held before, so the console can narrate what changed. */
+  previousRole: OrgRole;
+  /**
+   * The access keys the change revoked, which is what happened rather than what
+   * the preview offered: the commit revokes from a fresh read, so this can name
+   * a key minted since the preview and omit one revoked since.
+   */
+  revokedKeys?: AccessKeySummary[];
+}
+
+/**
+ * A role change that stopped partway.
+ *
+ * The keys named in `revokedKeys` are gone whatever the role now says, so the
+ * console reports them rather than treating the whole request as a no-op. The
+ * retry is the same PATCH, which finds fewer keys.
+ */
+export interface UpdateMemberRoleFailure {
+  message: string;
+  revokedKeys: AccessKeySummary[];
+  /** The keys a vendor refused, when that is what stopped the change. */
+  failedKeys?: AccessKeySummary[];
 }
 
 /**

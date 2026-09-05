@@ -2,19 +2,18 @@ import { useEffect, useState } from 'react';
 import { MagnifyingGlassIcon } from '@phosphor-icons/react/dist/ssr';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
-import { ApiErrorCode, OrgRole } from '@filone/shared';
-import type { ListMembersResponse, MemberSummary } from '@filone/shared';
+import { ApiErrorCode, OrgRole, roleNarrows } from '@filone/shared';
+import type { ListMembersResponse, MemberSummary, AccessKeySummary } from '@filone/shared';
 
 import { Alert } from '../components/Alert';
 import { Button } from '../components/Button';
-import { ConfirmDialog } from '../components/ConfirmDialog';
 import { EmptyStateCard } from '../components/EmptyStateCard';
 import { MembersTable } from '../components/MembersTable';
 import { MembersToolbar } from '../components/MembersToolbar';
-import { TransferOwnershipDialog } from '../components/TransferOwnershipDialog';
+import { MemberDialogs, useMemberDialogs } from '../components/MemberDialogs';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
-import { errorCodeOf, errorMessageOf, errorStatusOf, getMe } from '../lib/api.js';
+import { errorCodeOf, errorMessageOf, errorStatusOf, getMe, revokedKeysOf } from '../lib/api.js';
 import {
   listMembers,
   removeMember,
@@ -54,6 +53,23 @@ function dropFromRoster(client: QueryClient, userId: string): void {
 }
 
 /**
+ * The access keys list, after a change that revoked some.
+ *
+ * Its own invalidation because the roster and the key list are different
+ * queries with different stale windows: an admin who opened Access keys a
+ * moment ago would otherwise come back to it and see credentials that no
+ * longer exist rendered as active.
+ */
+function invalidateRevokedKeyViews(client: QueryClient, revokedCount: number): void {
+  if (revokedCount === 0) return;
+  void client.invalidateQueries({ queryKey: queryKeys.accessKeys });
+  // The narrowing dialog stays open on a refusal, and its preview was read
+  // before any of this: left alone it goes on offering keys that no longer
+  // exist as keys the next attempt will revoke.
+  void client.invalidateQueries({ queryKey: queryKeys.roleChangePreviews });
+}
+
+/**
  * What a membership change invalidates besides the roster.
  *
  * A demotion revokes that member's pending invitations the new role could not
@@ -61,7 +77,11 @@ function dropFromRoster(client: QueryClient, userId: string): void {
  * changed their own row keeps the permissions of the role they left until `/me`
  * is read again — a console offering buttons the server will now refuse.
  */
-function settleAfterChange(client: QueryClient, userId: string, selfUserId?: string): void {
+function invalidateAfterMembershipChange(
+  client: QueryClient,
+  userId: string,
+  selfUserId?: string,
+): void {
   void client.invalidateQueries({ queryKey: queryKeys.members });
   void client.invalidateQueries({ queryKey: queryKeys.invitations });
   if (userId === selfUserId) void client.invalidateQueries({ queryKey: queryKeys.me });
@@ -125,7 +145,7 @@ function isStaleRemovalTarget(error: unknown): boolean {
   return status === 404 || status === 409;
 }
 
-type RoleChange = { member: MemberSummary; role: OrgRole };
+export type RoleChange = { member: MemberSummary; role: OrgRole };
 
 function useRoleChange(ctx: MutationContext) {
   return useMutation({
@@ -133,21 +153,46 @@ function useRoleChange(ctx: MutationContext) {
     onMutate: ({ member }: RoleChange) => {
       ctx.pending.add(member.userId);
     },
-    onSuccess: (_result, { member, role }) => {
+    onSuccess: (result, { member, role }) => {
       patchRosterRole(ctx.client, member.userId, role);
-      settleAfterChange(ctx.client, member.userId, ctx.selfUserId);
+      invalidateAfterMembershipChange(ctx.client, member.userId, ctx.selfUserId);
+      invalidateRevokedKeyViews(ctx.client, result.revokedKeys?.length ?? 0);
       ctx.notice.clear();
-      ctx.toastSuccess(`${memberName(member)} is now ${ROLE_LABELS[role]}`);
+      ctx.toastSuccess(
+        `${memberName(member)} is now ${ROLE_LABELS[role]}${revokedSuffix(result.revokedKeys)}`,
+      );
     },
     onError: (err) => {
-      const remedy = 'That change would leave the organization without an owner.';
+      // The keys named here are already gone whatever the role now says, so the
+      // refusal has to carry them: a message about the role alone is half the
+      // answer.
+      const revoked = revokedKeysOf(err);
+      // Those keys are gone whatever the role now says, so the list they are
+      // listed on is stale either way.
+      invalidateRevokedKeyViews(ctx.client, revoked.length);
+      const remedy = `That change would leave the organization without an owner.${revokedSuffix(revoked)}`;
       if (ctx.notice.capture(err, remedy)) return;
-      ctx.toastError(errorMessageOf(err, 'Failed to change that role'));
+      ctx.toastError(
+        `${errorMessageOf(err, 'Failed to change that role')}${revokedSuffix(revoked)}`,
+      );
     },
     onSettled: (_result, _err, { member }) => {
       ctx.pending.remove(member.userId);
     },
   });
+}
+
+/** Up to three key names, then a count, so a toast stays one line. */
+function keyNameList(keys: readonly AccessKeySummary[]): string {
+  const named = keys.slice(0, 3).map((key) => key.keyName);
+  const rest = keys.length - named.length;
+  return rest > 0 ? `${named.join(', ')} and ${rest} more` : named.join(', ');
+}
+
+/** What a role change took away, appended to whatever it is being said beside. */
+function revokedSuffix(keys: readonly AccessKeySummary[] | undefined): string {
+  if (!keys?.length) return '';
+  return ` ${keys.length === 1 ? 'This key was' : `These ${keys.length} keys were`} revoked: ${keyNameList(keys)}.`;
 }
 
 function useMemberRemoval(ctx: MutationContext) {
@@ -158,7 +203,7 @@ function useMemberRemoval(ctx: MutationContext) {
     },
     onSuccess: (_result, member) => {
       dropFromRoster(ctx.client, member.userId);
-      settleAfterChange(ctx.client, member.userId, ctx.selfUserId);
+      invalidateAfterMembershipChange(ctx.client, member.userId, ctx.selfUserId);
       ctx.notice.clear();
       ctx.toastSuccess(`${memberName(member)} was removed from the organization`);
     },
@@ -226,7 +271,7 @@ function useOwnershipTransfer(ctx: MutationContext, onDone: () => void) {
       // before they click anything else.
       patchRosterRole(ctx.client, result.userId, OrgRole.Owner);
       patchRosterRole(ctx.client, result.previousOwnerUserId, OrgRole.Admin);
-      settleAfterChange(ctx.client, result.previousOwnerUserId, ctx.selfUserId);
+      invalidateAfterMembershipChange(ctx.client, result.previousOwnerUserId, ctx.selfUserId);
       ctx.notice.clear();
       // The dialog goes with the seat. Left open, it offers a destructive button
       // to a caller who is now an Admin, and the server answers the second click
@@ -287,153 +332,6 @@ function useTransferTarget(
 }
 
 // ---------------------------------------------------------------------------
-// Confirmations
-// ---------------------------------------------------------------------------
-
-/** Who each confirmation is about, or null while it is closed. */
-interface DialogTargets {
-  promotion: RoleChange | null;
-  selfChange: RoleChange | null;
-  removal: MemberSummary | null;
-  transfer: MemberSummary | null;
-}
-
-/**
- * Which confirmation is open and about whom.
- *
- * Three of the four live here; the transfer's target is owned above, because a
- * step-up round trip can reopen it without anybody asking again.
- */
-function useMemberDialogs(transferTarget: MemberSummary | null, closeTransfer: () => void) {
-  const [promotion, setPromotion] = useState<RoleChange | null>(null);
-  const [selfChange, setSelfChange] = useState<RoleChange | null>(null);
-  const [removal, setRemoval] = useState<MemberSummary | null>(null);
-
-  return {
-    targets: { promotion, selfChange, removal, transfer: transferTarget } as DialogTargets,
-    askToPromote: setPromotion,
-    askToChangeSelf: setSelfChange,
-    askToRemove: setRemoval,
-    close: {
-      promotion: () => setPromotion(null),
-      selfChange: () => setSelfChange(null),
-      removal: () => setRemoval(null),
-      transfer: closeTransfer,
-    },
-  };
-}
-
-/**
- * The target a dialog was last opened for, kept through its closing animation.
- *
- * Closing sets the target to null in the same commit that hides the dialog,
- * while the panel stays mounted for its leave transition — so copy read straight
- * off the live target becomes a sentence about nobody for the length of the
- * fade, on the dialogs whose whole job is naming who the change is about.
- */
-function useClosingCopy<T>(target: T | null): T | null {
-  const [last, setLast] = useState<T | null>(null);
-  if (target !== null && target !== last) setLast(target);
-  return target ?? last;
-}
-
-/**
- * What the caller is giving up by changing their own row.
- *
- * Every other role change is about somebody else; this one takes away the
- * caller's own authority, and below Admin it takes away the page they would undo
- * it on. So it is confirmed rather than committed on the change event, where one
- * click or one arrow key was enough.
- */
-function selfChangeDescription({ member, role }: RoleChange): string {
-  const from = ROLE_LABELS[member.role];
-  const to = ROLE_LABELS[role];
-  const opening = `You go from ${from} to ${to} in this organization.`;
-
-  // Admin is the one step down that keeps `members.manage`, so it is the one
-  // that leaves this page usable. Owner never arrives here — a move to Owner is
-  // a promotion, and it has its own dialog.
-  if (role === OrgRole.Admin) {
-    return `${opening} Billing and the organization itself go with the owner seat, and only an owner can hand it back.`;
-  }
-  return `${opening} Managing members goes with it, so this is the last change you can make on this page — putting it back takes another owner or admin.`;
-}
-
-/** Every change on this page that is asked about before it is made. */
-function MemberDialogs({
-  targets,
-  close,
-  orgName,
-  transferring,
-  onChangeRole,
-  onRemove,
-  onTransfer,
-}: {
-  targets: DialogTargets;
-  close: Record<keyof DialogTargets, () => void>;
-  orgName: string;
-  transferring: boolean;
-  onChangeRole: (change: RoleChange) => Promise<unknown>;
-  onRemove: (member: MemberSummary) => Promise<unknown>;
-  onTransfer: (member: MemberSummary) => void;
-}) {
-  const promotion = useClosingCopy(targets.promotion);
-  const selfChange = useClosingCopy(targets.selfChange);
-  const removal = useClosingCopy(targets.removal);
-  const transfer = useClosingCopy(targets.transfer);
-
-  return (
-    <>
-      <ConfirmDialog
-        open={targets.promotion !== null}
-        onClose={close.promotion}
-        onConfirm={() => runQuietly(targets.promotion, onChangeRole)}
-        title="Make this member an owner?"
-        description={
-          promotion
-            ? `${memberName(promotion.member)} will be able to manage billing, every member, and the organization itself — including removing you.`
-            : ''
-        }
-        confirmLabel="Make owner"
-      />
-
-      <ConfirmDialog
-        open={targets.selfChange !== null}
-        onClose={close.selfChange}
-        onConfirm={() => runQuietly(targets.selfChange, onChangeRole)}
-        title="Change your own role?"
-        description={selfChange ? selfChangeDescription(selfChange) : ''}
-        confirmLabel="Change my role"
-      />
-
-      <ConfirmDialog
-        open={targets.removal !== null}
-        onClose={close.removal}
-        onConfirm={() => runQuietly(targets.removal, onRemove)}
-        title="Remove this member?"
-        description={
-          removal
-            ? `${memberName(removal)} loses access to this organization in the console. Access keys they already created keep working until somebody revokes them.`
-            : ''
-        }
-        confirmLabel="Remove member"
-      />
-
-      <TransferOwnershipDialog
-        open={targets.transfer !== null}
-        orgName={orgName}
-        memberName={transfer ? memberName(transfer) : ''}
-        pending={transferring}
-        onClose={close.transfer}
-        onConfirm={() => {
-          if (targets.transfer) onTransfer(targets.transfer);
-        }}
-      />
-    </>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -485,13 +383,15 @@ export function MembersRoster() {
 
   // Promoting somebody to Owner is not a role change like the others: the org
   // gains a second person who can manage billing and remove anybody, the caller
-  // included. It gets the confirmation removal gets. Changing the caller's own
-  // row gets one too, for the authority it gives up. Every other move applies on
-  // the spot.
+  // included. It gets the confirmation removal gets. A change that takes a
+  // permission away gets one too, because it revokes the access keys the new
+  // role could not mint and breaks whatever client was using them — the
+  // caller's own row included, which also gives up the page they would undo it
+  // on. Every other move applies on the spot.
   function handleRoleChange(member: MemberSummary, role: OrgRole) {
     if (role === member.role) return;
     if (role === OrgRole.Owner) dialogs.askToPromote({ member, role });
-    else if (member.userId === scope.userId) dialogs.askToChangeSelf({ member, role });
+    else if (roleNarrows(member.role, role)) dialogs.askToNarrow({ member, role });
     else roleChange.mutate({ member, role });
   }
 
@@ -526,6 +426,7 @@ export function MembersRoster() {
         targets={dialogs.targets}
         close={dialogs.close}
         orgName={me?.orgName ?? 'this organization'}
+        selfUserId={scope.userId}
         transferring={transfer.isPending}
         onChangeRole={roleChange.mutateAsync}
         onRemove={removal.mutateAsync}
@@ -540,25 +441,6 @@ export function MembersRoster() {
  * member list do not re-run on every render before it arrives.
  */
 const NO_MEMBERS: MemberSummary[] = [];
-
-/**
- * Run a confirmed mutation against the dialog's target and swallow its
- * rejection.
- *
- * `ConfirmDialog` awaits what it is given, and a rejection there would escape as
- * an unhandled promise while the mutation's own `onError` has already rendered
- * the answer — inline for the last-owner refusal, a toast for everything else.
- * A null target is the dialog closing as the confirm lands, which is nothing to
- * run.
- */
-async function runQuietly<T>(target: T | null, run: (target: T) => Promise<unknown>) {
-  if (target === null) return;
-  try {
-    await run(target);
-  } catch {
-    // Rendered by the mutation's onError.
-  }
-}
 
 /**
  * The roster in each of its states.

@@ -1,5 +1,5 @@
 import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query';
-import { ApiErrorCode, type S3Region } from '@filone/shared';
+import { ApiErrorCode, type OrgRole, type S3Region } from '@filone/shared';
 
 export const ME_STALE_TIME = 10 * 60_000;
 
@@ -94,6 +94,9 @@ export const queryClient = new QueryClient({
   },
 });
 
+/** The prefix every preview shares, so one invalidation reaches them all. */
+const ROLE_CHANGE_PREVIEWS = ['role-change-preview'] as const;
+
 export const queryKeys = {
   me: ['me'] as const,
   meWithMfa: ['me', 'mfa'] as const,
@@ -124,6 +127,12 @@ export const queryKeys = {
   // `members.manage`, so a single key would tie a query most callers can run to
   // one most callers cannot.
   members: ['members'] as const,
+  // Its own prefix rather than under ['members']: the roster is invalidated on
+  // every change, and a preview of what a change would revoke is about a role
+  // nobody holds yet, so refetching it after the change asks a stale question.
+  roleChangePreviews: ROLE_CHANGE_PREVIEWS,
+  roleChangePreview: (userId: string, role: OrgRole) =>
+    [...ROLE_CHANGE_PREVIEWS, userId, role] as const,
   invitations: ['invitations'] as const,
   // Prefixed, so invalidating ['audit'] clears every filter combination a
   // session has looked at rather than just the one on screen.

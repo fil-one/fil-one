@@ -1083,6 +1083,33 @@ export default $config({
         ],
       },
 
+      // ── Members ────────────────────────────────────────────────────
+      // A narrowing revokes the keys the member could no longer mint, in
+      // whichever regions hold them, and emails the member that their client
+      // just stopped working. So these routes reach every orchestrator and the
+      // mail credential. `transfer-ownership` carries the same, below, beside
+      // the Management API credentials its step-up already needs.
+      //
+      // Thirty seconds rather than the ten `addRoute` defaults to: a narrowing
+      // reads the org's key rows and revokes each key the new role could not
+      // mint in turn, and each revocation is a vendor call plus an audit write.
+      // A tenant may hold up to 300 keys, so this is a bound for ordinary orgs
+      // rather than for every org; a member holding hundreds needs a worker,
+      // which is FIL-1017 follow-up work. A timeout during the pass is safe by
+      // design — the role is unwritten and the retry finds fewer keys.
+      'update-member-role': {
+        extraEnv: orchestratorEnv,
+        permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+        ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
+        timeout: '30 seconds',
+      },
+      'remove-member': {
+        extraEnv: orchestratorEnv,
+        permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+        ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
+        timeout: '30 seconds',
+      },
+
       // ── RAG ────────────────────────────────────────────────────────
       // RAG query playground (FIL-554): embed the question, vector-search the
       // bucket's index, and ground a Bedrock completion on the retrieved chunks.
@@ -1188,8 +1215,9 @@ export default $config({
       // fresh sign-in is enough of a step-up, so it needs the Management API
       // credentials the account routes already carry.
       'transfer-ownership': {
-        extraLink: mgmtRuntimeResources,
-        extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+        extraLink: [...mgmtRuntimeResources, ...(sendGridApiKey ? [sendGridApiKey] : [])],
+        extraEnv: { ...orchestratorEnv, AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+        permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
       },
 
       // ── Invitations ────────────────────────────────────────────────

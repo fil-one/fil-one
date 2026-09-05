@@ -1,8 +1,13 @@
 import { QueryCommand } from '@aws-sdk/client-dynamodb';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
-import { S3Region, canRetainAccessKey } from '@filone/shared';
-import type { ExcessKeyPermission, AccessKeyRevocationReason, OrgRole } from '@filone/shared';
+import { S3Region, auditKeyIdSuffix, canRetainAccessKey } from '@filone/shared';
+import type {
+  AccessKeyRevocationReason,
+  AccessKeySummary,
+  ExcessKeyPermission,
+  OrgRole,
+} from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.js';
 import { AccessKeyKeys } from './dynamo-records.js';
@@ -139,6 +144,26 @@ export async function reviewMemberAccessKeysForRole(
   role: OrgRole,
 ): Promise<AccessKeyRoleChangeReview> {
   return reviewAccessKeysForRole(await listOrgAccessKeys(orgId), userId, role);
+}
+
+/**
+ * A key a change will revoke, as the console lists it and the audit summary
+ * names it.
+ *
+ * The access key id is cut to the four characters the console already shows: a
+ * whole `AKIA…` in a response body or a log line is a credential half nobody
+ * needs to recognize a key by.
+ */
+export function summarizeAccessKey(key: AccessKeyToRevoke): AccessKeySummary {
+  return {
+    id: key.id,
+    keyName: key.keyName,
+    ...(key.accessKeyId ? { accessKeyIdSuffix: auditKeyIdSuffix('s3', key.accessKeyId) } : {}),
+    region: key.region,
+    createdAt: key.createdAt,
+    reason: key.reason,
+    excess: key.excess.map(({ keyPermission }) => keyPermission),
+  };
 }
 
 function toMemberAccessKey(record: Partial<AccessKeyRecord>): MemberAccessKey {

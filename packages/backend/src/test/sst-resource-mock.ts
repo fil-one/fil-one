@@ -33,6 +33,7 @@ export function sstResourceMock(resources: Record<string, unknown> = {}): {
       Auth0MgmtRuntimeClientSecret: { value: 'test-mgmt-runtime-client-secret' },
       AuroraBackofficeToken: { value: 'test-aurora-token' },
       HubSpotServiceKey: { value: 'test-hubspot-key' },
+      SendGridApiKey: { value: 'test-sendgrid-key' },
       ...resources,
     },
   };

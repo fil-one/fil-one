@@ -18,16 +18,27 @@ const mockUpdateRole = vi.fn();
 const mockRemove = vi.fn();
 const mockListInvitations = vi.fn();
 const mockTransfer = vi.fn();
+const mockRoleChangePreview = vi.fn();
 
 vi.mock('../lib/members-api.js', () => ({
   listMembers: () => mockListMembers(),
   updateMemberRole: (...args: unknown[]) => mockUpdateRole(...args),
   removeMember: (...args: unknown[]) => mockRemove(...args),
   transferOwnership: (...args: unknown[]) => mockTransfer(...args),
+  getRoleChangePreview: (...args: unknown[]) => mockRoleChangePreview(...args),
   listInvitations: () => mockListInvitations(),
   createInvitation: vi.fn(),
   revokeInvitation: vi.fn(),
 }));
+
+/** No keys to lose, which is what most of these cases are about. */
+const NO_KEYS_AT_RISK = {
+  currentRole: OrgRole.Owner,
+  role: OrgRole.Admin,
+  keys: [],
+  retainedKeyCount: 0,
+  unattributedKeyCount: 0,
+};
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -105,6 +116,19 @@ async function chooseRowAction(member: string, action: string) {
   fireEvent.click(await screen.findByRole('menuitem', { name: action }));
 }
 
+/**
+ * Confirm a narrowing, once its preview has arrived.
+ *
+ * The button stays inert while the preview loads: a dialog whose whole job is
+ * naming the keys a change revokes should not be confirmable before it has
+ * named them.
+ */
+async function confirmNarrowing() {
+  const confirm = await screen.findByRole('button', { name: /^Change role/ });
+  await waitFor(() => expect(confirm).toBeEnabled());
+  fireEvent.click(confirm);
+}
+
 /** The actions a row offers, or null when it offers no menu at all. */
 function rowMenuFor(member: string): HTMLElement | null {
   return screen.queryByRole('button', { name: `Actions for ${member}` });
@@ -118,6 +142,7 @@ describe('MembersPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockListInvitations.mockResolvedValue({ invitations: [] });
+    mockRoleChangePreview.mockResolvedValue(NO_KEYS_AT_RISK);
     window.history.replaceState(null, '', '/members');
   });
 
@@ -242,7 +267,7 @@ describe('MembersPage', () => {
     expect(await screen.findByText('Change your own role?')).toBeInTheDocument();
     expect(mockUpdateRole).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Change my role' }));
+    await confirmNarrowing();
     await waitFor(() => expect(mockUpdateRole).toHaveBeenCalledWith('user-1', OrgRole.Admin));
   });
 
@@ -269,7 +294,7 @@ describe('MembersPage', () => {
     fireEvent.change(await screen.findByLabelText('Role for Ada Lovelace'), {
       target: { value: OrgRole.Admin },
     });
-    fireEvent.click(await screen.findByRole('button', { name: 'Change my role' }));
+    await confirmNarrowing();
 
     const notice = await screen.findByTestId('members-last-owner');
     expect(notice).toHaveTextContent('Promote another member to owner first.');
@@ -280,18 +305,21 @@ describe('MembersPage', () => {
     const finish = heldCalls(mockUpdateRole);
     renderPage();
 
-    const select = await screen.findByLabelText('Role for grace@example.com');
+    // A promotion, which applies on the change event: a demotion revokes keys
+    // and is confirmed first, so it never leaves a request in flight here.
+    const select = await screen.findByLabelText('Role for Unnamed member');
     (select as HTMLSelectElement).focus();
-    fireEvent.change(select, { target: { value: OrgRole.Member } });
+    fireEvent.change(select, { target: { value: OrgRole.Admin } });
 
     await waitFor(() =>
-      expect(screen.getAllByTestId('member-row')[1]).toHaveAttribute('aria-busy', 'true'),
+      expect(screen.getAllByTestId('member-row')[2]).toHaveAttribute('aria-busy', 'true'),
     );
     // Disabling the control somebody just used drops focus to the body, and
     // nothing puts it back. The row says it is busy instead.
     expect(select).toBeEnabled();
     expect(select).toHaveFocus();
 
+    // The second change is a narrowing, so it asks rather than sending.
     fireEvent.change(select, { target: { value: OrgRole.ReadOnly } });
     expect(mockUpdateRole).toHaveBeenCalledTimes(1);
 
@@ -302,9 +330,11 @@ describe('MembersPage', () => {
     const finish = heldCalls(mockUpdateRole);
     renderPage();
 
+    // A demotion, confirmed through the dialog that lists what it revokes.
     fireEvent.change(await screen.findByLabelText('Role for grace@example.com'), {
       target: { value: OrgRole.Member },
     });
+    await confirmNarrowing();
     await waitFor(() =>
       expect(screen.getAllByTestId('member-row')[1]).toHaveAttribute('aria-busy', 'true'),
     );
@@ -371,10 +401,202 @@ describe('MembersPage', () => {
   });
 });
 
+/**
+ * What a demotion costs, before it happens.
+ *
+ * An access key carries its own permission set, fixed when it was minted, so a
+ * member moving to a narrower role keeps whatever their keys already hold until
+ * the change takes them away.
+ */
+describe('the role-narrowing confirmation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockListInvitations.mockResolvedValue({ invitations: [] });
+    mockRoleChangePreview.mockResolvedValue(NO_KEYS_AT_RISK);
+    window.history.replaceState(null, '', '/members');
+  });
+
+  it('names the keys a demotion revokes, and the safe order', async () => {
+    mockRoleChangePreview.mockResolvedValue({
+      currentRole: OrgRole.Admin,
+      role: OrgRole.Member,
+      keys: [
+        {
+          id: 'key-1',
+          keyName: 'nightly backup',
+          accessKeyIdSuffix: '9999',
+          region: 'us-east-1',
+          createdAt: '2026-02-01T00:00:00.000Z',
+          reason: 'exceeds_role',
+          excess: ['DeleteBucket'],
+        },
+      ],
+      retainedKeyCount: 2,
+      unattributedKeyCount: 1,
+    });
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText('Role for grace@example.com'), {
+      target: { value: OrgRole.Member },
+    });
+
+    expect(await screen.findByText('nightly backup')).toBeInTheDocument();
+    expect(screen.getByText(/carries DeleteBucket/)).toBeInTheDocument();
+    expect(screen.getByText(/create a replacement key/)).toBeInTheDocument();
+    expect(screen.getByText(/2 of their other keys stay within the new role/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/1 key in this organization have no recorded owner/),
+    ).toBeInTheDocument();
+    expect(mockRoleChangePreview).toHaveBeenCalledWith('user-2', OrgRole.Member);
+    expect(mockUpdateRole).not.toHaveBeenCalled();
+  });
+
+  it('says so when a demotion costs the member nothing', async () => {
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText('Role for grace@example.com'), {
+      target: { value: OrgRole.Member },
+    });
+
+    expect(
+      await screen.findByText(/None of their access keys carry more than the new role allows/),
+    ).toBeInTheDocument();
+  });
+
+  it('holds the confirm button down while the change is in flight', async () => {
+    // A bespoke dialog has to hold this itself: two clicks would otherwise be
+    // two revocations.
+    const finish = heldCalls(mockUpdateRole);
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText('Role for grace@example.com'), {
+      target: { value: OrgRole.Member },
+    });
+    await confirmNarrowing();
+
+    const confirm = screen.getByRole('button', { name: /^Chang/ });
+    await waitFor(() => expect(confirm).toBeDisabled());
+    fireEvent.click(confirm);
+    expect(mockUpdateRole).toHaveBeenCalledTimes(1);
+
+    await act(async () => finish());
+  });
+
+  it('closes once the change lands', async () => {
+    mockUpdateRole.mockResolvedValue({
+      userId: 'user-2',
+      role: OrgRole.Member,
+      previousRole: OrgRole.Admin,
+    });
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText('Role for grace@example.com'), {
+      target: { value: OrgRole.Member },
+    });
+    await confirmNarrowing();
+
+    await waitFor(() => expect(screen.queryByText('Change this role?')).not.toBeInTheDocument());
+  });
+
+  it('stays open when the change is refused, beside what it was about to do', async () => {
+    mockUpdateRole.mockRejectedValue(apiError('That member’s role changed', 409));
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText('Role for grace@example.com'), {
+      target: { value: OrgRole.Member },
+    });
+    await confirmNarrowing();
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Chang/ })).toBeEnabled());
+    expect(screen.getByText('Change this role?')).toBeInTheDocument();
+  });
+
+  it('drops the cached access keys when a narrowing revoked some', async () => {
+    // The roster and the key list are different queries with different stale
+    // windows, so an admin coming back to Access keys would otherwise see
+    // credentials that no longer exist.
+    mockUpdateRole.mockResolvedValue({
+      userId: 'user-2',
+      role: OrgRole.Member,
+      previousRole: OrgRole.Admin,
+      revokedKeys: [
+        {
+          id: 'key-1',
+          keyName: 'nightly backup',
+          region: 'us-east-1',
+          createdAt: '2026-02-01T00:00:00.000Z',
+          reason: 'exceeds_role',
+          excess: ['DeleteBucket'],
+        },
+      ],
+    });
+    const { client } = renderPage();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+
+    fireEvent.change(await screen.findByLabelText('Role for grace@example.com'), {
+      target: { value: OrgRole.Member },
+    });
+    await confirmNarrowing();
+
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.accessKeys }),
+    );
+    // And the preview, which was read before any of this and would otherwise go
+    // on offering deleted keys as keys the next attempt will revoke.
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.roleChangePreviews });
+  });
+
+  it('names the keys already revoked when the role write then failed', async () => {
+    // Those credentials are gone whatever the role now says.
+    mockUpdateRole.mockRejectedValue(
+      Object.assign(new Error('That member’s role changed while you were editing it.'), {
+        status: 409,
+        revokedKeys: [
+          {
+            id: 'key-1',
+            keyName: 'nightly backup',
+            region: 'us-east-1',
+            createdAt: '2026-02-01T00:00:00.000Z',
+            reason: 'exceeds_role',
+            excess: ['DeleteBucket'],
+          },
+        ],
+      }),
+    );
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText('Role for grace@example.com'), {
+      target: { value: OrgRole.Member },
+    });
+    await confirmNarrowing();
+
+    expect(await screen.findByText(/This key was revoked: nightly backup/)).toBeInTheDocument();
+  });
+
+  it('still offers the change when the preview cannot be read', async () => {
+    mockRoleChangePreview.mockRejectedValue(apiError('Preview unavailable', 503));
+    mockUpdateRole.mockResolvedValue({
+      userId: 'user-2',
+      role: OrgRole.Member,
+      previousRole: OrgRole.Admin,
+    });
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText('Role for grace@example.com'), {
+      target: { value: OrgRole.Member },
+    });
+
+    expect(await screen.findByText('The affected keys could not be listed')).toBeInTheDocument();
+    await confirmNarrowing();
+    await waitFor(() => expect(mockUpdateRole).toHaveBeenCalledWith('user-2', OrgRole.Member));
+  });
+});
+
 describe('MembersPage — a removal the roster is stale for', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockListInvitations.mockResolvedValue({ invitations: [] });
+    mockRoleChangePreview.mockResolvedValue(NO_KEYS_AT_RISK);
     window.history.replaceState(null, '', '/members');
   });
 
@@ -422,6 +644,7 @@ describe('MembersPage — transferring the owner seat', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockListInvitations.mockResolvedValue({ invitations: [] });
+    mockRoleChangePreview.mockResolvedValue(NO_KEYS_AT_RISK);
     window.history.replaceState(null, '', '/members');
   });
 

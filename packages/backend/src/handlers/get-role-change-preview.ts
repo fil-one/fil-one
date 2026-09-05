@@ -1,11 +1,10 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { auditKeyIdSuffix, isOrgRole } from '@filone/shared';
-import type { AccessKeySummary, RoleChangePreviewResponse } from '@filone/shared';
+import { isOrgRole } from '@filone/shared';
+import type { RoleChangePreviewResponse } from '@filone/shared';
 import { requireManageableMember } from '../lib/manageable-member.js';
-import { reviewMemberAccessKeysForRole } from '../lib/member-keys.js';
-import type { AccessKeyToRevoke } from '../lib/member-keys.js';
+import { reviewMemberAccessKeysForRole, summarizeAccessKey } from '../lib/member-keys.js';
 import { ResponseBuilder, badRequestResponse } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -68,23 +67,6 @@ export async function baseHandler(
 
 function previewResponse(body: RoleChangePreviewResponse): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder().status(200).body<RoleChangePreviewResponse>(body).build();
-}
-
-/**
- * A condemned key as the dialog lists it. The access key id is cut to the four
- * characters the console already shows, so a response that names somebody
- * else's credentials carries no more of them than the key list does.
- */
-function summarizeAccessKey(key: AccessKeyToRevoke): AccessKeySummary {
-  return {
-    id: key.id,
-    keyName: key.keyName,
-    ...(key.accessKeyId ? { accessKeyIdSuffix: auditKeyIdSuffix('s3', key.accessKeyId) } : {}),
-    region: key.region,
-    createdAt: key.createdAt,
-    reason: key.reason,
-    excess: key.excess.map(({ keyPermission }) => keyPermission),
-  };
 }
 
 export const handler = middy(baseHandler)

@@ -1,6 +1,6 @@
 import { API_URL } from '../env.js';
 import { ApiErrorCode, CSRF_COOKIE_NAME, ORG_ID_HEADER } from '@filone/shared';
-import type { StepUpRequiredResponse } from '@filone/shared';
+import type { AccessKeySummary, StepUpRequiredResponse } from '@filone/shared';
 import {
   clearActiveOrgAfterRefusal,
   clearActiveOrgOnNavigation,
@@ -122,6 +122,17 @@ export function errorCodeOf(error: unknown): string | undefined {
 export function errorStatusOf(error: unknown): number | undefined {
   const status = (error as { status?: unknown } | null | undefined)?.status;
   return typeof status === 'number' ? status : undefined;
+}
+
+/**
+ * The access keys a failed role change had already revoked before it failed.
+ *
+ * Those credentials are gone whatever the role now says, so a refusal that
+ * mentions only the role is telling the admin half of what happened.
+ */
+export function revokedKeysOf(error: unknown): AccessKeySummary[] {
+  const keys = (error as { revokedKeys?: unknown } | null | undefined)?.revokedKeys;
+  return Array.isArray(keys) ? (keys as AccessKeySummary[]) : [];
 }
 
 /** An error's message, or a fallback for anything that is not an `Error`. */
@@ -386,16 +397,20 @@ async function sendApiRequest(
       message?: string;
       code?: ApiErrorCode;
       resendAvailableAt?: string;
+      revokedKeys?: AccessKeySummary[];
     };
     // Carry the backend's error code through so callers can render specific copy
     // (e.g. BUCKET_NOT_EMPTY), or honour a server-set cooldown (the deletion 429
-    // carries resendAvailableAt).
+    // carries resendAvailableAt). `revokedKeys` rides along for the same reason:
+    // a role change that fails after revoking keys leaves those credentials
+    // gone, and a refusal that does not say so is a worse answer than none.
     throw Object.assign(
       new Error(error.message ?? `Request failed with status ${response.status}`),
       {
         status: response.status,
         ...(error.code && { code: error.code }),
         ...(error.resendAvailableAt && { resendAvailableAt: error.resendAvailableAt }),
+        ...(error.revokedKeys?.length && { revokedKeys: error.revokedKeys }),
       },
     );
   }
