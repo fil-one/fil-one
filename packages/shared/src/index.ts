@@ -97,8 +97,23 @@ export type {
   UpdateMemberRoleResponse,
 } from './api/members.js';
 
+export type {
+  AuditQueryFilters,
+  AuditQueryRequest,
+  AuditWindow,
+  ListAuditEventsResponse,
+} from './api/audit.js';
+export {
+  AUDIT_EXPORT_MAX_BYTES,
+  AUDIT_EXPORT_MAX_ROWS,
+  AUDIT_PAGE_SIZE,
+  AuditQuerySchema,
+  MALFORMED_CURSOR,
+} from './api/audit.js';
+
 export {
   AUDIT_EVENT_TYPES,
+  AUDIT_EVENT_TYPE_LABELS,
   AUDIT_ACTOR_KINDS,
   AUDIT_EVENT_PHASES,
   AUDIT_OUTCOMES,
@@ -111,6 +126,7 @@ export {
   PROHIBITED_AUDIT_FIELD_PATTERNS,
   TWO_PHASE_AUDIT_EVENT_TYPES,
   auditKeyIdSuffix,
+  getAuditEventTypeLabel,
   isAuditEventType,
   looksLikeCredential,
 } from './audit.js';
@@ -132,6 +148,7 @@ export type {
   AuditSinglePhase,
   AuditSubject,
   CommittableAuditEvent,
+  StandaloneAuditEvent,
   TwoPhaseAuditEvent,
   TwoPhaseAuditEventType,
   VendorBackedKeyEvent,

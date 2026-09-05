@@ -882,6 +882,10 @@ describe('authMiddleware', () => {
             Item: {
               pk: { S: `ORG#${MOCK_ORG_ID}` },
               sk: { S: expect.any(String) },
+              // The event-type index, stamped on every write so the viewer's
+              // type filter can never miss an event that was already stored.
+              gsi1pk: { S: `ORG#${MOCK_ORG_ID}#TYPE#org.created` },
+              gsi1sk: { S: expect.any(String) },
               eventId: { S: expect.any(String) },
               type: { S: 'org.created' },
               // No email: this ID token carries no `email_verified` claim, and

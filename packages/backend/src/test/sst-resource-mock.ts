@@ -21,7 +21,10 @@ export function sstResourceMock(resources: Record<string, unknown> = {}): {
     Resource: {
       UserInfoTable: { name: 'UserInfoTable' },
       OrgTable: { name: 'OrgTable' },
-      AuditTable: { name: 'AuditTable' },
+      // The link is `AuditLog`, a narrowed wrapper around the table; the name it
+      // carries is the table's own, which is what every TableName assertion
+      // matches on.
+      AuditLog: { name: 'AuditTable' },
       Auth0ClientId: { value: 'test-client-id' },
       Auth0ClientSecret: { value: 'test-client-secret' },
       Auth0MgmtClientId: { value: 'test-mgmt-client-id' },

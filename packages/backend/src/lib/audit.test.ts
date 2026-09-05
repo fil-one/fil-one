@@ -55,6 +55,13 @@ const DETAILS: { [T in AuditEventType]: AuditEventDetails[T] } = {
   'ownership.transferred': { fromUserId: USER_ID, toUserId: 'user-2' },
   'key.created': { keyKind: 's3', keyName: 'ci', region: 'eu-west-1', keyIdSuffix: 'AMPL' },
   'key.deleted': { keyKind: 's3', keyName: 'ci', region: 'eu-west-1' },
+  'audit.exported': {
+    from: '2026-05-17T12:00:00.000Z',
+    to: NOW,
+    eventType: 'member.removed',
+    actorId: USER_ID,
+    rowCount: 12,
+  },
 };
 
 function renamed(): AuditEventRecord<'org.renamed'> {
@@ -410,6 +417,12 @@ describe('auditPut', () => {
         Item: expect.objectContaining({
           pk: { S: `ORG#${ORG_ID}` },
           sk: { S: `${event.createdAt}#${event.eventId}` },
+          // The event-type index. Stamped on every write because DynamoDB
+          // populates an index only from items already carrying its keys, so an
+          // event written without these is invisible to it for as long as it is
+          // stored.
+          gsi1pk: { S: `ORG#${ORG_ID}#TYPE#org.renamed` },
+          gsi1sk: { S: `${event.createdAt}#${event.eventId}` },
           type: { S: 'org.renamed' },
           orgId: { S: ORG_ID },
           subject: { S: `org:${ORG_ID}` },
@@ -432,6 +445,16 @@ describe('auditPut', () => {
     expect(auditPut(event).Put!.Item!.pk).toStrictEqual({ S: `ORG#${ORG_ID}` });
     expect(auditPut(event).Put!.Item!.sk).toStrictEqual({
       S: `${event.createdAt}#${event.eventId}`,
+    });
+  });
+
+  it('derives the index keys from the event, whatever a stored row carried', () => {
+    const event = { ...renamed(), gsi1pk: 'ORG#somebody-else#TYPE#org.created' } as ReturnType<
+      typeof renamed
+    >;
+
+    expect(auditPut(event).Put!.Item!.gsi1pk).toStrictEqual({
+      S: `ORG#${ORG_ID}#TYPE#org.renamed`,
     });
   });
 

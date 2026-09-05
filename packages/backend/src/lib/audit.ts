@@ -32,6 +32,7 @@ import type {
   AuditOutcome,
   AuditSubject,
   CommittableAuditEvent,
+  StandaloneAuditEvent,
   TwoPhaseAuditEvent,
   TwoPhaseAuditEventType,
 } from '@filone/shared';
@@ -45,6 +46,11 @@ import { reportMetric } from './metrics.js';
  * `{createdAt}#{eventId}` — so one Query per org returns its history newest-last
  * with no index, and the 90-day TTL that expires an event cannot reach a
  * membership or billing row that happened to share a partition.
+ *
+ * Every write also stamps `gsi1pk`/`gsi1sk` for the `byType` index, which is
+ * what answers a viewer query filtered to a single event type. DynamoDB
+ * populates an index only from items that already carry its key attributes, so
+ * an event written without them is invisible to it for as long as it is stored.
  *
  * Two guarantees, chosen by whether the mutation is ours alone:
  *
@@ -81,8 +87,19 @@ export const AuditKeys = {
    * Timestamp first so a Query returns an org's events in the order they
    * happened, and the event id after it so two events stamped in the same
    * millisecond are two rows rather than one overwriting the other.
+   *
+   * Also the sort key of {@link AuditKeys.typePk}'s index, so a type-filtered
+   * query gets its date range from a `BETWEEN` on the same format.
    */
   eventSk: (createdAt: string, eventId: string): string => `${createdAt}#${eventId}`,
+  /**
+   * Partition key of the event-type index (`byType`), which answers a query
+   * filtered to exactly one type.
+   *
+   * Still org-scoped, so a type filter can never read across orgs — the index
+   * narrows what a reader sees within their own history and never widens it.
+   */
+  typePk: (orgId: string, type: AuditEventType): string => `ORG#${orgId}#TYPE#${type}`,
 } as const;
 
 /**
@@ -408,7 +425,12 @@ function auditTtl(createdAt: string): number {
  * reach the table.
  *
  * The keys are derived last, so a stored row spread back into an event cannot
- * carry a `pk` or `sk` that disagrees with its own `orgId` and `createdAt`.
+ * carry a `pk` or `sk` that disagrees with its own `orgId` and `createdAt`. The
+ * index attributes are derived here for the same reason, and they are absent
+ * from the envelope in shared for the same reason `pk` and `sk` are: they are
+ * where the row lives, not part of what it records. Stamping them on every
+ * write is what makes the `byType` index answer a type-filtered query — an
+ * event written without `gsi1pk` is invisible to the index forever.
  */
 function auditItem(event: AuditEvent): Record<string, unknown> {
   const { phase, correlationId, outcome } = event;
@@ -426,6 +448,8 @@ function auditItem(event: AuditEvent): Record<string, unknown> {
     ...(outcome ? { outcome } : {}),
     pk: AuditKeys.orgPk(event.orgId),
     sk: AuditKeys.eventSk(event.createdAt, event.eventId),
+    gsi1pk: AuditKeys.typePk(event.orgId, event.type),
+    gsi1sk: AuditKeys.eventSk(event.createdAt, event.eventId),
   };
 }
 
@@ -435,7 +459,7 @@ function auditWriteInput(event: AuditEvent): {
   Item: Record<string, AttributeValue>;
 } {
   return {
-    TableName: Resource.AuditTable.name,
+    TableName: Resource.AuditLog.name,
     Item: marshall(auditItem(event), { removeUndefinedValues: true }),
   };
 }
@@ -459,15 +483,16 @@ export function auditPut(event: AuditEvent): TransactWriteItem {
 /**
  * Append an event on its own.
  *
- * For a phase half with no local write to ride with: the `intent` of a
- * provider-backed mutation, which by definition has none, and a `completion`
- * whose request made no mutation. Everything else uses {@link commitAudited}.
+ * For an event with no local write to ride with: the `intent` of a
+ * provider-backed mutation, which by definition has none, a `completion` whose
+ * request made no mutation, and `audit.exported`, which describes a read.
+ * Everything else uses {@link commitAudited}.
  *
  * Not create-only. An automatic SDK retry after a lost response collides with
  * its own landed write, and a create-only condition would turn that into a
  * failed mutation: an intent Put re-landing identically is the retry working.
  */
-export async function appendAuditEvent(event: TwoPhaseAuditEvent): Promise<void> {
+export async function appendAuditEvent(event: StandaloneAuditEvent): Promise<void> {
   await getDynamoClient().send(new PutItemCommand(auditWriteInput(event)));
 }
 

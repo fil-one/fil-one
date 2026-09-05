@@ -287,17 +287,21 @@ export interface SentOrg {
 }
 
 /**
- * Wrapper around fetch for all Fil.one API calls.
- * - Always sends HttpOnly auth cookies via credentials: 'include'
- * - Redirects to Auth0 login on 401
+ * Every Fil.one API call, up to the point where the body is read.
+ *
+ * Cookies, the CSRF token, the org header, and the whole error ladder live here
+ * so a caller that wants something other than JSON — the audit CSV — gets the
+ * same 401 step-up, 403, and 410 handling rather than a second copy of it.
+ * {@link apiRequest} and {@link apiDownload} are the two ways to read what it
+ * returns.
  */
 // eslint-disable-next-line complexity/complexity
-export async function apiRequest<T>(
+async function sendApiRequest(
   path: string,
   options: RequestInit = {},
   behavior: ApiRequestBehavior = {},
   sentOrg?: SentOrg,
-): Promise<T> {
+): Promise<Response> {
   // The tab is on its way to another org. Held rather than rejected, for the
   // reason `getMe` returns instead of throwing on a mismatch: the page is
   // disappearing, and an error rendered over it would be the last thing the user
@@ -396,11 +400,41 @@ export async function apiRequest<T>(
     );
   }
 
+  return response;
+}
+
+/**
+ * Wrapper around fetch for all Fil.one API calls.
+ * - Always sends HttpOnly auth cookies via credentials: 'include'
+ * - Redirects to Auth0 login on 401
+ */
+export async function apiRequest<T>(
+  path: string,
+  options: RequestInit = {},
+  behavior: ApiRequestBehavior = {},
+  sentOrg?: SentOrg,
+): Promise<T> {
+  const response = await sendApiRequest(path, options, behavior, sentOrg);
+
   if (response.status === 204 || response.headers.get('content-length') === '0') {
     return undefined as T;
   }
 
   return response.json() as Promise<T>;
+}
+
+/**
+ * A file the API generated, as a blob the caller can hand to `downloadBlob`.
+ *
+ * A plain link would authenticate, since Lax cookies ride a top-level
+ * navigation, but it cannot set `X-Org-Id`, so it would download whichever org
+ * the session defaults to rather than the one the tab is showing. It would also
+ * render a failure as raw JSON in a browser tab instead of reaching the error
+ * handling above.
+ */
+export async function apiDownload(path: string): Promise<Blob> {
+  const response = await sendApiRequest(path);
+  return response.blob();
 }
 
 // ── Me / Org API ────────────────────────────────────────────────────────

@@ -153,16 +153,28 @@ export default $config({
     // profile, or billing row that happened to share a partition. Written only
     // through lib/audit.ts, which appends an event in the same transaction as
     // the mutation it records.
-    // Handlers reach this table with the same allResources link every route
-    // uses, so they hold dynamodb:* on it. Narrowing the audit grant to
-    // PutItem/Query is follow-up work: it is the one table where a handler
-    // holding DeleteItem contradicts the append-only claim.
+    // Routes reach it through the narrowed auditLog link below rather than
+    // through the table itself, because the Dynamo component's own link grants
+    // dynamodb:* and this is the one table where a handler holding DeleteItem
+    // contradicts the append-only claim.
     const auditTable = new sst.aws.Dynamo('AuditTable', {
       fields: {
         pk: 'string',
         sk: 'string',
+        // The event-type index: ORG#{orgId}#TYPE#{type} / {createdAt}#{eventId}.
+        // Org-scoped partition key, so a type-filtered query can never read
+        // across orgs, and the base sort key format, so it still gets its date
+        // range from a BETWEEN rather than a scan.
+        gsi1pk: 'string',
+        gsi1sk: 'string',
       },
       primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
+      // Projection defaults to ALL. The item is a few hundred bytes and the
+      // point of the index is that one query answers the request; KEYS_ONLY
+      // would turn every page into a batch of reads against the base table.
+      globalIndexes: {
+        byType: { hashKey: 'gsi1pk', rangeKey: 'gsi1sk' },
+      },
       ttl: 'ttl',
       transform: {
         table: {
@@ -178,6 +190,39 @@ export default $config({
           deletionProtectionEnabled: isProduction,
         },
       },
+    });
+
+    // How everything reaches AuditTable: the table's name, and the two actions
+    // an append-only log needs. Linking the Dynamo component directly would
+    // grant dynamodb:* on the table and its index, DeleteItem and UpdateItem
+    // included, which is the difference between an application that cannot
+    // modify an audit entry and one that merely does not.
+    //
+    // TransactWriteItems needs the underlying PutItem on each item it writes,
+    // so commitAudited works unchanged. No Scan: nothing reads this table
+    // without naming an org.
+    //
+    // Two statements because DynamoDB splits along the same line. A query may
+    // name the table or one of its indexes, so Query needs both ARNs; a write
+    // may only ever name the table, and granting PutItem on an index ARN would
+    // be a permission that can never match. The index is maintained by
+    // DynamoDB itself as the write lands, under its own permissions rather than
+    // the caller's.
+    //
+    // The one exception is the account deletion worker, which destroys an org's
+    // partition and takes DeleteItem on top of this link.
+    const auditLog = new sst.Linkable('AuditLog', {
+      properties: { name: auditTable.name },
+      include: [
+        sst.aws.permission({
+          actions: ['dynamodb:Query'],
+          resources: [auditTable.arn, $interpolate`${auditTable.arn}/index/*`],
+        }),
+        sst.aws.permission({
+          actions: ['dynamodb:PutItem'],
+          resources: [auditTable.arn],
+        }),
+      ],
     });
 
     // RAG indexer's own store: per-object chunk manifests
@@ -614,7 +659,7 @@ export default $config({
       userInfoTable,
       bulkDeleteTable,
       orgTable,
-      auditTable,
+      auditLog,
       userFilesBucket,
       ragVectorBucket,
       auth0ClientId,
@@ -875,6 +920,7 @@ export default $config({
         userInfoTable,
         ragIndexerTable,
         ragVectorBucket,
+        auditLog,
         stripeSecretKey,
         stripePriceId,
         orgTable,
@@ -894,6 +940,12 @@ export default $config({
       permissions: [
         ...ragPermissions,
         { actions: ['sqs:SendMessage'], resources: [accountDeletionDlq.arn] },
+        // The one credential in the system that may remove an audit entry. The
+        // auditLog link above deliberately withholds this from every route, and
+        // the teardown is the one place where deleting is the point: an org
+        // that asked to be erased must not leave a record of who belonged to it
+        // and what they did.
+        { actions: ['dynamodb:DeleteItem'], resources: [auditTable.arn] },
       ],
     });
 

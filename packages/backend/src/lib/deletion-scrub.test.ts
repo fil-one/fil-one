@@ -18,6 +18,7 @@ vi.mock('sst', () => ({
     RagIndexerTable: { name: 'RagIndexerTable' },
     RagVectorBucket: { name: 'rag-vectors' },
     OrgTable: { name: 'OrgTable' },
+    AuditLog: { name: 'AuditTable' },
   },
 }));
 
@@ -137,6 +138,26 @@ describe('scrubOrgRecords', () => {
     expect(kept).toContain(`UserInfoTable:ORG#${ORG}/MEMBER#user-1`);
     // Last: it holds the tenant ids a resumed pass reads.
     expect(kept.at(-1)).toBe(`UserInfoTable:ORG#${ORG}/PROFILE`);
+  });
+
+  // Destroyed rather than stamped: an event's personal data is in the row body,
+  // so emptying it would mean rewriting stored history.
+  it('destroys the org audit partition', async () => {
+    ddbMock.on(QueryCommand, { TableName: 'AuditTable' }).resolves({
+      Items: [
+        marshall({ pk: `ORG#${ORG}`, sk: '2026-08-27T10:00:00.000Z#event-1' }),
+        marshall({ pk: `ORG#${ORG}`, sk: '2026-08-28T10:00:00.000Z#event-2' }),
+      ],
+    });
+
+    await scrubOrgRecords(ORG, MEMBERS);
+
+    expect(deletedKeys()).toEqual([
+      `AuditTable:ORG#${ORG}/2026-08-27T10:00:00.000Z#event-1`,
+      `AuditTable:ORG#${ORG}/2026-08-28T10:00:00.000Z#event-2`,
+      `OrgTable:USER#user-1/MEMBERSHIP#${ORG}`,
+    ]);
+    expect(scrubbedKeys()).not.toContain(`AuditTable:ORG#${ORG}/2026-08-27T10:00:00.000Z#event-1`);
   });
 
   it('strips the name off the org profile and leaves the fence up', async () => {
