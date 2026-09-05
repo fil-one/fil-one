@@ -17,7 +17,6 @@ import {
 } from '../jobs/rag-indexer-manifest.js';
 import { AuditKeys } from './audit.js';
 import { getDynamoClient } from './ddb-client.js';
-import { collectPages } from './ddb-paging.js';
 import { RAGKeys } from './dynamo-records.js';
 import { OrgKeys } from './org-membership.js';
 import type { DeletionMember } from './deletion-record.js';
@@ -25,6 +24,7 @@ import { RagApiKeyKeys } from './rag-api-keys.js';
 import { SubscriptionKeys } from './subscription-store.js';
 
 type Item = Record<string, AttributeValue>;
+type Cursor = Record<string, AttributeValue> | undefined;
 
 /**
  * Removes an org's personal data. Credentials are destroyed; every row that
@@ -478,4 +478,18 @@ async function deleteRow(tableName: string, key: Record<string, string>): Promis
 
 async function deleteItem(tableName: string, key: Item): Promise<void> {
   await getDynamoClient().send(new DeleteItemCommand({ TableName: tableName, Key: key }));
+}
+
+/** Four reads here need the same loop; private until a second module wants it. */
+async function collectPages(
+  send: (cursor: Cursor) => Promise<{ Items?: Item[]; LastEvaluatedKey?: Cursor }>,
+): Promise<Item[]> {
+  const items: Item[] = [];
+  let cursor: Cursor;
+  do {
+    const page = await send(cursor);
+    items.push(...(page.Items ?? []));
+    cursor = page.LastEvaluatedKey;
+  } while (cursor);
+  return items;
 }

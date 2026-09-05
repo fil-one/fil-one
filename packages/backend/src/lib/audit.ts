@@ -32,7 +32,6 @@ import type {
   AuditOutcome,
   AuditSubject,
   CommittableAuditEvent,
-  StandaloneAuditEvent,
   TwoPhaseAuditEvent,
   TwoPhaseAuditEventType,
 } from '@filone/shared';
@@ -483,16 +482,15 @@ export function auditPut(event: AuditEvent): TransactWriteItem {
 /**
  * Append an event on its own.
  *
- * For an event with no local write to ride with: the `intent` of a
- * provider-backed mutation, which by definition has none, a `completion` whose
- * request made no mutation, and `audit.exported`, which describes a read.
- * Everything else uses {@link commitAudited}.
+ * For a phase half with no local write to ride with: the `intent` of a
+ * provider-backed mutation, which by definition has none, and a `completion`
+ * whose request made no mutation. Everything else uses {@link commitAudited}.
  *
  * Not create-only. An automatic SDK retry after a lost response collides with
  * its own landed write, and a create-only condition would turn that into a
  * failed mutation: an intent Put re-landing identically is the retry working.
  */
-export async function appendAuditEvent(event: StandaloneAuditEvent): Promise<void> {
+export async function appendAuditEvent(event: TwoPhaseAuditEvent): Promise<void> {
   await getDynamoClient().send(new PutItemCommand(auditWriteInput(event)));
 }
 
