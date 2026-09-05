@@ -15,6 +15,7 @@ import {
   AUTH0_DOMAIN_BY_CONSOLE_ORIGIN,
   getAvailableRegions,
   supportsBucketManagement,
+  getRegionAccessModel,
   isFoundationEmail,
   isSupportedRegion,
   formatRegion,
@@ -301,6 +302,21 @@ describe('supportsBucketManagement', () => {
 
   it('returns true for non-Aurora regions', () => {
     expect(supportsBucketManagement(S3Region.UsEast1)).toBe(true);
+  });
+});
+
+describe('getRegionAccessModel', () => {
+  it('answers scoped-keys for every region', () => {
+    const models = Object.fromEntries(
+      Object.values(S3Region).map((region) => [region, getRegionAccessModel(region)]),
+    );
+
+    expect(models).toEqual({
+      [S3Region.EuWest1]: 'scoped-keys',
+      [S3Region.UsEast1]: 'scoped-keys',
+      [S3Region.EuCentral3]: 'scoped-keys',
+      [S3Region.UsEast9]: 'scoped-keys',
+    });
   });
 });
 

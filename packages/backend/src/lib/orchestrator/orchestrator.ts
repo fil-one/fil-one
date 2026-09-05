@@ -143,6 +143,7 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
   return {
     id: config.id,
     region: config.region,
+    accessModel: 'scoped-keys',
 
     async ensureTenantReady(orgId: string): Promise<string | null> {
       return ensureManagementTenantReady(setupDeps, orgId);

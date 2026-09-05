@@ -6,10 +6,12 @@ import type {
   TenantInfo,
 } from '../lib/service-orchestrator.js';
 import { S3Region, TenantStatus } from '@filone/shared';
+import type { AccessModel } from '@filone/shared';
 
 export interface FakeOrchestrator {
   id: string;
   region: string;
+  accessModel: AccessModel;
   isTenantReady: ReturnType<typeof vi.fn>;
   getTenantStatus: ReturnType<typeof vi.fn>;
   updateTenantStatus: ReturnType<typeof vi.fn>;
@@ -26,6 +28,8 @@ export interface FakeOrchestratorOpts {
   status?: TenantStatus;
   /** Region reported by the orchestrator. Defaults to `eu-west-1`. */
   region?: S3Region;
+  /** Access model reported by the orchestrator. Defaults to `scoped-keys`. */
+  accessModel?: AccessModel;
   /** Storage series returned by `getTenantUsageMetrics`. Defaults to empty. */
   storage?: StorageUsageSample[];
   /** Egress series returned by `getTenantUsageMetrics`. Defaults to empty. */
@@ -60,6 +64,7 @@ export function fakeOrchestrator(id: string, opts: FakeOrchestratorOpts = {}): F
   return {
     id,
     region,
+    accessModel: opts.accessModel ?? 'scoped-keys',
     isTenantReady: vi.fn((orgProfile?: { pk?: { S?: string } }) => {
       const orgId = orgProfile?.pk?.S?.replace('ORG#', '');
       return ready && orgId ? tenantFor(id, orgId) : null;

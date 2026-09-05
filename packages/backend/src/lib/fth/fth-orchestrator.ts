@@ -77,6 +77,7 @@ export const _resetFthOrchestratorCachesForTesting = () => {
 export const fthOrchestrator = {
   id: 'fth',
   region: S3Region.UsEast1,
+  accessModel: 'scoped-keys',
 
   async ensureTenantReady(orgId: string): Promise<string | null> {
     return ensureFthTenantReady(client, orgId);
