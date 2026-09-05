@@ -73,7 +73,9 @@ export function isFoundationEmail(email: string | undefined): boolean {
 export function getAvailableRegions(stage: Stage | string): S3Region[] {
   const regions: S3Region[] = [S3Region.EuWest1, S3Region.UsEast1];
   if (stage !== Stage.Production) {
-    regions.push(S3Region.EuCentral3, S3Region.UsEast9);
+    // us-east-9 is temporarily disabled
+    // regions.push(S3Region.EuCentral3, S3Region.UsEast9);
+    regions.push(S3Region.EuCentral3);
   }
   return regions;
 }
@@ -124,7 +126,7 @@ export function getS3Endpoint(region: S3Region, stage: Stage | string): string {
       case S3Region.UsEast1:
         return 'https://us-east-1.fortilyx.com';
       case S3Region.EuCentral3:
-        return 'https://ingot.staging.fil.one';
+        return 'https://s3.eu-central-3.staging.filonecontent.com';
       case S3Region.UsEast9:
         return 'https://ingot.dev.forge-sandbox.fil.one';
     }

@@ -701,7 +701,7 @@ export default $config({
     // serving every region in it; the region is sent per-tenant in the PUT
     // /tenants body.
     const forgeEnv = {
-      FORGE_MANAGEMENT_API_URL: isProduction ? '' : 'https://hilt.staging.fil.one',
+      FORGE_MANAGEMENT_API_URL: isProduction ? '' : 'https://auth.staging.fil-forge.com',
       FORGE_DEV_MANAGEMENT_API_URL: isProduction ? '' : 'https://hilt.dev.forge-sandbox.fil.one',
     };
 
@@ -923,6 +923,7 @@ export default $config({
         auditLog,
         stripeSecretKey,
         stripePriceId,
+        orgTable,
         ...managementApiTokens,
         ...mgmtRuntimeResources,
       ],
