@@ -4,7 +4,7 @@ import type {
   GranularPermission,
   ObjectPermission,
 } from './api/access-keys.js';
-import { permissionsForRole } from './permissions.js';
+import { permissionsForRole, roleHasPermission } from './permissions.js';
 import type { Permission } from './permissions.js';
 
 /**
@@ -129,4 +129,77 @@ function requirementFor(
   return Object.prototype.hasOwnProperty.call(table, keyPermission)
     ? table[keyPermission]
     : undefined;
+}
+
+/**
+ * What a key row records about the authority it carries.
+ *
+ * Both fields are optional because a row the console rebuilt after a vendor
+ * 409 carries neither: the retry answers 409 with no secret, so the credential
+ * was never handed to anyone and the console never learned what it holds.
+ */
+export interface AccessKeyPermissions {
+  permissions?: readonly string[] | undefined;
+  granularPermissions?: readonly string[] | undefined;
+}
+
+/**
+ * Why a role cannot keep a key, and therefore why the key is revoked.
+ *
+ * `role_cannot_mint`: the role holds no `keys.create`, so it can hold no key.
+ * `permissions_unrecorded`: the row records no permission set.
+ * `exceeds_role`: the role could not grant everything the row carries.
+ *
+ * This is about one key against one role. `RevocationTrigger` (`audit.ts`) is
+ * the other question — what made anybody look.
+ */
+export type AccessKeyRevocationReason =
+  | 'role_cannot_mint'
+  | 'permissions_unrecorded'
+  | 'exceeds_role';
+
+/**
+ * Whether a role may keep a key, and when it may not, why.
+ *
+ * The refusing arms partition {@link AccessKeyRevocationReason} and are written
+ * out rather than derived from it: which arm a reason belongs to is a decision
+ * about whether it can name an excess, and a fourth reason should have to be
+ * placed deliberately rather than fall into whichever arm a subtraction leaves.
+ */
+export type KeyRetentionResult =
+  | { retained: true }
+  | { retained: false; reason: 'role_cannot_mint' | 'permissions_unrecorded' }
+  | { retained: false; reason: 'exceeds_role'; excess: ExcessKeyPermission[] };
+
+/**
+ * Whether a key its holder already has may be kept once that holder moves to
+ * `role`.
+ *
+ * One test, and the same one {@link excessKeyPermissions} applies at creation:
+ * a key is kept when its holder could mint it today. A role without
+ * `keys.create` has an empty ceiling, so demotion to ReadOnly takes every key
+ * the member created; one kept there would have a holder who can neither see
+ * nor revoke it, since `keys.manage_own` is what scopes the list and the
+ * delete.
+ *
+ * A row recording no permission set cannot be placed inside the new role, so it
+ * goes. Bucket scope is never compared: it is the creator's choice at mint time
+ * and no role caps it.
+ *
+ * The caller decides whose keys to ask about. A row with no `createdBy` belongs
+ * to nobody the console can name and is outside this rule entirely.
+ */
+export function canRetainAccessKey(role: string, key: AccessKeyPermissions): KeyRetentionResult {
+  if (!roleHasPermission(role, 'keys.create')) {
+    return { retained: false, reason: 'role_cannot_mint' };
+  }
+  if (!key.permissions) return { retained: false, reason: 'permissions_unrecorded' };
+
+  const excess = excessKeyPermissions(role, {
+    permissions: key.permissions,
+    granularPermissions: key.granularPermissions,
+  });
+  return excess.length === 0
+    ? { retained: true }
+    : { retained: false, reason: 'exceeds_role', excess };
 }

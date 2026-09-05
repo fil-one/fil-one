@@ -1,8 +1,11 @@
 import { S3Region } from '@filone/shared';
 import type {
+  AccessKeyBucketScope,
+  AccessKeyPermission,
   BulkDeleteFailure,
   BulkDeleteJobStatus,
   BulkDeleteScope,
+  GranularPermission,
   SubscriptionStatus,
 } from '@filone/shared';
 
@@ -45,6 +48,22 @@ export interface AccessKeyRecord {
   accessKeyId: string;
   createdAt: string;
   status: string;
+  /**
+   * The region whose orchestrator holds the credential. Absent on rows written
+   * before multi-region routing, which predate FTH and belong to Aurora.
+   */
+  region?: S3Region;
+  /**
+   * What the key carries. This stamp is the only record of it: the orchestrator
+   * interface reads no permissions back, so nothing at the vendor can be
+   * compared against it. Absent on a `recovered` row, which the console never
+   * learned the shape of.
+   */
+  permissions?: AccessKeyPermission[];
+  granularPermissions?: GranularPermission[];
+  bucketScope?: AccessKeyBucketScope;
+  buckets?: string[];
+  expiresAt?: string;
   /** The FilOne user who minted the key. Absent on keys older than roles. */
   createdBy?: string;
   /** The creator's verified email at creation time, for display without a join. */
