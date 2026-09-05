@@ -66,6 +66,33 @@ export class ResponseBuilder {
   }
 }
 
+/**
+ * A file the browser saves, rather than JSON.
+ *
+ * Built outside {@link ResponseBuilder}, which hardcodes a JSON content type
+ * and stringifies its body — the same reason the auth handlers build their 302s
+ * by hand. The security headers are repeated rather than skipped: this response
+ * carries customer data, and `nosniff` matters more here than on JSON, because
+ * a downloaded file is the thing a browser is most willing to guess about.
+ *
+ * `Content-Disposition` names the file for anything that follows the header.
+ * The console fetches this as a blob and names the download itself, since the
+ * request has to carry the org header and cannot be a plain link.
+ */
+export function csvResponse(body: string, filename: string): APIGatewayProxyStructuredResultV2 {
+  return {
+    statusCode: 200,
+    headers: {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'strict-origin-when-cross-origin',
+      'Strict-Transport-Security': 'max-age=2592000; includeSubDomains',
+    },
+    body,
+  };
+}
+
 export function unsupportedRegionResponse(region: string): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(400)

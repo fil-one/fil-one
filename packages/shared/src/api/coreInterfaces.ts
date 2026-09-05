@@ -64,6 +64,14 @@ export enum ApiErrorCode {
    * ownership — and a generic conflict would send the user to support.
    */
   LAST_OWNER = 'LAST_OWNER',
+  /**
+   * The audit export matched more than one response can carry. Its own code
+   * because the remedy is specific and the console can act on it: narrow the
+   * date range, or filter to one event type or one member. Refused rather than
+   * truncated — a short export that does not say it is short is worse than no
+   * export.
+   */
+  AUDIT_EXPORT_TOO_LARGE = 'AUDIT_EXPORT_TOO_LARGE',
 }
 
 export interface ErrorResponse {

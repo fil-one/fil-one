@@ -15,7 +15,9 @@ import {
   deleteManifestEntry,
   loadManifest,
 } from '../jobs/rag-indexer-manifest.js';
+import { AuditKeys } from './audit.js';
 import { getDynamoClient } from './ddb-client.js';
+import { collectPages } from './ddb-paging.js';
 import { RAGKeys } from './dynamo-records.js';
 import { OrgKeys } from './org-membership.js';
 import type { DeletionMember } from './deletion-record.js';
@@ -23,7 +25,6 @@ import { RagApiKeyKeys } from './rag-api-keys.js';
 import { SubscriptionKeys } from './subscription-store.js';
 
 type Item = Record<string, AttributeValue>;
-type Cursor = Record<string, AttributeValue> | undefined;
 
 /**
  * Removes an org's personal data. Credentials are destroyed; every row that
@@ -45,6 +46,9 @@ type Cursor = Record<string, AttributeValue> | undefined;
  * The OrgTable rows are destroyed rather than retained. They describe an org
  * that no longer exists, and leaving a membership behind would leave the member
  * able to act in it. They go last, after every step that reads a member has run.
+ *
+ * The audit partition is destroyed too, which is the one place this file removes
+ * a row it could have emptied instead. See {@link destroyAuditPartition}.
  */
 export async function scrubOrgRecords(orgId: string, members: DeletionMember[]): Promise<void> {
   const orgRows = await readOrgPartition(orgId);
@@ -57,6 +61,7 @@ export async function scrubOrgRecords(orgId: string, members: DeletionMember[]):
 
   await scrubBilling(orgId, members);
   await scrubMembers(orgId, members);
+  await destroyAuditPartition(orgId);
 
   // It holds the tenant ids a resumed pass reads, and a failed pass leaves the
   // most context for troubleshooting behind it.
@@ -362,6 +367,46 @@ async function readOrgTablePartition(orgId: string): Promise<Item[]> {
 }
 
 /**
+ * Every audit event the org ever produced, destroyed rather than emptied.
+ *
+ * An event's personal data is `actor.email` and the addresses on the invitation
+ * payloads, and both sit in the row body. Emptying them means rewriting stored
+ * events, which contradicts the append-only claim further than removing them
+ * does — the same reason credential rows and `RagIndexerTable` are destroyed
+ * here instead of stamped. Without this step an org's full record of who
+ * belonged to it and what they did outlives the org by up to 90 days, until the
+ * TTL reaches it.
+ *
+ * The account deletion worker is the one credential in the system holding
+ * `DeleteItem` on this table; every route's grant stops at `PutItem` and
+ * `Query`.
+ *
+ * Enumerated by pk, like the two partitions above, so an event type added later
+ * is destroyed with the rest.
+ */
+async function destroyAuditPartition(orgId: string): Promise<void> {
+  const auditTable = Resource.AuditLog.name;
+  const events = await collectPages((cursor) =>
+    getDynamoClient().send(
+      new QueryCommand({
+        TableName: auditTable,
+        KeyConditionExpression: 'pk = :pk',
+        ExpressionAttributeValues: marshall({ ':pk': AuditKeys.orgPk(orgId) }),
+        // The events of the mutations this teardown just made are the ones most
+        // likely to be missed by an eventually consistent read.
+        ConsistentRead: true,
+        ProjectionExpression: 'pk, sk',
+        ...(cursor ? { ExclusiveStartKey: cursor } : {}),
+      }),
+    ),
+  );
+
+  for (const event of events) {
+    await deleteItem(auditTable, { pk: event.pk!, sk: event.sk! });
+  }
+}
+
+/**
  * An invitation row that stores no `tokenHash` leaves its lookup row in place:
  * the lookup pk is the hash, and without it the row cannot be addressed. Nothing
  * reclaims it — OrgTable has no TTL, and invite expiry is a comparison made when
@@ -433,18 +478,4 @@ async function deleteRow(tableName: string, key: Record<string, string>): Promis
 
 async function deleteItem(tableName: string, key: Item): Promise<void> {
   await getDynamoClient().send(new DeleteItemCommand({ TableName: tableName, Key: key }));
-}
-
-/** Three reads here need the same loop; private until a second module wants it. */
-async function collectPages(
-  send: (cursor: Cursor) => Promise<{ Items?: Item[]; LastEvaluatedKey?: Cursor }>,
-): Promise<Item[]> {
-  const items: Item[] = [];
-  let cursor: Cursor;
-  do {
-    const page = await send(cursor);
-    items.push(...(page.Items ?? []));
-    cursor = page.LastEvaluatedKey;
-  } while (cursor);
-  return items;
 }
