@@ -93,7 +93,9 @@ describe('getS3Endpoint', () => {
   });
 
   it('returns the eu-central-3 staging gateway', () => {
-    expect(getS3Endpoint(S3Region.EuCentral3, Stage.Staging)).toBe('https://ingot.staging.fil.one');
+    expect(getS3Endpoint(S3Region.EuCentral3, Stage.Staging)).toBe(
+      'https://s3.eu-central-3.staging.filonecontent.com',
+    );
   });
 
   it('returns the us-east-9 dev sandbox gateway', () => {
