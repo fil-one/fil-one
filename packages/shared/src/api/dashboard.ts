@@ -5,13 +5,35 @@ export interface UsageDataPoint {
   value: number;
 }
 
+/**
+ * Windows the trend endpoint answers for.
+ *
+ * `24h` samples hourly; the others sample daily. Anything else falls back to
+ * `7d` rather than erroring, so an old client keeps working.
+ */
+export type UsageTrendsPeriod = '24h' | '7d' | '30d';
+
 export interface UsageTrendsRequest {
-  period: '7d' | '30d';
+  period: UsageTrendsPeriod;
 }
 
 export interface UsageTrendsResponse {
+  /** Bytes held at the close of each bucket. A stock: read the last point. */
   storage: UsageDataPoint[];
+  /**
+   * Objects held at the close of each bucket. A stock, like `storage`.
+   *
+   * Not charted on the dashboard: an object count maps to neither the bill nor
+   * a limit, and the current figure is already a stat card there. Kept in the
+   * response for the usage page (FIL-1099), since the storage query returns it
+   * at no extra cost.
+   */
   objects: UsageDataPoint[];
+  /**
+   * Bytes served during each bucket. A flow: sum the points for a window
+   * total, and never carry a value forward across a gap.
+   */
+  egress: UsageDataPoint[];
 }
 
 // ---------------------------------------------------------------------------

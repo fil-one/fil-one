@@ -626,13 +626,18 @@ export async function regenerateRecoveryCode(
 
 // ── Usage API ────────────────────────────────────────────────────────────
 
-import type { UsageResponse, RecentActivityResponse, UsageTrendsResponse } from '@filone/shared';
+import type {
+  UsageResponse,
+  RecentActivityResponse,
+  UsageTrendsPeriod,
+  UsageTrendsResponse,
+} from '@filone/shared';
 
 export function getUsage(): Promise<UsageResponse> {
   return apiRequest<UsageResponse>('/usage');
 }
 
-export function getUsageTrends(period: '7d' | '30d'): Promise<UsageTrendsResponse> {
+export function getUsageTrends(period: UsageTrendsPeriod): Promise<UsageTrendsResponse> {
   return apiRequest<UsageTrendsResponse>(`/usage/trends?period=${period}`);
 }
 

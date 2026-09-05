@@ -36,7 +36,7 @@ export {
   senderAddress,
 } from './constants.js';
 export type { UsageLimits } from './constants.js';
-export { formatBytes, formatBytesShort } from './formatBytes.js';
+export { formatBytes, formatBytesShort, bytesAxisFormatter } from './formatBytes.js';
 export { UUID_PATTERN, isUuid } from './uuid.js';
 export type {
   MeResponse,
@@ -335,6 +335,7 @@ export { ACTIVITY_ACTION_LABELS, getActivityActionLabel } from './api/dashboard.
 
 export type {
   UsageDataPoint,
+  UsageTrendsPeriod,
   UsageTrendsRequest,
   UsageTrendsResponse,
   BucketActivity,

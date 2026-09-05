@@ -9,6 +9,14 @@
 @plugin '@tailwindcss/typography';
 
 @theme {
+  /* Console type scale — the two steps Tailwind's 12/14/16 jump leaves out.
+     Both are already the console's most-used sizes, spelled as arbitrary
+     values (text-[13px], text-[11px]); see DESIGN.md §4 for the full scale. */
+  --text-meta: 11px;
+  --text-meta--line-height: 16px;
+  --text-ui: 13px;
+  --text-ui--line-height: 19.5px;
+
   /* Blue scale — hue transitions from cyan-blue (252°) in lights to pure blue (264°) in darks.
      brand-600 and brand-700 are designed to pass WCAG AA (4.5:1) with white text. */
   --color-brand-50: oklch(0.97 0.012 252);
