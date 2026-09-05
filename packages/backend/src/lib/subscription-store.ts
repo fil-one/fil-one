@@ -481,6 +481,15 @@ export interface SubscriptionScanOptions<T extends ScannedSubscription> {
   job: string;
   filterExpression: string;
   expressionAttributeValues: Record<string, AttributeValue>;
+  /**
+   * Stop after this many candidates instead of reading to the end of the table,
+   * for a job that reconciles a slice per run rather than the whole population.
+   *
+   * A page is kept whole, so the count can overshoot before the loop rechecks
+   * it; the return is sliced to honour the cap. Ask for one more than the batch
+   * you intend to process and a full return tells you rows were left behind.
+   */
+  limit?: number;
   /** Row to candidate, or undefined for a row this job has its own reason to skip. */
   select: (record: Record<string, unknown>, owner: ScannedSubscription) => T | undefined;
 }
@@ -529,6 +538,7 @@ export async function scanSubscriptions<T extends ScannedSubscription>({
   job,
   filterExpression,
   expressionAttributeValues,
+  limit,
   select,
 }: SubscriptionScanOptions<T>): Promise<T[]> {
   const selected: T[] = [];
@@ -553,7 +563,11 @@ export async function scanSubscriptions<T extends ScannedSubscription>({
     }
 
     lastEvaluatedKey = result.LastEvaluatedKey;
-  } while (lastEvaluatedKey);
+  } while (lastEvaluatedKey && (limit === undefined || selected.length < limit));
 
-  return assertOneRowPerOrg(selected, job);
+  // Sliced after the de-dupe, and after the loop: a page is kept whole, so
+  // `selected` can pass `limit` before the condition is next evaluated. A
+  // caller that named no cap is handed the array itself, not a copy of it.
+  const rows = assertOneRowPerOrg(selected, job);
+  return limit === undefined ? rows : rows.slice(0, limit);
 }

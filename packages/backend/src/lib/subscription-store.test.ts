@@ -4,6 +4,7 @@ import {
   DynamoDBClient,
   GetItemCommand,
   PutItemCommand,
+  ScanCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
@@ -21,7 +22,9 @@ const ddbMock = mockClient(DynamoDBClient);
 import {
   assertOneRowPerOrg,
   readSubscription,
+  type ScannedSubscription,
   scannedSubscription,
+  scanSubscriptions,
   SubscriptionKeys,
   updateSubscription,
   updateSubscriptionByUser,
@@ -390,5 +393,76 @@ describe('SubscriptionKeys', () => {
     expect(SubscriptionKeys.parseLegacyPk('CUSTOMER#')).toBeUndefined();
     // Ids are UUIDs; a `#` in the tail means the key is not what it claims.
     expect(SubscriptionKeys.parseLegacyPk('CUSTOMER#a#b')).toBeUndefined();
+  });
+});
+
+describe('scanSubscriptions', () => {
+  beforeEach(() => ddbMock.reset());
+
+  /** A distinct org per row, so `assertOneRowPerOrg` keeps every one of them. */
+  function orgRow(n: number) {
+    return marshall({
+      pk: `ORG#org-${n}`,
+      sk: 'SUBSCRIPTION',
+      orgId: `org-${n}`,
+      userId: `user-${n}`,
+    });
+  }
+
+  function page(count: number, { from = 0, more = false } = {}) {
+    return {
+      Items: Array.from({ length: count }, (_, i) => orgRow(from + i)) as never,
+      ...(more ? { LastEvaluatedKey: { pk: { S: 'cursor' } } } : {}),
+    };
+  }
+
+  const options = {
+    job: 'test-job',
+    filterExpression: 'sk = :sk',
+    expressionAttributeValues: { ':sk': { S: 'SUBSCRIPTION' } },
+    select: (_record: Record<string, unknown>, owner: ScannedSubscription) => owner,
+  };
+
+  const orgIds = (rows: ScannedSubscription[]) => rows.map((r) => r.orgId);
+
+  it('stops paging once the limit is reached', async () => {
+    ddbMock
+      .on(ScanCommand)
+      .resolvesOnce(page(3, { more: true }))
+      .resolvesOnce(page(3, { from: 3 }));
+
+    const rows = await scanSubscriptions({ ...options, limit: 3 });
+
+    expect(orgIds(rows)).toEqual(['org-0', 'org-1', 'org-2']);
+    expect(ddbMock.commandCalls(ScanCommand)).toHaveLength(1);
+  });
+
+  it('returns no more than the limit when a single page overshoots it', async () => {
+    ddbMock.on(ScanCommand).resolves(page(10, { more: true }));
+
+    const rows = await scanSubscriptions({ ...options, limit: 3 });
+
+    expect(orgIds(rows)).toEqual(['org-0', 'org-1', 'org-2']);
+  });
+
+  it('lets a caller asking for one extra tell a full batch from a backlog', async () => {
+    ddbMock.on(ScanCommand).resolves(page(3));
+    expect(await scanSubscriptions({ ...options, limit: 4 })).toHaveLength(3);
+
+    ddbMock.reset();
+    ddbMock.on(ScanCommand).resolves(page(10, { more: true }));
+    expect(await scanSubscriptions({ ...options, limit: 4 })).toHaveLength(4);
+  });
+
+  it('pages to exhaustion when no limit is given', async () => {
+    ddbMock
+      .on(ScanCommand)
+      .resolvesOnce(page(2, { more: true }))
+      .resolvesOnce(page(2, { from: 2 }));
+
+    const rows = await scanSubscriptions(options);
+
+    expect(orgIds(rows)).toEqual(['org-0', 'org-1', 'org-2', 'org-3']);
+    expect(ddbMock.commandCalls(ScanCommand)).toHaveLength(2);
   });
 });
