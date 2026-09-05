@@ -36,7 +36,7 @@ import {
 } from '../lib/org-profile.js';
 import { hasOrgsBetaAccess } from '../lib/orgs-beta.js';
 import { parseJsonBody } from '../lib/parse-json-body.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
+import { ResponseBuilder, beyondCeilingResponse } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -96,7 +96,9 @@ export async function baseHandler(
 
   // `authorize('members.manage')` refused every caller without a membership row.
   const callerRole = membership!.role;
-  if (!canManageTargetRole(callerRole, role)) return beyondCeilingResponse(role);
+  if (!canManageTargetRole(callerRole, role)) {
+    return beyondCeilingResponse(`invite someone as ${role}`);
+  }
 
   if (!(await hasOrgsBetaAccess({ verifiedEmail: inviterEmail, orgId }))) return betaOnlyResponse();
 
@@ -241,16 +243,6 @@ function newInvitation({
  */
 function acceptUrl(token: string): string {
   return `${process.env.WEBSITE_URL}/invite/accept#token=${encodeURIComponent(token)}`;
-}
-
-function beyondCeilingResponse(role: OrgRole): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder()
-    .status(403)
-    .body<ErrorResponse>({
-      message: `Your role in this organization cannot invite someone as ${role}.`,
-      code: ApiErrorCode.FORBIDDEN_ROLE,
-    })
-    .build();
 }
 
 /**

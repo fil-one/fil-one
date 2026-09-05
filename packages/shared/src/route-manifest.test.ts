@@ -89,6 +89,7 @@ describe('ROUTE_MANIFEST', () => {
       'create-access-key',
       'update-member-role',
       'remove-member',
+      'get-role-change-preview',
       'create-invitation',
       'revoke-invitation',
     ]);

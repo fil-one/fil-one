@@ -1,4 +1,4 @@
-import { ApiErrorCode, type ErrorResponse } from '@filone/shared';
+import { ApiErrorCode, type AccessKeySummary, type ErrorResponse } from '@filone/shared';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 
 export const COOKIE_ATTRIBUTES = 'HttpOnly; Secure; SameSite=Lax; Path=/';
@@ -119,6 +119,48 @@ export function tenantNotReadyResponse(): APIGatewayProxyStructuredResultV2 {
     .status(503)
     .body<ErrorResponse>({
       message: 'We are still setting up the region for you. Please try again in a moment.',
+    })
+    .build();
+}
+
+/**
+ * An error that also reports the keys a change revoked before it was refused.
+ * The keys are gone whatever the transaction did, so a refusal that dropped
+ * them would leave the console unable to say what just happened.
+ */
+export type ErrorWithRevokedKeys = ErrorResponse & { revokedKeys: AccessKeySummary[] };
+
+export function badRequestResponse(message: string): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder().status(400).body<ErrorResponse>({ message }).build();
+}
+
+/**
+ * The person a member verb names is not in the org. About the target, not the
+ * caller: `authorize` answers for a caller without a membership, with a 403.
+ */
+export function notAMemberResponse(
+  revokedKeys?: AccessKeySummary[],
+): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(404)
+    .body<ErrorResponse | ErrorWithRevokedKeys>({
+      message: 'That person is not a member of this organization.',
+      ...(revokedKeys ? { revokedKeys } : {}),
+    })
+    .build();
+}
+
+/**
+ * The caller's role does not reach the target's. Every member verb refuses
+ * with the same sentence; `verbPhrase` completes it with what was attempted —
+ * `remove a admin`, `change a owner to member`, `invite someone as admin`.
+ */
+export function beyondCeilingResponse(verbPhrase: string): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(403)
+    .body<ErrorResponse>({
+      message: `Your role in this organization cannot ${verbPhrase}.`,
+      code: ApiErrorCode.FORBIDDEN_ROLE,
     })
     .build();
 }
