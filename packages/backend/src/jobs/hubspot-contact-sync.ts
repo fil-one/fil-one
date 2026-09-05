@@ -289,7 +289,14 @@ async function readProfileEmails(userIds: string[]): Promise<Map<string, string>
     // tries: the next run reconciles them anyway, and the miss is counted.
     for (let attempt = 0; keys.length > 0 && attempt <= UNPROCESSED_RETRIES; attempt += 1) {
       const result = await dynamo.send(
-        new BatchGetItemCommand({ RequestItems: { [tableName]: { Keys: keys } } }),
+        new BatchGetItemCommand({
+          RequestItems: {
+            [tableName]: {
+              Keys: keys,
+              ProjectionExpression: 'pk, email',
+            },
+          },
+        }),
       );
 
       for (const item of result.Responses?.[tableName] ?? []) {
