@@ -3,12 +3,13 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import { ErrorResponse, S3Region, auditKeyIdSuffix } from '@filone/shared';
+import { ErrorResponse, S3Region } from '@filone/shared';
 import { Resource } from 'sst';
-import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.js';
+import { userActor } from '../lib/audit.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { AccessKeyKeys } from '../lib/dynamo-records.js';
 import { keyScope, notYourKeyResponse, withinScope } from '../lib/key-scope.js';
+import { revokeAccessKey } from '../lib/key-revocation.js';
 import { ResponseBuilder, tenantNotReadyResponse } from '../lib/response-builder.js';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { getOrgProfile } from '../lib/org-profile.js';
@@ -66,45 +67,19 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   const tenantId = orchestrator.isTenantReady(orgProfile);
   if (!tenantId) return tenantNotReadyResponse();
 
-  // Revocation happens at the vendor first and cannot join the local
-  // transaction, so it gets the same intent/completion pair a mint does: an
-  // intent that never completes says a credential was revoked at the vendor
-  // while its local row may still be listed.
-  //
-  // Best-effort, unlike a mint: an AuditTable outage must never be the reason a
-  // leaked key stays live, so a failed intent is logged and counted and the
-  // revocation goes ahead. The key id is known up front, so both halves are
-  // filed under the key.
-  const keyName = Item.keyName?.S;
-  const accessKeyId = Item.accessKeyId?.S;
-  const revocation = await twoPhaseAudit({
-    type: 'key.deleted',
-    mode: 'best-effort',
-    actor: userActor({ userId, email: getVerifiedEmail(event) }),
+  // The member is revoking their own key, which is the one revocation somebody
+  // asked for directly. The passes that take a key its holder did not ask about
+  // name themselves instead.
+  await revokeAccessKey({
     orgId,
-    // The access key id, which is what the console lists and what the details
-    // record four characters of — `keyId` is the orchestrator's own id for the
-    // row and four characters of it match nothing an operator can see. A row
-    // written before the id was stored falls back to it anyway.
-    subject: AuditSubjects.key('s3', accessKeyId ?? keyId),
-    details: {
-      keyKind: 's3',
-      region,
-      ...(keyName ? { keyName } : {}),
-      ...(accessKeyId ? { keyIdSuffix: auditKeyIdSuffix('s3', accessKeyId) } : {}),
-    },
-  });
-
-  try {
-    await orchestrator.deleteAccessKey(tenantId, keyId);
-  } catch (err) {
-    await revocation.complete({ outcome: 'failed' });
-    throw err;
-  }
-
-  await revocation.complete({
-    outcome: 'succeeded',
-    items: [{ Delete: { TableName: Resource.UserInfoTable.name, Key: rowKey } }],
+    keyId,
+    accessKeyId: Item.accessKeyId?.S,
+    keyName: Item.keyName?.S,
+    region,
+    orchestrator,
+    tenantId,
+    actor: userActor({ userId, email: getVerifiedEmail(event) }),
+    reason: 'user_requested',
   });
 
   return { statusCode: 204, body: '' };
