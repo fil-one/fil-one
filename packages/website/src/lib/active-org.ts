@@ -207,6 +207,13 @@ export function clearActiveOrgOnNavigation(): void {
  * key ids and every other path segment are org-scoped, so navigating in place
  * would greet the user with a not-found page in the org they just chose.
  *
+ * `landOn` picks that landing page. A switch between existing orgs wants the
+ * dashboard, but creating one lands on `get-started`: the new org is empty, so
+ * its dashboard is all zeroes, while get-started is the two things that empty
+ * org actually needs next. It only takes effect with a slug — get-started is
+ * org-scoped with no unscoped route to fall back to, so a slugless target lands
+ * on `/dashboard` regardless, and resolves itself from there.
+ *
  * The router import is dynamic to avoid a cycle: `router.ts` pulls in every
  * route, several of which import this module (via `api.ts`) at the top level,
  * so a static import back here would be resolved before either side's module
@@ -224,7 +231,11 @@ export function clearActiveOrgOnNavigation(): void {
  * second, avoidable redirect. A target org with no slug backfilled yet still
  * falls back the same way regardless of which source came up empty.
  */
-export function switchToOrg(orgId: string, knownSlug?: string): void {
+export function switchToOrg(
+  orgId: string,
+  knownSlug?: string,
+  landOn: 'dashboard' | 'get-started' = 'dashboard',
+): void {
   const previousOrgId = getActiveOrgId();
   const targetSlug = knownSlug ?? resolveOrgSlug(orgId);
   setActiveOrgId(orgId);
@@ -235,7 +246,10 @@ export function switchToOrg(orgId: string, knownSlug?: string): void {
     try {
       const { router } = await import('../router.js');
       if (targetSlug) {
-        await router.navigate({ to: '/$orgSlug/dashboard', params: { orgSlug: targetSlug } });
+        await router.navigate({
+          to: landOn === 'get-started' ? '/$orgSlug/get-started' : '/$orgSlug/dashboard',
+          params: { orgSlug: targetSlug },
+        });
       } else {
         await router.navigate({ to: '/dashboard' });
       }

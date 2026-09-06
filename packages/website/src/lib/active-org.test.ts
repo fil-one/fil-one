@@ -131,6 +131,20 @@ describe('the active org stash', () => {
       });
     });
 
+    it('lands on get-started, not the dashboard, when told to', async () => {
+      // Creating an org: the new one is empty, so it opens on its setup page
+      // rather than a dashboard of zeroes. The slug comes straight off the
+      // create response, the same way an invitation accept passes it.
+      switchToOrg(ORG_B, 'org-b', 'get-started');
+
+      await vi.waitFor(() => {
+        expect(navigate).toHaveBeenCalledWith({
+          to: '/$orgSlug/get-started',
+          params: { orgSlug: 'org-b' },
+        });
+      });
+    });
+
     it('falls back to the unscoped dashboard when the target org has no slug yet', async () => {
       // No `/me` cached at all — the state before the backend's slug backfill
       // has run for this stage, or simply before the first `/me` of the

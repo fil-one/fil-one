@@ -52,7 +52,7 @@ describe('CreateOrganizationDialog', () => {
     expect(screen.getByRole('button', { name: 'Create organization' })).toBeEnabled();
   });
 
-  it('creates the org, switches into it, and closes', async () => {
+  it('creates the org, switches into it landing on get-started, and closes', async () => {
     const { onClose } = renderDialog();
 
     fireEvent.change(await screen.findByLabelText('Organization name'), {
@@ -63,7 +63,11 @@ describe('CreateOrganizationDialog', () => {
     await waitFor(() =>
       expect(mockCreateOrg).toHaveBeenCalledWith({ name: 'Acme Two', logoUrl: undefined }),
     );
-    await waitFor(() => expect(mockSwitchToOrg).toHaveBeenCalledWith('org-2'));
+    // The response's own slug is passed so the switch skips a second redirect,
+    // and get-started is the landing since the new org is empty.
+    await waitFor(() =>
+      expect(mockSwitchToOrg).toHaveBeenCalledWith('org-2', 'acme-two', 'get-started'),
+    );
     expect(onClose).toHaveBeenCalled();
   });
 
