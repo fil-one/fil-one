@@ -39,8 +39,11 @@ export function CreateOrganizationDialog({ open, onClose }: CreateOrganizationDi
     mutationFn: () => createOrg({ name: OrgNameSchema.parse(name), logoUrl: logo.logoUrl }),
     onSuccess: (result) => {
       // A full org switch (clears every cached query, navigates in) — the new
-      // org is not the one any currently-loaded page's data describes.
-      switchToOrg(result.orgId);
+      // org is not the one any currently-loaded page's data describes. It lands
+      // on get-started rather than the dashboard: the org is brand new and
+      // empty, so those two setup tasks are what it needs, not a page of zeroes.
+      // The slug its response just carried saves the switch a second redirect.
+      switchToOrg(result.orgId, result.slug, 'get-started');
       handleClose();
     },
     onError: (err) => {
