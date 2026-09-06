@@ -19,6 +19,9 @@ import { Resource } from 'sst';
 
 const LOGO_UPLOAD_EXPIRY_SECONDS = 300;
 
+/** The key prefix a logo upload lands under — shared with `isOwnedAssetUrl`. */
+export const ORG_LOGO_KEY_PREFIX = 'logos/';
+
 // Module-level cache — reused across Lambda warm starts, the same pattern
 // `ddb-client.ts` uses.
 let cachedClient: S3Client | null = null;
@@ -52,7 +55,7 @@ export async function presignOrgLogoUpload({
   contentType: string;
 }): Promise<PresignedOrgLogoUpload> {
   const bucket = Resource.OrgLogoBucket.name;
-  const key = `logos/${crypto.randomUUID()}`;
+  const key = `${ORG_LOGO_KEY_PREFIX}${crypto.randomUUID()}`;
 
   const uploadUrl = await getSignedUrl(
     getPlatformS3Client(),
@@ -71,4 +74,36 @@ export async function presignOrgLogoUpload({
 function publicOrgLogoUrl(bucket: string, key: string): string {
   const region = process.env.AWS_REGION || 'us-east-1';
   return `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
+}
+
+/**
+ * Whether `url` already points at an object inside `OrgLogoBucket` under
+ * `prefix` — the one shape `presignOrgLogoUpload` and `presignAvatarUpload`
+ * (`avatar-storage.ts`) hand back.
+ *
+ * `logoUrl` and `pictureUrl` are both documented as "must already be a URL
+ * our own presign endpoint returned," but the wire schema only checks that
+ * the value is *a* well-formed URL — it has no way to know which bucket a
+ * URL belongs to. This is the check that makes the documented invariant
+ * real: `update-org.ts`, `create-org.ts`, and `update-profile.ts` all call it
+ * before persisting either field, rather than trusting the string as-is.
+ */
+export function isOwnedAssetUrl(url: string, prefix: string): boolean {
+  const bucket = Resource.OrgLogoBucket.name;
+  const region = process.env.AWS_REGION || 'us-east-1';
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  // `URL` lower-cases `hostname` per spec regardless of the input's casing,
+  // so the bucket side of the comparison must match that rather than assume
+  // the resource name itself is already lowercase (an S3 bucket name always
+  // is, but nothing stops a mock or a future resource id from not being).
+  return (
+    parsed.protocol === 'https:' &&
+    parsed.hostname === `${bucket}.s3.${region}.amazonaws.com`.toLowerCase() &&
+    parsed.pathname.startsWith(`/${prefix}`)
+  );
 }
