@@ -107,70 +107,11 @@ export async function createAdditionalOrg({
   const now = new Date().toISOString();
   const { slug, reservationItem } = await reserveOrgSlug({ orgId, name: orgName });
 
-  const userInfoTableName = Resource.UserInfoTable.name;
-  const orgTableName = Resource.OrgTable.name;
-
-  const items: TransactWriteItem[] = [
-    {
-      // Create-only, the same guard `accountRows` puts on the identity row:
-      // `orgId` is a fresh UUID, so a collision here would mean the id was
-      // reused, not that the org already existed.
-      Put: {
-        TableName: userInfoTableName,
-        Item: {
-          pk: { S: `ORG#${orgId}` },
-          sk: { S: 'PROFILE' },
-          name: { S: orgName },
-          slug: { S: slug },
-          // Named on the way in, unlike signup's derived name — there is no
-          // naming step to send this org through.
-          nameConfirmed: { BOOL: true },
-          auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
-          createdBy: { S: userId },
-          createdAt: { S: now },
-          ...(logoUrl ? { logoUrl: { S: logoUrl } } : {}),
-        },
-        ConditionExpression: 'attribute_not_exists(pk)',
-      },
-    },
-    {
-      Put: {
-        TableName: orgTableName,
-        Item: {
-          pk: { S: OrgKeys.orgPk(orgId) },
-          sk: { S: OrgKeys.orgMetaSk() },
-          ownerCount: { N: '1' },
-        },
-      },
-    },
-    {
-      Put: {
-        TableName: orgTableName,
-        Item: {
-          pk: { S: OrgKeys.orgPk(orgId) },
-          sk: { S: OrgKeys.memberSk(userId) },
-          role: { S: OrgRole.Owner },
-          joinedAt: { S: now },
-          source: { S: 'manual' },
-        },
-      },
-    },
-    {
-      Put: {
-        TableName: orgTableName,
-        Item: {
-          pk: { S: OrgKeys.userPk(userId) },
-          sk: { S: OrgKeys.membershipSk(orgId) },
-          role: { S: OrgRole.Owner },
-          joinedAt: { S: now },
-        },
-      },
-    },
-    reservationItem,
-  ];
-
   await commitAudited({
-    items,
+    items: [
+      ...explicitOrgRows({ orgId, orgName, slug, userId, now, nameConfirmed: true, logoUrl }),
+      reservationItem,
+    ],
     event: auditEvent({
       type: 'org.created',
       actor: userActor({ userId, email }),
@@ -207,10 +148,10 @@ export interface FloorOrgPreparation {
  * Prepare (but do not commit) a brand-new organization to catch an account a
  * membership removal would otherwise leave with nowhere to log in.
  *
- * Reuses {@link createAdditionalOrg}'s row shapes — this account asked for
- * this org exactly as little as it asked for the removal that necessitated
- * it, so its membership is stamped `source: 'manual'`, the same value that
- * path uses for "this org did not come with the account."
+ * Shares {@link explicitOrgRows} with {@link createAdditionalOrg} — this
+ * account asked for this org exactly as little as it asked for the removal
+ * that necessitated it, so its membership is stamped `source: 'manual'`, the
+ * same value that path uses for "this org did not come with the account."
  *
  * The name is derived the same way signup derives one (unconfirmed, so
  * `/create-organization` gate fires the next time this account logs in),
@@ -235,59 +176,8 @@ export async function prepareFloorOrg({
   const now = new Date().toISOString();
   const { slug, reservationItem } = await reserveOrgSlug({ orgId, name: orgName });
 
-  const userInfoTableName = Resource.UserInfoTable.name;
-  const orgTableName = Resource.OrgTable.name;
-
   const items: TransactWriteItem[] = [
-    {
-      Put: {
-        TableName: userInfoTableName,
-        Item: {
-          pk: { S: `ORG#${orgId}` },
-          sk: { S: 'PROFILE' },
-          name: { S: orgName },
-          slug: { S: slug },
-          nameConfirmed: { BOOL: false },
-          auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
-          createdBy: { S: userId },
-          createdAt: { S: now },
-        },
-        ConditionExpression: 'attribute_not_exists(pk)',
-      },
-    },
-    {
-      Put: {
-        TableName: orgTableName,
-        Item: {
-          pk: { S: OrgKeys.orgPk(orgId) },
-          sk: { S: OrgKeys.orgMetaSk() },
-          ownerCount: { N: '1' },
-        },
-      },
-    },
-    {
-      Put: {
-        TableName: orgTableName,
-        Item: {
-          pk: { S: OrgKeys.orgPk(orgId) },
-          sk: { S: OrgKeys.memberSk(userId) },
-          role: { S: OrgRole.Owner },
-          joinedAt: { S: now },
-          source: { S: 'manual' },
-        },
-      },
-    },
-    {
-      Put: {
-        TableName: orgTableName,
-        Item: {
-          pk: { S: OrgKeys.userPk(userId) },
-          sk: { S: OrgKeys.membershipSk(orgId) },
-          role: { S: OrgRole.Owner },
-          joinedAt: { S: now },
-        },
-      },
-    },
+    ...explicitOrgRows({ orgId, orgName, slug, userId, now, nameConfirmed: false }),
     reservationItem,
     // Repoint both home-org pointers so the next login (and every fresh
     // request in flight right now, per `attachIdentity`) resolves this org
@@ -298,7 +188,7 @@ export async function prepareFloorOrg({
     // has since repointed.
     {
       Update: {
-        TableName: userInfoTableName,
+        TableName: Resource.UserInfoTable.name,
         Key: { pk: { S: `SUB#${sub}` }, sk: { S: 'IDENTITY' } },
         UpdateExpression: 'SET orgId = :orgId',
         ConditionExpression: 'attribute_exists(pk) AND orgId = :leaving',
@@ -307,7 +197,7 @@ export async function prepareFloorOrg({
     },
     {
       Update: {
-        TableName: userInfoTableName,
+        TableName: Resource.UserInfoTable.name,
         Key: { pk: { S: `USER#${userId}` }, sk: { S: 'PROFILE' } },
         UpdateExpression: 'SET orgId = :orgId',
         ConditionExpression: 'attribute_exists(pk) AND orgId = :leaving',
@@ -517,10 +407,13 @@ function identityAndUserProfileRows({
 }
 
 /**
- * The org's own rows: its profile (UserInfoTable), and its owner count,
- * membership, and inverse membership item (OrgTable). The slug reservation
- * rides separately — `accountRows` appends it, since `createAdditionalOrg`
- * below builds the identical shape without going through this helper at all.
+ * The org's own rows for the org signup creates: its profile (UserInfoTable),
+ * and its owner count, membership, and inverse membership item (OrgTable).
+ * The slug reservation rides separately — `accountRows` appends it.
+ *
+ * Signup's own shape, kept separate from {@link explicitOrgRows}: this one
+ * always writes `nameConfirmed: false` and `source: 'signup'`, and — unlike
+ * that one — carries no `ConditionExpression` on the profile Put.
  */
 function orgAndMembershipRows({
   orgId,
@@ -587,6 +480,89 @@ function orgAndMembershipRows({
     {
       // Inverse item, written in the same transaction so a membership and
       // the list it appears in can never disagree about a role.
+      Put: {
+        TableName: orgTableName,
+        Item: {
+          pk: { S: OrgKeys.userPk(userId) },
+          sk: { S: OrgKeys.membershipSk(orgId) },
+          role: { S: OrgRole.Owner },
+          joinedAt: { S: now },
+        },
+      },
+    },
+  ];
+}
+
+/**
+ * The org's own rows for an org this account explicitly asked for —
+ * {@link createAdditionalOrg} and {@link prepareFloorOrg} both build this
+ * exact shape, differing only in whether the name arrives already confirmed
+ * and whether a logo rides along. Unlike {@link orgAndMembershipRows}, the
+ * profile Put is create-only: `orgId` is a fresh `crypto.randomUUID()` here,
+ * so a collision would mean the id was reused, not that the org already
+ * existed. `source: 'manual'` on the membership row, distinct from signup's
+ * `'signup'`: this org did not come with the account, the account asked for it.
+ */
+function explicitOrgRows({
+  orgId,
+  orgName,
+  slug,
+  userId,
+  now,
+  nameConfirmed,
+  logoUrl,
+}: {
+  orgId: string;
+  orgName: string;
+  slug: string;
+  userId: string;
+  now: string;
+  nameConfirmed: boolean;
+  logoUrl?: string;
+}): TransactWriteItem[] {
+  const orgTableName = Resource.OrgTable.name;
+
+  return [
+    {
+      Put: {
+        TableName: Resource.UserInfoTable.name,
+        Item: {
+          pk: { S: `ORG#${orgId}` },
+          sk: { S: 'PROFILE' },
+          name: { S: orgName },
+          slug: { S: slug },
+          nameConfirmed: { BOOL: nameConfirmed },
+          auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
+          createdBy: { S: userId },
+          createdAt: { S: now },
+          ...(logoUrl ? { logoUrl: { S: logoUrl } } : {}),
+        },
+        ConditionExpression: 'attribute_not_exists(pk)',
+      },
+    },
+    {
+      Put: {
+        TableName: orgTableName,
+        Item: {
+          pk: { S: OrgKeys.orgPk(orgId) },
+          sk: { S: OrgKeys.orgMetaSk() },
+          ownerCount: { N: '1' },
+        },
+      },
+    },
+    {
+      Put: {
+        TableName: orgTableName,
+        Item: {
+          pk: { S: OrgKeys.orgPk(orgId) },
+          sk: { S: OrgKeys.memberSk(userId) },
+          role: { S: OrgRole.Owner },
+          joinedAt: { S: now },
+          source: { S: 'manual' },
+        },
+      },
+    },
+    {
       Put: {
         TableName: orgTableName,
         Item: {
