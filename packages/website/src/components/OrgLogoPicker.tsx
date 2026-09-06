@@ -1,24 +1,14 @@
 import { useRef, useState } from 'react';
-import { CameraIcon, SpinnerIcon } from '@phosphor-icons/react/dist/ssr';
 import { ORG_LOGO_CONTENT_TYPES, ORG_LOGO_MAX_BYTES } from '@filone/shared';
 
 import { OrgAvatar } from './OrgAvatar';
-import { errorMessageOf, presignOrgLogoUpload } from '../lib/api.js';
+import { AvatarUploadButton } from './AvatarUploadButton.js';
+import { presignOrgLogoUpload } from '../lib/api.js';
+import { useImageUpload, validateImageFile } from '../lib/use-image-upload.js';
 
 const ACCEPT = ORG_LOGO_CONTENT_TYPES.join(',');
 
 type LogoContentType = (typeof ORG_LOGO_CONTENT_TYPES)[number];
-
-/** `null` means the file is acceptable. */
-function validateLogoFile(file: File): string | null {
-  if (!ORG_LOGO_CONTENT_TYPES.includes(file.type as LogoContentType)) {
-    return 'Logo must be a PNG, JPEG, or WebP image.';
-  }
-  if (file.size > ORG_LOGO_MAX_BYTES) {
-    return `Logo must be under ${Math.floor(ORG_LOGO_MAX_BYTES / (1024 * 1024))}MB.`;
-  }
-  return null;
-}
 
 /**
  * The logo upload's own state and the presign-then-PUT flow, pulled out of
@@ -46,43 +36,32 @@ export function useOrgLogoUpload(
   onUploaded?: (logoUrl: string) => void,
 ) {
   const [logoUrl, setLogoUrl] = useState<string | undefined>(initialLogoUrl);
-  const [error, setError] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-
-  async function pick(file: File): Promise<void> {
-    const validationError = validateLogoFile(file);
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
-    setError(null);
-    setUploading(true);
-    try {
+  const upload = useImageUpload<string>({
+    validate: (file) =>
+      validateImageFile(file, {
+        contentTypes: ORG_LOGO_CONTENT_TYPES,
+        maxBytes: ORG_LOGO_MAX_BYTES,
+        noun: 'Logo',
+      }),
+    presign: async (contentType) => {
       const { uploadUrl, logoUrl: uploadedUrl } = await presignOrgLogoUpload({
-        contentType: file.type as LogoContentType,
+        contentType: contentType as LogoContentType,
       });
-      const putResponse = await fetch(uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': file.type },
-        body: file,
-      });
-      if (!putResponse.ok) throw new Error('Upload failed');
+      return { uploadUrl, result: uploadedUrl };
+    },
+    onUploaded: (uploadedUrl) => {
       setLogoUrl(uploadedUrl);
       onUploaded?.(uploadedUrl);
-    } catch (err) {
-      setError(errorMessageOf(err, 'Failed to upload the logo'));
-    } finally {
-      setUploading(false);
-    }
-  }
+    },
+    errorFallback: 'Failed to upload the logo',
+  });
 
   function reset(next?: string): void {
     setLogoUrl(next);
-    setError(null);
-    setUploading(false);
+    upload.reset();
   }
 
-  return { logoUrl, error, uploading, pick, reset };
+  return { logoUrl, error: upload.error, uploading: upload.uploading, pick: upload.pick, reset };
 }
 
 const ORG_LOGO_MAX_MB = Math.floor(ORG_LOGO_MAX_BYTES / (1024 * 1024));
@@ -128,22 +107,17 @@ export function AvatarPicker({ name, logo, disabled, layout = 'dialog' }: Avatar
   if (layout === 'row') {
     return (
       <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
+        <AvatarUploadButton
+          size="h-14 w-14"
+          shape="rounded-xl"
+          iconSize={18}
+          uploading={logo.uploading}
           disabled={disabled}
-          aria-label="Change avatar"
-          className="group relative flex h-14 w-14 items-center justify-center rounded-xl focus-visible:brand-outline disabled:cursor-not-allowed"
+          ariaLabel="Change avatar"
+          onClick={() => fileInputRef.current?.click()}
         >
           <OrgAvatar name={name} logoUrl={logo.logoUrl} size="md" />
-          <span className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/0 text-transparent transition-colors group-hover:bg-black/40 group-hover:text-white">
-            {logo.uploading ? (
-              <SpinnerIcon size={18} className="animate-spin" />
-            ) : (
-              <CameraIcon size={18} />
-            )}
-          </span>
-        </button>
+        </AvatarUploadButton>
         {fileInput(fileInputRef, logo)}
         <div className="flex flex-col gap-0.5">
           <p className="text-sm font-medium text-zinc-900">Avatar</p>
@@ -166,22 +140,17 @@ export function AvatarPicker({ name, logo, disabled, layout = 'dialog' }: Avatar
 
   return (
     <div className="mb-5 flex flex-col items-center gap-2">
-      <button
-        type="button"
-        onClick={() => fileInputRef.current?.click()}
+      <AvatarUploadButton
+        size="h-16 w-16"
+        shape="rounded-xl"
+        iconSize={20}
+        uploading={logo.uploading}
         disabled={disabled}
-        aria-label="Choose avatar"
-        className="group relative flex h-16 w-16 items-center justify-center rounded-xl focus-visible:brand-outline disabled:cursor-not-allowed"
+        ariaLabel="Choose avatar"
+        onClick={() => fileInputRef.current?.click()}
       >
         <OrgAvatar name={previewSeed} logoUrl={logo.logoUrl} size="lg" />
-        <span className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/0 text-transparent transition-colors group-hover:bg-black/40 group-hover:text-white">
-          {logo.uploading ? (
-            <SpinnerIcon size={20} className="animate-spin" />
-          ) : (
-            <CameraIcon size={20} />
-          )}
-        </span>
-      </button>
+      </AvatarUploadButton>
       {fileInput(fileInputRef, logo)}
       <span className="text-xs text-zinc-500">Choose avatar</span>
       {logo.error && (
