@@ -922,5 +922,19 @@ describe('DELETE /api/org/members/{userId} handler', () => {
       expect(result).toMatchObject({ statusCode: 409 });
       expect(body(result).message).toContain('try again');
     });
+
+    it('returns 409 when its own audit Put loses the race, not just its other rows', async () => {
+      stubMembershipCount(1);
+      stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target');
+      // Same 11-item layout as above, but index 9 is the floor org's own
+      // audit Put (its 8th and last item) rather than one of its first 7 —
+      // the one the label list previously left uncovered.
+      ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(9, 11));
+
+      const result = await handler(removeEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 409 });
+      expect(body(result).message).toContain('try again');
+    });
   });
 });
