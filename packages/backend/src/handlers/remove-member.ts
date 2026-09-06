@@ -134,17 +134,22 @@ export async function baseHandler(
   // member" cannot tell which of their members to go and look at.
   const targetProfile = await readUserProfile(targetUserId);
   const targetEmail = removedMemberAddress(targetUserId, targetProfile?.email);
-  const invitationsToRevoke = await pendingInvitationsForRemoval(orgId, {
-    userId: targetUserId,
-    ...(targetEmail ? { emailNorm: normalizeInviteEmail(targetEmail) } : {}),
-  });
+  // Neither depends on the other's result, only on the profile just read, so
+  // there is no reason to pay for their DynamoDB round-trips one after the
+  // other.
+  const [invitationsToRevoke, floorOrg] = await Promise.all([
+    pendingInvitationsForRemoval(orgId, {
+      userId: targetUserId,
+      ...(targetEmail ? { emailNorm: normalizeInviteEmail(targetEmail) } : {}),
+    }),
+    prepareFloorOrgIfLastMembership({
+      targetUserId,
+      orgId,
+      name: targetProfile?.name,
+      email: targetProfile?.email,
+    }),
+  ]);
   const { now, later } = planRevocations(invitationsToRevoke, wasOwner ? 3 : 2);
-  const floorOrg = await prepareFloorOrgIfLastMembership({
-    targetUserId,
-    orgId,
-    name: targetProfile?.name,
-    email: targetProfile?.email,
-  });
 
   const refusal = await refuseBeforeRevokingKeys(orgId, wasOwner);
   if (refusal) return refusal;
@@ -420,7 +425,8 @@ async function removalFailureResponse(
   err: unknown,
   { orgId, targetUserId, wasOwner, revocations, floorOrg, revokedKeys }: RemovalFailure,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  // `prepareFloorOrg` returns seven items; every one of its conditions failing
+  // `prepareFloorOrg` returns seven items, plus the audit Put appended
+  // alongside them above (eight total); every one of their conditions failing
   // means the same thing to the caller (try the removal again), so they share
   // one label rather than naming each row.
   const failed = cancelledLabels(err, [
@@ -428,7 +434,7 @@ async function removalFailureResponse(
     'inverse',
     ...(wasOwner ? ['ownerCount'] : []),
     ...Array.from({ length: revocations * 2 }, () => 'invitation'),
-    ...(floorOrg ? Array.from({ length: 7 }, () => 'floorOrg') : []),
+    ...(floorOrg ? Array.from({ length: 8 }, () => 'floorOrg') : []),
   ]);
   if (failed.length === 0) throw err;
   if (failed.includes('floorOrg')) return floorOrgRaceResponse();
