@@ -2,9 +2,10 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { CreateOrgSchema, OrgRole } from '@filone/shared';
-import type { CreateOrgResponse } from '@filone/shared';
+import type { CreateOrgResponse, ErrorResponse } from '@filone/shared';
 import { createAdditionalOrg } from '../lib/account-creation.js';
 import { SanitizedOrgNameSchema } from '../lib/org-name-validation.js';
+import { ORG_LOGO_KEY_PREFIX, isOwnedAssetUrl } from '../lib/org-logo-storage.js';
 import { parseJsonBody } from '../lib/parse-json-body.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -45,6 +46,13 @@ export async function baseHandler(
   const parsed = parseJsonBody(event.body, CreateOrgBodySchema);
   if ('error' in parsed) return parsed.error;
   const { name, logoUrl } = parsed.data;
+
+  if (logoUrl !== undefined && !isOwnedAssetUrl(logoUrl, ORG_LOGO_KEY_PREFIX)) {
+    return new ResponseBuilder()
+      .status(400)
+      .body<ErrorResponse>({ message: 'Logo must be uploaded through the logo upload endpoint.' })
+      .build();
+  }
 
   const created = await createAdditionalOrg({ userId, orgName: name, logoUrl, email });
 

@@ -436,7 +436,7 @@ describe('PATCH /api/org handler', () => {
   });
 
   describe('the logo', () => {
-    const LOGO_URL = 'https://cdn.example.com/logo.png';
+    const LOGO_URL = 'https://OrgLogoBucket.s3.us-east-1.amazonaws.com/logos/logo.png';
 
     it('updates only the logo when the name is unchanged', async () => {
       const result = await handler(
@@ -538,6 +538,16 @@ describe('PATCH /api/org handler', () => {
       // Untouched by this save, so the rename's own write never sets it again.
       expect(updateInput().UpdateExpression).not.toContain('logoUrl');
       expect(auditedEvent().details).toStrictEqual({ name: 'New Corp', previousName: 'Old Corp' });
+    });
+
+    it('rejects a logo URL that did not come from the upload endpoint', async () => {
+      const result = await handler(
+        renameEvent({ name: 'Old Corp', logoUrl: 'https://attacker.example/tracker.png' }),
+        buildContext(),
+      );
+
+      expect(result).toMatchObject({ statusCode: 400 });
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
     });
   });
 

@@ -11,6 +11,7 @@ import { getDynamoClient } from '../lib/ddb-client.js';
 import { parseJsonBody } from '../lib/parse-json-body.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import { SanitizedOrgNameSchema } from '../lib/org-name-validation.js';
+import { ORG_LOGO_KEY_PREFIX, isOwnedAssetUrl } from '../lib/org-logo-storage.js';
 import { releaseOrgSlugItem, reserveOrgSlug } from '../lib/org-slug.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
@@ -58,6 +59,9 @@ export async function baseHandler(
   if ('error' in parsed) return parsed.error;
   const { name, logoUrl } = parsed.data;
 
+  const rejected = foreignLogoUrlResponse(logoUrl);
+  if (rejected) return rejected;
+
   const profileKey = orgProfileKey(orgId);
   const previous = await readOrgProfile(profileKey);
 
@@ -69,16 +73,7 @@ export async function baseHandler(
   // Submitting the form unchanged is what the Settings page does on every
   // save, and there is nothing to record: an event saying an org was renamed
   // from "Acme" to "Acme" is noise in the log a customer reads.
-  if (!nameChanged && !logoChanged) {
-    return new ResponseBuilder()
-      .status(200)
-      .body<UpdateOrgResponse>({
-        name,
-        ...(previous.slug ? { slug: previous.slug } : {}),
-        ...(previous.logoUrl ? { logoUrl: previous.logoUrl } : {}),
-      })
-      .build();
-  }
+  if (!nameChanged && !logoChanged) return unchangedOrgResponse(name, previous);
 
   const actor = userActor({ userId, email });
 
@@ -136,6 +131,32 @@ type OrgProfileKey = Record<'pk' | 'sk', { S: string }>;
 
 function orgProfileKey(orgId: string): OrgProfileKey {
   return { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } };
+}
+
+/** The 400 for a `logoUrl` that did not come from our own upload endpoint, or nothing. */
+function foreignLogoUrlResponse(
+  logoUrl: string | undefined,
+): APIGatewayProxyStructuredResultV2 | undefined {
+  if (logoUrl === undefined || isOwnedAssetUrl(logoUrl, ORG_LOGO_KEY_PREFIX)) return undefined;
+  return new ResponseBuilder()
+    .status(400)
+    .body<ErrorResponse>({ message: 'Logo must be uploaded through the logo upload endpoint.' })
+    .build();
+}
+
+/** Nothing changed: the same 200 body a save always answers with, built from what's stored. */
+function unchangedOrgResponse(
+  name: string,
+  previous: { slug?: string; logoUrl?: string },
+): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(200)
+    .body<UpdateOrgResponse>({
+      name,
+      ...(previous.slug ? { slug: previous.slug } : {}),
+      ...(previous.logoUrl ? { logoUrl: previous.logoUrl } : {}),
+    })
+    .build();
 }
 
 /**

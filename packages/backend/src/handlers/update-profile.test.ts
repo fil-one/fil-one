@@ -285,6 +285,28 @@ describe('PATCH /api/me/profile handler', () => {
     expect(result).toMatchObject({ statusCode: 400 });
   });
 
+  it('updates the picture when the URL is one our own upload endpoint issued', async () => {
+    const pictureUrl = 'https://OrgLogoBucket.s3.us-east-1.amazonaws.com/avatars/pic.png';
+
+    const result = await handler(profileEvent({ pictureUrl }), buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 200,
+      body: JSON.stringify({ picture: pictureUrl }),
+    });
+    expect(mockUpdateAuth0User).toHaveBeenCalledWith(MOCK_SUB, { picture: pictureUrl });
+  });
+
+  it('rejects a picture URL that did not come from the avatar upload endpoint', async () => {
+    const result = await handler(
+      profileEvent({ pictureUrl: 'https://attacker.example/tracker.png' }),
+      buildContext(),
+    );
+
+    expect(result).toMatchObject({ statusCode: 400 });
+    expect(mockUpdateAuth0User).not.toHaveBeenCalled();
+  });
+
   it('returns 400 for invalid JSON body', async () => {
     const event = buildEvent({
       cookies: [`hs_access_token=valid-token`, `hs_csrf_token=${MOCK_CSRF_TOKEN}`],

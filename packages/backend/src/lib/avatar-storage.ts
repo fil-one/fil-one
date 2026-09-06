@@ -2,6 +2,8 @@ import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Resource } from 'sst';
 
+export { isOwnedAssetUrl } from './org-logo-storage.js';
+
 /**
  * Presigned uploads into OrgLogoBucket, under an `avatars/` prefix rather than
  * a bucket of its own: a personal avatar is the same shape of thing as an org
@@ -11,6 +13,9 @@ import { Resource } from 'sst';
  */
 
 const AVATAR_UPLOAD_EXPIRY_SECONDS = 300;
+
+/** The key prefix an avatar upload lands under — shared with `isOwnedAssetUrl`. */
+export const AVATAR_KEY_PREFIX = 'avatars/';
 
 let cachedClient: S3Client | null = null;
 
@@ -41,7 +46,7 @@ export async function presignAvatarUpload({
   contentType: string;
 }): Promise<PresignedAvatarUpload> {
   const bucket = Resource.OrgLogoBucket.name;
-  const key = `avatars/${crypto.randomUUID()}`;
+  const key = `${AVATAR_KEY_PREFIX}${crypto.randomUUID()}`;
 
   const uploadUrl = await getSignedUrl(
     getPlatformS3Client(),
