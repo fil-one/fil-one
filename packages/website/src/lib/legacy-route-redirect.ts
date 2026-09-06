@@ -1,6 +1,16 @@
-import { notFound, redirect } from '@tanstack/react-router';
+import { createRoute, notFound, redirect } from '@tanstack/react-router';
+import type { AnyRoute } from '@tanstack/react-router';
 
 import { getMe } from './api.js';
+
+declare module '@tanstack/react-router' {
+  interface StaticDataRouteOption {
+    /** Set by {@link legacyRedirectRoute} — lets a route-tree check tell a
+     * deliberate legacy-redirect stub apart from a genuinely new page that
+     * happens to live outside `$orgSlug`. */
+    legacyRedirect?: boolean;
+  }
+}
 import { queryClient, queryKeys, ME_STALE_TIME } from './query-client.js';
 import { findActiveMembership } from './org-membership-slug.js';
 
@@ -38,4 +48,40 @@ export async function redirectToActiveOrgPath(path: string): Promise<never> {
   if (!active?.slug) throw notFound();
 
   throw redirect({ href: `/${active.slug}${path}`, replace: true });
+}
+
+/**
+ * A whole legacy-redirect route file in one call: register `path` and send it
+ * through {@link redirectToActiveOrgPath}. Every one of these stub files was
+ * otherwise the same four lines with only `path` (and occasionally `target`)
+ * differing — this is that shape, named once, so adding the next one is a
+ * one-line call rather than a new file copied from the last.
+ *
+ * `target`, when given, is the fixed destination `organization.tsx` needs
+ * (its own path moved, so `location.href` would build a link to the old
+ * scoped path). Omitted, the default carries `location.href` through
+ * unchanged — the common case, and the one that preserves a search string
+ * like `billing.tsx`'s `portal_return`.
+ *
+ * Tagged `legacyRedirect` in `staticData` so `use-org-path.test.ts` can tell
+ * these apart from a genuinely new unscoped page when it checks that every
+ * route outside `$orgSlug` is accounted for.
+ */
+export function legacyRedirectRoute({
+  path,
+  getParentRoute,
+  target,
+}: {
+  path: string;
+  getParentRoute: () => AnyRoute;
+  target?: string;
+}): AnyRoute {
+  return createRoute({
+    path,
+    getParentRoute,
+    staticData: { legacyRedirect: true },
+    beforeLoad: target
+      ? () => redirectToActiveOrgPath(target)
+      : ({ location }) => redirectToActiveOrgPath(location.href),
+  });
 }
