@@ -16,7 +16,7 @@ import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
-vi.mock('../lib/auth-secrets.js', () => ({
+vi.mock('../lib/auth-secrets.ts', () => ({
   getAuthSecrets: () => ({
     AUTH0_CLIENT_ID: 'test-client-id',
     AUTH0_CLIENT_SECRET: 'test-client-secret',
@@ -194,14 +194,17 @@ describe('POST /api/org handler', () => {
 
   it('carries the logo URL through when one is provided', async () => {
     const result = await handler(
-      createOrgEvent({ name: 'New Co', logoUrl: 'https://logos.example/abc.png' }),
+      createOrgEvent({
+        name: 'New Co',
+        logoUrl: 'https://OrgLogoBucket.s3.us-east-1.amazonaws.com/logos/abc.png',
+      }),
       buildContext(),
     );
 
     const body = JSON.parse((result as { body: string }).body);
-    expect(body.logoUrl).toBe('https://logos.example/abc.png');
+    expect(body.logoUrl).toBe('https://OrgLogoBucket.s3.us-east-1.amazonaws.com/logos/abc.png');
     expect(profilePut().Item).toMatchObject({
-      logoUrl: { S: 'https://logos.example/abc.png' },
+      logoUrl: { S: 'https://OrgLogoBucket.s3.us-east-1.amazonaws.com/logos/abc.png' },
     });
   });
 
@@ -211,6 +214,15 @@ describe('POST /api/org handler', () => {
     const body = JSON.parse((result as { body: string }).body);
     expect(body).not.toHaveProperty('logoUrl');
     expect(profilePut().Item).not.toHaveProperty('logoUrl');
+  });
+
+  it('rejects a logo URL that did not come from the upload endpoint', async () => {
+    const result = await handler(
+      createOrgEvent({ name: 'New Co', logoUrl: 'https://attacker.example/tracker.png' }),
+      buildContext(),
+    );
+
+    expect(result).toMatchObject({ statusCode: 400 });
   });
 
   it('records an org.created event distinct from a signup', async () => {

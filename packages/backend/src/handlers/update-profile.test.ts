@@ -158,7 +158,7 @@ describe('PATCH /api/me/profile handler', () => {
     // The schema's refine accepts pictureUrl alone: `POST
     // /api/me/avatar-upload-url` already put the file, so this call carries
     // nothing but the URL to persist.
-    const pictureUrl = 'https://cdn.example.com/avatar.png';
+    const pictureUrl = 'https://OrgLogoBucket.s3.us-east-1.amazonaws.com/avatars/pic-only.png';
 
     const result = await handler(profileEvent({ pictureUrl }), buildContext());
 
@@ -301,6 +301,28 @@ describe('PATCH /api/me/profile handler', () => {
     const result = await handler(profileEvent({ name: '' }), buildContext());
 
     expect(result).toMatchObject({ statusCode: 400 });
+  });
+
+  it('updates the picture when the URL is one our own upload endpoint issued', async () => {
+    const pictureUrl = 'https://OrgLogoBucket.s3.us-east-1.amazonaws.com/avatars/pic.png';
+
+    const result = await handler(profileEvent({ pictureUrl }), buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 200,
+      body: JSON.stringify({ picture: pictureUrl }),
+    });
+    expect(mockUpdateAuth0User).toHaveBeenCalledWith(MOCK_SUB, { picture: pictureUrl });
+  });
+
+  it('rejects a picture URL that did not come from the avatar upload endpoint', async () => {
+    const result = await handler(
+      profileEvent({ pictureUrl: 'https://attacker.example/tracker.png' }),
+      buildContext(),
+    );
+
+    expect(result).toMatchObject({ statusCode: 400 });
+    expect(mockUpdateAuth0User).not.toHaveBeenCalled();
   });
 
   it('returns 400 for invalid JSON body', async () => {
