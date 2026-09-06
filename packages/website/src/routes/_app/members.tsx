@@ -1,7 +1,5 @@
-import { createRoute } from '@tanstack/react-router';
-
 import { Route as appRoute } from '../_app';
-import { redirectToActiveOrgPath } from '../../lib/legacy-route-redirect.js';
+import { legacyRedirectRoute } from '../../lib/legacy-route-redirect.js';
 
 /**
  * The members roster is its own org-scoped page again (`/$orgSlug/members`),
@@ -13,8 +11,8 @@ import { redirectToActiveOrgPath } from '../../lib/legacy-route-redirect.js';
  * the back button returns where the caller came from rather than bouncing
  * through here again.
  */
-export const Route = createRoute({
+export const Route = legacyRedirectRoute({
   path: '/members',
   getParentRoute: () => appRoute,
-  beforeLoad: () => redirectToActiveOrgPath('/members'),
+  target: '/members',
 });

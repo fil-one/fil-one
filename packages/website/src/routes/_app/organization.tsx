@@ -1,6 +1,5 @@
-import { createRoute } from '@tanstack/react-router';
 import { Route as appRoute } from '../_app';
-import { redirectToActiveOrgPath } from '../../lib/legacy-route-redirect.js';
+import { legacyRedirectRoute } from '../../lib/legacy-route-redirect.js';
 
 /**
  * The pre-org-scoping URL. See `dashboard.tsx` for why this stays.
@@ -10,8 +9,8 @@ import { redirectToActiveOrgPath } from '../../lib/legacy-route-redirect.js';
  * `/edit-organization`, so `location.href` would build a link to the old
  * scoped path (which redirects again, but there is no reason to make it).
  */
-export const Route = createRoute({
+export const Route = legacyRedirectRoute({
   path: '/organization',
   getParentRoute: () => appRoute,
-  beforeLoad: () => redirectToActiveOrgPath('/edit-organization'),
+  target: '/edit-organization',
 });
