@@ -12,9 +12,9 @@ import { reserveOrgSlug } from '../src/lib/org-slug.js';
  * `stuck-tenant-metric.ts` are the closest precedent for a standalone
  * operational script — so this scans `ORG#{orgId}/PROFILE` rows in
  * UserInfoTable, skips any that already carry a slug, and reserves one for
- * the rest via the same `reserveOrgSlug` the create and rename paths use. Run
- * once per stage before shipping the frontend's slug-scoped routing: a route
- * cannot resolve a slug that does not exist yet.
+ * the rest via the same `reserveOrgSlug` the org-creation paths use. Run once
+ * per stage before shipping the frontend's slug-scoped routing: a route cannot
+ * resolve a slug that does not exist yet.
  *
  * Idempotent by construction — a row already carrying a slug is skipped, and
  * the write is conditioned on the row still lacking one — so re-running it
@@ -74,14 +74,9 @@ export async function backfillOrgSlugs(): Promise<BackfillResult> {
       }
 
       const orgId = item.pk!.S!.slice(ORG_PROFILE_PREFIX.length);
-      const name = item.name?.S ?? '';
 
       try {
-        const { slug, reservationItem } = await reserveOrgSlug({
-          orgId,
-          name,
-          tableName: orgTableName,
-        });
+        const { slug, reservationItem } = await reserveOrgSlug({ orgId, tableName: orgTableName });
 
         await dynamo.send(
           new TransactWriteItemsCommand({
