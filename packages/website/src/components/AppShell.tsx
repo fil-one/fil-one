@@ -144,6 +144,8 @@ function TenantBanners({
 
 type AppShellProps = {
   children: React.ReactNode;
+  /** Forwarded to `SidebarNav` on both the desktop and mobile-drawer copies. */
+  hideNavLinks?: boolean;
 };
 
 // Grace-period banner copy. `daysUntil` compares calendar days and clamps to
@@ -160,7 +162,7 @@ export function gracePeriodMessage(graceDays: number | null): string {
   return `Your free trial has expired. ${pluralizeDays(graceDays)} left to upgrade or download your data.`;
 }
 
-export function AppShell({ children }: AppShellProps) {
+export function AppShell({ children, hideNavLinks = false }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -256,7 +258,7 @@ export function AppShell({ children }: AppShellProps) {
         <div
           className={`hidden flex-shrink-0 transition-all duration-200 lg:block ${collapsed ? 'w-20' : 'w-60'}`}
         >
-          <SidebarNav collapsed={collapsed} showTestIds={true} />
+          <SidebarNav collapsed={collapsed} showTestIds={true} hideNavLinks={hideNavLinks} />
         </div>
 
         {/* Mobile drawer backdrop */}
@@ -303,6 +305,7 @@ export function AppShell({ children }: AppShellProps) {
               onClose={closeDrawer}
               showUserProfile={false}
               showTestIds={false}
+              hideNavLinks={hideNavLinks}
             />
           </div>
         </div>

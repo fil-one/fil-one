@@ -3,7 +3,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { CreditCardIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { AddPaymentDialog } from './billing/AddPaymentDialog.js';
-import { ChoosePlanDialog } from './billing/ChoosePlanDialog.js';
 import { ContactSalesDialog } from './billing/ContactSalesDialog.js';
 import { Button } from './Button.js';
 import { EmptyStateCard } from './EmptyStateCard.js';
@@ -15,15 +14,24 @@ import { queryKeys } from '../lib/query-client.js';
  * What every page in an org becomes once `/me` reports `billingActive: false`
  * — no plan has ever been chosen, so there is nothing here to read, write, or
  * store objects in yet. Swapped in for `<Outlet/>` inside `AppShell`, not a
- * route of its own: the sidebar (org switcher, log out) stays reachable,
- * because leaving for another org or ending the session are the two things a
- * blocked account can still do.
+ * route of its own: the sidebar's org switcher and log out stay reachable
+ * (the page-nav links are the ones `AppShell` hides here, via
+ * `hideNavLinks`), because leaving for another org or ending the session are
+ * the two things a blocked account can still do.
+ *
+ * The primary action goes straight to the card form, skipping the plan
+ * choice `BillingPage` itself offers: `get-me.ts`'s `resolveBillingActive`
+ * only ever reports false for "no subscription record" or
+ * `SubscriptionStatus.Inactive`, never GracePeriod/Canceled/PastDue, so the
+ * one thing `selectPayAsYouGo` could otherwise branch on — reactivating a
+ * saved card — never applies here. There is exactly one plan (pay as you
+ * go), so the choice in front of it would have been asking a question with
+ * one answer.
  *
  * Two readings, same as every other org-wide state this console gates on
  * (compare the disabled-account banner): `billing.manage` (Owner only — Admin
- * holds `billing.view` but not this) gets the fix in front of them, the same
- * Choose a plan / add a card flow `BillingPage` itself uses, and everyone
- * else gets told who to ask, not a button that would 403.
+ * holds `billing.view` but not this) gets the fix in front of them, and
+ * everyone else gets told who to ask, not a button that would 403.
  */
 export function BillingRequiredGate() {
   const mayManage = useHasPermission('billing.manage');
@@ -50,33 +58,29 @@ export function BillingRequiredGate() {
         title="Add a payment method to continue"
         description={
           mayManage
-            ? 'This organization has no active plan. Choose one to start storing data.'
+            ? 'This organization has no active plan. Add a card to start storing data.'
             : 'This organization has no active plan. Ask an Owner to add a payment method.'
         }
       >
         {mayManage && (
           <>
-            <Button variant="primary" size="md" onClick={flows.openPlan}>
-              Choose a plan
-            </Button>
-            <ChoosePlanDialog
-              open={flows.planOpen}
-              onClose={flows.closePlan}
-              onSelectPayAsYouGo={flows.selectPayAsYouGo}
-              onContactSales={flows.contactSalesFromPlan}
-              savedCardLast4={
-                flows.canReactivateWithSavedCard ? billing?.paymentMethod?.last4 : undefined
-              }
-              onUseDifferentCard={
-                flows.canReactivateWithSavedCard ? flows.useDifferentCard : undefined
-              }
-            />
+            <div className="flex flex-col items-center gap-2">
+              <Button variant="primary" size="md" onClick={() => void flows.selectPayAsYouGo()}>
+                Add payment method
+              </Button>
+              <Button variant="ghost" size="sm" onClick={flows.openContactSales}>
+                Talk to sales instead
+              </Button>
+            </div>
             <AddPaymentDialog
               open={flows.paymentOpen}
               clientSecret={flows.clientSecret}
               stripePublishableKey={flows.stripePublishableKey}
               onClose={flows.closePayment}
-              onBack={flows.backToPlan}
+              // No plan step behind this one to return to here (there is
+              // exactly one plan), so "Back" and the close button do the same
+              // thing: close the dialog and leave the caller on the gate.
+              onBack={flows.closePayment}
               onSuccess={flows.paymentSucceeded}
               onRefreshSetupIntent={flows.refreshSetupIntent}
             />

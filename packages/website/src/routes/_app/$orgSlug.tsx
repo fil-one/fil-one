@@ -124,10 +124,12 @@ function OrgScopedApp() {
   if (isNotAMember) return <NotAMember />;
 
   return (
-    <AppShell>
+    <AppShell hideNavLinks={!billingActive}>
       {/* In place of the routed page, not a redirect: the sidebar (org
           switcher, log out) stays reachable either way, which is all a
-          blocked account can still do here. */}
+          blocked account can still do here. The page-nav links themselves are
+          hidden (`hideNavLinks`) since every one of them would land right
+          back on this same gate. */}
       {billingActive ? <Outlet /> : <BillingRequiredGate />}
     </AppShell>
   );

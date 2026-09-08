@@ -7,10 +7,6 @@ import { seedPermissions } from '../lib/test-permissions.js';
 
 // Stub the dialogs — they pull in Stripe.js and are not what these tests
 // target, matching `BillingPage.test.tsx`'s own reasoning.
-vi.mock('./billing/ChoosePlanDialog.js', () => ({
-  ChoosePlanDialog: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="choose-plan-dialog" /> : null,
-}));
 vi.mock('./billing/AddPaymentDialog.js', () => ({
   AddPaymentDialog: ({ open }: { open: boolean }) =>
     open ? <div data-testid="add-payment-dialog" /> : null,
@@ -26,8 +22,9 @@ vi.mock('../components/Toast', () => ({
 const mockGetBilling = vi.fn();
 const mockGetUsage = vi.fn();
 const mockGetInvoices = vi.fn();
+const mockApiRequest = vi.fn();
 vi.mock('../lib/api.js', () => ({
-  apiRequest: vi.fn(),
+  apiRequest: (...args: unknown[]) => mockApiRequest(...args),
   getBilling: (...args: unknown[]) => mockGetBilling(...args),
   getUsage: (...args: unknown[]) => mockGetUsage(...args),
   getInvoices: (...args: unknown[]) => mockGetInvoices(...args),
@@ -54,31 +51,42 @@ describe('BillingRequiredGate', () => {
     mockGetUsage.mockResolvedValue({ storage: { usedBytes: 0 }, egress: { usedBytes: 0 } });
     mockGetBilling.mockResolvedValue({ subscription: { planId: 'none', status: 'inactive' } });
     mockGetInvoices.mockResolvedValue({ invoices: [] });
+    mockApiRequest.mockResolvedValue({
+      clientSecret: 'seti_test_secret',
+      stripePublishableKey: 'pk_test',
+    });
   });
 
-  it('offers an Owner the Choose a plan CTA', async () => {
+  it('offers an Owner a CTA straight to the card form, no plan choice in between', async () => {
     renderGate(OrgRole.Owner);
 
     expect(await screen.findByText('Add a payment method to continue')).toBeInTheDocument();
-    const cta = screen.getByRole('button', { name: 'Choose a plan' });
+    const cta = screen.getByRole('button', { name: 'Add payment method' });
     expect(cta).toBeInTheDocument();
 
     cta.click();
-    expect(await screen.findByTestId('choose-plan-dialog')).toBeInTheDocument();
+    expect(await screen.findByTestId('add-payment-dialog')).toBeInTheDocument();
+  });
+
+  it('also offers an Owner a way to talk to sales instead', async () => {
+    renderGate(OrgRole.Owner);
+
+    const link = await screen.findByRole('button', { name: 'Talk to sales instead' });
+    expect(link).toBeInTheDocument();
   });
 
   it('tells an Admin to ask the Owner too — billing.manage is Owner-only', async () => {
     renderGate(OrgRole.Admin);
 
     expect(await screen.findByText(/Ask an Owner to add a payment method/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Choose a plan' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add payment method' })).not.toBeInTheDocument();
   });
 
   it('tells a Member to ask an Owner, with no CTA that would 403', async () => {
     renderGate(OrgRole.Member);
 
     expect(await screen.findByText(/Ask an Owner to add a payment method/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Choose a plan' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add payment method' })).not.toBeInTheDocument();
   });
 
   it('tells a ReadOnly member the same thing', async () => {
