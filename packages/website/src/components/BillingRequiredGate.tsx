@@ -68,6 +68,9 @@ export function BillingRequiredGate() {
               <Button variant="primary" size="md" onClick={() => void flows.selectPayAsYouGo()}>
                 Add payment method
               </Button>
+              <p className="mt-1 text-xs text-zinc-400">
+                Have compliance or predictable volume needs?
+              </p>
               <Button variant="ghost" size="sm" onClick={flows.openContactSales}>
                 Talk to sales instead
               </Button>
