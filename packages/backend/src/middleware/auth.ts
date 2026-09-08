@@ -270,6 +270,35 @@ async function extractIdTokenClaims({
 }
 
 /**
+ * Hosts that only ever serve Auth0/Gravatar's own generated placeholder — a
+ * colored circle with the caller's initials — rather than a photo anyone
+ * actually chose.
+ *
+ * The `auth0` (database/passwordless) connection's `picture` claim is always
+ * `https://s.gravatar.com/avatar/<hash>?...&d=<default>`: Gravatar serves a
+ * registered photo for that hash if one exists, and otherwise redirects to
+ * the `d=` default, which Auth0 points at its own generated avatar on
+ * `cdn.auth0.com`. There is no registered-photo case on `cdn.auth0.com`
+ * itself (that host is only ever the generated fallback), and a genuinely
+ * chosen Gravatar photo is vanishingly unlikely for this product's accounts —
+ * so both are treated the same way: not a real picture. Real provider photos
+ * (`lh3.googleusercontent.com`, `avatars.githubusercontent.com`) and this
+ * console's own uploaded avatars (a distinct S3 domain, see
+ * `avatar-storage.ts`) are untouched.
+ */
+const GENERATED_AVATAR_HOSTS = new Set(['s.gravatar.com', 'cdn.auth0.com']);
+
+/** Whether `picture` is one of Auth0/Gravatar's own generated placeholders. */
+function isGeneratedAvatar(picture: string): boolean {
+  try {
+    return GENERATED_AVATAR_HOSTS.has(new URL(picture).hostname);
+  } catch {
+    // Not a URL at all — pass it through rather than guess.
+    return false;
+  }
+}
+
+/**
  * Resolve user identity from sub+email and attach userInfo to the request context.
  */
 async function attachIdentity({
@@ -297,7 +326,7 @@ async function attachIdentity({
     email: resolved.email ?? undefined,
     emailVerified,
     name: name ?? undefined,
-    picture: picture ?? undefined,
+    picture: picture && !isGeneratedAvatar(picture) ? picture : undefined,
     // Set only when this request created the account: the signup transaction
     // wrote the row, so re-reading it would be a race against its own write.
     ...(resolved.membership ? { membership: resolved.membership } : {}),
