@@ -1,12 +1,10 @@
 import { useEffect, useState } from 'react';
 import clsx from 'clsx';
 
-import { hashToPaletteIndex } from '../lib/color-from-string.js';
-
 export type OrgAvatarSize = 'xs' | 'sm' | 'md' | 'lg';
 
 type OrgAvatarProps = {
-  /** The org's name (or its in-progress name, before it has an id). Used both for the initial and, hashed, for the color — stable across renders without storing a color anywhere. */
+  /** The org's name (or its in-progress name, before it has an id). Only its first letter is used, for the monogram. */
   name: string;
   /** Real logo, once uploaded. Falls back to the monogram when absent or broken. */
   logoUrl?: string;
@@ -39,19 +37,12 @@ const ROUNDED_CLASSES: Record<OrgAvatarSize, string> = {
 };
 
 /**
- * Same palette `IconBox` already uses (brand/green/amber/red), plus zinc, so a
- * random org color never introduces a token nothing else in the console uses.
- * Solid backgrounds with white text, not the light tint `IconBox` uses,
- * because this avatar has to hold its own next to `UserAvatar`'s grey.
- */
-const PALETTE = ['bg-brand-600', 'bg-green-600', 'bg-amber-600', 'bg-red-600', 'bg-zinc-700'];
-
-/**
  * Rounded-square org identity, mirroring `UserAvatar`'s image-with-initial-
- * fallback shape but colored by a hash of the name rather than always
- * `bg-brand-600` — the tint is what tells two orgs' avatars apart before
- * either has a logo. Square (not `UserAvatar`'s circle) so an org reads as an
+ * fallback shape. Square (not `UserAvatar`'s circle) so an org reads as an
  * org rather than a person, the way Slack and Linear tell the two apart.
+ * One dark-grey background for every org, rather than a hash-of-the-name
+ * palette: distinguishing orgs by an arbitrary tint stopped being worth two
+ * orgs without a logo looking unrelated to each other's own identity.
  */
 export function OrgAvatar({ name, logoUrl, size = 'sm', className }: OrgAvatarProps) {
   const [status, setStatus] = useState<'pending' | 'loaded' | 'failed'>('pending');
@@ -60,16 +51,14 @@ export function OrgAvatar({ name, logoUrl, size = 'sm', className }: OrgAvatarPr
 
   const showImage = !!logoUrl && status !== 'failed';
   const initial = (name.trim().charAt(0) || '?').toUpperCase();
-  const color = PALETTE[hashToPaletteIndex(name || 'untitled', PALETTE.length)];
 
   return (
     <span
       aria-hidden="true"
       className={clsx(
-        'relative flex flex-shrink-0 items-center justify-center overflow-hidden font-semibold text-white',
+        'relative flex flex-shrink-0 items-center justify-center overflow-hidden bg-zinc-700 font-semibold text-white',
         SIZE_CLASSES[size],
         ROUNDED_CLASSES[size],
-        color,
         className,
       )}
     >

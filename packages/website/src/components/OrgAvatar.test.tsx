@@ -65,4 +65,11 @@ describe('OrgAvatar', () => {
     const { container } = render(<OrgAvatar name="Fil One" />);
     expect(container.firstElementChild).toHaveClass('h-7', 'w-7', 'rounded-md');
   });
+
+  it('is always the same dark grey, whatever the org is named', () => {
+    const { container: a } = render(<OrgAvatar name="Acme" />);
+    const { container: b } = render(<OrgAvatar name="Fil One" />);
+    expect(a.firstElementChild).toHaveClass('bg-zinc-700');
+    expect(b.firstElementChild).toHaveClass('bg-zinc-700');
+  });
 });
