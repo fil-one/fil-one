@@ -9,7 +9,6 @@ import { Input } from './Input';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './Modal';
 import { createOrg, errorMessageOf } from '../lib/api.js';
 import { switchToOrg } from '../lib/active-org.js';
-import { stashPendingOrgPaymentPrompt } from '../lib/pending-org-payment-prompt.js';
 
 export type CreateOrganizationDialogProps = {
   open: boolean;
@@ -42,14 +41,15 @@ export function CreateOrganizationDialog({ open, onClose }: CreateOrganizationDi
       // Only the account's first-ever org gets a free trial (see
       // `isSoloPersonalOrg` — this dialog is unreachable for that one, since a
       // brand-new account is named through the signup flow instead), so this
-      // one lands with no active plan. Stashed before the switch: get-started
-      // reads it on arrival and opens the payment prompt itself rather than
-      // leaving the caller to notice "No active plan" on their own.
-      stashPendingOrgPaymentPrompt(result.orgId);
+      // one lands with no active plan. `$orgSlug.tsx`'s own billing gate
+      // catches that on arrival and blocks the whole org behind an "add a
+      // card" page — nothing to arrange here.
+      //
       // A full org switch (clears every cached query, navigates in) — the new
       // org is not the one any currently-loaded page's data describes. It lands
       // on get-started rather than the dashboard: the org is brand new and
-      // empty, so those two setup tasks are what it needs, not a page of zeroes.
+      // empty, so those two setup tasks are what it needs, not a page of zeroes
+      // — once the gate above lets it through.
       // The slug its response just carried saves the switch a second redirect.
       switchToOrg(result.orgId, result.slug, 'get-started');
       handleClose();
