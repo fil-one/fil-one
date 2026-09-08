@@ -208,6 +208,27 @@ describe('SidebarNav — the API Keys entry', () => {
   });
 });
 
+describe('SidebarNav — hideNavLinks (the billing-blocked gate)', () => {
+  it('omits every page link and the inactive-plan banner, but keeps the org switcher and user menu', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seedPermissions(client, OrgRole.Owner);
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <SidebarNav collapsed={false} showTestIds={true} hideNavLinks={true} />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    for (const testId of ['nav-dashboard', 'nav-buckets', 'nav-api-keys']) {
+      expect(screen.queryByTestId(testId)).not.toBeInTheDocument();
+    }
+    expect(screen.queryByTestId('sidebar-choose-plan-button')).not.toBeInTheDocument();
+    expect(screen.getByTestId('org-switcher-button')).toBeInTheDocument();
+    expect(screen.getByTestId('user-menu-button')).toBeInTheDocument();
+  });
+});
+
 // Collapsed mode hides the display name and the avatar is decorative, so the
 // button's own label is the only accessible name left.
 describe('SidebarNav user identity accessible names', () => {

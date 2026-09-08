@@ -26,6 +26,16 @@ type SidebarNavProps = {
   // secondary mobile-drawer copy doesn't duplicate the desktop sidebar's
   // selectors. The primary desktop sidebar passes true.
   showTestIds: boolean;
+  /**
+   * Whether every page link would land the caller on the same blocked-org
+   * gate. Set by `$orgSlug.tsx` off the same `billingActive` that swaps the
+   * routed page for `BillingRequiredGate` — pages that all show the identical
+   * message read as broken, not as navigation, so this omits them rather than
+   * leave dead ends dressed up as links. The status banners below the links
+   * go with them: they are the same "no active plan" fact the gate itself
+   * already states, front and center, in the one place a caller is looking.
+   */
+  hideNavLinks?: boolean;
 };
 
 type NavItem = {
@@ -153,6 +163,7 @@ export function SidebarNav({
   onClose,
   showUserProfile = true,
   showTestIds,
+  hideNavLinks = false,
 }: SidebarNavProps) {
   const matchRoute = useMatchRoute();
 
@@ -197,34 +208,40 @@ export function SidebarNav({
           </div>
         )}
 
-        {/* Primary nav items */}
-        <NavLinks
-          collapsed={collapsed}
-          matchRoute={matchRoute}
-          onClose={onClose}
-          showTestIds={showTestIds}
-        />
+        {/* Primary nav items — omitted while every one of them would land on
+            the same blocked-org gate. See `hideNavLinks` above. */}
+        {!hideNavLinks && (
+          <NavLinks
+            collapsed={collapsed}
+            matchRoute={matchRoute}
+            onClose={onClose}
+            showTestIds={showTestIds}
+          />
+        )}
 
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Status banners */}
-        <StatusBanners
-          collapsed={collapsed}
-          showTestIds={showTestIds}
-          isTrialing={isTrialing}
-          trialDays={trialDays}
-          trialEndsLabel={trialEndsLabel}
-          storageUsed={storageUsed}
-          storagePct={storagePct}
-          egressUsed={egressUsed}
-          egressPct={egressPct}
-          limitsKnown={limitsKnown}
-          graceDays={graceDays}
-          graceEndsLabel={graceEndsLabel}
-          isPastDue={isPastDue}
-          isInactive={isInactive}
-        />
+        {/* Status banners — the inactive-plan banner would just repeat the
+            gate's own message, so it's dropped along with the links. */}
+        {!hideNavLinks && (
+          <StatusBanners
+            collapsed={collapsed}
+            showTestIds={showTestIds}
+            isTrialing={isTrialing}
+            trialDays={trialDays}
+            trialEndsLabel={trialEndsLabel}
+            storageUsed={storageUsed}
+            storagePct={storagePct}
+            egressUsed={egressUsed}
+            egressPct={egressPct}
+            limitsKnown={limitsKnown}
+            graceDays={graceDays}
+            graceEndsLabel={graceEndsLabel}
+            isPastDue={isPastDue}
+            isInactive={isInactive}
+          />
+        )}
 
         {/* Footer: user identity (also carries Documentation/Support now). System
             status has moved to the content window's bottom bar on desktop; it
