@@ -46,7 +46,7 @@ export async function createNewUserAndOrg({
   name,
 }: NewAccountParams): Promise<OrgMembership> {
   const now = new Date().toISOString();
-  const { slug, reservationItem } = await reserveOrgSlug({ orgId, name: orgName });
+  const { slug, reservationItem } = await reserveOrgSlug({ orgId });
 
   // Spans three tables: identity and profiles in UserInfoTable, membership and
   // the owner count in OrgTable, the event in AuditTable. The event rides the
@@ -105,7 +105,7 @@ export async function createAdditionalOrg({
 }: CreateAdditionalOrgParams): Promise<CreatedOrg> {
   const orgId = crypto.randomUUID();
   const now = new Date().toISOString();
-  const { slug, reservationItem } = await reserveOrgSlug({ orgId, name: orgName });
+  const { slug, reservationItem } = await reserveOrgSlug({ orgId });
 
   await commitAudited({
     items: [
@@ -174,7 +174,7 @@ export async function prepareFloorOrg({
   const orgId = crypto.randomUUID();
   const orgName = deriveOrgName(name, email);
   const now = new Date().toISOString();
-  const { slug, reservationItem } = await reserveOrgSlug({ orgId, name: orgName });
+  const { slug, reservationItem } = await reserveOrgSlug({ orgId });
 
   const items: TransactWriteItem[] = [
     ...explicitOrgRows({ orgId, orgName, slug, userId, now, nameConfirmed: false }),

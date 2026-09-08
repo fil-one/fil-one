@@ -35,11 +35,11 @@ export const Route = createRoute({
     const active = findActiveMembership(me);
 
     if (!requested) {
-      // Never valid, stale after a rename, or a real org this caller just
-      // isn't operating in right now — one rule for all three: land on the
-      // active org's dashboard, the same place a caller with no slug in the
-      // URL at all would go. No active slug at all (no memberships yet) has
-      // nowhere to send them, so it is a real not-found instead.
+      // Never valid, or a real org this caller just isn't operating in right
+      // now — one rule for both: land on the active org's dashboard, the same
+      // place a caller with no slug in the URL at all would go. No active
+      // slug at all (no memberships yet) has nowhere to send them, so it is a
+      // real not-found instead.
       if (!active?.slug) throw notFound();
       throw redirect({ href: `/${active.slug}/dashboard`, replace: true });
     }
