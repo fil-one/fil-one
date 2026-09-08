@@ -32,7 +32,11 @@ export const Route = createRoute({
     try {
       me = await queryClient.fetchQuery({
         queryKey: queryKeys.me,
-        queryFn: () => getMe(),
+        // `skipSwitchWait`: this `beforeLoad` is on every org switch's own
+        // critical path — `switchToOrg`'s navigation does not settle until
+        // this resolves, so it must not be held by the same latch that
+        // navigation is itself waiting on. See the option's own doc.
+        queryFn: () => getMe({ skipSwitchWait: true }),
         staleTime: ME_STALE_TIME,
       });
     } catch {

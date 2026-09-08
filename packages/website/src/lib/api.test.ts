@@ -345,6 +345,27 @@ describe('apiRequest — a switch in flight', () => {
     const sent = vi.mocked(fetch).mock.calls[0]?.[1]?.headers as Headers;
     expect(sent.get(ORG_ID_HEADER)).toBe(ORG_A);
   });
+
+  it('reads straight past the latch for the one request the navigation itself is waiting on', async () => {
+    // `routerNavigate` here stands for `_app.tsx`'s own `beforeLoad`, which
+    // calls `getMe()` to decide whether the navigation may proceed at all —
+    // the real reason a switch's own navigation never settles until this
+    // request does. Without `skipSwitchWait` this would deadlock: the
+    // navigation waits on this response, and this response waits on the
+    // navigation settling.
+    const { api, stash } = await freshApi();
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ orgId: ORG_B, memberships: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    routerNavigate.mockImplementation(() => api.getMe({ skipSwitchWait: true }));
+
+    stash.switchToOrg(ORG_B);
+
+    await vi.waitFor(() => expect(stash.isSwitchingOrg()).toBe(false));
+  });
 });
 
 describe('getMe — when /me itself refuses', () => {
