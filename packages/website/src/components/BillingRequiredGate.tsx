@@ -10,6 +10,13 @@ import { useBillingData, useBillingFlows } from '../lib/use-billing.js';
 import { useHasPermission } from '../lib/use-permissions.js';
 import { queryKeys } from '../lib/query-client.js';
 
+// Same shape as the "Not your account? Sign out" footer on WelcomePage,
+// VerifyEmailPage, and LeftLastOrgPage: a secondary path stated as a plain
+// question with a text link answering it, not a second button competing with
+// the primary one.
+const textLink =
+  'rounded-xs font-medium text-brand-600 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600';
+
 /**
  * What every page in an org becomes once `/me` reports `billingActive: false`
  * — no plan has ever been chosen, so there is nothing here to read, write, or
@@ -68,17 +75,15 @@ export function BillingRequiredGate() {
               <Button variant="primary" size="md" onClick={() => void flows.selectPayAsYouGo()}>
                 Add payment method
               </Button>
-              <div className="mt-2 flex w-56 flex-col items-center gap-3 border-t border-zinc-200 pt-4">
-                {/* zinc-500, not zinc-400: this text is 12px, and zinc-400 on
-                    white falls short of the 4.5:1 contrast ratio small text
-                    needs under WCAG AA. */}
-                <p className="text-xs text-zinc-500">
-                  Have compliance or predictable volume needs?
-                </p>
-                <Button variant="ghost" size="sm" onClick={flows.openContactSales}>
-                  Talk to sales instead
-                </Button>
-              </div>
+              {/* zinc-500, not zinc-400: this text is 12px, and zinc-400 on
+                  white falls short of the 4.5:1 contrast ratio small text
+                  needs under WCAG AA. */}
+              <p className="text-xs text-zinc-500">
+                Have compliance or predictable volume needs?{' '}
+                <button type="button" onClick={flows.openContactSales} className={textLink}>
+                  Talk to sales
+                </button>
+              </p>
             </div>
             <AddPaymentDialog
               open={flows.paymentOpen}
