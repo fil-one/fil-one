@@ -216,6 +216,18 @@ export interface ApiRequestBehavior {
    * the redirect would have landed on.
    */
   rendersUnverifiedEmail?: boolean;
+  /**
+   * Read straight past the org-switch latch instead of waiting it out.
+   *
+   * For the two routes on a switch's own critical path (`_app.tsx`,
+   * `$orgSlug.tsx`): their `beforeLoad` calls `getMe()`, and `getMe()` is
+   * itself a held request — so `switchToOrg`'s own navigation, which does not
+   * settle until those `beforeLoad`s do, would be waiting on a request that is
+   * waiting on the navigation. Every other caller still waits, which is the
+   * whole point of the latch: this option exists for those two call sites and
+   * nowhere else.
+   */
+  skipSwitchWait?: boolean;
 }
 
 /**
@@ -318,7 +330,12 @@ async function sendApiRequest(
   // disappearing, and an error rendered over it would be the last thing the user
   // sees of the org they just left. A switch that never navigates rolls back
   // instead, and the request goes ahead below against the restored stash.
-  await waitWhileSwitching();
+  //
+  // `skipSwitchWait` opts out for the one case where waiting is the bug: the
+  // navigation this latch is guarding does not settle until this exact request
+  // does, so holding it would hold the latch open forever. See the option's
+  // own doc for which two callers that is.
+  if (!behavior.skipSwitchWait) await waitWhileSwitching();
 
   const method = options.method?.toUpperCase() ?? 'GET';
   const headers = new Headers(options.headers);
@@ -497,6 +514,8 @@ export async function getMe(options?: {
   forceRefresh?: boolean;
   include?: 'mfa';
   skipOrgReconcile?: boolean;
+  /** See `ApiRequestBehavior.skipSwitchWait` — for `_app.tsx`/`$orgSlug.tsx`'s own `beforeLoad` only. */
+  skipSwitchWait?: boolean;
 }): Promise<MeResponse> {
   const params = new URLSearchParams();
   if (options?.forceRefresh) params.set('forceRefresh', '1');
@@ -507,7 +526,12 @@ export async function getMe(options?: {
   const sentOrg: SentOrg = { orgId: null };
   let me: MeResponse;
   try {
-    me = await apiRequest<MeResponse>(`/me${qs ? `?${qs}` : ''}`, undefined, {}, sentOrg);
+    me = await apiRequest<MeResponse>(
+      `/me${qs ? `?${qs}` : ''}`,
+      undefined,
+      { skipSwitchWait: options?.skipSwitchWait },
+      sentOrg,
+    );
   } catch (err) {
     // The status decides: only a refusal the header can be blamed for drops the
     // stash. A network error carries none at all.

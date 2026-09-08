@@ -24,10 +24,12 @@ export const Route = createRoute({
   path: '$orgSlug',
   beforeLoad: async ({ params, location }) => {
     // Already primed by `_app`'s own `beforeLoad` on this same navigation, so
-    // this is a cache read rather than a second request.
+    // this is a cache read rather than a second request. `skipSwitchWait` for
+    // the same reason `_app.tsx` passes it: on the rare miss where this does
+    // issue its own request, it is on a switch's own critical path too.
     const me = await queryClient.fetchQuery({
       queryKey: queryKeys.me,
-      queryFn: () => getMe(),
+      queryFn: () => getMe({ skipSwitchWait: true }),
       staleTime: ME_STALE_TIME,
     });
 
