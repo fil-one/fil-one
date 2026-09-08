@@ -77,10 +77,17 @@ describe('pricingLine', () => {
     expect(pricingLine(subscription({ planName: 'Business' }))).toBe('Custom pricing');
   });
 
-  it('describes what a trial includes, and what an inactive account needs', () => {
-    expect(pricingLine(subscription({ status: SubscriptionStatus.Trialing }))).toContain(
-      'of storage included',
-    );
+  it('says nothing while trialing, even with a rate already attached', () => {
+    // Nobody is charged that rate yet, and the trial usage card already
+    // states the storage/egress limits — repeating either here is redundant
+    // at best and, for the rate, reads as a bill that has not started.
+    expect(pricingLine(subscription({ status: SubscriptionStatus.Trialing }))).toBe('');
+    expect(
+      pricingLine(subscription({ status: SubscriptionStatus.Trialing, pricePerTbCents: 499 })),
+    ).toBe('');
+  });
+
+  it('describes what an inactive account needs', () => {
     expect(pricingLine(subscription({ status: SubscriptionStatus.Inactive }))).toBe(
       'Choose a plan to start storing data',
     );
@@ -88,17 +95,19 @@ describe('pricingLine', () => {
 });
 
 describe('timelineLine', () => {
-  it('counts down the trial, and says so on its last day', () => {
+  it('counts down the trial, and says so on its last day — with no "Trial" subject', () => {
+    // The plan name and the pill beside it already say it's a trial; this
+    // line's job is only the deadline.
     expect(
       timelineLine(
         subscription({ status: SubscriptionStatus.Trialing, trialEndsAt: daysFromNow(12) }),
       ),
-    ).toBe('Trial ends in 12 days');
+    ).toBe('Ends in 12 days');
     expect(
       timelineLine(
         subscription({ status: SubscriptionStatus.Trialing, trialEndsAt: daysFromNow(0) }),
       ),
-    ).toBe('Trial ends today');
+    ).toBe('Ends today');
   });
 
   it('counts down the grace period', () => {
