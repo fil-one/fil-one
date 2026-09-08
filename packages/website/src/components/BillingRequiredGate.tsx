@@ -1,11 +1,13 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { SubscriptionStatus } from '@filone/shared';
 import { CreditCardIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { AddPaymentDialog } from './billing/AddPaymentDialog.js';
 import { ContactSalesDialog } from './billing/ContactSalesDialog.js';
 import { Button } from './Button.js';
 import { EmptyStateCard } from './EmptyStateCard.js';
+import { Spinner } from './Spinner.js';
 import { useBillingData, useBillingFlows } from '../lib/use-billing.js';
 import { useHasPermission } from '../lib/use-permissions.js';
 import { queryKeys } from '../lib/query-client.js';
@@ -45,6 +47,19 @@ export function BillingRequiredGate() {
   const { billing } = useBillingData();
   const flows = useBillingFlows(billing, mayManage);
   const queryClient = useQueryClient();
+  // `selectPayAsYouGo` presigns a SetupIntent before the dialog can open —
+  // real latency with nothing else on the page to show for it, so the button
+  // says so itself rather than leaving a click looking like it did nothing.
+  const [startingPayment, setStartingPayment] = useState(false);
+
+  async function handleAddPaymentMethod(): Promise<void> {
+    setStartingPayment(true);
+    try {
+      await flows.selectPayAsYouGo();
+    } finally {
+      setStartingPayment(false);
+    }
+  }
 
   // `billingActive` lives on `/me`, not on `billing` — a query the flows above
   // already invalidate on activation, but never this one, since nothing else
@@ -56,6 +71,25 @@ export function BillingRequiredGate() {
     window.addEventListener('billing:updated', onBillingUpdated);
     return () => window.removeEventListener('billing:updated', onBillingUpdated);
   }, [queryClient]);
+
+  // An organic signup's trial is claimed as a side effect of this exact
+  // `GET /api/billing` call (see `get-billing.ts`'s own comment) — the first
+  // one any member of a brand-new org makes, which `useBillingData` above just
+  // made. That claim never fires the `billing:updated` event above: nothing
+  // the caller did dispatches it, since nothing here is a button click. Left
+  // alone, a freshly claimed trial would sit in the `billing` query while `/me`
+  // — and the gate reading it — kept reporting `billingActive: false` for up
+  // to `ME_STALE_TIME`, blocking an account that just became entitled to the
+  // one thing this gate exists to unblock. Any status the guard would treat as
+  // active is reason enough to recheck, not just `Trialing`: this gate has no
+  // way to end up in front of an account already on Grace/Canceled/PastDue
+  // (`resolveBillingActive` reports those as active), so seeing one here at
+  // all means `/me` was the thing that was wrong.
+  useEffect(() => {
+    if (billing && billing.subscription.status !== SubscriptionStatus.Inactive) {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.me });
+    }
+  }, [billing, queryClient]);
 
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-6 px-6">
@@ -70,7 +104,15 @@ export function BillingRequiredGate() {
         }
       >
         {mayManage && (
-          <Button variant="primary" size="md" onClick={() => void flows.selectPayAsYouGo()}>
+          <Button
+            variant="primary"
+            size="md"
+            disabled={startingPayment}
+            onClick={() => void handleAddPaymentMethod()}
+          >
+            {startingPayment && (
+              <Spinner ariaLabel="Starting checkout" size={14} colorClassName="text-current" />
+            )}
             Add payment method
           </Button>
         )}

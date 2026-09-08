@@ -104,4 +104,32 @@ describe('BillingRequiredGate', () => {
 
     await waitFor(() => expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['me'] }));
   });
+
+  it('invalidates /me on its own once billing reports a trial claimed behind its back', async () => {
+    // An organic signup's trial is claimed as a side effect of the very
+    // `GET /api/billing` call this gate makes on mount (see get-billing.ts) —
+    // not a button click, so the `billing:updated` event above never fires.
+    // Without its own check the gate would keep blocking a now-entitled
+    // account for up to ME_STALE_TIME.
+    const { client } = renderGate(OrgRole.Owner);
+    await screen.findByText('Add a payment method to continue');
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries');
+
+    mockGetBilling.mockResolvedValue({
+      subscription: { planId: 'pay_as_you_go', status: 'trialing' },
+    });
+    await client.invalidateQueries({ queryKey: ['billing'] });
+
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['me'] }));
+  });
+
+  it('leaves /me alone while billing still reports inactive', async () => {
+    const { client } = renderGate(OrgRole.Owner);
+    await screen.findByText('Add a payment method to continue');
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries');
+
+    await client.invalidateQueries({ queryKey: ['billing'] });
+
+    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['me'] });
+  });
 });
