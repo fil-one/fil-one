@@ -64,16 +64,21 @@ export function BillingRequiredGate() {
       >
         {mayManage && (
           <>
-            <div className="flex flex-col items-center gap-2">
+            <div className="flex flex-col items-center gap-3">
               <Button variant="primary" size="md" onClick={() => void flows.selectPayAsYouGo()}>
                 Add payment method
               </Button>
-              <p className="mt-1 text-xs text-zinc-400">
-                Have compliance or predictable volume needs?
-              </p>
-              <Button variant="ghost" size="sm" onClick={flows.openContactSales}>
-                Talk to sales instead
-              </Button>
+              <div className="mt-2 flex w-56 flex-col items-center gap-3 border-t border-zinc-200 pt-4">
+                {/* zinc-500, not zinc-400: this text is 12px, and zinc-400 on
+                    white falls short of the 4.5:1 contrast ratio small text
+                    needs under WCAG AA. */}
+                <p className="text-xs text-zinc-500">
+                  Have compliance or predictable volume needs?
+                </p>
+                <Button variant="ghost" size="sm" onClick={flows.openContactSales}>
+                  Talk to sales instead
+                </Button>
+              </div>
             </div>
             <AddPaymentDialog
               open={flows.paymentOpen}
