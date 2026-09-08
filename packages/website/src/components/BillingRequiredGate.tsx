@@ -58,7 +58,7 @@ export function BillingRequiredGate() {
   }, [queryClient]);
 
   return (
-    <div className="flex min-h-[60vh] items-center justify-center px-6">
+    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-6 px-6">
       <EmptyStateCard
         icon={CreditCardIcon}
         iconColor="blue"
@@ -70,37 +70,37 @@ export function BillingRequiredGate() {
         }
       >
         {mayManage && (
-          <>
-            <div className="flex flex-col items-center gap-9">
-              <Button variant="primary" size="md" onClick={() => void flows.selectPayAsYouGo()}>
-                Add payment method
-              </Button>
-              {/* zinc-500, not zinc-400: this text is 12px, and zinc-400 on
-                  white falls short of the 4.5:1 contrast ratio small text
-                  needs under WCAG AA. */}
-              <p className="max-w-48 text-center text-xs text-zinc-500">
-                Have compliance or predictable volume needs?{' '}
-                <button type="button" onClick={flows.openContactSales} className={textLink}>
-                  Talk to sales
-                </button>
-              </p>
-            </div>
-            <AddPaymentDialog
-              open={flows.paymentOpen}
-              clientSecret={flows.clientSecret}
-              stripePublishableKey={flows.stripePublishableKey}
-              onClose={flows.closePayment}
-              // No plan step behind this one to return to here (there is
-              // exactly one plan), so "Back" and the close button do the same
-              // thing: close the dialog and leave the caller on the gate.
-              onBack={flows.closePayment}
-              onSuccess={flows.paymentSucceeded}
-              onRefreshSetupIntent={flows.refreshSetupIntent}
-            />
-            <ContactSalesDialog open={flows.contactSalesOpen} onClose={flows.closeContactSales} />
-          </>
+          <Button variant="primary" size="md" onClick={() => void flows.selectPayAsYouGo()}>
+            Add payment method
+          </Button>
         )}
       </EmptyStateCard>
+      {mayManage && (
+        <>
+          {/* zinc-500, not zinc-400: this text is 12px, and zinc-400 on white
+              falls short of the 4.5:1 contrast ratio small text needs under
+              WCAG AA. */}
+          <p className="max-w-48 text-center text-xs text-zinc-500">
+            Have compliance or predictable volume needs?{' '}
+            <button type="button" onClick={flows.openContactSales} className={textLink}>
+              Talk to sales
+            </button>
+          </p>
+          <AddPaymentDialog
+            open={flows.paymentOpen}
+            clientSecret={flows.clientSecret}
+            stripePublishableKey={flows.stripePublishableKey}
+            onClose={flows.closePayment}
+            // No plan step behind this one to return to here (there is
+            // exactly one plan), so "Back" and the close button do the same
+            // thing: close the dialog and leave the caller on the gate.
+            onBack={flows.closePayment}
+            onSuccess={flows.paymentSucceeded}
+            onRefreshSetupIntent={flows.refreshSetupIntent}
+          />
+          <ContactSalesDialog open={flows.contactSalesOpen} onClose={flows.closeContactSales} />
+        </>
+      )}
     </div>
   );
 }
