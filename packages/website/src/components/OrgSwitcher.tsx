@@ -22,6 +22,25 @@ type OrgSwitcherProps = {
    * than the component's, exactly as `SidebarNav`'s `showTestIds` arranges.
    */
   testId?: string;
+  /**
+   * Closes the host panel. `Menu`'s own items close it automatically on
+   * activation, but these rows are plain buttons rather than `MenuItem`s (no
+   * clean way to get `role="menuitemradio"` — which `Menu`'s own semantics
+   * don't have a concept of — out of one), so nothing does that here unless
+   * the host wires it up itself: `OrgSwitcherMenu` passes `Menu`'s own
+   * render-prop `close`, and `AppShell`'s hand-rolled mobile dropdown (not a
+   * `Menu` at all) passes its own `setOpen(false)`.
+   *
+   * Closing on a real switch matters here specifically because `switchToOrg`
+   * clears every cached query the instant it is called (see its own doc
+   * comment for why), and this panel — Edit organization, Members, Billing
+   * among its rows — reads permissions out of that same cache. Left open
+   * through the switch, those rows blink out from under the caller mid-click
+   * rather than closing the way choosing any other menu action would. There
+   * is nothing left in this panel worth seeing once a switch has started
+   * anyway: it names the org the tab is leaving.
+   */
+  onClose?: () => void;
 };
 
 /**
@@ -37,7 +56,13 @@ type OrgSwitcherProps = {
  * options and the role the server enforces come from the same response and
  * cannot disagree.
  */
-export function OrgSwitcher({ memberships, activeOrgId, inMenu, testId }: OrgSwitcherProps) {
+export function OrgSwitcher({
+  memberships,
+  activeOrgId,
+  inMenu,
+  testId,
+  onClose,
+}: OrgSwitcherProps) {
   // The click starts a page load, and the browser takes its time about it. Until
   // it lands the list is inert: a second click would stash a third org while the
   // load for the second is already in flight.
@@ -92,6 +117,7 @@ export function OrgSwitcher({ memberships, activeOrgId, inMenu, testId }: OrgSwi
                 ? undefined
                 : () => {
                     setChosen(membership.orgId);
+                    onClose?.();
                     switchToOrg(membership.orgId, undefined, 'dashboard', {
                       orgName: membership.orgName,
                       logoUrl: membership.logoUrl,
