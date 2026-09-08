@@ -110,10 +110,16 @@ export function BillingRequiredGate() {
             disabled={startingPayment}
             onClick={() => void handleAddPaymentMethod()}
           >
-            {startingPayment && (
-              <Spinner ariaLabel="Starting checkout" size={14} colorClassName="text-current" />
-            )}
-            Add payment method
+            {/* Button's own inner wraps `children` in a single `<span>`, so
+                without a flex container of our own the Spinner (a `<div>`,
+                block by default) breaks onto its own line above the label
+                instead of sitting beside it. */}
+            <span className="inline-flex items-center gap-2">
+              {startingPayment && (
+                <Spinner ariaLabel="Starting checkout" size={14} colorClassName="text-current" />
+              )}
+              Add payment method
+            </span>
           </Button>
         )}
       </EmptyStateCard>
