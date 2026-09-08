@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, GetItemCommand, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { OrgRole, ROLE_PERMISSIONS } from '@filone/shared';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 import { sstResourceMock } from '../test/sst-resource-mock.js';
@@ -95,6 +95,7 @@ function ownerTail(orgName: string) {
       { orgId: MOCK_ORG_ID, orgName, slug: '', role: OrgRole.Owner, joinedAt: STUB_JOINED_AT },
     ],
     orgsBeta: false,
+    billingActive: true,
   };
 }
 
@@ -162,6 +163,13 @@ describe('GET /api/me handler', () => {
     ddbMock
       .on(GetItemCommand, { TableName: 'UserInfoTable', Key: { sk: { S: 'ORGS_BETA' } } })
       .resolves({ Item: undefined });
+
+    // Default: the org has an active subscription, so `billingActive` does not
+    // become the thing every unrelated test in this file has to reason about.
+    // The `billingActive` describe block below overrides this per case.
+    ddbMock
+      .on(GetItemCommand, { TableName: 'BillingTable' })
+      .resolves({ Item: { subscriptionStatus: { S: 'active' } } });
 
     // Default membership: sole Owner of the one org, as every account is today.
     stubMembershipRead(ddbMock, {
@@ -719,6 +727,76 @@ describe('GET /api/me handler', () => {
       const result = await handler(authenticatedEvent(), buildContext());
 
       expect(parseBody(result).orgsBeta).toBe(true);
+    });
+  });
+
+  describe('billingActive', () => {
+    function parseBody(result: unknown): { billingActive: boolean } {
+      return JSON.parse((result as { body: string }).body) as { billingActive: boolean };
+    }
+
+    it('is true for an active subscription (the suite default)', async () => {
+      profileResolves();
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).billingActive).toBe(true);
+    });
+
+    it('is true while trialing', async () => {
+      profileResolves();
+      ddbMock
+        .on(GetItemCommand, { TableName: 'BillingTable' })
+        .resolves({ Item: { subscriptionStatus: { S: 'trialing' } } });
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).billingActive).toBe(true);
+    });
+
+    it('is false when the org has never had a plan', async () => {
+      profileResolves();
+      ddbMock.on(GetItemCommand, { TableName: 'BillingTable' }).resolves({});
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).billingActive).toBe(false);
+    });
+
+    it('is false for a record with no subscription status yet', async () => {
+      // The customer-mapping-only row `create-setup-intent` leaves behind when
+      // somebody opens the payment modal and closes it.
+      profileResolves();
+      ddbMock
+        .on(GetItemCommand, { TableName: 'BillingTable' })
+        .resolves({ Item: { stripeCustomerId: { S: 'cus_123' } } });
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).billingActive).toBe(false);
+    });
+
+    it('is false for a record explicitly marked inactive', async () => {
+      profileResolves();
+      ddbMock
+        .on(GetItemCommand, { TableName: 'BillingTable' })
+        .resolves({ Item: { subscriptionStatus: { S: 'inactive' } } });
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).billingActive).toBe(false);
+    });
+
+    it('does not attempt to claim a trial — a plain read, not a write', async () => {
+      // `/me` runs before any page has had the chance to make its own billing
+      // call, on every navigation. Claiming here too would spend a Stripe round
+      // trip on every caller of `/me`, not just the gate page that needs it.
+      profileResolves();
+      ddbMock.on(GetItemCommand, { TableName: 'BillingTable' }).resolves({});
+
+      await handler(authenticatedEvent(), buildContext());
+
+      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
     });
   });
 });

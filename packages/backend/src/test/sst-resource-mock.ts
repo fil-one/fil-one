@@ -26,6 +26,10 @@ export function sstResourceMock(resources: Record<string, unknown> = {}): {
       // matches on.
       AuditLog: { name: 'AuditTable' },
       OrgLogoBucket: { name: 'OrgLogoBucket' },
+      // `/me` reads this to compute `billingActive` for every caller, so any
+      // test that calls it needs the table named even when billing itself
+      // isn't what the test is about.
+      BillingTable: { name: 'BillingTable' },
       Auth0ClientId: { value: 'test-client-id' },
       Auth0ClientSecret: { value: 'test-client-secret' },
       Auth0MgmtClientId: { value: 'test-mgmt-client-id' },

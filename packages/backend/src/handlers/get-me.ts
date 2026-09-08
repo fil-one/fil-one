@@ -1,12 +1,14 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
+import { SubscriptionStatus } from '@filone/shared';
 import type { MeResponse } from '@filone/shared';
 import { permissionsForRole } from '@filone/shared';
 import { getOrgProfile } from '../lib/org-profile.js';
 import { summarizeMemberships } from '../lib/org-membership.js';
 import { hasRagAccess } from '../middleware/rag-access.js';
 import { hasOrgsBetaAccess } from '../lib/orgs-beta.js';
+import { readSubscription } from '../lib/subscription-store.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import {
   getConnectionType,
@@ -17,6 +19,30 @@ import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+
+/**
+ * Whether the active org has usable billing — a plan chosen, trial or paid,
+ * as opposed to never having had one. Every role gets this, unlike `GET
+ * /api/billing` (`billing.view`, Owner and Admin only): the console's
+ * whole-console "add a card to continue" gate has to answer for a Member too,
+ * who cannot read the billing detail behind why but still needs to know the
+ * org is blocked and who to ask.
+ *
+ * A plain read, deliberately not a claim attempt: a first-ever org's `/me` is
+ * called before any page has had the chance to make its own billing call, so
+ * a record-less org here just means the trial has not been claimed *yet* —
+ * the gate page itself calls `GET /api/billing` on mount the same way the
+ * dashboard always has, which is what actually claims it. Attempting the
+ * claim here too would make every caller of `/me`, not just the one route
+ * that needs to, pay for a Stripe round trip.
+ */
+async function resolveBillingActive(orgId: string): Promise<boolean> {
+  const record = await readSubscription(orgId);
+  return (
+    record?.subscriptionStatus !== undefined &&
+    record.subscriptionStatus !== SubscriptionStatus.Inactive
+  );
+}
 
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { orgId, userId, email, emailVerified, sub, name, picture, membership } =
@@ -38,26 +64,30 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   // response that is supposed to introduce it.
   const activeOrgProfile = getOrgProfile(orgId, { consistentRead: true });
 
-  const [orgProfile, enrollments, passkeys, ragAccess, orgsBeta, memberships] = await Promise.all([
-    activeOrgProfile,
-    includeMfa ? getMfaEnrollments(sub) : Promise.resolve([]),
-    includeMfa && connectionType === 'auth0' ? getPasskeyAuthenticators(sub) : Promise.resolve([]),
-    hasRagAccess(verifiedEmail),
-    // The same predicate `POST /api/org/invitations` refuses on, asked here so
-    // the console can leave the surface out rather than render it and collect a
-    // 403 from the first thing the caller reaches for.
-    hasOrgsBetaAccess({ verifiedEmail, orgId }),
-    summarizeMemberships({
-      userId,
-      activeOrgId: orgId,
-      activeRole: membership?.role,
-      activeOrgSummary: activeOrgProfile.then((profile) => ({
-        name: profile?.name?.S ?? '',
-        slug: profile?.slug?.S ?? '',
-        ...(profile?.logoUrl?.S ? { logoUrl: profile.logoUrl.S } : {}),
-      })),
-    }),
-  ]);
+  const [orgProfile, enrollments, passkeys, ragAccess, orgsBeta, memberships, billingActive] =
+    await Promise.all([
+      activeOrgProfile,
+      includeMfa ? getMfaEnrollments(sub) : Promise.resolve([]),
+      includeMfa && connectionType === 'auth0'
+        ? getPasskeyAuthenticators(sub)
+        : Promise.resolve([]),
+      hasRagAccess(verifiedEmail),
+      // The same predicate `POST /api/org/invitations` refuses on, asked here so
+      // the console can leave the surface out rather than render it and collect a
+      // 403 from the first thing the caller reaches for.
+      hasOrgsBetaAccess({ verifiedEmail, orgId }),
+      summarizeMemberships({
+        userId,
+        activeOrgId: orgId,
+        activeRole: membership?.role,
+        activeOrgSummary: activeOrgProfile.then((profile) => ({
+          name: profile?.name?.S ?? '',
+          slug: profile?.slug?.S ?? '',
+          ...(profile?.logoUrl?.S ? { logoUrl: profile.logoUrl.S } : {}),
+        })),
+      }),
+      resolveBillingActive(orgId),
+    ]);
 
   const orgName = orgProfile?.name?.S ?? '';
   const slug = orgProfile?.slug?.S ?? '';
@@ -99,6 +129,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     permissions: permissionsForRole(membership?.role ?? ''),
     memberships,
     orgsBeta,
+    billingActive,
   };
 
   return new ResponseBuilder().status(200).body(body).build();

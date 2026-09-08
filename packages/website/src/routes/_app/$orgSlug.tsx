@@ -2,6 +2,7 @@ import { createRoute, notFound, Outlet, redirect, useNavigate } from '@tanstack/
 import { useQueryClient } from '@tanstack/react-query';
 import { Route as appRoute } from '../_app';
 import { AppShell } from '../../components/AppShell';
+import { BillingRequiredGate } from '../../components/BillingRequiredGate.js';
 import { Button } from '../../components/Button';
 import { getMe, logout } from '../../lib/api.js';
 import { queryClient, queryKeys, ME_STALE_TIME } from '../../lib/query-client.js';
@@ -106,7 +107,7 @@ function NotAMember() {
 
 function OrgScopedApp() {
   const navigate = useNavigate();
-  const { isNotAMember } = usePermissions();
+  const { isNotAMember, billingActive } = usePermissions();
 
   // Resume an MFA action after a step-up redirect round-trip. The api wrapper
   // stashes the pending action + return path in sessionStorage before bouncing
@@ -124,7 +125,10 @@ function OrgScopedApp() {
 
   return (
     <AppShell>
-      <Outlet />
+      {/* In place of the routed page, not a redirect: the sidebar (org
+          switcher, log out) stays reachable either way, which is all a
+          blocked account can still do here. */}
+      {billingActive ? <Outlet /> : <BillingRequiredGate />}
     </AppShell>
   );
 }
