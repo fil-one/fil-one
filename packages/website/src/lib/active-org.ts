@@ -70,6 +70,12 @@ const switchingListeners = new Set<(switching: boolean) => void>();
  * the page still shows the old org, and their answers are discarded by the
  * navigation anyway. `apiRequest` holds them instead, and the switcher disables
  * its buttons, so nothing is issued against an org the user has already left.
+ *
+ * Every route's own `beforeLoad` reaches `getMe()`, which is itself a held
+ * `apiRequest` — so this latch has to come down before the navigation it is
+ * guarding can ever settle. `getMe`'s `skipSwitchWait` option is how the two
+ * routes on a switch's own critical path (`_app.tsx`, `$orgSlug.tsx`) read past
+ * this latch instead of deadlocking against it; every other caller still waits.
  */
 export function isSwitchingOrg(): boolean {
   return switching;
