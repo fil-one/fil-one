@@ -447,8 +447,11 @@ export default $config({
         name: $interpolate`filone-${$app.stage}-security-headers`,
         securityHeadersConfig: {
           contentSecurityPolicy: {
-            // i1.wp.com: WordPress Photon CDN — Auth0 proxies some avatar images through it
-            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io https://status.fil.one ${s3GatewayUrls}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
+            // i0/i1/i2.wp.com: WordPress Photon CDN, load-balanced across all three
+            // subdomains by hash of the source URL — Auth0 proxies some avatar images
+            // through whichever one it lands on, so all three need to be allowed, not
+            // just the one a single test happened to hit.
+            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i0.wp.com https://i1.wp.com https://i2.wp.com https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io https://status.fil.one ${s3GatewayUrls}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
             override: true,
           },
           frameOptions: {
