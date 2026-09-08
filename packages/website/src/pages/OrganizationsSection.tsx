@@ -48,7 +48,11 @@ function OrgRow({ membership, isActive, onLeave }: OrgRowProps) {
           {
             label: 'Switch to this organization',
             icon: ArrowsLeftRightIcon,
-            onSelect: () => switchToOrg(membership.orgId),
+            onSelect: () =>
+              switchToOrg(membership.orgId, undefined, 'dashboard', {
+                orgName: membership.orgName,
+                logoUrl: membership.logoUrl,
+              }),
           },
         ]),
     ...(isActive

@@ -92,7 +92,10 @@ describe('OrgSwitcherMenu', () => {
     fireEvent.click(screen.getByTestId('org-switcher-button'));
     fireEvent.click(screen.getByRole('menuitemradio', { name: 'Globex' }));
 
-    expect(switchToOrg).toHaveBeenCalledWith(ORG_B);
+    expect(switchToOrg).toHaveBeenCalledWith(ORG_B, undefined, 'dashboard', {
+      orgName: 'Globex',
+      logoUrl: undefined,
+    });
   });
 
   it('opens the create-organization dialog from its own action', () => {

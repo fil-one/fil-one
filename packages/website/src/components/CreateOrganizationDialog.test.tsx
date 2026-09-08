@@ -66,7 +66,10 @@ describe('CreateOrganizationDialog', () => {
     // The response's own slug is passed so the switch skips a second redirect,
     // and get-started is the landing since the new org is empty.
     await waitFor(() =>
-      expect(mockSwitchToOrg).toHaveBeenCalledWith('org-2', 'acme-two', 'get-started'),
+      expect(mockSwitchToOrg).toHaveBeenCalledWith('org-2', 'acme-two', 'get-started', {
+        orgName: 'Acme Two',
+        logoUrl: undefined,
+      }),
     );
     expect(onClose).toHaveBeenCalled();
   });

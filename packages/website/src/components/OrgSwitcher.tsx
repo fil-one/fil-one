@@ -92,7 +92,10 @@ export function OrgSwitcher({ memberships, activeOrgId, inMenu, testId }: OrgSwi
                 ? undefined
                 : () => {
                     setChosen(membership.orgId);
-                    switchToOrg(membership.orgId);
+                    switchToOrg(membership.orgId, undefined, 'dashboard', {
+                      orgName: membership.orgName,
+                      logoUrl: membership.logoUrl,
+                    });
                   }
             }
             className={[

@@ -51,7 +51,10 @@ export function CreateOrganizationDialog({ open, onClose }: CreateOrganizationDi
       // empty, so those two setup tasks are what it needs, not a page of zeroes
       // — once the gate above lets it through.
       // The slug its response just carried saves the switch a second redirect.
-      switchToOrg(result.orgId, result.slug, 'get-started');
+      switchToOrg(result.orgId, result.slug, 'get-started', {
+        orgName: result.orgName,
+        logoUrl: result.logoUrl,
+      });
       handleClose();
     },
     onError: (err) => {
