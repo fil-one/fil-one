@@ -45,7 +45,7 @@ export function StatusBanners({
   return (
     <>
       {!collapsed && isTrialing && limitsKnown && (
-        <div className="py-3">
+        <div className="px-2 py-3">
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
             <p className="text-xs font-medium text-zinc-900" title={trialEndsLabel}>
               {trialDays !== null ? `${trialDays} days left in trial` : 'Trial active'}
@@ -82,7 +82,7 @@ export function StatusBanners({
       )}
 
       {!collapsed && isInactive && (
-        <div className="py-3">
+        <div className="px-2 py-3">
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
             <p className="text-xs font-medium text-zinc-900">No active plan</p>
             <p className="mt-1 text-xs text-zinc-500">Choose a plan to start storing data.</p>
