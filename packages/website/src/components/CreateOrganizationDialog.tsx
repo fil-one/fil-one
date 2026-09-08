@@ -9,6 +9,7 @@ import { Input } from './Input';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './Modal';
 import { createOrg, errorMessageOf } from '../lib/api.js';
 import { switchToOrg } from '../lib/active-org.js';
+import { stashPendingOrgPaymentPrompt } from '../lib/pending-org-payment-prompt.js';
 
 export type CreateOrganizationDialogProps = {
   open: boolean;
@@ -38,6 +39,13 @@ export function CreateOrganizationDialog({ open, onClose }: CreateOrganizationDi
   const create = useMutation({
     mutationFn: () => createOrg({ name: OrgNameSchema.parse(name), logoUrl: logo.logoUrl }),
     onSuccess: (result) => {
+      // Only the account's first-ever org gets a free trial (see
+      // `isSoloPersonalOrg` — this dialog is unreachable for that one, since a
+      // brand-new account is named through the signup flow instead), so this
+      // one lands with no active plan. Stashed before the switch: get-started
+      // reads it on arrival and opens the payment prompt itself rather than
+      // leaving the caller to notice "No active plan" on their own.
+      stashPendingOrgPaymentPrompt(result.orgId);
       // A full org switch (clears every cached query, navigates in) — the new
       // org is not the one any currently-loaded page's data describes. It lands
       // on get-started rather than the dashboard: the org is brand new and
