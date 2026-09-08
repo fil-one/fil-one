@@ -68,10 +68,10 @@ describe('BillingRequiredGate', () => {
     expect(await screen.findByTestId('add-payment-dialog')).toBeInTheDocument();
   });
 
-  it('also offers an Owner a way to talk to sales instead', async () => {
+  it('also offers an Owner a way to talk to sales', async () => {
     renderGate(OrgRole.Owner);
 
-    const link = await screen.findByRole('button', { name: 'Talk to sales instead' });
+    const link = await screen.findByRole('button', { name: 'Talk to sales' });
     expect(link).toBeInTheDocument();
   });
 
