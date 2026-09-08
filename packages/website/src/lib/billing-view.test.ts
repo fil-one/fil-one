@@ -51,10 +51,14 @@ describe('planTitle', () => {
     expect(planTitle(subscription({ planId: 'enterprise' as PlanId }))).toBe('Your plan');
   });
 
-  it('prefers the reported name over the state, even mid-trial', () => {
+  it('says "Free trial" even when Stripe already named the price it trials into', () => {
+    // Stripe attaches the eventual paid price's product name to a trialing
+    // subscription too — showing that name here would call an account that
+    // has committed to nothing and holds no card on file by the name of a
+    // plan it is not yet on.
     expect(
       planTitle(subscription({ status: SubscriptionStatus.Trialing, planName: 'Business' })),
-    ).toBe('Business');
+    ).toBe('Free trial');
   });
 });
 
