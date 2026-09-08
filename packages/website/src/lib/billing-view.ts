@@ -45,17 +45,21 @@ export function statusBadge(status: SubscriptionStatus): StatusBadge {
 /**
  * What to call the plan.
  *
- * The Stripe product's name when there is one, because that is what the
- * customer's contract and their invoices call it. Then the account's state, then
- * the plan enum, and where none of those answers, "Your plan". Never "Unknown":
- * a label the console cannot fill is still a plan somebody is paying for.
+ * "Free trial" while trialing, before anything else: Stripe attaches the
+ * eventual paid price's product name to a trialing subscription too, and
+ * showing that name here would call an account that has committed to
+ * nothing and holds no card on file by the name of a plan it is not yet on.
+ * Otherwise the Stripe product's name when there is one, because that is
+ * what the customer's contract and their invoices call it. Then the
+ * account's state, then the plan enum, and where none of those answers,
+ * "Your plan". Never "Unknown": a label the console cannot fill is still a
+ * plan somebody is paying for.
  */
 export function planTitle(subscription: Subscription): string {
+  if (subscription.status === SubscriptionStatus.Trialing) return 'Free trial';
   if (subscription.planName) return subscription.planName;
 
   switch (subscription.status) {
-    case SubscriptionStatus.Trialing:
-      return 'Free trial';
     case SubscriptionStatus.Inactive:
       return 'No plan';
     default:
