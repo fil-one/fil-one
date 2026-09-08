@@ -194,6 +194,31 @@ describe('BillingPage — inactive subscription', () => {
     expect(cta).toHaveTextContent('Upgrade');
     expect(mockGetInvoices).not.toHaveBeenCalled();
   });
+
+  it('has no payment card while trialing — nobody has one on file yet by design', async () => {
+    mockGetBilling.mockResolvedValue(trialingBilling());
+    renderPage();
+
+    await screen.findByText('Free trial');
+    expect(screen.queryByText('Payment method')).not.toBeInTheDocument();
+    expect(screen.queryByText('No card on file')).not.toBeInTheDocument();
+  });
+
+  it('reads the plan card status as Active, not Trial, while trialing', async () => {
+    mockGetBilling.mockResolvedValue(trialingBilling());
+    renderPage();
+
+    await screen.findByText('Free trial');
+    expect(screen.getByText('Active')).toBeInTheDocument();
+    expect(screen.queryByText('Trial')).not.toBeInTheDocument();
+  });
+
+  it('states the trial deadline with no rate and no "Trial" subject', async () => {
+    mockGetBilling.mockResolvedValue(trialingBilling());
+    renderPage();
+
+    expect(await screen.findByTestId('plan-meta')).toHaveTextContent(/^Ends in \d+ days?$/);
+  });
 });
 
 describe('BillingPage — current usage meters', () => {
