@@ -71,7 +71,7 @@ export function BillingRequiredGate() {
       >
         {mayManage && (
           <>
-            <div className="flex flex-col items-center gap-6">
+            <div className="flex flex-col items-center gap-9">
               <Button variant="primary" size="md" onClick={() => void flows.selectPayAsYouGo()}>
                 Add payment method
               </Button>
