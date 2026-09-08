@@ -16,6 +16,7 @@ const BASE_ME: MeResponse = {
   mfaEnrollments: [],
   ragAccess: false,
   orgsBeta: false,
+  billingActive: true,
 };
 
 function createQueryClient() {

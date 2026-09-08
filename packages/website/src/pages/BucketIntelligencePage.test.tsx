@@ -31,6 +31,7 @@ function me(ragAccess: boolean): MeResponse {
     mfaEnrollments: [],
     ragAccess,
     orgsBeta: false,
+    billingActive: true,
   };
 }
 
