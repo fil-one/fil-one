@@ -70,6 +70,7 @@ function MobileUserMenu() {
             activeOrgId={me?.orgId}
             inMenu
             testId="mobile-org-switcher"
+            onClose={() => setOpen(false)}
           />
           <button
             type="button"

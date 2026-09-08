@@ -152,6 +152,24 @@ describe('OrgSwitcher', () => {
     expect(routerNavigate).not.toHaveBeenCalled();
   });
 
+  it('closes the host panel on a real switch, so its rows never blink out from under an open menu', () => {
+    const onClose = vi.fn();
+    render(<OrgSwitcher memberships={memberships} activeOrgId={ORG_A} onClose={onClose} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Globex' }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not close the host panel when the current org is chosen — there is nothing to switch to', () => {
+    const onClose = vi.fn();
+    render(<OrgSwitcher memberships={memberships} activeOrgId={ORG_A} onClose={onClose} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Acme' }));
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it('names an org whose profile would not read', () => {
     render(
       <OrgSwitcher
