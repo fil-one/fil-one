@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, fireEvent, screen, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole } from '@filone/shared';
@@ -7,6 +7,7 @@ import type { MeResponse } from '@filone/shared';
 import { SidebarNav } from './SidebarNav';
 import { ToastProvider } from './Toast/ToastProvider.js';
 import { seedPermissions } from '../lib/test-permissions.js';
+import { queryKeys } from '../lib/query-client.js';
 
 // Render <a>/no-op router primitives so SidebarNav can mount without a router.
 vi.mock('@tanstack/react-router', () => ({
@@ -21,31 +22,38 @@ vi.mock('@tanstack/react-router', () => ({
   useParams: () => ({}),
 }));
 
+const DEFAULT_MOCK_ME = {
+  name: 'Ada',
+  email: 'ada@example.com',
+  orgName: 'Acme',
+  orgId: '11111111-1111-1111-1111-111111111111',
+  memberships: [
+    {
+      orgId: '11111111-1111-1111-1111-111111111111',
+      orgName: 'Acme',
+      slug: 'acme',
+      role: 'owner',
+    },
+    {
+      orgId: '22222222-2222-2222-2222-222222222222',
+      orgName: 'Globex',
+      slug: 'globex',
+      role: 'member',
+    },
+  ],
+};
+
+// Mutable so the pending-switch tests below can render with `me: undefined` —
+// the state between a switch starting and the new org's `/me` landing —
+// without a separate mock factory per test.
+let mockMe: typeof DEFAULT_MOCK_ME | undefined = DEFAULT_MOCK_ME;
+
 // Force both status banners to render so their button ids are present, and give
 // the fixture the two memberships the org switcher needs to appear at all — with
 // one, it renders nothing and a props regression stays invisible.
 vi.mock('./use-sidebar-data.js', () => ({
   useSidebarData: () => ({
-    me: {
-      name: 'Ada',
-      email: 'ada@example.com',
-      orgName: 'Acme',
-      orgId: '11111111-1111-1111-1111-111111111111',
-      memberships: [
-        {
-          orgId: '11111111-1111-1111-1111-111111111111',
-          orgName: 'Acme',
-          slug: 'acme',
-          role: 'owner',
-        },
-        {
-          orgId: '22222222-2222-2222-2222-222222222222',
-          orgName: 'Globex',
-          slug: 'globex',
-          role: 'member',
-        },
-      ],
-    },
+    me: mockMe,
     displayName: 'Ada',
     initial: 'A',
     isTrialing: true,
@@ -226,6 +234,50 @@ describe('SidebarNav — hideNavLinks (the billing-blocked gate)', () => {
     expect(screen.queryByTestId('sidebar-choose-plan-button')).not.toBeInTheDocument();
     expect(screen.getByTestId('org-switcher-button')).toBeInTheDocument();
     expect(screen.getByTestId('user-menu-button')).toBeInTheDocument();
+  });
+});
+
+describe('SidebarNav — the pending org switch target', () => {
+  afterEach(() => {
+    mockMe = DEFAULT_MOCK_ME;
+  });
+
+  it('names the org being switched to instead of the "Organization" placeholder while /me is still loading', () => {
+    mockMe = undefined;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seedPermissions(client, OrgRole.Owner);
+    client.setQueryData(queryKeys.pendingOrgSwitch, {
+      orgId: '22222222-2222-2222-2222-222222222222',
+      orgName: 'Globex',
+      logoUrl: undefined,
+    });
+
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <SidebarNav collapsed={false} showTestIds={true} />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByTestId('org-switcher-button')).toHaveAccessibleName(/Globex/);
+    expect(screen.queryByText('Organization')).not.toBeInTheDocument();
+  });
+
+  it('falls back to the placeholder when no switch is pending either', () => {
+    mockMe = undefined;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seedPermissions(client, OrgRole.Owner);
+
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <SidebarNav collapsed={false} showTestIds={true} />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByTestId('org-switcher-button')).toHaveAccessibleName(/Organization/);
   });
 });
 

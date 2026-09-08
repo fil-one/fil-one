@@ -156,6 +156,47 @@ describe('the active org stash', () => {
       });
     });
 
+    it('seeds the pending switch target from knownDisplay, so the sidebar has a name before /me answers', () => {
+      switchToOrg(ORG_B, 'org-b', 'dashboard', {
+        orgName: 'Globex',
+        logoUrl: 'https://x/logo.png',
+      });
+
+      expect(queryClient.getQueryData(queryKeys.pendingOrgSwitch)).toEqual({
+        orgId: ORG_B,
+        orgName: 'Globex',
+        logoUrl: 'https://x/logo.png',
+      });
+    });
+
+    it('seeds nothing when the caller has no display info on hand', () => {
+      switchToOrg(ORG_B, 'org-b');
+
+      expect(queryClient.getQueryData(queryKeys.pendingOrgSwitch)).toBeUndefined();
+    });
+
+    it('clears the pending switch target once the navigation settles', async () => {
+      seedMe({
+        memberships: [{ orgId: ORG_B, orgName: 'B', role: 'owner', slug: 'org-b' } as never],
+      });
+      switchToOrg(ORG_B, 'org-b', 'dashboard', { orgName: 'Globex' });
+      expect(queryClient.getQueryData(queryKeys.pendingOrgSwitch)).toBeTruthy();
+
+      await vi.waitFor(() => expect(navigate).toHaveBeenCalled());
+
+      expect(queryClient.getQueryData(queryKeys.pendingOrgSwitch)).toBeNull();
+    });
+
+    it('clears the pending switch target on rollback too', async () => {
+      navigate.mockRejectedValue(new Error('navigation blocked'));
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      switchToOrg(ORG_B, 'org-b', 'dashboard', { orgName: 'Globex' });
+      await vi.waitFor(() => expect(getActiveOrgId()).not.toBe(ORG_B));
+
+      expect(queryClient.getQueryData(queryKeys.pendingOrgSwitch)).toBeNull();
+    });
+
     it('rolls the stash back when the navigation does not complete', async () => {
       setActiveOrgId(ORG_A);
       navigate.mockRejectedValue(new Error('navigation blocked'));
