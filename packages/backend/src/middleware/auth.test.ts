@@ -791,7 +791,11 @@ describe('authMiddleware', () => {
 
       const transactCalls = ddbMock.commandCalls(TransactWriteItemsCommand);
       expect(transactCalls).toHaveLength(1);
-      expect(transactCalls[0].args[0].input.TransactItems).toStrictEqual([
+      const items = transactCalls[0].args[0].input.TransactItems!;
+      // Slugs are random, not derived from the org name — read back whatever
+      // `reserveOrgSlug` picked, then assert every row agrees on it.
+      const slug = items[2]!.Put!.Item!.slug!.S;
+      expect(items).toStrictEqual([
         // SUB → identity mapping
         {
           Put: {
@@ -830,7 +834,7 @@ describe('authMiddleware', () => {
               pk: { S: `ORG#${MOCK_ORG_ID}` },
               sk: { S: 'PROFILE' },
               name: { S: 'Alice Org' },
-              slug: { S: 'alice-org' },
+              slug: { S: slug },
               nameConfirmed: { BOOL: false },
               auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
               createdBy: { S: MOCK_USER_ID },
@@ -880,7 +884,7 @@ describe('authMiddleware', () => {
           Put: {
             TableName: 'OrgTable',
             Item: {
-              pk: { S: 'SLUG#alice-org' },
+              pk: { S: `SLUG#${slug}` },
               sk: { S: 'LOOKUP' },
               orgId: { S: MOCK_ORG_ID },
             },

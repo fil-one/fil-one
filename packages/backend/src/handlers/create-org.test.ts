@@ -150,7 +150,8 @@ describe('POST /api/org handler', () => {
     const body = JSON.parse((result as { body: string }).body);
     expect(body).toMatchObject({
       orgName: 'New Co',
-      slug: 'new-co',
+      // Random and opaque, not derived from the name — see `org-slug.ts`.
+      slug: expect.any(String),
       role: OrgRole.Owner,
     });
     expect(typeof body.orgId).toBe('string');
@@ -165,7 +166,7 @@ describe('POST /api/org handler', () => {
       Item: {
         sk: { S: 'PROFILE' },
         name: { S: 'New Co' },
-        slug: { S: 'new-co' },
+        slug: { S: expect.any(String) },
         // Named on the way in — there is no naming step to send this org
         // through, unlike the org signup creates.
         nameConfirmed: { BOOL: true },

@@ -22,13 +22,6 @@ vi.mock('../lib/api.js', async (importOriginal) => {
   };
 });
 
-const mockNavigate = vi.fn();
-
-vi.mock('@tanstack/react-router', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@tanstack/react-router')>();
-  return { ...actual, useNavigate: () => mockNavigate };
-});
-
 global.fetch = vi.fn(() => Promise.resolve(new Response(null, { status: 200 })));
 
 import { OrganizationPage } from './OrganizationPage.js';
@@ -107,8 +100,8 @@ describe('OrganizationPage', () => {
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
   });
 
-  it('follows a rename to its new slug, since the URL just went stale', async () => {
-    mockUpdateOrg.mockResolvedValue({ name: 'Acme Two', slug: 'acme-two' });
+  it("keeps the org's slug through a rename, since slugs never change", async () => {
+    mockUpdateOrg.mockResolvedValue({ name: 'Acme Two', slug: 'acme' });
     const { client } = renderPage(OrgRole.Owner);
 
     const nameField = await screen.findByLabelText('Organization name');
@@ -116,13 +109,11 @@ describe('OrganizationPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
 
     await waitFor(() =>
-      expect(client.getQueryData<MeResponse>(queryKeys.me)).toMatchObject({ slug: 'acme-two' }),
+      expect(client.getQueryData<MeResponse>(queryKeys.me)).toMatchObject({
+        orgName: 'Acme Two',
+        slug: 'acme',
+      }),
     );
-    expect(mockNavigate).toHaveBeenCalledWith({
-      to: '/$orgSlug/edit-organization',
-      params: { orgSlug: 'acme-two' },
-      replace: true,
-    });
   });
 
   it('refuses a name the schema will not take, without asking the server', async () => {

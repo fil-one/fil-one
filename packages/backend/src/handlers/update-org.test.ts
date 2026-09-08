@@ -134,8 +134,7 @@ function onlyTheLeaderHasTheProfileRow() {
 /**
  * Answer the profile-row read the rename makes to capture the previous name
  * and slug. `slug` absent describes an org that predates the slug field —
- * the rename gives it one for the first time rather than releasing a
- * reservation that was never made.
+ * a rename never assigns one; only the backfill script and org creation do.
  */
 function orgProfileNamed(name?: string, slug?: string, logoUrl?: string) {
   ddbMock
@@ -154,18 +153,6 @@ function orgProfileNamed(name?: string, slug?: string, logoUrl?: string) {
             },
           },
     );
-}
-
-/** Whether the slug lookup for `candidate` answers "already claimed". */
-function slugTaken(candidate: string, orgId = 'some-other-org') {
-  ddbMock
-    .on(GetItemCommand, {
-      TableName: 'OrgTable',
-      Key: { pk: { S: `SLUG#${candidate}` }, sk: { S: 'LOOKUP' } },
-    })
-    .resolves({
-      Item: { pk: { S: `SLUG#${candidate}` }, sk: { S: 'LOOKUP' }, orgId: { S: orgId } },
-    });
 }
 
 // ---------------------------------------------------------------------------
@@ -205,11 +192,10 @@ describe('PATCH /api/org handler', () => {
       });
 
     ddbMock.on(TransactWriteItemsCommand).resolves({});
-    // The slug probe's default answer: no candidate is already claimed, so
-    // `reserveOrgSlug` takes the base slug on its first read. Tests about
-    // collisions override this with a narrower, higher-priority matcher.
+    // Harmless default for any other OrgTable read this suite doesn't care
+    // about (e.g. the membership lookup `callerHolds` stubs more narrowly).
     ddbMock.on(GetItemCommand, { TableName: 'OrgTable' }).resolves({});
-    orgProfileNamed('Old Corp');
+    orgProfileNamed('Old Corp', 'old-corp');
     callerHolds(OrgRole.Owner);
   });
 
@@ -218,20 +204,20 @@ describe('PATCH /api/org handler', () => {
 
     expect(result).toMatchObject({
       statusCode: 200,
-      body: JSON.stringify({ name: 'New Corp', slug: 'new-corp' }),
+      body: JSON.stringify({ name: 'New Corp', slug: 'old-corp' }),
     });
     expect(updateInput()).toMatchObject({
       TableName: 'UserInfoTable',
       Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
       ExpressionAttributeValues: {
         ':name': { S: 'New Corp' },
-        ':slug': { S: 'new-corp' },
         ':previousName': { S: 'Old Corp' },
       },
       // Never conjure an org, and never record a transition that did not
       // happen: the write is conditional on the name the event names.
       ConditionExpression: 'attribute_exists(pk) AND #name = :previousName',
     });
+    expect(updateInput().ExpressionAttributeValues).not.toHaveProperty(':slug');
   });
 
   it('writes nothing when the submitted name is the one the org already has', async () => {
@@ -240,7 +226,10 @@ describe('PATCH /api/org handler', () => {
     // in a log a customer reads.
     const result = await handler(renameEvent({ name: 'Old Corp' }), buildContext());
 
-    expect(result).toMatchObject({ statusCode: 200, body: JSON.stringify({ name: 'Old Corp' }) });
+    expect(result).toMatchObject({
+      statusCode: 200,
+      body: JSON.stringify({ name: 'Old Corp', slug: 'old-corp' }),
+    });
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
   });
 
@@ -254,9 +243,9 @@ describe('PATCH /api/org handler', () => {
     await handler(renameEvent({ name: 'New Corp' }), buildContext());
 
     const items = transactItems();
-    // The profile update, the new slug's reservation (the org had no old one
-    // stubbed in this suite's default fixture), and the audit event.
-    expect(items).toHaveLength(3);
+    // Just the profile update and the audit event — a rename never touches
+    // the slug.
+    expect(items).toHaveLength(2);
     expect(items.find((item) => item.Put?.TableName === 'AuditTable')!.Put).toMatchObject({
       TableName: 'AuditTable',
       // Append-only: an event id already on the table cancels the whole
@@ -373,64 +362,35 @@ describe('PATCH /api/org handler', () => {
     });
   });
 
-  describe('rename-sync: the slug follows the name', () => {
-    function reservationPut() {
-      return transactItems().find(
-        (item) => item.Put?.TableName === 'OrgTable' && item.Put.Item?.sk?.S === 'LOOKUP',
-      )!.Put!;
-    }
-
-    function releaseDelete() {
-      return transactItems().find((item) => item.Delete?.TableName === 'OrgTable')?.Delete;
-    }
-
-    it('reserves a new slug derived from the new name', async () => {
+  describe('the slug never changes', () => {
+    it('touches nothing in OrgTable on a rename', async () => {
       await handler(renameEvent({ name: 'New Corp' }), buildContext());
 
-      expect(reservationPut()).toMatchObject({
-        TableName: 'OrgTable',
-        Item: { pk: { S: 'SLUG#new-corp' }, sk: { S: 'LOOKUP' }, orgId: { S: MOCK_ORG_ID } },
-        ConditionExpression: 'attribute_not_exists(pk)',
-      });
-      expect(updateInput().ExpressionAttributeValues).toMatchObject({
-        ':slug': { S: 'new-corp' },
+      expect(transactItems().some((item) => item.Put?.TableName === 'OrgTable')).toBe(false);
+      expect(transactItems().some((item) => item.Delete?.TableName === 'OrgTable')).toBe(false);
+    });
+
+    it('keeps echoing the same slug the org already had', async () => {
+      orgProfileNamed('Old Corp', 'legacy-slug');
+
+      const result = await handler(renameEvent({ name: 'New Corp' }), buildContext());
+
+      expect(result).toMatchObject({
+        statusCode: 200,
+        body: JSON.stringify({ name: 'New Corp', slug: 'legacy-slug' }),
       });
     });
 
-    it('releases the old slug reservation in the same transaction', async () => {
-      orgProfileNamed('Old Corp', 'old-corp');
-
-      await handler(renameEvent({ name: 'New Corp' }), buildContext());
-
-      expect(releaseDelete()).toMatchObject({
-        TableName: 'OrgTable',
-        Key: { pk: { S: 'SLUG#old-corp' }, sk: { S: 'LOOKUP' } },
-      });
-    });
-
-    it('releases nothing when the org had no slug yet', async () => {
-      // Predates the slug backfill: the rename gives the org a slug for the
-      // first time, rather than releasing a reservation that never existed.
+    it('omits the slug from the response for an org that predates it', async () => {
+      // Predates the slug backfill: a rename gives it no slug — only the
+      // backfill script and org creation ever assign one.
       orgProfileNamed('Old Corp', undefined);
 
-      await handler(renameEvent({ name: 'New Corp' }), buildContext());
+      const result = await handler(renameEvent({ name: 'New Corp' }), buildContext());
 
-      expect(releaseDelete()).toBeUndefined();
-      expect(reservationPut()).toMatchObject({
-        Item: { pk: { S: 'SLUG#new-corp' } },
-      });
-    });
-
-    it('probes past a slug another org already claimed', async () => {
-      slugTaken('new-corp');
-
-      await handler(renameEvent({ name: 'New Corp' }), buildContext());
-
-      expect(reservationPut()).toMatchObject({
-        Item: { pk: { S: 'SLUG#new-corp-2' } },
-      });
-      expect(updateInput().ExpressionAttributeValues).toMatchObject({
-        ':slug': { S: 'new-corp-2' },
+      expect(result).toMatchObject({
+        statusCode: 200,
+        body: JSON.stringify({ name: 'New Corp' }),
       });
     });
   });
@@ -446,7 +406,7 @@ describe('PATCH /api/org handler', () => {
 
       expect(result).toMatchObject({
         statusCode: 200,
-        body: JSON.stringify({ name: 'Old Corp', logoUrl: LOGO_URL }),
+        body: JSON.stringify({ name: 'Old Corp', slug: 'old-corp', logoUrl: LOGO_URL }),
       });
       // No slug work: just the profile update and the audit event.
       expect(transactItems()).toHaveLength(2);
@@ -513,11 +473,10 @@ describe('PATCH /api/org handler', () => {
 
       expect(result).toMatchObject({
         statusCode: 200,
-        body: JSON.stringify({ name: 'New Corp', slug: 'new-corp', logoUrl: LOGO_URL }),
+        body: JSON.stringify({ name: 'New Corp', slug: 'old-corp', logoUrl: LOGO_URL }),
       });
       expect(updateInput()).toMatchObject({
-        UpdateExpression:
-          'SET #name = :name, slug = :slug, nameConfirmed = :confirmed, logoUrl = :logoUrl',
+        UpdateExpression: 'SET #name = :name, nameConfirmed = :confirmed, logoUrl = :logoUrl',
         ExpressionAttributeValues: { ':logoUrl': { S: LOGO_URL } },
       });
       expect(auditedEvent()).toMatchObject({
@@ -533,7 +492,7 @@ describe('PATCH /api/org handler', () => {
 
       expect(result).toMatchObject({
         statusCode: 200,
-        body: JSON.stringify({ name: 'New Corp', slug: 'new-corp', logoUrl: LOGO_URL }),
+        body: JSON.stringify({ name: 'New Corp', logoUrl: LOGO_URL }),
       });
       // Untouched by this save, so the rename's own write never sets it again.
       expect(updateInput().UpdateExpression).not.toContain('logoUrl');
