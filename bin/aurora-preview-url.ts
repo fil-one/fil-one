@@ -525,7 +525,9 @@ async function presignGetObject(): Promise<string> {
   // Bin scripts must not import from @filone/shared, so the Aurora endpoints
   // are inlined — keep them in sync with getS3Endpoint in
   // packages/shared/src/constants.ts.
-  const endpoint = isProduction ? 'https://eu-west-1.s3.fil.one' : 'https://s3.dev.aur.lu';
+  const endpoint = isProduction
+    ? 'https://s3.eu-west-1.filonecontent.com'
+    : 'https://s3.dev.aur.lu';
   console.error('');
   console.error(`Endpoint: ${endpoint}`);
 
