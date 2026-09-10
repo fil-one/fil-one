@@ -5,7 +5,7 @@ import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 // at runtime (Node's type stripping does not resolve the backend's `./x.js`
 // specifiers), but vitest resolves it — so the mirror is held to it here rather
 // than by hand.
-import { SubscriptionKeys } from '@filone/backend/src/lib/subscription-store.js';
+import { SubscriptionKeys } from '@filone/backend/src/lib/subscription-store.ts';
 
 import {
   BillingKeys,
