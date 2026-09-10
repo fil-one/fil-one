@@ -5,7 +5,7 @@ import type {
   StorageUsageSample,
   TenantInfo,
 } from '../lib/service-orchestrator.js';
-import { S3Region, TenantStatus } from '@filone/shared';
+import { S3Region, type TenantStatus } from '@filone/shared';
 import type { AccessModel } from '@filone/shared';
 
 export interface FakeOrchestrator {

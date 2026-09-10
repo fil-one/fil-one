@@ -14,13 +14,13 @@ import {
   DuplicateTokenNameError,
   setupAuroraTenant,
 } from './aurora-backoffice.js';
-import { ACCESS_KEY_PERMISSIONS, ErrorResponse } from '@filone/shared';
+import { ACCESS_KEY_PERMISSIONS, type ErrorResponse } from '@filone/shared';
 import { createAuroraAccessKey } from './aurora-portal.js';
 import { reportMetric } from '../metrics.js';
 import { OrgDeletingError } from '../org-profile.js';
 import { OrgSetupStatus, isOrgSetupComplete } from '../org-setup-status.js';
 import { scanAndEmitStuckTenantCount } from '../stuck-tenant-metric.js';
-import { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
+import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ResponseBuilder } from '../response-builder.js';
 
 export { OrgSetupStatus };

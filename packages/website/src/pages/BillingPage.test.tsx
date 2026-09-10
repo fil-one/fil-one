@@ -123,7 +123,7 @@ function renderWithRouter(ui: () => React.JSX.Element) {
   return render(<RouterProvider router={router} />);
 }
 
-function renderPage(role = OrgRole.Owner) {
+function renderPage(role: OrgRole = OrgRole.Owner) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   // The page is gated on `billing.view` and its controls on `billing.manage`.
   seedPermissions(client, role);

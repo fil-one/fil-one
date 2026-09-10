@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 
-import { chunk } from './chunker.js';
-import { DEFAULT_CHUNK_SIZE, DEFAULT_OVERLAP_SIZE } from './constants.js';
+import { chunk } from './chunker.ts';
+import { DEFAULT_CHUNK_SIZE, DEFAULT_OVERLAP_SIZE } from './constants.ts';
 
 function hashChunks(chunks: string[]): string {
   return createHash('sha256').update(JSON.stringify(chunks)).digest('hex');

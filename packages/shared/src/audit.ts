@@ -1,5 +1,5 @@
-import type { OrgMembershipSource, OrgRole } from './api/org.js';
-import { RAG_KEY_DISPLAY_PREFIX_LENGTH } from './api/rag-api-keys.js';
+import type { OrgMembershipSource, OrgRole } from './api/org.ts';
+import { RAG_KEY_DISPLAY_PREFIX_LENGTH } from './api/rag-api-keys.ts';
 
 /**
  * The audit event envelope: what the control plane appends and what the M2

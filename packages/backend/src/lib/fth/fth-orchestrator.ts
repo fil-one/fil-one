@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto';
 import pRetry from 'p-retry';
 import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
-import { getS3Endpoint, S3Region, TenantStatus } from '@filone/shared';
+import { getS3Endpoint, S3Region, type TenantStatus } from '@filone/shared';
 import type { AccessKeyPermission, GranularPermission } from '@filone/shared';
 import { ensureTenantReady as ensureFthTenantReady } from './fth-tenant-setup.js';
 import {

@@ -112,13 +112,14 @@ export type ContactWriteOutcome = 'updated' | 'bootstrapped' | 'unmatched';
 
 /** Thrown for any HubSpot response that is neither success nor a handled 404. */
 export class HubSpotApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly responseBody: string,
-    operation: string,
-  ) {
+  readonly status: number;
+  readonly responseBody: string;
+
+  constructor(status: number, responseBody: string, operation: string) {
     super(`HubSpot ${operation} failed (${status}): ${responseBody}`);
     this.name = 'HubSpotApiError';
+    this.status = status;
+    this.responseBody = responseBody;
   }
 }
 

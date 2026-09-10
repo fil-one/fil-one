@@ -2,7 +2,12 @@ import { PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { Resource } from 'sst';
-import { TRIAL_STORAGE_LIMIT, TRIAL_EGRESS_LIMIT, formatBytes, TenantStatus } from '@filone/shared';
+import {
+  TRIAL_STORAGE_LIMIT,
+  TRIAL_EGRESS_LIMIT,
+  formatBytes,
+  type TenantStatus,
+} from '@filone/shared';
 import {
   getCustomerExistence,
   isStripeResourceMissing,

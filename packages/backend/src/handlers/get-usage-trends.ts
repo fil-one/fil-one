@@ -9,7 +9,7 @@ import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { authorize } from '../middleware/authorize.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { ProvisionedRegion, getProvisionedRegions } from '../lib/region-helpers.js';
+import { type ProvisionedRegion, getProvisionedRegions } from '../lib/region-helpers.js';
 
 function endOfDay(d: Date): Date {
   const eod = new Date(d);

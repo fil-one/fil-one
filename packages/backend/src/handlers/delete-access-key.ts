@@ -3,7 +3,7 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import { ErrorResponse, S3Region } from '@filone/shared';
+import { type ErrorResponse, S3Region } from '@filone/shared';
 import { Resource } from 'sst';
 import { userActor } from '../lib/audit.js';
 import { getDynamoClient } from '../lib/ddb-client.js';

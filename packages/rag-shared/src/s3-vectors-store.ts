@@ -9,9 +9,9 @@ import {
 } from '@aws-sdk/client-s3vectors';
 import type { DocumentType } from '@smithy/types';
 
-import { EMBEDDING_DIMENSION, MAX_METADATA_BYTES } from './constants.js';
-import type { VectorQueryResult, VectorStoreChunk } from './schemas.js';
-import type { EnsureIndexOptions, QueryOptions, VectorStore } from './vector-store.js';
+import { EMBEDDING_DIMENSION, MAX_METADATA_BYTES } from './constants.ts';
+import type { VectorQueryResult, VectorStoreChunk } from './schemas.ts';
+import type { EnsureIndexOptions, QueryOptions, VectorStore } from './vector-store.ts';
 
 /**
  * Metadata key under which the chunk's `objectKey` is stored. It is left

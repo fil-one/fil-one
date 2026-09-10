@@ -3,7 +3,7 @@ import {
   DeleteAccountSchema,
   DeletionCodeSchema,
   DELETION_CODE_LENGTH,
-} from './account-deletion.js';
+} from './account-deletion.ts';
 
 describe('DeletionCodeSchema', () => {
   it.each(['000000', '123456', '999999'])('accepts "%s"', (code) => {

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { OrgRole } from './org.js';
+import { OrgRole } from './org.ts';
 
 /**
  * Invitations: the only way a second member reaches an organization.

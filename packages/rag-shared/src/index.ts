@@ -7,23 +7,23 @@ export {
   EMBEDDING_DIMENSION,
   EMBEDDING_MODEL_ID,
   MAX_METADATA_BYTES,
-} from './constants.js';
+} from './constants.ts';
 
-export { embed, embedMany } from './embed.js';
+export { embed, embedMany } from './embed.ts';
 
-export { complete } from './complete.js';
-export type { CompleteOptions } from './complete.js';
+export { complete } from './complete.ts';
+export type { CompleteOptions } from './complete.ts';
 
-export { chunk } from './chunker.js';
-export type { ChunkingOptions } from './chunker.js';
+export { chunk } from './chunker.ts';
+export type { ChunkingOptions } from './chunker.ts';
 
-export { extractText } from './extractor.js';
+export { extractText } from './extractor.ts';
 
-export { extractTextFromPdf } from './pdf-extractor.js';
+export { extractTextFromPdf } from './pdf-extractor.ts';
 
-export { S3VectorsStore } from './s3-vectors-store.js';
+export { S3VectorsStore } from './s3-vectors-store.ts';
 
-export type { EnsureIndexOptions, VectorStore } from './vector-store.js';
+export type { EnsureIndexOptions, VectorStore } from './vector-store.ts';
 
-export { VectorQueryResultSchema, VectorStoreChunkSchema } from './schemas.js';
-export type { VectorQueryResult, VectorStoreChunk } from './schemas.js';
+export { VectorQueryResultSchema, VectorStoreChunkSchema } from './schemas.ts';
+export type { VectorQueryResult, VectorStoreChunk } from './schemas.ts';

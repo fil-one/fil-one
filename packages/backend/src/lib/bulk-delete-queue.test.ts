@@ -11,7 +11,11 @@ vi.mock('@aws-sdk/client-sqs', () => ({
     send = sendMock;
   },
   SendMessageCommand: class {
-    constructor(public input: Record<string, string>) {}
+    input: Record<string, string>;
+
+    constructor(input: Record<string, string>) {
+      this.input = input;
+    }
   },
 }));
 

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { S3Region, supportsBucketManagement } from '../constants.js';
+import { S3Region, supportsBucketManagement } from '../constants.ts';
 
 export type AccessKeyStatus = 'active' | 'inactive';
 

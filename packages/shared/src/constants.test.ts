@@ -24,7 +24,7 @@ import {
   S3_REGION,
   S3Region,
   Stage,
-} from './constants.js';
+} from './constants.ts';
 
 describe('constants', () => {
   it('TB_BYTES equals 10^12', () => {

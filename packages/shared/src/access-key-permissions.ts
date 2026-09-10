@@ -1,11 +1,11 @@
-import { GRANULAR_PERMISSION_MAP } from './api/access-keys.js';
+import { GRANULAR_PERMISSION_MAP } from './api/access-keys.ts';
 import type {
   AccessKeyPermission,
   GranularPermission,
   ObjectPermission,
-} from './api/access-keys.js';
-import { permissionsForRole, roleHasPermission } from './permissions.js';
-import type { Permission } from './permissions.js';
+} from './api/access-keys.ts';
+import { permissionsForRole, roleHasPermission } from './permissions.ts';
+import type { Permission } from './permissions.ts';
 
 /**
  * What a member must already hold to put a permission on a new access key.

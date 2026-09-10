@@ -10,6 +10,8 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
     "declaration": true,
     // We use esbuild to transpile and bundle the code,
     // so we only need the declaration files.
