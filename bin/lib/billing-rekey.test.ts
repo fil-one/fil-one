@@ -1,14 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 
-// The canonical source this file's mirror copies. A bin script cannot import it
-// at runtime (Node's type stripping does not resolve the backend's `./x.js`
-// specifiers), but vitest resolves it — so the mirror is held to it here rather
-// than by hand.
 import { SubscriptionKeys } from '@filone/backend/src/lib/subscription-store.ts';
 
 import {
-  BillingKeys,
   buildCopyItem,
   buildCopyTransactItems,
   buildRevertItem,
@@ -47,7 +42,7 @@ const TABLE = 'BillingTable';
 
 /** A legacy row with the attributes the classification and the copy read. */
 function legacyRow(overrides: Partial<SubscriptionRow> = {}): SubscriptionRow {
-  const pk = overrides.pk ?? BillingKeys.legacyPk(USER_ID);
+  const pk = overrides.pk ?? SubscriptionKeys.legacyPk(USER_ID);
   const orgId = 'orgId' in overrides ? overrides.orgId : ORG_ID;
   const subscriptionId = 'subscriptionId' in overrides ? overrides.subscriptionId : 'sub_1';
   const updatedAt = 'updatedAt' in overrides ? overrides.updatedAt : UPDATED_AT;
@@ -75,7 +70,7 @@ function copiedRow(
   source: SubscriptionRow,
   overrides: Record<string, string> = {},
 ): SubscriptionRow {
-  const pk = BillingKeys.orgPk(ORG_ID);
+  const pk = SubscriptionKeys.orgPk(ORG_ID);
   const carried = Object.fromEntries(
     Object.entries(source.attributes)
       .filter(([key]) => key !== 'pk')
@@ -111,7 +106,7 @@ function copiedRow(
  * subscription as {@link legacyRow} unless a test is about the two disagreeing.
  */
 function applicationRow(overrides: Record<string, string> = {}): SubscriptionRow {
-  const pk = BillingKeys.orgPk(ORG_ID);
+  const pk = SubscriptionKeys.orgPk(ORG_ID);
   const stored: Record<string, string> = {
     pk,
     sk: 'SUBSCRIPTION',
@@ -137,7 +132,7 @@ function attributes(values: Record<string, string>): Record<string, AttributeVal
 
 /** A legacy row with no `orgId` — the class --verify cannot pass on its own. */
 function orglessRow(overrides: Partial<SubscriptionRow> = {}): SubscriptionRow {
-  return legacyRow({ pk: BillingKeys.legacyPk('orphan-1'), orgId: undefined, ...overrides });
+  return legacyRow({ pk: SubscriptionKeys.legacyPk('orphan-1'), orgId: undefined, ...overrides });
 }
 
 /** The acceptance an operator would paste back after inspecting `row`. */
@@ -159,24 +154,23 @@ const EMPTY_SCAN: BillingScanCounts = {
 };
 
 // ---------------------------------------------------------------------------
-// The mirror
+// Key parsers
 // ---------------------------------------------------------------------------
 
-describe('BillingKeys mirrors the backend', () => {
-  it('builds the same keys the application reads and writes', () => {
-    expect(BillingKeys.orgPk(ORG_ID)).toBe(SubscriptionKeys.orgPk(ORG_ID));
-    expect(BillingKeys.orgPkPrefix()).toBe(SubscriptionKeys.orgPkPrefix());
-    expect(BillingKeys.legacyPk(USER_ID)).toBe(SubscriptionKeys.legacyPk(USER_ID));
-    expect(BillingKeys.legacyPkPrefix()).toBe(SubscriptionKeys.legacyPkPrefix());
-    expect(BillingKeys.subscriptionSk()).toBe(SubscriptionKeys.sk());
+describe('parseLegacyPk and parseOrgPk', () => {
+  it('reads the id out of a legacy key', () => {
+    expect(parseLegacyPk(SubscriptionKeys.legacyPk(USER_ID))).toBe(USER_ID);
   });
 
-  it('parses a legacy key the same way', () => {
-    expect(parseLegacyPk(BillingKeys.legacyPk(USER_ID))).toBe(
-      SubscriptionKeys.parseLegacyPk(SubscriptionKeys.legacyPk(USER_ID)),
-    );
-    expect(parseLegacyPk(BillingKeys.orgPk(ORG_ID))).toBeUndefined();
-    expect(parseOrgPk(BillingKeys.orgPk(ORG_ID))).toBe(ORG_ID);
+  it('rejects an org key as a legacy key', () => {
+    expect(parseLegacyPk(SubscriptionKeys.orgPk(ORG_ID))).toBeUndefined();
+  });
+
+  it('reads the id out of an org key', () => {
+    expect(parseOrgPk(SubscriptionKeys.orgPk(ORG_ID))).toBe(ORG_ID);
+  });
+
+  it('rejects an org key whose id contains a separator', () => {
     expect(parseOrgPk('ORG#a#b')).toBeUndefined();
   });
 });
@@ -295,7 +289,10 @@ describe('classifyOrgBilling', () => {
   it('surfaces a collision even when an application row exists', () => {
     // Two subscriptions claiming one org is a fact about the account, not about
     // which key its row happens to be on.
-    const rival = legacyRow({ pk: BillingKeys.legacyPk(OTHER_USER_ID), subscriptionId: 'sub_2' });
+    const rival = legacyRow({
+      pk: SubscriptionKeys.legacyPk(OTHER_USER_ID),
+      subscriptionId: 'sub_2',
+    });
 
     expect(
       classifyOrgBilling(state({ legacyRows: [legacyRow(), rival], orgRow: applicationRow() })),
@@ -313,7 +310,7 @@ describe('classifyOrgBilling', () => {
   describe('when several legacy rows name one org', () => {
     const first = legacyRow({ updatedAt: UPDATED_AT });
     const second = legacyRow({
-      pk: BillingKeys.legacyPk(OTHER_USER_ID),
+      pk: SubscriptionKeys.legacyPk(OTHER_USER_ID),
       updatedAt: NEWER,
     });
 
@@ -332,7 +329,7 @@ describe('classifyOrgBilling', () => {
 
     it('halts as a collision when they name different subscriptions', () => {
       const rival = legacyRow({
-        pk: BillingKeys.legacyPk(OTHER_USER_ID),
+        pk: SubscriptionKeys.legacyPk(OTHER_USER_ID),
         subscriptionId: 'sub_2',
       });
 
@@ -345,7 +342,7 @@ describe('classifyOrgBilling', () => {
 
     it('copies the row an operator named, whatever its updatedAt', () => {
       const rival = legacyRow({
-        pk: BillingKeys.legacyPk(OTHER_USER_ID),
+        pk: SubscriptionKeys.legacyPk(OTHER_USER_ID),
         subscriptionId: 'sub_2',
         updatedAt: NEWER,
       });
@@ -376,7 +373,7 @@ describe('classifyOrgBilling', () => {
       // row. Re-deriving would halt on the same collision every run, and would
       // need --resolve-collisions passed forever.
       const rival = legacyRow({
-        pk: BillingKeys.legacyPk(OTHER_USER_ID),
+        pk: SubscriptionKeys.legacyPk(OTHER_USER_ID),
         subscriptionId: 'sub_2',
         updatedAt: NEWER,
       });
@@ -390,7 +387,7 @@ describe('classifyOrgBilling', () => {
     it('names the anomaly when the recorded winner is gone and another claimant survives', () => {
       // Not a dead end: the halt text carries what to check in Stripe and what
       // to do either way.
-      const copied = copiedRow(legacyRow({ pk: BillingKeys.legacyPk(OTHER_USER_ID) }));
+      const copied = copiedRow(legacyRow({ pk: SubscriptionKeys.legacyPk(OTHER_USER_ID) }));
 
       const plan = classifyOrgBilling(state({ legacyRows: [first], orgRow: copied }));
       expect(plan).toMatchObject({ kind: 'anomaly', reason: 'foreign-org-row' });
@@ -403,7 +400,7 @@ describe('classifyOrgBilling', () => {
       // disagree; collapsing their missing ids into one Set entry read as
       // agreement.
       const nameless = legacyRow({
-        pk: BillingKeys.legacyPk(OTHER_USER_ID),
+        pk: SubscriptionKeys.legacyPk(OTHER_USER_ID),
         subscriptionId: '',
       });
 
@@ -425,9 +422,9 @@ describe('buildCopyItem', () => {
   it('carries every source attribute, re-keyed to the org', () => {
     const { item, pk } = buildCopyItem(plan, NOW);
 
-    expect(pk).toBe(BillingKeys.orgPk(ORG_ID));
+    expect(pk).toBe(SubscriptionKeys.orgPk(ORG_ID));
     expect(item).toStrictEqual({
-      pk: { S: BillingKeys.orgPk(ORG_ID) },
+      pk: { S: SubscriptionKeys.orgPk(ORG_ID) },
       sk: { S: 'SUBSCRIPTION' },
       orgId: { S: ORG_ID },
       userId: { S: USER_ID },
@@ -435,7 +432,7 @@ describe('buildCopyItem', () => {
       stripeCustomerId: { S: 'cus_1' },
       subscriptionStatus: { S: 'active' },
       updatedAt: { S: UPDATED_AT },
-      [REKEY_ATTRIBUTES.from]: { S: BillingKeys.legacyPk(USER_ID) },
+      [REKEY_ATTRIBUTES.from]: { S: SubscriptionKeys.legacyPk(USER_ID) },
       [REKEY_ATTRIBUTES.at]: { S: NOW },
       [REKEY_ATTRIBUTES.sourceUpdatedAt]: { S: UPDATED_AT },
     });
@@ -465,7 +462,7 @@ describe('buildCopyTransactItems', () => {
     });
     expect(check.ConditionCheck).toStrictEqual({
       TableName: TABLE,
-      Key: { pk: { S: BillingKeys.legacyPk(USER_ID) }, sk: { S: 'SUBSCRIPTION' } },
+      Key: { pk: { S: SubscriptionKeys.legacyPk(USER_ID) }, sk: { S: 'SUBSCRIPTION' } },
       ConditionExpression: '#updatedAt = :sourceUpdatedAt',
       ExpressionAttributeNames: { '#updatedAt': 'updatedAt' },
       ExpressionAttributeValues: { ':sourceUpdatedAt': { S: UPDATED_AT } },
@@ -502,7 +499,7 @@ describe('buildCopyTransactItems', () => {
         '#updatedAt': 'updatedAt',
       },
       ExpressionAttributeValues: {
-        ':source': { S: BillingKeys.legacyPk(USER_ID) },
+        ':source': { S: SubscriptionKeys.legacyPk(USER_ID) },
         ':orgUpdatedAt': { S: UPDATED_AT },
       },
     });
@@ -511,14 +508,14 @@ describe('buildCopyTransactItems', () => {
 
 describe('buildRevertItem', () => {
   it('deletes only a row still copied from the source the revert read', () => {
-    const [item] = buildRevertItem(ORG_ID, BillingKeys.legacyPk(USER_ID), TABLE);
+    const [item] = buildRevertItem(ORG_ID, SubscriptionKeys.legacyPk(USER_ID), TABLE);
 
     expect(item.Delete).toStrictEqual({
       TableName: TABLE,
-      Key: { pk: { S: BillingKeys.orgPk(ORG_ID) }, sk: { S: 'SUBSCRIPTION' } },
+      Key: { pk: { S: SubscriptionKeys.orgPk(ORG_ID) }, sk: { S: 'SUBSCRIPTION' } },
       ConditionExpression: 'attribute_exists(pk) AND #rekeyedFrom = :source',
       ExpressionAttributeNames: { '#rekeyedFrom': REKEY_ATTRIBUTES.from },
-      ExpressionAttributeValues: { ':source': { S: BillingKeys.legacyPk(USER_ID) } },
+      ExpressionAttributeValues: { ':source': { S: SubscriptionKeys.legacyPk(USER_ID) } },
     });
   });
 
@@ -528,11 +525,11 @@ describe('buildRevertItem', () => {
     // serves one carrying no orgId. A revert conditioned on existence alone
     // deletes the org row, prints DELETED, and leaves the account reading as
     // having no subscription at all.
-    const [, check] = buildRevertItem(ORG_ID, BillingKeys.legacyPk(USER_ID), TABLE);
+    const [, check] = buildRevertItem(ORG_ID, SubscriptionKeys.legacyPk(USER_ID), TABLE);
 
     expect(check.ConditionCheck).toStrictEqual({
       TableName: TABLE,
-      Key: { pk: { S: BillingKeys.legacyPk(USER_ID) }, sk: { S: 'SUBSCRIPTION' } },
+      Key: { pk: { S: SubscriptionKeys.legacyPk(USER_ID) }, sk: { S: 'SUBSCRIPTION' } },
       ConditionExpression:
         'attribute_exists(pk) AND (attribute_not_exists(#orgId) OR #orgId = :orgId)',
       ExpressionAttributeNames: { '#orgId': 'orgId' },
@@ -583,7 +580,7 @@ describe('unkeyableOrgAnomalies', () => {
     // row it fails on is one it wrote.
     const anomalies = unkeyableOrgAnomalies([
       legacyRow({ orgId: 'a#b' }),
-      legacyRow({ pk: BillingKeys.legacyPk(OTHER_USER_ID), orgId: 'a#b' }),
+      legacyRow({ pk: SubscriptionKeys.legacyPk(OTHER_USER_ID), orgId: 'a#b' }),
     ]);
 
     expect(anomalies).toHaveLength(1);
@@ -591,7 +588,7 @@ describe('unkeyableOrgAnomalies', () => {
       kind: 'anomaly',
       orgId: 'a#b',
       reason: 'no-org-id',
-      rows: [BillingKeys.legacyPk(USER_ID), BillingKeys.legacyPk(OTHER_USER_ID)],
+      rows: [SubscriptionKeys.legacyPk(USER_ID), SubscriptionKeys.legacyPk(OTHER_USER_ID)],
     });
     expect(anomalies[0].detail).toContain('cannot be half of a key');
   });
@@ -645,7 +642,7 @@ describe('dispositionReread', () => {
 
     expect(dispositionReread(plan)).toStrictEqual({
       outcome: 'skipped',
-      message: `${BillingKeys.orgPk(ORG_ID)} — no longer needs a copy (backfill)`,
+      message: `${SubscriptionKeys.orgPk(ORG_ID)} — no longer needs a copy (backfill)`,
     });
   });
 
@@ -653,7 +650,7 @@ describe('dispositionReread', () => {
     // A run that counts this as an ordinary skip ends with exit 0 and zero
     // anomalies reported, for an org nothing copied and nothing will.
     const rival = legacyRow({
-      pk: BillingKeys.legacyPk(OTHER_USER_ID),
+      pk: SubscriptionKeys.legacyPk(OTHER_USER_ID),
       subscriptionId: 'sub_2',
     });
     const plan = classifyOrgBilling(state({ legacyRows: [legacyRow(), rival] }));
@@ -678,7 +675,7 @@ describe('dispositionReread', () => {
 describe('parseResolvedCollisions', () => {
   it('accepts the prefixed forms the report prints', () => {
     const resolved = parseResolvedCollisions(
-      `${BillingKeys.orgPk(ORG_ID)}=${BillingKeys.legacyPk(USER_ID)}`,
+      `${SubscriptionKeys.orgPk(ORG_ID)}=${SubscriptionKeys.legacyPk(USER_ID)}`,
     );
 
     expect(resolved.get(ORG_ID)).toBe(USER_ID);
@@ -726,13 +723,13 @@ describe('parseAcceptedOrgless', () => {
       updatedAt: UPDATED_AT,
       subscriptionId: 'sub_1',
     });
-    expect(accepted.get(BillingKeys.legacyPk('orphan-2'))).toMatchObject({
+    expect(accepted.get(SubscriptionKeys.legacyPk('orphan-2'))).toMatchObject({
       subscriptionId: 'sub_2',
     });
   });
 
   it('refuses a key with no state, rather than reading it as an acceptance', () => {
-    const { accepted, malformed } = parseAcceptedOrgless(BillingKeys.legacyPk('orphan-1'));
+    const { accepted, malformed } = parseAcceptedOrgless(SubscriptionKeys.legacyPk('orphan-1'));
 
     expect(accepted.size).toBe(0);
     expect(malformed[0]).toContain('expected');
@@ -768,7 +765,7 @@ describe('validateResolvedCollisions', () => {
   it('accepts a resolution naming a row that claims the org', () => {
     const rows = [
       legacyRow(),
-      legacyRow({ pk: BillingKeys.legacyPk(OTHER_USER_ID), subscriptionId: 'sub_2' }),
+      legacyRow({ pk: SubscriptionKeys.legacyPk(OTHER_USER_ID), subscriptionId: 'sub_2' }),
     ];
     const states = [state({ legacyRows: rows })];
 
@@ -787,7 +784,7 @@ describe('validateResolvedCollisions', () => {
   });
 
   it('names a resolution for an org whose rows agree about the subscription', () => {
-    const twin = legacyRow({ pk: BillingKeys.legacyPk(OTHER_USER_ID), updatedAt: NEWER });
+    const twin = legacyRow({ pk: SubscriptionKeys.legacyPk(OTHER_USER_ID), updatedAt: NEWER });
     const problems = validateResolvedCollisions(new Map([[ORG_ID, USER_ID]]), [
       state({ legacyRows: [legacyRow(), twin] }),
     ]);
@@ -803,7 +800,7 @@ describe('validateResolvedCollisions', () => {
 
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain('does not claim this org');
-    expect(problems[0]).toContain(BillingKeys.legacyPk(USER_ID));
+    expect(problems[0]).toContain(SubscriptionKeys.legacyPk(USER_ID));
   });
 });
 
@@ -932,7 +929,7 @@ describe('verifyBillingRekey', () => {
       plans: [],
       scan: EMPTY_SCAN,
       orglessRows: [],
-      unkeyableOrgIds: [`${BillingKeys.legacyPk(USER_ID)} carries orgId="a#b"`],
+      unkeyableOrgIds: [`${SubscriptionKeys.legacyPk(USER_ID)} carries orgId="a#b"`],
     });
     const check = checks.find((c) => c.name.startsWith('Every SUBSCRIPTION row has a key'))!;
 
@@ -988,7 +985,7 @@ describe('verifyBillingRekey', () => {
 
   it('fails an unresolved collision', () => {
     const rival = legacyRow({
-      pk: BillingKeys.legacyPk(OTHER_USER_ID),
+      pk: SubscriptionKeys.legacyPk(OTHER_USER_ID),
       subscriptionId: 'sub_2',
     });
     const { named } = checksFor([state({ legacyRows: [legacyRow(), rival] })]);
@@ -1045,7 +1042,7 @@ describe('formatBillingPlanReport', () => {
   });
 
   it('enumerates the rows with no orgId as the tokens an acceptance pastes back', () => {
-    const rows = [orglessRow(), orglessRow({ pk: BillingKeys.legacyPk('orphan-2') })];
+    const rows = [orglessRow(), orglessRow({ pk: SubscriptionKeys.legacyPk('orphan-2') })];
     const report = formatBillingPlanReport(
       { ...EMPTY_SCAN, orglessRows: 2 },
       [],
@@ -1058,7 +1055,7 @@ describe('formatBillingPlanReport', () => {
 
   it('lists an anomaly with the reason it is one', () => {
     const rival = legacyRow({
-      pk: BillingKeys.legacyPk(OTHER_USER_ID),
+      pk: SubscriptionKeys.legacyPk(OTHER_USER_ID),
       subscriptionId: 'sub_2',
     });
     const plans = [classifyOrgBilling(state({ legacyRows: [legacyRow(), rival] }))];
