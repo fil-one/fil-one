@@ -156,7 +156,8 @@ const S3_DATA_DOMAIN = 'filonecontent.com';
 
 /**
  * Build the S3-compatible endpoint URL for a region and stage. Non-production
- * stages talk to each operator's own hostname directly.
+ * stages use a per-stage hostname under the data domain where the operator
+ * serves one, and the operator's own hostname otherwise.
  */
 export function getS3Endpoint(region: S3Region, stage: StageLike): string {
   //TODO change this when aurora supports staging URL structure through our DNS.
