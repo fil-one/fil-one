@@ -27,7 +27,9 @@ export function UserAvatar({ src, initial, className }: UserAvatarProps) {
     <span
       aria-hidden="true"
       className={cn(
-        'relative flex h-7 w-7 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand-600 text-xs font-semibold text-white',
+        // Same zinc pairing as Badge's strong grey variant — already the
+        // console's established, AA-passing grey (well past 4.5:1).
+        'relative flex h-7 w-7 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-zinc-200 text-xs font-semibold text-zinc-800',
         className,
       )}
     >

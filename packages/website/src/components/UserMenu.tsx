@@ -1,5 +1,6 @@
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
 import {
+  ArrowUpRightIcon,
   BookOpenIcon,
   CaretUpDownIcon,
   ChatCircleIcon,
@@ -13,7 +14,7 @@ import { BaseLink } from './BaseLink.js';
 import { UserAvatar } from './UserAvatar.js';
 
 const itemClassName =
-  'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-zinc-600 transition-colors data-focus:bg-zinc-100 data-focus:text-zinc-900';
+  'flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-xs text-zinc-600 transition-colors data-focus:bg-zinc-100 data-focus:text-zinc-900';
 
 type UserMenuProps = {
   src: string | undefined;
@@ -51,9 +52,9 @@ export function UserMenu({ src, initial, displayName, collapsed, testId }: UserM
         ].join(' ')}
       >
         {/* Smaller than the 11px token floor on purpose: two initials in a 20px
-            circle. `text-white` is re-asserted so the size override cannot drop
-            the base colour. */}
-        <UserAvatar src={src} initial={initial} className="h-5 w-5 text-[10px] text-white" />
+            circle. `text-zinc-800` is re-asserted so the size override cannot
+            drop the base colour. */}
+        <UserAvatar src={src} initial={initial} className="h-5 w-5 text-[10px] text-zinc-800" />
         {!collapsed && (
           <>
             <span className="min-w-0 flex-1 truncate text-left text-xs leading-tight">
@@ -71,16 +72,17 @@ export function UserMenu({ src, initial, displayName, collapsed, testId }: UserM
         className="z-50 mb-1 w-52 rounded-lg border border-zinc-200 bg-white p-1 shadow-md focus:outline-none"
       >
         <MenuItem as={BaseLink} href="/settings" className={itemClassName}>
-          <GearIcon size={16} className="flex-shrink-0 text-zinc-400" />
+          <GearIcon size={13} className="flex-shrink-0 text-zinc-400" />
           Settings
         </MenuItem>
-        <MenuItem as={BaseLink} href={DOCS_URL} className={itemClassName}>
-          <BookOpenIcon size={16} className="flex-shrink-0 text-zinc-400" />
-          Documentation
-        </MenuItem>
         <MenuItem as={BaseLink} href="/support" className={itemClassName}>
-          <ChatCircleIcon size={16} className="flex-shrink-0 text-zinc-400" />
+          <ChatCircleIcon size={13} className="flex-shrink-0 text-zinc-400" />
           Support
+        </MenuItem>
+        <MenuItem as={BaseLink} href={DOCS_URL} className={itemClassName}>
+          <BookOpenIcon size={13} className="flex-shrink-0 text-zinc-400" />
+          Documentation
+          <ArrowUpRightIcon size={12} className="ml-auto flex-shrink-0 text-zinc-400" />
         </MenuItem>
         <div className="my-1 border-t border-zinc-100" />
         <MenuItem>
@@ -90,7 +92,7 @@ export function UserMenu({ src, initial, displayName, collapsed, testId }: UserM
             onClick={logout}
             className={itemClassName}
           >
-            <SignOutIcon size={16} className="flex-shrink-0 text-zinc-400" />
+            <SignOutIcon size={13} className="flex-shrink-0 text-zinc-400" />
             Log out
           </button>
         </MenuItem>

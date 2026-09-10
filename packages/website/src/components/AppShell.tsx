@@ -239,7 +239,12 @@ export function AppShell({ children }: AppShellProps) {
   }, [mobileOpen, closeDrawer]);
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
+    // The console's own default background: zinc-50 everywhere, so anything
+    // not explicitly given a different color (the sidebar and the frame
+    // around the content window, both bg-white below) reads as the same
+    // soft grey as the content window itself, whatever gets revealed by a
+    // short page, a resize, or a scroll bounce overshooting its bounds.
+    <div className="flex h-screen flex-col overflow-hidden bg-zinc-50">
       <TenantBanners
         tenantStatus={tenantStatus}
         mayReadBilling={mayReadBilling}
@@ -306,9 +311,19 @@ export function AppShell({ children }: AppShellProps) {
             softly shadowed panel floating on the white canvas, with the sidebar
             outside it (Linear's layout). The `lg:` insets and card chrome are
             desktop-only; on mobile the content stays edge to edge. The panel is
-            the scroll container, so its rounded corners clip the content. */}
+            the scroll container, so its rounded corners clip the content.
+            `main` itself stays transparent: on mobile it sits directly on the
+            grey root with nothing to override, and on desktop its `lg:`
+            padding sits inside the white frame above, so either way it already
+            shows the right color without needing its own. */}
         <main className="flex flex-1 flex-col overflow-hidden lg:px-2 lg:pt-2">
-          <div className="flex flex-1 flex-col overflow-auto bg-zinc-50 lg:rounded-xl lg:border lg:border-zinc-200 lg:shadow-xs">
+          {/* `overscroll-contain`: a fast fling can overshoot the panel's own
+              scroll bounds and chain onto the document's scroll, which
+              briefly reveals `<body>`'s background (unset, so browser-default
+              white) instead of anything this app styles. Containing the
+              overscroll here keeps the bounce inside the panel, where its own
+              background already matches. */}
+          <div className="flex flex-1 flex-col overflow-auto overscroll-contain bg-zinc-50 lg:rounded-xl lg:border lg:border-zinc-200 lg:shadow-xs">
             {/* Mobile top bar */}
             <div className="sticky top-0 z-20 flex h-14 flex-shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-3 lg:hidden">
               <MobileUserMenu />

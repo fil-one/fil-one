@@ -326,6 +326,12 @@ const MANIFEST = [
     requires: 'members.manage',
     capsInHandler: true,
   },
+  // `members.manage` is what removing someone ELSE costs, capped the same way
+  // update-member-role's is. A caller targeting their own `userId` is a
+  // different verb — leaving — and needs no permission at all: the handler's
+  // gate is membership alone, and it waives `members.manage` for that one
+  // case rather than the manifest naming a `members.leave` permission
+  // nothing else would ever check.
   {
     method: 'DELETE',
     path: '/api/org/members/{userId}',
@@ -409,6 +415,16 @@ const MANIFEST = [
     method: 'PATCH',
     path: '/api/me/profile',
     handler: 'update-profile',
+    category: 'authenticated',
+    requires: 'self',
+  },
+  // A place to put a personal avatar before PATCH /api/me/profile persists it.
+  // Same shape as the org logo's own presign step, `self` rather than
+  // `in-handler` because the caller's own identity is the whole requirement.
+  {
+    method: 'POST',
+    path: '/api/me/avatar-upload-url',
+    handler: 'presign-avatar',
     category: 'authenticated',
     requires: 'self',
   },
