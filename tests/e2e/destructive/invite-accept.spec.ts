@@ -111,7 +111,7 @@ test.describe('trial user joins a second organization', () => {
     await page.waitForURL((url) => url.pathname === '/dashboard');
     await expect(page.getByTestId('user-profile')).toContainText(hostOrgName);
 
-    await page.goto('/organization');
+    await page.goto('/members');
     await expect(memberRow(page, hostUserId)).toBeVisible();
     await expect(memberRow(page, inviteeUserId)).toHaveAttribute('data-member-role', 'member');
 
@@ -130,7 +130,7 @@ test.describe('trial user joins a second organization', () => {
 
     // The rosters are different lists, not the same one re-rendered: the org the
     // invitee came from has nobody else in it.
-    await page.goto('/organization');
+    await page.goto('/members');
     await expect(memberRow(page, inviteeUserId)).toBeVisible();
     await expect(memberRow(page, hostUserId)).toHaveCount(0);
   });

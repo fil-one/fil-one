@@ -1,3 +1,8 @@
+import type { MeResponse } from '@filone/shared';
+
+import { queryClient, queryKeys } from './query-client.js';
+import { findMembershipByOrgId } from './org-membership-slug.js';
+
 const ACTIVE_ORG_KEY = 'filone:activeOrgId';
 const RECONCILED_KEY = 'filone:activeOrgReconciled';
 
@@ -188,22 +193,66 @@ export function clearActiveOrgOnNavigation(): void {
 }
 
 /**
- * Switch this tab to another org: stash the choice and load the console's root.
+ * Switch this tab to another org: stash the choice and navigate into it.
  *
- * A full page load rather than query invalidation. No query key carries an org
- * dimension, and `/me` is cached under two keys with a ten-minute stale time, so
- * a load is the one mechanism that cannot leak org A's cache into org B's view.
- * A soft switch — org id in every key — is later polish.
+ * `queryClient.clear()` rather than a full page load. No query key carries an
+ * org dimension, and `/me` is cached under two keys with a ten-minute stale
+ * time, so clearing every cached query is what used to make a full reload the
+ * only safe option — with the cache empty, a router navigation cannot leak
+ * org A's data into org B's view either, and it does not cost a full document
+ * load to get there. A soft switch — org id in every key instead of a clear —
+ * is later polish.
  *
- * The root rather than the current URL: bucket names, key ids and every other
- * path segment are org-scoped, so reloading in place would greet the user with a
- * not-found page in the org they just chose.
+ * The target org's own `/dashboard` rather than the current URL: bucket names,
+ * key ids and every other path segment are org-scoped, so navigating in place
+ * would greet the user with a not-found page in the org they just chose.
+ *
+ * The router import is dynamic to avoid a cycle: `router.ts` pulls in every
+ * route, several of which import this module (via `api.ts`) at the top level,
+ * so a static import back here would be resolved before either side's module
+ * body has finished running.
+ *
+ * The slug comes from this tab's own cached `/me`, not from the caller
+ * (`OrgSwitcher` only ever had the org id to give): a target org without a
+ * slug yet — a real possibility until the backend's slug backfill has run for
+ * this stage — falls back to the unscoped `/dashboard`, which resolves the
+ * same org id into a slugged URL itself once it exists.
  */
 export function switchToOrg(orgId: string): void {
   const previousOrgId = getActiveOrgId();
+  const targetSlug = resolveOrgSlug(orgId);
   setActiveOrgId(orgId);
-  latchUntilNavigation(previousOrgId);
-  window.location.assign('/');
+  setSwitching(true);
+  queryClient.clear();
+
+  void (async () => {
+    try {
+      const { router } = await import('../router.js');
+      if (targetSlug) {
+        await router.navigate({ to: '/$orgSlug/dashboard', params: { orgSlug: targetSlug } });
+      } else {
+        await router.navigate({ to: '/dashboard' });
+      }
+      setSwitching(false);
+    } catch (error) {
+      // The navigation was blocked or failed — a `beforeLoad` redirect threw
+      // somewhere unexpected, say. Roll the stash back to where this tab was,
+      // the same recovery a cancelled full-page switch used to get from
+      // `latchUntilNavigation`'s `pagehide` listener, which a client-side
+      // navigation never fires.
+      console.warn('[active-org] The switch navigation did not complete — rolling back', error);
+      if (previousOrgId === null) clearActiveOrgId();
+      else setActiveOrgId(previousOrgId);
+      setSwitching(false);
+    }
+  })();
+}
+
+/** The slug for `orgId`, as this tab's cached `/me` currently knows it. */
+function resolveOrgSlug(orgId: string): string | undefined {
+  const me = queryClient.getQueryData<MeResponse>(queryKeys.me);
+  if (!me) return undefined;
+  return findMembershipByOrgId(me, orgId)?.slug;
 }
 
 /**

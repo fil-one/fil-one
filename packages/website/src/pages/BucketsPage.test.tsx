@@ -24,6 +24,9 @@ vi.mock('@tanstack/react-router', () => ({
     <a href={to}>{children}</a>
   ),
   useNavigate: () => vi.fn(),
+  // `useOrgSlug`/`BaseLink` read the active org's slug through this; no org
+  // context here, so `orgSlug` comes back empty and paths render unprefixed.
+  useParams: () => ({}),
 }));
 
 // ---------------------------------------------------------------------------

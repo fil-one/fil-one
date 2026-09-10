@@ -38,6 +38,7 @@ import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
 import { queryKeys, queryClient } from '../lib/query-client.js';
 import { getBilling } from '../lib/api.js';
 import { batchPresign } from '../lib/use-presign.js';
+import { useOrgSlug } from '../lib/use-org-path.js';
 import {
   parseHeadObjectResponse,
   parseGetObjectRetentionResponse,
@@ -109,6 +110,7 @@ export function ObjectDetailPage({
   versionId,
 }: ObjectDetailPageProps) {
   const navigate = useNavigate();
+  const orgSlug = useOrgSlug();
 
   const {
     data: metadata,
@@ -189,8 +191,8 @@ export function ObjectDetailPage({
     region,
     onDeleted: () => {
       void navigate({
-        to: '/buckets/$bucketName',
-        params: { bucketName },
+        to: '/$orgSlug/buckets/$bucketName',
+        params: { orgSlug, bucketName },
         search: { region },
       });
     },
@@ -261,8 +263,8 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
           aria-label="Back to bucket"
           onClick={() =>
             void navigate({
-              to: '/buckets/$bucketName',
-              params: { bucketName },
+              to: '/$orgSlug/buckets/$bucketName',
+              params: { orgSlug, bucketName },
               search: { region },
             })
           }

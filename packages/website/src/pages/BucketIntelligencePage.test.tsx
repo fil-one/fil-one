@@ -23,6 +23,8 @@ function me(ragAccess: boolean): MeResponse {
   return {
     orgId: 'org-1',
     orgName: 'Acme',
+    slug: 'acme',
+    nameConfirmed: true,
     emailVerified: true,
     email: 'user@example.com',
     name: 'User',

@@ -264,6 +264,14 @@ export default $config({
     // ── S3 Bucket for user file storage ──────────────────────────────
     const userFilesBucket = new sst.aws.Bucket('UserFilesBucket');
 
+    // ── S3 Bucket for org logos ────────────────────────────────────────
+    // Platform identity data, not tenant data — an org logo is uploaded during
+    // "Create organization," before the org (and therefore any tenant) exists,
+    // so it cannot share presign.ts's tenant-scoped signer or trust boundary.
+    // Public read, the same treatment `me.picture` gets: a plain public URL,
+    // no presigned-GET machinery. See packages/backend/src/lib/org-logo-storage.ts.
+    const orgLogoBucket = new sst.aws.Bucket('OrgLogoBucket', { access: 'public' });
+
     // ── S3 Vectors bucket for RAG embeddings (FIL-548) ───────────────
     // One vector bucket hosts one index per RAG-enabled bucket. The
     // @filone/rag-shared S3VectorsStore reads the bucket name at runtime via
@@ -1211,6 +1219,11 @@ export default $config({
       'transfer-ownership': {
         extraLink: mgmtRuntimeResources,
         extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+      },
+      // Presigns a PUT into OrgLogoBucket; create-org itself never touches S3,
+      // it only persists the logoUrl string this route hands back.
+      'presign-org-logo': {
+        extraLink: [orgLogoBucket],
       },
 
       // ── Invitations ────────────────────────────────────────────────

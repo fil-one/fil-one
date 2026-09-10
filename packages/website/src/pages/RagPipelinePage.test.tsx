@@ -52,6 +52,8 @@ import { ToastProvider } from '../components/Toast/ToastProvider.js';
 const ME: MeResponse = {
   orgId: 'org-1',
   orgName: 'Acme',
+  slug: 'acme',
+  nameConfirmed: true,
   emailVerified: true,
   email: 'user@example.com',
   name: 'User',
@@ -109,15 +111,23 @@ function renderPage() {
   // The page's own /me fixture, plus the permissions its gated controls read.
   seedPermissions(client, OrgRole.Owner, ME);
 
-  const rootRoute = createRootRoute({ component: () => <RagPipelinePage /> });
+  // Org-scoped like every other real route now: the page's query sources link
+  // through `$orgSlug`, so that ancestor needs registering too.
+  const rootRoute = createRootRoute();
+  const orgSlugRoute = createRoute({ getParentRoute: () => rootRoute, path: '$orgSlug' });
+  const hostRoute = createRoute({
+    getParentRoute: () => orgSlugRoute,
+    path: '/host',
+    component: () => <RagPipelinePage />,
+  });
   const objectsRoute = createRoute({
-    getParentRoute: () => rootRoute,
+    getParentRoute: () => orgSlugRoute,
     path: '/buckets/$bucketName/objects',
     component: () => null,
   });
   const router = createRouter({
-    routeTree: rootRoute.addChildren([objectsRoute]),
-    history: createMemoryHistory({ initialEntries: ['/'] }),
+    routeTree: rootRoute.addChildren([orgSlugRoute.addChildren([hostRoute, objectsRoute])]),
+    history: createMemoryHistory({ initialEntries: ['/acme/host'] }),
   });
 
   return render(

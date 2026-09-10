@@ -24,6 +24,7 @@ import { FILONE_STAGE } from '../env.js';
 import { useHasPermission } from '../lib/use-permissions.js';
 import { useCopyToClipboard } from '../lib/use-copy-to-clipboard.js';
 import { formatDate } from '../lib/time.js';
+import { useOrgSlug } from '../lib/use-org-path.js';
 import {
   EMPTY_BUCKET_FILTERS,
   type BucketFilters,
@@ -143,6 +144,7 @@ function BucketRowActions({
   onDelete: (name: string) => void;
 }) {
   const navigate = useNavigate();
+  const orgSlug = useOrgSlug();
   const { copy } = useCopyToClipboard();
   const { toast } = useToast();
   const mayDelete = useHasPermission('buckets.delete');
@@ -159,8 +161,8 @@ function BucketRowActions({
           icon: FolderOpenIcon,
           onSelect: () =>
             void navigate({
-              to: '/buckets/$bucketName',
-              params: { bucketName: bucket.bucketName },
+              to: '/$orgSlug/buckets/$bucketName',
+              params: { orgSlug, bucketName: bucket.bucketName },
               search: { region: region as S3Region },
             }),
         },
@@ -194,6 +196,7 @@ function BucketRowActions({
 
 function BucketRow({ bucket, onDelete }: { bucket: Bucket; onDelete: (name: string) => void }) {
   const region = bucket.region ?? S3_REGION;
+  const orgSlug = useOrgSlug();
 
   return (
     <Table.Row data-testid="bucket-row" data-bucket-name={bucket.bucketName}>
@@ -203,8 +206,8 @@ function BucketRow({ bucket, onDelete }: { bucket: Bucket; onDelete: (name: stri
       <Table.Cell className="py-4">
         <div className="flex items-center gap-1.5 leading-tight">
           <Link
-            to="/buckets/$bucketName"
-            params={{ bucketName: bucket.bucketName }}
+            to="/$orgSlug/buckets/$bucketName"
+            params={{ orgSlug, bucketName: bucket.bucketName }}
             search={{ region: bucket.region as S3Region }}
             data-testid="bucket-link"
             className="font-medium text-zinc-900 hover:text-brand-600"

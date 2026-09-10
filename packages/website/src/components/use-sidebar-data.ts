@@ -4,6 +4,7 @@ import { getBilling, getMe, getUsage } from '../lib/api.js';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { useHasPermission } from '../lib/use-permissions.js';
 import { daysUntil, formatDateTime } from '../lib/time.js';
+import { monogramFromName } from '../lib/monogram.js';
 
 export function useSidebarData() {
   const { data: me } = useQuery({ queryKey: queryKeys.me, queryFn: () => getMe() });
@@ -67,7 +68,7 @@ export function useSidebarData() {
   return {
     me,
     displayName,
-    initial: displayName.charAt(0).toUpperCase(),
+    initial: monogramFromName(displayName),
     isTrialing,
     isPastDue,
     isInactive,
