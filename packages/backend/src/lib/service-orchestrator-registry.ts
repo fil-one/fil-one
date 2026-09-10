@@ -3,6 +3,7 @@ import { Resource } from 'sst';
 import { auroraOrchestrator } from './aurora/aurora-orchestrator.ts';
 import { createForgeOrchestrator, type ForgeManagementApi } from './forge/forge-orchestrator.ts';
 import { createFthOrchestrator, createInstrumentedFthClient } from './fth/fth-orchestrator.ts';
+import { ORCHESTRATOR_ID_BY_REGION } from './service-orchestrator-ids.ts';
 import type { ServiceOrchestrator } from './service-orchestrator.ts';
 
 // Aurora is built at import; its module reads no secret while loading. FTH and
@@ -40,12 +41,12 @@ export function getOrchestratorForRegion(region: S3Region): ServiceOrchestrator 
         fthOrchestrator ??= createFthOrchestrator(createInstrumentedFthClient());
         return fthOrchestrator;
       case S3Region.EuCentral3:
-        return getForgeOrchestrator('forge', region, () => ({
+        return getForgeOrchestrator(ORCHESTRATOR_ID_BY_REGION[region], region, () => ({
           baseUrl: process.env.FORGE_MANAGEMENT_API_URL!,
           accessToken: Resource.ForgeManagementApiToken.value,
         }));
       case S3Region.UsEast9:
-        return getForgeOrchestrator('forgeDev', region, () => ({
+        return getForgeOrchestrator(ORCHESTRATOR_ID_BY_REGION[region], region, () => ({
           baseUrl: process.env.FORGE_DEV_MANAGEMENT_API_URL!,
           accessToken: Resource.ForgeDevManagementApiToken.value,
         }));

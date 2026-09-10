@@ -12,7 +12,7 @@ import { Resource } from 'sst';
 import { readAccessKeyMintSeq } from './access-key-mint-seq.ts';
 import type { KeyMintFence } from './access-key-mint-seq.ts';
 import { getDynamoClient } from './ddb-client.ts';
-import { AccessKeyKeys } from './dynamo-records.ts';
+import { AccessKeyKeys, DEFAULT_ACCESS_KEY_REGION } from './dynamo-records.ts';
 import type { AccessKeyRecord } from './dynamo-records.ts';
 
 /**
@@ -195,9 +195,7 @@ function toMemberAccessKey(record: Partial<AccessKeyRecord>): MemberAccessKey {
   return {
     id: sk.slice(AccessKeyKeys.keySkPrefix().length),
     keyName: record.keyName ?? '',
-    // Rows written before multi-region routing carry no region. Those predate
-    // FTH, so they belong to Aurora.
-    region: record.region ?? S3Region.EuWest1,
+    region: record.region ?? DEFAULT_ACCESS_KEY_REGION,
     createdAt: record.createdAt ?? '',
     ...(record.accessKeyId ? { accessKeyId: record.accessKeyId } : {}),
     ...(record.createdBy ? { createdBy: record.createdBy } : {}),

@@ -7,6 +7,7 @@ import type { AccessKey, GranularPermission, ListAccessKeysResponse } from '@fil
 import { S3Region, isSupportedRegion } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.ts';
+import { DEFAULT_ACCESS_KEY_REGION } from '../lib/dynamo-records.ts';
 import { keyScope, withinScope } from '../lib/key-scope.ts';
 import { ResponseBuilder, unsupportedRegionResponse } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
@@ -108,7 +109,7 @@ export async function baseHandler(
         (record.granularPermissions as GranularPermission[] | undefined) ?? undefined,
       bucketScope: record.bucketScope as AccessKey['bucketScope'],
       buckets: record.buckets as string[] | undefined,
-      region: (record.region as AccessKey['region']) ?? S3Region.EuWest1,
+      region: (record.region as AccessKey['region']) ?? DEFAULT_ACCESS_KEY_REGION,
       expiresAt: (record.expiresAt as string | undefined) ?? null,
       // Shipped so the console can gate the per-row revoke button on the same
       // rule the delete route enforces.

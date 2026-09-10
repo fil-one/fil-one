@@ -22,6 +22,7 @@ import {
   getOrchestratorForRegion,
   getAvailableOrchestrators,
 } from './service-orchestrator-registry.ts';
+import { ORCHESTRATOR_ID_BY_REGION } from './service-orchestrator-ids.ts';
 
 afterEach(() => {
   delete process.env.FILONE_STAGE;
@@ -53,6 +54,15 @@ describe('service-orchestrator registry', () => {
     expect(orchestrator.id).toBe('forgeDev');
     expect(orchestrator.region).toBe(S3Region.UsEast9);
   });
+
+  // The ids map is the answer for code that cannot build an orchestrator, so
+  // it must agree with the orchestrators the registry does build.
+  for (const [region, id] of Object.entries(ORCHESTRATOR_ID_BY_REGION)) {
+    it(`builds the orchestrator named by ORCHESTRATOR_ID_BY_REGION for ${region}`, () => {
+      process.env.FILONE_STAGE = Stage.Staging;
+      expect(getOrchestratorForRegion(region as S3Region).id).toBe(id);
+    });
+  }
 });
 
 describe('getAvailableOrchestrators', () => {

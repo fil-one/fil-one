@@ -7,7 +7,7 @@ import { type ErrorResponse, S3Region } from '@filone/shared';
 import { Resource } from 'sst';
 import { userActor } from '../lib/audit.ts';
 import { getDynamoClient } from '../lib/ddb-client.ts';
-import { AccessKeyKeys } from '../lib/dynamo-records.ts';
+import { AccessKeyKeys, DEFAULT_ACCESS_KEY_REGION } from '../lib/dynamo-records.ts';
 import { keyScope, notYourKeyResponse, withinScope } from '../lib/key-scope.ts';
 import { revokeAccessKey } from '../lib/key-revocation.ts';
 import { ResponseBuilder, tenantNotReadyResponse } from '../lib/response-builder.ts';
@@ -59,9 +59,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   )
     return notYourKeyResponse();
 
-  // Legacy rows written before multi-region routing don't carry a `region`
-  // attribute — those predate FTH, so they belong to Aurora (eu-west-1).
-  const region: S3Region = (Item.region?.S as S3Region | undefined) ?? S3Region.EuWest1;
+  const region: S3Region = (Item.region?.S as S3Region | undefined) ?? DEFAULT_ACCESS_KEY_REGION;
   const orchestrator = getOrchestratorForRegion(region);
 
   const tenantId = orchestrator.isTenantReady(orgProfile);

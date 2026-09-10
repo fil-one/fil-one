@@ -53,6 +53,24 @@ describe('RAGKeys', () => {
     expect(RAGKeys.parseBucketPk('BUCKET#org-1#eu-west-1#')).toBeUndefined(); // empty bucket name
   });
 
+  it('round-trips checkpointPk through parseCheckpointPk', () => {
+    const pk = RAGKeys.checkpointPk('org-1', S3Region.EuWest1, 'my-bucket');
+    expect(RAGKeys.parseCheckpointPk(pk)).toEqual({
+      orgId: 'org-1',
+      region: S3Region.EuWest1,
+      bucketName: 'my-bucket',
+    });
+  });
+
+  it('keeps the two pk shapes apart when parsing', () => {
+    const bucketPk = RAGKeys.bucketPk('org-1', S3Region.EuWest1, 'my-bucket');
+    const checkpointPk = RAGKeys.checkpointPk('org-1', S3Region.EuWest1, 'my-bucket');
+    expect([RAGKeys.parseBucketPk(checkpointPk), RAGKeys.parseCheckpointPk(bucketPk)]).toEqual([
+      undefined,
+      undefined,
+    ]);
+  });
+
   it('isolates tenants: two orgs sharing region+bucketName get distinct pks (FIL-596)', () => {
     const a = RAGKeys.bucketPk('org-a', S3Region.EuWest1, 'shared-name');
     const b = RAGKeys.bucketPk('org-b', S3Region.EuWest1, 'shared-name');

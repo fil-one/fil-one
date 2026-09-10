@@ -1,20 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
-
-// The canonical sources this file's mirrors copy. A bin script cannot import
-// either at runtime — Node's type stripping resolves neither the backend's
-// `./x.js` specifiers nor rag-shared's — but vitest resolves both, so the
-// mirrors are held to them here rather than by hand.
 import { RAGKeys } from '@filone/backend/src/lib/dynamo-records.ts';
+import { ragIndexName } from '@filone/rag-shared/src/s3-vectors-store.ts';
 import { S3Region } from '@filone/shared';
-import { S3VectorsStore } from '@filone/rag-shared/src/s3-vectors-store.ts';
 
 import {
   assertRegionAllowed,
   buildResetPlan,
   formatResetPlan,
   parseRagPk,
-  ragIndexName,
   type OrgRows,
   type StoredRow,
 } from './region-reset.ts';
@@ -109,24 +103,6 @@ describe('parseRagPk', () => {
       expect(parseRagPk(pk)).toBeUndefined();
     });
   }
-});
-
-describe('ragIndexName', () => {
-  it('names the index S3VectorsStore drops', async () => {
-    let droppedIndexName: string | undefined;
-    // The store reaches its client only through `send`, so a fake recording
-    // one command is the whole contract.
-    const store = new S3VectorsStore(VECTOR_BUCKET, {
-      send: async (command: { input: { indexName?: string } }) => {
-        droppedIndexName = command.input.indexName;
-        return {};
-      },
-    } as never);
-
-    await store.dropIndex(ORG_ID, 'eu-central-3', 'my-bucket');
-
-    expect(droppedIndexName).toBe(ragIndexName(ORG_ID, 'eu-central-3', 'my-bucket'));
-  });
 });
 
 describe('buildResetPlan', () => {
