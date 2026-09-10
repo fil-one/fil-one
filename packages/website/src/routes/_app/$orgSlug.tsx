@@ -24,10 +24,12 @@ export const Route = createRoute({
   path: '$orgSlug',
   beforeLoad: async ({ params, location }) => {
     // Already primed by `_app`'s own `beforeLoad` on this same navigation, so
-    // this is a cache read rather than a second request.
+    // this is a cache read rather than a second request. `skipSwitchWait` for
+    // the same reason `_app.tsx` passes it: on the rare miss where this does
+    // issue its own request, it is on a switch's own critical path too.
     const me = await queryClient.fetchQuery({
       queryKey: queryKeys.me,
-      queryFn: () => getMe(),
+      queryFn: () => getMe({ skipSwitchWait: true }),
       staleTime: ME_STALE_TIME,
     });
 
@@ -35,11 +37,11 @@ export const Route = createRoute({
     const active = findActiveMembership(me);
 
     if (!requested) {
-      // Never valid, stale after a rename, or a real org this caller just
-      // isn't operating in right now — one rule for all three: land on the
-      // active org's dashboard, the same place a caller with no slug in the
-      // URL at all would go. No active slug at all (no memberships yet) has
-      // nowhere to send them, so it is a real not-found instead.
+      // Never valid, or a real org this caller just isn't operating in right
+      // now — one rule for both: land on the active org's dashboard, the same
+      // place a caller with no slug in the URL at all would go. No active
+      // slug at all (no memberships yet) has nowhere to send them, so it is a
+      // real not-found instead.
       if (!active?.slug) throw notFound();
       throw redirect({ href: `/${active.slug}/dashboard`, replace: true });
     }

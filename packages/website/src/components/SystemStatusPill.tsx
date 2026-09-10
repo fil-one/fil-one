@@ -50,7 +50,7 @@ export function SystemStatusPill() {
           `width:auto` cannot; the label is short, so a generous ceiling is safe. */}
       <span
         className={clsx(
-          'max-w-0 overflow-hidden whitespace-nowrap text-xs opacity-0 transition-all duration-200',
+          'max-w-0 overflow-hidden whitespace-nowrap text-xs opacity-0 transition-[max-width,margin-left,opacity] duration-200',
           'group-hover:ml-1.5 group-hover:max-w-40 group-hover:opacity-100',
           'group-focus-visible:ml-1.5 group-focus-visible:max-w-40 group-focus-visible:opacity-100',
           textColorStyles[display.color],
@@ -60,7 +60,7 @@ export function SystemStatusPill() {
       </span>
       <ArrowUpRightIcon
         className={clsx(
-          'ml-1 max-w-0 flex-shrink-0 overflow-hidden opacity-0 transition-all duration-200',
+          'ml-1 max-w-0 flex-shrink-0 overflow-hidden opacity-0 transition-[max-width,opacity] duration-200',
           'group-hover:max-w-4 group-hover:opacity-100',
           'group-focus-visible:max-w-4 group-focus-visible:opacity-100',
           textColorStyles[display.color],

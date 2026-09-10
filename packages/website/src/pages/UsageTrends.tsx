@@ -76,7 +76,7 @@ function StorageChartCard({
     <Card>
       <div className="mb-3 flex items-center justify-between">
         <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">STORAGE</span>
-        <span className="text-[13px] font-semibold text-zinc-900">{formatBytes(latest)}</span>
+        <span className="text-ui font-semibold text-zinc-900">{formatBytes(latest)}</span>
       </div>
       {isEmpty ? (
         <ChartEmptyState label="Your storage usage will appear here" />
@@ -143,7 +143,7 @@ function ObjectsChartCard({
     <Card>
       <div className="mb-3 flex items-center justify-between">
         <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">OBJECTS</span>
-        <span className="text-[13px] font-semibold text-zinc-900">{latest} total</span>
+        <span className="text-ui font-semibold text-zinc-900">{latest} total</span>
       </div>
       {isEmpty ? (
         <ChartEmptyState label="Your objects will appear here" />

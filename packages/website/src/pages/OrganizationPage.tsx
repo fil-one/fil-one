@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
 import { OrgNameSchema } from '@filone/shared';
 import type { MeResponse } from '@filone/shared';
 
@@ -29,7 +28,7 @@ import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
  * rest of the console reads the other, and `memberships` alongside `orgName`/
  * `slug`/`logoUrl`: the switcher reads all three from the list, so patching
  * only the top level renames the org in the header and leaves the switcher
- * (and the URL, see `IdentitySection` below) stale.
+ * stale.
  */
 function applyOrgUpdate(
   client: QueryClient,
@@ -63,14 +62,11 @@ function applyOrgUpdate(
 
 /**
  * The logo autosaves the moment a file lands (`onUploaded` below); the name
- * needs an explicit Save. Unlike the personal name field on Settings, a
- * rename here re-slugifies the org - its URL changes with it - which is
- * enough of a consequence that it shouldn't fire on a stray blur.
+ * needs an explicit Save.
  */
 function IdentitySection({ me }: { me: MeResponse }) {
   const { toast } = useToast();
   const client = useQueryClient();
-  const navigate = useNavigate();
 
   const [name, setName] = useState(me.orgName);
   const [error, setError] = useState<string | null>(null);
@@ -103,16 +99,6 @@ function IdentitySection({ me }: { me: MeResponse }) {
       applyOrgUpdate(client, result.name, result.slug, result.logoUrl);
       setName(result.name);
       toast.success(`This organization is called ${result.name} now`);
-      // The rename re-slugified the org, so the URL this page is sitting on
-      // just went stale — carry it forward rather than leaving the caller on
-      // a slug that is about to stop resolving to anything.
-      if (result.slug && result.slug !== me.slug) {
-        void navigate({
-          to: '/$orgSlug/edit-organization',
-          params: { orgSlug: result.slug },
-          replace: true,
-        });
-      }
     },
     onError: (err) => {
       setError(errorMessageOf(err, 'Failed to save the organization'));
