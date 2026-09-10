@@ -22,7 +22,7 @@ vi.mock('../lib/members-api.js', () => ({
 }));
 
 function renderPage(
-  role = OrgRole.Owner,
+  role: OrgRole = OrgRole.Owner,
   members = 0,
   invitations = 0,
   me: Partial<MeResponse> = {},

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { extractTextFromDocx, extractTextFromPptx } from './ooxml-extractor.js';
-import { buildDocx, buildPptx, buildZip, docxParagraph, pptxParagraph } from './test-fixtures.js';
+import { extractTextFromDocx, extractTextFromPptx } from './ooxml-extractor.ts';
+import { buildDocx, buildPptx, buildZip, docxParagraph, pptxParagraph } from './test-fixtures.ts';
 
 describe('extractTextFromDocx', () => {
   it('reads <w:t> runs from a simple paragraph', () => {

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { S3Region } from '../constants.js';
+import { S3Region } from '../constants.ts';
 
 export const BUCKET_NAME_MIN_LENGTH = 3;
 export const BUCKET_NAME_MAX_LENGTH = 63;

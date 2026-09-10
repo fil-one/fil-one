@@ -82,7 +82,7 @@ const PLAIN: MemberSummary = {
 };
 
 function renderPage(
-  role = OrgRole.Owner,
+  role: OrgRole = OrgRole.Owner,
   members: MemberSummary[] = [OWNER, ADMIN, PLAIN],
   me: Partial<MeResponse> = {},
 ) {

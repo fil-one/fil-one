@@ -1,4 +1,4 @@
-import type { Permission } from './permissions.js';
+import type { Permission } from './permissions.ts';
 
 /**
  * Every API route, its authentication category, and what it requires of the

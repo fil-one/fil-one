@@ -12,8 +12,8 @@ import {
   auditKeyIdSuffix,
   isAuditEventType,
   looksLikeCredential,
-} from './audit.js';
-import { RAG_KEY_DISPLAY_PREFIX_LENGTH } from './api/rag-api-keys.js';
+} from './audit.ts';
+import { RAG_KEY_DISPLAY_PREFIX_LENGTH } from './api/rag-api-keys.ts';
 
 /**
  * Every event type the ADRs name, transcribed from them rather than derived

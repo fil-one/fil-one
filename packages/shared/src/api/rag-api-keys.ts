@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { S3Region } from '../constants.js';
-import { KEY_NAME_MAX_LENGTH, KEY_NAME_PATTERN } from './access-keys.js';
+import { S3Region } from '../constants.ts';
+import { KEY_NAME_MAX_LENGTH, KEY_NAME_PATTERN } from './access-keys.ts';
 
 /**
  * RAG API keys: named bearer tokens that authorize ONLY the RAG query endpoint

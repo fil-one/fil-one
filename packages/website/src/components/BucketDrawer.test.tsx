@@ -39,7 +39,7 @@ const bucket: RagBucket = {
 function renderDrawer(
   onClose: () => void = () => {},
   onStopIndexing: () => void = () => {},
-  role = OrgRole.Owner,
+  role: OrgRole = OrgRole.Owner,
 ) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   // Stop indexing is gated on the bucket permissions, so the caller's role has

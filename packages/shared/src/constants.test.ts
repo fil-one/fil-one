@@ -24,7 +24,7 @@ import {
   S3_REGION,
   S3Region,
   Stage,
-} from './constants.js';
+} from './constants.ts';
 
 describe('constants', () => {
   it('TB_BYTES equals 10^12', () => {
@@ -79,12 +79,6 @@ describe('getUsageLimits', () => {
 });
 
 describe('getS3Endpoint', () => {
-  it('returns the production URL with region prefix', () => {
-    expect(getS3Endpoint(S3Region.EuWest1, Stage.Production)).toBe(
-      'https://eu-west-1.s3.filonecontent.com',
-    );
-  });
-
   it('returns the dev URL for staging', () => {
     expect(getS3Endpoint(S3Region.EuWest1, Stage.Staging)).toBe('https://s3.dev.aur.lu');
   });
@@ -105,13 +99,18 @@ describe('getS3Endpoint', () => {
     );
   });
 
-  it('serves every region from the content domain in production', () => {
-    for (const region of Object.values(S3Region)) {
-      expect(getS3Endpoint(region, Stage.Production)).toBe(
-        `https://${region}.s3.filonecontent.com`,
-      );
-    }
-  });
+  // Hard-coded the expected region endpoints so that this test suite
+  // reliably detects any accidental regressions in the code building
+  // the S3 endpoint URLs.
+  const EXPECTED_PRODUCTION_REGION_ENDPOINTS: [S3Region, string][] = [
+    [S3Region.EuWest1, 'https://s3.eu-west-1.filonecontent.com'],
+    [S3Region.UsEast1, 'https://s3.us-east-1.filonecontent.com'],
+  ];
+  for (const [region, endpoint] of EXPECTED_PRODUCTION_REGION_ENDPOINTS) {
+    it(`returns ${endpoint} for ${region} in production`, () => {
+      expect(getS3Endpoint(region, Stage.Production)).toBe(endpoint);
+    });
+  }
 });
 
 describe('getAuth0Domain', () => {

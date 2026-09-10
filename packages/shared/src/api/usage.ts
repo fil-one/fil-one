@@ -1,4 +1,4 @@
-import { TenantStatus } from './tenants.ts';
+import type { TenantStatus } from './tenants.ts';
 
 export interface UsageResponse {
   storage: {

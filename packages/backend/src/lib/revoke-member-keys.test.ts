@@ -32,7 +32,7 @@ import type { AccessKeyToRevoke } from './member-keys.js';
 const ORG_ID = 'org-1';
 const ACTOR = userActor({ userId: 'admin-1' });
 
-function keyToRevoke(id: string, region = S3Region.UsEast1): AccessKeyToRevoke {
+function keyToRevoke(id: string, region: S3Region = S3Region.UsEast1): AccessKeyToRevoke {
   return {
     id,
     keyName: `key ${id}`,

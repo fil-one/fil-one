@@ -325,7 +325,7 @@ describe('fthOrchestrator.getS3ClientContext', () => {
     const ctx = await fthOrchestrator.getS3ClientContext(fthClientId);
 
     expect(ctx).toEqual({
-      endpointUrl: 'https://us-east-1.fortilyx.com',
+      endpointUrl: 'https://s3.us-east-1.staging.filonecontent.com',
       region: 'us-east-1',
       credentials: { accessKeyId: 'AK1', secretAccessKey: 'SK1' },
       forcePathStyle: true,

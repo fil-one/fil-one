@@ -289,9 +289,12 @@ const INVITATION_ROW_LIMIT = 20_000;
 
 /** Thrown when an org's invitation partition exceeds {@link INVITATION_ROW_LIMIT}. */
 export class InvitationListTooLargeError extends Error {
-  constructor(readonly orgId: string) {
+  readonly orgId: string;
+
+  constructor(orgId: string) {
     super(`Organization ${orgId} holds more than ${INVITATION_ROW_LIMIT} invitation rows`);
     this.name = 'InvitationListTooLargeError';
+    this.orgId = orgId;
   }
 }
 

@@ -1,4 +1,4 @@
-import { OrgRole, isOrgRole } from './api/org.js';
+import { OrgRole, isOrgRole } from './api/org.ts';
 
 /**
  * The console permission registry: the vocabulary every authorization check

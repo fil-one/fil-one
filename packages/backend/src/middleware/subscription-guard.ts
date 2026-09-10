@@ -14,10 +14,11 @@ import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { withRefreshedCookies } from './auth.js';
 
-export enum AccessLevel {
-  Read = 'read',
-  Write = 'write',
-}
+export const AccessLevel = {
+  Read: 'read',
+  Write: 'write',
+} as const;
+export type AccessLevel = (typeof AccessLevel)[keyof typeof AccessLevel];
 
 type GuardRequest = Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>;
 
@@ -123,7 +124,7 @@ async function claimTrialOrDeny(
 async function transitionExpiredTrial(
   record: SubscriptionRecord,
   owner: { orgId: string; userId: string },
-): Promise<SubscriptionStatus.GracePeriod | null> {
+): Promise<typeof SubscriptionStatus.GracePeriod | null> {
   const { trialEndsAt } = record;
   if (!trialEndsAt || new Date(trialEndsAt).getTime() >= Date.now()) {
     return null;

@@ -1,4 +1,4 @@
-import type { AuditEventType } from '../audit.js';
+import type { AuditEventType } from '../audit.ts';
 
 export interface UsageDataPoint {
   date: string;

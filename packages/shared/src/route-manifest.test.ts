@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { PERMISSIONS } from './permissions.js';
-import { ROUTE_MANIFEST } from './route-manifest.js';
-import type { RouteManifestEntry } from './route-manifest.js';
+import { PERMISSIONS } from './permissions.ts';
+import { ROUTE_MANIFEST } from './route-manifest.ts';
+import type { RouteManifestEntry } from './route-manifest.ts';
 
 const entries = ROUTE_MANIFEST;
 

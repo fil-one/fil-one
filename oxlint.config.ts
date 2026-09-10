@@ -97,6 +97,25 @@ export default defineConfig({
       },
     },
     {
+      // Plain Node loads these packages, and Node does not map './x.js' to
+      // x.ts the way esbuild and vitest do. Relative imports name the .ts file.
+      // See docs/architectural-decisions/2026-09-node-loadable-typescript-sources.md.
+      files: ['packages/shared/**/*.ts', 'packages/rag-shared/**/*.ts'],
+      rules: {
+        'no-restricted-imports': [
+          'error',
+          {
+            patterns: [
+              {
+                group: ['*.js'],
+                message: 'Import the .ts file by name so plain Node can load this module.',
+              },
+            ],
+          },
+        ],
+      },
+    },
+    {
       files: ['tests/e2e/**/*.ts', 'tests/e2e/**/*.tsx'],
       rules: {
         '@filone/oxlint-rules/no-text-locators': 'error',

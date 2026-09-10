@@ -558,8 +558,8 @@ async function verifyS3Access(keyName: string, key: FthAccessKeyWithSecret): Pro
 // packages/shared/src/constants.ts, as bin/fth-s3-env.ts does.
 function getFthS3Endpoint(stage: string): string {
   return stage === 'production'
-    ? 'https://us-east-1.s3.filonecontent.com'
-    : 'https://us-east-1.fortilyx.com';
+    ? 'https://s3.us-east-1.filonecontent.com'
+    : 'https://s3.us-east-1.staging.filonecontent.com';
 }
 
 // ── AWS lookups ─────────────────────────────────────────────────

@@ -5,7 +5,7 @@
 // PROFILE-row attributes used: `auroraTenantId` and `auroraSetupStatus`.
 
 import pRetry from 'p-retry';
-import { S3Region, getS3Endpoint, TenantStatus } from '@filone/shared';
+import { S3Region, getS3Endpoint, type TenantStatus } from '@filone/shared';
 import type {
   AccessKeyPermission,
   GranularPermission,

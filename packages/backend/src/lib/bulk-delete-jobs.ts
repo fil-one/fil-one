@@ -33,9 +33,12 @@ const dynamo = getDynamoClient();
 const JOB_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 export class BulkDeleteJobExistsError extends Error {
-  constructor(public readonly job: BulkDeleteJobRecord) {
+  readonly job: BulkDeleteJobRecord;
+
+  constructor(job: BulkDeleteJobRecord) {
     super('A bulk delete job already exists for this request');
     this.name = 'BulkDeleteJobExistsError';
+    this.job = job;
   }
 }
 

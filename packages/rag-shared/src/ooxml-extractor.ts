@@ -1,6 +1,6 @@
 import { XMLParser } from 'fast-xml-parser';
 
-import { readZip } from './zip.js';
+import { readZip } from './zip.ts';
 
 /**
  * In `preserveOrder` mode fast-xml-parser yields an ordered array of nodes,

@@ -31,12 +31,11 @@ export interface RevokeAccessKeyArgs {
  * credential that no longer exists, until somebody deletes it.
  */
 export class RevocationNotRecordedError extends Error {
-  constructor(
-    readonly keyId: string,
-    options?: { cause?: unknown },
-  ) {
+  readonly keyId: string;
+  constructor(keyId: string, options?: { cause?: unknown }) {
     super(`Access key ${keyId} was deleted at the vendor, but the record did not land.`, options);
     this.name = 'RevocationNotRecordedError';
+    this.keyId = keyId;
   }
 }
 

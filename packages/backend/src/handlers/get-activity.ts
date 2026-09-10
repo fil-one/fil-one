@@ -16,7 +16,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { authorize } from '../middleware/authorize.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import type { AccessKeyRecord } from '../lib/dynamo-records.js';
-import { ProvisionedRegion, getProvisionedRegions } from '../lib/region-helpers.js';
+import { type ProvisionedRegion, getProvisionedRegions } from '../lib/region-helpers.js';
 import { reportMetric } from '../lib/metrics.js';
 
 const dynamo = getDynamoClient();
