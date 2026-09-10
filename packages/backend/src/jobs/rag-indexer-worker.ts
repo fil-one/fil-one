@@ -11,14 +11,14 @@
 import type { Context } from 'aws-lambda';
 import { Resource } from 'sst';
 import { S3VectorsStore, type VectorStore } from '@filone/rag-shared';
-import { getProvisionedRegions } from '../lib/region-helpers.js';
-import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
-import { createS3Client } from '../lib/s3-client.js';
-import { updateBucketTelemetry } from '../lib/bucket-rag-enablement.js';
-import { indexBucket } from './rag-indexer-helpers.js';
-import { reportMetric } from '../lib/metrics.js';
+import { getProvisionedRegions } from '../lib/region-helpers.ts';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import { createS3Client } from '../lib/s3-client.ts';
+import { updateBucketTelemetry } from '../lib/bucket-rag-enablement.ts';
+import { indexBucket } from './rag-indexer-helpers.ts';
+import { reportMetric } from '../lib/metrics.ts';
 import { S3Region } from '@filone/shared';
-import { isOrgDeletedOrDeleting } from '../lib/org-profile.js';
+import { isOrgDeletedOrDeleting } from '../lib/org-profile.ts';
 
 const LOG = '[rag-indexer-worker]';
 

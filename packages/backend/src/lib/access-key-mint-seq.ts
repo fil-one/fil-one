@@ -1,8 +1,8 @@
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
-import { getDynamoClient } from './ddb-client.js';
-import { OrgKeys } from './org-membership.js';
+import { getDynamoClient } from './ddb-client.ts';
+import { OrgKeys } from './org-membership.ts';
 
 /**
  * The member's access-key mint sequence: how many key rows have landed for them.

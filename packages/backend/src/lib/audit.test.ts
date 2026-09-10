@@ -14,7 +14,7 @@ import type {
   AuditEventType,
   TwoPhaseAuditEvent,
 } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
@@ -35,7 +35,7 @@ import {
   newCorrelationId,
   twoPhaseAudit,
   userActor,
-} from './audit.js';
+} from './audit.ts';
 
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
 const USER_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';

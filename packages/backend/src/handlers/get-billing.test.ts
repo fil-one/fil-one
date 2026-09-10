@@ -18,7 +18,7 @@ vi.mock('sst', () => ({
 
 const mockSubscriptionsRetrieve = vi.fn();
 
-vi.mock('../lib/stripe-client.js', () => ({
+vi.mock('../lib/stripe-client.ts', () => ({
   getStripeClient: () => ({
     subscriptions: { retrieve: mockSubscriptionsRetrieve },
   }),
@@ -34,13 +34,13 @@ const ddbMock = mockClient(DynamoDBClient);
 // endpoint owes is firing it on exactly the records that leave it open — no
 // guard sits in front of the route the dashboard calls first.
 const mockClaimTrialIfEligible = vi.fn();
-vi.mock('../lib/trial-claim.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../lib/trial-claim.js')>()),
+vi.mock('../lib/trial-claim.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/trial-claim.ts')>()),
   claimTrialIfEligible: (...args: unknown[]) => mockClaimTrialIfEligible(...args),
 }));
 
-import { baseHandler } from './get-billing.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import { baseHandler } from './get-billing.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

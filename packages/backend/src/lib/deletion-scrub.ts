@@ -14,15 +14,15 @@ import {
   clearCheckpoint,
   deleteManifestEntry,
   loadManifest,
-} from '../jobs/rag-indexer-manifest.js';
-import { AuditKeys } from './audit.js';
-import { getDynamoClient } from './ddb-client.js';
-import { collectPages } from './ddb-paging.js';
-import { RAGKeys } from './dynamo-records.js';
-import { OrgKeys } from './org-membership.js';
-import type { DeletionMember } from './deletion-record.js';
-import { RagApiKeyKeys } from './rag-api-keys.js';
-import { SubscriptionKeys } from './subscription-store.js';
+} from '../jobs/rag-indexer-manifest.ts';
+import { AuditKeys } from './audit.ts';
+import { getDynamoClient } from './ddb-client.ts';
+import { collectPages } from './ddb-paging.ts';
+import { RAGKeys } from './dynamo-records.ts';
+import { OrgKeys } from './org-membership.ts';
+import type { DeletionMember } from './deletion-record.ts';
+import { RagApiKeyKeys } from './rag-api-keys.ts';
+import { SubscriptionKeys } from './subscription-store.ts';
 
 type Item = Record<string, AttributeValue>;
 

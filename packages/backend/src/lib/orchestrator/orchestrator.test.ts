@@ -49,7 +49,7 @@ vi.mock('@filone/orchestrator-client', () => ({
     mockGetBucketMetrics(o),
 }));
 
-vi.mock('./metrics.js', () => ({
+vi.mock('./metrics.ts', () => ({
   instrumentClient: vi.fn(),
 }));
 
@@ -64,10 +64,10 @@ import {
   BucketConfigurationError,
   BucketNotEmptyError,
   BucketNotFoundError,
-} from '../errors.js';
-import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
-import { instrumentClient } from './metrics.js';
-import { createFilOneOrchestrator, type FilOneOrchestratorConfig } from './orchestrator.js';
+} from '../errors.ts';
+import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
+import { instrumentClient } from './metrics.ts';
+import { createFilOneOrchestrator, type FilOneOrchestratorConfig } from './orchestrator.ts';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 // tenantId === orgId for Management API orchestrators (client-supplied UUID).

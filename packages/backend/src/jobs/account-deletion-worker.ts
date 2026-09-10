@@ -6,19 +6,19 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
-import { deleteAuth0User, getAuth0UserEmail } from '../lib/auth0-management.js';
-import { getDynamoClient } from '../lib/ddb-client.js';
+import { deleteAuth0User, getAuth0UserEmail } from '../lib/auth0-management.ts';
+import { getDynamoClient } from '../lib/ddb-client.ts';
 import {
   deletionRecordKey,
   DELETION_STATUS,
   type DeletionMember,
   type DeletionRecord,
-} from '../lib/deletion-record.js';
-import { resolveDeletionTargets } from '../lib/deletion-targets.js';
-import { ragAllowlistKey } from '../middleware/rag-access.js';
-import { scrubOrgRecords } from '../lib/deletion-scrub.js';
-import { tearDownStripe } from '../lib/deletion-stripe-teardown.js';
-import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.js';
+} from '../lib/deletion-record.ts';
+import { resolveDeletionTargets } from '../lib/deletion-targets.ts';
+import { ragAllowlistKey } from '../middleware/rag-access.ts';
+import { scrubOrgRecords } from '../lib/deletion-scrub.ts';
+import { tearDownStripe } from '../lib/deletion-stripe-teardown.ts';
+import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.ts';
 
 const LOG = '[account-deletion-worker]';
 

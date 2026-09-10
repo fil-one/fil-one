@@ -7,16 +7,16 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { S3Region } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
-import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
+import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { userActor } from './audit.js';
-import { revokeAccessKey } from './key-revocation.js';
-import type { RevokeAccessKeyArgs } from './key-revocation.js';
+import { userActor } from './audit.ts';
+import { revokeAccessKey } from './key-revocation.ts';
+import type { RevokeAccessKeyArgs } from './key-revocation.ts';
 
 const ORG_ID = 'org-1';
 const KEY_ID = 'key-1';

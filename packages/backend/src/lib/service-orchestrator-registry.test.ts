@@ -21,7 +21,7 @@ vi.mock('sst', () => ({
 import {
   getOrchestratorForRegion,
   getAvailableOrchestrators,
-} from './service-orchestrator-registry.js';
+} from './service-orchestrator-registry.ts';
 
 afterEach(() => {
   delete process.env.FILONE_STAGE;

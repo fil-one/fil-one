@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { S3Region } from '@filone/shared';
 import type { AccessKeySummary } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
 let regionsWithoutTenant: S3Region[] = [];
-vi.mock('./service-orchestrator-registry.js', () => ({
+vi.mock('./service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (region: S3Region) => ({
     id: 'aurora',
     region,
@@ -19,15 +19,15 @@ vi.mock('./service-orchestrator-registry.js', () => ({
 const mockRevokeAccessKey = vi.fn();
 // Partial: the error class is the real one, since the classification below is
 // an `instanceof` test against it.
-vi.mock('./key-revocation.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('./key-revocation.js')>()),
+vi.mock('./key-revocation.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./key-revocation.ts')>()),
   revokeAccessKey: (...args: unknown[]) => mockRevokeAccessKey(...args),
 }));
 
-import { userActor } from './audit.js';
-import { RevocationNotRecordedError } from './key-revocation.js';
-import { revokeMemberKeys } from './revoke-member-keys.js';
-import type { AccessKeyToRevoke } from './member-keys.js';
+import { userActor } from './audit.ts';
+import { RevocationNotRecordedError } from './key-revocation.ts';
+import { revokeMemberKeys } from './revoke-member-keys.ts';
+import type { AccessKeyToRevoke } from './member-keys.ts';
 
 const ORG_ID = 'org-1';
 const ACTOR = userActor({ userId: 'admin-1' });

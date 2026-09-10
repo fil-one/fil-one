@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 
-import type { BucketSummary } from './service-orchestrator.js';
-import { filterBucketsByName, sortBuckets } from './bucket-list.js';
+import type { BucketSummary } from './service-orchestrator.ts';
+import { filterBucketsByName, sortBuckets } from './bucket-list.ts';
 
 type BucketFixture = Omit<BucketSummary, 'region'> & { region: string };
 

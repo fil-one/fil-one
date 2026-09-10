@@ -7,10 +7,10 @@ import type {
 } from 'aws-lambda';
 import { ApiErrorCode, roleHasPermission } from '@filone/shared';
 import type { ErrorResponse, Permission } from '@filone/shared';
-import { ResponseBuilder } from '../lib/response-builder.js';
-import { reportMetric } from '../lib/metrics.js';
-import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.js';
-import { withRefreshedCookies } from './auth.js';
+import { ResponseBuilder } from '../lib/response-builder.ts';
+import { reportMetric } from '../lib/metrics.ts';
+import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.ts';
+import { withRefreshedCookies } from './auth.ts';
 
 /**
  * The console's authorization gate: the caller's role in the active org either

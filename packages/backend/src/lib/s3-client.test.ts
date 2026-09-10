@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { GetBucketVersioningCommand, S3Client } from '@aws-sdk/client-s3';
-import { createS3Client } from './s3-client.js';
-import type { S3ClientContext } from './s3-client.js';
+import { createS3Client } from './s3-client.ts';
+import type { S3ClientContext } from './s3-client.ts';
 
 const ctx: S3ClientContext = {
   endpointUrl: 'https://s3.example.com',

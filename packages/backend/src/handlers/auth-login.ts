@@ -2,10 +2,10 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { OAUTH_STATE_COOKIE, buildAuth0AuthorizeUrl } from '@filone/shared';
-import { getAuthSecrets } from '../lib/auth-secrets.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { resolveOrigin } from '../lib/resolve-origin.js';
-import { resolveAuth0Domain } from '../lib/auth0-domain.js';
+import { getAuthSecrets } from '../lib/auth-secrets.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
+import { resolveOrigin } from '../lib/resolve-origin.ts';
+import { resolveAuth0Domain } from '../lib/auth0-domain.ts';
 
 async function baseHandler(
   event: APIGatewayProxyEventV2,

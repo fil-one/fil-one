@@ -1,7 +1,7 @@
-import { getOrgProfile } from '../lib/org-profile.js';
-import { scanSubscriptions } from '../lib/subscription-store.js';
+import { getOrgProfile } from '../lib/org-profile.ts';
+import { scanSubscriptions } from '../lib/subscription-store.ts';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
-import type { UsageReportingWorkerPayload } from './usage-reporting-worker.js';
+import type { UsageReportingWorkerPayload } from './usage-reporting-worker.ts';
 
 const lambda = new LambdaClient({});
 

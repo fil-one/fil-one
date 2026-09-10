@@ -3,20 +3,20 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ApiErrorCode, canManageTargetRole } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
-import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.js';
-import { readInvitation, retireInvitationItems } from '../lib/invitations.js';
-import { cancelledLabels } from '../lib/membership-changes.js';
+import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.ts';
+import { readInvitation, retireInvitationItems } from '../lib/invitations.ts';
+import { cancelledLabels } from '../lib/membership-changes.ts';
 import {
   ResponseBuilder,
   badRequestResponse,
   beyondCeilingResponse,
-} from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { csrfMiddleware } from '../middleware/csrf.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+} from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { csrfMiddleware } from '../middleware/csrf.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 
 /**
  * DELETE /api/org/invitations/{inviteId} — withdraw an invitation.

@@ -1,16 +1,16 @@
 import { GetItemCommand, QueryCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
-import { getDynamoClient } from './ddb-client.js';
-import { DELETION_KEEP_REASON, type DeletionKeepReason } from './deletion-record.js';
-import type { DeletionMember } from './deletion-record.js';
+import { getDynamoClient } from './ddb-client.ts';
+import { DELETION_KEEP_REASON, type DeletionKeepReason } from './deletion-record.ts';
+import type { DeletionMember } from './deletion-record.ts';
 import {
   listMembershipRows,
   OrgKeys,
   type OrgMembershipRecord,
   type OrgMembershipSource,
-} from './org-membership.js';
-import { getProvisionedRegions } from './region-helpers.js';
+} from './org-membership.ts';
+import { getProvisionedRegions } from './region-helpers.ts';
 
 const LOG = '[deletion-targets]';
 

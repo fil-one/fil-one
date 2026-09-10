@@ -6,15 +6,15 @@ import {
   requireMembership,
   requireOrgMembershipMiddleware,
   requirePermission,
-} from './authorize.js';
-import { buildEvent, buildMiddyRequest, NO_MEMBERSHIP } from '../test/lambda-test-utilities.js';
+} from './authorize.ts';
+import { buildEvent, buildMiddyRequest, NO_MEMBERSHIP } from '../test/lambda-test-utilities.ts';
 import {
   expectErrorResponse,
   expectRefreshedCookies,
   REFRESHED_TOKENS,
-} from '../test/assert-helpers.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import type { OrgMembership } from '../lib/org-membership.js';
+} from '../test/assert-helpers.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import type { OrgMembership } from '../lib/org-membership.ts';
 
 const ORG_ID = 'org-1';
 const USER_ID = 'user-1';

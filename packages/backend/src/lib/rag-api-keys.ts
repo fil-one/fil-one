@@ -4,7 +4,7 @@ import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import type { RagKeyBucketRef, RagKeyBucketScope } from '@filone/shared';
 import { RAG_KEY_DISPLAY_PREFIX_LENGTH, RAG_KEY_TOKEN_PREFIX } from '@filone/shared';
-import { getDynamoClient } from './ddb-client.js';
+import { getDynamoClient } from './ddb-client.ts';
 
 /**
  * Storage and lookup for RAG API keys (bearer tokens for the query endpoint).

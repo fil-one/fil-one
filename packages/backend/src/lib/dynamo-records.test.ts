@@ -6,7 +6,7 @@ import {
   type RAGConfigRecord,
   type RagIndexerCheckpointRecord,
   RAGKeys,
-} from './dynamo-records.js';
+} from './dynamo-records.ts';
 import { S3Region } from '@filone/shared';
 
 const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;

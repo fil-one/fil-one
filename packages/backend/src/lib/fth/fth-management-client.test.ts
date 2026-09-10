@@ -8,7 +8,7 @@ import {
   type FthManagementClient,
   type FthMetricsTimeseriesResponse,
   type FthMetricsCurrentResponse,
-} from './fth-management-client.js';
+} from './fth-management-client.ts';
 
 function mockFetch(status: number, body: unknown = {}): typeof fetch {
   return vi.fn<typeof fetch>().mockResolvedValue(

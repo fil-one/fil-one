@@ -1,9 +1,9 @@
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ApiErrorCode, roleHasPermission } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
-import { ResponseBuilder } from './response-builder.js';
-import type { AuthenticatedEvent } from './user-context.js';
-import { getUserInfo } from './user-context.js';
+import { ResponseBuilder } from './response-builder.ts';
+import type { AuthenticatedEvent } from './user-context.ts';
+import { getUserInfo } from './user-context.ts';
 
 /**
  * Which keys a caller may see and revoke.

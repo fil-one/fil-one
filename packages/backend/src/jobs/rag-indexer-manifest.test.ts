@@ -23,7 +23,7 @@ import {
   loadManifest,
   saveCheckpoint,
   saveManifestEntry,
-} from './rag-indexer-manifest.js';
+} from './rag-indexer-manifest.ts';
 import { S3Region } from '@filone/shared';
 
 function manifestRow(objectKey: string, etag: string, chunkKeys: string[]) {

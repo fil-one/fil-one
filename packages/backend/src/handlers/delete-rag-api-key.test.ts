@@ -8,18 +8,18 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 
-import { sstResourceMock } from '../test/sst-resource-mock.js';
-import { auditItemIn, expectNoSecrets, hasAuditItem } from '../test/audit-assertions.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
+import { auditItemIn, expectNoSecrets, hasAuditItem } from '../test/audit-assertions.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
 const ddbMock = mockClient(DynamoDBClient);
 
 import { ApiErrorCode, OrgRole } from '@filone/shared';
-import { baseHandler } from './delete-rag-api-key.js';
-import { RagApiKeyKeys } from '../lib/rag-api-keys.js';
-import { buildEvent, membershipFor } from '../test/lambda-test-utilities.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
+import { baseHandler } from './delete-rag-api-key.ts';
+import { RagApiKeyKeys } from '../lib/rag-api-keys.ts';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1', emailVerified: true };
 const TOKEN_HASH = 'b'.repeat(64);

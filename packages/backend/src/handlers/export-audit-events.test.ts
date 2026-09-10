@@ -8,11 +8,11 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
-vi.mock('../lib/auth-secrets.js', () => ({
+vi.mock('../lib/auth-secrets.ts', () => ({
   getAuthSecrets: () => ({
     AUTH0_CLIENT_ID: 'test-client-id',
     AUTH0_CLIENT_SECRET: 'test-client-secret',
@@ -31,13 +31,13 @@ const ddbMock = mockClient(DynamoDBClient);
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
-import { handler } from './export-audit-events.js';
+import { handler } from './export-audit-events.ts';
 import {
   buildContext,
   buildEvent,
   NO_MEMBERSHIP,
   stubMembershipRead,
-} from '../test/lambda-test-utilities.js';
+} from '../test/lambda-test-utilities.ts';
 
 const MOCK_SUB = 'auth0|admin';
 const ORG_ID = '11111111-2222-3333-4444-555555555555';

@@ -20,7 +20,7 @@ vi.stubEnv('USAGE_WORKER_FUNCTION_NAME', 'usage-worker-fn');
 const ddbMock = mockClient(DynamoDBClient);
 const lambdaMock = mockClient(LambdaClient);
 
-import { handler } from './usage-reporting-orchestrator.js';
+import { handler } from './usage-reporting-orchestrator.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

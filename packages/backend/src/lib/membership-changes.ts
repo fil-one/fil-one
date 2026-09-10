@@ -3,9 +3,9 @@ import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
 import { OrgRole, canManageTargetRole, canRetainAccessKey } from '@filone/shared';
 import type { AccessKeyPermissions, OrgMembershipSource } from '@filone/shared';
-import { retireInvitationItems } from './invitations.js';
-import type { InvitationRecord } from './invitations.js';
-import { OrgKeys } from './org-membership.js';
+import { retireInvitationItems } from './invitations.ts';
+import type { InvitationRecord } from './invitations.ts';
+import { OrgKeys } from './org-membership.ts';
 
 /**
  * The writes that change who is in an organization and what they may do.

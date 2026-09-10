@@ -22,7 +22,7 @@ const s3Mock = mockClient(S3Client);
 const mockEnsureFthTenantReady = vi.fn();
 const mockUpdateClientStatus = vi.fn();
 const mockGetClient = vi.fn();
-vi.mock('./fth-tenant-setup.js', () => ({
+vi.mock('./fth-tenant-setup.ts', () => ({
   ensureTenantReady: (...args: unknown[]) => mockEnsureFthTenantReady(...args),
   FTH_CONSOLE_USER_CODE: 'filone-console',
 }));
@@ -50,13 +50,13 @@ import {
   BucketConfigurationError,
   BucketNotEmptyError,
   BucketNotFoundError,
-} from '../errors.js';
-import { FthApiError, FthConflictError, FthNotFoundError } from './fth-management-client.js';
-import type { FthManagementClient } from './fth-management-client.js';
-import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
+} from '../errors.ts';
+import { FthApiError, FthConflictError, FthNotFoundError } from './fth-management-client.ts';
+import type { FthManagementClient } from './fth-management-client.ts';
+import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
 
-import { createFthOrchestrator } from './fth-orchestrator.js';
-import type { IssueAccessKeyOpts, ServiceOrchestrator } from '../service-orchestrator.js';
+import { createFthOrchestrator } from './fth-orchestrator.ts';
+import type { IssueAccessKeyOpts, ServiceOrchestrator } from '../service-orchestrator.ts';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 const fthClientId = '42';

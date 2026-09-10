@@ -3,20 +3,20 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { MeResponse } from '@filone/shared';
 import { permissionsForRole } from '@filone/shared';
-import { getOrgProfile } from '../lib/org-profile.js';
-import { summarizeMemberships } from '../lib/org-membership.js';
-import { hasRagAccess } from '../middleware/rag-access.js';
-import { hasOrgsBetaAccess } from '../lib/orgs-beta.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
+import { getOrgProfile } from '../lib/org-profile.ts';
+import { summarizeMemberships } from '../lib/org-membership.ts';
+import { hasRagAccess } from '../middleware/rag-access.ts';
+import { hasOrgsBetaAccess } from '../lib/orgs-beta.ts';
+import { ResponseBuilder } from '../lib/response-builder.ts';
 import {
   getConnectionType,
   getMfaEnrollments,
   getPasskeyAuthenticators,
-} from '../lib/auth0-management.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+} from '../lib/auth0-management.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { orgId, userId, email, emailVerified, sub, name, picture, membership } =

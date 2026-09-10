@@ -1,5 +1,5 @@
 import validator from 'validator';
-import { sendMail } from './mailer.js';
+import { sendMail } from './mailer.ts';
 
 /**
  * The organization-invitation email: its copy, and the fields a log line about

@@ -27,18 +27,18 @@ import {
   finalizeJob,
   getBulkDeleteJob,
   putBulkDeleteJob,
-} from '../lib/bulk-delete-jobs.js';
+} from '../lib/bulk-delete-jobs.ts';
 import {
   MAX_BULK_DELETE_DELIVERY_ATTEMPTS,
   enqueueBulkDeleteJob,
   type BulkDeleteWorkerPayload,
-} from '../lib/bulk-delete-queue.js';
-import type { BulkDeleteJobRecord } from '../lib/dynamo-records.js';
-import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
-import { getOrgProfile } from '../lib/org-profile.js';
-import { createS3Client } from '../lib/s3-client.js';
-import { getBucketVersioningStatus } from '../lib/s3-bucket-operations.js';
-import { deleteTargets, enumerateDeletionPage } from '../lib/s3-bulk-delete.js';
+} from '../lib/bulk-delete-queue.ts';
+import type { BulkDeleteJobRecord } from '../lib/dynamo-records.ts';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import { getOrgProfile } from '../lib/org-profile.ts';
+import { createS3Client } from '../lib/s3-client.ts';
+import { getBucketVersioningStatus } from '../lib/s3-bucket-operations.ts';
+import { deleteTargets, enumerateDeletionPage } from '../lib/s3-bulk-delete.ts';
 
 const LOG = '[bulk-delete-worker]';
 

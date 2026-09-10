@@ -18,8 +18,8 @@ const ddbMock = mockClient(DynamoDBClient);
 
 process.env.FILONE_STAGE = 'test';
 
-import { baseHandler } from './list-access-keys.js';
-import { buildEvent, membershipFor } from '../test/lambda-test-utilities.js';
+import { baseHandler } from './list-access-keys.ts';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

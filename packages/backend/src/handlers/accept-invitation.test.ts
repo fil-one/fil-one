@@ -9,8 +9,8 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
-import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
+import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -18,7 +18,7 @@ import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.js';
 
 vi.mock('sst', () => sstResourceMock());
 
-vi.mock('../lib/auth-secrets.js', () => ({
+vi.mock('../lib/auth-secrets.ts', () => ({
   getAuthSecrets: () => ({
     AUTH0_CLIENT_ID: 'test-client-id',
     AUTH0_CLIENT_SECRET: 'test-client-secret',
@@ -37,10 +37,10 @@ const ddbMock = mockClient(DynamoDBClient);
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
-import { handler } from './accept-invitation.js';
-import { OrgKeys } from '../lib/org-membership.js';
-import { hashInviteToken, inviteExpiresAt } from '../lib/invitations.js';
-import { buildEvent, buildContext, NO_MEMBERSHIP } from '../test/lambda-test-utilities.js';
+import { handler } from './accept-invitation.ts';
+import { OrgKeys } from '../lib/org-membership.ts';
+import { hashInviteToken, inviteExpiresAt } from '../lib/invitations.ts';
+import { buildEvent, buildContext, NO_MEMBERSHIP } from '../test/lambda-test-utilities.ts';
 
 // ---------------------------------------------------------------------------
 // Fixtures

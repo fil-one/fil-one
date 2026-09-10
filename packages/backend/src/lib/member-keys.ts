@@ -9,11 +9,11 @@ import type {
   OrgRole,
 } from '@filone/shared';
 import { Resource } from 'sst';
-import { readAccessKeyMintSeq } from './access-key-mint-seq.js';
-import type { KeyMintFence } from './access-key-mint-seq.js';
-import { getDynamoClient } from './ddb-client.js';
-import { AccessKeyKeys } from './dynamo-records.js';
-import type { AccessKeyRecord } from './dynamo-records.js';
+import { readAccessKeyMintSeq } from './access-key-mint-seq.ts';
+import type { KeyMintFence } from './access-key-mint-seq.ts';
+import { getDynamoClient } from './ddb-client.ts';
+import { AccessKeyKeys } from './dynamo-records.ts';
+import type { AccessKeyRecord } from './dynamo-records.ts';
 
 /**
  * An org's access-key rows, and which of them a member could still mint.

@@ -9,11 +9,11 @@ import type {
 import { Resource } from 'sst';
 import { isFoundationEmail } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
-import { getDynamoClient } from '../lib/ddb-client.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getVerifiedEmail } from '../lib/user-context.js';
-import { withRefreshedCookies } from './auth.js';
+import { getDynamoClient } from '../lib/ddb-client.ts';
+import { ResponseBuilder } from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getVerifiedEmail } from '../lib/user-context.ts';
+import { withRefreshedCookies } from './auth.ts';
 
 const dynamo = getDynamoClient();
 

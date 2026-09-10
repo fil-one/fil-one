@@ -8,12 +8,12 @@ import {
   makeCookieHeader,
   makeHintCookieHeader,
   makeClearCookieHeader,
-} from '../lib/response-builder.js';
-import { parseCookies } from '../lib/cookies.js';
-import { getAuthSecrets } from '../lib/auth-secrets.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { resolveOrigin } from '../lib/resolve-origin.js';
-import { resolveAuth0Domain } from '../lib/auth0-domain.js';
+} from '../lib/response-builder.ts';
+import { parseCookies } from '../lib/cookies.ts';
+import { getAuthSecrets } from '../lib/auth-secrets.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
+import { resolveOrigin } from '../lib/resolve-origin.ts';
+import { resolveAuth0Domain } from '../lib/auth0-domain.ts';
 
 function redirect(location: string, cookies: string[] = []): APIGatewayProxyStructuredResultV2 {
   return {

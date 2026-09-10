@@ -4,13 +4,13 @@ import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { AUDIT_RETENTION_DAYS } from '@filone/shared';
 import type { AuditQueryFilters } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { queryAllAuditEvents, queryAuditEvents, resolveWindow } from './audit-query.js';
+import { queryAllAuditEvents, queryAuditEvents, resolveWindow } from './audit-query.ts';
 
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
 const OTHER_ORG = '99999999-8888-7777-6666-555555555555';

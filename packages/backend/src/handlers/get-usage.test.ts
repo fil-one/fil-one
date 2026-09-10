@@ -13,11 +13,11 @@ vi.mock('sst', () => ({
 }));
 
 const mockGetAvailableOrchestrators = vi.fn();
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getAvailableOrchestrators: (...args: unknown[]) => mockGetAvailableOrchestrators(...args),
 }));
 
-vi.mock('../lib/org-profile.js', () => ({
+vi.mock('../lib/org-profile.ts', () => ({
   getOrgProfile: vi.fn(async (orgId: string) => fakeOrgProfile(orgId)),
 }));
 
@@ -25,9 +25,9 @@ process.env.FILONE_STAGE = 'test';
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { baseHandler } from './get-usage.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
-import { fakeOrchestrator, fakeOrgProfile, tenantFor } from '../test/fake-orchestrator.js';
+import { baseHandler } from './get-usage.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
+import { fakeOrchestrator, fakeOrgProfile, tenantFor } from '../test/fake-orchestrator.ts';
 import { S3Region } from '@filone/shared';
 
 // ---------------------------------------------------------------------------

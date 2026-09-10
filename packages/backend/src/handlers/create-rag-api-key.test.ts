@@ -7,17 +7,17 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 
-import { sstResourceMock } from '../test/sst-resource-mock.js';
-import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
+import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { baseHandler } from './create-rag-api-key.js';
-import { OrgDeletingError } from '../lib/org-profile.js';
-import { hashRagKeyToken, RagApiKeyKeys } from '../lib/rag-api-keys.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import { baseHandler } from './create-rag-api-key.ts';
+import { OrgDeletingError } from '../lib/org-profile.ts';
+import { hashRagKeyToken, RagApiKeyKeys } from '../lib/rag-api-keys.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
 
 const USER_INFO = {
   userId: 'user-1',

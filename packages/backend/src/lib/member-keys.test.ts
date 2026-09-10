@@ -3,7 +3,7 @@ import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { NO_ROLE, OrgRole, S3Region } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
@@ -14,8 +14,8 @@ import {
   reviewMemberAccessKeysForRole,
   listOrgAccessKeys,
   reviewAccessKeysForRole,
-} from './member-keys.js';
-import type { MemberAccessKey } from './member-keys.js';
+} from './member-keys.ts';
+import type { MemberAccessKey } from './member-keys.ts';
 
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
 const MEMBER = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
