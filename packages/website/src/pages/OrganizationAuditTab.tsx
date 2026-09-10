@@ -168,7 +168,7 @@ function AuditFilters({ filters, members, onChange, onClear }: FiltersProps) {
       </label>
 
       {hasAuditFilters(filters) && (
-        <Button variant="ghost" size="sm" onClick={onClear}>
+        <Button variant="tertiary" size="sm" onClick={onClear}>
           Clear
         </Button>
       )}
