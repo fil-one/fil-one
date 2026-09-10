@@ -31,8 +31,11 @@ export function statusBadge(status: SubscriptionStatus): StatusBadge {
     // cards is what says so; a red pill here would read as cancelled.
     case SubscriptionStatus.PastDue:
       return { label: 'Payment failed', tone: 'amber', dot: false };
+    // "Active", not "Trial": the plan name and the meta line beside it already
+    // say a trial is running, and this pill is read at a glance as "is this
+    // account in good standing" — which, mid-trial, it is.
     case SubscriptionStatus.Trialing:
-      return { label: 'Trial', tone: 'blue', dot: true };
+      return { label: 'Active', tone: 'blue', dot: true };
     case SubscriptionStatus.GracePeriod:
       return { label: 'Grace period', tone: 'amber', dot: false };
     case SubscriptionStatus.Canceled:
@@ -45,17 +48,21 @@ export function statusBadge(status: SubscriptionStatus): StatusBadge {
 /**
  * What to call the plan.
  *
- * The Stripe product's name when there is one, because that is what the
- * customer's contract and their invoices call it. Then the account's state, then
- * the plan enum, and where none of those answers, "Your plan". Never "Unknown":
- * a label the console cannot fill is still a plan somebody is paying for.
+ * "Free trial" while trialing, before anything else: Stripe attaches the
+ * eventual paid price's product name to a trialing subscription too, and
+ * showing that name here would call an account that has committed to
+ * nothing and holds no card on file by the name of a plan it is not yet on.
+ * Otherwise the Stripe product's name when there is one, because that is
+ * what the customer's contract and their invoices call it. Then the
+ * account's state, then the plan enum, and where none of those answers,
+ * "Your plan". Never "Unknown": a label the console cannot fill is still a
+ * plan somebody is paying for.
  */
 export function planTitle(subscription: Subscription): string {
+  if (subscription.status === SubscriptionStatus.Trialing) return 'Free trial';
   if (subscription.planName) return subscription.planName;
 
   switch (subscription.status) {
-    case SubscriptionStatus.Trialing:
-      return 'Free trial';
     case SubscriptionStatus.Inactive:
       return 'No plan';
     default:
@@ -100,24 +107,21 @@ export function formatCents(cents: number): string {
  *
  * With no rate at all — where a negotiated quote lands, since a volume deal has
  * no single per-TB number — this says so in two words rather than inventing one.
+ *
+ * Nothing at all while trialing, even when Stripe already attached a price to
+ * the subscription it will become: nobody is charged that rate yet, and the
+ * usage card right below this one already states the trial's own storage and
+ * egress limits, so repeating either fact here is redundant at best and, for
+ * the rate, reads as a bill that has not started.
  */
 export function pricingLine(subscription: Subscription): string {
   const { pricePerTbCents, status } = subscription;
 
+  if (status === SubscriptionStatus.Trialing) return '';
   if (pricePerTbCents) return `${formatCents(pricePerTbCents)}/TB per month`;
-
-  if (status === SubscriptionStatus.Trialing) {
-    return `${formatBytesForCopy(getUsageLimits(false).storageLimitBytes)} of storage included`;
-  }
   if (status === SubscriptionStatus.Inactive) return 'Choose a plan to start storing data';
 
   return 'Custom pricing';
-}
-
-/** Whole TB or GB, for a sentence rather than a table. */
-function formatBytesForCopy(bytes: number): string {
-  const tb = bytes / TB_BYTES;
-  return tb >= 1 ? `${String(Math.round(tb))} TB` : `${String(Math.round(bytes / 1e9))} GB`;
 }
 
 /**
@@ -141,8 +145,10 @@ export function planMetaLine(subscription: Subscription): string {
 export function timelineLine(subscription: Subscription): string | null {
   const { status, trialEndsAt, gracePeriodEndsAt, currentPeriodEnd, canceledAt } = subscription;
 
+  // No "Trial" subject: the plan name and the pill beside it already say
+  // it's a trial, and this line's job is just the deadline.
   if (status === SubscriptionStatus.Trialing && trialEndsAt) {
-    return endsInLabel('Trial', trialEndsAt);
+    return endsInLabel(undefined, trialEndsAt);
   }
   if (status === SubscriptionStatus.GracePeriod && gracePeriodEndsAt) {
     return endsInLabel('Access', gracePeriodEndsAt);
@@ -155,12 +161,14 @@ export function timelineLine(subscription: Subscription): string | null {
 }
 
 /**
- * "Trial ends in 12 days", with the last day of it spelled out rather than
- * counted: `daysUntil` clamps at zero, so 0 is later today, not gone.
+ * "Access ends in 12 days", or plain "Ends in 12 days" with no `subject` —
+ * the last day of it spelled out rather than counted: `daysUntil` clamps at
+ * zero, so 0 is later today, not gone.
  */
-function endsInLabel(subject: string, iso: string): string {
+function endsInLabel(subject: string | undefined, iso: string): string {
   const days = daysUntil(iso);
-  return days === 0 ? `${subject} ends today` : `${subject} ends in ${pluralizeDays(days)}`;
+  const prefix = subject ? `${subject} ends` : 'Ends';
+  return days === 0 ? `${prefix} today` : `${prefix} in ${pluralizeDays(days)}`;
 }
 
 /**

@@ -71,6 +71,15 @@ export interface MeResponse {
    * what makes the answer follow the org rather than the session.
    */
   orgsBeta: boolean;
+  /**
+   * Whether the active org has usable billing — a plan chosen, trial or paid,
+   * as opposed to never having had one. Computed server-side like
+   * {@link MeResponse.ragAccess}, and visible to every role rather than gated
+   * on `billing.view`: the console's whole-console gate has to answer for a
+   * Member too, who cannot read the billing detail behind why but still needs
+   * to know the org is blocked and who to ask.
+   */
+  billingActive: boolean;
 }
 
 export interface MfaEnrollment {

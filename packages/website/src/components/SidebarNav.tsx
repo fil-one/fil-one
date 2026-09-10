@@ -8,6 +8,7 @@ import {
 import { Link, useMatchRoute } from '@tanstack/react-router';
 
 import type { Permission } from '@filone/shared';
+import { usePendingOrgSwitchTarget } from '../lib/active-org.js';
 import { usePermissions } from '../lib/use-permissions.js';
 import { useOrgPath } from '../lib/use-org-path.js';
 import { useSidebarData } from './use-sidebar-data.js';
@@ -26,6 +27,16 @@ type SidebarNavProps = {
   // secondary mobile-drawer copy doesn't duplicate the desktop sidebar's
   // selectors. The primary desktop sidebar passes true.
   showTestIds: boolean;
+  /**
+   * Whether every page link would land the caller on the same blocked-org
+   * gate. Set by `$orgSlug.tsx` off the same `billingActive` that swaps the
+   * routed page for `BillingRequiredGate` — pages that all show the identical
+   * message read as broken, not as navigation, so this omits them rather than
+   * leave dead ends dressed up as links. The status banners below the links
+   * go with them: they are the same "no active plan" fact the gate itself
+   * already states, front and center, in the one place a caller is looking.
+   */
+  hideNavLinks?: boolean;
 };
 
 type NavItem = {
@@ -153,6 +164,7 @@ export function SidebarNav({
   onClose,
   showUserProfile = true,
   showTestIds,
+  hideNavLinks = false,
 }: SidebarNavProps) {
   const matchRoute = useMatchRoute();
 
@@ -174,6 +186,12 @@ export function SidebarNav({
     limitsKnown,
   } = useSidebarData();
 
+  // Filled in only for the moment between a switch starting and the new org's
+  // `/me` landing — see `usePendingOrgSwitchTarget`'s own doc for why `me`
+  // itself is empty for that stretch. `me` wins the instant it has an answer;
+  // this is never more than a stand-in for the row already clicked.
+  const pendingSwitch = usePendingOrgSwitchTarget();
+
   return (
     <div className="h-full">
       <nav
@@ -187,8 +205,8 @@ export function SidebarNav({
         {showUserProfile && (
           <div className="flex flex-shrink-0 flex-col gap-1 px-2 pt-2 pb-1">
             <OrgSwitcherMenu
-              orgName={me?.orgName ?? 'Organization'}
-              logoUrl={me?.logoUrl}
+              orgName={me?.orgName ?? pendingSwitch?.orgName ?? 'Organization'}
+              logoUrl={me?.logoUrl ?? pendingSwitch?.logoUrl}
               memberships={me?.memberships}
               activeOrgId={me?.orgId}
               collapsed={collapsed}
@@ -197,34 +215,40 @@ export function SidebarNav({
           </div>
         )}
 
-        {/* Primary nav items */}
-        <NavLinks
-          collapsed={collapsed}
-          matchRoute={matchRoute}
-          onClose={onClose}
-          showTestIds={showTestIds}
-        />
+        {/* Primary nav items — omitted while every one of them would land on
+            the same blocked-org gate. See `hideNavLinks` above. */}
+        {!hideNavLinks && (
+          <NavLinks
+            collapsed={collapsed}
+            matchRoute={matchRoute}
+            onClose={onClose}
+            showTestIds={showTestIds}
+          />
+        )}
 
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Status banners */}
-        <StatusBanners
-          collapsed={collapsed}
-          showTestIds={showTestIds}
-          isTrialing={isTrialing}
-          trialDays={trialDays}
-          trialEndsLabel={trialEndsLabel}
-          storageUsed={storageUsed}
-          storagePct={storagePct}
-          egressUsed={egressUsed}
-          egressPct={egressPct}
-          limitsKnown={limitsKnown}
-          graceDays={graceDays}
-          graceEndsLabel={graceEndsLabel}
-          isPastDue={isPastDue}
-          isInactive={isInactive}
-        />
+        {/* Status banners — the inactive-plan banner would just repeat the
+            gate's own message, so it's dropped along with the links. */}
+        {!hideNavLinks && (
+          <StatusBanners
+            collapsed={collapsed}
+            showTestIds={showTestIds}
+            isTrialing={isTrialing}
+            trialDays={trialDays}
+            trialEndsLabel={trialEndsLabel}
+            storageUsed={storageUsed}
+            storagePct={storagePct}
+            egressUsed={egressUsed}
+            egressPct={egressPct}
+            limitsKnown={limitsKnown}
+            graceDays={graceDays}
+            graceEndsLabel={graceEndsLabel}
+            isPastDue={isPastDue}
+            isInactive={isInactive}
+          />
+        )}
 
         {/* Footer: user identity (also carries Documentation/Support now). System
             status has moved to the content window's bottom bar on desktop; it

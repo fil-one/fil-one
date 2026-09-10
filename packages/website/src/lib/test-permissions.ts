@@ -32,6 +32,9 @@ export function seedPermissions(
     // not have to switch the feature on before it can render the thing it is
     // about. The surface tests override it.
     orgsBeta: true,
+    // On by default too — the whole-console billing gate has its own tests,
+    // and every other test here is about a page that gate would otherwise hide.
+    billingActive: true,
     userId: 'user-1',
     role,
     permissions: ROLE_PERMISSIONS[role],
