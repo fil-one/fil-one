@@ -28,6 +28,8 @@ import { Route as supportRoute } from './routes/_app/$orgSlug.support.js';
 import { Route as bucketIntelligenceRoute } from './routes/_app/$orgSlug.bucket-intelligence.js';
 import { Route as aiAgentToolkitRoute } from './routes/_app/$orgSlug.ai-agent-toolkit.js';
 import { Route as verifyEmailRoute } from './routes/verify-email.js';
+import { Route as createOrganizationRoute } from './routes/create-organization.js';
+import { Route as leftLastOrgRoute } from './routes/left-organization.js';
 import { Route as welcomeRoute } from './routes/welcome.js';
 import { RouteErrorPage, RouteNotFoundPage } from './components/RouteRecoveryPage.js';
 import { Route as accountDeletedRoute } from './routes/account-deleted.js';
@@ -53,6 +55,8 @@ import { Route as legacyAiAgentToolkitRoute } from './routes/_app/ai-agent-toolk
 const routeTree = rootRoute.addChildren([
   indexRoute,
   verifyEmailRoute,
+  createOrganizationRoute,
+  leftLastOrgRoute,
   welcomeRoute,
   accountDeletedRoute,
   acceptInvitationRoute,

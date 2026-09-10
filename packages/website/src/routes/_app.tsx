@@ -50,7 +50,7 @@ export const Route = createRoute({
     // organization and reads as confirmed, so `!me.nameConfirmed` would wrongly
     // send every such account back through naming.
     if (me.nameConfirmed === false) {
-      throw redirect({ to: '/welcome' });
+      throw redirect({ to: '/create-organization' });
     }
   },
   component: () => <Outlet />,
