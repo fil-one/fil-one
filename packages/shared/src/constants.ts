@@ -158,10 +158,6 @@ export function getS3Endpoint(region: S3Region, stage: Stage | string): string {
     }
   }
 
-  // TODO remove this branch when Aurora supports the new domain name
-  if (region === S3Region.EuWest1) {
-    return `https://eu-west-1.s3.${S3_DATA_DOMAIN}`;
-  }
   return `https://s3.${region}.${S3_DATA_DOMAIN}`;
 }
 

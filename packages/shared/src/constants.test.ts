@@ -103,7 +103,7 @@ describe('getS3Endpoint', () => {
   // reliably detects any accidental regressions in the code building
   // the S3 endpoint URLs.
   const EXPECTED_PRODUCTION_REGION_ENDPOINTS: [S3Region, string][] = [
-    [S3Region.EuWest1, 'https://eu-west-1.s3.filonecontent.com'],
+    [S3Region.EuWest1, 'https://s3.eu-west-1.filonecontent.com'],
     [S3Region.UsEast1, 'https://s3.us-east-1.filonecontent.com'],
   ];
   for (const [region, endpoint] of EXPECTED_PRODUCTION_REGION_ENDPOINTS) {
