@@ -1,6 +1,6 @@
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
-import { getDynamoClient } from './ddb-client.js';
+import { getDynamoClient } from './ddb-client.ts';
 
 /**
  * The organizations beta flag, which gates one thing: creating an invitation.

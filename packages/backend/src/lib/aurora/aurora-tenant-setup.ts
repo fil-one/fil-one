@@ -6,22 +6,22 @@ import {
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { SSMClient, PutParameterCommand, GetParameterCommand } from '@aws-sdk/client-ssm';
-import { getDynamoClient } from '../ddb-client.js';
+import { getDynamoClient } from '../ddb-client.ts';
 import { Resource } from 'sst';
 import {
   createAuroraTenant,
   createAuroraTenantApiKey,
   DuplicateTokenNameError,
   setupAuroraTenant,
-} from './aurora-backoffice.js';
+} from './aurora-backoffice.ts';
 import { ACCESS_KEY_PERMISSIONS, type ErrorResponse } from '@filone/shared';
-import { createAuroraAccessKey } from './aurora-portal.js';
-import { reportMetric } from '../metrics.js';
-import { OrgDeletingError } from '../org-profile.js';
-import { OrgSetupStatus, isOrgSetupComplete } from '../org-setup-status.js';
-import { scanAndEmitStuckTenantCount } from '../stuck-tenant-metric.js';
+import { createAuroraAccessKey } from './aurora-portal.ts';
+import { reportMetric } from '../metrics.ts';
+import { OrgDeletingError } from '../org-profile.ts';
+import { OrgSetupStatus, isOrgSetupComplete } from '../org-setup-status.ts';
+import { scanAndEmitStuckTenantCount } from '../stuck-tenant-metric.ts';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { ResponseBuilder } from '../response-builder.js';
+import { ResponseBuilder } from '../response-builder.ts';
 
 export { OrgSetupStatus };
 

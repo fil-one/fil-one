@@ -6,7 +6,7 @@ import {
   type TransactWriteItem,
 } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
-import { getDynamoClient } from './ddb-client.js';
+import { getDynamoClient } from './ddb-client.ts';
 
 const dynamo = getDynamoClient();
 

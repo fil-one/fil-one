@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { AUDIT_RETENTION_DAYS } from '@filone/shared';
-import { AuditFilterError, parseAuditRequest } from './audit-request.js';
+import { AuditFilterError, parseAuditRequest } from './audit-request.ts';
 
 const NOW = '2026-08-15T12:00:00.000Z';
 const USER_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';

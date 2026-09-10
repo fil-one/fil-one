@@ -8,8 +8,8 @@ import {
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
-import { buildEvent } from '../test/lambda-test-utilities.js';
-import { type MetricEvent, reportMetric } from '../lib/metrics.js';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
+import { type MetricEvent, reportMetric } from '../lib/metrics.ts';
 import { SubscriptionStatus } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
@@ -25,13 +25,13 @@ vi.mock('sst', () => ({
 
 // The orchestrator registry instantiates real clients at import time; mock it
 // so the otherwise-real region-helpers module can be loaded below.
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getAvailableOrchestrators: () => [],
 }));
 
 const mockSyncTenantStatusInProvisionedRegions = vi.fn();
-vi.mock('../lib/region-helpers.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../lib/region-helpers.js')>()),
+vi.mock('../lib/region-helpers.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/region-helpers.ts')>()),
   syncTenantStatusInProvisionedRegions: (...args: unknown[]) =>
     mockSyncTenantStatusInProvisionedRegions(...args),
 }));
@@ -40,7 +40,7 @@ const mockConstructEvent = vi.fn();
 const mockCustomersRetrieve = vi.fn();
 const mockPaymentMethodsRetrieve = vi.fn();
 
-vi.mock('../lib/stripe-client.js', () => ({
+vi.mock('../lib/stripe-client.ts', () => ({
   getStripeClient: () => ({
     webhooks: { constructEvent: mockConstructEvent },
     customers: { retrieve: mockCustomersRetrieve },
@@ -50,11 +50,11 @@ vi.mock('../lib/stripe-client.js', () => ({
 }));
 
 const mockStartDeletion = vi.fn(async (_params: unknown) => undefined);
-vi.mock('../lib/deletion-from-stripe.js', () => ({
+vi.mock('../lib/deletion-from-stripe.ts', () => ({
   startDeletionFromStripe: (params: unknown) => mockStartDeletion(params),
 }));
 
-vi.mock('../lib/metrics.js', () => ({
+vi.mock('../lib/metrics.ts', () => ({
   reportMetric: vi.fn(),
 }));
 
@@ -62,9 +62,9 @@ const reportMetricMock = vi.mocked(reportMetric);
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { handler } from './stripe-webhook.js';
-import { WEBHOOK_STATUS_SYNC_RETRY } from '../lib/region-helpers.js';
-import { BILLING_IDENTITY_PROJECTION } from '../lib/subscription-store.js';
+import { handler } from './stripe-webhook.ts';
+import { WEBHOOK_STATUS_SYNC_RETRY } from '../lib/region-helpers.ts';
+import { BILLING_IDENTITY_PROJECTION } from '../lib/subscription-store.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -12,8 +12,8 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
-import { getDynamoClient } from '../lib/ddb-client.js';
-import { RAGKeys, type RagIndexerCheckpointRecord } from '../lib/dynamo-records.js';
+import { getDynamoClient } from '../lib/ddb-client.ts';
+import { RAGKeys, type RagIndexerCheckpointRecord } from '../lib/dynamo-records.ts';
 import { S3Region } from '@filone/shared';
 
 const dynamo = getDynamoClient();

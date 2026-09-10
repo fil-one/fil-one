@@ -4,8 +4,8 @@ import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import { OrgRole, isOrgRole } from '@filone/shared';
 import type { OrgMembershipSource, OrgMembershipSummary } from '@filone/shared';
-import { getDynamoClient } from './ddb-client.js';
-import { resolveOrgName } from './org-profile.js';
+import { getDynamoClient } from './ddb-client.ts';
+import { resolveOrgName } from './org-profile.ts';
 
 /**
  * Organization membership, in OrgTable.

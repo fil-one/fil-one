@@ -8,7 +8,7 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 import { mockClient } from 'aws-sdk-client-mock';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { type MetricEvent, reportMetric } from '../lib/metrics.js';
+import { type MetricEvent, reportMetric } from '../lib/metrics.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -22,16 +22,16 @@ vi.mock('sst', () => ({
 }));
 
 const mockUpsertContact = vi.fn();
-vi.mock('../lib/hubspot-client.js', () => ({
+vi.mock('../lib/hubspot-client.ts', () => ({
   upsertContactSubscriptionStatus: (...args: unknown[]) => mockUpsertContact(...args),
 }));
 
-vi.mock('../lib/metrics.js', () => ({ reportMetric: vi.fn() }));
+vi.mock('../lib/metrics.ts', () => ({ reportMetric: vi.fn() }));
 
 const reportMetricMock = vi.mocked(reportMetric);
 const ddbMock = mockClient(DynamoDBClient);
 
-import { handler, syncAllContacts } from './hubspot-contact-sync.js';
+import { handler, syncAllContacts } from './hubspot-contact-sync.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

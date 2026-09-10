@@ -3,7 +3,7 @@ import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, ScanCommand } from '@aws-sdk/client-dynamodb';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { marshall } from '@aws-sdk/util-dynamodb';
-import type { RagIndexerWorkerPayload } from './rag-indexer-worker.js';
+import type { RagIndexerWorkerPayload } from './rag-indexer-worker.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -15,15 +15,15 @@ vi.mock('sst', () => ({
   },
 }));
 
-vi.mock('../lib/metrics.js', () => ({ reportMetric: vi.fn() }));
+vi.mock('../lib/metrics.ts', () => ({ reportMetric: vi.fn() }));
 
 vi.stubEnv('RAG_INDEXER_WORKER_FUNCTION_NAME', 'rag-indexer-worker-fn');
 
 const ddbMock = mockClient(DynamoDBClient);
 const lambdaMock = mockClient(LambdaClient);
 
-import { handler } from './rag-indexer-orchestrator.js';
-import { reportMetric, type MetricEvent } from '../lib/metrics.js';
+import { handler } from './rag-indexer-orchestrator.ts';
+import { reportMetric, type MetricEvent } from '../lib/metrics.ts';
 
 const reportMetricMock = vi.mocked(reportMetric);
 const reportedMetrics = (): MetricEvent[] => reportMetricMock.mock.calls.map(([e]) => e);

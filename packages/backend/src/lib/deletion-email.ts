@@ -1,6 +1,6 @@
 import validator from 'validator';
 import { DELETION_CODE_TTL_MINUTES } from '@filone/shared';
-import { sendMail } from './mailer.js';
+import { sendMail } from './mailer.ts';
 
 /**
  * Send the account-deletion verification code. SendGrid direct: Auth0 already

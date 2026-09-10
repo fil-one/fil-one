@@ -22,33 +22,33 @@ import type {
   GranularPermission,
 } from '@filone/shared';
 import { Resource } from 'sst';
-import { accessKeyMintSeqItem } from '../lib/access-key-mint-seq.js';
-import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.js';
-import { RevocationNotRecordedError, revokeAccessKey } from '../lib/key-revocation.js';
-import { resolveMembership } from '../lib/org-membership.js';
-import type { AuditCorrelation } from '../lib/audit.js';
-import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
-import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.js';
-import type { IssuedAccessKey, ServiceOrchestrator } from '../lib/service-orchestrator.js';
-import { getDynamoClient } from '../lib/ddb-client.js';
-import { isOrgDeleting } from '../lib/org-profile.js';
-import { parseJsonBody } from '../lib/parse-json-body.js';
+import { accessKeyMintSeqItem } from '../lib/access-key-mint-seq.ts';
+import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
+import { RevocationNotRecordedError, revokeAccessKey } from '../lib/key-revocation.ts';
+import { resolveMembership } from '../lib/org-membership.ts';
+import type { AuditCorrelation } from '../lib/audit.ts';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
+import type { IssuedAccessKey, ServiceOrchestrator } from '../lib/service-orchestrator.ts';
+import { getDynamoClient } from '../lib/ddb-client.ts';
+import { isOrgDeleting } from '../lib/org-profile.ts';
+import { parseJsonBody } from '../lib/parse-json-body.ts';
 import {
   accountDeletedResponse,
   ResponseBuilder,
   tenantNotReadyResponse,
   unsupportedRegionResponse,
-} from '../lib/response-builder.js';
-import { AccessKeyKeys, keyAttribution } from '../lib/dynamo-records.js';
-import { cancelledLabels, creatorRoleStillMintsCheck } from '../lib/membership-changes.js';
-import type { AccessKeyRecord } from '../lib/dynamo-records.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize, requireOrgMembershipMiddleware } from '../middleware/authorize.js';
-import { csrfMiddleware } from '../middleware/csrf.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
+} from '../lib/response-builder.ts';
+import { AccessKeyKeys, keyAttribution } from '../lib/dynamo-records.ts';
+import { cancelledLabels, creatorRoleStillMintsCheck } from '../lib/membership-changes.ts';
+import type { AccessKeyRecord } from '../lib/dynamo-records.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize, requireOrgMembershipMiddleware } from '../middleware/authorize.ts';
+import { csrfMiddleware } from '../middleware/csrf.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
+import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
 
 // TODO: Refactor the handler, reducing its complexity and removing the ignore eslint directive.
 // https://linear.app/filecoin-foundation/issue/FIL-320/refactor-create-access-key-handler

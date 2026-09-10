@@ -3,14 +3,14 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ListInvoicesResponse, Invoice } from '@filone/shared';
 import type Stripe from 'stripe';
-import { getStripeClient } from '../lib/stripe-client.js';
-import { readSubscription } from '../lib/subscription-store.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+import { getStripeClient } from '../lib/stripe-client.ts';
+import { readSubscription } from '../lib/subscription-store.ts';
+import { ResponseBuilder } from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 
 /**
  * How many invoices the console lists: a year of monthly billing, in one Stripe

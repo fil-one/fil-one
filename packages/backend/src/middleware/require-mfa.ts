@@ -6,10 +6,10 @@ import type {
   Context,
 } from 'aws-lambda';
 import type { StepUpRequiredResponse } from '@filone/shared';
-import { getMfaEnrollments } from '../lib/auth0-management.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getVerifiedIdTokenClaims, withRefreshedCookies } from './auth.js';
+import { getMfaEnrollments } from '../lib/auth0-management.ts';
+import { ResponseBuilder } from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getVerifiedIdTokenClaims, withRefreshedCookies } from './auth.ts';
 
 /**
  * Gate handlers that require a strong-auth session. Reads the OIDC `amr`

@@ -3,28 +3,28 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { NO_ROLE, OrgRole } from '@filone/shared';
 import type { AccessKeySummary, RemoveMemberResponse } from '@filone/shared';
-import { AuditSubjects, userActor } from '../lib/audit.js';
-import { commitAfterRevokingKeys } from '../lib/commit-after-revoking-keys.js';
-import { notifyRevokedKeys } from '../lib/key-revocation-email.js';
-import { reviewKeysForRoleChange } from '../lib/member-keys.js';
-import { requireManageableMember } from '../lib/manageable-member.js';
-import { getOrgProfile } from '../lib/org-profile.js';
-import type { OrgProfileItem } from '../lib/org-profile.js';
+import { AuditSubjects, userActor } from '../lib/audit.ts';
+import { commitAfterRevokingKeys } from '../lib/commit-after-revoking-keys.ts';
+import { notifyRevokedKeys } from '../lib/key-revocation-email.ts';
+import { reviewKeysForRoleChange } from '../lib/member-keys.ts';
+import { requireManageableMember } from '../lib/manageable-member.ts';
+import { getOrgProfile } from '../lib/org-profile.ts';
+import type { OrgProfileItem } from '../lib/org-profile.ts';
 import {
   normalizeInviteEmail,
   pendingInvitationsForRemoval,
   planRevocations,
   retireInvitationItems,
   revokeDeferred,
-} from '../lib/invitations.js';
-import type { InvitationRecord } from '../lib/invitations.js';
+} from '../lib/invitations.ts';
+import type { InvitationRecord } from '../lib/invitations.ts';
 import {
   cancelledLabels,
   membershipDeleteItems,
   ownerCountItem,
-} from '../lib/membership-changes.js';
-import { readOwnerCount, resolveMembership } from '../lib/org-membership.js';
-import { readUserProfile } from '../lib/user-profile.js';
+} from '../lib/membership-changes.ts';
+import { readOwnerCount, resolveMembership } from '../lib/org-membership.ts';
+import { readUserProfile } from '../lib/user-profile.ts';
 import {
   ResponseBuilder,
   invitationRaceResponse,
@@ -34,14 +34,14 @@ import {
   notAMemberResponse,
   ownerCountUnavailableResponse,
   refusedKeysSubject,
-} from '../lib/response-builder.js';
-import type { ErrorWithRevokedKeys } from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { csrfMiddleware } from '../middleware/csrf.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+} from '../lib/response-builder.ts';
+import type { ErrorWithRevokedKeys } from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { csrfMiddleware } from '../middleware/csrf.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 
 const SOURCE = 'remove-member';
 

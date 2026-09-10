@@ -1,6 +1,6 @@
 import pRetry, { AbortError, type Options as RetryOptions } from 'p-retry';
 import { Resource } from 'sst';
-import type { HubSpotLifecycleStatus } from './hubspot-lifecycle-status.js';
+import type { HubSpotLifecycleStatus } from './hubspot-lifecycle-status.ts';
 
 // HubSpot subscription type ID for marketing emails. Shared across all environments
 // (single HubSpot portal). Look up via:

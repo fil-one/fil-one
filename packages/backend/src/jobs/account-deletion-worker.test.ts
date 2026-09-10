@@ -7,7 +7,7 @@ import {
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
-import type { DeletionMember } from '../lib/deletion-record.js';
+import type { DeletionMember } from '../lib/deletion-record.ts';
 
 vi.mock('sst', () => ({
   Resource: { UserInfoTable: { name: 'UserInfoTable' } },
@@ -27,26 +27,26 @@ const mockResolveTargets = vi.fn(async () => ({
   tenantIds: { fth: '42' } as Record<string, string>,
 }));
 
-vi.mock('../lib/deletion-stripe-teardown.js', () => ({
+vi.mock('../lib/deletion-stripe-teardown.ts', () => ({
   tearDownStripe: (...args: unknown[]) => mockTearDownStripe(...args),
 }));
-vi.mock('../lib/deletion-scrub.js', () => ({ scrubOrgRecords: () => mockScrub() }));
-vi.mock('../lib/deletion-targets.js', () => ({
+vi.mock('../lib/deletion-scrub.ts', () => ({ scrubOrgRecords: () => mockScrub() }));
+vi.mock('../lib/deletion-targets.ts', () => ({
   resolveDeletionTargets: () => mockResolveTargets(),
 }));
-vi.mock('../lib/auth0-management.js', () => ({
+vi.mock('../lib/auth0-management.ts', () => ({
   deleteAuth0User: (sub: string) => mockDeleteAuth0User(sub),
   getAuth0UserEmail: (sub: string) => mockGetAuth0UserEmail(sub),
 }));
 
 const mockGetAvailableOrchestrators = vi.fn();
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getAvailableOrchestrators: () => mockGetAvailableOrchestrators(),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { handler } from './account-deletion-worker.js';
+import { handler } from './account-deletion-worker.ts';
 
 const ORG = 'org-1';
 

@@ -7,24 +7,24 @@ vi.mock('sst', () => ({
 
 const mockIsOrgDeleting = vi.fn(async (_orgId: string, _o?: { consistent?: boolean }) => false);
 const mockGetOrgProfile = vi.fn(async () => ({ name: { S: 'Acme Corp' } }));
-vi.mock('../lib/org-profile.js', async () => ({
-  ...(await vi.importActual<typeof import('../lib/org-profile.js')>('../lib/org-profile.js')),
+vi.mock('../lib/org-profile.ts', async () => ({
+  ...(await vi.importActual<typeof import('../lib/org-profile.ts')>('../lib/org-profile.ts')),
   isOrgDeleting: (...args: Parameters<typeof mockIsOrgDeleting>) => mockIsOrgDeleting(...args),
   getOrgProfile: () => mockGetOrgProfile(),
 }));
 
 const mockCreateChallenge = vi.fn();
-vi.mock('../lib/deletion-challenge.js', () => ({
+vi.mock('../lib/deletion-challenge.ts', () => ({
   createDeletionChallenge: (...args: unknown[]) => mockCreateChallenge(...args),
 }));
 
 const mockSendEmail = vi.fn(async (_args: unknown) => undefined);
-vi.mock('../lib/deletion-email.js', () => ({
+vi.mock('../lib/deletion-email.ts', () => ({
   sendDeletionCodeEmail: (args: unknown) => mockSendEmail(args),
 }));
 
-import { baseHandler } from './request-account-deletion.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import { baseHandler } from './request-account-deletion.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
 
 const USER_INFO = {
   userId: 'user-1',

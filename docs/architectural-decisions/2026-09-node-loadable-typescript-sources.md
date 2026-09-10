@@ -93,11 +93,13 @@ code comply with it, so `main` never fails lint:
   `.js`, once per imported name, and on nothing else; no third-party specifier
   in the three packages ends in `.js`. It does not inspect `vi.mock()` or
   `import()` calls. The former never run under Node. The latter need their own
-  guard: a rule in `@filone/oxlint-rules`, the repository's own oxlint plugin,
-  that reports an `import()` whose string argument ends in `.js`. Shared and
-  rag-shared have no dynamic imports today; the backend has 33, so the rule
-  lands with the backend rewrite. `import/extensions` was tried and rejected
-  because it also fires on website's extension-less imports.
+  guard: `no-js-dynamic-import`, a rule in `@filone/oxlint-rules`, the
+  repository's own oxlint plugin, that reports an `import()` whose string or
+  template-literal argument ends in `.js`. Shared and rag-shared have no
+  dynamic imports today; the backend has 33, so the rule lands with the
+  backend rewrite.
+  `import/extensions` was tried and rejected because it also fires on website's
+  extension-less imports.
 
 TypeScript offers no option that forbids the `.js` form. Under both `NodeNext`
 and `Bundler` resolution it maps `./x.js` to `x.ts` by design, and the mapping

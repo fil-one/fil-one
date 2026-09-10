@@ -2,9 +2,9 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import { auditKeyIdSuffix } from '@filone/shared';
 import type { AuditActor, RevocationTrigger, S3Region } from '@filone/shared';
 import { Resource } from 'sst';
-import { AuditSubjects, twoPhaseAudit } from './audit.js';
-import { AccessKeyKeys } from './dynamo-records.js';
-import type { ServiceOrchestrator } from './service-orchestrator.js';
+import { AuditSubjects, twoPhaseAudit } from './audit.ts';
+import { AccessKeyKeys } from './dynamo-records.ts';
+import type { ServiceOrchestrator } from './service-orchestrator.ts';
 
 export interface RevokeAccessKeyArgs {
   orgId: string;

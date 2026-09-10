@@ -22,8 +22,8 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
-import { getDynamoClient } from './ddb-client.js';
-import type { SubscriptionRecord } from './dynamo-records.js';
+import { getDynamoClient } from './ddb-client.ts';
+import type { SubscriptionRecord } from './dynamo-records.ts';
 
 /**
  * BillingTable subscription keys.

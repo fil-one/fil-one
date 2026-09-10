@@ -4,7 +4,7 @@ import type {
   EgressUsageSample,
   StorageUsageSample,
   TenantInfo,
-} from '../lib/service-orchestrator.js';
+} from '../lib/service-orchestrator.ts';
 import { S3Region, type TenantStatus } from '@filone/shared';
 import type { AccessModel } from '@filone/shared';
 

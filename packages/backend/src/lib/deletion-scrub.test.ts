@@ -32,7 +32,7 @@ vi.mock('@filone/rag-shared', () => ({
 const mockLoadManifest = vi.fn(async () => new Map<string, unknown>());
 const mockDeleteManifestEntry = vi.fn(async () => undefined);
 const mockClearCheckpoint = vi.fn(async () => undefined);
-vi.mock('../jobs/rag-indexer-manifest.js', () => ({
+vi.mock('../jobs/rag-indexer-manifest.ts', () => ({
   loadManifest: () => mockLoadManifest(),
   deleteManifestEntry: (...args: unknown[]) => mockDeleteManifestEntry(...(args as [])),
   clearCheckpoint: (...args: unknown[]) => mockClearCheckpoint(...(args as [])),
@@ -40,8 +40,8 @@ vi.mock('../jobs/rag-indexer-manifest.js', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { scrubOrgRecords } from './deletion-scrub.js';
-import type { DeletionMember } from './deletion-record.js';
+import { scrubOrgRecords } from './deletion-scrub.ts';
+import type { DeletionMember } from './deletion-record.ts';
 
 const ORG = 'org-1';
 const OTHER_ORG = 'org-2';

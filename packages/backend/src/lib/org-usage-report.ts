@@ -1,12 +1,12 @@
 import { GB_BYTES } from '@filone/shared';
-import { getProvisionedRegions } from './region-helpers.js';
-import type { TenantUsageMetrics } from './service-orchestrator.js';
-import { getStripeClient, isStripeResourceMissing } from './stripe-client.js';
+import { getProvisionedRegions } from './region-helpers.ts';
+import type { TenantUsageMetrics } from './service-orchestrator.ts';
+import { getStripeClient, isStripeResourceMissing } from './stripe-client.ts';
 import {
   calculateAverageUsage,
   mergeStorageSamples,
   sortStorageSamplesByTimestamp,
-} from './usage-calculator.js';
+} from './usage-calculator.ts';
 
 const LOG = '[org-usage-report]';
 

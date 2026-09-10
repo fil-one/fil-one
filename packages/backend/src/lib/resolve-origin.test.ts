@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
-import { resolveOrigin } from './resolve-origin.js';
+import { resolveOrigin } from './resolve-origin.ts';
 
 const CANONICAL = 'https://app.fil.one';
 const ALIAS = 'https://app.filone.ai';

@@ -1,5 +1,5 @@
-import { reportMetric } from './metrics.js';
-import type { AuditQueryCost } from './audit-query.js';
+import { reportMetric } from './metrics.ts';
+import type { AuditQueryCost } from './audit-query.ts';
 
 /**
  * What an audit read cost, as EMF.

@@ -26,8 +26,8 @@ import {
   getPresignedListObjectVersionsUrl,
   getPresignedListObjectsUrl,
   getPresignedPutObjectUrl,
-} from './s3-presigner.js';
-import type { S3ClientContext } from './s3-client.js';
+} from './s3-presigner.ts';
+import type { S3ClientContext } from './s3-client.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

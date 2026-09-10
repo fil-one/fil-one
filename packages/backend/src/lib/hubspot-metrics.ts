@@ -1,4 +1,4 @@
-import { reportMetric } from './metrics.js';
+import { reportMetric } from './metrics.ts';
 
 /**
  * The webhook write is best-effort, so this is the only immediate signal that a

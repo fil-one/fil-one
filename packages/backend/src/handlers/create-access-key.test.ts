@@ -10,8 +10,8 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
-import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
+import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -35,7 +35,7 @@ const mockOrchestrator = {
   deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
 };
 
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (region: string) => {
     mockGetOrchestratorForRegion(region);
     return mockOrchestrator;
@@ -49,22 +49,22 @@ const ddbMock = mockClient(DynamoDBClient);
 // Importing the handler module builds its Middy chain, so the middleware that
 // chain installs is stubbed to a pass-through. The tests below call
 // `baseHandler` directly.
-vi.mock('../middleware/csrf.js', () => ({
+vi.mock('../middleware/csrf.ts', () => ({
   csrfMiddleware: () => ({ before: () => undefined }),
 }));
-vi.mock('../middleware/subscription-guard.js', () => ({
+vi.mock('../middleware/subscription-guard.ts', () => ({
   AccessLevel: { Read: 'read', Write: 'write' },
   subscriptionGuardMiddleware: () => ({ before: () => undefined }),
 }));
 
-import { baseHandler } from './create-access-key.js';
-import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.js';
+import { baseHandler } from './create-access-key.ts';
+import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
 import {
   buildEvent,
   membershipFor,
   stubAbsentMembershipRead,
   stubMembershipRead,
-} from '../test/lambda-test-utilities.js';
+} from '../test/lambda-test-utilities.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

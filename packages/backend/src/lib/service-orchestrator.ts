@@ -7,8 +7,8 @@ import type {
   S3Region,
   TenantStatus,
 } from '@filone/shared';
-import type { S3ClientContext } from './s3-client.js';
-import type { OrgProfileItem } from './org-profile.js';
+import type { S3ClientContext } from './s3-client.ts';
+import type { OrgProfileItem } from './org-profile.ts';
 
 // Retry budget for {@link ServiceOrchestrator.deleteTenant}. A DELETE 409s
 // unless the tenant is already `disabled`; both calls are synchronous, so a 409

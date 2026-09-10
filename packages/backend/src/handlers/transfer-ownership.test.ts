@@ -9,12 +9,12 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
-import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
+import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
-vi.mock('../lib/auth-secrets.js', () => ({
+vi.mock('../lib/auth-secrets.ts', () => ({
   getAuthSecrets: () => ({
     AUTH0_CLIENT_ID: 'test-client-id',
     AUTH0_CLIENT_SECRET: 'test-client-secret',
@@ -22,7 +22,7 @@ vi.mock('../lib/auth-secrets.js', () => ({
 }));
 
 const mockGetMfaEnrollments = vi.fn();
-vi.mock('../lib/auth0-management.js', () => ({
+vi.mock('../lib/auth0-management.ts', () => ({
   getMfaEnrollments: (sub: string) => mockGetMfaEnrollments(sub),
 }));
 
@@ -37,7 +37,7 @@ vi.mock('jose', () => ({
 // holds them, and the registry builds the FTH client at import time from a
 // secret this suite has no reason to stand up.
 const mockDeleteAccessKey = vi.fn();
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (region: string) => ({
     id: region === 'us-east-1' ? 'fth' : 'aurora',
     region,
@@ -56,16 +56,16 @@ vi.stubGlobal('fetch', mockFetch);
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
-import { handler } from './transfer-ownership.js';
-import { OrgKeys } from '../lib/org-membership.js';
-import { inviteExpiresAt } from '../lib/invitations.js';
+import { handler } from './transfer-ownership.ts';
+import { OrgKeys } from '../lib/org-membership.ts';
+import { inviteExpiresAt } from '../lib/invitations.ts';
 import {
   buildEvent,
   buildContext,
   NO_MEMBERSHIP,
   stubAbsentMembershipRead,
   stubMembershipRead,
-} from '../test/lambda-test-utilities.js';
+} from '../test/lambda-test-utilities.ts';
 
 const MOCK_SUB = 'auth0|owner';
 const ORG_ID = '11111111-2222-3333-4444-555555555555';

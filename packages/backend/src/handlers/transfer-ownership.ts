@@ -3,44 +3,44 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { OrgRole, TransferOwnershipSchema, canManageTargetRole } from '@filone/shared';
 import type { AccessKeySummary, ErrorResponse, TransferOwnershipResponse } from '@filone/shared';
-import { AuditSubjects, userActor } from '../lib/audit.js';
-import { commitAfterRevokingKeys } from '../lib/commit-after-revoking-keys.js';
-import { notifyRevokedKeys } from '../lib/key-revocation-email.js';
-import { reviewKeysForRoleChange } from '../lib/member-keys.js';
-import { pendingInvitationsFrom, planRevocations, revokeDeferred } from '../lib/invitations.js';
-import type { InvitationRecord } from '../lib/invitations.js';
+import { AuditSubjects, userActor } from '../lib/audit.ts';
+import { commitAfterRevokingKeys } from '../lib/commit-after-revoking-keys.ts';
+import { notifyRevokedKeys } from '../lib/key-revocation-email.ts';
+import { reviewKeysForRoleChange } from '../lib/member-keys.ts';
+import { pendingInvitationsFrom, planRevocations, revokeDeferred } from '../lib/invitations.ts';
+import type { InvitationRecord } from '../lib/invitations.ts';
 import {
   cancelledLabels,
   labelled,
   ownerCountItem,
   roleChangeItems,
   withInvitationRevocations,
-} from '../lib/membership-changes.js';
-import type { LabelledItems } from '../lib/membership-changes.js';
-import { readOwnerCount, resolveMembership } from '../lib/org-membership.js';
+} from '../lib/membership-changes.ts';
+import type { LabelledItems } from '../lib/membership-changes.ts';
+import { readOwnerCount, resolveMembership } from '../lib/org-membership.ts';
 import {
   OrgDeletingError,
   getOrgProfile,
   isGuardRejection,
   orgNotDeletingCheck,
-} from '../lib/org-profile.js';
-import type { OrgProfileItem } from '../lib/org-profile.js';
-import { parseJsonBody } from '../lib/parse-json-body.js';
+} from '../lib/org-profile.ts';
+import type { OrgProfileItem } from '../lib/org-profile.ts';
+import { parseJsonBody } from '../lib/parse-json-body.ts';
 import {
   ResponseBuilder,
   notAMemberResponse,
   ownerCountUnavailableResponse,
   keyMintedResponse,
   refusedKeysSubject,
-} from '../lib/response-builder.js';
-import type { ErrorWithRevokedKeys } from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { csrfMiddleware } from '../middleware/csrf.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { requireMfaIfEnrolled } from '../middleware/require-mfa.js';
+} from '../lib/response-builder.ts';
+import type { ErrorWithRevokedKeys } from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { csrfMiddleware } from '../middleware/csrf.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
+import { requireMfaIfEnrolled } from '../middleware/require-mfa.ts';
 
 const SOURCE = 'transfer-ownership';
 

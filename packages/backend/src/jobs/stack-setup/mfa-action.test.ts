@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Mock } from 'vitest';
 import vm from 'node:vm';
 
-import { onExecutePostLogin } from './mfa-action.js';
-import type { PostLoginApi, PostLoginEvent } from './mfa-action.js';
+import { onExecutePostLogin } from './mfa-action.ts';
+import type { PostLoginApi, PostLoginEvent } from './mfa-action.ts';
 
 interface CapturedApi extends PostLoginApi {
   authentication: {

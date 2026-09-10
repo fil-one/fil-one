@@ -8,10 +8,10 @@ import { format } from 'node:util';
 import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, PutParameterCommand } from '@aws-sdk/client-ssm';
 import { Resource } from 'sst';
-import { getDynamoClient } from '../ddb-client.js';
-import { OrgDeletingError } from '../org-profile.js';
-import { resolveRefusedTenantWrite } from '../tenant-setup-fence.js';
-import type { FthManagementClient } from './fth-management-client.js';
+import { getDynamoClient } from '../ddb-client.ts';
+import { OrgDeletingError } from '../org-profile.ts';
+import { resolveRefusedTenantWrite } from '../tenant-setup-fence.ts';
+import type { FthManagementClient } from './fth-management-client.ts';
 
 export const FTH_FULL_PERMISSIONS = [
   's3:CreateBucket',

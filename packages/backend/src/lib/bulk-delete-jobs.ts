@@ -21,8 +21,8 @@ import {
   type S3Region,
 } from '@filone/shared';
 
-import { getDynamoClient } from './ddb-client.js';
-import { BulkDeleteKeys, type BulkDeleteJobRecord } from './dynamo-records.js';
+import { getDynamoClient } from './ddb-client.ts';
+import { BulkDeleteKeys, type BulkDeleteJobRecord } from './dynamo-records.ts';
 
 const dynamo = getDynamoClient();
 

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, PutParameterCommand } from '@aws-sdk/client-ssm';
-import type { FthManagementClient } from './fth-management-client.js';
+import type { FthManagementClient } from './fth-management-client.ts';
 
 vi.mock('sst', () => ({
   Resource: {
@@ -26,15 +26,15 @@ const mockFthClient = {
 
 const fthClient = mockFthClient as unknown as FthManagementClient;
 
-vi.mock('./fth-api-metrics.js', () => ({
+vi.mock('./fth-api-metrics.ts', () => ({
   instrumentClient: vi.fn(),
 }));
 
 process.env.FILONE_STAGE = 'test';
 process.env.FTH_MANAGEMENT_API_URL = 'https://api.fortilyx.test';
 
-import { ensureTenantReady } from './fth-tenant-setup.js';
-import { OrgDeletingError } from '../org-profile.js';
+import { ensureTenantReady } from './fth-tenant-setup.ts';
+import { OrgDeletingError } from '../org-profile.ts';
 import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 
 const orgId = '00000000-0000-0000-0000-000000000001';

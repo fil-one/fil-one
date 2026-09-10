@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Stage } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 vi.mock('sst', () => sstResourceMock({ SendGridApiKey: { value: 'test-sendgrid-key' } }));
 
 const mockFetch = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
 vi.stubGlobal('fetch', mockFetch);
 
-import { sendMail } from './mailer.js';
+import { sendMail } from './mailer.ts';
 
 const SEND_URL = 'https://api.sendgrid.com/v3/mail/send';
 const ORIGINAL_STAGE = process.env.FILONE_STAGE;

@@ -33,11 +33,11 @@ const mockOrchestrator = {
 
 const mockGetOrchestratorForRegion = vi.fn();
 
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (...args: unknown[]) => mockGetOrchestratorForRegion(...args),
 }));
 
-vi.mock('../lib/org-profile.js', () => ({
+vi.mock('../lib/org-profile.ts', () => ({
   getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
 }));
 
@@ -49,7 +49,7 @@ const mockGetPresignedGetObjectUrl = vi.fn();
 const mockGetPresignedPutObjectUrl = vi.fn();
 const mockGetPresignedDeleteObjectUrl = vi.fn();
 
-vi.mock('../lib/s3-presigner.js', () => ({
+vi.mock('../lib/s3-presigner.ts', () => ({
   getPresignedListObjectsUrl: (...args: unknown[]) => mockGetPresignedListObjectsUrl(...args),
   getPresignedListObjectVersionsUrl: (...args: unknown[]) =>
     mockGetPresignedListObjectVersionsUrl(...args),
@@ -61,8 +61,8 @@ vi.mock('../lib/s3-presigner.js', () => ({
   getPresignedDeleteObjectUrl: (...args: unknown[]) => mockGetPresignedDeleteObjectUrl(...args),
 }));
 
-import { baseHandler } from './presign.js';
-import { buildEvent, membershipFor } from '../test/lambda-test-utilities.js';
+import { baseHandler } from './presign.ts';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

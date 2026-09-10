@@ -1,9 +1,9 @@
 import { getAvailableRegions, isSupportedRegion, S3Region } from '@filone/shared';
 import { Resource } from 'sst';
-import { auroraOrchestrator } from './aurora/aurora-orchestrator.js';
-import { createForgeOrchestrator, type ForgeManagementApi } from './forge/forge-orchestrator.js';
-import { createFthOrchestrator, createInstrumentedFthClient } from './fth/fth-orchestrator.js';
-import type { ServiceOrchestrator } from './service-orchestrator.js';
+import { auroraOrchestrator } from './aurora/aurora-orchestrator.ts';
+import { createForgeOrchestrator, type ForgeManagementApi } from './forge/forge-orchestrator.ts';
+import { createFthOrchestrator, createInstrumentedFthClient } from './fth/fth-orchestrator.ts';
+import type { ServiceOrchestrator } from './service-orchestrator.ts';
 
 // Aurora is built at import; its module reads no secret while loading. FTH and
 // Forge are built lazily on the first request for their region and memoized,

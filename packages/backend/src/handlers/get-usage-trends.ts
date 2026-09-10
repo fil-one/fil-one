@@ -2,14 +2,14 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { UsageDataPoint, UsageTrendsResponse } from '@filone/shared';
-import type { ServiceOrchestrator, StorageUsageSample } from '../lib/service-orchestrator.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { type ProvisionedRegion, getProvisionedRegions } from '../lib/region-helpers.js';
+import type { ServiceOrchestrator, StorageUsageSample } from '../lib/service-orchestrator.ts';
+import { ResponseBuilder } from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
+import { type ProvisionedRegion, getProvisionedRegions } from '../lib/region-helpers.ts';
 
 function endOfDay(d: Date): Date {
   const eod = new Date(d);

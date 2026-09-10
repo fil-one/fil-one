@@ -1,6 +1,6 @@
 import { AuditQuerySchema, MALFORMED_CURSOR } from '@filone/shared';
 import type { AuditQueryFilters } from '@filone/shared';
-import { resolveWindow } from './audit-query.js';
+import { resolveWindow } from './audit-query.ts';
 
 /** What both audit routes accept, and the one place a request is checked. */
 

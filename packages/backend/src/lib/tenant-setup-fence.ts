@@ -1,5 +1,5 @@
 import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
-import { OrgDeletingError } from './org-profile.js';
+import { OrgDeletingError } from './org-profile.ts';
 
 const LOG = '[tenant-setup-fence]';
 

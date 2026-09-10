@@ -15,8 +15,8 @@ import {
   type ModelsTenantStatus,
   type ModelsTenantWithMetricsBackofficeResponse,
 } from '@filone/aurora-backoffice-client';
-import { instrumentClient } from './aurora-api-metrics.js';
-import { getAuroraBackofficeSecrets } from '../auth-secrets.js';
+import { instrumentClient } from './aurora-api-metrics.ts';
+import { getAuroraBackofficeSecrets } from '../auth-secrets.ts';
 import type { TenantStatus } from '@filone/shared';
 
 export type {
