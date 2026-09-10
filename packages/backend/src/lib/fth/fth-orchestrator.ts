@@ -11,8 +11,7 @@
 // The management client is injected through createFthOrchestrator, so importing
 // this module reads no environment variable and no SST resource. The registry
 // builds the client with createInstrumentedFthClient on the first request for
-// the FTH region. Once the backend's import specifiers resolve under plain
-// node, a bin/ script can import from this module without building a client.
+// the FTH region.
 
 import { createHash } from 'node:crypto';
 import pRetry from 'p-retry';
