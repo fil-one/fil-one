@@ -5,30 +5,17 @@
 // same object it builds is the backup file's body, so a restore reads exactly
 // what the run decided to delete.
 
-import { createHash } from 'node:crypto';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
-
-// Inlined from packages/backend/src/lib/service-orchestrator-registry.ts and
-// packages/shared/src/constants.ts — bin/ scripts must NOT import
-// @filone/shared or the backend. Keep in sync when a region is added or
-// re-homed. The map is also what reaches us-east-9, which getAvailableRegions
-// currently disables on every stage.
-export const ORCHESTRATOR_ID_BY_REGION: Record<string, string> = {
-  'eu-west-1': 'aurora',
-  'us-east-1': 'fth',
-  'eu-central-3': 'forge',
-  'us-east-9': 'forgeDev',
-};
-
-/**
- * The region an ACCESSKEY# row belongs to when it predates the `region`
- * attribute — the same fallback as
- * packages/backend/src/handlers/delete-access-key.ts.
- */
-export const DEFAULT_ACCESS_KEY_REGION = 'eu-west-1';
-
-/** Inlined from packages/backend/src/lib/org-setup-status.ts. */
-export const FILONE_ORG_CREATED = 'FILONE_ORG_CREATED';
+import {
+  AccessKeyKeys,
+  DEFAULT_ACCESS_KEY_REGION,
+  RAGKeys,
+} from '@filone/backend/src/lib/dynamo-records.ts';
+import {
+  ORCHESTRATOR_ID_BY_REGION,
+  orchestratorIdForRegion,
+} from '@filone/backend/src/lib/service-orchestrator-ids.ts';
+import { ragIndexName } from '@filone/rag-shared/src/s3-vectors-store.ts';
 
 /** One `ACCESSKEY#` / `BUCKET#` / `PROFILE` row as DynamoDB stores it. */
 export type StoredRow = Record<string, AttributeValue>;
@@ -92,7 +79,7 @@ export interface ResetPlanInput {
  * caller owns the message.
  */
 export function assertRegionAllowed(stage: string, region: string): void {
-  if (!ORCHESTRATOR_ID_BY_REGION[region]) {
+  if (!orchestratorIdForRegion(region)) {
     throw new Error(
       `Unknown region "${region}". Known regions: ${Object.keys(ORCHESTRATOR_ID_BY_REGION).join(', ')}.`,
     );
@@ -107,52 +94,24 @@ export function assertRegionAllowed(stage: string, region: string): void {
 
 export type RagPkKind = 'bucket' | 'checkpoint';
 
-/** The prefix each RAG partition-key shape carries, from RAGKeys in dynamo-records.ts. */
-const RAG_PK_KIND_BY_PREFIX: Record<string, RagPkKind> = {
-  BUCKET: 'bucket',
-  INDEXER_CHECKPOINT: 'checkpoint',
-};
-
 /**
- * Split a RAG partition key back into its parts.
- *
- * Mirrors `RAGKeys.parseBucketPk` in packages/backend/src/lib/dynamo-records.ts
- * for both shapes it writes — `BUCKET#{orgId}#{region}#{bucketName}` and
- * `INDEXER_CHECKPOINT#{orgId}#{region}#{bucketName}`. None of the three
- * segments can hold a `#`, so a 4-way split is unambiguous. Region membership
- * is checked stage-independently, because a currently-disabled region must
- * still parse.
+ * Split a RAG partition key back into its parts, whichever of the two shapes
+ * RagIndexerTable holds per bucket it is: `BUCKET#...` or
+ * `INDEXER_CHECKPOINT#...`. A currently-disabled region still parses, because
+ * RAGKeys checks region membership stage-independently.
  */
 export function parseRagPk(
   pk: string,
 ): { kind: RagPkKind; orgId: string; region: string; bucketName: string } | undefined {
-  const parts = pk.split('#');
-  if (parts.length !== 4) return undefined;
-
-  const kind = RAG_PK_KIND_BY_PREFIX[parts[0]!];
-  const [, orgId, region, bucketName] = parts;
-  if (!kind || !orgId || !bucketName) return undefined;
-  if (!ORCHESTRATOR_ID_BY_REGION[region!]) return undefined;
-
-  return { kind, orgId, region: region!, bucketName };
+  const bucket = RAGKeys.parseBucketPk(pk);
+  if (bucket) return { kind: 'bucket', ...bucket };
+  const checkpoint = RAGKeys.parseCheckpointPk(pk);
+  if (checkpoint) return { kind: 'checkpoint', ...checkpoint };
+  return undefined;
 }
 
-/**
- * The S3 Vectors index behind one RAG-enabled bucket.
- *
- * Mirrors `S3VectorsStore#indexName` in
- * packages/rag-shared/src/s3-vectors-store.ts, which is private and cannot be
- * imported here anyway: Node's type stripping does not resolve that module's
- * `./constants.js` specifier. region-reset.test.ts holds this copy to the real
- * store, because a copy that drifts would name an index nothing deletes.
- */
-export function ragIndexName(orgId: string, region: string, bucketName: string): string {
-  const digest = createHash('sha256').update([orgId, region, bucketName].join('#')).digest('hex');
-  return `rag-${digest.slice(0, 56)}`;
-}
-
-/** The prefix every account partition key carries, from lib/account-creation.ts. */
-const ORG_PK_PREFIX = 'ORG#';
+/** AccessKeyKeys has no parser for the ORG# prefix, so derive it from the builder. */
+const ORG_PK_PREFIX = AccessKeyKeys.orgPk('');
 
 /**
  * Everything the reset deletes, per account.
@@ -222,7 +181,7 @@ export function buildResetPlan({
   // twice over; nothing else would ever find them.
   for (const [orgId, buckets] of ragByOrg) {
     accounts.push({
-      orgPk: `${ORG_PK_PREFIX}${orgId}`,
+      orgPk: AccessKeyKeys.orgPk(orgId),
       orgId,
       deleting: false,
       profileAttributes: {},

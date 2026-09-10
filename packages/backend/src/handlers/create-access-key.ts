@@ -39,7 +39,7 @@ import {
   tenantNotReadyResponse,
   unsupportedRegionResponse,
 } from '../lib/response-builder.ts';
-import { AccessKeyKeys, keyAttribution } from '../lib/dynamo-records.ts';
+import { AccessKeyKeys, DEFAULT_ACCESS_KEY_REGION, keyAttribution } from '../lib/dynamo-records.ts';
 import { cancelledLabels, creatorRoleStillMintsCheck } from '../lib/membership-changes.ts';
 import type { AccessKeyRecord } from '../lib/dynamo-records.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
@@ -509,7 +509,7 @@ async function recoverDuplicateKey({
   );
 
   const alreadyInDb = existingKeys?.some((item) => {
-    const itemRegion = (item.region?.S as S3Region | undefined) ?? S3Region.EuWest1;
+    const itemRegion = (item.region?.S as S3Region | undefined) ?? DEFAULT_ACCESS_KEY_REGION;
     return item.keyName?.S === keyName && itemRegion === region;
   });
   if (alreadyInDb) {

@@ -6,7 +6,7 @@ import type { AttributeValue, TransactWriteItem } from '@aws-sdk/client-dynamodb
 // `./x.js` specifiers nor the `OrgRole` enum), but vitest resolves both — so
 // the mirror is held to them here rather than by hand.
 import { OrgRole } from '@filone/shared';
-import { OrgKeys as BackendOrgKeys } from '@filone/backend/src/lib/org-membership.js';
+import { OrgKeys as BackendOrgKeys } from '@filone/backend/src/lib/org-membership.ts';
 
 import { classifyCancellation } from './dynamo.ts';
 import {
