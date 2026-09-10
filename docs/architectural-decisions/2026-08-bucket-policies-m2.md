@@ -281,7 +281,7 @@ The IAM arm is shaped after AWS IAM, minus its request bodies:
 | `listBucketPoliciesForMember(tenantId, userId)`            | the member detail view                                                                   |
 | `resolveMemberAccess(tenantId, userId)`                    | per-bucket permissions, for the bucket list and the activity feed                        |
 | `issueMemberKey(tenantId, userId, opts)`                   | a key bound to a principal, with a name and expiry only                                  |
-| `listAccessKeys(tenantId, opts)`                           | identity fields plus each key's principal and its access                                 |
+| `listAccessKeys(tenantId, opts)`                           | identity fields plus each key's principal; access is read per principal                  |
 
 A vendor that grows principals and policies moves its region to `iam` by
 implementing that arm, with no console change.
@@ -352,16 +352,15 @@ authorized it.
 
 **A scoped member creates a bucket.**
 
-1. `POST /api/buckets` calls the management API's bucket create with the policy
-   in the same request, signed with the tenant-wide credential.
+1. `POST /api/buckets` creates the bucket over S3 with the tenant-wide
+   credential, then writes the bucket's policy with the create-only token, and
+   answers the member after both calls succeed.
 2. The policy names the org's current Owners and Admins in one Allow, and the
    creator in another with the actions their role permits. An unscoped creator
    is already in the first statement.
-3. The storage system commits the bucket and its policy together, so a failure
-   leaves no bucket and never a bucket its creator cannot see.
-
-The gateway has not seen a bucket created this way and registers it on the first
-bucket-info call for the name.
+3. A bucket without a policy is reachable by the tenant-wide credential only,
+   so a failure between the two calls leaves a bucket no member can see, and the
+   retry writes the policy.
 
 **Removal.**
 
@@ -448,10 +447,10 @@ per request. Deny is what makes this more than a proof-chain check: several S3
 actions map to the same Forge commands, so the gateway has to hold each key's
 effective action set per bucket and refuse anything outside it rather than
 probing for a chain.
-6. **Revocation before acknowledgement.** Every narrowing of a principal or a
-   policy publishes revocations for the delegations it invalidates before Hilt
-   acknowledges the change, and refuses the change outright when it cannot, so a
-   failed narrowing leaves the old access rather than a stale one. The
+6. **Revocation before acknowledgement.** Every change to a principal's access,
+   narrowing or widening, publishes revocations for the grants it invalidates
+   before Hilt acknowledges the change, and refuses the change outright when it
+   cannot, so a failed change leaves the old access rather than a stale one. The
    propagation time is the published staleness bound: a revocation that reaches
    every warm cache holding a principal's grants, independent of when those
    caches would have expired on their own. A policy edit costs on the order of
