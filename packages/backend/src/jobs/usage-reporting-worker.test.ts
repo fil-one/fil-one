@@ -95,7 +95,7 @@ const {
   };
 });
 vi.mock('../lib/aurora/aurora-orchestrator.js', () => ({ auroraOrchestrator }));
-vi.mock('../lib/fth/fth-orchestrator.js', () => ({ fthOrchestrator }));
+vi.mock('../lib/fth/fth-orchestrator.js', () => ({ createFthOrchestrator: () => fthOrchestrator }));
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getAvailableOrchestrators: () => [auroraOrchestrator, fthOrchestrator],
 }));

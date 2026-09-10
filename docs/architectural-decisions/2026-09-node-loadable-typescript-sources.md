@@ -41,12 +41,12 @@ throws on the first property access outside `sst shell`, and `bin/` scripts
 run outside it by design. Most backend modules read it inside functions and
 load under plain Node once their specifiers resolve; `subscription-store.ts`,
 `deletion-record.ts`, `account-deletion-sweeper.ts`, `orgs-beta.ts` and
-`fth-tenant-setup.ts` were checked. `fth-orchestrator.ts` builds its
-management client at module level and reads a linked secret while doing so, so
-it and `service-orchestrator-registry.ts`, which imports it, throw at import.
-Scripts can therefore import key builders, constants and pure helpers from
-modules that defer their resource reads, and must keep resolving table names
-from `sst state export` as they do now.
+`fth-tenant-setup.ts` were checked. `fth-orchestrator.ts` built its
+management client at module level and read a linked secret while doing so, so
+it and `service-orchestrator-registry.ts`, which imports it, threw at import
+until step 4 below. Scripts can therefore import key builders, constants and
+pure helpers from modules that defer their resource reads, and must keep
+resolving table names from `sst state export` as they do now.
 
 ## Decision
 
@@ -134,13 +134,19 @@ constants instead of copying them. Shared goes before backend because a
 backend module that imports `@filone/shared` cannot load until shared's own
 internal specifiers resolve, whatever the backend's specifiers say.
 
-**4. Defer resource reads in the FTH orchestrator.** Make
-`fth-orchestrator.ts` create its management client on first use instead of at
-module level, and export the console user code the `fth-console-key` script
-mirrors. A small pull request with no other change, so that after step 5 the
-orchestrator registry and everything it imports load under plain Node. Each
-step 6 pull request repeats the check for its own source module before
-deleting the mirror.
+**4. Defer resource reads in the FTH orchestrator.** `fth-orchestrator.ts`
+exports `createFthOrchestrator(client)`, which takes the management client as
+an argument, and `createInstrumentedFthClient()`, which reads the API URL and
+the linked token only when called. The registry builds the FTH orchestrator on
+the first request for `us-east-1` and memoizes it, the same shape it already
+uses for Forge. Behind the factory sits a class, because the
+`max-lines-per-function` lint rule caps a function at 100 lines and one closure
+holding every method would exceed it. `fth-tenant-setup.ts` exports
+`FTH_CONSOLE_USER_CODE`, `FTH_CONSOLE_KEY_NAME` and `FTH_FULL_PERMISSIONS`, the
+three constants the `fth-console-key` script mirrors. A small pull request with
+no other change, so that after step 5 the orchestrator registry and everything
+it imports load under plain Node. Each step 6 pull request repeats the check
+for its own source module before deleting the mirror.
 
 **5. Backend to `.ts` specifiers.** Rewrite the backend (1236 import lines,
 179 `vi.mock` calls, 33 dynamic imports), widen the lint override, add the

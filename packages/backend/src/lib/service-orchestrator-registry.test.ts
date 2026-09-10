@@ -1,11 +1,10 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { S3Region, Stage, getRegionAccessModel } from '@filone/shared';
 
-// fth-orchestrator builds its FTH management client at import time, so satisfy
-// both inputs createInstrumentedFthClient() touches before the registry import
-// runs: the baseUrl env var and the SST-linked API token. Forge is built lazily
-// (per-region, on first request), so each Forge network's env/secret only needs
-// to exist by the time a lookup for one of its regions happens.
+// The registry builds every non-Aurora orchestrator lazily, on the first lookup
+// for its region. The FTH client reads its baseUrl from the environment and its
+// API token from the SST-linked secret at that moment, and each Forge network
+// reads its own pair, so all of them are in place before any lookup runs.
 vi.hoisted(() => {
   process.env.FTH_MANAGEMENT_API_URL = 'https://api.fortilyx.test';
   process.env.FORGE_MANAGEMENT_API_URL = 'https://forge.test';

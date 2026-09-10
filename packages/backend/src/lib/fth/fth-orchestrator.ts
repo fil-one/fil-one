@@ -7,6 +7,11 @@
 //   - data-plane (createBucket, deleteBucket, listBuckets, getBucket,
 //     getS3ClientContext) speak S3 directly against the FTH S3 endpoint
 //     using the service access key stashed in SSM during setup.
+//
+// The management client is injected through createFthOrchestrator, so importing
+// this module reads no environment variable and no SST resource. The registry
+// builds the client with createInstrumentedFthClient on the first request for
+// the FTH region.
 
 import { createHash } from 'node:crypto';
 import pRetry from 'p-retry';
@@ -14,7 +19,10 @@ import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
 import { getS3Endpoint, S3Region, type TenantStatus } from '@filone/shared';
 import type { AccessKeyPermission, GranularPermission } from '@filone/shared';
-import { ensureTenantReady as ensureFthTenantReady } from './fth-tenant-setup.js';
+import {
+  ensureTenantReady as ensureFthTenantReady,
+  FTH_CONSOLE_USER_CODE,
+} from './fth-tenant-setup.js';
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
@@ -49,7 +57,7 @@ import {
   getBucketVersioning,
   getBucketObjectLock,
 } from '../s3-bucket-operations.js';
-import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
+import { getConsoleS3Credentials } from '../s3-credentials.js';
 import {
   createFthManagementClient,
   FthApiError,
@@ -59,48 +67,69 @@ import {
 import type { FthManagementClient } from './fth-management-client.js';
 import { instrumentClient } from './fth-api-metrics.js';
 
-const FTH_CONSOLE_USER_CODE = 'filone-console';
-
 // Versioning / object-lock are applied as separate, idempotent S3 calls after the
 // bucket is created. Retry them so a transient S3 blip doesn't leave the bucket
 // partially configured (which would surface as a dead-end BucketConfigurationError).
 const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
 
-const consoleStorageUserCache = new QuickLRU<string, string>({ maxSize: 500 });
-const client = createInstrumentedFthClient();
+export function createFthOrchestrator(client: FthManagementClient): ServiceOrchestrator {
+  return new FthOrchestrator(client);
+}
 
-export const _resetFthOrchestratorCachesForTesting = () => {
-  _resetS3CredentialsCacheForTesting();
-  consoleStorageUserCache.clear();
-};
+// Reads the management API URL from the environment and the API token from the
+// linked SST secret, so call it only where both exist (inside a Lambda or
+// `sst shell`).
+export function createInstrumentedFthClient(): FthManagementClient {
+  const client = createFthManagementClient({
+    baseUrl: process.env.FTH_MANAGEMENT_API_URL!,
+    token: Resource.FthManagementApiToken.value,
+  });
+  instrumentClient(client, { apiName: 'fth-management' });
+  return client;
+}
 
-export const fthOrchestrator = {
-  id: 'fth',
-  region: S3Region.UsEast1,
-  accessModel: 'scoped-keys',
+// The max-lines-per-function lint rule caps a function at 100 lines and the
+// orchestrator methods together run well past that, so they live on a class.
+// Callers only ever see createFthOrchestrator(client).
+class FthOrchestrator implements ServiceOrchestrator {
+  readonly id = 'fth';
+  readonly region = S3Region.UsEast1;
+  readonly accessModel = 'scoped-keys';
+
+  private readonly client: FthManagementClient;
+
+  // User-issued access keys hang off the same `filone-console` storage user that
+  // fth-tenant-setup.ts provisions for the bootstrap console key. The storage
+  // user id isn't persisted on the PROFILE row, so resolve it lazily via
+  // listStorageUsers and memoize per warm container.
+  private readonly consoleStorageUserCache = new QuickLRU<string, string>({ maxSize: 500 });
+
+  constructor(client: FthManagementClient) {
+    this.client = client;
+  }
 
   async ensureTenantReady(orgId: string): Promise<string | null> {
-    return ensureFthTenantReady(client, orgId);
-  },
+    return ensureFthTenantReady(this.client, orgId);
+  }
 
   isTenantReady(orgProfile: OrgProfileItem | undefined): string | null {
     const tenantId = orgProfile?.fthTenantId?.S;
     if (!tenantId) return null;
     // TODO: check fthTenantSetupStatus
     return tenantId;
-  },
+  }
 
   async updateTenantStatus(tenantId: string, status: TenantStatus): Promise<void> {
     // FTH uses the same lowercase-dashed status values, so no mapping is needed.
     // A status PATCH is naturally idempotent, so no idempotency key is sent;
     // transient failures are retried by the caller (region-helpers).
-    await client.updateClientStatus(tenantId, { status });
-  },
+    await this.client.updateClientStatus(tenantId, { status });
+  }
 
   async deleteTenant(tenantId: string): Promise<void> {
     await pRetry(async () => {
       try {
-        await client.updateClientStatus(tenantId, { status: 'disabled' });
+        await this.client.updateClientStatus(tenantId, { status: 'disabled' });
       } catch (err) {
         // Precondition only, so a not-found here must not skip the delete.
         if (!(err instanceof FthNotFoundError)) {
@@ -109,44 +138,44 @@ export const fthOrchestrator = {
       }
 
       try {
-        await client.deleteClient(tenantId);
+        await this.client.deleteClient(tenantId);
       } catch (err) {
         // Already deleted answers 204; a not-found means the same.
         if (err instanceof FthNotFoundError) return;
         throw new Error(`Failed to delete FTH tenant ${tenantId}`, { cause: err });
       }
     }, TENANT_DELETE_RETRY);
-  },
+  }
 
   async getTenantStatus(tenantId: string): Promise<TenantStatusProbe> {
     try {
-      const record = await client.getClient(tenantId);
+      const record = await this.client.getClient(tenantId);
       return { kind: 'ok', status: normalizeFthStatus(record.status) };
     } catch (cause) {
       if (cause instanceof FthNotFoundError) return { kind: 'not_found' };
       return { kind: 'error', cause };
     }
-  },
+  }
 
   async getS3ClientContext(tenantId: string): Promise<S3ClientContext> {
     const stage = process.env.FILONE_STAGE!;
     const credentials = await getConsoleS3Credentials({
-      orchestratorId: fthOrchestrator.id,
+      orchestratorId: this.id,
       stage,
       tenantId,
     });
     return {
-      endpointUrl: getS3Endpoint(fthOrchestrator.region, stage),
+      endpointUrl: getS3Endpoint(this.region, stage),
       region: 'us-east-1',
       credentials,
       forcePathStyle: true,
-      orchestratorId: fthOrchestrator.id,
+      orchestratorId: this.id,
       tenantId,
     };
-  },
+  }
 
   async createBucket(tenantId: string, args: CreateBucketArgs): Promise<void> {
-    const ctx = await fthOrchestrator.getS3ClientContext(tenantId);
+    const ctx = await this.getS3ClientContext(tenantId);
     const s3 = createS3Client(ctx);
     await s3CreateBucket(s3, {
       bucketName: args.bucketName,
@@ -173,34 +202,34 @@ export const fthOrchestrator = {
     } catch (err) {
       throw new BucketConfigurationError(args.bucketName, { cause: err });
     }
-  },
+  }
 
   async deleteBucket(tenantId: string, bucketName: string): Promise<void> {
-    const ctx = await fthOrchestrator.getS3ClientContext(tenantId);
+    const ctx = await this.getS3ClientContext(tenantId);
     const s3 = createS3Client(ctx);
     await s3DeleteBucket(s3, bucketName);
-  },
+  }
 
   async listBuckets(tenantId: string): Promise<BucketSummary[]> {
     // Versioning and object-lock both cost a GetBucket*/GetObjectLockConfiguration
     // call per bucket, an N+1 nobody wants to pay just to render a list. Neither
     // is returned here; getBucket loads both for the one bucket the detail page
     // actually needs them for.
-    const ctx = await fthOrchestrator.getS3ClientContext(tenantId);
+    const ctx = await this.getS3ClientContext(tenantId);
     const s3 = createS3Client(ctx);
     const { buckets } = await s3ListBuckets(s3);
 
     return buckets.map((b) => ({
       bucketName: b.name,
-      region: fthOrchestrator.region,
+      region: this.region,
       createdAt: b.createdAt,
       isPublic: false,
       encrypted: true,
     }));
-  },
+  }
 
   async getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null> {
-    const ctx = await fthOrchestrator.getS3ClientContext(tenantId);
+    const ctx = await this.getS3ClientContext(tenantId);
     const s3 = createS3Client(ctx);
     const { buckets } = await s3ListBuckets(s3);
     const match = buckets.find((b) => b.name === bucketName);
@@ -213,7 +242,7 @@ export const fthOrchestrator = {
 
     return {
       bucketName,
-      region: fthOrchestrator.region,
+      region: this.region,
       createdAt: match.createdAt,
       isPublic: false,
       versioning,
@@ -223,10 +252,10 @@ export const fthOrchestrator = {
       ...(lock?.retentionDuration != null && { retentionDuration: lock.retentionDuration }),
       ...(lock?.retentionDurationType && { retentionDurationType: lock.retentionDurationType }),
     };
-  },
+  }
 
   async issueAccessKey(tenantId: string, opts: IssueAccessKeyOpts): Promise<IssuedAccessKey> {
-    const storageUserId = await getFthConsoleStorageUserId(tenantId);
+    const storageUserId = await this.getFthConsoleStorageUserId(tenantId);
 
     const permissions = buildFthPermissions(opts.permissions, opts.granularPermissions);
     const buckets = opts.buckets ?? [];
@@ -245,7 +274,7 @@ export const fthOrchestrator = {
     };
 
     try {
-      const accessKey = await client.createAccessKey(tenantId, storageUserId, {
+      const accessKey = await this.client.createAccessKey(tenantId, storageUserId, {
         ...request,
         idempotencyKey: idempotencyKeyFor(tenantId, storageUserId, request),
       });
@@ -270,10 +299,10 @@ export const fthOrchestrator = {
         cause: err,
       });
     }
-  },
+  }
 
   async findAccessKeyByName(tenantId: string, keyName: string) {
-    const keys = await client.listAccessKeys(tenantId);
+    const keys = await this.client.listAccessKeys(tenantId);
     const match = keys.find((k) => k.name === keyName);
     if (!match) return undefined;
     return {
@@ -281,11 +310,11 @@ export const fthOrchestrator = {
       accessKeyId: match.accessKeyId,
       createdAt: match.createdAt,
     };
-  },
+  }
 
   async deleteAccessKey(tenantId: string, keyId: string): Promise<void> {
     try {
-      await client.deleteAccessKey(tenantId, keyId, { idempotencyKey: `delete-${keyId}` });
+      await this.client.deleteAccessKey(tenantId, keyId, { idempotencyKey: `delete-${keyId}` });
     } catch (err) {
       if (err instanceof FthNotFoundError) {
         console.log(
@@ -297,14 +326,13 @@ export const fthOrchestrator = {
         cause: err,
       });
     }
-  },
+  }
 
   async getTenantUsageMetrics(
     tenantId: string,
     opts: GetTenantUsageMetricsOptions,
   ): Promise<TenantUsageMetrics> {
-    const client = createInstrumentedFthClient();
-    const res = await client.getClientMetricsTimeseries(tenantId, {
+    const res = await this.client.getClientMetricsTimeseries(tenantId, {
       from: opts.from,
       to: opts.to,
       interval: opts.interval ?? '1d',
@@ -324,10 +352,10 @@ export const fthOrchestrator = {
         bytesUsed: p.egress_bytes ?? 0,
       }));
     return { storage, egress };
-  },
+  }
 
   async getTenantInfo(tenantId: string): Promise<TenantInfo> {
-    const c = await client.getClient(tenantId);
+    const c = await this.client.getClient(tenantId);
     return {
       bucketCount: c.bucketCount ?? 0,
       bucketLimit: c.bucketLimit ?? 0,
@@ -335,7 +363,7 @@ export const fthOrchestrator = {
       accessKeyLimit: c.accessKeyLimit ?? 0,
       status: normalizeFthStatus(c.status),
     };
-  },
+  }
 
   async getBucketUsageMetrics(
     tenantId: string,
@@ -346,13 +374,13 @@ export const fthOrchestrator = {
     // the bucket. A snapshot miss alone can't distinguish "not owned" from
     // "owned but absent from the current breakdown" (e.g. an empty bucket), so
     // confirm existence before reading metrics.
-    const bucket = await fthOrchestrator.getBucket(tenantId, bucketName);
+    const bucket = await this.getBucket(tenantId, bucketName);
     if (!bucket) throw new BucketNotFoundError(bucketName);
 
     // FTH has no per-bucket time series; the current-snapshot `by_bucket`
     // breakdown is the finest per-bucket reading available. A bucket can appear
     // once per storage tier, so fold all matching rows into one sample.
-    const snapshot = await client.getClientMetricsCurrent(tenantId);
+    const snapshot = await this.client.getClientMetricsCurrent(tenantId);
     const rows = (snapshot.usage?.by_bucket ?? []).filter((b) => b.bucket === bucketName);
     if (rows.length === 0) return [];
 
@@ -362,22 +390,29 @@ export const fthOrchestrator = {
       ? new Date(snapshot.as_of).toISOString()
       : new Date().toISOString();
     return [{ timestamp, bytesUsed, objectCount }];
-  },
-} satisfies ServiceOrchestrator;
+  }
+
+  private async getFthConsoleStorageUserId(tenantId: string): Promise<string> {
+    const cached = this.consoleStorageUserCache.get(tenantId);
+    if (cached) return cached;
+
+    const users = await this.client.listStorageUsers(tenantId);
+    const consoleUser = users.find((u) => u.userCode === FTH_CONSOLE_USER_CODE);
+    if (!consoleUser) {
+      throw new Error(
+        `FTH console storage user ("${FTH_CONSOLE_USER_CODE}") not found for tenant ${tenantId}`,
+      );
+    }
+    const id = String(consoleUser.id);
+    this.consoleStorageUserCache.set(tenantId, id);
+    return id;
+  }
+}
 
 const FTH_TENANT_STATUSES: readonly TenantStatus[] = ['active', 'write-locked', 'disabled'];
 
 function normalizeFthStatus(status: string | undefined): TenantStatus | undefined {
   return FTH_TENANT_STATUSES.find((s) => s === status);
-}
-
-function createInstrumentedFthClient(): FthManagementClient {
-  const client = createFthManagementClient({
-    baseUrl: process.env.FTH_MANAGEMENT_API_URL!,
-    token: Resource.FthManagementApiToken.value,
-  });
-  instrumentClient(client, { apiName: 'fth-management' });
-  return client;
 }
 
 const FTH_ALWAYS_PERMISSIONS: readonly string[] = ['s3:ListAllMyBuckets'];
@@ -445,24 +480,4 @@ function extractFthMessage(err: FthApiError): string | undefined {
     if (typeof message === 'string') return message;
   }
   return undefined;
-}
-
-// User-issued access keys hang off the same `filone-console` storage user that
-// fth-tenant-setup.ts provisions for the bootstrap console key. The storage
-// user id isn't persisted on the PROFILE row, so resolve it lazily via
-// listStorageUsers and memoize per warm container.
-async function getFthConsoleStorageUserId(tenantId: string): Promise<string> {
-  const cached = consoleStorageUserCache.get(tenantId);
-  if (cached) return cached;
-
-  const users = await client.listStorageUsers(tenantId);
-  const consoleUser = users.find((u) => u.userCode === FTH_CONSOLE_USER_CODE);
-  if (!consoleUser) {
-    throw new Error(
-      `FTH console storage user ("${FTH_CONSOLE_USER_CODE}") not found for tenant ${tenantId}`,
-    );
-  }
-  const id = String(consoleUser.id);
-  consoleStorageUserCache.set(tenantId, id);
-  return id;
 }
