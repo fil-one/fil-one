@@ -1,4 +1,4 @@
-import { defineRule } from '@oxlint/plugins';
+import { defineRule, type ESTree } from '@oxlint/plugins';
 
 export const noJsDynamicImport = defineRule({
   meta: {
@@ -13,16 +13,30 @@ export const noJsDynamicImport = defineRule({
     return {
       ImportExpression(node) {
         const { source } = node;
-        if (source.type !== 'Literal') return;
-        if (typeof source.value !== 'string') return;
-        if (!source.value.endsWith('.js')) return;
+        const specifier = staticSpecifierText(source);
+        if (specifier === undefined) return;
+        if (!specifier.endsWith('.js')) return;
         context.report({
           node: source,
           message:
-            `Import the .ts file by name instead of '${source.value}'. ` +
-            'Plain Node does not map .js specifiers to .ts sources, so a .js import() fails outside the bundle.',
+            `Import the .ts file by name instead of '${specifier}'. ` +
+            'Bundlers and test runners map a .js specifier to its .ts source; plain Node does not.',
         });
       },
     };
   },
 });
+
+// Returns the specifier text when the argument is a string or template literal,
+// with `${}` placeholders abbreviated so the message shows the code as written.
+function staticSpecifierText(source: ESTree.Expression): string | undefined {
+  if (source.type === 'Literal') {
+    return typeof source.value === 'string' ? source.value : undefined;
+  }
+  if (source.type === 'TemplateLiteral') {
+    return source.quasis
+      .map((quasi, index) => quasi.value.raw + (index < source.expressions.length ? '${…}' : ''))
+      .join('');
+  }
+  return undefined;
+}
