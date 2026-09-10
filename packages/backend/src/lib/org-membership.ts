@@ -43,6 +43,12 @@ import { resolveOrgName } from './org-profile.ts';
  * transactions that change an org's name and its membership span both tables.
  */
 
+/** The org partition prefix, shared by the builder and the scan filters in bin/. */
+const orgPkPrefix = (): string => 'ORG#';
+
+/** The user partition prefix, shared by the builder and the scan filters in bin/. */
+const userPkPrefix = (): string => 'USER#';
+
 /** The canonical membership sort-key prefix, shared by the builder and the parser. */
 const memberSkPrefix = (): string => 'MEMBER#';
 
@@ -61,7 +67,8 @@ const inviteSkPrefix = (): string => 'INVITE#';
 const inviteAddrSkPrefix = (): string => 'INVITEADDR#';
 
 export const OrgKeys = {
-  orgPk: (orgId: string): string => `ORG#${orgId}`,
+  orgPk: (orgId: string): string => `${orgPkPrefix()}${orgId}`,
+  orgPkPrefix,
   memberSk: (userId: string): string => `${memberSkPrefix()}${userId}`,
   memberSkPrefix,
   /**
@@ -83,7 +90,8 @@ export const OrgKeys = {
     return userId && !userId.includes('#') ? userId : undefined;
   },
   orgMetaSk: (): string => 'META',
-  userPk: (userId: string): string => `USER#${userId}`,
+  userPk: (userId: string): string => `${userPkPrefix()}${userId}`,
+  userPkPrefix,
   membershipSk: (orgId: string): string => `MEMBERSHIP#${orgId}`,
   membershipSkPrefix,
   /**
