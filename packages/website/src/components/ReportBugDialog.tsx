@@ -74,8 +74,8 @@ export function ReportBugDialog({ open, onClose }: ReportBugDialogProps) {
           autoFocus
         />
         <p className="mt-3 text-xs text-(--color-paragraph-text)">
-          This report includes your description and technical details from your current session, so
-          we can look into it.
+          This report includes your description, your name and email, and technical details from
+          your current session, so we can look into it.
         </p>
       </ModalBody>
       <ModalFooter>

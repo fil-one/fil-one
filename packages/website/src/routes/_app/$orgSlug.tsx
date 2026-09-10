@@ -15,7 +15,7 @@ import { useEffect } from 'react';
  * `$orgSlug` against the caller's memberships, then renders `AppShell` around
  * whatever page matched underneath.
  *
- * Split out from `_app.tsx` because `/new` — first-run setup, reached before
+ * Split out from `_app.tsx` because `/get-started` — first-run setup, reached before
  * the caller's organization has a slug worth putting in a URL — sits beside
  * this route rather than under it.
  */
