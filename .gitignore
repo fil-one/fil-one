@@ -40,3 +40,12 @@ coverage/
 # Sentry Config File
 .env.sentry-build-plugin
 .auth
+
+# design-sync (claude.ai/design) transient state
+.design-sync/sb-reference/
+.design-sync/learnings/
+.design-sync/.cache/
+.design-sync/node_modules
+.design-sync/*.log
+.ds-sync/
+ds-bundle/

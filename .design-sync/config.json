@@ -1,0 +1,110 @@
+{
+  "projectId": "08489640-a149-42ff-9d13-38e13470e2be",
+  "pkg": "@filone/website",
+  "shape": "storybook",
+  "storybookConfigDir": "packages/website/.storybook",
+  "storybookStatic": ".design-sync/sb-reference",
+  "entry": "packages/website/.design-sync.entry.ts",
+  "extraEntries": [
+    "./.design-sync.entry.ts",
+    "./.design-sync.preview.tsx",
+    "@stripe/react-stripe-js",
+    "@tanstack/react-router",
+    "@tanstack/react-query"
+  ],
+  "overrides": {
+    "AddBucketKeyModal": {
+      "cardMode": "single",
+      "primaryStory": "Default"
+    },
+    "BucketDrawer": {
+      "cardMode": "single",
+      "primaryStory": "Default"
+    },
+    "ConfirmDialog": {
+      "cardMode": "single",
+      "primaryStory": "Default"
+    },
+    "DeleteAccountModal": {
+      "cardMode": "single",
+      "primaryStory": "Warning"
+    },
+    "EmptyBucketDialog": {
+      "cardMode": "single",
+      "primaryStory": "Confirmation"
+    },
+    "Modal": {
+      "cardMode": "single",
+      "primaryStory": "Medium"
+    },
+    "SaveCredentialsModal": {
+      "cardMode": "single",
+      "primaryStory": "Default"
+    },
+    "ToggleConfirmModal": {
+      "cardMode": "single",
+      "primaryStory": "Enable"
+    },
+    "ComingSoonPage": {
+      "cardMode": "single",
+      "primaryStory": "Page",
+      "viewport": "900x2000"
+    },
+    "ChoosePlanDialog": {
+      "cardMode": "single",
+      "primaryStory": "Default"
+    },
+    "ContactSalesDialog": {
+      "cardMode": "single",
+      "primaryStory": "Default"
+    },
+    "PaymentForm": {
+      "cardMode": "single",
+      "primaryStory": "Default"
+    },
+    "Alert": {
+      "cardMode": "column"
+    },
+    "Badge": {
+      "viewport": "900x1300"
+    },
+    "AccessKeyFormFields": {
+      "viewport": "900x1500"
+    },
+    "AccessKeyPermissionsFields": {
+      "viewport": "900x1300"
+    },
+    "BucketPropertyCards": {
+      "cardMode": "column"
+    },
+    "Button": {
+      "cardMode": "column",
+      "viewport": "900x1500"
+    },
+    "CopyableField": {
+      "cardMode": "column"
+    },
+    "ProgressBar": {
+      "cardMode": "column"
+    },
+    "SettingRow": {
+      "cardMode": "column"
+    },
+    "Spinner": {
+      "cardMode": "column"
+    },
+    "SupportPage": {
+      "skip": ["pages-supportpage--filled-in"]
+    }
+  },
+  "provider": {
+    "component": "PreviewProviders"
+  },
+  "titleMap": {
+    "Design Tokens": null,
+    "BucketPropertiesCard": "BucketPropertyCards",
+    "RouteRecoveryPage": "RouteErrorPage",
+    "Toast": "ToastProvider"
+  },
+  "readmeHeader": ".design-sync/conventions.md"
+}
