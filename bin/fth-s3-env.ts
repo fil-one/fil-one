@@ -79,6 +79,6 @@ console.log(`export AWS_SECRET_ACCESS_KEY=${secretAccessKey}`);
 // application source imports.
 function getFthS3Endpoint(stage: string): string {
   return stage === 'production'
-    ? 'https://us-east-1.s3.filonecontent.com'
-    : 'https://us-east-1.fortilyx.com';
+    ? 'https://s3.us-east-1.filonecontent.com'
+    : 'https://s3.us-east-1.staging.filonecontent.com';
 }

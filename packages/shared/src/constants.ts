@@ -149,30 +149,32 @@ export function getRegionAccessModel(_region: S3Region): AccessModel {
  * registrable domain, so one abusive upload under `fil.one` could flag the
  * console, website, docs and email with it. Nothing else is served from here.
  *
- * Operators terminate TLS themselves — every one must serve this hostname
- * before merge.
+ * Operators terminate TLS themselves. Every one must serve its region's S3
+ * endpoint hostname under this domain before merge.
  */
-const S3_DATA_DOMAIN = 's3.filonecontent.com';
+const S3_DATA_DOMAIN = 'filonecontent.com';
 
 /**
  * Build the S3-compatible endpoint URL for a region and stage. Non-production
- * stages talk to each operator's own hostname directly.
+ * stages use a per-stage hostname under the data domain where the operator
+ * serves one, and the operator's own hostname otherwise.
  */
 export function getS3Endpoint(region: S3Region, stage: StageLike): string {
   //TODO change this when aurora supports staging URL structure through our DNS.
-  if (stage != Stage.Production) {
+  if (stage !== Stage.Production) {
     switch (region) {
       case S3Region.EuWest1:
         return 'https://s3.dev.aur.lu';
       case S3Region.UsEast1:
-        return 'https://us-east-1.fortilyx.com';
+        return 'https://s3.us-east-1.staging.filonecontent.com';
       case S3Region.EuCentral3:
         return 'https://s3.eu-central-3.staging.filonecontent.com';
       case S3Region.UsEast9:
         return 'https://s3.us-east-9.latest.dev.filonecontent.com';
     }
   }
-  return `https://${region}.${S3_DATA_DOMAIN}`;
+
+  return `https://s3.${region}.${S3_DATA_DOMAIN}`;
 }
 
 /**
