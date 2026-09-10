@@ -9,19 +9,14 @@ import { StateCard } from './StateCard';
 import { Table } from './Table';
 import { TableSkeleton } from './Table/TableSkeleton.js';
 import { errorMessageOf } from '../lib/api.js';
-import { formatDateTime } from '../lib/time.js';
+import { formatDate, formatTime } from '../lib/time.js';
 import { useInView } from '../lib/use-in-view.js';
 
 /**
  * The columns, shared with the loading skeleton so the placeholder drops the
  * same column at the same breakpoint as the table it stands in for.
  */
-export const COLUMNS = [
-  { label: 'Event' },
-  { label: 'Member' },
-  { label: 'Subject', className: 'hidden md:table-cell' },
-  { label: 'When' },
-];
+export const COLUMNS = [{ label: 'Event' }, { label: 'Member' }, { label: 'When' }];
 
 export interface AuditLogTableProps {
   /** Undefined while the first page is in flight. */
@@ -115,12 +110,10 @@ export function AuditLogTable({
       <Table>
         <Table.Header>
           <Table.Row>
-            <Table.Head className="w-8" />
             {COLUMNS.map((column) => (
-              <Table.Head key={column.label} className={column.className}>
-                {column.label}
-              </Table.Head>
+              <Table.Head key={column.label}>{column.label}</Table.Head>
             ))}
+            <Table.Head className="w-8" />
           </Table.Row>
         </Table.Header>
         <Table.Body>
@@ -199,6 +192,7 @@ interface RowProps {
  */
 function AuditRow({ event, expanded, onToggleExpand, onFilterActor }: RowProps) {
   const Caret = expanded ? CaretDownIcon : CaretRightIcon;
+  const detailsId = `audit-details-${event.eventId}`;
 
   return (
     <>
@@ -207,25 +201,11 @@ function AuditRow({ event, expanded, onToggleExpand, onFilterActor }: RowProps) 
         onClick={onToggleExpand}
         data-testid={`audit-row-${event.eventId}`}
       >
-        <Table.Cell className="pr-0 text-zinc-400">
-          <button
-            type="button"
-            aria-label={expanded ? 'Hide details' : 'Show details'}
-            aria-expanded={expanded}
-            className="rounded-md p-0.5 focus-visible:brand-outline"
-            onClick={(clicked) => {
-              clicked.stopPropagation();
-              onToggleExpand();
-            }}
-          >
-            <Caret size={12} weight="bold" />
-          </button>
-        </Table.Cell>
         <Table.Cell className="font-medium text-zinc-900">
           {getAuditEventTypeLabel(event.type)}
           {event.phase && <PhaseNote event={event} />}
         </Table.Cell>
-        <Table.Cell>
+        <Table.Cell className="text-xs">
           {event.actor.kind === 'user' ? (
             <button
               type="button"
@@ -241,16 +221,29 @@ function AuditRow({ event, expanded, onToggleExpand, onFilterActor }: RowProps) 
             <span className="text-zinc-600">{event.actor.kind}</span>
           )}
         </Table.Cell>
-        <Table.Cell className="hidden font-mono text-xs text-zinc-500 md:table-cell">
-          {event.subject}
+        <Table.Cell className="whitespace-nowrap">
+          <p className="text-xs text-zinc-900">{formatDate(event.createdAt)}</p>
+          <p className="text-xs text-zinc-500">{formatTime(event.createdAt)}</p>
         </Table.Cell>
-        <Table.Cell className="whitespace-nowrap text-zinc-500">
-          {formatDateTime(event.createdAt)}
+        <Table.Cell className="pl-0 text-right text-zinc-400">
+          <button
+            type="button"
+            aria-label={expanded ? 'Hide details' : 'Show details'}
+            aria-expanded={expanded}
+            aria-controls={detailsId}
+            className="rounded-md p-0.5 focus-visible:brand-outline"
+            onClick={(clicked) => {
+              clicked.stopPropagation();
+              onToggleExpand();
+            }}
+          >
+            <Caret size={12} weight="bold" />
+          </button>
         </Table.Cell>
       </Table.Row>
 
       {expanded && (
-        <Table.Row className="bg-zinc-50/50 hover:bg-zinc-50/50">
+        <Table.Row id={detailsId} className="bg-zinc-50/50 hover:bg-zinc-50/50">
           <Table.Cell colSpan={COLUMNS.length + 1}>
             <AuditDetails event={event} />
           </Table.Cell>
@@ -282,6 +275,10 @@ function AuditDetails({ event }: { event: AuditEvent }) {
 
   return (
     <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+      <div className="contents">
+        <dt className="text-zinc-500">Subject</dt>
+        <dd className="text-zinc-900">{event.subject}</dd>
+      </div>
       {fields.map(([field, value]) => (
         <div key={field} className="contents">
           <dt className="text-zinc-500">{humanizeField(field)}</dt>

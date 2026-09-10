@@ -157,6 +157,18 @@ describe('OrganizationAuditTab', () => {
     expect(screen.getByText(OrgRole.Member)).toBeInTheDocument();
   });
 
+  it('points the expand button at the details row it controls', async () => {
+    // So a screen reader announces which content the button owns, not just
+    // that something, somewhere, changed.
+    renderTab();
+    const toggle = await screen.findByRole('button', { name: 'Show details' });
+    fireEvent.click(toggle);
+
+    const controlsId = toggle.getAttribute('aria-controls');
+    expect(controlsId).toBeTruthy();
+    expect(document.getElementById(controlsId!)).toHaveTextContent('Previous role');
+  });
+
   it('collapses a row that is already open', async () => {
     renderTab();
     fireEvent.click(await screen.findByRole('button', { name: 'Show details' }));
