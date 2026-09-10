@@ -5,9 +5,9 @@ import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 // either at runtime — Node's type stripping resolves neither the backend's
 // `./x.js` specifiers nor rag-shared's — but vitest resolves both, so the
 // mirrors are held to them here rather than by hand.
-import { RAGKeys } from '@filone/backend/src/lib/dynamo-records.js';
+import { RAGKeys } from '@filone/backend/src/lib/dynamo-records.ts';
 import { S3Region } from '@filone/shared';
-import { S3VectorsStore } from '@filone/rag-shared/src/s3-vectors-store.js';
+import { S3VectorsStore } from '@filone/rag-shared/src/s3-vectors-store.ts';
 
 import {
   assertRegionAllowed,
