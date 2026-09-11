@@ -5,7 +5,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ApiErrorCode, PlanId, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
 import type { BillingInfo, ErrorResponse } from '@filone/shared';
 import type Stripe from 'stripe';
-import { getStripeClient } from '../lib/stripe-client.ts';
+import { getBillingSecrets, getStripeClient } from '../lib/stripe-client.ts';
 import {
   readSubscription,
   updateSubscription,
@@ -148,9 +148,22 @@ function describePrice(price: StripePriceDetails | undefined): {
 } {
   return {
     monthlyMinimumCents: deriveMonthlyMinimumCents(price),
-    planName: price?.product_name,
+    planName: isSelfServePrice(price) ? undefined : price?.product_name,
     pricePerTbCents: derivePricePerTbCents(price),
   };
+}
+
+/**
+ * Whether this is the self-serve Pay-as-you-go price everyone signs up on.
+ *
+ * Its Stripe product is named for internal bookkeeping ("Fil ONE Storage
+ * (GB)"), not for a customer to read, so it must not stand in for the plan
+ * name the console already gives that price ("Pay as you go" from `planId`,
+ * see `planTitle()`). Only a genuinely negotiated price — one Stripe was told
+ * a real plan name for — should override that.
+ */
+function isSelfServePrice(price: StripePriceDetails | undefined): boolean {
+  return price?.id === getBillingSecrets().STRIPE_PRICE_ID;
 }
 
 /**
