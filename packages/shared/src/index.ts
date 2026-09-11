@@ -37,7 +37,7 @@ export {
   senderAddress,
 } from './constants.ts';
 export type { AccessModel, UsageLimits, StageLike, S3RegionLike } from './constants.ts';
-export { formatBytes, formatBytesShort } from './formatBytes.ts';
+export { formatBytes, formatBytesShort, bytesAxisFormatter } from './formatBytes.ts';
 export { UUID_PATTERN, isUuid } from './uuid.ts';
 export type {
   MeResponse,
@@ -349,6 +349,7 @@ export { ACTIVITY_ACTION_LABELS, getActivityActionLabel } from './api/dashboard.
 
 export type {
   UsageDataPoint,
+  UsageTrendsPeriod,
   UsageTrendsRequest,
   UsageTrendsResponse,
   BucketActivity,
