@@ -5,19 +5,19 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // ---------------------------------------------------------------------------
 
 const mockGetAvailableOrchestrators = vi.hoisted(() => vi.fn());
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getAvailableOrchestrators: (...args: unknown[]) => mockGetAvailableOrchestrators(...args),
 }));
 
-vi.mock('../lib/org-profile.js', () => ({
+vi.mock('../lib/org-profile.ts', () => ({
   getOrgProfile: vi.fn(async (orgId: string) => fakeOrgProfile(orgId)),
 }));
 
 process.env.FILONE_STAGE = 'test';
 
-import { baseHandler } from './get-usage-trends.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
-import { fakeOrchestrator, fakeOrgProfile, tenantFor } from '../test/fake-orchestrator.js';
+import { baseHandler } from './get-usage-trends.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
+import { fakeOrchestrator, fakeOrgProfile, tenantFor } from '../test/fake-orchestrator.ts';
 import { S3Region } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
@@ -71,6 +71,7 @@ describe('get-usage-trends baseHandler', () => {
       storage: flatTrend(7, 0),
       objects: flatTrend(7, 0),
       egress: flatTrend(7, 0),
+      complete: true,
     });
   });
 
@@ -84,6 +85,46 @@ describe('get-usage-trends baseHandler', () => {
     expect(statusCode).toBe(200);
     expect(body.storage).toStrictEqual(flatTrend(7, 0));
     expect(aurora.getTenantUsageMetrics).not.toHaveBeenCalled();
+  });
+
+  it('reports the response incomplete when a region fetch fails', async () => {
+    vi.setSystemTime(new Date('2026-01-08T12:00:00Z'));
+    mockGetAvailableOrchestrators.mockReturnValue([
+      fakeOrchestrator('aurora', { failUsage: true }),
+    ]);
+
+    const { statusCode, body } = await run();
+
+    // The outage is swallowed into a zero-filled series so the dashboard
+    // still renders, but `complete: false` is what tells it the zeros are a
+    // stand-in rather than a genuinely empty account.
+    expect(statusCode).toBe(200);
+    expect(body.storage).toStrictEqual(flatTrend(7, 0));
+    expect(body.complete).toBe(false);
+  });
+
+  it('is complete when every region answers, even with zero usage', async () => {
+    vi.setSystemTime(new Date('2026-01-08T12:00:00Z'));
+    mockGetAvailableOrchestrators.mockReturnValue([
+      fakeOrchestrator('aurora'),
+      fakeOrchestrator('fth'),
+    ]);
+
+    const { body } = await run();
+
+    expect(body.complete).toBe(true);
+  });
+
+  it('is incomplete when only one of several regions fails', async () => {
+    vi.setSystemTime(new Date('2026-01-08T12:00:00Z'));
+    mockGetAvailableOrchestrators.mockReturnValue([
+      fakeOrchestrator('aurora'),
+      fakeOrchestrator('fth', { failUsage: true }),
+    ]);
+
+    const { body } = await run();
+
+    expect(body.complete).toBe(false);
   });
 
   it('zero-fills missing days around real samples', async () => {

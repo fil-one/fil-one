@@ -17,7 +17,7 @@ vi.mock('sst', () => ({
 
 const mockInvoicesList = vi.fn();
 
-vi.mock('../lib/stripe-client.js', () => ({
+vi.mock('../lib/stripe-client.ts', () => ({
   getStripeClient: () => ({
     invoices: { list: mockInvoicesList },
   }),
@@ -29,8 +29,8 @@ vi.mock('../lib/stripe-client.js', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { baseHandler } from './list-invoices.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import { baseHandler } from './list-invoices.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

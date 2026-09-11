@@ -16,6 +16,7 @@
 
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import { getS3Endpoint, S3Region } from '@filone/shared';
 import { findTable } from './lib/sst-state.ts';
 
 const orgId = process.argv[2];
@@ -69,16 +70,7 @@ if (!Parameter?.Value) {
 
 const { accessKeyId, secretAccessKey } = JSON.parse(Parameter.Value);
 
-console.log(`export AWS_ENDPOINT_URL=${getFthS3Endpoint(stage)}`);
+console.log(`export AWS_ENDPOINT_URL=${getS3Endpoint(S3Region.UsEast1, stage)}`);
 console.log(`export AWS_REGION=us-east-1`);
 console.log(`export AWS_ACCESS_KEY_ID=${accessKeyId}`);
 console.log(`export AWS_SECRET_ACCESS_KEY=${secretAccessKey}`);
-
-// Mirrors getS3Endpoint(S3Region.UsEast1, stage) in
-// packages/shared/src/constants.ts. Inlined to keep this script free of
-// application source imports.
-function getFthS3Endpoint(stage: string): string {
-  return stage === 'production'
-    ? 'https://us-east-1.s3.filonecontent.com'
-    : 'https://us-east-1.fortilyx.com';
-}

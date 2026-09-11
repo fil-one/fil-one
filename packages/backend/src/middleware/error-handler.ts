@@ -1,9 +1,8 @@
 import type { MiddlewareObj, Request } from '@middy/core';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, Context } from 'aws-lambda';
-import type { ErrorResponse } from '@filone/shared';
-import { OrgDeletingError } from '../lib/org-profile.js';
-import { accountDeletedResponse, ResponseBuilder } from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
+import { OrgDeletingError } from '../lib/org-profile.ts';
+import { accountDeletedResponse, unexpectedFailureResponse } from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
 
 export function errorHandlerMiddleware(): MiddlewareObj<
   APIGatewayProxyEventV2,
@@ -38,12 +37,7 @@ export function errorHandlerMiddleware(): MiddlewareObj<
       request.error,
     );
 
-    request.response = new ResponseBuilder()
-      .status(500)
-      .body<ErrorResponse>({
-        message: 'An unexpected server error occurred. Please try again later.',
-      })
-      .build();
+    request.response = unexpectedFailureResponse();
   };
 
   return { onError };

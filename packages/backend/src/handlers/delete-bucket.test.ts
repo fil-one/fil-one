@@ -20,19 +20,19 @@ const mockOrchestrator = {
   deleteBucket: (...args: unknown[]) => mockOrchestratorDeleteBucket(...args),
 };
 
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: () => mockOrchestrator,
 }));
 
-vi.mock('../lib/org-profile.js', () => ({
+vi.mock('../lib/org-profile.ts', () => ({
   getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
 }));
 
 process.env.FILONE_STAGE = 'test';
 
-import { baseHandler } from './delete-bucket.js';
-import { BucketNotEmptyError } from '../lib/errors.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import { baseHandler } from './delete-bucket.ts';
+import { BucketNotEmptyError } from '../lib/errors.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

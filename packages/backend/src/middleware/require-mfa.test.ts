@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockGetMfaEnrollments = vi.fn();
-vi.mock('../lib/auth0-management.js', () => ({
+vi.mock('../lib/auth0-management.ts', () => ({
   getMfaEnrollments: (sub: string) => mockGetMfaEnrollments(sub),
 }));
 
-import { requireMfa, requireMfaIfEnrolled, STEP_UP_MAX_AGE_SECONDS } from './require-mfa.js';
-import type { IdTokenClaims } from './auth.js';
-import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
-import { expectRefreshedCookies, REFRESHED_TOKENS } from '../test/assert-helpers.js';
+import { requireMfa, requireMfaIfEnrolled, STEP_UP_MAX_AGE_SECONDS } from './require-mfa.ts';
+import type { IdTokenClaims } from './auth.ts';
+import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.ts';
+import { expectRefreshedCookies, REFRESHED_TOKENS } from '../test/assert-helpers.ts';
 
 function buildRequest(claims?: Partial<IdTokenClaims>) {
   // With a caller on it: the enrolled-user branch reads the session's `sub` to

@@ -28,8 +28,13 @@ function series(values: number[]): UsageDataPoint[] {
   }));
 }
 
-function trends(storage: number[], objects: number[], egress: number[]): UsageTrendsResponse {
-  return { storage: series(storage), objects: series(objects), egress: series(egress) };
+function trends(
+  storage: number[],
+  objects: number[],
+  egress: number[],
+  complete = true,
+): UsageTrendsResponse {
+  return { storage: series(storage), objects: series(objects), egress: series(egress), complete };
 }
 
 const MB = 1_000_000;
@@ -78,7 +83,14 @@ const FIXTURES = {
    * No days reported at all. Distinct from `empty`: the account may well hold
    * data, so the copy must not claim otherwise.
    */
-  noData: { storage: [], objects: [], egress: [] },
+  noData: { storage: [], objects: [], egress: [], complete: true },
+  /**
+   * A region outage, zero-filled to the same shape as `empty`. `complete:
+   * false` is the only signal telling the two apart (FIL-1098) — without it
+   * this would render "No usage yet" on an account the pipeline simply
+   * couldn't reach.
+   */
+  incompleteRegion: trends(Array(7).fill(0), Array(7).fill(0), Array(7).fill(0), false),
   /** Day one, with six days of nothing behind it. */
   firstDay: trends(
     [0, 0, 0, 0, 0, 0, 1.2 * MB],
@@ -192,6 +204,13 @@ export const Empty: Story = { args: { fixture: 'empty' } };
  * yet": that is a claim about the account, and this is a fact about the request.
  */
 export const NoData: Story = { args: { fixture: 'noData' } };
+
+/**
+ * A region outage that zero-fills the same shape as `Empty`. Also correctly
+ * says "no usage data" rather than "no usage yet", but for a different reason:
+ * the handler marked the response incomplete rather than sending no days.
+ */
+export const IncompleteRegion: Story = { args: { fixture: 'incompleteRegion' } };
 
 export const FirstDay: Story = { args: { fixture: 'firstDay' } };
 

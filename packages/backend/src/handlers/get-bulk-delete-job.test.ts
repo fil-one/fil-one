@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import { BulkDeleteJobStatus, BulkDeleteScope, S3Region } from '@filone/shared';
 
-import type { BulkDeleteJobRecord } from '../lib/dynamo-records.js';
+import type { BulkDeleteJobRecord } from '../lib/dynamo-records.ts';
 
 vi.mock('sst', () => ({
   Resource: {
@@ -11,16 +11,16 @@ vi.mock('sst', () => ({
   },
 }));
 
-vi.mock('../lib/bulk-delete-jobs.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../lib/bulk-delete-jobs.js')>();
+vi.mock('../lib/bulk-delete-jobs.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/bulk-delete-jobs.ts')>();
   return { ...actual, getBulkDeleteJob: vi.fn() };
 });
 
 process.env.FILONE_STAGE = 'test';
 
-import { getBulkDeleteJob } from '../lib/bulk-delete-jobs.js';
-import { baseHandler } from './get-bulk-delete-job.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import { getBulkDeleteJob } from '../lib/bulk-delete-jobs.ts';
+import { baseHandler } from './get-bulk-delete-job.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
 
 const mockGet = vi.mocked(getBulkDeleteJob);
 

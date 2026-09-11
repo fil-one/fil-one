@@ -20,8 +20,8 @@ vi.mock('sst', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { confirmAccountDeletion, consumeVerifyAttempt } from './deletion-confirm-transaction.js';
-import { MAX_VERIFY_ATTEMPTS } from './deletion-challenge.js';
+import { confirmAccountDeletion, consumeVerifyAttempt } from './deletion-confirm-transaction.ts';
+import { MAX_VERIFY_ATTEMPTS } from './deletion-challenge.ts';
 
 const PARAMS = {
   orgId: 'org-1',

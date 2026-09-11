@@ -3,8 +3,8 @@ import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
-import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -29,25 +29,25 @@ vi.mock('sst', () => ({
 const mockIsOrgDeleting = vi.fn(
   async (_orgId: string, _options?: { consistent?: boolean }) => false,
 );
-vi.mock('../lib/org-profile.js', async () => ({
-  ...(await vi.importActual<typeof import('../lib/org-profile.js')>('../lib/org-profile.js')),
+vi.mock('../lib/org-profile.ts', async () => ({
+  ...(await vi.importActual<typeof import('../lib/org-profile.ts')>('../lib/org-profile.ts')),
   isOrgDeleting: (...args: Parameters<typeof mockIsOrgDeleting>) => mockIsOrgDeleting(...args),
 }));
 
 // The orchestrator registry instantiates real clients at import time; mock it
 // so the otherwise-real region-helpers module can be loaded below.
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getAvailableOrchestrators: () => [],
 }));
 
 const mockSyncTenantStatusInProvisionedRegions = vi.fn();
-vi.mock('../lib/region-helpers.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../lib/region-helpers.js')>()),
+vi.mock('../lib/region-helpers.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/region-helpers.ts')>()),
   syncTenantStatusInProvisionedRegions: (...args: unknown[]) =>
     mockSyncTenantStatusInProvisionedRegions(...args),
 }));
 
-vi.mock('../lib/stripe-client.js', () => ({
+vi.mock('../lib/stripe-client.ts', () => ({
   getStripeClient: () => ({
     setupIntents: { list: mockSetupIntentsList },
     subscriptions: { create: mockSubscriptionsCreate, update: mockSubscriptionsUpdate },
@@ -61,7 +61,7 @@ vi.mock('../lib/stripe-client.js', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { baseHandler } from './activate-subscription.js';
+import { baseHandler } from './activate-subscription.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

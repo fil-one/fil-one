@@ -12,13 +12,16 @@ import {
   auditKeyIdSuffix,
   isAuditEventType,
   looksLikeCredential,
-} from './audit.js';
-import { RAG_KEY_DISPLAY_PREFIX_LENGTH } from './api/rag-api-keys.js';
+} from './audit.ts';
+import { RAG_KEY_DISPLAY_PREFIX_LENGTH } from './api/rag-api-keys.ts';
 
 /**
- * The M1 event types, transcribed from the ADR rather than derived from the
- * export — a registry that agrees with itself proves nothing, and the viewer
- * (FIL-1022) is written against this list.
+ * Every event type the ADRs name, transcribed from them rather than derived
+ * from the export — a registry that agrees with itself proves nothing, and the
+ * viewer is written against this list.
+ *
+ * The first ten are M1's write path. `audit.exported` is the audit log v1 ADR's
+ * addition and the only one written on a read path.
  */
 const ADR_EVENT_TYPES = [
   'org.created',
@@ -31,10 +34,11 @@ const ADR_EVENT_TYPES = [
   'ownership.transferred',
   'key.created',
   'key.deleted',
+  'audit.exported',
 ];
 
 describe('the event-type registry', () => {
-  it('is exactly the M1 set the ADR names', () => {
+  it('is exactly the set the ADRs name', () => {
     expect([...AUDIT_EVENT_TYPES]).toStrictEqual(ADR_EVENT_TYPES);
   });
 
@@ -61,8 +65,16 @@ describe('the event-type registry', () => {
     expect([...AUDIT_EVENT_PHASES]).toStrictEqual(['intent', 'completion']);
   });
 
-  it('marks only the vendor-backed key flows as two-phase', () => {
-    expect([...TWO_PHASE_AUDIT_EVENT_TYPES]).toStrictEqual(['key.created', 'key.deleted']);
+  it('marks the flows that reach a vendor before they write as two-phase', () => {
+    // The key flows always, and the three membership flows because a narrowing
+    // revokes keys at the vendor before it writes the role.
+    expect([...TWO_PHASE_AUDIT_EVENT_TYPES]).toStrictEqual([
+      'key.created',
+      'key.deleted',
+      'member.role_changed',
+      'member.removed',
+      'ownership.transferred',
+    ]);
     for (const type of TWO_PHASE_AUDIT_EVENT_TYPES) {
       expect(AUDIT_EVENT_TYPES).toContain(type);
     }

@@ -3,20 +3,20 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { BucketAnalyticsResponse } from '@filone/shared';
 import { S3Region, isSupportedRegion } from '@filone/shared';
-import { BucketNotFoundError } from '../lib/errors.js';
-import { getOrgProfile } from '../lib/org-profile.js';
+import { BucketNotFoundError } from '../lib/errors.ts';
+import { getOrgProfile } from '../lib/org-profile.ts';
 import {
   ResponseBuilder,
   tenantNotReadyResponse,
   unsupportedRegionResponse,
-} from '../lib/response-builder.js';
-import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
+} from '../lib/response-builder.ts';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
+import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
 
 export async function baseHandler(
   event: AuthenticatedEvent,

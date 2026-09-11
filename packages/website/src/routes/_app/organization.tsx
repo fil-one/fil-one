@@ -16,7 +16,7 @@ import { useMembersSurface } from '../../lib/use-members-surface';
  * `use-billing` reads it to know the plan or the card may have changed.
  */
 const organizationSearchSchema = z.object({
-  tab: z.enum(['members', 'invitations', 'billing']).optional(),
+  tab: z.enum(['members', 'invitations', 'audit', 'billing']).optional(),
   portal_return: z.string().optional(),
 });
 

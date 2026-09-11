@@ -1,5 +1,5 @@
-export { buildAuth0AuthorizeUrl } from './auth.js';
-export type { Auth0LoginUrlOptions } from './auth.js';
+export { buildAuth0AuthorizeUrl } from './auth.ts';
+export type { Auth0LoginUrlOptions } from './auth.ts';
 
 export {
   Stage,
@@ -14,6 +14,7 @@ export {
   getAvailableRegions,
   isSupportedRegion,
   supportsBucketManagement,
+  getRegionAccessModel,
   getS3Endpoint,
   getAuth0Domain,
   getStageFromHostname,
@@ -34,10 +35,10 @@ export {
   UNLIMITED,
   getUsageLimits,
   senderAddress,
-} from './constants.js';
-export type { UsageLimits } from './constants.js';
-export { formatBytes, formatBytesShort, bytesAxisFormatter } from './formatBytes.js';
-export { UUID_PATTERN, isUuid } from './uuid.js';
+} from './constants.ts';
+export type { AccessModel, UsageLimits, StageLike, S3RegionLike } from './constants.ts';
+export { formatBytes, formatBytesShort, bytesAxisFormatter } from './formatBytes.ts';
+export { UUID_PATTERN, isUuid } from './uuid.ts';
 export type {
   MeResponse,
   OrgMembershipSummary,
@@ -47,14 +48,14 @@ export type {
   UpdateProfileResponse,
   RegenerateRecoveryCodeResponse,
   StepUpRequiredResponse,
-} from './api/me.js';
-export { PASSKEY_PER_USER_LIMIT, UpdateProfileSchema } from './api/me.js';
+} from './api/me.ts';
+export { PASSKEY_PER_USER_LIMIT, UpdateProfileSchema } from './api/me.ts';
 
-export type { PreferencesResponse, UpdatePreferencesRequest } from './api/preferences.js';
-export { UpdatePreferencesSchema } from './api/preferences.js';
+export type { PreferencesResponse, UpdatePreferencesRequest } from './api/preferences.ts';
+export { UpdatePreferencesSchema } from './api/preferences.ts';
 
-export { getProvider, isSocialConnection } from './connection-providers.js';
-export type { ConnectionProvider } from './connection-providers.js';
+export { getProvider, isSocialConnection } from './connection-providers.ts';
+export type { ConnectionProvider } from './connection-providers.ts';
 export {
   OrgRole,
   isOrgRole,
@@ -64,8 +65,8 @@ export {
   ORG_NAME_MAX_LENGTH,
   ORG_NAME_PATTERN,
   ORG_NAME_DISALLOWED_CHARS,
-} from './api/org.js';
-export type { OrgMembershipSource, UpdateOrgRequest, UpdateOrgResponse } from './api/org.js';
+} from './api/org.ts';
+export type { OrgMembershipSource, UpdateOrgRequest, UpdateOrgResponse } from './api/org.ts';
 
 export {
   INVITATION_STATUSES,
@@ -76,7 +77,7 @@ export {
   AcceptInvitationSchema,
   CreateInvitationSchema,
   InvitedRoleSchema,
-} from './api/invitations.js';
+} from './api/invitations.ts';
 export type {
   AcceptInvitationRequest,
   AcceptInvitationResponse,
@@ -85,20 +86,39 @@ export type {
   InvitationStatus,
   InvitationSummary,
   ListInvitationsResponse,
-} from './api/invitations.js';
+} from './api/invitations.ts';
 
-export { TransferOwnershipSchema, UpdateMemberRoleSchema } from './api/members.js';
+export { TransferOwnershipSchema, UpdateMemberRoleSchema } from './api/members.ts';
 export type {
   ListMembersResponse,
   MemberSummary,
+  AccessKeySummary,
+  RemoveMemberResponse,
+  RoleChangePreviewResponse,
+  UpdateMemberRoleFailure,
   TransferOwnershipRequest,
   TransferOwnershipResponse,
   UpdateMemberRoleRequest,
   UpdateMemberRoleResponse,
-} from './api/members.js';
+} from './api/members.ts';
+
+export type {
+  AuditQueryFilters,
+  AuditQueryRequest,
+  AuditWindow,
+  ListAuditEventsResponse,
+} from './api/audit.ts';
+export {
+  AUDIT_EXPORT_MAX_BYTES,
+  AUDIT_EXPORT_MAX_ROWS,
+  AUDIT_PAGE_SIZE,
+  AuditQuerySchema,
+  MALFORMED_CURSOR,
+} from './api/audit.ts';
 
 export {
   AUDIT_EVENT_TYPES,
+  AUDIT_EVENT_TYPE_LABELS,
   AUDIT_ACTOR_KINDS,
   AUDIT_EVENT_PHASES,
   AUDIT_OUTCOMES,
@@ -111,9 +131,10 @@ export {
   PROHIBITED_AUDIT_FIELD_PATTERNS,
   TWO_PHASE_AUDIT_EVENT_TYPES,
   auditKeyIdSuffix,
+  getAuditEventTypeLabel,
   isAuditEventType,
   looksLikeCredential,
-} from './audit.js';
+} from './audit.ts';
 export type {
   AuditActor,
   AuditActorKind,
@@ -128,14 +149,16 @@ export type {
   AuditIntentPhase,
   AuditKeyKind,
   AuditOutcome,
+  RevocationTrigger,
   AuditPhaseFields,
   AuditSinglePhase,
   AuditSubject,
   CommittableAuditEvent,
+  StandaloneAuditEvent,
   TwoPhaseAuditEvent,
   TwoPhaseAuditEventType,
   VendorBackedKeyEvent,
-} from './audit.js';
+} from './audit.ts';
 
 export {
   PERMISSIONS,
@@ -145,36 +168,44 @@ export {
   roleHasPermission,
   canManageTargetRole,
   canChangeRole,
-} from './permissions.js';
-export type { Permission } from './permissions.js';
+  roleNarrows,
+  NO_ROLE,
+} from './permissions.ts';
+export type { Permission } from './permissions.ts';
 
 export {
   ACCESS_KEY_PERMISSION_REQUIREMENT,
   GRANULAR_PERMISSION_REQUIREMENT,
   excessKeyPermissions,
-} from './access-key-permissions.js';
-export type { ExcessKeyPermission } from './access-key-permissions.js';
+  canRetainAccessKey,
+} from './access-key-permissions.ts';
+export type {
+  ExcessKeyPermission,
+  AccessKeyRevocationReason,
+  KeyRetentionResult,
+  AccessKeyPermissions,
+} from './access-key-permissions.ts';
 
-export { ROUTE_MANIFEST } from './route-manifest.js';
+export { ROUTE_MANIFEST } from './route-manifest.ts';
 export type {
   RouteCategory,
   RouteHandler,
   RouteManifestEntry,
   RouteRequirement,
-} from './route-manifest.js';
-export { ApiErrorCode } from './api/coreInterfaces.js';
-export type { ErrorResponse } from './api/coreInterfaces.js';
+} from './route-manifest.ts';
+export { ApiErrorCode } from './api/coreInterfaces.ts';
+export type { ErrorResponse } from './api/coreInterfaces.ts';
 export {
   DELETION_CODE_LENGTH,
   DELETION_CODE_TTL_MINUTES,
   DeletionCodeSchema,
   DeleteAccountSchema,
-} from './api/account-deletion.js';
+} from './api/account-deletion.ts';
 export type {
   DeleteAccountRequest,
   RequestAccountDeletionResponse,
   ConfirmAccountDeletionResponse,
-} from './api/account-deletion.js';
+} from './api/account-deletion.ts';
 
 export type {
   Bucket,
@@ -187,7 +218,7 @@ export type {
   GetBucketResponse,
   DeleteBucketRequest,
   BucketAnalyticsResponse,
-} from './api/buckets.js';
+} from './api/buckets.ts';
 
 export {
   BUCKET_NAME_MIN_LENGTH,
@@ -201,9 +232,9 @@ export {
   RETENTION_MAX_YEARS,
   CreateBucketSchema,
   listBucketsUnavailableMessage,
-} from './api/buckets.js';
+} from './api/buckets.ts';
 
-export type { RetentionMode, RetentionDurationType } from './api/buckets.js';
+export type { RetentionMode, RetentionDurationType } from './api/buckets.ts';
 
 export type {
   S3Object,
@@ -214,7 +245,7 @@ export type {
   DeleteObjectRequest,
   ObjectMetadataResponse,
   ObjectRetentionInfo,
-} from './api/objects.js';
+} from './api/objects.ts';
 
 export type {
   PresignOp,
@@ -222,9 +253,9 @@ export type {
   PresignHttpMethod,
   PresignResponseItem,
   PresignResponse,
-} from './api/presign.js';
+} from './api/presign.ts';
 
-export { PresignOpSchema, PresignRequestSchema } from './api/presign.js';
+export { PresignOpSchema, PresignRequestSchema } from './api/presign.ts';
 
 export type {
   BulkDeleteFailure,
@@ -232,7 +263,7 @@ export type {
   CreateBulkDeleteJobRequest,
   CreateBulkDeleteJobResponse,
   GetBulkDeleteJobResponse,
-} from './api/bulk-delete.js';
+} from './api/bulk-delete.ts';
 
 export {
   BulkDeleteJobStatus,
@@ -241,7 +272,7 @@ export {
   MAX_REPORTED_BULK_DELETE_FAILURES,
   TERMINAL_BULK_DELETE_STATUSES,
   isTerminalBulkDeleteStatus,
-} from './api/bulk-delete.js';
+} from './api/bulk-delete.ts';
 
 export {
   QueryBucketSchema,
@@ -250,7 +281,7 @@ export {
   SUPPORTED_COMPLETION_MODELS,
   SUPPORTED_COMPLETION_MODEL_IDS,
   SetBucketRagEnabledSchema,
-} from './api/rag.js';
+} from './api/rag.ts';
 
 export type {
   QueryBucketRequest,
@@ -260,7 +291,7 @@ export type {
   BucketRagSyncState,
   SetBucketRagEnabledRequest,
   BucketRagEnablementResponse,
-} from './api/rag.js';
+} from './api/rag.ts';
 
 export {
   ACCESS_KEY_PERMISSIONS,
@@ -281,7 +312,7 @@ export {
   RESERVED_KEY_NAME_PREFIX,
   isReservedKeyName,
   CreateAccessKeySchema,
-} from './api/access-keys.js';
+} from './api/access-keys.ts';
 export type {
   AccessKeyStatus,
   AccessKeyPermission,
@@ -295,7 +326,7 @@ export type {
   CreateAccessKeyRequest,
   CreateAccessKeyResponse,
   DeleteAccessKeyRequest,
-} from './api/access-keys.js';
+} from './api/access-keys.ts';
 
 export {
   RAG_KEY_TOKEN_PREFIX,
@@ -304,7 +335,7 @@ export {
   RAG_KEY_BUCKET_SCOPES,
   RagKeyBucketRefSchema,
   CreateRagApiKeySchema,
-} from './api/rag-api-keys.js';
+} from './api/rag-api-keys.ts';
 export type {
   RagKeyBucketScope,
   RagKeyBucketRef,
@@ -312,9 +343,9 @@ export type {
   ListRagApiKeysResponse,
   CreateRagApiKeyRequest,
   CreateRagApiKeyResponse,
-} from './api/rag-api-keys.js';
+} from './api/rag-api-keys.ts';
 
-export { ACTIVITY_ACTION_LABELS, getActivityActionLabel } from './api/dashboard.js';
+export { ACTIVITY_ACTION_LABELS, getActivityActionLabel } from './api/dashboard.ts';
 
 export type {
   UsageDataPoint,
@@ -326,16 +357,16 @@ export type {
   KeyActivity,
   RecentActivity,
   RecentActivityResponse,
-} from './api/dashboard.js';
+} from './api/dashboard.ts';
 
-export type { UsageResponse } from './api/usage.js';
+export type { UsageResponse } from './api/usage.ts';
 
 export {
   PlanId,
   SubscriptionStatus,
   mapStripeStatus,
   ActivateSubscriptionRequestSchema,
-} from './api/billing.js';
+} from './api/billing.ts';
 export type {
   Plan,
   Subscription,
@@ -347,5 +378,5 @@ export type {
   CreatePortalSessionResponse,
   Invoice,
   ListInvoicesResponse,
-} from './api/billing.js';
-export type { TenantStatus } from './api/tenants.js';
+} from './api/billing.ts';
+export type { TenantStatus } from './api/tenants.ts';

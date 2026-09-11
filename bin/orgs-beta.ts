@@ -51,19 +51,13 @@ import {
   QueryCommand,
 } from '@aws-sdk/client-dynamodb';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
+import { OrgKeys } from '@filone/backend/src/lib/org-membership.ts';
+import { ALLOWLIST_PK_PREFIX, ORGS_BETA_SK } from '@filone/backend/src/lib/orgs-beta.ts';
 import { scanAll } from './lib/dynamo.ts';
 import { findTable, requireAwsProfile } from './lib/sst-state.ts';
 
-/** The sort key both grant rows share, from packages/backend/src/lib/orgs-beta.ts. */
-const ORGS_BETA_SK = 'ORGS_BETA';
-
-/** The allowlist partition key, from packages/backend/src/lib/orgs-beta.ts. */
-const ALLOWLIST_PK_PREFIX = 'ALLOWLIST#';
-
-/** Key shapes owned by OrgKeys in packages/backend/src/lib/org-membership.ts. */
-const ORG_PK_PREFIX = 'ORG#';
-const MEMBER_SK_PREFIX = 'MEMBER#';
-const INVITE_SK_PREFIX = 'INVITE#';
+/** The `ORG#` prefix, derived from the builder because OrgKeys has no parser for it. */
+const ORG_PK_PREFIX = OrgKeys.orgPk('');
 
 /** The org profile row, in UserInfoTable — every org has one (lib/account-creation.ts). */
 const ORG_PROFILE_SK = 'PROFILE';
@@ -169,7 +163,7 @@ function partitionKeyFor(value: string): string {
     console.error(`Not an email address or an organization id: ${value}`);
     process.exit(1);
   }
-  return `${ORG_PK_PREFIX}${value.toLowerCase()}`;
+  return OrgKeys.orgPk(value.toLowerCase());
 }
 
 async function grant(pk: string): Promise<void> {
@@ -397,8 +391,8 @@ async function countMembers(orgId: string): Promise<number> {
         TableName: requireOrgTable(),
         KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
         ExpressionAttributeValues: {
-          ':pk': { S: `${ORG_PK_PREFIX}${orgId}` },
-          ':skPrefix': { S: MEMBER_SK_PREFIX },
+          ':pk': { S: OrgKeys.orgPk(orgId) },
+          ':skPrefix': { S: OrgKeys.memberSkPrefix() },
         },
         Select: 'COUNT',
         ConsistentRead: true,
@@ -446,7 +440,7 @@ async function acceptableInvitations(pk: string): Promise<AcceptableInvitation[]
             'begins_with(sk, :skPrefix) AND #status = :pending AND emailNorm = :emailNorm',
           ExpressionAttributeNames: { '#status': 'status' },
           ExpressionAttributeValues: {
-            ':skPrefix': { S: INVITE_SK_PREFIX },
+            ':skPrefix': { S: OrgKeys.inviteSkPrefix() },
             ':pending': { S: 'pending' },
             ':emailNorm': { S: pk.slice(ALLOWLIST_PK_PREFIX.length) },
           },
@@ -464,7 +458,7 @@ async function acceptableInvitations(pk: string): Promise<AcceptableInvitation[]
 
     found.push({
       orgId: rowPk.slice(ORG_PK_PREFIX.length),
-      inviteId: sk.slice(INVITE_SK_PREFIX.length),
+      inviteId: sk.slice(OrgKeys.inviteSkPrefix().length),
       email: item.email?.S ?? '(no address)',
       role: item.role?.S ?? '(no role)',
       expiresAt,
@@ -486,8 +480,8 @@ async function* queryInvitations(orgId: string): AsyncGenerator<Record<string, A
         FilterExpression: '#status = :pending',
         ExpressionAttributeNames: { '#status': 'status' },
         ExpressionAttributeValues: {
-          ':pk': { S: `${ORG_PK_PREFIX}${orgId}` },
-          ':skPrefix': { S: INVITE_SK_PREFIX },
+          ':pk': { S: OrgKeys.orgPk(orgId) },
+          ':skPrefix': { S: OrgKeys.inviteSkPrefix() },
           ':pending': { S: 'pending' },
         },
         ConsistentRead: true,

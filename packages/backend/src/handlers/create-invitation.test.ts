@@ -10,8 +10,8 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { ApiErrorCode, MAX_PENDING_INVITATIONS_PER_ORG, OrgRole } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
-import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
+import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -19,7 +19,7 @@ import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.js';
 
 vi.mock('sst', () => sstResourceMock());
 
-vi.mock('../lib/auth-secrets.js', () => ({
+vi.mock('../lib/auth-secrets.ts', () => ({
   getAuthSecrets: () => ({
     AUTH0_CLIENT_ID: 'test-client-id',
     AUTH0_CLIENT_SECRET: 'test-client-secret',
@@ -42,8 +42,8 @@ vi.mock('jose', () => ({
  * test can read the accept URL it built.
  */
 const sentInvitations: { acceptUrl: string; orgId: string; inviteId: string }[] = [];
-vi.mock('../lib/invite-mailer.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../lib/invite-mailer.js')>();
+vi.mock('../lib/invite-mailer.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/invite-mailer.ts')>();
   return {
     ...actual,
     sendInvitationEmail: async (params: Parameters<typeof actual.sendInvitationEmail>[0]) => {
@@ -62,15 +62,15 @@ process.env.WEBSITE_URL = 'https://app.example.com';
 // URL instead of sending, which is what the e2e suite drives.
 process.env.FILONE_STAGE = 'dev-test';
 
-import { handler } from './create-invitation.js';
-import { OrgKeys } from '../lib/org-membership.js';
-import { inviteExpiresAt, normalizeInviteEmail } from '../lib/invitations.js';
+import { handler } from './create-invitation.ts';
+import { OrgKeys } from '../lib/org-membership.ts';
+import { inviteExpiresAt, normalizeInviteEmail } from '../lib/invitations.ts';
 import {
   buildEvent,
   buildContext,
   NO_MEMBERSHIP,
   stubMembershipRead,
-} from '../test/lambda-test-utilities.js';
+} from '../test/lambda-test-utilities.ts';
 
 // ---------------------------------------------------------------------------
 // Fixtures

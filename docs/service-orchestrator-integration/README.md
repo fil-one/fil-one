@@ -61,7 +61,7 @@ The Management API is unversioned at this stage. Future breaking revisions will 
 
 FilOne provisions one tenant per customer organisation on demand — typically when the user creates their first bucket in a region managed by a given Service Orchestrator. Provisioning is synchronous: FilOne calls `PUT /tenants/{tenantId}` and waits for the tenant to be fully operational before proceeding.
 
-The Service Orchestrator must expose an API to create a tenant given a client-supplied `tenantId` (a UUID, in the URL path) and a mandatory `region` identifying where the tenant's data is provisioned — the same region name used in the S3 Gateway hostname (`https://{region}.s3.filonecontent.com`). A Service Orchestrator may manage more than one region; it must reject region values it does not serve. The `tenantId` is the canonical identifier in every subsequent call and the idempotency key for `PUT /tenants/{tenantId}` — a retry with the same `tenantId` must return the existing tenant. UUID is the contract's only format constraint, picked so any Service Orchestrator can persist the value efficiently and so cross-partner collisions are ruled out by construction. FilOne uses its organisation ID (already a UUID) verbatim.
+The Service Orchestrator must expose an API to create a tenant given a client-supplied `tenantId` (a UUID, in the URL path) and a mandatory `region` identifying where the tenant's data is provisioned — the same region name used in the S3 Gateway hostname (`https://s3.{region}.filonecontent.com`). A Service Orchestrator may manage more than one region; it must reject region values it does not serve. The `tenantId` is the canonical identifier in every subsequent call and the idempotency key for `PUT /tenants/{tenantId}` — a retry with the same `tenantId` must return the existing tenant. UUID is the contract's only format constraint, picked so any Service Orchestrator can persist the value efficiently and so cross-partner collisions are ruled out by construction. FilOne uses its organisation ID (already a UUID) verbatim.
 
 The Service Orchestrator must also expose a tenant info endpoint (`GET /tenants/{tenantId}`) that returns the tenant's current status, resource counts (buckets, access keys), and resource limits (`bucketLimit`, `accessKeyLimit`). These limits are Service Orchestrator–defined: the Service Orchestrator is the only source of truth for what a given tenant is allowed to hold, and FilOne's dashboard reads them directly from this endpoint.
 
@@ -117,7 +117,7 @@ Several Management API operations must be safely retried: tenant creation (retur
 
 ## S3 Gateway
 
-The S3 Gateway is a standard S3-compatible endpoint reached at `https://{region}.s3.filonecontent.com`. FilOne's backend and the FilOne Console UI drive bucket and object operations directly against this gateway, often via pre-signed URLs. Authentication uses per-tenant AWS Sig V4 access keys issued through the Management API.
+The S3 Gateway is a standard S3-compatible endpoint reached at `https://s3.{region}.filonecontent.com`. FilOne's backend and the FilOne Console UI drive bucket and object operations directly against this gateway, often via pre-signed URLs. Authentication uses per-tenant AWS Sig V4 access keys issued through the Management API.
 
 ### Required Features
 
@@ -131,7 +131,7 @@ The S3 Gateway is a standard S3-compatible endpoint reached at `https://{region}
 - AWS Signature V4 authentication
 - Metadata headers (x-amz-meta-\*)
 - Versioning, Object Lock and Retention
-- DNS-level forwarding (`https://{region}.s3.filonecontent.com`)
+- DNS-level forwarding (`https://s3.{region}.filonecontent.com`)
 
 ### Bucket Creation and Deletion
 

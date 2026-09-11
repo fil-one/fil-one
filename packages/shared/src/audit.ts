@@ -1,5 +1,5 @@
-import type { OrgMembershipSource, OrgRole } from './api/org.js';
-import { RAG_KEY_DISPLAY_PREFIX_LENGTH } from './api/rag-api-keys.js';
+import type { OrgMembershipSource, OrgRole } from './api/org.ts';
+import { RAG_KEY_DISPLAY_PREFIX_LENGTH } from './api/rag-api-keys.ts';
 
 /**
  * The audit event envelope: what the control plane appends and what the M2
@@ -45,6 +45,7 @@ export const AUDIT_EVENT_TYPES = [
   'ownership.transferred',
   'key.created',
   'key.deleted',
+  'audit.exported',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -58,12 +59,24 @@ export function isAuditEventType(value: string): value is AuditEventType {
  * `completion` after it. Every other type is single-phase, and the envelope
  * types below make stamping a phase on one a compile error.
  *
- * Only the key flows: a credential is minted or revoked at the storage vendor
- * before any local write, so the local write cannot be the thing that
- * authorizes it. `key.created` also appears single-phase — a RAG key is minted
- * here rather than at a vendor, so its whole mutation is one transaction.
+ * The key flows: a credential is minted or revoked at the storage vendor before
+ * any local write, so the local write cannot be the thing that authorizes it.
+ * `key.created` also appears single-phase — a RAG key is minted here rather
+ * than at a vendor, so its whole mutation is one transaction.
+ *
+ * The three membership flows for the same reason, when they revoke keys: a
+ * narrowing revokes at the vendor before it writes the role, so a crash between
+ * the two leaves a visible dangling intent instead of revoked credentials with
+ * no record. They also appear single-phase, and every membership change that
+ * touches no vendor takes that form.
  */
-export const TWO_PHASE_AUDIT_EVENT_TYPES = ['key.created', 'key.deleted'] as const;
+export const TWO_PHASE_AUDIT_EVENT_TYPES = [
+  'key.created',
+  'key.deleted',
+  'member.role_changed',
+  'member.removed',
+  'ownership.transferred',
+] as const;
 export type TwoPhaseAuditEventType = (typeof TWO_PHASE_AUDIT_EVENT_TYPES)[number];
 
 /**
@@ -153,6 +166,27 @@ export type AuditDetailValue =
 export type AuditDetailRecord = { [field: string]: AuditDetailValue | undefined };
 
 /**
+ * What took a key: the request that asked for it, or the pass that found it.
+ *
+ * Every revocation names one, so no reading of this field turns on its absence.
+ * `user_requested` is a member revoking their own key. `role_narrowing` and
+ * `member_removed` are the passes that take a key its holder did not ask about.
+ * `stale_role_at_mint` is the odd one: the actor is the minting member, undoing
+ * their own work on finding their role narrowed underneath it. Each revocation
+ * writes its own `key.deleted` carrying this, and those per-key events are the
+ * durable account: a pass that fails midway would otherwise leave revoked
+ * credentials with nothing recording them.
+ *
+ * Distinct from `AccessKeyRevocationReason`, which says why one key could not
+ * be kept under one role. This says what made anybody look.
+ */
+export type RevocationTrigger =
+  | 'user_requested'
+  | 'role_narrowing'
+  | 'member_removed'
+  | 'stale_role_at_mint';
+
+/**
  * The payload each event type carries, keyed by type.
  *
  * Deliberately small. The envelope records what changed and who changed it, not
@@ -201,8 +235,15 @@ export interface AuditEventDetails {
      * that it is revoked.
      */
     revokedInvitations?: number;
+    /**
+     * The access keys this change revoked, because a key must not outlive its
+     * holder's authority to mint it. Ids rather than a count, unlike the
+     * invitations: each revocation is its own `key.deleted` outside this
+     * event's transaction, and the ids are what join the summary to those.
+     */
+    revokedKeys?: string[];
   };
-  'member.removed': { role: OrgRole; revokedInvitations?: number };
+  'member.removed': { role: OrgRole; revokedInvitations?: number; revokedKeys?: string[] };
   'ownership.transferred': {
     fromUserId: string;
     toUserId: string;
@@ -211,6 +252,8 @@ export interface AuditEventDetails {
      * revoked: an Admin cannot issue one, so they cannot keep one either.
      */
     revokedInvitations?: number;
+    /** The outgoing Owner's keys an Admin could not mint, revoked with the seat. */
+    revokedKeys?: string[];
   };
   'key.created': {
     keyKind: AuditKeyKind;
@@ -224,6 +267,11 @@ export interface AuditEventDetails {
      * created the credential (`create-access-key.ts`).
      */
     recovered?: boolean;
+    /**
+     * The abandoned mint's credential could not be taken back, so it is live at
+     * the vendor with no local row — this event is its only trace.
+     */
+    cleanupFailed?: boolean;
   };
   'key.deleted': {
     keyKind: AuditKeyKind;
@@ -231,6 +279,31 @@ export interface AuditEventDetails {
     region?: string;
     /** The characters of the key the console shows — see {@link auditKeyIdSuffix}. */
     keyIdSuffix?: string;
+    /**
+     * What took the key. Optional only for rows written before every
+     * revocation named one; `revokeAccessKey` requires it of every caller.
+     */
+    reason?: RevocationTrigger;
+  };
+  /**
+   * The one event written on a read path, and the highest-signal action the log
+   * records: it is the one that takes an org's security history out of the
+   * system. The filters travel with it, because who exported everything and who
+   * exported one member's week are different acts.
+   *
+   * It means an export was produced, not that the bytes arrived. A client that
+   * disconnects mid-transfer leaves a record of an export nobody received.
+   * Nothing acts on the distinction, so the type stays single-phase.
+   */
+  'audit.exported': {
+    /** The effective window, after clamping to {@link AUDIT_RETENTION_DAYS}. */
+    from: string;
+    to: string;
+    /** Absent when the export was not filtered to one type. */
+    eventType?: AuditEventType;
+    /** The actor filtered on, which is a user id and never an address. */
+    actorId?: string;
+    rowCount: number;
   };
 }
 
@@ -356,6 +429,67 @@ export type CommittableAuditEvent = Exclude<AuditEvent, VendorBackedKeyEvent & A
  */
 export type TwoPhaseAuditEvent = Extract<AuditEvent, { type: TwoPhaseAuditEventType }> &
   (AuditIntentPhase | AuditCompletionPhase);
+
+/**
+ * An event that rides no local transaction — what `appendAuditEvent` accepts.
+ *
+ * Two shapes qualify, for opposite reasons. A phase half has no mutation to
+ * travel with by construction: the `intent` precedes the vendor call, and a
+ * `completion` may close a request that changed nothing. `audit.exported`
+ * describes a read, so there is no mutation for it to be atomic with at all.
+ *
+ * Everything else goes through `commitAudited`, because everything else records
+ * a local write that must not be able to land unrecorded.
+ */
+export type StandaloneAuditEvent =
+  | TwoPhaseAuditEvent
+  | (Extract<AuditEvent, { type: 'audit.exported' }> & AuditSinglePhase);
+
+/**
+ * What each event type reads as in the viewer and the CSV.
+ *
+ * Exhaustive over {@link AUDIT_EVENT_TYPES}, so adding a type without deciding
+ * what it says to a reader is a compile error rather than a blank cell. The
+ * envelope's own docblock makes the same point: an event nothing can label is
+ * an event nobody reads.
+ *
+ * The subject and the actor are rendered beside the label, so the label carries
+ * only what happened. It follows `ACTIVITY_ACTION_LABELS`
+ * (`api/dashboard.ts`), which does the same for the dashboard feed.
+ *
+ * `retention_override.signed` is not here yet, but when FIL-1019 adds it the
+ * label has to read as a signing: the event records that a URL was minted, and
+ * it is redeemed at the vendor where its use cannot be logged.
+ */
+export const AUDIT_EVENT_TYPE_LABELS: Record<AuditEventType, string> = {
+  'org.created': 'Organization created',
+  'org.renamed': 'Organization renamed',
+  'member.invited': 'Member invited',
+  'invite.revoked': 'Invitation revoked',
+  'invite.accepted': 'Invitation accepted',
+  'member.role_changed': 'Role changed',
+  'member.removed': 'Member removed',
+  'ownership.transferred': 'Ownership transferred',
+  'key.created': 'Key created',
+  'key.deleted': 'Key deleted',
+  'audit.exported': 'Audit log exported',
+};
+
+/**
+ * The label for a stored event's type.
+ *
+ * The fallback humanizes the verb after the last dot, so a console running
+ * behind a backend that has learned a new type renders something rather than an
+ * empty cell. A stored event outlives the code that wrote it, and the viewer is
+ * the last place that should go blank when the two disagree.
+ */
+export function getAuditEventTypeLabel(type: string): string {
+  const label = AUDIT_EVENT_TYPE_LABELS[type as AuditEventType];
+  if (label) return label;
+
+  const verb = type.split('.').pop() ?? '';
+  return verb ? verb.charAt(0).toUpperCase() + verb.slice(1).replaceAll('_', ' ') : 'Audit event';
+}
 
 /**
  * How long an event survives: the IAM PRD's 90-day audit retention, carried

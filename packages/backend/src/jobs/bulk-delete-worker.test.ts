@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import { BulkDeleteJobStatus, BulkDeleteScope, S3Region } from '@filone/shared';
 
-import type { BulkDeleteJobRecord } from '../lib/dynamo-records.js';
+import type { BulkDeleteJobRecord } from '../lib/dynamo-records.ts';
 
 vi.mock('sst', () => ({
   Resource: {
@@ -11,24 +11,24 @@ vi.mock('sst', () => ({
   },
 }));
 
-vi.mock('../lib/bulk-delete-jobs.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../lib/bulk-delete-jobs.js')>();
+vi.mock('../lib/bulk-delete-jobs.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/bulk-delete-jobs.ts')>();
   return {
     ...actual,
     getBulkDeleteJob: vi.fn(),
     putBulkDeleteJob: vi.fn(),
   };
 });
-vi.mock('../lib/s3-bulk-delete.js', () => ({
+vi.mock('../lib/s3-bulk-delete.ts', () => ({
   enumerateDeletionPage: vi.fn(),
   deleteTargets: vi.fn(),
 }));
-vi.mock('../lib/s3-bucket-operations.js', () => ({
+vi.mock('../lib/s3-bucket-operations.ts', () => ({
   getBucketVersioningStatus: vi.fn(async () => 'Enabled'),
 }));
-vi.mock('../lib/s3-client.js', () => ({ createS3Client: vi.fn(() => ({})) }));
-vi.mock('../lib/org-profile.js', () => ({ getOrgProfile: vi.fn(async () => ({})) }));
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/s3-client.ts', () => ({ createS3Client: vi.fn(() => ({})) }));
+vi.mock('../lib/org-profile.ts', () => ({ getOrgProfile: vi.fn(async () => ({})) }));
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: vi.fn(() => ({
     isTenantReady: () => 'tenant-1',
     getS3ClientContext: async () => ({
@@ -42,15 +42,15 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
   })),
 }));
 
-vi.mock('../lib/bulk-delete-queue.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../lib/bulk-delete-queue.js')>();
+vi.mock('../lib/bulk-delete-queue.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/bulk-delete-queue.ts')>();
   return { ...actual, enqueueBulkDeleteJob: vi.fn() };
 });
 
-import { getBulkDeleteJob, putBulkDeleteJob } from '../lib/bulk-delete-jobs.js';
-import { enqueueBulkDeleteJob } from '../lib/bulk-delete-queue.js';
-import { deleteTargets, enumerateDeletionPage } from '../lib/s3-bulk-delete.js';
-import { processJob } from './bulk-delete-worker.js';
+import { getBulkDeleteJob, putBulkDeleteJob } from '../lib/bulk-delete-jobs.ts';
+import { enqueueBulkDeleteJob } from '../lib/bulk-delete-queue.ts';
+import { deleteTargets, enumerateDeletionPage } from '../lib/s3-bulk-delete.ts';
+import { processJob } from './bulk-delete-worker.ts';
 
 const mockGetJob = vi.mocked(getBulkDeleteJob);
 const mockPutJob = vi.mocked(putBulkDeleteJob);
@@ -241,7 +241,7 @@ describe('bulk-delete worker', () => {
   });
 
   it('fails a non-retryable error on the first delivery without redelivering', async () => {
-    const registry = await import('../lib/service-orchestrator-registry.js');
+    const registry = await import('../lib/service-orchestrator-registry.ts');
     vi.mocked(registry.getOrchestratorForRegion).mockReturnValueOnce({
       isTenantReady: () => undefined,
     } as never);

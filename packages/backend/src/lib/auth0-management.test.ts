@@ -26,7 +26,7 @@ import {
   deleteRecoveryCode,
   getConnectionType,
   MFA_GUARDIAN_TYPES,
-} from './auth0-management.js';
+} from './auth0-management.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -666,7 +666,7 @@ describe('auth0-management domain resolution', () => {
     });
 
     it('updateAuth0User sends token request and PATCH to AUTH0_MGMT_DOMAIN', async () => {
-      const { updateAuth0User } = await import('./auth0-management.js');
+      const { updateAuth0User } = await import('./auth0-management.ts');
       await updateAuth0User('auth0|123', { name: 'Test' });
 
       const urls = fetchCallUrls();
@@ -675,7 +675,7 @@ describe('auth0-management domain resolution', () => {
     });
 
     it('updateAuth0User sends correct audience in token request body', async () => {
-      const { updateAuth0User } = await import('./auth0-management.js');
+      const { updateAuth0User } = await import('./auth0-management.ts');
       await updateAuth0User('auth0|123', { name: 'Test' });
 
       const tokenBody = JSON.parse(mockFetch.mock.calls[0][1]!.body as string);
@@ -688,7 +688,7 @@ describe('auth0-management domain resolution', () => {
     });
 
     it('sendVerificationEmail sends requests to AUTH0_MGMT_DOMAIN', async () => {
-      const { sendVerificationEmail } = await import('./auth0-management.js');
+      const { sendVerificationEmail } = await import('./auth0-management.ts');
       await sendVerificationEmail('auth0|456');
 
       const urls = fetchCallUrls();
@@ -699,7 +699,7 @@ describe('auth0-management domain resolution', () => {
     it('initiatePasswordReset sends request to AUTH0_DOMAIN, not AUTH0_MGMT_DOMAIN', async () => {
       mockFetch.mockResolvedValue(new Response('', { status: 200 }));
 
-      const { initiatePasswordReset } = await import('./auth0-management.js');
+      const { initiatePasswordReset } = await import('./auth0-management.ts');
       await initiatePasswordReset('user@example.com', 'client-id');
 
       const urls = fetchCallUrls();
@@ -723,7 +723,7 @@ describe('auth0-management domain resolution', () => {
 
     it('getMfaEnrollments sends token request and /api/v2/ calls to AUTH0_MGMT_DOMAIN', async () => {
       stubFetchTokenAndArray();
-      const { getMfaEnrollments } = await import('./auth0-management.js');
+      const { getMfaEnrollments } = await import('./auth0-management.ts');
       await getMfaEnrollments('auth0|123');
 
       const urls = fetchCallUrls();
@@ -736,7 +736,7 @@ describe('auth0-management domain resolution', () => {
 
     it('getPasskeyAuthenticators sends /api/v2/ call to AUTH0_MGMT_DOMAIN', async () => {
       stubFetchTokenAndArray();
-      const { getPasskeyAuthenticators } = await import('./auth0-management.js');
+      const { getPasskeyAuthenticators } = await import('./auth0-management.ts');
       await getPasskeyAuthenticators('auth0|123');
 
       const urls = fetchCallUrls();
@@ -747,7 +747,7 @@ describe('auth0-management domain resolution', () => {
     });
 
     it('deleteGuardianEnrollment sends /api/v2/ call to AUTH0_MGMT_DOMAIN', async () => {
-      const { deleteGuardianEnrollment } = await import('./auth0-management.js');
+      const { deleteGuardianEnrollment } = await import('./auth0-management.ts');
       await deleteGuardianEnrollment('otp|1');
 
       const urls = fetchCallUrls();
@@ -756,7 +756,7 @@ describe('auth0-management domain resolution', () => {
     });
 
     it('deleteAuthenticationMethod sends /api/v2/ call to AUTH0_MGMT_DOMAIN', async () => {
-      const { deleteAuthenticationMethod } = await import('./auth0-management.js');
+      const { deleteAuthenticationMethod } = await import('./auth0-management.ts');
       await deleteAuthenticationMethod('auth0|123', 'webauthn|2');
 
       const urls = fetchCallUrls();
@@ -768,7 +768,7 @@ describe('auth0-management domain resolution', () => {
 
     it('deleteRecoveryCode sends /api/v2/ list call to AUTH0_MGMT_DOMAIN', async () => {
       stubFetchTokenAndArray();
-      const { deleteRecoveryCode } = await import('./auth0-management.js');
+      const { deleteRecoveryCode } = await import('./auth0-management.ts');
       await deleteRecoveryCode('auth0|123');
 
       const urls = fetchCallUrls();
@@ -785,7 +785,7 @@ describe('auth0-management domain resolution', () => {
     });
 
     it('updateAuth0User falls back to AUTH0_DOMAIN', async () => {
-      const { updateAuth0User } = await import('./auth0-management.js');
+      const { updateAuth0User } = await import('./auth0-management.ts');
       await updateAuth0User('auth0|123', { name: 'Test' });
 
       const urls = fetchCallUrls();
@@ -794,7 +794,7 @@ describe('auth0-management domain resolution', () => {
     });
 
     it('sendVerificationEmail falls back to AUTH0_DOMAIN', async () => {
-      const { sendVerificationEmail } = await import('./auth0-management.js');
+      const { sendVerificationEmail } = await import('./auth0-management.ts');
       await sendVerificationEmail('auth0|456');
 
       const urls = fetchCallUrls();
@@ -805,7 +805,7 @@ describe('auth0-management domain resolution', () => {
     it('initiatePasswordReset uses AUTH0_DOMAIN', async () => {
       mockFetch.mockResolvedValue(new Response('', { status: 200 }));
 
-      const { initiatePasswordReset } = await import('./auth0-management.js');
+      const { initiatePasswordReset } = await import('./auth0-management.ts');
       await initiatePasswordReset('user@example.com', 'client-id');
 
       expect(fetchCallUrls()[0]).toBe(`https://${CUSTOM_DOMAIN}/dbconnections/change_password`);

@@ -1,4 +1,4 @@
-import type { AuditEventType } from '../audit.js';
+import type { AuditEventType } from '../audit.ts';
 
 export interface UsageDataPoint {
   date: string;
@@ -34,6 +34,18 @@ export interface UsageTrendsResponse {
    * total, and never carry a value forward across a gap.
    */
   egress: UsageDataPoint[];
+  /**
+   * Whether every provisioned region answered this request.
+   *
+   * The series above are always gap-filled to the full window, zeros
+   * included, whether or not the underlying metrics fetch succeeded. Without
+   * this flag a region outage and a genuinely empty account are the same
+   * all-zero shape, and the console would tell a returning customer to
+   * "upload your first object" while the pipeline that would have told it
+   * otherwise was down. `false` means at least one region's fetch failed, so
+   * the zeros above may understate real usage.
+   */
+  complete: boolean;
 }
 
 // ---------------------------------------------------------------------------

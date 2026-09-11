@@ -25,10 +25,10 @@ import {
   putObjectLockConfiguration,
   setBucketVersioning,
   deleteBucket,
-} from './s3-bucket-operations.js';
-import { createS3Client } from './s3-client.js';
-import { BucketAlreadyExistsError, BucketNotEmptyError } from './errors.js';
-import type { S3ClientContext } from './s3-client.js';
+} from './s3-bucket-operations.ts';
+import { createS3Client } from './s3-client.ts';
+import { BucketAlreadyExistsError, BucketNotEmptyError } from './errors.ts';
+import type { S3ClientContext } from './s3-client.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks

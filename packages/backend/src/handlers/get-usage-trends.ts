@@ -2,14 +2,14 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { UsageDataPoint, UsageTrendsPeriod, UsageTrendsResponse } from '@filone/shared';
-import type { ServiceOrchestrator, StorageUsageSample } from '../lib/service-orchestrator.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { ProvisionedRegion, getProvisionedRegions } from '../lib/region-helpers.js';
+import type { ServiceOrchestrator, StorageUsageSample } from '../lib/service-orchestrator.ts';
+import { ResponseBuilder } from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
+import { type ProvisionedRegion, getProvisionedRegions } from '../lib/region-helpers.ts';
 
 /**
  * How a period is bucketed.
@@ -67,7 +67,9 @@ const TREND_WINDOWS: Record<UsageTrendsPeriod, { points: number; granularity: Gr
 const DEFAULT_PERIOD: UsageTrendsPeriod = '7d';
 
 function parsePeriod(raw: string | undefined): UsageTrendsPeriod {
-  return raw !== undefined && raw in TREND_WINDOWS ? (raw as UsageTrendsPeriod) : DEFAULT_PERIOD;
+  return raw !== undefined && Object.hasOwn(TREND_WINDOWS, raw)
+    ? (raw as UsageTrendsPeriod)
+    : DEFAULT_PERIOD;
 }
 
 export async function baseHandler(
@@ -122,7 +124,9 @@ async function buildTimeSeries(
     egress.push({ date, value: egressBytes });
   }
 
-  return { storage, objects, egress };
+  const complete = perRegion.every((region) => region.ok);
+
+  return { storage, objects, egress, complete };
 }
 
 type FetchSamplesArgs = {
@@ -138,6 +142,8 @@ type SamplesByBucket = {
   storage: Map<string, StorageUsageSample>;
   /** End-of-bucket key to the bytes served during that bucket. */
   egress: Map<string, number>;
+  /** False when this region's fetch failed and the maps above are a stand-in. */
+  ok: boolean;
 };
 
 /**
@@ -185,14 +191,14 @@ async function fetchSamplesByBucket({
       egressByBucket.set(key, (egressByBucket.get(key) ?? 0) + e.bytesUsed);
     }
 
-    return { storage: storageByBucket, egress: egressByBucket };
+    return { storage: storageByBucket, egress: egressByBucket, ok: true };
   } catch (err) {
     console.error('[get-usage-trends] Failed to fetch usage metrics', {
       tenantId,
       region: orchestrator.region,
       err,
     });
-    return { storage: new Map(), egress: new Map() };
+    return { storage: new Map(), egress: new Map(), ok: false };
   }
 }
 

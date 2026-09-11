@@ -1,9 +1,11 @@
 import { TransactionCanceledException } from '@aws-sdk/client-dynamodb';
 import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
-import { OrgRole, canManageTargetRole } from '@filone/shared';
-import type { OrgMembershipSource } from '@filone/shared';
-import { OrgKeys } from './org-membership.js';
+import { OrgRole, canManageTargetRole, canRetainAccessKey } from '@filone/shared';
+import type { AccessKeyPermissions, OrgMembershipSource } from '@filone/shared';
+import { retireInvitationItems } from './invitations.ts';
+import type { InvitationRecord } from './invitations.ts';
+import { OrgKeys } from './org-membership.ts';
 
 /**
  * The writes that change who is in an organization and what they may do.
@@ -118,7 +120,7 @@ export function roleChangeItems({
   userId: string;
   fromRole: OrgRole;
   toRole: OrgRole;
-}): TransactWriteItem[] {
+}): [membership: TransactWriteItem, inverse: TransactWriteItem] {
   const tableName = Resource.OrgTable.name;
 
   return [
@@ -158,7 +160,9 @@ export function roleChangeItems({
  * `attribute_exists(pk)` stays alongside it so a removal of somebody already
  * gone is a clean 404 rather than a silent success. The inverse delete is
  * unconditional, because a member whose inverse item is missing must still be
- * removable.
+ * removable. The member's mint sequence is left where it is: a removal fences on
+ * that row, and it has to keep counting across memberships anyway
+ * (`lib/access-key-mint-seq.ts`).
  */
 export function membershipDeleteItems({
   orgId,
@@ -298,21 +302,99 @@ export function inviterAuthorityCheck({
   invitedBy: string;
   invitedRole: OrgRole;
 }): TransactWriteItem {
-  const admissible = Object.values(OrgRole).filter((role) =>
-    canManageTargetRole(role, invitedRole),
-  );
-  const values = Object.fromEntries(
-    admissible.map((role, index) => [`:role${index}`, { S: role }]),
-  );
-
   return {
     ConditionCheck: {
       TableName: Resource.OrgTable.name,
       Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: OrgKeys.memberSk(invitedBy) } },
-      ConditionExpression: `attribute_exists(pk) AND #role IN (${Object.keys(values).join(', ')})`,
-      ExpressionAttributeNames: { '#role': 'role' },
-      ExpressionAttributeValues: values,
+      ...roleIsOneOf((role) => canManageTargetRole(role, invitedRole)),
     },
+  };
+}
+
+/**
+ * Assert, inside the transaction, that the creator still holds a role that
+ * mints the key being written.
+ *
+ * The mint path evaluates its permission cap against the creator's role and
+ * then writes the key row, and a role narrowing between the two would leave a
+ * key above the role that authorized it. The narrowing revokes what it finds,
+ * so this closes the window where a row lands after its listing: the row cannot
+ * be written unless the role on file could still grant everything the key
+ * carries.
+ *
+ * The requested permissions rather than the cap role, because those are the
+ * question. An Owner demoted to Admin mid-mint keeps a key carrying nothing
+ * above Admin — comparing the whole former role would discard it, and the
+ * narrowing that demoted them would have retained the identical key.
+ *
+ * The admissible roles are asked of `canRetainAccessKey` one by one, the way
+ * {@link inviterAuthorityCheck} asks the registry, so a role change and a mint
+ * decide what a role may hold by the same test.
+ */
+export function creatorRoleStillMintsCheck({
+  orgId,
+  userId,
+  key,
+}: {
+  orgId: string;
+  userId: string;
+  /** The permissions the requested key would carry. */
+  key: AccessKeyPermissions;
+}): TransactWriteItem {
+  return {
+    ConditionCheck: {
+      TableName: Resource.OrgTable.name,
+      Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: OrgKeys.memberSk(userId) } },
+      ...roleIsOneOf((current) => canRetainAccessKey(current, key).retained),
+    },
+  };
+}
+
+/**
+ * The condition that a membership row exists and its role is one a predicate
+ * admits, as an `IN` set in registry order: `:role0`, `:role1`, and so on.
+ *
+ * A predicate admitting nothing would build `#role IN ()`, which DynamoDB
+ * rejects as a malformed expression rather than reporting an unmet condition —
+ * so a caller must always admit at least one role. Both do, structurally rather
+ * than by luck: the creator's own role passed the mint's cap, so it retains the
+ * key it asked for, and every invitable role has some role that may invite it.
+ */
+function roleIsOneOf(admits: (role: OrgRole) => boolean) {
+  const values = Object.fromEntries(
+    Object.values(OrgRole)
+      .filter(admits)
+      .map((role, index) => [`:role${index}`, { S: role }]),
+  );
+
+  return {
+    ConditionExpression: `attribute_exists(pk) AND #role IN (${Object.keys(values).join(', ')})`,
+    ExpressionAttributeNames: { '#role': 'role' },
+    ExpressionAttributeValues: values,
+  };
+}
+
+/**
+ * A transaction's items with a label per position, so a cancellation names what
+ * failed rather than an index.
+ *
+ * Built together rather than as two lists kept in step by hand: DynamoDB reports
+ * cancellations positionally, so a label list one item out of line would answer
+ * a genuine last-Owner refusal with "an invitation changed". An item and its
+ * label are added or omitted in the same expression, and the item count is read
+ * off the list rather than counted.
+ */
+export interface LabelledItems {
+  items: TransactWriteItem[];
+  labels: string[];
+}
+
+export function labelled(
+  entries: ReadonlyArray<readonly [label: string, item: TransactWriteItem]>,
+): LabelledItems {
+  return {
+    items: entries.map(([, item]) => item),
+    labels: entries.map(([label]) => label),
   };
 }
 
@@ -349,3 +431,15 @@ export function cancelledLabels(err: unknown, labels: readonly string[]): string
 
 /** The one cancellation reason that means a condition we wrote was not met. */
 const CONDITION_FAILED = 'ConditionalCheckFailed';
+
+/** The base plus the invitations that fit beside it, two items each. */
+export function withInvitationRevocations(
+  base: LabelledItems,
+  now: InvitationRecord[],
+): LabelledItems {
+  const items = now.flatMap((invitation) => retireInvitationItems(invitation, 'revoked'));
+  return {
+    items: [...base.items, ...items],
+    labels: [...base.labels, ...items.map(() => 'invitation')],
+  };
+}

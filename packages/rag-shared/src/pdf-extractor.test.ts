@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { extractTextFromPdf } from './pdf-extractor.js';
-import { buildPdf } from './test-fixtures.js';
+import { extractTextFromPdf } from './pdf-extractor.ts';
+import { buildPdf } from './test-fixtures.ts';
 
 describe('extractTextFromPdf', () => {
   it('extracts the text of a single-page PDF', async () => {

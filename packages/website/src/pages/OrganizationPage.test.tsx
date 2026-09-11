@@ -22,7 +22,7 @@ vi.mock('../lib/members-api.js', () => ({
 }));
 
 function renderPage(
-  role = OrgRole.Owner,
+  role: OrgRole = OrgRole.Owner,
   members = 0,
   invitations = 0,
   me: Partial<MeResponse> = {},
@@ -137,13 +137,17 @@ describe('OrganizationPage', () => {
     // The number belongs with the label somebody reads before choosing a tab.
     await waitFor(() => expect(screen.getByTestId('org-tab-members')).toHaveTextContent('4'));
     expect(screen.getByTestId('org-tab-invitations')).toHaveTextContent('2');
-    // Billing counts nothing, so it carries no number.
+    // Neither the audit log nor billing counts anything, so neither carries a
+    // number.
+    expect(screen.getByTestId('org-tab-audit')).toHaveTextContent(/^Audit log$/);
     expect(screen.getByTestId('org-tab-billing')).toHaveTextContent(/^Billing$/);
 
-    // People first, money last: the two member views sit beside each other.
+    // People first, money last, and the audit log after the two tabs whose
+    // changes it records.
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
       'Members4',
       'Invitations2',
+      'Audit log',
       'Billing',
     ]);
   });

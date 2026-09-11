@@ -8,24 +8,24 @@ import { Resource } from 'sst';
 import {
   isSelfServeDeletionEnabled,
   selfServeDeletionUnavailable,
-} from '../lib/account-deletion-flag.js';
-import { invokeAccountDeletionWorker } from '../lib/account-deletion-invoke.js';
-import { getDynamoClient } from '../lib/ddb-client.js';
-import { deletionChallengeKey } from '../lib/deletion-challenge.js';
+} from '../lib/account-deletion-flag.ts';
+import { invokeAccountDeletionWorker } from '../lib/account-deletion-invoke.ts';
+import { getDynamoClient } from '../lib/ddb-client.ts';
+import { deletionChallengeKey } from '../lib/deletion-challenge.ts';
 import {
   confirmAccountDeletion,
   consumeVerifyAttempt,
   type ConfirmResult,
-} from '../lib/deletion-confirm-transaction.js';
-import { getOrgProfile } from '../lib/org-profile.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { csrfMiddleware } from '../middleware/csrf.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { requireMfaIfEnrolled } from '../middleware/require-mfa.js';
+} from '../lib/deletion-confirm-transaction.ts';
+import { getOrgProfile } from '../lib/org-profile.ts';
+import { ResponseBuilder } from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { csrfMiddleware } from '../middleware/csrf.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
+import { requireMfaIfEnrolled } from '../middleware/require-mfa.ts';
 
 /**
  * Spends the emailed code and commits the deletion. Terminal: there is no undo,

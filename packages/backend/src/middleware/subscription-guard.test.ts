@@ -7,14 +7,14 @@ import {
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { ApiErrorCode } from '@filone/shared';
-import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
+import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.ts';
 import {
   expectErrorResponse,
   expectRefreshedCookies,
   REFRESHED_TOKENS,
-} from '../test/assert-helpers.js';
+} from '../test/assert-helpers.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -26,23 +26,23 @@ vi.mock('sst', () => ({
   },
 }));
 
-vi.mock('../lib/user-context.js', () => ({
+vi.mock('../lib/user-context.ts', () => ({
   getUserInfo: (event: AuthenticatedEvent) => event.requestContext.userInfo,
 }));
 
-vi.mock('../lib/trial-entitlement.js', () => ({
+vi.mock('../lib/trial-entitlement.ts', () => ({
   ensureTrialEntitlement: vi.fn(),
 }));
 
-vi.mock('../lib/org-membership.js', () => ({
+vi.mock('../lib/org-membership.ts', () => ({
   listMemberships: vi.fn(),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { subscriptionGuardMiddleware, AccessLevel } from './subscription-guard.js';
-import { listMemberships } from '../lib/org-membership.js';
-import { ensureTrialEntitlement } from '../lib/trial-entitlement.js';
+import { subscriptionGuardMiddleware, AccessLevel } from './subscription-guard.ts';
+import { listMemberships } from '../lib/org-membership.ts';
+import { ensureTrialEntitlement } from '../lib/trial-entitlement.ts';
 import { OrgRole, SubscriptionStatus } from '@filone/shared';
 
 const mockEnsureTrialEntitlement = vi.mocked(ensureTrialEntitlement);

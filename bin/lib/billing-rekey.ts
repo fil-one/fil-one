@@ -6,24 +6,12 @@
 // The runners are ./backfill-billing-to-org.ts and ./revert-billing-backfill.ts;
 // the procedure is docs/BillingRekeyRunbook.md.
 //
-// KEY BUILDERS ARE MIRRORED, NOT IMPORTED, for the same reason
-// ./org-conversion.ts records: bin scripts run as `node ./bin/<script>.ts` under
-// Node's type stripping, which resolves neither the backend's `./x.js`
-// specifiers nor its enums. The canonical definitions live in
-// packages/backend/src/lib/subscription-store.ts (`SubscriptionKeys`), and
-// ./billing-rekey.test.ts imports that module and asserts the values here equal
-// it, so the mirror cannot drift silently.
+// Row keys come from the backend's `SubscriptionKeys`, the same builder the
+// application reads and writes with, so a key change there reaches this script
+// without a copy to keep in sync.
 
 import type { AttributeValue, TransactWriteItem } from '@aws-sdk/client-dynamodb';
-
-/** BillingTable keys — mirror of `SubscriptionKeys` in the backend's subscription-store. */
-export const BillingKeys = {
-  orgPk: (orgId: string): string => `ORG#${orgId}`,
-  orgPkPrefix: (): string => 'ORG#',
-  legacyPk: (userId: string): string => `CUSTOMER#${userId}`,
-  legacyPkPrefix: (): string => 'CUSTOMER#',
-  subscriptionSk: (): string => 'SUBSCRIPTION',
-} as const;
+import { SubscriptionKeys } from '@filone/backend/src/lib/subscription-store.ts';
 
 /**
  * Attributes this backfill stamps on every row it writes, so a later run — and
@@ -46,12 +34,12 @@ export const REKEY_ATTRIBUTES = {
 
 /** `CUSTOMER#{userId}` -> userId. Undefined for the org key or any other shape. */
 export function parseLegacyPk(pk: string): string | undefined {
-  return parsePrefixed(pk, BillingKeys.legacyPkPrefix());
+  return parsePrefixed(pk, SubscriptionKeys.legacyPkPrefix());
 }
 
 /** `ORG#{orgId}` -> orgId. */
 export function parseOrgPk(pk: string): string | undefined {
-  return parsePrefixed(pk, BillingKeys.orgPkPrefix());
+  return parsePrefixed(pk, SubscriptionKeys.orgPkPrefix());
 }
 
 function parsePrefixed(value: string, prefix: string): string | undefined {
@@ -447,7 +435,7 @@ export function buildCopyItem(
   now: string,
 ): { item: Record<string, AttributeValue>; pk: string } {
   const { orgId, userId, source } = plan;
-  const pk = BillingKeys.orgPk(orgId);
+  const pk = SubscriptionKeys.orgPk(orgId);
   const { pk: _sourcePk, ...carried } = source.attributes;
 
   return {
@@ -455,7 +443,7 @@ export function buildCopyItem(
     item: {
       ...carried,
       pk: { S: pk },
-      sk: { S: BillingKeys.subscriptionSk() },
+      sk: { S: SubscriptionKeys.sk() },
       orgId: { S: orgId },
       userId: { S: userId },
       [REKEY_ATTRIBUTES.from]: { S: source.pk },
@@ -514,7 +502,7 @@ export function buildCopyTransactItems(
     {
       ConditionCheck: {
         TableName: tableName,
-        Key: { pk: { S: plan.source.pk }, sk: { S: BillingKeys.subscriptionSk() } },
+        Key: { pk: { S: plan.source.pk }, sk: { S: SubscriptionKeys.sk() } },
         ...sourceUnchanged,
       },
     },
@@ -573,7 +561,7 @@ export function buildRevertItem(
     {
       Delete: {
         TableName: tableName,
-        Key: { pk: { S: BillingKeys.orgPk(orgId) }, sk: { S: BillingKeys.subscriptionSk() } },
+        Key: { pk: { S: SubscriptionKeys.orgPk(orgId) }, sk: { S: SubscriptionKeys.sk() } },
         ConditionExpression: 'attribute_exists(pk) AND #rekeyedFrom = :source',
         ExpressionAttributeNames: { '#rekeyedFrom': REKEY_ATTRIBUTES.from },
         ExpressionAttributeValues: { ':source': { S: rekeyedFrom } },
@@ -582,7 +570,7 @@ export function buildRevertItem(
     {
       ConditionCheck: {
         TableName: tableName,
-        Key: { pk: { S: rekeyedFrom }, sk: { S: BillingKeys.subscriptionSk() } },
+        Key: { pk: { S: rekeyedFrom }, sk: { S: SubscriptionKeys.sk() } },
         ConditionExpression:
           'attribute_exists(pk) AND (attribute_not_exists(#orgId) OR #orgId = :orgId)',
         ExpressionAttributeNames: { '#orgId': 'orgId' },
@@ -712,7 +700,7 @@ function formatBillingAnomalies(plans: readonly BillingPlan[]): string[] {
   return [
     'Anomalies — dispose of these before executing:',
     ...anomalies.map(
-      (plan) => `  [${plan.reason}] ${BillingKeys.orgPk(plan.orgId)}  ${plan.detail}`,
+      (plan) => `  [${plan.reason}] ${SubscriptionKeys.orgPk(plan.orgId)}  ${plan.detail}`,
     ),
     '',
   ];
@@ -740,8 +728,8 @@ export function parseResolvedCollisions(value: string | undefined): Map<string, 
         `--resolve-collisions entries are <orgId>=<userId>; could not read "${trimmed}"`,
       );
     }
-    const orgId = stripPrefix(org.trim(), BillingKeys.orgPkPrefix());
-    const userId = stripPrefix(user.trim(), BillingKeys.legacyPkPrefix());
+    const orgId = stripPrefix(org.trim(), SubscriptionKeys.orgPkPrefix());
+    const userId = stripPrefix(user.trim(), SubscriptionKeys.legacyPkPrefix());
 
     // One decision per org. Two entries for one org is an operator who edited a
     // list and left the old line in, and taking the last silently would copy a
@@ -749,8 +737,8 @@ export function parseResolvedCollisions(value: string | undefined): Map<string, 
     const existing = resolved.get(orgId);
     if (existing && existing !== userId) {
       throw new Error(
-        `--resolve-collisions names ${BillingKeys.orgPk(orgId)} twice, as ` +
-          `${BillingKeys.legacyPk(existing)} and ${BillingKeys.legacyPk(userId)}. ` +
+        `--resolve-collisions names ${SubscriptionKeys.orgPk(orgId)} twice, as ` +
+          `${SubscriptionKeys.legacyPk(existing)} and ${SubscriptionKeys.legacyPk(userId)}. ` +
           'Each org gets one winner.',
       );
     }
@@ -779,21 +767,21 @@ export function validateResolvedCollisions(
     const state = byOrg.get(orgId);
     if (!state) {
       problems.push(
-        `${BillingKeys.orgPk(orgId)}=${BillingKeys.legacyPk(userId)} — no scanned row names that org`,
+        `${SubscriptionKeys.orgPk(orgId)}=${SubscriptionKeys.legacyPk(userId)} — no scanned row names that org`,
       );
       continue;
     }
     if (!state.legacyRows.some((row) => parseLegacyPk(row.pk) === userId)) {
       const claimants = state.legacyRows.map((row) => row.pk).join(', ') || '(none)';
       problems.push(
-        `${BillingKeys.orgPk(orgId)}=${BillingKeys.legacyPk(userId)} — that row does not claim this org; ` +
+        `${SubscriptionKeys.orgPk(orgId)}=${SubscriptionKeys.legacyPk(userId)} — that row does not claim this org; ` +
           `its claimants are ${claimants}`,
       );
       continue;
     }
     if (!disagreeOnSubscription(state.legacyRows)) {
       problems.push(
-        `${BillingKeys.orgPk(orgId)}=${BillingKeys.legacyPk(userId)} — this org's rows no longer name ` +
+        `${SubscriptionKeys.orgPk(orgId)}=${SubscriptionKeys.legacyPk(userId)} — this org's rows no longer name ` +
           'different subscriptions, so there is nothing to resolve. Drop the entry and re-run',
       );
     }
@@ -820,7 +808,7 @@ export function formatAppliedResolutions(
           : plan?.kind === 'already-copied'
             ? `already keyed to the org (${plan.origin})`
             : `still an anomaly (${plan?.reason ?? 'org not scanned'})`;
-      return `  ${BillingKeys.orgPk(orgId)} = ${BillingKeys.legacyPk(userId)} — ${outcome}`;
+      return `  ${SubscriptionKeys.orgPk(orgId)} = ${SubscriptionKeys.legacyPk(userId)} — ${outcome}`;
     }),
     '',
   ];

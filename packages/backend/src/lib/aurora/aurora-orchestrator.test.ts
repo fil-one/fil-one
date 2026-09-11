@@ -15,7 +15,7 @@ vi.mock('sst', () => ({
 const ssmMock = mockClient(SSMClient);
 
 const mockEnsureAuroraTenantReady = vi.fn();
-vi.mock('./aurora-tenant-setup.js', () => ({
+vi.mock('./aurora-tenant-setup.ts', () => ({
   ensureTenantReady: (...args: unknown[]) => mockEnsureAuroraTenantReady(...args),
 }));
 
@@ -26,8 +26,8 @@ const mockFindAuroraAccessKeyByName = vi.fn();
 const mockGetAuroraPortalApiKey = vi.fn();
 const mockCreatePortalClient = vi.fn().mockResolvedValue('instrumented-portal-client');
 
-vi.mock('./aurora-portal.js', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../aurora/aurora-portal.js')>();
+vi.mock('./aurora-portal.ts', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../aurora/aurora-portal.ts')>();
   return {
     ...original,
     createAuroraBucket: (...args: unknown[]) => mockCreateAuroraBucket(...args),
@@ -45,8 +45,8 @@ const mockGetStorageSamples = vi.fn();
 const mockGetOperationsSamples = vi.fn();
 const mockGetBucketStorageSamples = vi.fn();
 const mockGetTenantInfo = vi.fn();
-vi.mock('./aurora-backoffice.js', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../aurora/aurora-backoffice.js')>();
+vi.mock('./aurora-backoffice.ts', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../aurora/aurora-backoffice.ts')>();
   return {
     ...original,
     updateTenantStatus: (...args: unknown[]) => mockUpdateAuroraTenantStatusApi(...args),
@@ -70,15 +70,15 @@ process.env.FILONE_STAGE = 'test';
 process.env.AURORA_PORTAL_URL = 'https://portal.dev.aur.lu/api';
 
 import { S3Region } from '@filone/shared';
-import { auroraOrchestrator, _resetSsmCacheForTesting } from './aurora-orchestrator.js';
-import type { OrgProfileItem } from '../org-profile.js';
-import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../org-setup-status.js';
+import { auroraOrchestrator, _resetSsmCacheForTesting } from './aurora-orchestrator.ts';
+import type { OrgProfileItem } from '../org-profile.ts';
+import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../org-setup-status.ts';
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
   BucketAlreadyExistsError,
   BucketNotFoundError,
-} from '../errors.js';
+} from '../errors.ts';
 
 // ---------------------------------------------------------------------------
 // Tests

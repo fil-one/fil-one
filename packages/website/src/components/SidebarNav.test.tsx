@@ -64,7 +64,7 @@ vi.mock('../lib/api.js', () => ({ logout: vi.fn(), getMe: vi.fn() }));
 // Mirrors how AppShell mounts the sidebar twice: the visible desktop sidebar
 // plus the mobile drawer copy. The drawer copy must not duplicate the
 // page-unique e2e selectors, or Playwright strict-mode locators break.
-function renderBothSidebars(role = OrgRole.Owner, overrides: Partial<MeResponse> = {}) {
+function renderBothSidebars(role: OrgRole = OrgRole.Owner, overrides: Partial<MeResponse> = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   // The Billing entry is gated on `billing.view`, so the role has to be known
   // before the nav renders.

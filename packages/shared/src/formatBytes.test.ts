@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatBytes, formatBytesShort, bytesAxisFormatter } from './formatBytes.js';
+import { formatBytes, formatBytesShort, bytesAxisFormatter } from './formatBytes.ts';
 
 describe('formatBytes', () => {
   it('returns "0 B" for zero', () => {

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import { BulkDeleteJobStatus, BulkDeleteScope, S3Region } from '@filone/shared';
 
-import type { BulkDeleteJobRecord } from '../lib/dynamo-records.js';
+import type { BulkDeleteJobRecord } from '../lib/dynamo-records.ts';
 
 vi.mock('sst', () => ({
   Resource: {
@@ -12,16 +12,16 @@ vi.mock('sst', () => ({
   },
 }));
 
-vi.mock('../lib/bulk-delete-queue.js', () => ({ enqueueBulkDeleteJob: vi.fn() }));
+vi.mock('../lib/bulk-delete-queue.ts', () => ({ enqueueBulkDeleteJob: vi.fn() }));
 
 const mockIsTenantReady = vi.fn<() => string | undefined>(() => 'tenant-1');
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: () => ({ isTenantReady: () => mockIsTenantReady() }),
 }));
-vi.mock('../lib/org-profile.js', () => ({ getOrgProfile: vi.fn(async () => ({})) }));
+vi.mock('../lib/org-profile.ts', () => ({ getOrgProfile: vi.fn(async () => ({})) }));
 
-vi.mock('../lib/bulk-delete-jobs.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../lib/bulk-delete-jobs.js')>();
+vi.mock('../lib/bulk-delete-jobs.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/bulk-delete-jobs.ts')>();
   return { ...actual, createBulkDeleteJob: vi.fn(), putBulkDeleteJob: vi.fn() };
 });
 
@@ -31,10 +31,10 @@ import {
   BulkDeleteJobExistsError,
   createBulkDeleteJob,
   putBulkDeleteJob,
-} from '../lib/bulk-delete-jobs.js';
-import { enqueueBulkDeleteJob } from '../lib/bulk-delete-queue.js';
-import { baseHandler } from './create-bulk-delete-job.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+} from '../lib/bulk-delete-jobs.ts';
+import { enqueueBulkDeleteJob } from '../lib/bulk-delete-queue.ts';
+import { baseHandler } from './create-bulk-delete-job.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
 
 const mockCreate = vi.mocked(createBulkDeleteJob);
 const mockPutJob = vi.mocked(putBulkDeleteJob);

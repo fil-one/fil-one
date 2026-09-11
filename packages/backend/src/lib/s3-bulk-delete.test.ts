@@ -9,8 +9,8 @@ import {
 
 import { BulkDeleteScope } from '@filone/shared';
 
-import { deleteTargets, enumerateDeletionPage, type BulkDeleteTarget } from './s3-bulk-delete.js';
-import { createS3Client } from './s3-client.js';
+import { deleteTargets, enumerateDeletionPage, type BulkDeleteTarget } from './s3-bulk-delete.ts';
+import { createS3Client } from './s3-client.ts';
 
 const s3Mock = mockClient(S3Client);
 

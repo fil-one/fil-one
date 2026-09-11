@@ -4,7 +4,7 @@ import {
   PutItemCommand,
   GetItemCommand,
   DeleteItemCommand,
-  AttributeValue,
+  type AttributeValue,
 } from '@aws-sdk/client-dynamodb';
 import {
   getDynamoClient,

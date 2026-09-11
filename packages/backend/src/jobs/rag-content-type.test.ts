@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveContentType } from './rag-content-type.js';
+import { resolveContentType } from './rag-content-type.ts';
 
 describe('resolveContentType', () => {
   it('prefers a specific stored content type', () => {

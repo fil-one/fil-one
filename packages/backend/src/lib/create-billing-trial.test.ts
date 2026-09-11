@@ -10,7 +10,7 @@ import { SubscriptionStatus } from '@filone/shared';
 const mockCustomersCreate = vi.fn();
 const mockSubscriptionsCreate = vi.fn();
 
-vi.mock('./stripe-client.js', () => ({
+vi.mock('./stripe-client.ts', () => ({
   getStripeClient: () => ({
     customers: { create: mockCustomersCreate },
     subscriptions: { create: mockSubscriptionsCreate },
@@ -32,8 +32,8 @@ vi.mock('sst', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { createBillingTrial } from './create-billing-trial.js';
-import { OrgDeletingError } from './org-profile.js';
+import { createBillingTrial } from './create-billing-trial.ts';
+import { OrgDeletingError } from './org-profile.ts';
 
 // ---------------------------------------------------------------------------
 // Tests

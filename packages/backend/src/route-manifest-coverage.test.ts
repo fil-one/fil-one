@@ -15,15 +15,15 @@ import {
   SubscriptionStatus,
 } from '@filone/shared';
 import type { Permission, RouteManifestEntry } from '@filone/shared';
-import type { OrgMembership } from './lib/org-membership.js';
-import { sstResourceMock } from './test/sst-resource-mock.js';
-import { authPartialMock } from './test/auth-partial-mock.js';
+import type { OrgMembership } from './lib/org-membership.ts';
+import { sstResourceMock } from './test/sst-resource-mock.ts';
+import { authPartialMock } from './test/auth-partial-mock.ts';
 import {
   buildContext,
   buildEvent,
   membershipFor,
   NO_MEMBERSHIP,
-} from './test/lambda-test-utilities.js';
+} from './test/lambda-test-utilities.ts';
 
 /**
  * What the route manifest declares, proved by running the routes.
@@ -111,7 +111,7 @@ vi.mock('sst', () =>
     StripeSecretKey: { value: 'sk_test_fake' },
   }),
 );
-vi.mock('./middleware/auth.js', () => ({
+vi.mock('./middleware/auth.ts', () => ({
   ...authPartialMock(),
   getVerifiedIdTokenClaims: () => ({
     email: null,
@@ -175,7 +175,7 @@ function withActiveSubscription(): void {
 // Every other table answers an empty item, which is what the self-service
 // routes need: they are meant to run, and a route that runs has to reach the
 // end of its own work to say what it answers a caller with no membership row.
-vi.mock('./lib/ddb-client.js', () => ({
+vi.mock('./lib/ddb-client.ts', () => ({
   getDynamoClient: () => ({
     send: (command: { input?: DynamoRead }) => {
       const stubbed = stubbedRows.get(readKey(command.input));
@@ -596,6 +596,7 @@ describe('the caps routes apply on top of their declared permission', () => {
       'create-access-key',
       'update-member-role',
       'remove-member',
+      'get-role-change-preview',
       'create-invitation',
       'revoke-invitation',
     ]);

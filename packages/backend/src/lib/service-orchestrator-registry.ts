@@ -1,15 +1,21 @@
 import { getAvailableRegions, isSupportedRegion, S3Region } from '@filone/shared';
 import { Resource } from 'sst';
-import { auroraOrchestrator } from './aurora/aurora-orchestrator.js';
-import { createForgeOrchestrator, type ForgeManagementApi } from './forge/forge-orchestrator.js';
-import { fthOrchestrator } from './fth/fth-orchestrator.js';
-import type { ServiceOrchestrator } from './service-orchestrator.js';
+import { auroraOrchestrator } from './aurora/aurora-orchestrator.ts';
+import { createForgeOrchestrator, type ForgeManagementApi } from './forge/forge-orchestrator.ts';
+import { createFthOrchestrator, createInstrumentedFthClient } from './fth/fth-orchestrator.ts';
+import { ORCHESTRATOR_ID_BY_REGION } from './service-orchestrator-ids.ts';
+import type { ServiceOrchestrator } from './service-orchestrator.ts';
 
-// Forge orchestrators are built lazily and memoized per id (unique per region):
-// construction reads a Forge token secret, which is linked only on non-production
-// stages. Eager construction (as aurora/fth do) would crash production at import.
-// The api config arrives as a thunk for the same reason — an argument evaluated at
-// every registry call would touch the secret on stages that never link it.
+// Aurora is built at import; its module reads no secret while loading. FTH and
+// Forge are built lazily on the first request for their region and memoized,
+// because construction reads a linked secret. For Forge the secrets are linked
+// only on non-production stages, so eager construction would crash production
+// at import. For FTH the secret is linked everywhere, and deferring the read
+// keeps this module and everything it imports loadable under plain node, where
+// bin/ scripts run without `sst shell`. The Forge api config arrives as a thunk
+// for the same reason: an argument evaluated at every registry call would touch
+// the secret on stages that never link it.
+let fthOrchestrator: ServiceOrchestrator | undefined;
 const forgeOrchestrators = new Map<string, ServiceOrchestrator>();
 
 function getForgeOrchestrator(
@@ -32,14 +38,15 @@ export function getOrchestratorForRegion(region: S3Region): ServiceOrchestrator 
       case S3Region.EuWest1:
         return auroraOrchestrator;
       case S3Region.UsEast1:
+        fthOrchestrator ??= createFthOrchestrator(createInstrumentedFthClient());
         return fthOrchestrator;
       case S3Region.EuCentral3:
-        return getForgeOrchestrator('forge', region, () => ({
+        return getForgeOrchestrator(ORCHESTRATOR_ID_BY_REGION[region], region, () => ({
           baseUrl: process.env.FORGE_MANAGEMENT_API_URL!,
           accessToken: Resource.ForgeManagementApiToken.value,
         }));
       case S3Region.UsEast9:
-        return getForgeOrchestrator('forgeDev', region, () => ({
+        return getForgeOrchestrator(ORCHESTRATOR_ID_BY_REGION[region], region, () => ({
           baseUrl: process.env.FORGE_DEV_MANAGEMENT_API_URL!,
           accessToken: Resource.ForgeDevManagementApiToken.value,
         }));

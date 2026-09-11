@@ -1,6 +1,6 @@
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ErrorResponse } from '@filone/shared';
-import { ResponseBuilder } from './response-builder.js';
+import { ResponseBuilder } from './response-builder.ts';
 
 /**
  * Self-serve deletion is withheld until Aurora exposes a tenant DELETE

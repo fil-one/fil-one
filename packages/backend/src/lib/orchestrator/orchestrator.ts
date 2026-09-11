@@ -19,13 +19,13 @@ import type { AccessKeyPermission, GranularPermission } from '@filone/shared';
 import {
   ensureTenantReady as ensureManagementTenantReady,
   type TenantSetupDeps,
-} from './tenant-setup.js';
+} from './tenant-setup.ts';
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
   BucketConfigurationError,
   BucketNotFoundError,
-} from '../errors.js';
+} from '../errors.ts';
 import type {
   BucketDetails,
   BucketSummary,
@@ -38,11 +38,11 @@ import type {
   TenantInfo,
   TenantStatusProbe,
   TenantUsageMetrics,
-} from '../service-orchestrator.js';
-import { TENANT_DELETE_RETRY } from '../service-orchestrator.js';
-import type { OrgProfileItem } from '../org-profile.js';
-import type { S3ClientContext } from '../s3-client.js';
-import { createS3Client } from '../s3-client.js';
+} from '../service-orchestrator.ts';
+import { TENANT_DELETE_RETRY } from '../service-orchestrator.ts';
+import type { OrgProfileItem } from '../org-profile.ts';
+import type { S3ClientContext } from '../s3-client.ts';
+import { createS3Client } from '../s3-client.ts';
 import {
   createBucket as s3CreateBucket,
   listBuckets as s3ListBuckets,
@@ -51,8 +51,8 @@ import {
   putObjectLockConfiguration,
   getBucketVersioning,
   getBucketObjectLock,
-} from '../s3-bucket-operations.js';
-import { getConsoleS3Credentials } from '../s3-credentials.js';
+} from '../s3-bucket-operations.ts';
+import { getConsoleS3Credentials } from '../s3-credentials.ts';
 import {
   createClient,
   deleteTenantsByTenantId,
@@ -67,7 +67,7 @@ import {
   type CreateAccessKeyRequest,
   type Metrics,
 } from '@filone/orchestrator-client';
-import { instrumentClient } from './metrics.js';
+import { instrumentClient } from './metrics.ts';
 
 export interface FilOneOrchestratorConfig {
   /**
@@ -81,7 +81,7 @@ export interface FilOneOrchestratorConfig {
   region: S3Region;
   /** Deployment stage — explicit (rather than read from process.env) so instances are testable. */
   stage: string;
-  /** S3 gateway endpoint for the data plane, e.g. `https://{region}.s3.filonecontent.com`. */
+  /** S3 gateway endpoint for the data plane, e.g. `https://s3.{region}.filonecontent.com`. */
   s3EndpointUrl: string;
   /**
    * Control-plane Management API access: either connection settings (the
@@ -143,6 +143,7 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
   return {
     id: config.id,
     region: config.region,
+    accessModel: 'scoped-keys',
 
     async ensureTenantReady(orgId: string): Promise<string | null> {
       return ensureManagementTenantReady(setupDeps, orgId);

@@ -13,7 +13,7 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import type { RetentionDurationType, RetentionMode, S3Object } from '@filone/shared';
-import { BucketAlreadyExistsError, BucketNotEmptyError } from './errors.js';
+import { BucketAlreadyExistsError, BucketNotEmptyError } from './errors.ts';
 
 export interface CreateBucketOptions {
   bucketName: string;

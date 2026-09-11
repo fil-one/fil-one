@@ -175,15 +175,19 @@ function seriesMax(series: UsageDataPoint[]): number {
  * The distinction matters, and the console already draws it elsewhere: on
  * BucketsPage, "No buckets yet" is deliberately withheld while a region is
  * down, because it is a claim about the account rather than about the request.
- * Same here. Days reported as zero mean the account is genuinely empty and the
- * next step is worth naming; no days reported at all means the metrics pipeline
- * gave us nothing, and saying "no usage yet" would be inventing a fact.
+ * Same here. A complete response reporting all zeros means the account is
+ * genuinely empty and the next step is worth naming; a response with no days
+ * at all, or one the handler marked incomplete, means the metrics pipeline
+ * didn't answer, and saying "no usage yet" would be inventing a fact — the
+ * series are gap-filled to zero on a partial outage, so an all-zero shape
+ * alone can't tell the two apart without the `complete` flag.
  */
 type TrendsState = 'no-data' | 'no-usage' | 'ready';
 
 function trendsState(series: NormalizedSeries): TrendsState {
   if (!series.received) return 'no-data';
   if (series.storage.length + series.egress.length === 0) return 'no-data';
+  if (!series.complete) return 'no-data';
   if (seriesMax(series.storage) === 0 && seriesMax(series.egress) === 0) return 'no-usage';
   return 'ready';
 }
@@ -196,6 +200,12 @@ type NormalizedSeries = {
   egress: UsageDataPoint[];
   /** Whether the response carried an egress series, as opposed to an empty one. */
   hasEgress: boolean;
+  /**
+   * Whether every region answered. Defaults to true for a handler that
+   * predates the field, matching that handler's all-or-nothing behavior: it
+   * either returned a full response or the request failed outright.
+   */
+  complete: boolean;
 };
 
 /**
@@ -219,6 +229,7 @@ function normalizeSeries(trends: UsageTrendsResponse | undefined): NormalizedSer
     objects: Array.isArray(trends?.objects) ? trends.objects : [],
     egress: egress ?? [],
     hasEgress: egress !== undefined,
+    complete: trends?.complete ?? true,
   };
 }
 
@@ -296,6 +307,7 @@ export function UsageTrends() {
     egress: egressSeries,
     hasEgress,
     received,
+    complete,
   } = normalizeSeries(data);
 
   const storageScale = niceScale(seriesMax(storageSeries), { tickCount: 5 });
@@ -309,6 +321,7 @@ export function UsageTrends() {
     egress: egressSeries,
     hasEgress,
     received,
+    complete,
   });
 
   /**

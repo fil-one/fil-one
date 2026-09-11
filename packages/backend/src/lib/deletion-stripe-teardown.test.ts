@@ -16,10 +16,10 @@ const mockReportOrgUsage = vi.fn(async () => {
 
 // Both reach service-orchestrator-registry, which resolves SST Resource values at
 // import time and cannot load under a stubbed Resource.
-vi.mock('./region-helpers.js', () => ({
+vi.mock('./region-helpers.ts', () => ({
   syncTenantStatusInProvisionedRegions: (...args: unknown[]) => mockDisableTenants(...(args as [])),
 }));
-vi.mock('./org-usage-report.js', () => ({
+vi.mock('./org-usage-report.ts', () => ({
   reportOrgUsage: (...args: unknown[]) => mockReportOrgUsage(...(args as [])),
 }));
 
@@ -32,7 +32,7 @@ const mockCustomersDel = vi.fn(async (id: string) => void order.push(`del:${id}`
 const mockCustomersRetrieve = vi.fn();
 const mockPaymentMethodsList = vi.fn();
 
-vi.mock('./stripe-client.js', () => ({
+vi.mock('./stripe-client.ts', () => ({
   getStripeClient: () => ({
     subscriptions: { list: mockSubscriptionsList, cancel: mockSubscriptionsCancel },
     invoices: { list: mockInvoicesList, finalizeInvoice: mockFinalize, pay: mockPay },
@@ -45,8 +45,8 @@ vi.mock('./stripe-client.js', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { tearDownStripe } from './deletion-stripe-teardown.js';
-import type { DeletionMember } from './deletion-record.js';
+import { tearDownStripe } from './deletion-stripe-teardown.ts';
+import type { DeletionMember } from './deletion-record.ts';
 
 const ORG = 'org-1';
 const CUSTOMER = 'cus_1';

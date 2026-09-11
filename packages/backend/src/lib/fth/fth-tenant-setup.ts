@@ -1,4 +1,4 @@
-// FTH tenant setup. Owned by fthOrchestrator.ensureTenantReady but kept in a
+// FTH tenant setup. Owned by the FTH orchestrator's ensureTenantReady but kept in a
 // separate module so it can grow into a real state machine (failure-count
 // tracking, partial-progress resumption, transitional statuses from
 // FthTenantSetupStatus) without bloating the orchestrator. See
@@ -8,12 +8,12 @@ import { format } from 'node:util';
 import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, PutParameterCommand } from '@aws-sdk/client-ssm';
 import { Resource } from 'sst';
-import { getDynamoClient } from '../ddb-client.js';
-import { OrgDeletingError } from '../org-profile.js';
-import { resolveRefusedTenantWrite } from '../tenant-setup-fence.js';
-import type { FthManagementClient } from './fth-management-client.js';
+import { getDynamoClient } from '../ddb-client.ts';
+import { OrgDeletingError } from '../org-profile.ts';
+import { resolveRefusedTenantWrite } from '../tenant-setup-fence.ts';
+import type { FthManagementClient } from './fth-management-client.ts';
 
-const FTH_FULL_PERMISSIONS = [
+export const FTH_FULL_PERMISSIONS = [
   's3:CreateBucket',
   's3:ListAllMyBuckets',
   's3:DeleteBucket',
@@ -42,6 +42,10 @@ const FTH_FULL_PERMISSIONS = [
 // key via bin/fth-console-key.ts, which prunes v1 once warm Lambda containers
 // have stopped using it.
 export const FTH_CONSOLE_KEY_NAME = 'filone-console-v2';
+
+// userCode of the storage user every console-issued access key hangs off. The
+// orchestrator looks the user up by it, so it stays stable across key rotations.
+export const FTH_CONSOLE_USER_CODE = 'filone-console';
 
 const dynamo = getDynamoClient();
 const ssm = new SSMClient({});
@@ -108,7 +112,7 @@ async function processTenantSetup(client: FthManagementClient, orgId: string): P
     // synthetic email by tenantId (which is itself unique per FTH client)
     email: `console-${stage}-${tenantId}@filone.internal`,
     displayName: 'FilOne Console User',
-    userCode: 'filone-console',
+    userCode: FTH_CONSOLE_USER_CODE,
     role: 'storage_user',
     issueS3Credentials: false,
     idempotencyKey: `console-${stage}-${tenantId}`,

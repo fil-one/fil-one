@@ -44,6 +44,7 @@ describe('UsageTrends', () => {
       storage: series([10, 20, 30]),
       objects: series([1, 2, 3]),
       egress: series([100, 200, 300]),
+      complete: true,
     } satisfies UsageTrendsResponse);
 
     renderTrends();
@@ -58,6 +59,7 @@ describe('UsageTrends', () => {
       storage: series([10]),
       objects: series([7]),
       egress: series([5]),
+      complete: true,
     } satisfies UsageTrendsResponse);
 
     renderTrends();
@@ -110,6 +112,7 @@ describe('UsageTrends', () => {
       storage: series([10, 20, 30]),
       objects: series([1, 2, 3]),
       egress: series([0, 0, 0]),
+      complete: true,
     } satisfies UsageTrendsResponse);
 
     renderTrends();
@@ -123,6 +126,7 @@ describe('UsageTrends', () => {
       storage: series([0, 0, 0]),
       objects: series([0, 0, 0]),
       egress: series([0, 0, 0]),
+      complete: true,
     } satisfies UsageTrendsResponse);
 
     renderTrends();
@@ -135,6 +139,27 @@ describe('UsageTrends', () => {
       storage: [],
       objects: [],
       egress: [],
+      complete: true,
+    } satisfies UsageTrendsResponse);
+
+    renderTrends();
+
+    expect(await screen.findByText('No usage data for this period')).toBeInTheDocument();
+    expect(screen.queryByText('No usage yet')).not.toBeInTheDocument();
+  });
+
+  /**
+   * A region outage zero-fills the same shape as a genuinely empty account
+   * (FIL-1098): the handler's `complete: false` is the only thing telling
+   * these two apart, and losing it would tell a returning customer to
+   * "upload your first object."
+   */
+  it('does not claim the account is empty when the handler reports an incomplete response', async () => {
+    mockGetUsageTrends.mockResolvedValue({
+      storage: series([0, 0, 0]),
+      objects: series([0, 0, 0]),
+      egress: series([0, 0, 0]),
+      complete: false,
     } satisfies UsageTrendsResponse);
 
     renderTrends();
@@ -148,6 +173,7 @@ describe('UsageTrends', () => {
       storage: series([10]),
       objects: series([1]),
       egress: series([2]),
+      complete: true,
     } satisfies UsageTrendsResponse);
 
     renderTrends();

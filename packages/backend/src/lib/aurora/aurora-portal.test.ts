@@ -26,7 +26,7 @@ vi.mock('@filone/aurora-portal-client', () => ({
   deleteS3AccessKey: (options: Record<string, unknown>) => mockDeleteAccessKey(options),
 }));
 
-vi.mock('./aurora-api-metrics.js', () => ({
+vi.mock('./aurora-api-metrics.ts', () => ({
   instrumentClient: vi.fn(),
 }));
 
@@ -44,9 +44,9 @@ import {
   findAuroraAccessKeyByName,
   getAuroraPortalApiKey,
   _resetSsmCacheForTesting,
-} from './aurora-portal.js';
-import { instrumentClient } from './aurora-api-metrics.js';
-import { AccessKeyAlreadyExistsError, BucketNotEmptyError } from '../errors.js';
+} from './aurora-portal.ts';
+import { instrumentClient } from './aurora-api-metrics.ts';
+import { AccessKeyAlreadyExistsError, BucketNotEmptyError } from '../errors.ts';
 import { ACCESS_KEY_PERMISSIONS } from '@filone/shared';
 
 // ---------------------------------------------------------------------------

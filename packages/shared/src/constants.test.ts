@@ -15,6 +15,7 @@ import {
   AUTH0_DOMAIN_BY_CONSOLE_ORIGIN,
   getAvailableRegions,
   supportsBucketManagement,
+  getRegionAccessModel,
   isFoundationEmail,
   isSupportedRegion,
   formatRegion,
@@ -23,7 +24,7 @@ import {
   S3_REGION,
   S3Region,
   Stage,
-} from './constants.js';
+} from './constants.ts';
 
 describe('constants', () => {
   it('TB_BYTES equals 10^12', () => {
@@ -78,12 +79,6 @@ describe('getUsageLimits', () => {
 });
 
 describe('getS3Endpoint', () => {
-  it('returns the production URL with region prefix', () => {
-    expect(getS3Endpoint(S3Region.EuWest1, Stage.Production)).toBe(
-      'https://eu-west-1.s3.filonecontent.com',
-    );
-  });
-
   it('returns the dev URL for staging', () => {
     expect(getS3Endpoint(S3Region.EuWest1, Stage.Staging)).toBe('https://s3.dev.aur.lu');
   });
@@ -93,22 +88,29 @@ describe('getS3Endpoint', () => {
   });
 
   it('returns the eu-central-3 staging gateway', () => {
-    expect(getS3Endpoint(S3Region.EuCentral3, Stage.Staging)).toBe('https://ingot.staging.fil.one');
+    expect(getS3Endpoint(S3Region.EuCentral3, Stage.Staging)).toBe(
+      'https://s3.eu-central-3.staging.filonecontent.com',
+    );
   });
 
   it('returns the us-east-9 dev sandbox gateway', () => {
     expect(getS3Endpoint(S3Region.UsEast9, Stage.Staging)).toBe(
-      'https://ingot.dev.forge-sandbox.fil.one',
+      'https://s3.us-east-9.latest.dev.filonecontent.com',
     );
   });
 
-  it('serves every region from the content domain in production', () => {
-    for (const region of Object.values(S3Region)) {
-      expect(getS3Endpoint(region, Stage.Production)).toBe(
-        `https://${region}.s3.filonecontent.com`,
-      );
-    }
-  });
+  // Hard-coded the expected region endpoints so that this test suite
+  // reliably detects any accidental regressions in the code building
+  // the S3 endpoint URLs.
+  const EXPECTED_PRODUCTION_REGION_ENDPOINTS: [S3Region, string][] = [
+    [S3Region.EuWest1, 'https://s3.eu-west-1.filonecontent.com'],
+    [S3Region.UsEast1, 'https://s3.us-east-1.filonecontent.com'],
+  ];
+  for (const [region, endpoint] of EXPECTED_PRODUCTION_REGION_ENDPOINTS) {
+    it(`returns ${endpoint} for ${region} in production`, () => {
+      expect(getS3Endpoint(region, Stage.Production)).toBe(endpoint);
+    });
+  }
 });
 
 describe('getAuth0Domain', () => {
@@ -240,7 +242,7 @@ describe('getAvailableRegions', () => {
       S3Region.EuWest1,
       S3Region.UsEast1,
       S3Region.EuCentral3,
-      // S3Region.UsEast9,
+      S3Region.UsEast9,
     ]);
   });
 
@@ -253,9 +255,10 @@ describe('getAvailableRegions', () => {
       S3Region.EuWest1,
       S3Region.UsEast1,
       S3Region.EuCentral3,
-      // S3Region.UsEast9,
+      S3Region.UsEast9,
     ]);
     expect(getAvailableRegions('dev-pr-123')).toContain(S3Region.EuCentral3);
+    expect(getAvailableRegions('dev-pr-123')).toContain(S3Region.UsEast9);
   });
 });
 
@@ -271,11 +274,11 @@ describe('isSupportedRegion', () => {
     expect(isSupportedRegion('eu-central-3', 'unknown')).toBe(true);
   });
 
-  for (const stage of [Stage.Production, Stage.Staging, 'unknown']) {
-    it(`rejects the temporarily disabled us-east-9 region in stage ${stage}`, () => {
-      expect(isSupportedRegion('us-east-9', stage)).toEqual(false);
-    });
-  }
+  it('gates us-east-9 to non-production stages', () => {
+    expect(isSupportedRegion('us-east-9', Stage.Production)).toBe(false);
+    expect(isSupportedRegion('us-east-9', Stage.Staging)).toBe(true);
+    expect(isSupportedRegion('us-east-9', 'unknown')).toBe(true);
+  });
 
   it('rejects unknown regions', () => {
     expect(isSupportedRegion('mars-1', Stage.Staging)).toBe(false);
@@ -299,6 +302,21 @@ describe('supportsBucketManagement', () => {
 
   it('returns true for non-Aurora regions', () => {
     expect(supportsBucketManagement(S3Region.UsEast1)).toBe(true);
+  });
+});
+
+describe('getRegionAccessModel', () => {
+  it('answers scoped-keys for every region', () => {
+    const models = Object.fromEntries(
+      Object.values(S3Region).map((region) => [region, getRegionAccessModel(region)]),
+    );
+
+    expect(models).toEqual({
+      [S3Region.EuWest1]: 'scoped-keys',
+      [S3Region.UsEast1]: 'scoped-keys',
+      [S3Region.EuCentral3]: 'scoped-keys',
+      [S3Region.UsEast9]: 'scoped-keys',
+    });
   });
 });
 

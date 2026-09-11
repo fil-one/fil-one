@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { type MetricEvent, reportMetric } from '../metrics.js';
-import { instrumentClient } from './fth-api-metrics.js';
-import { createFthManagementClient } from './fth-management-client.js';
+import { type MetricEvent, reportMetric } from '../metrics.ts';
+import { instrumentClient } from './fth-api-metrics.ts';
+import { createFthManagementClient } from './fth-management-client.ts';
 
-vi.mock('../metrics.js', () => ({
+vi.mock('../metrics.ts', () => ({
   reportMetric: vi.fn(),
 }));
 

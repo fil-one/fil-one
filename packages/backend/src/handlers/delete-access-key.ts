@@ -3,22 +3,23 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import { ErrorResponse, S3Region, auditKeyIdSuffix } from '@filone/shared';
+import { type ErrorResponse, S3Region } from '@filone/shared';
 import { Resource } from 'sst';
-import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.js';
-import { getDynamoClient } from '../lib/ddb-client.js';
-import { AccessKeyKeys } from '../lib/dynamo-records.js';
-import { keyScope, notYourKeyResponse, withinScope } from '../lib/key-scope.js';
-import { ResponseBuilder, tenantNotReadyResponse } from '../lib/response-builder.js';
-import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
-import { getOrgProfile } from '../lib/org-profile.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { csrfMiddleware } from '../middleware/csrf.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
+import { userActor } from '../lib/audit.ts';
+import { getDynamoClient } from '../lib/ddb-client.ts';
+import { AccessKeyKeys, DEFAULT_ACCESS_KEY_REGION } from '../lib/dynamo-records.ts';
+import { keyScope, notYourKeyResponse, withinScope } from '../lib/key-scope.ts';
+import { revokeAccessKey } from '../lib/key-revocation.ts';
+import { ResponseBuilder, tenantNotReadyResponse } from '../lib/response-builder.ts';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import { getOrgProfile } from '../lib/org-profile.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { csrfMiddleware } from '../middleware/csrf.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
+import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
 
 const dynamo = getDynamoClient();
 
@@ -58,53 +59,25 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   )
     return notYourKeyResponse();
 
-  // Legacy rows written before multi-region routing don't carry a `region`
-  // attribute — those predate FTH, so they belong to Aurora (eu-west-1).
-  const region: S3Region = (Item.region?.S as S3Region | undefined) ?? S3Region.EuWest1;
+  const region: S3Region = (Item.region?.S as S3Region | undefined) ?? DEFAULT_ACCESS_KEY_REGION;
   const orchestrator = getOrchestratorForRegion(region);
 
   const tenantId = orchestrator.isTenantReady(orgProfile);
   if (!tenantId) return tenantNotReadyResponse();
 
-  // Revocation happens at the vendor first and cannot join the local
-  // transaction, so it gets the same intent/completion pair a mint does: an
-  // intent that never completes says a credential was revoked at the vendor
-  // while its local row may still be listed.
-  //
-  // Best-effort, unlike a mint: an AuditTable outage must never be the reason a
-  // leaked key stays live, so a failed intent is logged and counted and the
-  // revocation goes ahead. The key id is known up front, so both halves are
-  // filed under the key.
-  const keyName = Item.keyName?.S;
-  const accessKeyId = Item.accessKeyId?.S;
-  const revocation = await twoPhaseAudit({
-    type: 'key.deleted',
-    mode: 'best-effort',
-    actor: userActor({ userId, email: getVerifiedEmail(event) }),
+  // The member is revoking their own key, which is the one revocation somebody
+  // asked for directly. The passes that take a key its holder did not ask about
+  // name themselves instead.
+  await revokeAccessKey({
     orgId,
-    // The access key id, which is what the console lists and what the details
-    // record four characters of — `keyId` is the orchestrator's own id for the
-    // row and four characters of it match nothing an operator can see. A row
-    // written before the id was stored falls back to it anyway.
-    subject: AuditSubjects.key('s3', accessKeyId ?? keyId),
-    details: {
-      keyKind: 's3',
-      region,
-      ...(keyName ? { keyName } : {}),
-      ...(accessKeyId ? { keyIdSuffix: auditKeyIdSuffix('s3', accessKeyId) } : {}),
-    },
-  });
-
-  try {
-    await orchestrator.deleteAccessKey(tenantId, keyId);
-  } catch (err) {
-    await revocation.complete({ outcome: 'failed' });
-    throw err;
-  }
-
-  await revocation.complete({
-    outcome: 'succeeded',
-    items: [{ Delete: { TableName: Resource.UserInfoTable.name, Key: rowKey } }],
+    keyId,
+    accessKeyId: Item.accessKeyId?.S,
+    keyName: Item.keyName?.S,
+    region,
+    orchestrator,
+    tenantId,
+    actor: userActor({ userId, email: getVerifiedEmail(event) }),
+    reason: 'user_requested',
   });
 
   return { statusCode: 204, body: '' };
