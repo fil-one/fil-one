@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Stage } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -11,8 +11,8 @@ vi.mock('sst', () => sstResourceMock({ SendGridApiKey: { value: 'test-sendgrid-k
 const mockFetch = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
 vi.stubGlobal('fetch', mockFetch);
 
-import { sendInvitationEmail } from './invite-mailer.js';
-import type { SendInvitationEmailParams } from './invite-mailer.js';
+import { sendInvitationEmail } from './invite-mailer.ts';
+import type { SendInvitationEmailParams } from './invite-mailer.ts';
 
 // ---------------------------------------------------------------------------
 // Fixtures and helpers

@@ -113,20 +113,26 @@ test.describe('paid owner manages members', () => {
     const ownRow = memberRow(page, ownerUserId);
     await expect(ownRow).toHaveAttribute('data-member-role', 'owner');
 
+    // The caller's own row is confirmed first: this is the change that takes
+    // away their own authority.
+    await ownRow.locator('select').selectOption('admin');
+    const dialog = page.getByTestId('role-narrowing-dialog');
+    await expect(dialog).toBeVisible();
+
     const patched = page.waitForResponse(
       (response) =>
         new URL(response.url()).pathname.endsWith(`/api/org/members/${ownerUserId}`) &&
         response.request().method() === 'PATCH',
     );
-    // The caller's own row is confirmed first: this is the change that takes
-    // away their own authority.
-    await ownRow.locator('select').selectOption('admin');
-    await expect(page.getByTestId('confirm-dialog')).toBeVisible();
-    await page.locator('#confirm-dialog-confirm-button').click();
+    await dialog.locator('#role-narrowing-confirm-button').click();
 
     const response = await patched;
     expect(response.status()).toBe(409);
     expect((await response.json()) as { code?: string }).toMatchObject({ code: 'LAST_OWNER' });
+
+    await expect(dialog).toContainText('That change was refused');
+    await dialog.locator('#role-narrowing-cancel-button').click();
+    await expect(dialog).toBeHidden();
 
     // The refusal carries a remedy, so it stays on the page instead of being
     // toasted away while the operator is still looking at the row.

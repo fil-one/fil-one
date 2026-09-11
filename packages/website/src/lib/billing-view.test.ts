@@ -39,10 +39,16 @@ describe('planTitle', () => {
     expect(planTitle(subscription({ planName: 'Business' }))).toBe('Business');
   });
 
-  it('names the state when Stripe reported no product', () => {
+  it('names the state, then the plan, when Stripe reported no product', () => {
     expect(planTitle(subscription({ status: SubscriptionStatus.Trialing }))).toBe('Free trial');
     expect(planTitle(subscription({ status: SubscriptionStatus.Inactive }))).toBe('No plan');
-    expect(planTitle(subscription())).toBe('Your plan');
+    expect(planTitle(subscription())).toBe('Pay as you go');
+  });
+
+  it('falls back to a plan somebody is on rather than to "Unknown"', () => {
+    // The Dashboard printed "Unknown" for a planId it did not recognise. A label
+    // the console cannot fill is still a plan being paid for.
+    expect(planTitle(subscription({ planId: 'enterprise' as PlanId }))).toBe('Your plan');
   });
 
   it('prefers the reported name over the state, even mid-trial', () => {

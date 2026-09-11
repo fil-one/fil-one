@@ -24,8 +24,8 @@ import {
   AccessKeyValidationError,
   BucketAlreadyExistsError,
   BucketNotEmptyError,
-} from '../errors.js';
-import { instrumentClient } from './aurora-api-metrics.js';
+} from '../errors.ts';
+import { instrumentClient } from './aurora-api-metrics.ts';
 
 const ssm = new SSMClient({});
 const ssmCache = new QuickLRU<string, string>({ maxSize: 500 });

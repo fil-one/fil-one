@@ -1,6 +1,6 @@
 import { API_URL } from '../env.js';
 import { ApiErrorCode, CSRF_COOKIE_NAME, ORG_ID_HEADER } from '@filone/shared';
-import type { StepUpRequiredResponse } from '@filone/shared';
+import type { AccessKeySummary, StepUpRequiredResponse } from '@filone/shared';
 import {
   clearActiveOrgAfterRefusal,
   clearActiveOrgOnNavigation,
@@ -122,6 +122,17 @@ export function errorCodeOf(error: unknown): string | undefined {
 export function errorStatusOf(error: unknown): number | undefined {
   const status = (error as { status?: unknown } | null | undefined)?.status;
   return typeof status === 'number' ? status : undefined;
+}
+
+/**
+ * The access keys a failed role change had already revoked before it failed.
+ *
+ * Those credentials are gone whatever the role now says, so a refusal that
+ * mentions only the role is telling the admin half of what happened.
+ */
+export function revokedKeysOf(error: unknown): AccessKeySummary[] {
+  const keys = (error as { revokedKeys?: unknown } | null | undefined)?.revokedKeys;
+  return Array.isArray(keys) ? (keys as AccessKeySummary[]) : [];
 }
 
 /** An error's message, or a fallback for anything that is not an `Error`. */
@@ -287,17 +298,21 @@ export interface SentOrg {
 }
 
 /**
- * Wrapper around fetch for all Fil.one API calls.
- * - Always sends HttpOnly auth cookies via credentials: 'include'
- * - Redirects to Auth0 login on 401
+ * Every Fil.one API call, up to the point where the body is read.
+ *
+ * Cookies, the CSRF token, the org header, and the whole error ladder live here
+ * so a caller that wants something other than JSON — the audit CSV — gets the
+ * same 401 step-up, 403, and 410 handling rather than a second copy of it.
+ * {@link apiRequest} and {@link apiDownload} are the two ways to read what it
+ * returns.
  */
 // eslint-disable-next-line complexity/complexity
-export async function apiRequest<T>(
+async function sendApiRequest(
   path: string,
   options: RequestInit = {},
   behavior: ApiRequestBehavior = {},
   sentOrg?: SentOrg,
-): Promise<T> {
+): Promise<Response> {
   // The tab is on its way to another org. Held rather than rejected, for the
   // reason `getMe` returns instead of throwing on a mismatch: the page is
   // disappearing, and an error rendered over it would be the last thing the user
@@ -382,25 +397,59 @@ export async function apiRequest<T>(
       message?: string;
       code?: ApiErrorCode;
       resendAvailableAt?: string;
+      revokedKeys?: AccessKeySummary[];
     };
     // Carry the backend's error code through so callers can render specific copy
     // (e.g. BUCKET_NOT_EMPTY), or honour a server-set cooldown (the deletion 429
-    // carries resendAvailableAt).
+    // carries resendAvailableAt). `revokedKeys` rides along for the same reason:
+    // a role change that fails after revoking keys leaves those credentials
+    // gone, and a refusal that does not say so is a worse answer than none.
     throw Object.assign(
       new Error(error.message ?? `Request failed with status ${response.status}`),
       {
         status: response.status,
         ...(error.code && { code: error.code }),
         ...(error.resendAvailableAt && { resendAvailableAt: error.resendAvailableAt }),
+        ...(error.revokedKeys?.length && { revokedKeys: error.revokedKeys }),
       },
     );
   }
+
+  return response;
+}
+
+/**
+ * Wrapper around fetch for all Fil.one API calls.
+ * - Always sends HttpOnly auth cookies via credentials: 'include'
+ * - Redirects to Auth0 login on 401
+ */
+export async function apiRequest<T>(
+  path: string,
+  options: RequestInit = {},
+  behavior: ApiRequestBehavior = {},
+  sentOrg?: SentOrg,
+): Promise<T> {
+  const response = await sendApiRequest(path, options, behavior, sentOrg);
 
   if (response.status === 204 || response.headers.get('content-length') === '0') {
     return undefined as T;
   }
 
   return response.json() as Promise<T>;
+}
+
+/**
+ * A file the API generated, as a blob the caller can hand to `downloadBlob`.
+ *
+ * A plain link would authenticate, since Lax cookies ride a top-level
+ * navigation, but it cannot set `X-Org-Id`, so it would download whichever org
+ * the session defaults to rather than the one the tab is showing. It would also
+ * render a failure as raw JSON in a browser tab instead of reaching the error
+ * handling above.
+ */
+export async function apiDownload(path: string): Promise<Blob> {
+  const response = await sendApiRequest(path);
+  return response.blob();
 }
 
 // ── Me / Org API ────────────────────────────────────────────────────────

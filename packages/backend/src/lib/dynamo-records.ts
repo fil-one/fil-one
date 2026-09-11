@@ -1,8 +1,11 @@
 import { S3Region } from '@filone/shared';
 import type {
+  AccessKeyBucketScope,
+  AccessKeyPermission,
   BulkDeleteFailure,
   BulkDeleteJobStatus,
   BulkDeleteScope,
+  GranularPermission,
   SubscriptionStatus,
 } from '@filone/shared';
 
@@ -37,6 +40,13 @@ export const AccessKeyKeys = {
   keySkPrefix: (): string => ACCESS_KEY_SK_PREFIX,
 } as const;
 
+/**
+ * The region of an access-key row that carries no `region` attribute. Those
+ * rows were written before multi-region routing, so they predate FTH and
+ * belong to Aurora.
+ */
+export const DEFAULT_ACCESS_KEY_REGION: S3Region = S3Region.EuWest1;
+
 /** UserInfoTable — pk: ORG#{orgId}, sk: ACCESSKEY#{id} */
 export interface AccessKeyRecord {
   pk: string;
@@ -45,6 +55,22 @@ export interface AccessKeyRecord {
   accessKeyId: string;
   createdAt: string;
   status: string;
+  /**
+   * The region whose orchestrator holds the credential. Absent on rows written
+   * before multi-region routing, which predate FTH and belong to Aurora.
+   */
+  region?: S3Region;
+  /**
+   * What the key carries. This stamp is the only record of it: the orchestrator
+   * interface reads no permissions back, so nothing at the vendor can be
+   * compared against it. Absent on a `recovered` row, which the console never
+   * learned the shape of.
+   */
+  permissions?: AccessKeyPermission[];
+  granularPermissions?: GranularPermission[];
+  bucketScope?: AccessKeyBucketScope;
+  buckets?: string[];
+  expiresAt?: string;
   /** The FilOne user who minted the key. Absent on keys older than roles. */
   createdBy?: string;
   /** The creator's verified email at creation time, for display without a join. */
@@ -151,6 +177,19 @@ export interface SubscriptionRecord {
    */
   deletedAt?: string;
   lastPaymentFailedAt?: string;
+  /**
+   * What `hubspot-contact-sync` knows about this row's HubSpot contact.
+   *
+   * `hubspotSyncedAt` is when the job last attempted the row, whatever came of
+   * it, and is what its scan filter gates on — so a contact HubSpot cannot
+   * match waits out the re-verify window like any other rather than being
+   * retried on every run. `hubspotSubscriptionStatus` is the value HubSpot
+   * confirmed holding, absent when it holds no contact for this user; the job
+   * selects on it disagreeing with `subscriptionStatus` to repair a dropped
+   * live write.
+   */
+  hubspotSubscriptionStatus?: SubscriptionStatus;
+  hubspotSyncedAt?: string;
   paymentMethodId?: string;
   paymentMethodLast4?: string;
   paymentMethodBrand?: string;
@@ -306,16 +345,20 @@ export interface RagIndexerCheckpointRecord {
   ttl: number; // epoch seconds; DynamoDB TTL expiry (48h)
 }
 
+const RAG_BUCKET_PK_PREFIX = 'BUCKET#';
+const RAG_CHECKPOINT_PK_PREFIX = 'INDEXER_CHECKPOINT#';
+
 /**
  * Key builders for the RAG records above. Centralizing the pk/sk shapes keeps
  * the partition design (and the per-bucket `begins_with MANIFEST#` query)
  * consistent across handlers and jobs.
  */
+
 export const RAGKeys = {
   configPk: (orgId: string): string => `ORG#${orgId}`,
   configSk: (): string => 'RAGCONFIG',
   bucketPk: (orgId: string, region: S3Region, bucketName: string): string =>
-    `BUCKET#${orgId}#${region}#${bucketName}`,
+    `${RAG_BUCKET_PK_PREFIX}${orgId}#${region}#${bucketName}`,
   /**
    * Inverse of {@link bucketPk}: parse a `BUCKET#{orgId}#{region}#{bucketName}` pk back into
    * its parts. None of the three segments can contain `#` (orgId is a UUID, region is an enum,
@@ -325,24 +368,38 @@ export const RAGKeys = {
    * currently-disabled region must still parse), so this does NOT use the stage-aware
    * `isSupportedRegion`.
    */
-  parseBucketPk: (
-    pk: string,
-  ): { orgId: string; region: S3Region; bucketName: string } | undefined => {
-    const parts = pk.split('#');
-    if (parts.length !== 4 || parts[0] !== 'BUCKET') return undefined;
-    const [, orgId, region, bucketName] = parts;
-    if (!orgId || !bucketName) return undefined;
-    if (!Object.values(S3Region).includes(region as S3Region)) return undefined;
-    return { orgId, region: region as S3Region, bucketName };
-  },
+  parseBucketPk: (pk: string): ParsedRagBucketPk | undefined =>
+    parseRagBucketPk(RAG_BUCKET_PK_PREFIX, pk),
+  /** Shared prefix for `begins_with` scans returning every bucket's rows. */
+  bucketPkPrefix: (): string => RAG_BUCKET_PK_PREFIX,
   enablementSk: (): string => 'RAG',
   /** Shared prefix for `begins_with` queries returning a bucket's manifests. */
   manifestSkPrefix: (): string => 'MANIFEST#',
   manifestSk: (objectKey: string): string => `MANIFEST#${objectKey}`,
   checkpointPk: (orgId: string, region: S3Region, bucketName: string): string =>
-    `INDEXER_CHECKPOINT#${orgId}#${region}#${bucketName}`,
+    `${RAG_CHECKPOINT_PK_PREFIX}${orgId}#${region}#${bucketName}`,
+  /** Inverse of {@link checkpointPk}, with the same rules as {@link parseBucketPk}. */
+  parseCheckpointPk: (pk: string): ParsedRagBucketPk | undefined =>
+    parseRagBucketPk(RAG_CHECKPOINT_PK_PREFIX, pk),
+  /** Shared prefix for `begins_with` scans returning every bucket's checkpoint. */
+  checkpointPkPrefix: (): string => RAG_CHECKPOINT_PK_PREFIX,
   checkpointSk: (): string => 'CHECKPOINT',
 } as const;
+
+export interface ParsedRagBucketPk {
+  orgId: string;
+  region: S3Region;
+  bucketName: string;
+}
+
+function parseRagBucketPk(prefix: string, pk: string): ParsedRagBucketPk | undefined {
+  const parts = pk.split('#');
+  if (parts.length !== 4 || `${parts[0]}#` !== prefix) return undefined;
+  const [, orgId, region, bucketName] = parts;
+  if (!orgId || !bucketName) return undefined;
+  if (!Object.values(S3Region).includes(region as S3Region)) return undefined;
+  return { orgId, region: region as S3Region, bucketName };
+}
 
 /**
  * A user-initiated bulk deletion of a bucket's objects, resumable across Lambda

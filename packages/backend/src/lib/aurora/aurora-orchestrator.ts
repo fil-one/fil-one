@@ -5,7 +5,7 @@
 // PROFILE-row attributes used: `auroraTenantId` and `auroraSetupStatus`.
 
 import pRetry from 'p-retry';
-import { S3Region, getS3Endpoint, TenantStatus } from '@filone/shared';
+import { S3Region, getS3Endpoint, type TenantStatus } from '@filone/shared';
 import type {
   AccessKeyPermission,
   GranularPermission,
@@ -15,7 +15,7 @@ import type {
 } from '@filone/shared';
 import type { BucketBucketResponse } from '@filone/aurora-portal-client';
 import { getBucketInfo, listBuckets } from '@filone/aurora-portal-client';
-import { ensureTenantReady as ensureAuroraTenantReady } from '../aurora/aurora-tenant-setup.js';
+import { ensureTenantReady as ensureAuroraTenantReady } from '../aurora/aurora-tenant-setup.ts';
 import {
   createAuroraAccessKey,
   createAuroraBucket,
@@ -23,7 +23,7 @@ import {
   deleteAuroraAccessKey,
   deleteAuroraBucket,
   findAuroraAccessKeyByName,
-} from '../aurora/aurora-portal.js';
+} from '../aurora/aurora-portal.ts';
 import {
   getOperationsSamples,
   getStorageSamples,
@@ -33,11 +33,11 @@ import {
   updateTenantStatus as updateAuroraTenantStatusApi,
   getBucketStorageSamples,
   getTenantInfo,
-} from '../aurora/aurora-backoffice.js';
-import { isOrgSetupComplete } from '../org-setup-status.js';
-import type { OrgProfileItem } from '../org-profile.js';
-import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
-import { BucketNotFoundError } from '../errors.js';
+} from '../aurora/aurora-backoffice.ts';
+import { isOrgSetupComplete } from '../org-setup-status.ts';
+import type { OrgProfileItem } from '../org-profile.ts';
+import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
+import { BucketNotFoundError } from '../errors.ts';
 import type {
   BucketDetails,
   BucketProtection,
@@ -51,9 +51,9 @@ import type {
   StorageUsageSample,
   TenantInfo,
   TenantUsageMetrics,
-} from '../service-orchestrator.js';
-import { TENANT_DELETE_RETRY } from '../service-orchestrator.js';
-import type { S3ClientContext } from '../s3-client.js';
+} from '../service-orchestrator.ts';
+import { TENANT_DELETE_RETRY } from '../service-orchestrator.ts';
+import type { S3ClientContext } from '../s3-client.ts';
 
 export const _resetSsmCacheForTesting = () => _resetS3CredentialsCacheForTesting();
 
@@ -79,6 +79,7 @@ function toBucketProtection(data: BucketBucketResponse): BucketProtection {
 export const auroraOrchestrator = {
   id: 'aurora',
   region: S3Region.EuWest1 as S3RegionType,
+  accessModel: 'scoped-keys',
 
   async ensureTenantReady(orgId): Promise<string | null> {
     const result = await ensureAuroraTenantReady(orgId);

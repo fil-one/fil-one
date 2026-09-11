@@ -1,30 +1,55 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { ApiErrorCode, OrgRole, canManageTargetRole } from '@filone/shared';
-import type { ErrorResponse, OrgRole as Role } from '@filone/shared';
-import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.js';
+import { NO_ROLE, OrgRole } from '@filone/shared';
+import type { AccessKeySummary, RemoveMemberResponse } from '@filone/shared';
+import { AuditSubjects, userActor } from '../lib/audit.ts';
+import { commitAfterRevokingKeys } from '../lib/commit-after-revoking-keys.ts';
+import { notifyRevokedKeys } from '../lib/key-revocation-email.ts';
+import { reviewKeysForRoleChange } from '../lib/member-keys.ts';
+import { requireManageableMember } from '../lib/manageable-member.ts';
+import { getOrgProfile } from '../lib/org-profile.ts';
+import type { OrgProfileItem } from '../lib/org-profile.ts';
 import {
   normalizeInviteEmail,
   pendingInvitationsForRemoval,
   planRevocations,
   retireInvitationItems,
   revokeDeferred,
-} from '../lib/invitations.js';
+} from '../lib/invitations.ts';
+import type { InvitationRecord } from '../lib/invitations.ts';
 import {
   cancelledLabels,
   membershipDeleteItems,
   ownerCountItem,
-} from '../lib/membership-changes.js';
-import { readOwnerCount, resolveMembership } from '../lib/org-membership.js';
-import { readUserProfile } from '../lib/user-profile.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { csrfMiddleware } from '../middleware/csrf.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+} from '../lib/membership-changes.ts';
+import { readOwnerCount, resolveMembership } from '../lib/org-membership.ts';
+import { readUserProfile } from '../lib/user-profile.ts';
+import {
+  ResponseBuilder,
+  invitationRaceResponse,
+  keyMintedResponse,
+  lastOwnerResponse,
+  memberRoleChangedResponse,
+  notAMemberResponse,
+  ownerCountUnavailableResponse,
+  refusedKeysSubject,
+} from '../lib/response-builder.ts';
+import type { ErrorWithRevokedKeys } from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { csrfMiddleware } from '../middleware/csrf.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
+
+const SOURCE = 'remove-member';
+
+/**
+ * The way out of a last-Owner refusal, for somebody removing an Owner: unlike a
+ * demotion, the seat can also be handed over.
+ */
+const LAST_OWNER_REMEDY = 'Transfer ownership or promote another member first.';
 
 /**
  * DELETE /api/org/members/{userId} — take a member out of the organization.
@@ -61,98 +86,221 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
  * those writers still removes the member, sweeps what they issued, and logs that
  * the addressed-to sweep could not run.
  *
- * Keys are untouched in M1. A departing member's access keys keep working until
- * somebody revokes them, which the console names in the confirmation dialog; the
- * revoke-by-default flow with per-key review is FIL-1021.
+ * Removal is the narrowing to nothing: a key does not outlive the membership
+ * that created it, so every attributed key the member minted is revoked at its
+ * orchestrator before the membership rows go (`lib/commit-after-revoking-keys.ts`).
+ * Rows with no recorded creator are outside the rule, as they are outside every
+ * other, and FIL-1021's per-key review is confined to those.
  */
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const targetUserId = event.pathParameters?.userId;
-  if (!targetUserId) return badRequestResponse();
-
-  const { orgId, userId, membership } = getUserInfo(event);
+  const { orgId, userId } = getUserInfo(event);
   const actorEmail = getVerifiedEmail(event);
 
-  const target = await resolveMembership(orgId, targetUserId);
-  if (!target) return notAMemberResponse();
-
-  // `authorize('members.manage')` refused every caller without a membership row.
-  if (!canManageTargetRole(membership!.role, target.role)) {
-    return beyondCeilingResponse(target.role);
-  }
+  const gate = await requireManageableMember(event, { kind: 'removal' });
+  if (!gate.ok) return gate.refusal;
+  const target = gate.value;
+  const targetUserId = target.userId;
 
   const wasOwner = target.role === OrgRole.Owner;
-  const doomed = await pendingInvitationsForRemoval(orgId, {
+  // One read, two answers: the address the invitation sweep matches on, and the
+  // one a fence refusal names — an admin told "a key was created for that
+  // member" cannot tell which of their members to go and look at.
+  const targetEmail = await removedMemberAddress(targetUserId);
+  const invitationsToRevoke = await pendingInvitationsForRemoval(orgId, {
     userId: targetUserId,
-    emailNorm: await removedMemberAddress(targetUserId),
+    ...(targetEmail ? { emailNorm: normalizeInviteEmail(targetEmail) } : {}),
   });
-  const { now, later } = planRevocations(doomed, wasOwner ? 3 : 2);
+  const { now, later } = planRevocations(invitationsToRevoke, wasOwner ? 3 : 2);
 
-  try {
-    await commitAudited({
-      items: [
-        ...membershipDeleteItems({ orgId, userId: targetUserId, fromRole: target.role }),
-        ...(wasOwner ? [ownerCountItem(orgId, 'decrement')] : []),
-        ...now.flatMap((invitation) => retireInvitationItems(invitation, 'revoked')),
-      ],
-      event: auditEvent({
-        type: 'member.removed',
-        actor: userActor({ userId, email: actorEmail }),
+  const refusal = await refuseBeforeRevokingKeys(orgId, wasOwner);
+  if (refusal) return refusal;
+
+  const items = [
+    ...membershipDeleteItems({ orgId, userId: targetUserId, fromRole: target.role }),
+    ...(wasOwner ? [ownerCountItem(orgId, 'decrement')] : []),
+    ...now.flatMap((invitation) => retireInvitationItems(invitation, 'revoked')),
+  ];
+  const failure = { orgId, targetUserId, wasOwner, revocations: now.length };
+
+  const orgProfile = await getOrgProfile(orgId);
+  const { keysToRevoke, fence } = await reviewKeysForRoleChange(orgId, targetUserId, NO_ROLE);
+  const changedBy = actorEmail ?? userId;
+
+  const committed = await commitAfterRevokingKeys({
+    items,
+    keys: keysToRevoke,
+    fence,
+    orgId,
+    orgProfile,
+    actor: userActor({ userId, email: actorEmail }),
+    trigger: 'member_removed',
+    auditEventType: 'member.removed',
+    subject: AuditSubjects.user(targetUserId),
+    details: {
+      role: target.role,
+      ...(invitationsToRevoke.length > 0 ? { revokedInvitations: invitationsToRevoke.length } : {}),
+    },
+    source: SOURCE,
+    onCancelled: (err, revokedKeys) => removalFailureResponse(err, { ...failure, revokedKeys }),
+    onRefused: (refused, revoked) => vendorRefusedResponse(revoked, refused),
+    // The member is still here with their clients already broken. The caller
+    // sees it in the response; this is the only thing that reaches the member.
+    notifyMember: (revoked) =>
+      notifyRevokedKeys({
         orgId,
-        subject: AuditSubjects.user(targetUserId),
-        details: {
-          role: target.role,
-          ...(doomed.length > 0 ? { revokedInvitations: doomed.length } : {}),
-        },
+        orgProfile,
+        userId: targetUserId,
+        changedBy,
+        revoked,
+        cause: { kind: 'change_failed' },
+        source: SOURCE,
       }),
-    });
-  } catch (err) {
-    return await removalFailureResponse(err, {
-      orgId,
-      targetUserId,
-      wasOwner,
-      revocations: now.length,
-    });
-  }
+  });
+  if ('response' in committed) return committed.response;
+  if ('keyMinted' in committed)
+    return keyMintedResponse(targetEmail ?? 'that member', committed.keyMinted);
 
-  await revokeDeferred(later);
-
-  return { statusCode: 204, body: '' };
+  return await finishRemoval({
+    orgId,
+    orgProfile,
+    targetUserId,
+    changedBy,
+    later,
+    revoked: committed.revoked,
+  });
 }
 
 /**
- * The removed member's address, lowercased, or undefined when we do not hold
- * one.
+ * Every local precondition that can refuse the removal, checked before a key is
+ * touched, since a revocation cannot be undone.
+ *
+ * The last-Owner guard is the decrement's own condition, so it is read here
+ * rather than waited for, and a counter that cannot be read refuses on the same
+ * ground: the decrement conditions on `ownerCount`, so a missing META row
+ * cancels the transaction just the same and the removal would end with the
+ * member still here and their credentials gone.
+ */
+async function refuseBeforeRevokingKeys(
+  orgId: string,
+  wasOwner: boolean,
+): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
+  if (!wasOwner) return undefined;
+
+  const owners = await readOwnerCount(orgId);
+  if (owners === 1) return lastOwnerResponse(LAST_OWNER_REMEDY);
+  if (owners === undefined) return refuseWithoutOwnerCount(orgId);
+  return undefined;
+}
+
+/**
+ * The tail once the rows are gone: the invitations that did not fit the
+ * transaction, the member's email, and the answer.
+ *
+ * Nothing here can fail the request. The member is out, and an error now would
+ * send the caller into a retry that answers 404, while the thing that failed
+ * was a notification.
+ */
+async function finishRemoval({
+  orgId,
+  orgProfile,
+  targetUserId,
+  changedBy,
+  later,
+  revoked,
+}: {
+  orgId: string;
+  orgProfile: OrgProfileItem | undefined;
+  targetUserId: string;
+  /** The admin, by verified email or by id, for the member's email. */
+  changedBy: string;
+  /** The revoked invitations the transaction had no room for. */
+  later: InvitationRecord[];
+  revoked: AccessKeySummary[];
+}): Promise<APIGatewayProxyStructuredResultV2> {
+  await revokeDeferred(later);
+  await notifyRevokedKeys({
+    orgId,
+    orgProfile,
+    userId: targetUserId,
+    changedBy,
+    revoked,
+    cause: { kind: 'removed' },
+    source: SOURCE,
+  });
+
+  return new ResponseBuilder()
+    .status(200)
+    .body<RemoveMemberResponse>(
+      // Named only when there are any, so removing somebody who held no key
+      // answers with the empty body rather than an empty list.
+      revoked.length > 0 ? { revokedKeys: revoked } : {},
+    )
+    .build();
+}
+
+/**
+ * A vendor refused a revocation, so the member is still in the org and the keys
+ * already revoked stay revoked. Retrying is the same DELETE, which finds fewer
+ * keys.
+ */
+function vendorRefusedResponse(
+  revokedKeys: AccessKeySummary[],
+  failedKeys: AccessKeySummary[],
+): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(502)
+    .body<ErrorWithRevokedKeys>({
+      message: `${refusedKeysSubject(failedKeys)} could not be revoked, so the member is still in this organization. Try again.`,
+      revokedKeys,
+    })
+    .build();
+}
+
+/**
+ * The removed member's address as stored, or undefined when we do not hold one.
  *
  * Held because the two paths that learn a verified address write it: account
  * creation and invitation acceptance (`lib/user-profile.ts`). So undefined is
  * now the rare answer — a row written before either did, or a read that failed
- * — rather than the only one, and it is worth a log line each time. It narrows
- * the sweep to the invitations the member issued: the invitation their old link
- * belongs to stays live until it expires, and an operator reading this line is
- * the only person who can revoke it by hand.
+ * — rather than the only one, and it is worth a log line each time. Without one
+ * the sweep narrows to the invitations the member issued: the invitation their
+ * old link belongs to stays live until it expires, and an operator reading this
+ * line is the only person who can revoke it by hand.
+ *
+ * As stored rather than normalized, because it has two readers now: the sweep
+ * matches on it and normalizes at the call site, and a fence refusal shows it
+ * to an admin, who should see the address the roster showed them.
  */
 async function removedMemberAddress(userId: string): Promise<string | undefined> {
   const email = (await readUserProfile(userId))?.email;
-  if (!email) {
+  if (!email)
     console.error(
       '[remove-member] No address for the removed member — invitations to them stay live',
       { userId },
     );
-    return undefined;
-  }
-  return normalizeInviteEmail(email);
+  return email;
+}
+
+/** What a cancelled removal needs to tell one refusal from another. */
+interface RemovalFailure {
+  orgId: string;
+  targetUserId: string;
+  wasOwner: boolean;
+  revocations: number;
+  /**
+   * Keys the pass already revoked. They are gone whatever the membership now
+   * says, so every refusal below carries them: a removal that cancels after a
+   * revocation leaves a member in the org whose clients have stopped working,
+   * and an answer that mentions only the membership hides that.
+   */
+  revokedKeys: AccessKeySummary[];
 }
 
 async function removalFailureResponse(
   err: unknown,
-  {
-    orgId,
-    targetUserId,
-    wasOwner,
-    revocations,
-  }: { orgId: string; targetUserId: string; wasOwner: boolean; revocations: number },
+  { orgId, targetUserId, wasOwner, revocations, revokedKeys }: RemovalFailure,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const failed = cancelledLabels(err, [
     'membership',
@@ -169,88 +317,27 @@ async function removalFailureResponse(
   // diagnosis of an org we cannot diagnose.
   if (failed.includes('ownerCount')) {
     return (await readOwnerCount(orgId)) === undefined
-      ? ownerCountUnavailableResponse(orgId)
-      : lastOwnerResponse();
+      ? refuseWithoutOwnerCount(orgId, revokedKeys)
+      : lastOwnerResponse(LAST_OWNER_REMEDY, revokedKeys);
   }
-  if (failed.includes('invitation')) return invitationRaceResponse();
+  if (failed.includes('invitation')) return invitationRaceResponse(revokedKeys);
   // The membership delete carries both the row's existence and its role, so a
   // cancellation here is one of two things and the row says which: gone, which
   // is the outcome the caller wanted, or still there under a role somebody
   // changed while this was in flight — and that one must not read as removed,
   // because the transaction's owner-count delta was decided from the old role.
   return (await resolveMembership(orgId, targetUserId))
-    ? roleChangedResponse()
-    : notAMemberResponse();
+    ? memberRoleChangedResponse('while the removal was in flight — try again', revokedKeys)
+    : notAMemberResponse(revokedKeys);
 }
 
-function badRequestResponse(): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder()
-    .status(400)
-    .body<ErrorResponse>({ message: 'Missing userId in path' })
-    .build();
-}
-
-function notAMemberResponse(): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder()
-    .status(404)
-    .body<ErrorResponse>({ message: 'That person is not a member of this organization.' })
-    .build();
-}
-
-function beyondCeilingResponse(role: Role): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder()
-    .status(403)
-    .body<ErrorResponse>({
-      message: `Your role in this organization cannot remove a ${role}.`,
-      code: ApiErrorCode.FORBIDDEN_ROLE,
-    })
-    .build();
-}
-
-function lastOwnerResponse(): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder()
-    .status(409)
-    .body<ErrorResponse>({
-      message:
-        'This organization would be left without an owner. Transfer ownership or promote another member first.',
-      code: ApiErrorCode.LAST_OWNER,
-    })
-    .build();
-}
-
-/**
- * The org has membership rows and no counter, so the last-Owner invariant is
- * unenforceable for it until somebody repairs the META row — which the drift
- * checker does within a day. Loud, and the same answer the accept path gives for
- * the same missing row, because "contact support" is true and "you are the last
- * Owner" would not be.
- */
-function ownerCountUnavailableResponse(orgId: string): APIGatewayProxyStructuredResultV2 {
+/** Loud, because the org needs its META row repaired before an Owner can leave. */
+function refuseWithoutOwnerCount(
+  orgId: string,
+  revokedKeys?: AccessKeySummary[],
+): APIGatewayProxyStructuredResultV2 {
   console.error('[remove-member] ownerCount missing — removal of an Owner refused', { orgId });
-  return new ResponseBuilder()
-    .status(409)
-    .body<ErrorResponse>({
-      message: 'The organization’s owner count could not be updated. Please contact support.',
-    })
-    .build();
-}
-
-function roleChangedResponse(): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder()
-    .status(409)
-    .body<ErrorResponse>({
-      message: 'That member’s role changed while the removal was in flight — try again.',
-    })
-    .build();
-}
-
-function invitationRaceResponse(): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder()
-    .status(409)
-    .body<ErrorResponse>({
-      message: 'An invitation from that member changed while this was in flight — try again.',
-    })
-    .build();
+  return ownerCountUnavailableResponse('updated', revokedKeys);
 }
 
 export const handler = middy(baseHandler)

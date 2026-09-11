@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { authPartialMock } from '../test/auth-partial-mock.js';
+import { authPartialMock } from '../test/auth-partial-mock.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -17,12 +17,12 @@ const mockGetOrchestratorForRegion = vi.fn();
 
 let orch: FakeOrchestrator;
 
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (...args: unknown[]) => mockGetOrchestratorForRegion(...args),
 }));
 
-vi.mock('../lib/org-profile.js', async () => ({
-  ...(await vi.importActual<typeof import('../lib/org-profile.js')>('../lib/org-profile.js')),
+vi.mock('../lib/org-profile.ts', async () => ({
+  ...(await vi.importActual<typeof import('../lib/org-profile.ts')>('../lib/org-profile.ts')),
   getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
   isOrgDeleting: vi.fn(async () => false),
 }));
@@ -31,7 +31,7 @@ vi.mock('../lib/org-profile.js', async () => ({
 // Defaulted per describe-block to an org-1 record with a completed first sync.
 const mockGetEnablement = vi.fn();
 
-vi.mock('../lib/bucket-rag-enablement.js', () => ({
+vi.mock('../lib/bucket-rag-enablement.ts', () => ({
   getBucketRagEnablement: (...args: unknown[]) => mockGetEnablement(...args),
 }));
 
@@ -75,20 +75,20 @@ const ddbMock = mockClient(DynamoDBClient);
 // Those have their own dedicated tests; here we replace them with pass-through
 // middleware so the gate's wiring can be exercised in isolation. The userInfo
 // the auth middleware would populate is stamped by buildEvent instead.
-vi.mock('../middleware/auth.js', () => authPartialMock());
-vi.mock('../middleware/subscription-guard.js', () => ({
+vi.mock('../middleware/auth.ts', () => authPartialMock());
+vi.mock('../middleware/subscription-guard.ts', () => ({
   AccessLevel: { Read: 'read', Write: 'write' },
   subscriptionGuardMiddleware: () => ({ before: () => undefined }),
 }));
 
 process.env.FILONE_STAGE = 'test';
 
-import { baseHandler, handler } from './query-bucket.js';
-import { hashRagKeyToken, RagApiKeyKeys } from '../lib/rag-api-keys.js';
-import { buildEvent, buildContext, stubMembershipRead } from '../test/lambda-test-utilities.js';
-import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.js';
+import { baseHandler, handler } from './query-bucket.ts';
+import { hashRagKeyToken, RagApiKeyKeys } from '../lib/rag-api-keys.ts';
+import { buildEvent, buildContext, stubMembershipRead } from '../test/lambda-test-utilities.ts';
+import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.ts';
 import { OrgRole, S3Region } from '@filone/shared';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

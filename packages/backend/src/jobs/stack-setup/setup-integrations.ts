@@ -11,11 +11,11 @@ import type {
   CloudFormationCustomResourceEvent,
   CloudFormationCustomResourceResponse,
 } from 'aws-lambda';
-import { onExecutePostLogin } from './mfa-action.js';
-import { setupAuth0Callbacks, teardownAuth0Callbacks } from './setup-auth0-client.js';
-import { setupAuth0PasskeyAuth } from './setup-passkey.js';
-import { getAuth0ManagementToken } from './auth0-mgmt-token.js';
-import { throwIfNotOk } from '../../lib/auth0-management.js';
+import { onExecutePostLogin } from './mfa-action.ts';
+import { setupAuth0Callbacks, teardownAuth0Callbacks } from './setup-auth0-client.ts';
+import { setupAuth0PasskeyAuth } from './setup-passkey.ts';
+import { getAuth0ManagementToken } from './auth0-mgmt-token.ts';
+import { throwIfNotOk } from '../../lib/auth0-management.ts';
 
 // ── Custom resource property types ────────────────────────────────────
 

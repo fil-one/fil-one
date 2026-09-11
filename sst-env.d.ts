@@ -30,6 +30,10 @@ declare module "sst" {
       "type": "sst.aws.ApiGatewayV2"
       "url": string
     }
+    "AuditLog": {
+      "name": string
+      "type": "sst.sst.Linkable"
+    }
     "AuditTable": {
       "name": string
       "type": "sst.aws.Dynamo"
@@ -170,6 +174,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "ExportAuditEvents": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "ForgeDevManagementApiToken": {
       "type": "sst.sst.Secret"
       "value": string
@@ -239,6 +247,10 @@ declare module "sst" {
       "value": string
     }
     "ListAccessKeys": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "ListAuditEvents": {
       "name": string
       "type": "sst.aws.Function"
     }

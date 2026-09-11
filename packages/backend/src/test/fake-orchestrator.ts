@@ -4,12 +4,14 @@ import type {
   EgressUsageSample,
   StorageUsageSample,
   TenantInfo,
-} from '../lib/service-orchestrator.js';
-import { S3Region, TenantStatus } from '@filone/shared';
+} from '../lib/service-orchestrator.ts';
+import { S3Region, type TenantStatus } from '@filone/shared';
+import type { AccessModel } from '@filone/shared';
 
 export interface FakeOrchestrator {
   id: string;
   region: string;
+  accessModel: AccessModel;
   isTenantReady: ReturnType<typeof vi.fn>;
   getTenantStatus: ReturnType<typeof vi.fn>;
   updateTenantStatus: ReturnType<typeof vi.fn>;
@@ -27,6 +29,8 @@ export interface FakeOrchestratorOpts {
   status?: TenantStatus;
   /** Region reported by the orchestrator. Defaults to `eu-west-1`. */
   region?: S3Region;
+  /** Access model reported by the orchestrator. Defaults to `scoped-keys`. */
+  accessModel?: AccessModel;
   /** Storage series returned by `getTenantUsageMetrics`. Defaults to empty. */
   storage?: StorageUsageSample[];
   /** Egress series returned by `getTenantUsageMetrics`. Defaults to empty. */
@@ -52,17 +56,12 @@ export interface FakeOrchestratorOpts {
  */
 export function fakeOrchestrator(id: string, opts: FakeOrchestratorOpts = {}): FakeOrchestrator {
   const { ready = true, status = 'active', region = S3Region.EuWest1, failUsage = false } = opts;
-  const info: TenantInfo = {
-    bucketCount: opts.info?.bucketCount ?? 0,
-    bucketLimit: opts.info?.bucketLimit ?? 100,
-    keyCount: opts.info?.keyCount ?? 0,
-    accessKeyLimit: opts.info?.accessKeyLimit ?? 300,
-    status: opts.info?.status,
-  };
-  const bucketMetrics = opts.bucketMetrics ?? [];
+  const regionDown = () => vi.fn().mockRejectedValue(new Error('region down'));
+
   return {
     id,
     region,
+    accessModel: opts.accessModel ?? 'scoped-keys',
     isTenantReady: vi.fn((orgProfile?: { pk?: { S?: string } }) => {
       const orgId = orgProfile?.pk?.S?.replace('ORG#', '');
       return ready && orgId ? tenantFor(id, orgId) : null;
@@ -70,20 +69,31 @@ export function fakeOrchestrator(id: string, opts: FakeOrchestratorOpts = {}): F
     getTenantStatus: vi.fn(async () => ({ kind: 'ok', status })),
     updateTenantStatus: vi.fn().mockResolvedValue(undefined),
     getTenantUsageMetrics: failUsage
-      ? vi.fn().mockRejectedValue(new Error('region down'))
+      ? regionDown()
       : vi.fn().mockResolvedValue({ storage: opts.storage ?? [], egress: opts.egress ?? [] }),
-    getTenantInfo: failUsage
-      ? vi.fn().mockRejectedValue(new Error('region down'))
-      : vi.fn().mockResolvedValue(info),
-    getBucketUsageMetrics:
-      bucketMetrics instanceof Error
-        ? vi.fn().mockRejectedValue(bucketMetrics)
-        : vi.fn().mockResolvedValue(bucketMetrics),
+    getTenantInfo: failUsage ? regionDown() : vi.fn().mockResolvedValue(buildTenantInfo(opts.info)),
+    getBucketUsageMetrics: fakeBucketMetrics(opts.bucketMetrics),
     getBucket: vi.fn().mockResolvedValue(opts.bucket ?? null),
     listBuckets: failUsage
-      ? vi.fn().mockRejectedValue(new Error('region down'))
+      ? regionDown()
       : vi.fn().mockResolvedValue((opts.buckets ?? []).map((bucketName) => ({ bucketName }))),
   };
+}
+
+function buildTenantInfo(info: Partial<TenantInfo> = {}): TenantInfo {
+  return {
+    bucketCount: info.bucketCount ?? 0,
+    bucketLimit: info.bucketLimit ?? 100,
+    keyCount: info.keyCount ?? 0,
+    accessKeyLimit: info.accessKeyLimit ?? 300,
+    status: info.status,
+  };
+}
+
+function fakeBucketMetrics(bucketMetrics: StorageUsageSample[] | Error = []) {
+  return bucketMetrics instanceof Error
+    ? vi.fn().mockRejectedValue(bucketMetrics)
+    : vi.fn().mockResolvedValue(bucketMetrics);
 }
 
 /** The PROFILE item a mocked `getOrgProfile` should resolve for the given org. */

@@ -21,7 +21,7 @@ const mockOrchestrator = {
   createBucket: (...args: unknown[]) => mockCreateBucket(...args),
 };
 
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (...args: unknown[]) => {
     mockGetOrchestratorForRegion(...args);
     return mockOrchestrator;
@@ -32,14 +32,14 @@ const mockIsOrgDeleting = vi.fn(
   async (_orgId: string, _options?: { consistent?: boolean }) => false,
 );
 
-vi.mock('../lib/org-profile.js', async () => ({
-  ...(await vi.importActual<typeof import('../lib/org-profile.js')>('../lib/org-profile.js')),
+vi.mock('../lib/org-profile.ts', async () => ({
+  ...(await vi.importActual<typeof import('../lib/org-profile.ts')>('../lib/org-profile.ts')),
   isOrgDeleting: (...args: Parameters<typeof mockIsOrgDeleting>) => mockIsOrgDeleting(...args),
 }));
 
-import { baseHandler } from './create-bucket.js';
-import { BucketAlreadyExistsError, BucketConfigurationError } from '../lib/errors.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import { baseHandler } from './create-bucket.ts';
+import { BucketAlreadyExistsError, BucketConfigurationError } from '../lib/errors.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
 import { S3_REGION, S3Region } from '@filone/shared';
 
 // ---------------------------------------------------------------------------

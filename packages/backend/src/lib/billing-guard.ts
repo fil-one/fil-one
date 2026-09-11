@@ -4,7 +4,7 @@ import {
   type UpdateItemCommandInput,
   type UpdateItemCommandOutput,
 } from '@aws-sdk/client-dynamodb';
-import { getDynamoClient } from './ddb-client.js';
+import { getDynamoClient } from './ddb-client.ts';
 
 const dynamo = getDynamoClient();
 

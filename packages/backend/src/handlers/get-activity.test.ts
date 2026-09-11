@@ -25,16 +25,16 @@ const mockOrchestrator = {
 };
 
 const mockGetAvailableOrchestrators = vi.fn();
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getAvailableOrchestrators: (...args: unknown[]) => mockGetAvailableOrchestrators(...args),
 }));
 
-vi.mock('../lib/org-profile.js', () => ({
+vi.mock('../lib/org-profile.ts', () => ({
   getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
 }));
 
 const mockReportMetric = vi.fn();
-vi.mock('../lib/metrics.js', () => ({
+vi.mock('../lib/metrics.ts', () => ({
   reportMetric: (...args: unknown[]) => mockReportMetric(...args),
 }));
 
@@ -57,8 +57,8 @@ process.env.FILONE_STAGE = 'test';
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { baseHandler } from './get-activity.js';
-import { buildEvent, membershipFor } from '../test/lambda-test-utilities.js';
+import { baseHandler } from './get-activity.ts';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

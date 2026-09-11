@@ -8,7 +8,7 @@
 // from the price the subscription is billed on, and where they are absent this
 // module says "see your agreement" rather than filling the gap in.
 
-import { SubscriptionStatus, TB_BYTES, getUsageLimits } from '@filone/shared';
+import { PlanId, SubscriptionStatus, TB_BYTES, getUsageLimits } from '@filone/shared';
 import type { BillingInfo, Subscription } from '@filone/shared';
 
 import { daysUntil, formatDate, formatMonthDay, pluralizeDays } from './time.js';
@@ -46,16 +46,30 @@ export function statusBadge(status: SubscriptionStatus): StatusBadge {
  * What to call the plan.
  *
  * The Stripe product's name when there is one, because that is what the
- * customer's contract and their invoices call it. The fallbacks are states
- * rather than names: an account with no subscription has no product to name, and
- * a trial is a trial whatever it turns into.
+ * customer's contract and their invoices call it. Then the account's state, then
+ * the plan enum, and where none of those answers, "Your plan". Never "Unknown":
+ * a label the console cannot fill is still a plan somebody is paying for.
  */
 export function planTitle(subscription: Subscription): string {
   if (subscription.planName) return subscription.planName;
+
   switch (subscription.status) {
     case SubscriptionStatus.Trialing:
       return 'Free trial';
     case SubscriptionStatus.Inactive:
+      return 'No plan';
+    default:
+      break;
+  }
+
+  // The enum, for an account Stripe has not named. It carries three values and
+  // a negotiated quote is none of them, so it answers only where it can.
+  switch (subscription.planId) {
+    case PlanId.FreeTrial:
+      return 'Free trial';
+    case PlanId.PayAsYouGo:
+      return 'Pay as you go';
+    case PlanId.None:
       return 'No plan';
     default:
       return 'Your plan';

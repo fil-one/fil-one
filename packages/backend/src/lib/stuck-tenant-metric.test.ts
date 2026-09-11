@@ -9,14 +9,14 @@ vi.mock('sst', () => ({
 }));
 
 const mockReportMetric = vi.fn();
-vi.mock('./metrics.js', () => ({
+vi.mock('./metrics.ts', () => ({
   reportMetric: (...args: unknown[]) => mockReportMetric(...args),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { scanAndEmitStuckTenantCount } from './stuck-tenant-metric.js';
-import { FINAL_SETUP_STATUS } from './org-setup-status.js';
+import { scanAndEmitStuckTenantCount } from './stuck-tenant-metric.ts';
+import { FINAL_SETUP_STATUS } from './org-setup-status.ts';
 
 describe('scanAndEmitStuckTenantCount', () => {
   beforeEach(() => {

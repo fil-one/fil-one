@@ -8,19 +8,19 @@ import {
   DuplicateTokenNameError,
   updateTenantStatus,
   getBucketStorageSamples,
-} from './aurora-backoffice.js';
+} from './aurora-backoffice.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../auth-secrets.js', () => ({
+vi.mock('../auth-secrets.ts', () => ({
   getAuroraBackofficeSecrets: () => ({
     AURORA_BACKOFFICE_TOKEN: 'test-aurora-token',
   }),
 }));
 
-vi.mock('./aurora-api-metrics.js', () => ({
+vi.mock('./aurora-api-metrics.ts', () => ({
   instrumentClient: vi.fn(),
 }));
 

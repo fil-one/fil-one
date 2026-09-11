@@ -12,12 +12,9 @@ import {
   GetObjectLockConfigurationCommand,
 } from '@aws-sdk/client-s3';
 
-vi.mock('sst', () => ({
-  Resource: {
-    UserInfoTable: { name: 'UserInfoTable' },
-    FthManagementApiToken: { value: 'kid.secret' },
-  },
-}));
+// No sst mock on purpose. The management client is injected, so nothing on the
+// orchestrator's import path reads `Resource`; sst throws on the first property
+// access outside `sst shell`, so this suite passing proves the import is clean.
 
 const ssmMock = mockClient(SSMClient);
 const s3Mock = mockClient(S3Client);
@@ -25,16 +22,14 @@ const s3Mock = mockClient(S3Client);
 const mockEnsureFthTenantReady = vi.fn();
 const mockUpdateClientStatus = vi.fn();
 const mockGetClient = vi.fn();
-vi.mock('./fth-tenant-setup.js', () => ({
+vi.mock('./fth-tenant-setup.ts', () => ({
   ensureTenantReady: (...args: unknown[]) => mockEnsureFthTenantReady(...args),
+  FTH_CONSOLE_USER_CODE: 'filone-console',
 }));
 
 const mockGetClientMetricsTimeseries = vi.fn();
 const mockGetClientMetricsCurrent = vi.fn();
-// Hoisted so it is initialized before the static import of fth-orchestrator.js,
-// whose module-level `createInstrumentedFthClient()` runs at import time and
-// reads this mock via the mocked createFthManagementClient.
-const mockFthClient = vi.hoisted(() => ({
+const mockFthClient = {
   createAccessKey: vi.fn(),
   listAccessKeys: vi.fn(),
   deleteAccessKey: vi.fn(),
@@ -44,24 +39,9 @@ const mockFthClient = vi.hoisted(() => ({
   getClientMetricsTimeseries: (...args: unknown[]) => mockGetClientMetricsTimeseries(...args),
   updateClientStatus: (...args: unknown[]) => mockUpdateClientStatus(...args),
   getClientMetricsCurrent: (...args: unknown[]) => mockGetClientMetricsCurrent(...args),
-}));
-
-vi.mock('./fth-management-client.js', async () => {
-  const actual = await vi.importActual<typeof import('./fth-management-client.js')>(
-    './fth-management-client.js',
-  );
-  return {
-    ...actual,
-    createFthManagementClient: vi.fn(() => mockFthClient),
-  };
-});
-
-vi.mock('./fth-api-metrics.js', () => ({
-  instrumentClient: vi.fn(),
-}));
+};
 
 process.env.FILONE_STAGE = 'test';
-process.env.FTH_MANAGEMENT_API_URL = 'https://api.fortilyx.test';
 
 import {
   AccessKeyAlreadyExistsError,
@@ -70,11 +50,13 @@ import {
   BucketConfigurationError,
   BucketNotEmptyError,
   BucketNotFoundError,
-} from '../errors.js';
-import { FthApiError, FthConflictError, FthNotFoundError } from './fth-management-client.js';
+} from '../errors.ts';
+import { FthApiError, FthConflictError, FthNotFoundError } from './fth-management-client.ts';
+import type { FthManagementClient } from './fth-management-client.ts';
+import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
 
-import { fthOrchestrator, _resetFthOrchestratorCachesForTesting } from './fth-orchestrator.js';
-import type { IssueAccessKeyOpts } from '../service-orchestrator.js';
+import { createFthOrchestrator } from './fth-orchestrator.ts';
+import type { IssueAccessKeyOpts, ServiceOrchestrator } from '../service-orchestrator.ts';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 const fthClientId = '42';
@@ -83,11 +65,16 @@ function profileItem(attrs: Record<string, string>) {
   return Object.fromEntries(Object.entries(attrs).map(([k, v]) => [k, { S: v }]));
 }
 
+// A fresh instance per test replaces a cache reset: the console storage-user
+// cache lives on the instance.
+let fthOrchestrator: ServiceOrchestrator;
+
 beforeEach(() => {
   ssmMock.reset();
   s3Mock.reset();
   vi.clearAllMocks();
-  _resetFthOrchestratorCachesForTesting();
+  _resetS3CredentialsCacheForTesting();
+  fthOrchestrator = createFthOrchestrator(mockFthClient as unknown as FthManagementClient);
 });
 
 function stubConsoleStorageUser() {
@@ -325,7 +312,7 @@ describe('fthOrchestrator.getS3ClientContext', () => {
     const ctx = await fthOrchestrator.getS3ClientContext(fthClientId);
 
     expect(ctx).toEqual({
-      endpointUrl: 'https://us-east-1.fortilyx.com',
+      endpointUrl: 'https://s3.us-east-1.staging.filonecontent.com',
       region: 'us-east-1',
       credentials: { accessKeyId: 'AK1', secretAccessKey: 'SK1' },
       forcePathStyle: true,

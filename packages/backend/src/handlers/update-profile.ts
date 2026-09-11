@@ -7,18 +7,18 @@ import { UpdateProfileSchema, isSocialConnection, ApiErrorCode } from '@filone/s
 import disposableDomainsList from 'disposable-domains';
 import * as psl from 'psl';
 import { Resource } from 'sst';
-import { getDynamoClient } from '../lib/ddb-client.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
+import { getDynamoClient } from '../lib/ddb-client.ts';
+import { ResponseBuilder } from '../lib/response-builder.ts';
 import {
   updateAuth0User,
   sendVerificationEmail,
   getConnectionType,
-} from '../lib/auth0-management.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo, requestTokenRefresh } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { csrfMiddleware } from '../middleware/csrf.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+} from '../lib/auth0-management.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo, requestTokenRefresh } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { csrfMiddleware } from '../middleware/csrf.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 
 const DISPOSABLE_DOMAINS = new Set(disposableDomainsList as string[]);
 

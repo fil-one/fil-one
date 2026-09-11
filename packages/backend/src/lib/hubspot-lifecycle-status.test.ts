@@ -1,6 +1,6 @@
 import { SubscriptionStatus, mapStripeStatus } from '@filone/shared';
 import { describe, expect, it } from 'vitest';
-import { HubSpotLifecycleStatus, fromInternalStatus } from './hubspot-lifecycle-status.js';
+import { HubSpotLifecycleStatus, fromInternalStatus } from './hubspot-lifecycle-status.ts';
 
 describe('fromInternalStatus', () => {
   it.each([

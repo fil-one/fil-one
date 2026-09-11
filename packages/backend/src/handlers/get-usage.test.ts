@@ -13,11 +13,11 @@ vi.mock('sst', () => ({
 }));
 
 const mockGetAvailableOrchestrators = vi.fn();
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getAvailableOrchestrators: (...args: unknown[]) => mockGetAvailableOrchestrators(...args),
 }));
 
-vi.mock('../lib/org-profile.js', () => ({
+vi.mock('../lib/org-profile.ts', () => ({
   getOrgProfile: vi.fn(async (orgId: string) => fakeOrgProfile(orgId)),
 }));
 
@@ -25,9 +25,9 @@ process.env.FILONE_STAGE = 'test';
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { baseHandler } from './get-usage.js';
-import { buildEvent, membershipFor } from '../test/lambda-test-utilities.js';
-import { fakeOrchestrator, fakeOrgProfile, tenantFor } from '../test/fake-orchestrator.js';
+import { baseHandler } from './get-usage.ts';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
+import { fakeOrchestrator, fakeOrgProfile, tenantFor } from '../test/fake-orchestrator.ts';
 import { OrgRole, S3Region } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
@@ -49,12 +49,20 @@ function authenticatedEvent(role?: OrgRole) {
 }
 
 /**
- * The org's stored `ACCESSKEY#` rows. Only the attributes the count projects are
- * written, since scope is the only predicate applied to them.
+ * The org's stored `ACCESSKEY#` rows. Only `createdBy`/`recovered` vary per
+ * test; the rest are the minimum a real row carries, since the count is read
+ * through the same mapping the API Keys list uses.
  */
 function stubAccessKeyRows(...rows: { createdBy?: string; recovered?: boolean }[]) {
   ddbMock.on(QueryCommand).resolves({
-    Items: rows.map((row) => ({
+    Items: rows.map((row, i) => ({
+      sk: { S: `ACCESSKEY#key-${i}` },
+      keyName: { S: `Key ${i}` },
+      accessKeyId: { S: `AKIA${i}` },
+      createdAt: { S: '2026-01-01T00:00:00Z' },
+      status: { S: 'active' },
+      permissions: { L: [{ S: 'read' }] },
+      bucketScope: { S: 'all' },
       ...(row.createdBy ? { createdBy: { S: row.createdBy } } : {}),
       ...(row.recovered ? { recovered: { BOOL: true } } : {}),
     })),

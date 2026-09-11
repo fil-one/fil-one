@@ -32,7 +32,7 @@ const { FakeDuplicateTokenNameError } = vi.hoisted(() => {
   return { FakeDuplicateTokenNameError };
 });
 
-vi.mock('./aurora-backoffice.js', () => ({
+vi.mock('./aurora-backoffice.ts', () => ({
   createAuroraTenant: (...args: unknown[]) => mockCreateAuroraTenant(...args),
   setupAuroraTenant: (...args: unknown[]) => mockSetupAuroraTenant(...args),
   createAuroraTenantApiKey: (...args: unknown[]) => mockCreateAuroraTenantApiKey(...args),
@@ -41,17 +41,17 @@ vi.mock('./aurora-backoffice.js', () => ({
 
 const mockCreateAuroraAccessKey = vi.fn();
 
-vi.mock('./aurora-portal.js', () => ({
+vi.mock('./aurora-portal.ts', () => ({
   createAuroraAccessKey: (...args: unknown[]) => mockCreateAuroraAccessKey(...args),
 }));
 
 const mockReportMetric = vi.fn();
-vi.mock('../metrics.js', () => ({
+vi.mock('../metrics.ts', () => ({
   reportMetric: (...args: unknown[]) => mockReportMetric(...args),
 }));
 
 const mockScanAndEmitStuckTenantCount = vi.fn().mockResolvedValue(undefined);
-vi.mock('../stuck-tenant-metric.js', () => ({
+vi.mock('../stuck-tenant-metric.ts', () => ({
   scanAndEmitStuckTenantCount: (...args: unknown[]) => mockScanAndEmitStuckTenantCount(...args),
 }));
 
@@ -66,8 +66,8 @@ import {
   processTenantSetup,
   recordSetupFailure,
   OrgSetupStatus,
-} from './aurora-tenant-setup.js';
-import { OrgDeletingError } from '../org-profile.js';
+} from './aurora-tenant-setup.ts';
+import { OrgDeletingError } from '../org-profile.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

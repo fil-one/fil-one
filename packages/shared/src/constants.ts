@@ -1,23 +1,38 @@
 /** Deployment stages. */
-export enum Stage {
-  Production = 'production',
-  Staging = 'staging',
-}
+export const Stage = {
+  Production: 'production',
+  Staging: 'staging',
+} as const;
+export type Stage = (typeof Stage)[keyof typeof Stage];
+
+/**
+ * A known stage or any other stage name, such as a developer's personal stage.
+ *
+ * `Stage | string` would collapse to `string` and lose the editor's completion
+ * of the known values. TypeScript does not merge a literal union into
+ * `string & {}`, so callers see `Stage.Production` and `Stage.Staging` in
+ * completion while any string is still accepted.
+ */
+export type StageLike = Stage | (string & {});
 
 export const DOCS_URL = 'https://docs.fil.one';
 
 /** Available S3 regions. */
-export enum S3Region {
-  EuWest1 = 'eu-west-1',
-  UsEast1 = 'us-east-1',
+export const S3Region = {
+  EuWest1: 'eu-west-1',
+  UsEast1: 'us-east-1',
   /** Forge-backed. Not yet GA — non-production stages only (see getAvailableRegions). */
-  EuCentral3 = 'eu-central-3',
+  EuCentral3: 'eu-central-3',
   /**
    * The Forge dev sandbox: a virtual S3 region label for the dev FilOne
    * Appliance. Non-production stages only (see getAvailableRegions).
    */
-  UsEast9 = 'us-east-9',
-}
+  UsEast9: 'us-east-9',
+} as const;
+export type S3Region = (typeof S3Region)[keyof typeof S3Region];
+
+/** A known region or any other region name; see {@link StageLike} for the idiom. */
+export type S3RegionLike = S3Region | (string & {});
 
 /** Default S3 region for Fil One. */
 export const S3_REGION = S3Region.EuWest1 satisfies S3Region;
@@ -31,7 +46,7 @@ export const REGION_LABELS: Record<S3Region, string> = {
 };
 
 /** Format a region as `"Europe (France) eu-west-1"`. */
-export function formatRegion(region: S3Region | string): string {
+export function formatRegion(region: S3RegionLike): string {
   const label = REGION_LABELS[region as S3Region];
   return label ? `${label} ${region}` : region;
 }
@@ -42,7 +57,7 @@ export function formatRegion(region: S3Region | string): string {
  * Defaults to the label of {@link S3_REGION} when the input is null/undefined,
  * and falls back to the raw region string when it isn't a known {@link S3Region}.
  */
-export function getRegionLabel(region: S3Region | string | null | undefined): string {
+export function getRegionLabel(region: S3RegionLike | null | undefined): string {
   const r = region ?? S3_REGION;
   return REGION_LABELS[r as S3Region] ?? r;
 }
@@ -70,7 +85,7 @@ export function isFoundationEmail(email: string | undefined): boolean {
  * unused. It causes considerable churn and it is likely in the future that we
  * will want staging only regions temporarily.
  */
-export function getAvailableRegions(stage: Stage | string): S3Region[] {
+export function getAvailableRegions(stage: StageLike): S3Region[] {
   const regions: S3Region[] = [S3Region.EuWest1, S3Region.UsEast1];
   if (stage !== Stage.Production) {
     regions.push(S3Region.EuCentral3, S3Region.UsEast9);
@@ -88,7 +103,7 @@ export function getAvailableRegions(stage: Stage | string): S3Region[] {
  * unused. It causes considerable churn and it is likely in the future that we
  * will want staging only regions temporarily.
  */
-export function isSupportedRegion(region: string, stage: Stage | string): region is S3Region {
+export function isSupportedRegion(region: string, stage: StageLike): region is S3Region {
   return getAvailableRegions(stage).includes(region as S3Region);
 }
 
@@ -102,34 +117,64 @@ export function supportsBucketManagement(region: S3Region): boolean {
 }
 
 /**
+ * How a backend decides what a credential may do.
+ *
+ * `scoped-keys`: the org is a tenant and an access key carries its own
+ * permission set and bucket list, stamped at creation and unchangeable
+ * afterwards. The member's role caps what a key may carry, and a role narrowing
+ * revokes the keys the holder could no longer mint.
+ *
+ * `iam`: each member is a principal at the storage system, an access key
+ * belongs to a member, and the key's authority is the member's as evaluated at
+ * request time. No region declares it yet.
+ */
+export type AccessModel = 'scoped-keys' | 'iam';
+
+/**
+ * The access model a region's backend serves. Every region is `scoped-keys`
+ * today: Aurora and FTH cannot model a principal, and the Forge integration
+ * issues flat-permission keys through the Management API, which is the same
+ * shape. A Forge region moves to `iam` when its Hilt network implements the
+ * principal-and-policy contract.
+ *
+ * Mirrored here rather than read off the orchestrator so the console can decide
+ * without one in hand.
+ */
+export function getRegionAccessModel(_region: S3Region): AccessModel {
+  return 'scoped-keys';
+}
+
+/**
  * Domain dedicated to user data (FIL-627). Reputation systems act on the
  * registrable domain, so one abusive upload under `fil.one` could flag the
  * console, website, docs and email with it. Nothing else is served from here.
  *
- * Operators terminate TLS themselves — every one must serve this hostname
- * before merge.
+ * Operators terminate TLS themselves. Every one must serve its region's S3
+ * endpoint hostname under this domain before merge.
  */
-const S3_DATA_DOMAIN = 's3.filonecontent.com';
+const S3_DATA_DOMAIN = 'filonecontent.com';
 
 /**
  * Build the S3-compatible endpoint URL for a region and stage. Non-production
- * stages talk to each operator's own hostname directly.
+ * stages use a per-stage hostname under the data domain where the operator
+ * serves one, and the operator's own hostname otherwise.
  */
-export function getS3Endpoint(region: S3Region, stage: Stage | string): string {
+export function getS3Endpoint(region: S3Region, stage: StageLike): string {
   //TODO change this when aurora supports staging URL structure through our DNS.
-  if (stage != Stage.Production) {
+  if (stage !== Stage.Production) {
     switch (region) {
       case S3Region.EuWest1:
         return 'https://s3.dev.aur.lu';
       case S3Region.UsEast1:
-        return 'https://us-east-1.fortilyx.com';
+        return 'https://s3.us-east-1.staging.filonecontent.com';
       case S3Region.EuCentral3:
-        return 'https://ingot.staging.fil.one';
+        return 'https://s3.eu-central-3.staging.filonecontent.com';
       case S3Region.UsEast9:
-        return 'https://ingot.dev.forge-sandbox.fil.one';
+        return 'https://s3.us-east-9.latest.dev.filonecontent.com';
     }
   }
-  return `https://${region}.${S3_DATA_DOMAIN}`;
+
+  return `https://s3.${region}.${S3_DATA_DOMAIN}`;
 }
 
 /**
@@ -138,7 +183,7 @@ export function getS3Endpoint(region: S3Region, stage: Stage | string): string {
  * Production uses a custom domain (`auth.fil.one`); all other stages —
  * staging, per-PR previews, personal dev — share the dev tenant.
  */
-export function getAuth0Domain(stage: Stage | string): string {
+export function getAuth0Domain(stage: StageLike): string {
   return stage === Stage.Production ? 'auth.fil.one' : 'dev-oar2nhqh58xf5pwf.us.auth0.com';
 }
 

@@ -6,8 +6,8 @@
 // is live. Every destructive writer asks before it applies one.
 
 import type Stripe from 'stripe';
-import { emitSupersededBillingEvent } from './stripe-webhook-metrics.js';
-import { BILLING_IDENTITY_PROJECTION, readSubscription } from './subscription-store.js';
+import { emitSupersededBillingEvent } from './stripe-webhook-metrics.ts';
+import { BILLING_IDENTITY_PROJECTION, readSubscription } from './subscription-store.ts';
 
 /**
  * Whether the stored row has already moved on from the subscription this event

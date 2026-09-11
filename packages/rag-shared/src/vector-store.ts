@@ -1,4 +1,4 @@
-import type { VectorQueryResult, VectorStoreChunk } from './schemas.js';
+import type { VectorQueryResult, VectorStoreChunk } from './schemas.ts';
 
 /**
  * Options accepted by {@link VectorStore.ensureIndex}.

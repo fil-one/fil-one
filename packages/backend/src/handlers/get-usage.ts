@@ -2,16 +2,16 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { UsageResponse, TenantStatus } from '@filone/shared';
-import { countAccessKeysInScope } from '../lib/access-key-inventory.js';
-import { keyScope } from '../lib/key-scope.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
-import { getProvisionedRegions } from '../lib/region-helpers.js';
-import type { ServiceOrchestrator, TenantInfo } from '../lib/service-orchestrator.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+import { countAccessKeysInScope } from '../lib/access-key-inventory.ts';
+import { keyScope } from '../lib/key-scope.ts';
+import { ResponseBuilder } from '../lib/response-builder.ts';
+import { getProvisionedRegions } from '../lib/region-helpers.ts';
+import type { ServiceOrchestrator, TenantInfo } from '../lib/service-orchestrator.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 
 interface RegionUsage {
   /** Most-recent storage reading for the region (point-in-time). */

@@ -1,6 +1,6 @@
 import pRetry, { AbortError, type Options as RetryOptions } from 'p-retry';
 import { Resource } from 'sst';
-import type { HubSpotLifecycleStatus } from './hubspot-lifecycle-status.js';
+import type { HubSpotLifecycleStatus } from './hubspot-lifecycle-status.ts';
 
 // HubSpot subscription type ID for marketing emails. Shared across all environments
 // (single HubSpot portal). Look up via:
@@ -112,13 +112,14 @@ export type ContactWriteOutcome = 'updated' | 'bootstrapped' | 'unmatched';
 
 /** Thrown for any HubSpot response that is neither success nor a handled 404. */
 export class HubSpotApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly responseBody: string,
-    operation: string,
-  ) {
+  readonly status: number;
+  readonly responseBody: string;
+
+  constructor(status: number, responseBody: string, operation: string) {
     super(`HubSpot ${operation} failed (${status}): ${responseBody}`);
     this.name = 'HubSpotApiError';
+    this.status = status;
+    this.responseBody = responseBody;
   }
 }
 

@@ -1,13 +1,14 @@
 import type {
   AccessKeyPermission,
+  AccessModel,
   GranularPermission,
   RetentionDurationType,
   RetentionMode,
   S3Region,
   TenantStatus,
 } from '@filone/shared';
-import type { S3ClientContext } from './s3-client.js';
-import type { OrgProfileItem } from './org-profile.js';
+import type { S3ClientContext } from './s3-client.ts';
+import type { OrgProfileItem } from './org-profile.ts';
 
 // Retry budget for {@link ServiceOrchestrator.deleteTenant}. A DELETE 409s
 // unless the tenant is already `disabled`; both calls are synchronous, so a 409
@@ -171,6 +172,14 @@ export interface ServiceOrchestrator {
    */
   readonly id: string;
   readonly region: S3Region;
+
+  /**
+   * How this backend decides what a credential may do, and therefore which
+   * rules the console applies to it. Every orchestrator serves `scoped-keys`
+   * today; see {@link getRegionAccessModel}, which answers the same question
+   * for callers holding a region rather than an orchestrator.
+   */
+  readonly accessModel: AccessModel;
 
   /**
    * Resolves the org's tenant on this orchestrator, provisioning it if needed

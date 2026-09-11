@@ -5,12 +5,13 @@ import {
   GetItemCommand,
   PutItemCommand,
   QueryCommand,
+  TransactionCanceledException,
   TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
-import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
+import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -21,6 +22,7 @@ vi.mock('sst', () => sstResourceMock());
 const mockEnsureTenantReady = vi.fn();
 const mockIssueAccessKey = vi.fn();
 const mockFindAccessKeyByName = vi.fn();
+const mockDeleteAccessKey = vi.fn();
 const mockGetOrchestratorForRegion = vi.fn();
 
 const mockOrchestrator = {
@@ -29,9 +31,11 @@ const mockOrchestrator = {
   ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
   issueAccessKey: (...args: unknown[]) => mockIssueAccessKey(...args),
   findAccessKeyByName: (...args: unknown[]) => mockFindAccessKeyByName(...args),
+  // A mint that finds its creator demoted discards what it just made.
+  deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
 };
 
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (region: string) => {
     mockGetOrchestratorForRegion(region);
     return mockOrchestrator;
@@ -45,17 +49,22 @@ const ddbMock = mockClient(DynamoDBClient);
 // Importing the handler module builds its Middy chain, so the middleware that
 // chain installs is stubbed to a pass-through. The tests below call
 // `baseHandler` directly.
-vi.mock('../middleware/csrf.js', () => ({
+vi.mock('../middleware/csrf.ts', () => ({
   csrfMiddleware: () => ({ before: () => undefined }),
 }));
-vi.mock('../middleware/subscription-guard.js', () => ({
+vi.mock('../middleware/subscription-guard.ts', () => ({
   AccessLevel: { Read: 'read', Write: 'write' },
   subscriptionGuardMiddleware: () => ({ before: () => undefined }),
 }));
 
-import { baseHandler } from './create-access-key.js';
-import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.js';
-import { buildEvent, membershipFor } from '../test/lambda-test-utilities.js';
+import { baseHandler } from './create-access-key.ts';
+import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
+import {
+  buildEvent,
+  membershipFor,
+  stubAbsentMembershipRead,
+  stubMembershipRead,
+} from '../test/lambda-test-utilities.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -63,14 +72,27 @@ import { buildEvent, membershipFor } from '../test/lambda-test-utilities.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 
-function validBody({ keyName, region = 'eu-west-1' }: { keyName?: string; region?: string }) {
+function validBody({
+  keyName,
+  region = 'eu-west-1',
+  granularPermissions,
+}: {
+  keyName?: string;
+  region?: string;
+  /** `PutObjectRetention` and `PutObjectLegalHold` need `privileged.grant`, which only an Owner holds. */
+  granularPermissions?: string[];
+}) {
   return JSON.stringify({
     keyName,
     permissions: ['read', 'write', 'list', 'delete'],
+    ...(granularPermissions ? { granularPermissions } : {}),
     bucketScope: 'all',
     region,
   });
 }
+
+/** A key only an Owner may mint, so a demotion to Admin strands it. */
+const PRIVILEGED = { granularPermissions: ['PutObjectRetention'] };
 
 function issuedAccessKey() {
   return {
@@ -88,10 +110,36 @@ function issuedAccessKey() {
 /**
  * The two writes a mint makes: the intent, put on its own before the vendor
  * call, and the transaction carrying the key row with its completion event.
+ *
+ * Plus the read that follows them: the mint asks once more what role the
+ * creator holds, and a suite that leaves it unstubbed is a suite where every
+ * key is discarded for a demotion that never happened.
  */
-function stubWrites() {
+function stubWrites(role: OrgRole = OrgRole.Owner) {
   ddbMock.on(PutItemCommand).resolves({});
   ddbMock.on(TransactWriteItemsCommand).resolves({});
+  stubCreatorRole(role);
+}
+
+/** What the post-write check reads. */
+function stubCreatorRole(role: OrgRole | undefined) {
+  stubMembershipRead(ddbMock, {
+    orgId: USER_INFO.orgId,
+    userId: USER_INFO.userId,
+    role: role ?? OrgRole.Owner,
+  });
+}
+
+/**
+ * The cancellation DynamoDB sends for the key-row transaction, one code per
+ * item: the role check, the sequence bump, the row, then the audit event.
+ */
+function cancelledWith(codes: readonly string[]) {
+  return new TransactionCanceledException({
+    message: 'cancelled',
+    $metadata: {},
+    CancellationReasons: codes.map((Code) => ({ Code })),
+  });
 }
 
 /** Every transaction that wrote a key row (one per mint, or none). */
@@ -822,6 +870,9 @@ describe('create-access-key baseHandler', () => {
       role: OrgRole,
       body: { permissions: string[]; granularPermissions?: string[]; region?: string },
     ) {
+      // The row has to agree with the session: the mint reads the role again
+      // after writing, and a row saying something else is a demotion mid-flight.
+      stubCreatorRole(role);
       return buildEvent({
         body: JSON.stringify({
           keyName: 'My Key',
@@ -929,6 +980,206 @@ describe('create-access-key baseHandler', () => {
       // refused here would be a live credential with no record.
       expect(mockEnsureTenantReady).not.toHaveBeenCalled();
       expect(mockIssueAccessKey).not.toHaveBeenCalled();
+    });
+  });
+  /**
+   * The permission cap runs against a role read before the vendor call, and the
+   * vendor call is slow. Two checks cover a role change landing in that gap:
+   * the key row's own `ConditionCheck`, and a read after the row lands. Only a
+   * narrowing costs the key; a widening covers it.
+   */
+  describe('a role change during the mint', () => {
+    beforeEach(() => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      stubWrites();
+      mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+      mockDeleteAccessKey.mockResolvedValue(undefined);
+    });
+
+    it('asks again once the row has landed', async () => {
+      const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
+      await baseHandler(event);
+
+      expect(
+        ddbMock.commandCalls(GetItemCommand).map((call) => call.args[0].input.Key),
+      ).toContainEqual({ pk: { S: 'ORG#org-1' }, sk: { S: 'MEMBER#user-1' } });
+    });
+
+    it('advances the mint sequence in the transaction that writes the row', async () => {
+      // Same transaction as the row on purpose: a refused mint must advance
+      // nothing, or a narrowing would cancel over a key that never existed.
+      const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
+
+      await baseHandler(event);
+
+      const items = keyRowWrites()[0]!.args[0].input.TransactItems ?? [];
+      const bump = items.find(
+        (item) => item.Update?.Key?.sk?.S === `ACCESSKEY_MINT_SEQ#${USER_INFO.userId}`,
+      );
+      expect(bump?.Update).toMatchObject({
+        TableName: 'OrgTable',
+        UpdateExpression: 'ADD mintSeq :one',
+      });
+      expect(items.some((item) => item.Put?.TableName === 'UserInfoTable')).toBe(true);
+    });
+
+    it('keeps the key when the role is the one the cap ran against', async () => {
+      const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
+
+      expect((await baseHandler(event)).statusCode).toBe(201);
+      expect(mockDeleteAccessKey).not.toHaveBeenCalled();
+    });
+
+    it('keeps the key when the role widened underneath it', async () => {
+      // Every key a Member could mint, an Admin can: the key is valid under the
+      // role they now hold, and a 409 would destroy it for nothing.
+      stubCreatorRole(OrgRole.Admin);
+      const event = buildEvent({
+        body: validBody({ keyName: 'My Key' }),
+        userInfo: {
+          ...USER_INFO,
+          membership: membershipFor(USER_INFO.orgId, USER_INFO.userId, OrgRole.Member),
+        },
+      });
+
+      expect((await baseHandler(event)).statusCode).toBe(201);
+      expect(mockDeleteAccessKey).not.toHaveBeenCalled();
+    });
+
+    it('discards the key and the row when the role narrowed underneath it', async () => {
+      // The row is already written, unlike the ConditionCheck path, so both
+      // halves have to go. An Admin holds no `privileged.grant`, so the
+      // retention key the Owner asked for is one they could not have minted.
+      stubCreatorRole(OrgRole.Admin);
+      const event = buildEvent({
+        body: validBody({ keyName: 'My Key', ...PRIVILEGED }),
+        userInfo: {
+          ...USER_INFO,
+          membership: membershipFor(USER_INFO.orgId, USER_INFO.userId, OrgRole.Owner),
+        },
+      });
+
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(409);
+      expect(JSON.parse(result.body!).code).toBe(ApiErrorCode.FORBIDDEN_ROLE);
+      expect(mockDeleteAccessKey).toHaveBeenCalledWith('aurora-t-1', 'aurora-key-1');
+
+      const deletes = keyRowWrites()
+        .flatMap((call) => call.args[0].input.TransactItems ?? [])
+        .filter((item) => item.Delete?.TableName === 'UserInfoTable');
+      expect(deletes).toHaveLength(1);
+      expect(deletes[0]!.Delete!.Key).toStrictEqual({
+        pk: { S: 'ORG#org-1' },
+        sk: { S: 'ACCESSKEY#aurora-key-1' },
+      });
+    });
+
+    it('records the discard as a revocation the member made of their own key', async () => {
+      stubCreatorRole(OrgRole.Admin);
+      const event = buildEvent({
+        body: validBody({ keyName: 'My Key', ...PRIVILEGED }),
+        userInfo: {
+          ...USER_INFO,
+          membership: membershipFor(USER_INFO.orgId, USER_INFO.userId, OrgRole.Owner),
+        },
+      });
+
+      await baseHandler(event);
+
+      const revocation = standaloneEvents().find((event) => event.type === 'key.deleted');
+      expect(revocation).toMatchObject({
+        phase: 'intent',
+        actor: { kind: 'user', id: 'user-1' },
+        details: { keyKind: 's3', reason: 'stale_role_at_mint', keyName: 'My Key' },
+      });
+    });
+
+    it('keeps the key when the narrower role could have minted it', async () => {
+      // Owner to Admin narrows the role, but not below anything this key
+      // carries — and the narrowing that demoted them would have retained the
+      // identical key, so discarding it here would contradict that.
+      stubCreatorRole(OrgRole.Admin);
+      const event = buildEvent({
+        body: validBody({ keyName: 'My Key' }),
+        userInfo: {
+          ...USER_INFO,
+          membership: membershipFor(USER_INFO.orgId, USER_INFO.userId, OrgRole.Owner),
+        },
+      });
+
+      expect((await baseHandler(event)).statusCode).toBe(201);
+      expect(mockDeleteAccessKey).not.toHaveBeenCalled();
+    });
+
+    it('discards the key when the row refuses to land under a narrowed role', async () => {
+      // The `ConditionCheck` path: the row never landed, so only the credential
+      // has to go.
+      ddbMock
+        .on(TransactWriteItemsCommand)
+        .rejects(cancelledWith(['ConditionalCheckFailed', 'None', 'None', 'None']));
+
+      const result = await baseHandler(
+        buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO }),
+      );
+
+      expect(result.statusCode).toBe(409);
+      expect(JSON.parse(result.body!).code).toBe(ApiErrorCode.FORBIDDEN_ROLE);
+      expect(mockDeleteAccessKey).toHaveBeenCalled();
+    });
+
+    it('hands the credential back when the transaction lost to contention', async () => {
+      // Every mint for this member writes the sequence row and every narrowing
+      // of their role asserts it, so DynamoDB can cancel this one over
+      // contention alone. Nothing landed, and rethrowing would answer 500 while
+      // leaving a live credential no row names.
+      ddbMock
+        .on(TransactWriteItemsCommand)
+        .rejects(cancelledWith(['None', 'TransactionConflict', 'None', 'None']));
+
+      const result = await baseHandler(
+        buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO }),
+      );
+
+      expect(result.statusCode).toBe(409);
+      expect(JSON.parse(result.body!).message).toContain('try again');
+      expect(mockDeleteAccessKey).toHaveBeenCalledWith('aurora-t-1', 'aurora-key-1');
+    });
+
+    it('discards the key when the member was removed outright', async () => {
+      // No membership row at all: the row write's `attribute_exists(pk)` would
+      // have refused a removal that landed first, so this is one that landed
+      // after.
+      stubAbsentMembershipRead(ddbMock, { orgId: USER_INFO.orgId, userId: USER_INFO.userId });
+
+      expect(
+        (
+          await baseHandler(
+            buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO }),
+          )
+        ).statusCode,
+      ).toBe(409);
+      expect(mockDeleteAccessKey).toHaveBeenCalled();
+    });
+
+    it('still answers 409 when the vendor will not take the key back', async () => {
+      // The row survives, naming a credential that may still exist. Logged for
+      // an operator rather than retried on a request path.
+      stubCreatorRole(OrgRole.Admin);
+      mockDeleteAccessKey.mockRejectedValue(new Error('vendor down'));
+
+      const result = await baseHandler(
+        buildEvent({
+          body: validBody({ keyName: 'My Key', ...PRIVILEGED }),
+          userInfo: {
+            ...USER_INFO,
+            membership: membershipFor(USER_INFO.orgId, USER_INFO.userId, OrgRole.Owner),
+          },
+        }),
+      );
+
+      expect(result.statusCode).toBe(409);
+      expect(vi.mocked(console.error).mock.calls[0]?.[0]).toContain('creator was demoted');
     });
   });
 });

@@ -3,9 +3,9 @@
 // existing instrumentClient pattern (see fth-api-metrics.ts) but does not
 // depend on @hey-api/client-fetch or codegen.
 
-import { createApiError } from './fth-api-errors.js';
+import { createApiError } from './fth-api-errors.ts';
 
-export * from './fth-api-errors.js';
+export * from './fth-api-errors.ts';
 
 // Local status union — keeps the low-level client independent of
 // service-orchestrator.ts. Matches FTH's TenantStatus enum.

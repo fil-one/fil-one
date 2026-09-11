@@ -7,14 +7,15 @@ import {
   TransactionCanceledException,
   TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
-import { unmarshall } from '@aws-sdk/util-dynamodb';
-import { ApiErrorCode, OrgRole } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
-import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.js';
+import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
+import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
+import type { AccessKeySummary } from '@filone/shared';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
+import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
-vi.mock('../lib/auth-secrets.js', () => ({
+vi.mock('../lib/auth-secrets.ts', () => ({
   getAuthSecrets: () => ({
     AUTH0_CLIENT_ID: 'test-client-id',
     AUTH0_CLIENT_SECRET: 'test-client-secret',
@@ -28,21 +29,39 @@ vi.mock('jose', () => ({
   createRemoteJWKSet: vi.fn((_url: unknown) => 'mock-jwks'),
 }));
 
+// The removal revokes the member's keys at whichever orchestrator holds them,
+// and the registry builds the FTH client at import time from a secret this
+// suite has no reason to stand up.
+const mockDeleteAccessKey = vi.fn();
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
+  getOrchestratorForRegion: (region: string) => ({
+    id: region === 'us-east-1' ? 'fth' : 'aurora',
+    region,
+    accessModel: 'scoped-keys',
+    isTenantReady: () => `tenant:${region}`,
+    deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
+  }),
+}));
+
 const ddbMock = mockClient(DynamoDBClient);
+
+// The revocation email is the only thing here that leaves over HTTP.
+const mockFetch = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
+vi.stubGlobal('fetch', mockFetch);
 
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
-import { handler } from './remove-member.js';
-import { OrgKeys } from '../lib/org-membership.js';
-import { inviteExpiresAt } from '../lib/invitations.js';
+import { handler } from './remove-member.ts';
+import { OrgKeys } from '../lib/org-membership.ts';
+import { inviteExpiresAt } from '../lib/invitations.ts';
 import {
   buildEvent,
   buildContext,
   NO_MEMBERSHIP,
   stubAbsentMembershipRead,
   stubMembershipRead,
-} from '../test/lambda-test-utilities.js';
+} from '../test/lambda-test-utilities.ts';
 
 const MOCK_SUB = 'auth0|owner';
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
@@ -145,6 +164,36 @@ function stubTargetInvitations(count: number) {
   );
 }
 
+/** The departing member's access keys, as the org partition holds them. */
+function stubMemberKeys(...keys: Array<Record<string, unknown>>) {
+  ddbMock
+    .on(QueryCommand, {
+      TableName: 'UserInfoTable',
+      ExpressionAttributeValues: {
+        ':pk': { S: `ORG#${ORG_ID}` },
+        ':skPrefix': { S: 'ACCESSKEY#' },
+      },
+    })
+    .resolves({
+      Items: keys.map((key, index) =>
+        marshall(
+          {
+            pk: `ORG#${ORG_ID}`,
+            sk: `ACCESSKEY#key-${index}`,
+            keyName: `key ${index}`,
+            accessKeyId: `AKIAEXAMPLE000${index}`,
+            createdAt: '2026-02-01T00:00:00.000Z',
+            status: 'active',
+            region: S3Region.UsEast1,
+            createdBy: TARGET_ID,
+            ...key,
+          },
+          { removeUndefinedValues: true },
+        ),
+      ),
+    });
+}
+
 /**
  * The org's META row, which the failure path reads to tell the last-Owner guard
  * firing from there being no counter for it to fire on.
@@ -178,10 +227,10 @@ function stubTargetProfile(email: string | undefined, userId = TARGET_ID) {
     .resolves(email ? { Item: { email: { S: email } } } : {});
 }
 
+/** The membership transaction, which is the last one a removal writes. */
 function transactItems() {
   const calls = ddbMock.commandCalls(TransactWriteItemsCommand);
-  expect(calls).toHaveLength(1);
-  return calls[0].args[0].input.TransactItems ?? [];
+  return calls.at(-1)?.args[0].input.TransactItems ?? [];
 }
 
 function body(result: unknown) {
@@ -210,6 +259,8 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     });
 
     ddbMock.on(GetItemCommand).resolves({});
+    // The org partition the revocation pass reads. Most cases hold no keys.
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
     ddbMock
       .on(GetItemCommand, {
         TableName: 'UserInfoTable',
@@ -227,7 +278,9 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     ddbMock.on(TransactWriteItemsCommand).resolves({});
     stubTargetInvitations(0);
     stubTargetProfile(TARGET_EMAIL);
-    stubOwnerCount(1);
+    // Two Owners by default: the handler reads the counter before it revokes
+    // anything, so a sole Owner is refused before a key is touched.
+    stubOwnerCount(2);
     callerHolds(OrgRole.Owner);
     targetHolds(OrgRole.Member);
   });
@@ -235,9 +288,10 @@ describe('DELETE /api/org/members/{userId} handler', () => {
   it('removes both membership rows', async () => {
     const result = await handler(removeEvent(), buildContext());
 
-    expect(result).toMatchObject({ statusCode: 204 });
+    expect(result).toMatchObject({ statusCode: 200 });
     const items = transactItems();
-    expect(items).toHaveLength(3);
+    // Both rows, the mint-sequence fence, and the event.
+    expect(items).toHaveLength(4);
     expect(items[0].Delete).toMatchObject({
       Key: { pk: { S: OrgKeys.orgPk(ORG_ID) }, sk: { S: OrgKeys.memberSk(TARGET_ID) } },
       // Removing somebody already gone is a clean 404, not a silent success; the
@@ -249,6 +303,40 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     expect(items[1].Delete).toMatchObject({
       Key: { pk: { S: OrgKeys.userPk(TARGET_ID) }, sk: { S: OrgKeys.membershipSk(ORG_ID) } },
     });
+    // The removal fences on the member's mint sequence, so a key minted against
+    // the listing it revoked from turns the change into a retry. The row is
+    // read, never deleted: its reading must not be satisfiable by a member who
+    // left and rejoined.
+    expect(items[2].ConditionCheck?.Key).toEqual({
+      pk: { S: OrgKeys.orgPk(ORG_ID) },
+      sk: { S: OrgKeys.accessKeyMintSeqSk(TARGET_ID) },
+    });
+    expect(items.filter((item) => item.Delete)).toHaveLength(2);
+  });
+
+  it('refuses a removal when a key was minted after the listing, and names whose', async () => {
+    // Two rows, the fence, and the event: the fence is the third item, and it
+    // alone cancelling is what turns the removal into a retry.
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(2, 4));
+
+    const result = await handler(removeEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 409 });
+    // The address the roster already showed the admin. Told only "that member",
+    // they cannot tell which of their members to go and look at.
+    expect(body(result).message).toContain(
+      `An access key was created for ${TARGET_EMAIL} while this was in flight`,
+    );
+  });
+
+  it('names the member generically when a fence refusal has no address to use', async () => {
+    stubTargetProfile(undefined);
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(2, 4));
+
+    const result = await handler(removeEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 409 });
+    expect(body(result).message).toContain('An access key was created for that member');
   });
 
   it('records the removal with no secret in it', async () => {
@@ -308,7 +396,7 @@ describe('DELETE /api/org/members/{userId} handler', () => {
 
     const result = await handler(removeEvent(USER_ID), buildContext());
 
-    expect(result).toMatchObject({ statusCode: 204 });
+    expect(result).toMatchObject({ statusCode: 200 });
   });
 
   it('refuses a Member trying to leave, because the matrix grants them no removal', async () => {
@@ -469,7 +557,7 @@ describe('DELETE /api/org/members/{userId} handler', () => {
 
     // The removal is the urgent act; the invitation to them stays live until it
     // expires, which is a line an operator can act on rather than a silence.
-    expect(result).toMatchObject({ statusCode: 204 });
+    expect(result).toMatchObject({ statusCode: 200 });
     expect(unmarshall(auditItemIn(transactItems())).details).toMatchObject({
       revokedInvitations: 1,
     });
@@ -511,14 +599,175 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     expect(body(result).message).toContain('role changed');
   });
 
-  it('leaves the member’s keys alone', async () => {
-    // M1 removes the membership and nothing else; the console names the keys in
-    // its confirmation dialog and FIL-1021 adds the revoke-by-default flow.
+  it('leaves the membership transaction free of key rows', async () => {
+    // A key is revoked at its orchestrator and delisted by its own `key.deleted`
+    // completion, never inside the membership write: those are separate
+    // transactions, and the RAG keys are outside the pass entirely.
+    stubMemberKeys({ permissions: ['read'] });
+
     await handler(removeEvent(), buildContext());
 
     const written = JSON.stringify(transactItems());
-    expect(written).not.toContain('ACCESSKEY');
+    // The mint-sequence fence rides this transaction; a key row never does.
+    expect(written).not.toContain('ACCESSKEY#');
     expect(written).not.toContain('RAGKEY');
+  });
+
+  it('revokes every key the departing member created, and nobody else’s', async () => {
+    stubMemberKeys(
+      { permissions: ['read'] },
+      { permissions: ['read', 'DeleteBucket'] },
+      { createdBy: 'somebody-else' },
+      { createdBy: undefined },
+    );
+
+    const result = await handler(removeEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 200 });
+    expect(mockDeleteAccessKey.mock.calls).toStrictEqual([
+      ['tenant:us-east-1', 'key-0'],
+      ['tenant:us-east-1', 'key-1'],
+    ]);
+    // The admin doing this is not the key holder, so the response is the only
+    // place they learn which credentials the removal destroyed.
+    expect(body(result).revokedKeys.map((key: AccessKeySummary) => key.keyName)).toStrictEqual([
+      'key 0',
+      'key 1',
+    ]);
+  });
+
+  it('revokes at the orchestrator before it takes the rows away', async () => {
+    stubMemberKeys({ permissions: ['read'] });
+    const order: string[] = [];
+    mockDeleteAccessKey.mockImplementation(() => {
+      order.push('revoke');
+      return Promise.resolve();
+    });
+    ddbMock.on(TransactWriteItemsCommand).callsFake(() => {
+      order.push('transaction');
+      return {};
+    });
+
+    await handler(removeEvent(), buildContext());
+
+    expect(order[0]).toBe('revoke');
+  });
+
+  it('leaves the member in the org when a vendor refuses', async () => {
+    stubMemberKeys({ permissions: ['read'] });
+    mockDeleteAccessKey.mockRejectedValueOnce(new Error('down'));
+
+    const result = await handler(removeEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 502 });
+    expect(
+      ddbMock
+        .commandCalls(TransactWriteItemsCommand)
+        .flatMap((call) => call.args[0].input.TransactItems ?? [])
+        .filter((item) => item.Delete?.Key?.sk?.S?.startsWith('MEMBER#')),
+    ).toHaveLength(0);
+  });
+
+  it('refuses to remove an Owner with no counter to read, before a key is touched', async () => {
+    // The decrement conditions on `ownerCount`, so a missing META row cancels
+    // the transaction just the same. Revoking first would leave the member here
+    // and their credentials gone.
+    targetHolds(OrgRole.Owner);
+    stubOwnerCount(undefined);
+    stubMemberKeys({ permissions: ['read'] });
+
+    const result = await handler(removeEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 409 });
+    expect(body(result).message).toContain('owner count');
+    expect(mockDeleteAccessKey).not.toHaveBeenCalled();
+  });
+
+  it('names the keys already revoked when a vendor refuses a later one', async () => {
+    // The member is still here and the earlier keys are gone; a response that
+    // named only the failure would hide that.
+    stubMemberKeys({ permissions: ['read'] }, { permissions: ['read'] });
+    mockDeleteAccessKey.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('down'));
+
+    const result = await handler(removeEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 502 });
+    expect(body(result).revokedKeys.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
+  });
+
+  it('removes the member even when the pass after it cannot finish', async () => {
+    // The rows are gone by then. Answering with an error would send the caller
+    // into a retry that answers 404.
+    stubMemberKeys({ permissions: ['read'] });
+    ddbMock
+      .on(QueryCommand, {
+        TableName: 'UserInfoTable',
+        ExpressionAttributeValues: {
+          ':pk': { S: `ORG#${ORG_ID}` },
+          ':skPrefix': { S: 'ACCESSKEY#' },
+        },
+      })
+      .resolvesOnce({
+        Items: [
+          marshall({
+            pk: `ORG#${ORG_ID}`,
+            sk: 'ACCESSKEY#key-0',
+            keyName: 'key 0',
+            accessKeyId: 'AKIAEXAMPLE0000',
+            createdAt: '2026-02-01T00:00:00.000Z',
+            status: 'active',
+            region: S3Region.UsEast1,
+            createdBy: TARGET_ID,
+            permissions: ['read'],
+          }),
+        ],
+      })
+      .rejects(new Error('DynamoDB unavailable'));
+
+    expect(await handler(removeEvent(), buildContext())).toMatchObject({ statusCode: 200 });
+  });
+
+  it('names the keys already revoked when the removal then cancelled', async () => {
+    // The member is still here and their clients have stopped working, so a
+    // refusal that mentions only the roster hides half of what happened.
+    stubMemberKeys({ permissions: ['read'] });
+    ddbMock.on(TransactWriteItemsCommand).callsFake((input) => {
+      const items = input.TransactItems ?? [];
+      // The revocation's own completion goes through; the membership one does not.
+      if (
+        items.some((item: { Delete?: { Key?: { sk?: { S?: string } } } }) =>
+          item.Delete?.Key?.sk?.S?.startsWith('MEMBER#'),
+        )
+      ) {
+        throw cancelledAt(0, 3);
+      }
+      return {};
+    });
+    targetOnSecondRead(OrgRole.Admin);
+
+    const result = await handler(removeEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 409 });
+    expect(body(result).revokedKeys.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
+  });
+
+  it('records the removal with the ids of the keys that went', async () => {
+    stubMemberKeys({ permissions: ['read'] });
+
+    await handler(removeEvent(), buildContext());
+
+    const committed = ddbMock
+      .commandCalls(TransactWriteItemsCommand)
+      .map((call) => unmarshall(auditItemIn(call.args[0].input.TransactItems)));
+    const revocation = committed.find((event) => event.type === 'key.deleted');
+    const completion = committed.find((event) => event.type === 'member.removed');
+
+    expect(revocation).toMatchObject({ details: { reason: 'member_removed' } });
+    expect(completion).toMatchObject({
+      phase: 'completion',
+      outcome: 'succeeded',
+      details: { revokedKeys: ['key-0'] },
+    });
   });
 
   it('returns 400 with no member id in the path', async () => {

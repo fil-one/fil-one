@@ -8,9 +8,9 @@ import type {
 } from '@aws-sdk/client-dynamodb';
 import type { AwsStub } from 'aws-sdk-client-mock';
 import { OrgRole } from '@filone/shared';
-import { OrgKeys } from '../lib/org-membership.js';
-import type { OrgMembership } from '../lib/org-membership.js';
-import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.js';
+import { OrgKeys } from '../lib/org-membership.ts';
+import type { OrgMembership } from '../lib/org-membership.ts';
+import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.ts';
 
 /** What `mockClient(DynamoDBClient)` returns. */
 type DynamoMock = AwsStub<ServiceInputTypes, ServiceOutputTypes, DynamoDBClientResolvedConfig>;

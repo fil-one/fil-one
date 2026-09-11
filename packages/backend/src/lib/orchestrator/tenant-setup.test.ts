@@ -34,8 +34,8 @@ const ssmMock = mockClient(SSMClient);
 // SDK calls are module-mocked, so the client value is just forwarded — a sentinel is enough.
 const client = 'mock-management-client' as unknown as Client;
 
-import { ensureTenantReady, CONSOLE_KEY_NAME } from './tenant-setup.js';
-import { OrgDeletingError } from '../org-profile.js';
+import { ensureTenantReady, CONSOLE_KEY_NAME } from './tenant-setup.ts';
+import { OrgDeletingError } from '../org-profile.ts';
 import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 
 const orgId = '00000000-0000-0000-0000-000000000001';

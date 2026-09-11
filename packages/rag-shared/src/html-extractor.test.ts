@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { extractTextFromHtml } from './html-extractor.js';
+import { extractTextFromHtml } from './html-extractor.ts';
 
 describe('extractTextFromHtml', () => {
   it('strips ordinary tags and keeps the text content', () => {
