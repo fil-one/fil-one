@@ -1544,9 +1544,32 @@ export default $config({
               Version: '2012-10-17',
               Statement: [
                 {
+                  // FIL-1139: the broker's lookup is a reverse tenant-UUID →
+                  // org match with no key available, so Scan is unavoidable
+                  // until UserInfoTable grows a tenant-id GSI. This condition
+                  // is the enforced ceiling meanwhile: every request must
+                  // declare SPECIFIC_ATTRIBUTES (the plain StringEquals is
+                  // what blocks a bare return-everything Scan) and may only
+                  // reference the five attributes the lookup filters on and
+                  // projects — member rows, emails, invite tokens, and
+                  // credential material cannot be returned through this role.
+                  // The broker's two consumers pass Select explicitly; deploy
+                  // their change before this one.
                   Effect: 'Allow',
                   Action: ['dynamodb:Scan'],
                   Resource: [userInfoTable.arn],
+                  Condition: {
+                    'ForAllValues:StringEquals': {
+                      'dynamodb:Attributes': [
+                        'pk',
+                        'sk',
+                        'createdBy',
+                        'auroraTenantId',
+                        'fthTenantId',
+                      ],
+                    },
+                    StringEquals: { 'dynamodb:Select': 'SPECIFIC_ATTRIBUTES' },
+                  },
                 },
                 {
                   Effect: 'Allow',
