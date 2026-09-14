@@ -6,6 +6,7 @@ import {
   PutItemCommand,
   TransactionCanceledException,
   TransactWriteItemsCommand,
+  UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { sstResourceMock } from '../test/sst-resource-mock.ts';
@@ -328,6 +329,7 @@ describe('rotate-access-key baseHandler', () => {
     stubStoredKey({ createdBy: OWNER.userId });
     ddbMock.on(PutItemCommand).resolves({});
     ddbMock.on(TransactWriteItemsCommand).resolves({});
+    ddbMock.on(UpdateItemCommand).resolves({});
     // The owner was demoted just after the row landed.
     stubMembershipRead(ddbMock, { ...OWNER, role: OrgRole.ReadOnly });
 
@@ -335,6 +337,89 @@ describe('rotate-access-key baseHandler', () => {
 
     expect(result.statusCode).toBe(409);
     expect(body(result).message).toContain('owner');
+    expect(mockDeleteAccessKey).toHaveBeenCalledWith(TENANT_ID, 'aurora-key-2');
+    expect(mockDeleteAccessKey).not.toHaveBeenCalledWith(TENANT_ID, KEY_ID);
+  });
+
+  it('releases the claim on the old row when the replacement is discarded', async () => {
+    // Left in place, the claim would strand the old key: live, listed, and
+    // refused every rotation as already rotated, pointing at a key that is gone.
+    stubStoredKey({ createdBy: OWNER.userId });
+    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+    ddbMock.on(UpdateItemCommand).resolves({});
+    stubMembershipRead(ddbMock, { ...OWNER, role: OrgRole.ReadOnly });
+
+    await baseHandler(eventFor(OrgRole.Admin));
+
+    const release = ddbMock.commandCalls(UpdateItemCommand).map((call) => call.args[0].input);
+    expect(release).toHaveLength(1);
+    expect(release[0].Key).toStrictEqual(marshall({ pk: 'ORG#org-1', sk: `ACCESSKEY#${KEY_ID}` }));
+    expect(release[0].UpdateExpression).toBe('REMOVE replacedBy');
+    expect(release[0].ConditionExpression).toBe('replacedBy = :ours');
+    expect(release[0].ExpressionAttributeValues).toStrictEqual(
+      marshall({ ':ours': 'aurora-key-2' }),
+    );
+  });
+
+  it('keeps the claim when the discarded replacement may still be live', async () => {
+    stubStoredKey({ createdBy: OWNER.userId });
+    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+    ddbMock.on(UpdateItemCommand).resolves({});
+    stubMembershipRead(ddbMock, { ...OWNER, role: OrgRole.ReadOnly });
+    mockDeleteAccessKey.mockRejectedValue(new Error('vendor unavailable'));
+
+    await baseHandler(eventFor(OrgRole.Admin));
+
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+  });
+
+  it("asserts the rotator's own authority when the key is somebody else's", async () => {
+    // The owner's row is what the mint conditions; a caller demoted or removed
+    // mid-flight would otherwise complete on the snapshot they arrived with.
+    stubStoredKey({ createdBy: OWNER.userId });
+    stubWrites();
+    stubMembershipRead(ddbMock, { ...OWNER, role: OrgRole.Member });
+
+    await baseHandler(eventFor(OrgRole.Admin));
+
+    const checked = mintItems()
+      .filter((item) => item.ConditionCheck)
+      .map((item) => item.ConditionCheck?.Key?.sk?.S);
+    expect(checked).toStrictEqual([
+      OrgKeys.memberSk(OWNER.userId),
+      OrgKeys.memberSk(USER_INFO.userId),
+    ]);
+  });
+
+  it('conditions the row once when the caller is the owner', async () => {
+    stubStoredKey();
+    stubWrites();
+
+    await baseHandler(eventFor());
+
+    expect(mintItems().filter((item) => item.ConditionCheck)).toHaveLength(1);
+  });
+
+  it("refuses when the rotator's role changed mid-rotation", async () => {
+    stubStoredKey({ createdBy: OWNER.userId });
+    ddbMock.on(PutItemCommand).resolves({});
+    stubMembershipRead(ddbMock, { ...OWNER, role: OrgRole.Member });
+    // Items: owner role, sequence, row, source claim, rotator role, audit.
+    ddbMock.on(TransactWriteItemsCommand).rejects(
+      new TransactionCanceledException({
+        message: 'cancelled',
+        $metadata: {},
+        CancellationReasons: [{}, {}, {}, {}, { Code: 'ConditionalCheckFailed' }, {}],
+      }),
+    );
+
+    const result = await baseHandler(eventFor(OrgRole.Admin));
+
+    expect(result.statusCode).toBe(409);
+    expect(body(result).code).toBe(ApiErrorCode.FORBIDDEN_ROLE);
+    expect(body(result).message).toContain('Your role');
     expect(mockDeleteAccessKey).toHaveBeenCalledWith(TENANT_ID, 'aurora-key-2');
     expect(mockDeleteAccessKey).not.toHaveBeenCalledWith(TENANT_ID, KEY_ID);
   });
@@ -563,6 +648,45 @@ describe('rotate-access-key baseHandler', () => {
     expect(result.statusCode).toBe(409);
     expect(body(result).code).toBe(ApiErrorCode.FORBIDDEN_ROLE);
     expect(mockDeleteAccessKey).toHaveBeenCalledWith(TENANT_ID, 'aurora-key-2');
+  });
+
+  it('skips the revoke when the response would not go out in time', async () => {
+    // Once the row has landed, this response is the only copy of the secret.
+    stubStoredKey();
+    stubWrites();
+
+    const result = await baseHandler(eventFor(), { getRemainingTimeInMillis: () => 1_000 });
+
+    expect(result.statusCode).toBe(201);
+    expect(body(result)).toMatchObject({
+      secretAccessKey: 'secret-abc-123',
+      previousKeyRevoked: false,
+    });
+    expect(mockDeleteAccessKey).not.toHaveBeenCalledWith(TENANT_ID, KEY_ID);
+  });
+
+  it('gives the revoke the time that remains and no more', async () => {
+    stubStoredKey();
+    stubWrites();
+    // The vendor never answers the revoke.
+    mockDeleteAccessKey.mockImplementation((_tenant: string, id: string) =>
+      id === KEY_ID ? new Promise(() => {}) : Promise.resolve(),
+    );
+
+    const result = await baseHandler(eventFor(), { getRemainingTimeInMillis: () => 3_050 });
+
+    expect(result.statusCode).toBe(201);
+    expect(body(result).previousKeyRevoked).toBe(false);
+  });
+
+  it('revokes when the invocation has time for it', async () => {
+    stubStoredKey();
+    stubWrites();
+
+    const result = await baseHandler(eventFor(), { getRemainingTimeInMillis: () => 30_000 });
+
+    expect(body(result).previousKeyRevoked).toBe(true);
+    expect(mockDeleteAccessKey).toHaveBeenCalledWith(TENANT_ID, KEY_ID);
   });
 
   it('hands over the replacement even when the old key survives its revoke', async () => {

@@ -202,6 +202,11 @@ export async function discardUnrecordedKey({
  * path. Through `revokeAccessKey` so the removal is audited like any other, and
  * so the row delete rides its completion rather than being a second write
  * nobody records.
+ *
+ * Answers whether the credential is gone, so a caller holding state that only
+ * makes sense while it exists — a rotation's claim on the row it replaced — can
+ * let go of it. A `RevocationNotRecordedError` is a dead credential with a
+ * stale row, which is gone for that purpose; anything else may still be live.
  */
 export async function discardRecordedKey({
   minted,
@@ -211,9 +216,10 @@ export async function discardRecordedKey({
   minted: MintedKey;
   minter: Pick<KeyMinter, 'orgId' | 'userId'>;
   actor: AuditActor;
-}): Promise<void> {
+}): Promise<boolean> {
   try {
     await revokeAccessKey({ orgId: minter.orgId, ...minted, actor, reason: 'stale_role_at_mint' });
+    return true;
   } catch (err) {
     // Left for the operator rather than retried: a second delete against a
     // vendor that just refused one is not for a request path. A
@@ -230,6 +236,7 @@ export async function discardRecordedKey({
         error: err,
       },
     );
+    return err instanceof RevocationNotRecordedError;
   }
 }
 

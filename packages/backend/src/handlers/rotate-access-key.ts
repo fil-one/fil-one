@@ -1,9 +1,10 @@
-import { GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import type { AttributeValue, TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
-import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
+import type { APIGatewayProxyStructuredResultV2, Context } from 'aws-lambda';
+import { setTimeout as sleep } from 'node:timers/promises';
 import {
   ApiErrorCode,
   NO_ROLE,
@@ -37,6 +38,8 @@ import {
 } from '../lib/key-mint.ts';
 import type { KeyMinter, MintRecord, MintedKey } from '../lib/key-mint.ts';
 import { revokeAndReport } from '../lib/key-revocation.ts';
+import type { RevokeAccessKeyArgs } from '../lib/key-revocation.ts';
+import { rotatorStillAuthorizedCheck } from '../lib/membership-changes.ts';
 import { keyScope, notYourKeyResponse, withinScope } from '../lib/key-scope.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
 import {
@@ -78,10 +81,23 @@ const dynamo = getDynamoClient();
  */
 export async function baseHandler(
   event: AuthenticatedEvent,
+  context?: Pick<Context, 'getRemainingTimeInMillis'>,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const prepared = await prepareRotation(event);
-  return 'keyId' in prepared ? await issueReplacement(prepared) : prepared;
+  if (!('keyId' in prepared)) return prepared;
+  return await issueReplacement(prepared, context?.getRemainingTimeInMillis?.());
 }
+
+/**
+ * Time held back from the revoke of the old key so the response goes out.
+ *
+ * Once the replacement's row has landed, this response is the only copy of its
+ * secret there will ever be. The revoke that follows is a vendor call, and an
+ * invocation that timed out inside it would lose the secret to save a key the
+ * caller can delete from the list. So the revoke gets the time that remains
+ * minus this, and no more.
+ */
+const RESPONSE_RESERVE_MS = 3_000;
 
 /**
  * Everything that can refuse a rotation before the vendor is touched, and the
@@ -181,13 +197,10 @@ async function prepareRotation(
 }
 
 /** Mint the replacement, record it, and take the key it supersedes. */
-async function issueReplacement({
-  keyId,
-  stored,
-  orchestrator,
-  tenantId,
-  rotator,
-}: Rotation): Promise<APIGatewayProxyStructuredResultV2> {
+async function issueReplacement(
+  { keyId, stored, orchestrator, tenantId, rotator }: Rotation,
+  remainingMs: number | undefined,
+): Promise<APIGatewayProxyStructuredResultV2> {
   const { orgId, userId, email } = rotator;
   const actor = userActor({ userId, email });
   // The replacement is the owner's key, so the owner is whose role the row
@@ -245,43 +258,48 @@ async function issueReplacement({
     tenantId,
   };
 
-  const row: AccessKeyRecord = {
-    pk: AccessKeyKeys.orgPk(orgId),
-    sk: AccessKeyKeys.keySk(replacement.id),
-    keyName: stored.keyName,
-    accessKeyId: replacement.accessKeyId,
-    createdAt: replacement.createdAt,
-    status: 'active',
-    region: stored.region,
-    permissions: stored.permissions,
-    vendorKeyName,
-    // Who reissued it and when, beside the owner the row keeps.
-    rotatedBy: userId,
-    rotatedAt: replacement.createdAt,
-    ...optionalKeyAttributes(stored),
-    ...carriedAttribution(stored),
-  };
+  const row = replacementRow({ orgId, stored, replacement, vendorKeyName, rotatedBy: userId });
 
   // Claiming the source row in the same transaction is what serialises two
   // rotations of one key: the second finds `replacedBy` set and its row does
   // not land, so it hands its credential back. `attribute_exists` covers a key
   // revoked between the read at the top and this write.
+  // A key that is not the caller's also asserts the caller's own authority,
+  // which the row write otherwise says nothing about: the owner's row is the
+  // one the mint conditions, and a caller demoted or removed mid-flight would
+  // complete on the snapshot they arrived with.
   const record = await recordMintedKey({
     row,
     mint,
     minter,
-    alongside: [claimSourceRow({ orgId, keyId, replacedBy: replacement.id })],
+    alongside: [
+      claimSourceRow({ orgId, keyId, replacedBy: replacement.id }),
+      ...(ownedByCaller
+        ? []
+        : [
+            {
+              item: rotatorStillAuthorizedCheck({ orgId, userId, key: stored }),
+              label: 'rotatorRole',
+            },
+          ]),
+    ],
   });
   if (!record.recorded) {
     await discardUnrecordedKey({ minted, mint, minter });
-    return unrecordedResponse(record.reason, ownedByCaller);
+    return unrecordedResponse(record, ownedByCaller);
   }
 
   // The row's own condition cannot refuse a demotion that landed just after the
   // write, so the rotation looks once more while it is the only request holding
   // the credential. `create-access-key.ts` explains the race in full.
   if (await keyExceedsCurrentRole(minter)) {
-    await discardRecordedKey({ minted, minter, actor });
+    // The claim on the old row named a replacement that is now gone. Left in
+    // place it would strand the key: live, listed, and refused every rotation
+    // as already rotated. Released only once the credential is gone, so a
+    // claim never points at nothing while a credential still exists.
+    if (await discardRecordedKey({ minted, minter, actor })) {
+      await releaseSourceClaim({ orgId, keyId, replacedBy: replacement.id });
+    }
     return ownerRoleChangedResponse(ownedByCaller);
   }
 
@@ -290,19 +308,22 @@ async function issueReplacement({
   // credential at the vendor with no local row whenever this call then failed,
   // which is the one outcome nobody can see. This way the worst case is two
   // listed keys, and the caller is told about it.
-  const previousKeyRevoked = await revokeAndReport({
-    orgId,
-    keyId,
-    accessKeyId: stored.accessKeyId,
-    // The name the vendor holds it under, which is what an operator reading the
-    // event would search for. The two differ once a key has been rotated before.
-    keyName: stored.vendorKeyName ?? stored.keyName,
-    region: stored.region,
-    orchestrator,
-    tenantId,
-    actor,
-    reason: 'rotation',
-  });
+  const previousKeyRevoked = await revokeWithinBudget(
+    {
+      orgId,
+      keyId,
+      accessKeyId: stored.accessKeyId,
+      // The name the vendor holds it under, which is what an operator reading the
+      // event would search for. The two differ once a key has been rotated before.
+      keyName: stored.vendorKeyName ?? stored.keyName,
+      region: stored.region,
+      orchestrator,
+      tenantId,
+      actor,
+      reason: 'rotation',
+    },
+    remainingMs,
+  );
 
   return new ResponseBuilder()
     .status(201)
@@ -342,6 +363,38 @@ type StoredKey = Partial<AccessKeyRecord> & { keyName: string; region: S3Region 
 function readStoredKey(item: Record<string, AttributeValue>, keyId: string): StoredKey {
   const row = unmarshall(item) as Partial<AccessKeyRecord>;
   return { ...row, keyName: row.keyName ?? keyId, region: row.region ?? DEFAULT_ACCESS_KEY_REGION };
+}
+
+/** The replacement's row: the original's shape, a new credential, and who reissued it. */
+function replacementRow({
+  orgId,
+  stored,
+  replacement,
+  vendorKeyName,
+  rotatedBy,
+}: {
+  orgId: string;
+  stored: Rotation['stored'];
+  replacement: IssuedAccessKey;
+  vendorKeyName: string;
+  rotatedBy: string;
+}): AccessKeyRecord {
+  return {
+    pk: AccessKeyKeys.orgPk(orgId),
+    sk: AccessKeyKeys.keySk(replacement.id),
+    keyName: stored.keyName,
+    accessKeyId: replacement.accessKeyId,
+    createdAt: replacement.createdAt,
+    status: 'active',
+    region: stored.region,
+    permissions: stored.permissions,
+    vendorKeyName,
+    // Who reissued it and when, beside the owner the row keeps.
+    rotatedBy,
+    rotatedAt: replacement.createdAt,
+    ...optionalKeyAttributes(stored),
+    ...carriedAttribution(stored),
+  };
 }
 
 /**
@@ -422,16 +475,101 @@ function claimSourceRow({
 
 /** What the caller hears when the replacement's row did not land, by why. */
 function unrecordedResponse(
-  reason: Exclude<MintRecord, { recorded: true }>['reason'],
+  record: Exclude<MintRecord, { recorded: true }>,
   ownedByCaller: boolean,
 ): APIGatewayProxyStructuredResultV2 {
-  switch (reason) {
+  switch (record.reason) {
     case 'minter_role_changed':
       return ownerRoleChangedResponse(ownedByCaller);
     case 'condition_failed':
-      return sourceClaimedResponse();
+      // The rotator's own row refused, or the source row was already claimed.
+      return record.label === 'rotatorRole' ? roleChangedResponse() : sourceClaimedResponse();
     case 'write_conflict':
       return mintConflictResponse();
+  }
+}
+
+/**
+ * Take back the claim {@link claimSourceRow} put on the old row, when the
+ * replacement it named is gone. Conditional on the claim still being ours: a
+ * later rotation may have landed its own by now, and that one stands.
+ */
+async function releaseSourceClaim({
+  orgId,
+  keyId,
+  replacedBy,
+}: {
+  orgId: string;
+  keyId: string;
+  replacedBy: string;
+}): Promise<void> {
+  try {
+    await dynamo.send(
+      new UpdateItemCommand({
+        TableName: Resource.UserInfoTable.name,
+        Key: marshall({ pk: AccessKeyKeys.orgPk(orgId), sk: AccessKeyKeys.keySk(keyId) }),
+        UpdateExpression: 'REMOVE replacedBy',
+        ConditionExpression: 'replacedBy = :ours',
+        ExpressionAttributeValues: marshall({ ':ours': replacedBy }),
+      }),
+    );
+  } catch (err) {
+    // The key is live and listed either way; what is lost is its next rotation,
+    // which the operator can restore by clearing the attribute.
+    console.error(
+      '[rotate-access-key] Could not release the claim on a key whose replacement was discarded',
+      {
+        orgId,
+        error: err,
+      },
+    );
+  }
+}
+
+/**
+ * Revoke the old key inside the time the invocation has left, or not at all.
+ *
+ * With no clock — a direct call from a test — the revoke simply runs. Otherwise
+ * it gets what remains minus {@link RESPONSE_RESERVE_MS}; when that is nothing,
+ * it is skipped, and when it runs out, the answer is that the old key survived.
+ * Both leave the old row claimed and listed, and the response says so, which is
+ * the state the console already knows how to show. A revoke abandoned mid-call
+ * leaves its own intent dangling, which is what that record is for.
+ */
+async function revokeWithinBudget(
+  args: RevokeAccessKeyArgs,
+  remainingMs: number | undefined,
+): Promise<boolean> {
+  if (remainingMs === undefined) return revokeAndReport(args);
+
+  const budgetMs = remainingMs - RESPONSE_RESERVE_MS;
+  if (budgetMs <= 0) {
+    console.warn(
+      '[rotate-access-key] No time left to revoke the rotated key; the response goes first',
+      {
+        orgId: args.orgId,
+        remainingMs,
+      },
+    );
+    return false;
+  }
+
+  const clock = new AbortController();
+  const expired = sleep(budgetMs, 'expired' as const, { signal: clock.signal }).catch(
+    () => 'expired' as const,
+  );
+  try {
+    const outcome = await Promise.race([revokeAndReport(args), expired]);
+    if (outcome === 'expired') {
+      console.error('[rotate-access-key] The revoke of the rotated key outran its budget', {
+        orgId: args.orgId,
+        budgetMs,
+      });
+      return false;
+    }
+    return outcome;
+  } finally {
+    clock.abort();
   }
 }
 
