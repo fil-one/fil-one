@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { ListIcon, XIcon, SignOutIcon } from '@phosphor-icons/react/dist/ssr';
+import { ListIcon, XIcon, SignOutIcon, SidebarSimpleIcon } from '@phosphor-icons/react/dist/ssr';
 import { useQuery } from '@tanstack/react-query';
 import { SubscriptionStatus } from '@filone/shared';
 import { SidebarNav } from './SidebarNav';
 import { Banner } from './Banner';
 import { UserAvatar } from './UserAvatar';
 import { OrgSwitcher } from './OrgSwitcher';
+import { ReportBugButton } from './ReportBugButton';
+import { SystemStatusPill } from './SystemStatusPill';
+import { Tooltip } from './Tooltip';
 import { getUsage, getBilling, getMe, logout } from '../lib/api';
 import { monogramFromName } from '../lib/monogram.js';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
@@ -243,16 +246,12 @@ export function AppShell({ children }: AppShellProps) {
         isGracePeriod={isGracePeriod}
         graceDays={graceDays}
       />
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden bg-white">
         {/* Desktop sidebar — unchanged */}
         <div
           className={`hidden flex-shrink-0 transition-all duration-200 lg:block ${collapsed ? 'w-20' : 'w-60'}`}
         >
-          <SidebarNav
-            collapsed={collapsed}
-            onToggle={() => setCollapsed((c) => !c)}
-            showTestIds={true}
-          />
+          <SidebarNav collapsed={collapsed} showTestIds={true} />
         </div>
 
         {/* Mobile drawer backdrop */}
@@ -296,7 +295,6 @@ export function AppShell({ children }: AppShellProps) {
           <div className="flex-1 overflow-y-auto">
             <SidebarNav
               collapsed={false}
-              onToggle={() => {}}
               onClose={closeDrawer}
               showUserProfile={false}
               showTestIds={false}
@@ -304,26 +302,57 @@ export function AppShell({ children }: AppShellProps) {
           </div>
         </div>
 
-        <main className="flex-1 overflow-auto bg-zinc-50">
-          {/* Mobile top bar */}
-          <div className="sticky top-0 z-20 flex h-14 flex-shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-3 lg:hidden">
-            <MobileUserMenu />
-            <button
-              ref={hamburgerButtonRef}
-              id="mobile-nav-toggle-button"
-              type="button"
-              onClick={() => setMobileOpen(true)}
-              aria-label="Open navigation menu"
-              aria-expanded={mobileOpen}
-              aria-controls={drawerId}
-              className="-mr-1 flex h-11 w-11 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100"
-            >
-              <ListIcon size={20} />
-            </button>
+        {/* On desktop the content sits in an inset "window": a rounded, bordered,
+            softly shadowed panel floating on the white canvas, with the sidebar
+            outside it (Linear's layout). The `lg:` insets and card chrome are
+            desktop-only; on mobile the content stays edge to edge. The panel is
+            the scroll container, so its rounded corners clip the content. */}
+        <main className="flex flex-1 flex-col overflow-hidden lg:px-2 lg:pt-2">
+          <div className="flex flex-1 flex-col overflow-auto bg-zinc-50 lg:rounded-xl lg:border lg:border-zinc-200 lg:shadow-xs">
+            {/* Mobile top bar */}
+            <div className="sticky top-0 z-20 flex h-14 flex-shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-3 lg:hidden">
+              <MobileUserMenu />
+              <button
+                ref={hamburgerButtonRef}
+                id="mobile-nav-toggle-button"
+                type="button"
+                onClick={() => setMobileOpen(true)}
+                aria-label="Open navigation menu"
+                aria-expanded={mobileOpen}
+                aria-controls={drawerId}
+                className="-mr-1 flex h-11 w-11 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100"
+              >
+                <ListIcon size={20} />
+              </button>
+            </div>
+
+            {children}
+            <div className="h-10 shrink-0" aria-hidden="true" />
           </div>
 
-          {children}
-          <div className="h-10 shrink-0" aria-hidden="true" />
+          {/* Utility bar under the content window (desktop only): quiet controls
+              that belong to the app rather than the page. The sidebar collapse
+              toggle sits at the left since it acts on the sidebar beside it;
+              bug report and system status stay grouped at the right the way
+              Linear places them. h-12 (not h-10) matches the sidebar footer's
+              total height (p-2 around a py-1.5 button = 48px) so both bars,
+              bottom-anchored side by side, land on the same vertical center. */}
+          <div className="hidden h-12 flex-shrink-0 items-center justify-between gap-1 px-1 lg:flex">
+            <Tooltip content={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} side="right">
+              <button
+                type="button"
+                onClick={() => setCollapsed((c) => !c)}
+                aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+              >
+                <SidebarSimpleIcon size={18} />
+              </button>
+            </Tooltip>
+            <div className="flex items-center gap-1">
+              <ReportBugButton />
+              <SystemStatusPill />
+            </div>
+          </div>
         </main>
       </div>
     </div>
