@@ -28,7 +28,15 @@ export async function ensureTrialEntitlement({
   email,
   emailVerified,
 }: EnsureTrialEntitlementParams): Promise<boolean> {
-  if (!emailVerified || !email) return false;
+  if (!emailVerified || !email) {
+    console.warn('[trial-entitlement] No verified email on the request — refusing the claim', {
+      userId,
+      orgId,
+      hasEmail: Boolean(email),
+      emailVerified,
+    });
+    return false;
+  }
 
   const tableName = Resource.UserInfoTable.name;
   const normalizedEmail = normalizeEmailForEntitlement(email);

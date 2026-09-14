@@ -1,29 +1,19 @@
-import { useRef, useState } from 'react';
-import { CameraIcon, SpinnerIcon } from '@phosphor-icons/react/dist/ssr';
+import { useRef } from 'react';
 import { AVATAR_CONTENT_TYPES, AVATAR_MAX_BYTES } from '@filone/shared';
 import type { MeResponse } from '@filone/shared';
 
 import { UserAvatar } from './UserAvatar.js';
+import { AvatarUploadButton } from './AvatarUploadButton.js';
 import { useToast } from './Toast';
-import { errorMessageOf, presignAvatarUpload, updateProfile } from '../lib/api.js';
+import { presignAvatarUpload, updateProfile } from '../lib/api.js';
 import { monogramFromName } from '../lib/monogram.js';
 import { usePatchProfileCache } from '../lib/profile-cache.js';
+import { useImageUpload, validateImageFile } from '../lib/use-image-upload.js';
 
 const ACCEPT = AVATAR_CONTENT_TYPES.join(',');
 const AVATAR_MAX_MB = Math.floor(AVATAR_MAX_BYTES / (1024 * 1024));
 
 type AvatarContentType = (typeof AVATAR_CONTENT_TYPES)[number];
-
-/** `null` means the file is acceptable. */
-function validateAvatarFile(file: File): string | null {
-  if (!AVATAR_CONTENT_TYPES.includes(file.type as AvatarContentType)) {
-    return 'Avatar must be a PNG, JPEG, or WebP image.';
-  }
-  if (file.size > AVATAR_MAX_BYTES) {
-    return `Avatar must be under ${AVATAR_MAX_MB}MB.`;
-  }
-  return null;
-}
 
 /**
  * Upload then save in one step, unlike {@link useOrgLogoUpload} in
@@ -34,39 +24,33 @@ function validateAvatarFile(file: File): string | null {
 function useProfileAvatarUpload(me: MeResponse) {
   const { toast } = useToast();
   const patchCache = usePatchProfileCache();
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function pick(file: File): Promise<void> {
-    const validationError = validateAvatarFile(file);
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
-    setError(null);
-    setUploading(true);
-    try {
+  const upload = useImageUpload<string>({
+    validate: (file) =>
+      validateImageFile(file, {
+        contentTypes: AVATAR_CONTENT_TYPES,
+        maxBytes: AVATAR_MAX_BYTES,
+        noun: 'Avatar',
+      }),
+    presign: async (contentType) => {
       const { uploadUrl, pictureUrl } = await presignAvatarUpload({
-        contentType: file.type as AvatarContentType,
+        contentType: contentType as AvatarContentType,
       });
-      const putResponse = await fetch(uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': file.type },
-        body: file,
-      });
-      if (!putResponse.ok) throw new Error('Upload failed');
-
+      return { uploadUrl, result: pictureUrl };
+    },
+    onUploaded: async (pictureUrl) => {
       const saved = await updateProfile({ pictureUrl });
       patchCache(saved);
       toast.success('Avatar updated');
-    } catch (err) {
-      setError(errorMessageOf(err, 'Failed to update your avatar'));
-    } finally {
-      setUploading(false);
-    }
-  }
+    },
+    errorFallback: 'Failed to update your avatar',
+  });
 
-  return { picture: me.picture, uploading, error, pick };
+  return {
+    picture: me.picture,
+    uploading: upload.uploading,
+    error: upload.error,
+    pick: upload.pick,
+  };
 }
 
 /** The clickable avatar at the top of the Profile section. */
@@ -79,21 +63,16 @@ export function ProfileAvatarPicker({ me }: { me: MeResponse }) {
 
   return (
     <div className="flex items-center gap-3">
-      <button
-        type="button"
+      <AvatarUploadButton
+        size="h-14 w-14"
+        shape="rounded-full"
+        iconSize={18}
+        uploading={avatar.uploading}
+        ariaLabel="Change avatar"
         onClick={() => fileInputRef.current?.click()}
-        aria-label="Change avatar"
-        className="group relative flex h-14 w-14 items-center justify-center rounded-full focus-visible:brand-outline"
       >
         <UserAvatar src={avatar.picture} initial={initial} className="h-14 w-14 text-lg" />
-        <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/0 text-transparent transition-colors group-hover:bg-black/40 group-hover:text-white">
-          {avatar.uploading ? (
-            <SpinnerIcon size={18} className="animate-spin" />
-          ) : (
-            <CameraIcon size={18} />
-          )}
-        </span>
-      </button>
+      </AvatarUploadButton>
       <input
         ref={fileInputRef}
         type="file"

@@ -197,6 +197,26 @@ describe('GET /api/me handler', () => {
     });
   });
 
+  it('reads the active org profile consistently, so a just-created org is never named empty', async () => {
+    profileResolves();
+
+    await handler(authenticatedEvent(), buildContext());
+
+    // Other code paths (e.g. the deletion fence) read this same row without
+    // consistency, on purpose — so this checks that at least one read of it
+    // was consistent, the one `/me` itself makes to name the org, rather than
+    // asserting every read of the key was.
+    const profileReads = ddbMock
+      .commandCalls(GetItemCommand)
+      .filter(
+        (call) =>
+          call.args[0].input.TableName === 'UserInfoTable' &&
+          call.args[0].input.Key?.pk?.S === `ORG#${MOCK_ORG_ID}` &&
+          call.args[0].input.Key?.sk?.S === 'PROFILE',
+      );
+    expect(profileReads.some((call) => call.args[0].input.ConsistentRead === true)).toBe(true);
+  });
+
   it('returns 200 with emailVerified false for unverified users (verified-email gate opt-out)', async () => {
     mockJwtVerify.mockResolvedValue({
       payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: false },
