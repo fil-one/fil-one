@@ -217,7 +217,7 @@ function ActionMenu({ onRotate, onDelete }: { onRotate?: () => void; onDelete?: 
                 setOpen(false);
                 onRotate();
               }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50"
+              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 focus-visible:brand-outline focus-visible:outline-offset-[-2px] active:bg-zinc-100"
             >
               <ArrowsClockwiseIcon size={14} />
               Rotate
@@ -230,7 +230,7 @@ function ActionMenu({ onRotate, onDelete }: { onRotate?: () => void; onDelete?: 
                 setOpen(false);
                 onDelete();
               }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 focus-visible:brand-outline focus-visible:outline-offset-[-2px] active:bg-red-100"
             >
               <TrashIcon size={14} />
               Delete

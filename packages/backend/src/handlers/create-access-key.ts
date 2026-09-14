@@ -1,4 +1,3 @@
-import { QueryCommand } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
@@ -13,7 +12,6 @@ import type {
   CreateAccessKeyResponse,
   ErrorResponse,
 } from '@filone/shared';
-import { Resource } from 'sst';
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
 import {
   discardRecordedKey,
@@ -26,11 +24,11 @@ import {
   roleChangedResponse,
 } from '../lib/key-mint.ts';
 import type { KeyMinter, MintedKey } from '../lib/key-mint.ts';
+import { listOrgAccessKeys } from '../lib/member-keys.ts';
 import type { AuditCorrelation } from '../lib/audit.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
 import type { IssuedAccessKey, ServiceOrchestrator } from '../lib/service-orchestrator.ts';
-import { getDynamoClient } from '../lib/ddb-client.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
 import {
@@ -39,7 +37,7 @@ import {
   tenantNotReadyResponse,
   unsupportedRegionResponse,
 } from '../lib/response-builder.ts';
-import { AccessKeyKeys, DEFAULT_ACCESS_KEY_REGION, keyAttribution } from '../lib/dynamo-records.ts';
+import { AccessKeyKeys, keyAttribution } from '../lib/dynamo-records.ts';
 import type { AccessKeyRecord } from '../lib/dynamo-records.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
@@ -183,6 +181,11 @@ export async function baseHandler(
  * accept a second key the console would list twice under one name. This is the
  * check that keeps the name unique where it is actually read.
  *
+ * Through `listOrgAccessKeys`, which follows `LastEvaluatedKey` to the end and
+ * reads consistently on every page: a single Query answers one page, and a
+ * rotation that just landed its replacement has freed the name at the vendor,
+ * so a row this check does not see is a name a second key takes.
+ *
  * Not a lock: two creates racing on the same free name can both pass it, and
  * the vendor only catches the pair whose name it still holds. A single-table
  * design has nowhere to put a uniqueness constraint, and a duplicate display
@@ -197,25 +200,8 @@ async function orgAlreadyShowsKeyName({
   keyName: string;
   region: S3Region;
 }): Promise<boolean> {
-  const { Items } = await getDynamoClient().send(
-    new QueryCommand({
-      TableName: Resource.UserInfoTable.name,
-      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
-      ExpressionAttributeValues: {
-        ':pk': { S: AccessKeyKeys.orgPk(orgId) },
-        ':skPrefix': { S: AccessKeyKeys.keySkPrefix() },
-      },
-      // A rotation that just landed its replacement under a suffixed vendor
-      // name has freed the console name at the vendor; an eventually
-      // consistent read here could miss that row and let a second key take it.
-      ConsistentRead: true,
-    }),
-  );
-
-  return (Items ?? []).some((item) => {
-    const itemRegion = (item.region?.S as S3Region | undefined) ?? DEFAULT_ACCESS_KEY_REGION;
-    return item.keyName?.S === keyName && itemRegion === region;
-  });
+  const keys = await listOrgAccessKeys(orgId);
+  return keys.some((key) => key.keyName === keyName && key.region === region);
 }
 
 /** The name is taken, whoever is holding it. */
