@@ -605,6 +605,77 @@ describe('authMiddleware', () => {
       });
     });
 
+    it.each([
+      'https://s.gravatar.com/avatar/abc123?s=480&r=pg&d=https%3A%2F%2Fcdn.auth0.com%2Favatars%2Ffi.png',
+      'https://cdn.auth0.com/avatars/fi.png',
+    ])(
+      'drops a generated placeholder picture rather than a photo nobody chose (%s)',
+      async (generatedPicture) => {
+        const existingUserId = 'existing-user-uuid';
+        const existingOrgId = 'existing-org-uuid';
+
+        mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+          payload: {
+            email: MOCK_EMAIL,
+            email_verified: true,
+            name: MOCK_NAME,
+            picture: generatedPicture,
+          },
+        });
+
+        ddbMock
+          .on(GetItemCommand, {
+            Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+          })
+          .resolves({
+            Item: {
+              pk: { S: `SUB#${MOCK_SUB}` },
+              sk: { S: 'IDENTITY' },
+              userId: { S: existingUserId },
+              orgId: { S: existingOrgId },
+              email: { S: MOCK_EMAIL },
+            },
+          });
+
+        ddbMock
+          .on(GetItemCommand, {
+            Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: 'PROFILE' } },
+          })
+          .resolves({
+            Item: {
+              pk: { S: `ORG#${existingOrgId}` },
+              sk: { S: 'PROFILE' },
+              name: { S: 'example.com' },
+              auroraSetupStatus: { S: FINAL_SETUP_STATUS },
+            },
+          });
+
+        const { before } = authMiddleware();
+        const event = buildEvent({
+          cookies: [
+            `hs_access_token=valid-token`,
+            `hs_id_token=id-token`,
+            `hs_refresh_token=refresh-token`,
+          ],
+        });
+        const request = buildMiddyRequest(event);
+
+        const result = await before(request);
+
+        expect(result).toBeUndefined();
+        expect(getUserInfoFromEvent(event)).toStrictEqual({
+          sub: MOCK_SUB,
+          userId: existingUserId,
+          orgId: existingOrgId,
+          email: MOCK_EMAIL,
+          emailVerified: true,
+          name: MOCK_NAME,
+          picture: undefined,
+          ...noMembership(),
+        });
+      },
+    );
+
     it('extracts picture from refreshed ID token', async () => {
       const existingUserId = 'refreshed-user-uuid';
       const existingOrgId = 'refreshed-org-uuid';

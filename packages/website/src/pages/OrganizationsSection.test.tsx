@@ -46,6 +46,7 @@ function me(overrides: Partial<MeResponse> = {}): MeResponse {
     mfaEnrollments: [],
     ragAccess: true,
     orgsBeta: true,
+    billingActive: true,
     userId: USER_ID,
     role: OrgRole.Owner,
     permissions: [],
@@ -125,7 +126,10 @@ describe('OrganizationsSection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Globex' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Switch to this organization' }));
 
-    expect(mockSwitchToOrg).toHaveBeenCalledWith(OTHER_ORG);
+    expect(mockSwitchToOrg).toHaveBeenCalledWith(OTHER_ORG, undefined, 'dashboard', {
+      orgName: 'Globex',
+      logoUrl: undefined,
+    });
   });
 
   it('leaves the active org after confirming', async () => {

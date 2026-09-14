@@ -201,8 +201,17 @@ export function BillingDetails({ chrome = 'tab' }: { chrome?: BillingChrome } = 
       {/* Paired because they hold the same amount: a title, one line of fact,
           and one action each. Usage carries three rows and a total, so pairing
           it with the payment card left the shorter one stretched to match, with
-          a card's worth of empty space under a single line of text. */}
-      <div className="grid gap-4 lg:grid-cols-2">
+          a card's worth of empty space under a single line of text.
+
+          No payment card at all while trialing: nobody has one on file yet by
+          design (the trial exists precisely so they don't need one), so the
+          card only ever said "No card on file — needed before your trial
+          ends" — a reminder the trial banner above already carries, and the
+          Plan card's own Upgrade button already acts on. Plan takes the full
+          width in its place instead of sitting in a half-empty row. */}
+      <div
+        className={`grid gap-4 ${status === SubscriptionStatus.Trialing ? '' : 'lg:grid-cols-2'}`}
+      >
         <PlanCard
           subscription={billing.subscription}
           mayManage={mayManage}
@@ -210,12 +219,14 @@ export function BillingDetails({ chrome = 'tab' }: { chrome?: BillingChrome } = 
           onChoosePlan={flows.openPlan}
         />
 
-        <PaymentMethodCard
-          billing={billing}
-          mayManage={mayManage}
-          onManage={flows.openStripePortal}
-          onAddCard={flows.openPlan}
-        />
+        {status !== SubscriptionStatus.Trialing && (
+          <PaymentMethodCard
+            billing={billing}
+            mayManage={mayManage}
+            onManage={flows.openStripePortal}
+            onAddCard={flows.openPlan}
+          />
+        )}
       </div>
 
       {/* Full width: the figures align to the right edge across the card, which

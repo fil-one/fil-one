@@ -2,6 +2,7 @@ import { createRoute, notFound, Outlet, redirect, useNavigate } from '@tanstack/
 import { useQueryClient } from '@tanstack/react-query';
 import { Route as appRoute } from '../_app';
 import { AppShell } from '../../components/AppShell';
+import { BillingRequiredGate } from '../../components/BillingRequiredGate.js';
 import { Button } from '../../components/Button';
 import { getMe, logout } from '../../lib/api.js';
 import { queryClient, queryKeys, ME_STALE_TIME } from '../../lib/query-client.js';
@@ -106,7 +107,8 @@ function NotAMember() {
 
 function OrgScopedApp() {
   const navigate = useNavigate();
-  const { isNotAMember } = usePermissions();
+  const { orgSlug } = Route.useParams();
+  const { isNotAMember, billingActive } = usePermissions();
 
   // Resume an MFA action after a step-up redirect round-trip. The api wrapper
   // stashes the pending action + return path in sessionStorage before bouncing
@@ -123,8 +125,24 @@ function OrgScopedApp() {
   if (isNotAMember) return <NotAMember />;
 
   return (
-    <AppShell>
-      <Outlet />
+    <AppShell hideNavLinks={!billingActive}>
+      {/* In place of the routed page, not a redirect: the sidebar (org
+          switcher, log out) stays reachable either way, which is all a
+          blocked account can still do here. The page-nav links themselves are
+          hidden (`hideNavLinks`) since every one of them would land right
+          back on this same gate.
+
+          `key={orgSlug}` on both branches: a switch keeps this same route
+          component mounted (only the param changes), and something downstream
+          — `BillingRequiredGate`'s own `useHasPermission` among them — has been
+          observed to stop picking up the query cache's fresh org-scoped data
+          after a few switches, painting the previous org's permissions over
+          the new org's page until a full reload. Keying on the org forces a
+          real unmount/remount at the org boundary instead of trusting every
+          descendant's subscription to notice the switch on its own — the same
+          hard reset `queryClient.clear()` already gives the data side of a
+          switch, extended to the render side. */}
+      {billingActive ? <Outlet key={orgSlug} /> : <BillingRequiredGate key={orgSlug} />}
     </AppShell>
   );
 }

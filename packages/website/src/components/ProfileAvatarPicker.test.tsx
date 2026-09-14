@@ -26,6 +26,7 @@ const ME: MeResponse = {
   mfaEnrollments: [],
   ragAccess: false,
   orgsBeta: false,
+  billingActive: true,
 };
 
 function renderPicker(me: MeResponse = ME) {

@@ -7,7 +7,7 @@ import { Button } from '../components/Button';
 import { FormField } from '../components/FormField';
 import { Heading } from '../components/Heading/Heading';
 import { Input } from '../components/Input';
-import { errorMessageOf, logout, updateOrg } from '../lib/api.js';
+import { errorMessageOf, getBilling, logout, updateOrg } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
 
 /**
@@ -56,6 +56,17 @@ export function WelcomePage({ suggestedName, email, onNamed }: WelcomePageProps)
   const rename = useMutation({
     mutationFn: (next: string) => updateOrg({ name: next }),
     onSuccess: async () => {
+      // The account's free trial is claimed as a side effect of this exact
+      // `GET /api/billing` call (see get-billing.ts), not of naming the org —
+      // but this is the account's first-ever visit to a page that isn't this
+      // one, so nothing has made the call yet. Awaited here, before `/me` is
+      // ever re-read: `/me`'s own `billingActive` is a plain read of whatever
+      // the claim already wrote, not a claim attempt itself, so without this
+      // the caller would land on `/get-started` to a "no active plan" gate
+      // for however long the claim takes to catch up on its own. Failing
+      // silently and continuing regardless: a claim that could not be made
+      // (or already was) is what the destination page's own gate is for.
+      await getBilling().catch(() => {});
       // The gate in `_app` reads `nameConfirmed` off `/me`, so the cached copy
       // has to go before we navigate or the redirect bounces straight back.
       await queryClient.invalidateQueries({ queryKey: queryKeys.me });

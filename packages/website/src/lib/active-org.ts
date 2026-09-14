@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import type { MeResponse } from '@filone/shared';
 
 import { queryClient, queryKeys } from './query-client.js';
@@ -113,7 +114,50 @@ export function waitWhileSwitching(): Promise<void> {
 
 function setSwitching(next: boolean): void {
   switching = next;
+  // The pending display below is only ever meaningful while a switch is in
+  // flight — once the latch comes back down, either the real `/me` has landed
+  // (the sidebar has the true name now) or the switch was rolled back (the
+  // stub named an org the tab never actually reached). Both cases want it
+  // gone, so it rides this same transition rather than a copy of the logic at
+  // every place `switchToOrg` itself brings the latch down.
+  if (!next) queryClient.setQueryData(queryKeys.pendingOrgSwitch, null);
   for (const listener of switchingListeners) listener(next);
+}
+
+export type PendingOrgSwitchTarget = {
+  orgId: string;
+  orgName: string;
+  logoUrl?: string;
+};
+
+/**
+ * The org a switch in flight is headed for, painted from the switcher row the
+ * caller just clicked rather than waited on the network for.
+ *
+ * `switchToOrg`'s `queryClient.clear()` is what makes a client-side navigation
+ * safe instead of a full reload (see its own doc comment), but it also throws
+ * away the `memberships` list the sidebar reads its header from — so for
+ * however long the destination route's `beforeLoad` takes to bring back a
+ * fresh `/me`, the sidebar has nothing to name the org with. The row just
+ * clicked already carried that org's name and logo; this is where `switchToOrg`
+ * hands them forward instead of letting them be discarded a moment later.
+ *
+ * Deliberately not folded into `['me']`: this is never fetched, only ever
+ * `setQueryData`'d, and carries nothing beyond display — no permissions, no
+ * role, nothing a stale value could make a gated surface trust.
+ */
+export function usePendingOrgSwitchTarget(): PendingOrgSwitchTarget | null {
+  const { data } = useQuery({
+    queryKey: queryKeys.pendingOrgSwitch,
+    // Never actually runs: nothing here calls `fetchQuery`/`refetch` on this
+    // key, only `setQueryData`. `enabled: false` says so, and a `queryFn` is
+    // still required to satisfy the type.
+    queryFn: () => null as PendingOrgSwitchTarget | null,
+    enabled: false,
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+  return data ?? null;
 }
 
 /**
@@ -236,17 +280,32 @@ export function clearActiveOrgOnNavigation(): void {
  * org id into a slugged URL itself, once `/me` is fetched fresh) but it is a
  * second, avoidable redirect. A target org with no slug backfilled yet still
  * falls back the same way regardless of which source came up empty.
+ *
+ * `knownDisplay` is the org's name and logo, when the caller already has them
+ * on hand — every call site does, since a switcher row and a just-created
+ * org's response both carry them. Seeded as `usePendingOrgSwitchTarget` right
+ * after the clear below, so the sidebar has the right name to paint the
+ * instant the switch starts rather than the `'Organization'` fallback for
+ * however long the fresh `/me` takes.
  */
 export function switchToOrg(
   orgId: string,
   knownSlug?: string,
   landOn: 'dashboard' | 'get-started' = 'dashboard',
+  knownDisplay?: { orgName: string; logoUrl?: string },
 ): void {
   const previousOrgId = getActiveOrgId();
   const targetSlug = knownSlug ?? resolveOrgSlug(orgId);
   setActiveOrgId(orgId);
   setSwitching(true);
   queryClient.clear();
+  if (knownDisplay) {
+    queryClient.setQueryData(queryKeys.pendingOrgSwitch, {
+      orgId,
+      orgName: knownDisplay.orgName,
+      logoUrl: knownDisplay.logoUrl,
+    } satisfies PendingOrgSwitchTarget);
+  }
 
   void (async () => {
     try {
