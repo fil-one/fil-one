@@ -1179,7 +1179,7 @@ describe('create-access-key baseHandler', () => {
       );
 
       expect(result.statusCode).toBe(409);
-      expect(vi.mocked(console.error).mock.calls[0]?.[0]).toContain('creator was demoted');
+      expect(vi.mocked(console.error).mock.calls[0]?.[0]).toContain('minter was demoted');
     });
   });
 });
