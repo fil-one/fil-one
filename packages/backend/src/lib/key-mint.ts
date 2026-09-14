@@ -34,6 +34,13 @@ import type { ServiceOrchestrator } from './service-orchestrator.ts';
  * what they do about a duplicate name, and what they refuse before starting.
  */
 
+/**
+ * The two events a mint is recorded under. A create writes `key.created`; a
+ * rotation writes `key.rotated`, so the reader sees a rotation rather than a
+ * create and a revoke a second apart. The helpers below close either.
+ */
+export type MintAuditEventType = 'key.created' | 'key.rotated';
+
 /** The credential the vendor handed back, and where it lives. */
 export interface MintedKey {
   /** The orchestrator's id for the key, which is what `deleteAccessKey` takes. */
@@ -94,7 +101,7 @@ export async function recordMintedKey({
   alongside = [],
 }: {
   row: AccessKeyRecord;
-  mint: AuditCorrelation<'key.created'>;
+  mint: AuditCorrelation<MintAuditEventType>;
   minter: KeyMinter;
   /** The credential existed at the vendor already and this write recovered its row. */
   recovered?: true;
@@ -169,7 +176,7 @@ export async function discardUnrecordedKey({
   minter,
 }: {
   minted: MintedKey;
-  mint: AuditCorrelation<'key.created'>;
+  mint: AuditCorrelation<MintAuditEventType>;
   minter: Pick<KeyMinter, 'orgId' | 'userId'>;
 }): Promise<void> {
   let cleanupFailed = false;

@@ -202,12 +202,13 @@ async function issueReplacement({
   const ownedByCaller = owner === userId;
 
   // Fail-closed and ahead of the vendor, for the mint's reason: no SigV4 key may
-  // come into existence without a record that somebody asked for it. The intent
-  // names the key being replaced, which is what joins this event to the
-  // `key.deleted` the revoke writes — without it the pair reads as an unrelated
-  // create and revoke moments apart.
+  // come into existence without a record that somebody asked for it. Its own
+  // event type, so the log says a key was rotated rather than leaving the reader
+  // to pair a create with a revoke a second apart; the intent names the key
+  // being replaced, and the `key.deleted` the revoke writes carries `rotation`
+  // as its reason, so the two point at each other.
   const mint = await twoPhaseAudit({
-    type: 'key.created',
+    type: 'key.rotated',
     mode: 'fail-closed',
     actor,
     orgId,
@@ -503,7 +504,7 @@ function refusedRotation(
  */
 async function handleMintRefusal(
   err: unknown,
-  mint: AuditCorrelation<'key.created'>,
+  mint: AuditCorrelation<'key.rotated'>,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   if (err instanceof AccessKeyAlreadyExistsError) {
     await mint.complete({ outcome: 'failed' });

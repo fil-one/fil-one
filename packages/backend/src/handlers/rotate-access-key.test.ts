@@ -252,14 +252,14 @@ describe('rotate-access-key baseHandler', () => {
     expect(revocationIntent?.details).toMatchObject({ reason: 'rotation' });
   });
 
-  it('joins the two events by naming the key being replaced', async () => {
+  it('records a rotation as its own event, naming the key being replaced', async () => {
     stubStoredKey();
     stubWrites();
 
     await baseHandler(eventFor());
 
     const mintIntent = standaloneEvents().find(
-      (event) => event.type === 'key.created' && event.phase === 'intent',
+      (event) => event.type === 'key.rotated' && event.phase === 'intent',
     );
     expect(mintIntent?.details).toMatchObject({
       keyName: 'My Key',

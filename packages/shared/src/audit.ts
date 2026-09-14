@@ -46,6 +46,7 @@ export const AUDIT_EVENT_TYPES = [
   'key.created',
   'key.deleted',
   'audit.exported',
+  'key.rotated',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -76,6 +77,7 @@ export const TWO_PHASE_AUDIT_EVENT_TYPES = [
   'member.role_changed',
   'member.removed',
   'ownership.transferred',
+  'key.rotated',
 ] as const;
 export type TwoPhaseAuditEventType = (typeof TWO_PHASE_AUDIT_EVENT_TYPES)[number];
 
@@ -275,13 +277,6 @@ export interface AuditEventDetails {
      * the vendor with no local row — this event is its only trace.
      */
     cleanupFailed?: boolean;
-    /**
-     * The key this one replaces, by the same characters `keyIdSuffix` carries.
-     * Present only on a rotation, and it is what joins this event to the
-     * `key.deleted` that follows it — without it the pair reads as an unrelated
-     * create and revoke a second apart.
-     */
-    replacedKeyIdSuffix?: string;
   };
   'key.deleted': {
     keyKind: AuditKeyKind;
@@ -294,6 +289,28 @@ export interface AuditEventDetails {
      * revocation named one; `revokeAccessKey` requires it of every caller.
      */
     reason?: RevocationTrigger;
+  };
+  /**
+   * A key reissued in place: same name, permissions, scope and owner, new
+   * credential. Its own type rather than a `key.created`, so a reader does not
+   * have to reconstruct a rotation from a create and a revoke a second apart.
+   *
+   * Two-phase like `key.created`, for the same reason: the replacement is
+   * minted at the vendor before anything local is written. The key it replaces
+   * is revoked afterwards under its own `key.deleted` with reason `rotation`,
+   * so a rotation is this pair plus that one, and `replacedKeyIdSuffix` is what
+   * ties them together.
+   */
+  'key.rotated': {
+    keyKind: AuditKeyKind;
+    keyName: string;
+    region?: string;
+    /** The replacement, by the characters the console shows. Set on the completion. */
+    keyIdSuffix?: string;
+    /** The key being replaced, by the same characters. Set on the intent. */
+    replacedKeyIdSuffix: string;
+    /** As on `key.created`: the abandoned replacement could not be taken back. */
+    cleanupFailed?: boolean;
   };
   /**
    * The one event written on a read path, and the highest-signal action the log
@@ -483,6 +500,7 @@ export const AUDIT_EVENT_TYPE_LABELS: Record<AuditEventType, string> = {
   'key.created': 'Key created',
   'key.deleted': 'Key deleted',
   'audit.exported': 'Audit log exported',
+  'key.rotated': 'Key rotated',
 };
 
 /**
