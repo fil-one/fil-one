@@ -200,3 +200,19 @@ export const Selectable: Story = {
     onBulkDelete: () => Promise.resolve(),
   },
 };
+
+/** A key scoped to far more buckets than fit inline — the overflow popover's own scroll. */
+export const WithManyBuckets: Story = {
+  args: {
+    keys: [
+      {
+        ...mockKeys[1],
+        buckets: Array.from(
+          { length: 30 },
+          (_, i) => `data-pipeline-${String(i + 1).padStart(2, '0')}`,
+        ),
+      },
+    ],
+    showBuckets: true,
+  },
+};

@@ -32,7 +32,13 @@ function usePopoverTrigger() {
     if (!open && triggerRef.current) {
       const rect = triggerRef.current.getBoundingClientRect();
       const left = Math.min(rect.left, window.innerWidth - PANEL_WIDTH_ESTIMATE - 16);
-      setPos({ top: rect.bottom + 4, left: Math.max(left, 16) });
+      // The panel is always mounted, so its real (capped) height is already
+      // known — flip it above the trigger when there isn't room below, rather
+      // than letting a long list run off the bottom of the screen.
+      const panelHeight = panelRef.current?.offsetHeight ?? 0;
+      const fitsBelow = rect.bottom + 4 + panelHeight <= window.innerHeight - 16;
+      const top = fitsBelow ? rect.bottom + 4 : Math.max(rect.top - panelHeight - 4, 16);
+      setPos({ top, left: Math.max(left, 16) });
     }
     setOpen((o) => !o);
   }
@@ -63,7 +69,7 @@ function PopoverPanel({
       aria-hidden={!open}
       style={{ top: pos.top, left: pos.left }}
       className={clsx(
-        'fixed z-50 min-w-40 max-w-64 origin-top-left rounded-lg border border-zinc-200 bg-white p-3 shadow-lg transition duration-150 ease-out',
+        'fixed z-50 max-h-80 min-w-40 max-w-64 origin-top-left overflow-y-auto rounded-lg border border-zinc-200 bg-white p-3 shadow-lg transition duration-150 ease-out',
         open ? 'scale-100 opacity-100' : 'pointer-events-none scale-95 opacity-0',
       )}
     >
