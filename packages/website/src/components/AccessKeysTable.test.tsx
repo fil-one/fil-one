@@ -21,17 +21,30 @@ function makeKey(overrides: Partial<AccessKey>): AccessKey {
   };
 }
 
-describe('AccessKeysTable — bucket-info permissions', () => {
-  it('renders a bucket-info group badge when a bucket-info permission is granted', () => {
+describe('AccessKeysTable — permission detail', () => {
+  it('offers a details trigger when a key carries more than its object permissions', () => {
     const keys = [makeKey({ permissions: ['read', 'GetBucketVersioning'] })];
     renderWithProviders(<AccessKeysTable keys={keys} showPermissions />);
-    expect(screen.getByTestId('permission-badge-bucket-info')).toBeInTheDocument();
+    expect(screen.getByTestId('permission-badge-details')).toBeInTheDocument();
   });
 
-  it('does not render the bucket-info group badge when no bucket-info permission is granted', () => {
+  it('drops the details trigger when the key carries only object permissions', () => {
     const keys = [makeKey({ permissions: ['read', 'write'] })];
     renderWithProviders(<AccessKeysTable keys={keys} showPermissions />);
-    expect(screen.queryByTestId('permission-badge-bucket-info')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('permission-badge-details')).not.toBeInTheDocument();
+  });
+
+  it('opens the permissions drawer on the bucket-info permission granted', () => {
+    const keys = [makeKey({ permissions: ['read', 'GetBucketVersioning'] })];
+    renderWithProviders(<AccessKeysTable keys={keys} showPermissions />);
+
+    fireEvent.click(screen.getByTestId('permission-badge-details'));
+
+    expect(screen.getByTestId('access-key-permissions-drawer')).toBeInTheDocument();
+    expect(
+      screen.getByTestId('access-key-permissions-drawer-section-bucket-info'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Read bucket versioning')).toBeInTheDocument();
   });
 });
 

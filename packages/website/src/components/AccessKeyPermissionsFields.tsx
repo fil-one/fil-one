@@ -21,21 +21,9 @@ import {
 } from '@filone/shared';
 
 import { usePermissions } from '../lib/use-permissions.js';
+import { PERMISSION_OPTIONS } from '../lib/access-key-permission-options.js';
 import { Checkbox } from './Checkbox';
 import { Tooltip } from './Tooltip';
-
-type PermissionOption = {
-  value: ObjectPermission;
-  label: string;
-  description: string;
-};
-
-const PERMISSION_OPTIONS: PermissionOption[] = [
-  { value: 'read', label: 'Read', description: 'Download and retrieve objects' },
-  { value: 'write', label: 'Write', description: 'Upload and overwrite objects' },
-  { value: 'list', label: 'List', description: 'Browse and list objects' },
-  { value: 'delete', label: 'Delete', description: 'Permanently remove objects' },
-];
 
 type AccessKeyPermissionsFieldsProps = {
   value: AccessKeyPermission[];

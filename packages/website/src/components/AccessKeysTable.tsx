@@ -10,33 +10,24 @@ import {
 
 import { IconBox } from './IconBox';
 
-import type { AccessKey, GranularPermission, ObjectPermission } from '@filone/shared';
+import type { AccessKey } from '@filone/shared';
 import {
-  BUCKET_INFO_PERMISSION_LABELS,
-  BUCKET_PERMISSION_LABELS,
-  GRANULAR_PERMISSION_LABELS,
-  GRANULAR_PERMISSION_MAP,
   getRegionLabel,
   isBucketInfoPermission,
   isBucketPermission,
   isObjectPermission,
 } from '@filone/shared';
 
+import { AccessKeyPermissionsDrawer } from './AccessKeyPermissionsDrawer';
 import { Badge } from './Badge';
 import { Button } from './Button';
 import { Checkbox } from './Checkbox';
 import { CopyButton } from './CopyButton';
 import { IconButton } from './IconButton';
-import { OverflowBadge, PermissionChip, type OverflowSection } from './OverflowBadge';
+import { OverflowBadge } from './OverflowBadge';
 import { Table } from './Table/Table';
+import { PERMISSION_OPTIONS } from '../lib/access-key-permission-options.js';
 import { formatDate } from '../lib/time.js';
-
-const OBJECT_PERMISSION_LABELS: Record<ObjectPermission, string> = {
-  read: 'Read',
-  write: 'Write',
-  list: 'List',
-  delete: 'Delete',
-};
 
 function StatusBadge({ status }: { status: AccessKey['status'] }) {
   return status === 'active' ? (
@@ -50,65 +41,47 @@ function StatusBadge({ status }: { status: AccessKey['status'] }) {
   );
 }
 
+/**
+ * The object permissions as plain, static facts — scannable across many rows
+ * at once, nothing to click, nothing to guess about. Whatever else the key
+ * carries (data-protection extras, bucket management, bucket info) is real
+ * detail that a chip has no room to be honest about, so one "+N" opens the
+ * drawer instead of trying to cram it in here too.
+ */
 function PermissionBadges({
-  permissions,
-  granularPermissions,
+  accessKey,
+  onShowDetails,
 }: {
-  permissions: AccessKey['permissions'];
-  granularPermissions: GranularPermission[];
+  accessKey: AccessKey;
+  onShowDetails: () => void;
 }) {
-  const objectPermissions = permissions.filter(isObjectPermission);
-  const bucketManagement = permissions.filter(isBucketPermission);
-  const bucketInfo = permissions.filter(isBucketInfoPermission);
-
-  const groups: (OverflowSection & { title: string; testId: string })[] = [];
-  if (bucketManagement.length > 0) {
-    groups.push({
-      title: 'Bucket management',
-      testId: 'permission-badge-bucket-management',
-      items: bucketManagement.map((p) => ({
-        key: p,
-        label: BUCKET_PERMISSION_LABELS[p].label,
-      })),
-    });
-  }
-  if (bucketInfo.length > 0) {
-    groups.push({
-      title: 'Bucket info',
-      testId: 'permission-badge-bucket-info',
-      items: bucketInfo.map((p) => ({
-        key: p,
-        label: BUCKET_INFO_PERMISSION_LABELS[p].label,
-      })),
-    });
-  }
+  const objectPermissions = accessKey.permissions.filter(isObjectPermission);
+  const bucketManagement = accessKey.permissions.filter(isBucketPermission);
+  const bucketInfo = accessKey.permissions.filter(isBucketInfoPermission);
+  const extraCount =
+    (accessKey.granularPermissions?.length ?? 0) + bucketManagement.length + bucketInfo.length;
 
   return (
     <div className="flex flex-wrap items-center gap-1">
-      {objectPermissions.map((p) => (
-        <PermissionChip
-          key={p}
-          label={OBJECT_PERMISSION_LABELS[p]}
-          testId={`permission-badge-${p}`}
-          extras={GRANULAR_PERMISSION_MAP[p]
-            .filter((g) => granularPermissions.includes(g))
-            .map((g) => GRANULAR_PERMISSION_LABELS[g].label)}
-        />
-      ))}
-      {groups.length === 1 && (
-        <OverflowBadge
-          label={groups[0].title}
-          color="blue"
-          testId={groups[0].testId}
-          sections={groups}
-        />
-      )}
-      {groups.length > 1 && (
-        <OverflowBadge
-          label={`+${groups.length} more`}
-          testId="permission-badge-overflow"
-          sections={groups}
-        />
+      {objectPermissions.map((p) => {
+        const option = PERMISSION_OPTIONS.find((o) => o.value === p);
+        return (
+          <Badge key={p} color="blue" size="sm" data-testid={`permission-badge-${p}`}>
+            {option?.label ?? p}
+          </Badge>
+        );
+      })}
+      {extraCount > 0 && (
+        <button
+          type="button"
+          data-testid="permission-badge-details"
+          onClick={onShowDetails}
+          className="cursor-pointer"
+        >
+          <Badge color="grey" size="sm">
+            +{extraCount} more
+          </Badge>
+        </button>
       )}
     </div>
   );
@@ -343,6 +316,7 @@ export function AccessKeysTable({
 
   const selectable = Boolean(onBulkDelete);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [detailKey, setDetailKey] = useState<AccessKey | null>(null);
 
   // Drop any selected ids that no longer exist (e.g. after a delete).
   useEffect(() => {
@@ -486,10 +460,7 @@ export function AccessKeysTable({
                 {/* Permissions */}
                 {showPermissions && (
                   <Table.Cell className="hidden md:table-cell">
-                    <PermissionBadges
-                      permissions={key.permissions ?? []}
-                      granularPermissions={key.granularPermissions ?? []}
-                    />
+                    <PermissionBadges accessKey={key} onShowDetails={() => setDetailKey(key)} />
                   </Table.Cell>
                 )}
 
@@ -527,6 +498,9 @@ export function AccessKeysTable({
           })}
         </Table.Body>
       </Table>
+      {detailKey && (
+        <AccessKeyPermissionsDrawer accessKey={detailKey} onClose={() => setDetailKey(null)} />
+      )}
     </>
   );
 }
