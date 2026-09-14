@@ -473,7 +473,7 @@ describe('list-access-keys baseHandler', () => {
     });
 
     await expect(baseHandler(event)).rejects.toThrow('DDB unavailable');
-    expect(consoleError).toHaveBeenCalledWith('[list-access-keys] Access key query failed', {
+    expect(consoleError).toHaveBeenCalledWith('[access-key-inventory] Access key query failed', {
       orgId: 'org-1',
       bucketFilter: 'target-bucket',
       regionFilter: 'us-east-1',
@@ -490,7 +490,7 @@ describe('list-access-keys baseHandler', () => {
 
     await expect(baseHandler(event)).rejects.toThrow('DDB unavailable');
     expect(consoleError).toHaveBeenCalledWith(
-      '[list-access-keys] Access key query failed',
+      '[access-key-inventory] Access key query failed',
       expect.objectContaining({ bucketFilter: null, regionFilter: null }),
     );
     consoleError.mockRestore();
