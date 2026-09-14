@@ -1,7 +1,12 @@
 import { TransactionCanceledException } from '@aws-sdk/client-dynamodb';
 import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
-import { OrgRole, canManageTargetRole, canRetainAccessKey } from '@filone/shared';
+import {
+  OrgRole,
+  canManageTargetRole,
+  canRetainAccessKey,
+  roleHasPermission,
+} from '@filone/shared';
 import type { AccessKeyPermissions, OrgMembershipSource } from '@filone/shared';
 import { retireInvitationItems } from './invitations.ts';
 import type { InvitationRecord } from './invitations.ts';
@@ -346,6 +351,41 @@ export function creatorRoleStillMintsCheck({
       TableName: Resource.OrgTable.name,
       Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: OrgKeys.memberSk(userId) } },
       ...roleIsOneOf((current) => canRetainAccessKey(current, key).retained),
+    },
+  };
+}
+
+/**
+ * The rotator's own authority, for a rotation of a key that is not theirs.
+ *
+ * The row write asserts the owner's role, because the replacement is the
+ * owner's key. The rotator was checked against the request's snapshot of their
+ * membership before the vendor call, and an Admin demoted or removed while the
+ * call was in flight would otherwise complete the rotation on authority they no
+ * longer hold. So the transaction asks again: still able to mint, still able to
+ * reach a key that is not their own, still able to grant what it carries. A
+ * rotation of the caller's own key needs no second item — the owner's check is
+ * the same row, and a transaction may touch an item once.
+ */
+export function rotatorStillAuthorizedCheck({
+  orgId,
+  userId,
+  key,
+}: {
+  orgId: string;
+  userId: string;
+  key: AccessKeyPermissions;
+}): TransactWriteItem {
+  return {
+    ConditionCheck: {
+      TableName: Resource.OrgTable.name,
+      Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: OrgKeys.memberSk(userId) } },
+      ...roleIsOneOf(
+        (current) =>
+          roleHasPermission(current, 'keys.create') &&
+          roleHasPermission(current, 'keys.manage_all') &&
+          canRetainAccessKey(current, key).retained,
+      ),
     },
   };
 }

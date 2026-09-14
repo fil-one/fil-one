@@ -325,6 +325,7 @@ export type {
   ListAccessKeysResponse,
   CreateAccessKeyRequest,
   CreateAccessKeyResponse,
+  RotateAccessKeyResponse,
   DeleteAccessKeyRequest,
 } from './api/access-keys.ts';
 

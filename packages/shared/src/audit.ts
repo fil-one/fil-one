@@ -46,6 +46,7 @@ export const AUDIT_EVENT_TYPES = [
   'key.created',
   'key.deleted',
   'audit.exported',
+  'key.rotated',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -76,6 +77,7 @@ export const TWO_PHASE_AUDIT_EVENT_TYPES = [
   'member.role_changed',
   'member.removed',
   'ownership.transferred',
+  'key.rotated',
 ] as const;
 export type TwoPhaseAuditEventType = (typeof TWO_PHASE_AUDIT_EVENT_TYPES)[number];
 
@@ -169,10 +171,12 @@ export type AuditDetailRecord = { [field: string]: AuditDetailValue | undefined 
  * What took a key: the request that asked for it, or the pass that found it.
  *
  * Every revocation names one, so no reading of this field turns on its absence.
- * `user_requested` is a member revoking their own key. `role_narrowing` and
- * `member_removed` are the passes that take a key its holder did not ask about.
- * `stale_role_at_mint` is the odd one: the actor is the minting member, undoing
- * their own work on finding their role narrowed underneath it. Each revocation
+ * `user_requested` is a member revoking their own key. `rotation` is the same
+ * member replacing it: the credential they asked for is the new one, and this
+ * is what became of the old. `role_narrowing` and `member_removed` are the
+ * passes that take a key its holder did not ask about. `stale_role_at_mint` is
+ * the odd one: the actor is the minting member, undoing their own work on
+ * finding their role narrowed underneath it. Each revocation
  * writes its own `key.deleted` carrying this, and those per-key events are the
  * durable account: a pass that fails midway would otherwise leave revoked
  * credentials with nothing recording them.
@@ -182,6 +186,7 @@ export type AuditDetailRecord = { [field: string]: AuditDetailValue | undefined 
  */
 export type RevocationTrigger =
   | 'user_requested'
+  | 'rotation'
   | 'role_narrowing'
   | 'member_removed'
   | 'stale_role_at_mint';
@@ -284,6 +289,28 @@ export interface AuditEventDetails {
      * revocation named one; `revokeAccessKey` requires it of every caller.
      */
     reason?: RevocationTrigger;
+  };
+  /**
+   * A key reissued in place: same name, permissions, scope and owner, new
+   * credential. Its own type rather than a `key.created`, so a reader does not
+   * have to reconstruct a rotation from a create and a revoke a second apart.
+   *
+   * Two-phase like `key.created`, for the same reason: the replacement is
+   * minted at the vendor before anything local is written. The key it replaces
+   * is revoked afterwards under its own `key.deleted` with reason `rotation`,
+   * so a rotation is this pair plus that one, and `replacedKeyIdSuffix` is what
+   * ties them together.
+   */
+  'key.rotated': {
+    keyKind: AuditKeyKind;
+    keyName: string;
+    region?: string;
+    /** The replacement, by the characters the console shows. Set on the completion. */
+    keyIdSuffix?: string;
+    /** The key being replaced, by the same characters. Set on the intent. */
+    replacedKeyIdSuffix: string;
+    /** As on `key.created`: the abandoned replacement could not be taken back. */
+    cleanupFailed?: boolean;
   };
   /**
    * The one event written on a read path, and the highest-signal action the log
@@ -473,6 +500,7 @@ export const AUDIT_EVENT_TYPE_LABELS: Record<AuditEventType, string> = {
   'key.created': 'Key created',
   'key.deleted': 'Key deleted',
   'audit.exported': 'Audit log exported',
+  'key.rotated': 'Key rotated',
 };
 
 /**

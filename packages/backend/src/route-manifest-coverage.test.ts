@@ -594,6 +594,7 @@ describe('the caps routes apply on top of their declared permission', () => {
     // arrives here and has to be given cases rather than passing on a number.
     expect(capped).toStrictEqual([
       'create-access-key',
+      'rotate-access-key',
       'update-member-role',
       'remove-member',
       'get-role-change-preview',
@@ -670,6 +671,55 @@ describe('the caps routes apply on top of their declared permission', () => {
       expect(errorCode(result)).toBe(ApiErrorCode.FORBIDDEN_ROLE);
       // Named, because "your role does not permit this key" against a form of
       // checkboxes does not say which one to clear.
+      expect(result.body).toContain(keyPermission);
+    },
+  );
+
+  /**
+   * Rotating applies the same cap, against a stored row rather than a body: the
+   * replacement is a fresh credential, so a role that could not mint the key is
+   * refused the reissue. The cases are the mint's, with the permission written
+   * into the row the handler reads instead of into a request.
+   */
+  const ROTATED_KEY_ID = 'key-to-rotate';
+
+  const stubRotatableKey = (keyPermission: string, granular: boolean) => {
+    const parent = parentOf(keyPermission);
+    stubbedRows.set(
+      rowKey('UserInfoTable', `ORG#${ORG_ID}`, `ACCESSKEY#${ROTATED_KEY_ID}`),
+      marshall({
+        pk: `ORG#${ORG_ID}`,
+        sk: `ACCESSKEY#${ROTATED_KEY_ID}`,
+        keyName: 'a key',
+        accessKeyId: 'AKIA0000TESTKEY0',
+        createdAt: '2026-01-01T00:00:00Z',
+        status: 'active',
+        region: 'us-east-1',
+        createdBy: USER_ID,
+        permissions: granular ? [parent] : [keyPermission],
+        ...(granular ? { granularPermissions: [keyPermission] } : {}),
+        bucketScope: 'all',
+      }),
+    );
+  };
+
+  it.each(cases)(
+    '$role rotating a key carrying $keyPermission, which needs $requires',
+    async ({ role, keyPermission, requires, granular }) => {
+      stubRotatableKey(keyPermission, granular);
+
+      const result = await invokeRoute(routeFor('rotate-access-key'), {
+        membership: membershipFor(ORG_ID, USER_ID, role),
+        request: { pathParameters: { keyId: ROTATED_KEY_ID } },
+      });
+
+      if (roleHasPermission(role, requires)) {
+        expect(errorCode(result)).not.toBe(ApiErrorCode.FORBIDDEN_ROLE);
+        return;
+      }
+
+      expect(result.statusCode).toBe(403);
+      expect(errorCode(result)).toBe(ApiErrorCode.FORBIDDEN_ROLE);
       expect(result.body).toContain(keyPermission);
     },
   );

@@ -1,4 +1,5 @@
 import { TransactionCanceledException } from '@aws-sdk/client-dynamodb';
+import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ApiErrorCode, NO_ROLE, auditKeyIdSuffix, canRetainAccessKey } from '@filone/shared';
@@ -33,6 +34,13 @@ import type { ServiceOrchestrator } from './service-orchestrator.ts';
  * what they do about a duplicate name, and what they refuse before starting.
  */
 
+/**
+ * The two events a mint is recorded under. A create writes `key.created`; a
+ * rotation writes `key.rotated`, so the reader sees a rotation rather than a
+ * create and a revoke a second apart. The helpers below close either.
+ */
+export type MintAuditEventType = 'key.created' | 'key.rotated';
+
 /** The credential the vendor handed back, and where it lives. */
 export interface MintedKey {
   /** The orchestrator's id for the key, which is what `deleteAccessKey` takes. */
@@ -44,7 +52,14 @@ export interface MintedKey {
   tenantId: string;
 }
 
-/** Who the creator-authority cap was evaluated for, and the key it admitted. */
+/**
+ * Whose key the row becomes, and what it carries.
+ *
+ * The row's write asserts this member's role on file can still hold the key and
+ * bumps their mint sequence, so a narrowing of their role that listed their keys
+ * a moment earlier notices the row and re-lists. On a create that is the caller;
+ * on a rotation it is the key's owner, who need not be the caller at all.
+ */
 export interface KeyMinter {
   orgId: string;
   userId: string;
@@ -66,7 +81,9 @@ export interface KeyMinter {
  */
 export type MintRecord =
   | { recorded: true }
-  | { recorded: false; reason: 'minter_role_changed' | 'write_conflict' };
+  | { recorded: false; reason: 'minter_role_changed' | 'write_conflict' }
+  /** A condition the caller put alongside the row refused, named by its label. */
+  | { recorded: false; reason: 'condition_failed'; label: string };
 
 /**
  * Write the key's row and the mint's completion event as one transaction, so
@@ -81,12 +98,19 @@ export async function recordMintedKey({
   mint,
   minter,
   recovered,
+  alongside = [],
 }: {
   row: AccessKeyRecord;
-  mint: AuditCorrelation<'key.created'>;
+  mint: AuditCorrelation<MintAuditEventType>;
   minter: KeyMinter;
   /** The credential existed at the vendor already and this write recovered its row. */
   recovered?: true;
+  /**
+   * Further items the transaction carries, each with the label its refusal
+   * reports as `condition_failed`. A rotation claims the row it replaces here,
+   * so two rotations of one key cannot both land.
+   */
+  alongside?: { item: TransactWriteItem; label: string }[];
 }): Promise<MintRecord> {
   try {
     await mint.complete({
@@ -105,6 +129,7 @@ export async function recordMintedKey({
         creatorRoleStillMintsCheck(minter),
         accessKeyMintSeqItem(minter),
         { Put: { TableName: Resource.UserInfoTable.name, Item: marshall(row) } },
+        ...alongside.map(({ item }) => item),
       ],
     });
     return { recorded: true };
@@ -112,9 +137,13 @@ export async function recordMintedKey({
     // The role check is item 0; `commitAudited` appends the audit Put last. The
     // unconditioned bump never cancels, but it holds a position, so it holds a
     // label.
-    if (cancelledLabels(err, ['minterRole', 'mintSeq', 'keyRow']).includes('minterRole')) {
+    const labels = ['minterRole', 'mintSeq', 'keyRow', ...alongside.map(({ label }) => label)];
+    const cancelled = cancelledLabels(err, labels);
+    if (cancelled.includes('minterRole')) {
       return { recorded: false, reason: 'minter_role_changed' };
     }
+    const refused = alongside.find(({ label }) => cancelled.includes(label));
+    if (refused) return { recorded: false, reason: 'condition_failed', label: refused.label };
     // A cancellation with no condition of ours in it is contention on the
     // sequence row: a second mint for this member, or the narrowing that asserts
     // it. Nothing landed, so the credential goes back rather than outliving the
@@ -147,7 +176,7 @@ export async function discardUnrecordedKey({
   minter,
 }: {
   minted: MintedKey;
-  mint: AuditCorrelation<'key.created'>;
+  mint: AuditCorrelation<MintAuditEventType>;
   minter: Pick<KeyMinter, 'orgId' | 'userId'>;
 }): Promise<void> {
   let cleanupFailed = false;
@@ -173,6 +202,11 @@ export async function discardUnrecordedKey({
  * path. Through `revokeAccessKey` so the removal is audited like any other, and
  * so the row delete rides its completion rather than being a second write
  * nobody records.
+ *
+ * Answers whether the credential is gone, so a caller holding state that only
+ * makes sense while it exists — a rotation's claim on the row it replaced — can
+ * let go of it. A `RevocationNotRecordedError` is a dead credential with a
+ * stale row, which is gone for that purpose; anything else may still be live.
  */
 export async function discardRecordedKey({
   minted,
@@ -182,9 +216,10 @@ export async function discardRecordedKey({
   minted: MintedKey;
   minter: Pick<KeyMinter, 'orgId' | 'userId'>;
   actor: AuditActor;
-}): Promise<void> {
+}): Promise<boolean> {
   try {
     await revokeAccessKey({ orgId: minter.orgId, ...minted, actor, reason: 'stale_role_at_mint' });
+    return true;
   } catch (err) {
     // Left for the operator rather than retried: a second delete against a
     // vendor that just refused one is not for a request path. A
@@ -201,6 +236,7 @@ export async function discardRecordedKey({
         error: err,
       },
     );
+    return err instanceof RevocationNotRecordedError;
   }
 }
 

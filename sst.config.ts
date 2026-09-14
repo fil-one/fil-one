@@ -1002,6 +1002,20 @@ export default $config({
     //
     // Declared here rather than beside each route because the entries reference
     // the queues, tables and workers above, all of which have to exist first.
+    // Minting a key reaches the orchestrator and its SSM-held credentials and
+    // waits on a vendor call. Rotation does the same and then revokes, so both
+    // routes take one grant set; rotation takes more time.
+    const accessKeyMintRoute: RouteInfraConfig = {
+      extraEnv: orchestratorEnv,
+      permissions: [
+        {
+          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+          resources: [auroraApiKeySsmArn, ...orchestratorS3KeySsmArns],
+        },
+      ],
+      timeout: '30 seconds',
+    };
+
     const ROUTE_INFRA_CONFIGS: Partial<Record<RouteHandler, RouteInfraConfig>> = {
       // ── Buckets and objects ────────────────────────────────────────
       'list-buckets': {
@@ -1063,16 +1077,13 @@ export default $config({
       'list-access-keys': {
         provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       },
-      'create-access-key': {
-        extraEnv: orchestratorEnv,
-        permissions: [
-          {
-            actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-            resources: [auroraApiKeySsmArn, ...orchestratorS3KeySsmArns],
-          },
-        ],
-        timeout: '30 seconds',
-      },
+      'create-access-key': accessKeyMintRoute,
+      // Twice the mint's budget, because a rotation makes two vendor calls in one
+      // request and the second comes after the replacement's row has landed.
+      // From that point the response is the only copy of the secret there will
+      // ever be, and an invocation that timed out inside the revoke would lose
+      // it to save a key the caller can delete from the list.
+      'rotate-access-key': { ...accessKeyMintRoute, timeout: '60 seconds' },
       'delete-access-key': {
         extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL, ...fthEnv, ...forgeEnv },
         permissions: [

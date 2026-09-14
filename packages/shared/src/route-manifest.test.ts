@@ -81,12 +81,14 @@ describe('ROUTE_MANIFEST', () => {
   it('names a declared permission alongside every in-handler cap', () => {
     // A cap narrows a requirement; it does not replace one. create-access-key
     // gates on `keys.create` in the chain and caps the new key at the creator's
-    // own authority in the handler; the member and invitation routes gate on
-    // `members.manage` and cap the reach at the caller's own role. The manifest
-    // states both halves in each case.
+    // own authority in the handler, and rotate-access-key caps the replacement
+    // the same way against the row it reissues; the member and invitation
+    // routes gate on `members.manage` and cap the reach at the caller's own
+    // role. The manifest states both halves in each case.
     const capped = entries.filter((route) => route.capsInHandler);
     expect(capped.map((route) => route.handler)).toStrictEqual([
       'create-access-key',
+      'rotate-access-key',
       'update-member-role',
       'remove-member',
       'get-role-change-preview',

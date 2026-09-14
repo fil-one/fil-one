@@ -12,6 +12,7 @@ import { PageLayout } from '../components/PageLayout.js';
 import { CodeBlock } from '../components/CodeBlock';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Tab, TabList, TabPanel, TabPanels, Tabs } from '../components/Tabs';
+import { SaveCredentialsModal } from '../components/SaveCredentialsModal';
 import { TableSkeleton, type SkeletonColumn } from '../components/Table/TableSkeleton';
 import { useToast } from '../components/Toast';
 
@@ -26,6 +27,7 @@ import { useCopyToClipboard } from '../lib/use-copy-to-clipboard.js';
 import { LIST_GC_TIME, LIST_STALE_TIME, queryKeys } from '../lib/query-client.js';
 import { RequirePermission } from '../components/RequirePermission';
 import { useHasPermission } from '../lib/use-permissions.js';
+import { useKeyRotation } from '../lib/use-key-rotation.js';
 import { useKeyActionScope } from '../lib/use-key-scope.js';
 import { useAccountDisabled } from '../lib/use-account-disabled.js';
 
@@ -54,6 +56,10 @@ type AccessKeysTabProps = {
   onDelete?: (id: string) => Promise<void>;
   /** Whether a row's Revoke belongs to this caller. */
   canRevoke?: (key: AccessKey) => boolean;
+  /** Absent for a role that cannot mint keys — the table drops the action. */
+  onRotate?: (id: string) => void;
+  /** Whether this caller could still mint the key, and so may reissue it. */
+  canRotate?: (key: AccessKey) => boolean;
   creatorFor?: (userId: string) => { name: string; email?: string } | undefined;
 };
 
@@ -62,6 +68,8 @@ function AccessKeysTab({
   onCreateOpen,
   onDelete,
   canRevoke,
+  onRotate,
+  canRotate,
   creatorFor,
 }: AccessKeysTabProps) {
   return (
@@ -79,6 +87,8 @@ function AccessKeysTab({
         showPermissions
         onDelete={onDelete}
         canDelete={canRevoke}
+        onRotate={onRotate}
+        canRotate={canRotate}
         creatorFor={creatorFor}
         onCreateOpen={onCreateOpen}
       />
@@ -108,6 +118,8 @@ function AccessKeysPanel({
   onCreateOpen,
   onDelete,
   canRevoke,
+  onRotate,
+  canRotate,
   creatorFor,
 }: AccessKeysTabProps & {
   mayList: boolean;
@@ -149,6 +161,8 @@ function AccessKeysPanel({
       onCreateOpen={onCreateOpen}
       onDelete={onDelete}
       canRevoke={canRevoke}
+      onRotate={onRotate}
+      canRotate={canRotate}
       creatorFor={creatorFor}
     />
   );
@@ -486,6 +500,7 @@ export function ApiKeysPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const mayCreate = useHasPermission('keys.create');
+  const rotation = useKeyRotation();
   // Listing is `keys.manage_own` and the server narrows the response to the
   // caller's own keys; `keys.manage_all` lifts that narrowing server-side and
   // asks nothing extra of this request. Revoking is per row.
@@ -593,6 +608,8 @@ export function ApiKeysPage() {
               onCreateOpen={mayCreate ? openCreateKey : undefined}
               onDelete={handleDelete}
               canRevoke={mayRevoke}
+              onRotate={rotation.request}
+              canRotate={rotation.canRotate}
               creatorFor={creatorFor}
             />
           </TabPanel>
@@ -610,6 +627,23 @@ export function ApiKeysPage() {
         description="This access key will be permanently revoked. Any applications using it will lose access immediately."
         confirmLabel="Delete key"
       />
+
+      <ConfirmDialog
+        open={rotation.pendingKeyId !== null}
+        onClose={rotation.cancel}
+        onConfirm={rotation.confirm}
+        title="Rotate access key"
+        description="The key keeps its name, permissions and buckets, and gets a new access key ID and secret. The current secret stops working as soon as the new one is issued, so update anything using it."
+        confirmLabel="Rotate key"
+      />
+
+      {rotation.credentials && (
+        <SaveCredentialsModal
+          open={true}
+          onDone={rotation.dismissCredentials}
+          credentials={rotation.credentials}
+        />
+      )}
     </PageLayout>
   );
 }

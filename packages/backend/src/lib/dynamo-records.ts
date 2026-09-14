@@ -83,6 +83,35 @@ export interface AccessKeyRecord {
    * confirmed creator. See `recoverDuplicateKey`.
    */
   recovered?: boolean;
+  /**
+   * The name this key answers to at the vendor, when that is not `keyName`.
+   *
+   * Key names are unique per tenant and no orchestrator can rename one, so a
+   * rotation cannot reuse the console name while the key it replaces still
+   * holds it. The replacement is minted under a suffixed name and the console
+   * goes on showing the name its owner chose. Absent on a key that was never
+   * rotated, where the two are the same string.
+   *
+   * Nothing on a request path reads it. It is here so an operator chasing a
+   * credential can find it at the vendor, where it does not answer to the name
+   * the console shows.
+   */
+  vendorKeyName?: string;
+  /**
+   * The id of the key that replaced this one, written in the same transaction
+   * as the replacement's row. It is the claim that keeps two rotations of one
+   * key from both landing: the second finds it set and refuses. It survives
+   * only on a row whose revoke then failed, which the list still shows and the
+   * owner can still delete.
+   */
+  replacedBy?: string;
+  /**
+   * Who last rotated the key and when. Kept apart from `createdBy`, which stays
+   * with the owner across a rotation: an Admin reissuing a member's credential
+   * is recorded here, and the owner's list still shows the key as theirs.
+   */
+  rotatedBy?: string;
+  rotatedAt?: string;
 }
 
 /**
