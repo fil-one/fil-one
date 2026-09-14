@@ -81,15 +81,12 @@ export async function recordMintedKey({
   mint,
   minter,
   recovered,
-  extraDetails,
 }: {
   row: AccessKeyRecord;
   mint: AuditCorrelation<'key.created'>;
   minter: KeyMinter;
   /** The credential existed at the vendor already and this write recovered its row. */
   recovered?: true;
-  /** Anything the completion records beyond the key's own id suffix. */
-  extraDetails?: Record<string, string>;
 }): Promise<MintRecord> {
   try {
     await mint.complete({
@@ -98,7 +95,6 @@ export async function recordMintedKey({
         // The id the console shows, by its last characters only.
         keyIdSuffix: auditKeyIdSuffix('s3', row.accessKeyId),
         ...(recovered ? { recovered } : {}),
-        ...extraDetails,
       },
       // The cap ran against a role read before the vendor call, so the row only
       // lands if the role on file could still grant the key. The sequence bump
@@ -149,20 +145,17 @@ export async function discardUnrecordedKey({
   minted,
   mint,
   minter,
-  handler,
 }: {
   minted: MintedKey;
   mint: AuditCorrelation<'key.created'>;
   minter: Pick<KeyMinter, 'orgId' | 'userId'>;
-  /** The handler's name, for the log line an operator greps for. */
-  handler: string;
 }): Promise<void> {
   let cleanupFailed = false;
   try {
     await minted.orchestrator.deleteAccessKey(minted.tenantId, minted.keyId);
   } catch (err) {
     cleanupFailed = true;
-    console.error(`[${handler}] Could not discard a key whose row never landed`, {
+    console.error('[key-mint] Could not discard a key whose row never landed', {
       orgId: minter.orgId,
       userId: minter.userId,
       keyIdSuffix: auditKeyIdSuffix('s3', minted.accessKeyId),
@@ -185,12 +178,10 @@ export async function discardRecordedKey({
   minted,
   minter,
   actor,
-  handler,
 }: {
   minted: MintedKey;
   minter: Pick<KeyMinter, 'orgId' | 'userId'>;
   actor: AuditActor;
-  handler: string;
 }): Promise<void> {
   try {
     await revokeAccessKey({ orgId: minter.orgId, ...minted, actor, reason: 'stale_role_at_mint' });
@@ -201,8 +192,8 @@ export async function discardRecordedKey({
     // anything else may still be live.
     console.error(
       err instanceof RevocationNotRecordedError
-        ? `[${handler}] Discarded a key whose minter was demoted, but its row survives`
-        : `[${handler}] Could not discard a key whose minter was demoted`,
+        ? '[key-mint] Discarded a key whose minter was demoted, but its row survives'
+        : '[key-mint] Could not discard a key whose minter was demoted',
       {
         orgId: minter.orgId,
         userId: minter.userId,
@@ -268,13 +259,11 @@ export function mintConflictResponse(): APIGatewayProxyStructuredResultV2 {
 }
 
 /** The answer when the minter's role moved: try again under the one they hold now. */
-export function roleChangedResponse(
-  verb: 'created' | 'rotated',
-): APIGatewayProxyStructuredResultV2 {
+export function roleChangedResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(409)
     .body<ErrorResponse>({
-      message: `Your role in this organization changed while the key was being ${verb}.`,
+      message: 'Your role in this organization changed while this key was being issued.',
       code: ApiErrorCode.FORBIDDEN_ROLE,
     })
     .build();

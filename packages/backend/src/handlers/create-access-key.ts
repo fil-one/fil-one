@@ -49,9 +49,6 @@ import { csrfMiddleware } from '../middleware/csrf.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
 
-/** Names this handler in the shared mint helpers' log lines. */
-const HANDLER = 'create-access-key';
-
 // TODO: Refactor the handler, reducing its complexity and removing the ignore eslint directive.
 // https://linear.app/filecoin-foundation/issue/FIL-320/refactor-create-access-key-handler
 export async function baseHandler(
@@ -150,15 +147,13 @@ export async function baseHandler(
     minter: creator,
   });
   if (!record.recorded) {
-    await discardUnrecordedKey({ minted: mintedKey, mint, minter: creator, handler: HANDLER });
-    return record.reason === 'minter_role_changed'
-      ? roleChangedResponse('created')
-      : mintConflictResponse();
+    await discardUnrecordedKey({ minted: mintedKey, mint, minter: creator });
+    return record.reason === 'minter_role_changed' ? roleChangedResponse() : mintConflictResponse();
   }
 
   if (await keyExceedsCurrentRole(creator)) {
-    await discardRecordedKey({ minted: mintedKey, minter: creator, actor, handler: HANDLER });
-    return roleChangedResponse('created');
+    await discardRecordedKey({ minted: mintedKey, minter: creator, actor });
+    return roleChangedResponse();
   }
 
   return new ResponseBuilder()
@@ -325,7 +320,7 @@ async function recoverDuplicateKey({
   // This path answers 409 either way; a row that did not land just leaves no
   // credential behind it.
   if (!record.recorded) {
-    await discardUnrecordedKey({ minted, mint, minter: creator, handler: HANDLER });
+    await discardUnrecordedKey({ minted, mint, minter: creator });
     return;
   }
 
