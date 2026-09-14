@@ -9,7 +9,6 @@ import {
   GRANULAR_PERMISSION_MAP,
   isBucketInfoPermission,
   isBucketPermission,
-  isObjectPermission,
 } from '@filone/shared';
 
 import { PERMISSION_OPTIONS } from '../lib/access-key-permission-options.js';
@@ -51,7 +50,12 @@ export function AccessKeyPermissionsDrawer({
 
   const shown = visible && !closing;
 
-  const objectPermissions = accessKey.permissions.filter(isObjectPermission);
+  // PERMISSION_OPTIONS' order, not the array's: the create form always
+  // presents Read/Write/List/Delete in that fixed order, and a key stores
+  // whatever order they were toggled in, which is not a fact worth showing.
+  const objectPermissions = PERMISSION_OPTIONS.map((o) => o.value).filter((p) =>
+    accessKey.permissions.includes(p),
+  );
   const bucketManagement = accessKey.permissions.filter(isBucketPermission);
   const bucketInfo = accessKey.permissions.filter(isBucketInfoPermission);
   const granularPermissions = accessKey.granularPermissions ?? [];
@@ -117,25 +121,29 @@ export function AccessKeyPermissionsDrawer({
               </DrawerSection>
             )}
 
-            {bucketManagement.length > 0 && (
+            {(bucketManagement.length > 0 || bucketInfo.length > 0) && (
+              // Same section, same order as AccessKeyPermissionsFields: the
+              // always-on fact first, then the bucket-info reads, then the
+              // region-gated management writes. Two sections here would say
+              // this is a different taxonomy from the one the key was built
+              // with, and it isn't.
               <DrawerSection title="Bucket management" testId="bucket-management">
-                {bucketManagement.map((permission) => (
-                  <PermissionRow
-                    key={permission}
-                    label={BUCKET_PERMISSION_LABELS[permission].label}
-                    description={BUCKET_PERMISSION_LABELS[permission].description}
-                  />
-                ))}
-              </DrawerSection>
-            )}
-
-            {bucketInfo.length > 0 && (
-              <DrawerSection title="Bucket info" testId="bucket-info">
+                <PermissionRow
+                  label="List all buckets"
+                  description="List all buckets in the account"
+                />
                 {bucketInfo.map((permission) => (
                   <PermissionRow
                     key={permission}
                     label={BUCKET_INFO_PERMISSION_LABELS[permission].label}
                     description={BUCKET_INFO_PERMISSION_LABELS[permission].description}
+                  />
+                ))}
+                {bucketManagement.map((permission) => (
+                  <PermissionRow
+                    key={permission}
+                    label={BUCKET_PERMISSION_LABELS[permission].label}
+                    description={BUCKET_PERMISSION_LABELS[permission].description}
                   />
                 ))}
               </DrawerSection>

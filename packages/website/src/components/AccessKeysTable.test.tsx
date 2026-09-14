@@ -42,7 +42,7 @@ describe('AccessKeysTable — permission detail', () => {
 
     expect(screen.getByTestId('access-key-permissions-drawer')).toBeInTheDocument();
     expect(
-      screen.getByTestId('access-key-permissions-drawer-section-bucket-info'),
+      screen.getByTestId('access-key-permissions-drawer-section-bucket-management'),
     ).toBeInTheDocument();
     expect(screen.getByText('Read bucket versioning')).toBeInTheDocument();
   });

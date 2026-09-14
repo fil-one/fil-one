@@ -11,12 +11,7 @@ import {
 import { IconBox } from './IconBox';
 
 import type { AccessKey } from '@filone/shared';
-import {
-  getRegionLabel,
-  isBucketInfoPermission,
-  isBucketPermission,
-  isObjectPermission,
-} from '@filone/shared';
+import { getRegionLabel, isBucketInfoPermission, isBucketPermission } from '@filone/shared';
 
 import { AccessKeyPermissionsDrawer } from './AccessKeyPermissionsDrawer';
 import { Badge } from './Badge';
@@ -55,7 +50,11 @@ function PermissionBadges({
   accessKey: AccessKey;
   onShowDetails: () => void;
 }) {
-  const objectPermissions = accessKey.permissions.filter(isObjectPermission);
+  // PERMISSION_OPTIONS' order, not the array's — same reason the drawer uses
+  // it: Read/Write/List/Delete read in a fixed order everywhere else.
+  const objectPermissions = PERMISSION_OPTIONS.filter((o) =>
+    accessKey.permissions.includes(o.value),
+  );
   const bucketManagement = accessKey.permissions.filter(isBucketPermission);
   const bucketInfo = accessKey.permissions.filter(isBucketInfoPermission);
   const extraCount =
@@ -63,14 +62,16 @@ function PermissionBadges({
 
   return (
     <div className="flex flex-wrap items-center gap-1">
-      {objectPermissions.map((p) => {
-        const option = PERMISSION_OPTIONS.find((o) => o.value === p);
-        return (
-          <Badge key={p} color="blue" size="sm" data-testid={`permission-badge-${p}`}>
-            {option?.label ?? p}
-          </Badge>
-        );
-      })}
+      {objectPermissions.map((option) => (
+        <Badge
+          key={option.value}
+          color="blue"
+          size="sm"
+          data-testid={`permission-badge-${option.value}`}
+        >
+          {option.label}
+        </Badge>
+      ))}
       {extraCount > 0 && (
         <button
           type="button"
