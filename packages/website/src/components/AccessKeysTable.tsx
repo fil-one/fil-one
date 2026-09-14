@@ -20,7 +20,6 @@ import { Checkbox } from './Checkbox';
 import { CopyButton } from './CopyButton';
 import { IconButton } from './IconButton';
 import { OverflowBadge } from './OverflowBadge';
-import { RegionFlag } from './RegionFlag';
 import { Table } from './Table/Table';
 import { PERMISSION_OPTIONS } from '../lib/access-key-permission-options.js';
 import { formatDate } from '../lib/time.js';
@@ -34,23 +33,6 @@ function StatusBadge({ status }: { status: AccessKey['status'] }) {
     <Badge color="grey" dot size="sm" weight="medium">
       Inactive
     </Badge>
-  );
-}
-
-/** Same layout as the buckets table's region cell: flag, label, code. */
-function RegionCell({ region }: { region: AccessKey['region'] }) {
-  if (!region) {
-    return <span className="text-xs text-zinc-400">—</span>;
-  }
-
-  return (
-    <div className="flex items-center gap-2.5">
-      <RegionFlag region={region} />
-      <div>
-        <p className="text-xs font-medium text-zinc-900">{getRegionLabel(region)}</p>
-        <p className="text-xs text-zinc-500">{region}</p>
-      </div>
-    </div>
   );
 }
 
@@ -459,7 +441,13 @@ export function AccessKeysTable({
                 {/* Region — access keys are region-scoped */}
                 {showRegion && (
                   <Table.Cell className="hidden md:table-cell">
-                    <RegionCell region={key.region} />
+                    {key.region ? (
+                      <Badge color="grey" size="sm" description={getRegionLabel(key.region)}>
+                        {key.region}
+                      </Badge>
+                    ) : (
+                      <span className="text-xs text-zinc-400">—</span>
+                    )}
                   </Table.Cell>
                 )}
 
