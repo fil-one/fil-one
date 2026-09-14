@@ -26,6 +26,7 @@ import { Button } from './Button';
 import { Checkbox } from './Checkbox';
 import { CopyButton } from './CopyButton';
 import { IconButton } from './IconButton';
+import { OverflowBadge, type OverflowSection } from './OverflowBadge';
 import { Table } from './Table/Table';
 import { formatDate } from '../lib/time.js';
 
@@ -52,78 +53,92 @@ function PermissionBadges({
   const bucketManagement = permissions.filter(isBucketPermission);
   const bucketInfo = permissions.filter(isBucketInfoPermission);
 
+  const groups: (OverflowSection & { title: string; testId: string })[] = [];
+  if (granularPermissions.length > 0) {
+    groups.push({
+      title: 'Data protection',
+      testId: 'permission-badge-data-protection',
+      items: granularPermissions.map((g) => ({
+        key: g,
+        label: GRANULAR_PERMISSION_LABELS[g].label,
+      })),
+    });
+  }
+  if (bucketManagement.length > 0) {
+    groups.push({
+      title: 'Bucket management',
+      testId: 'permission-badge-bucket-management',
+      items: bucketManagement.map((p) => ({
+        key: p,
+        label: BUCKET_PERMISSION_LABELS[p].label,
+      })),
+    });
+  }
+  if (bucketInfo.length > 0) {
+    groups.push({
+      title: 'Bucket info',
+      testId: 'permission-badge-bucket-info',
+      items: bucketInfo.map((p) => ({
+        key: p,
+        label: BUCKET_INFO_PERMISSION_LABELS[p].label,
+      })),
+    });
+  }
+
   return (
-    <div className="flex flex-wrap gap-1">
+    <div className="flex flex-wrap items-center gap-1">
       {objectPermissions.map((p) => (
         <Badge key={p} color="blue" size="sm" className="capitalize">
           {p}
         </Badge>
       ))}
-      {granularPermissions.length > 0 && (
-        <GroupBadge
-          title="Data protection"
-          testId="permission-badge-data-protection"
-          items={granularPermissions.map((g) => ({
-            key: g,
-            label: GRANULAR_PERMISSION_LABELS[g].label,
-          }))}
+      {groups.length === 1 && (
+        <OverflowBadge
+          label={groups[0].title}
+          color="blue"
+          testId={groups[0].testId}
+          sections={groups}
         />
       )}
-      {bucketManagement.length > 0 && (
-        <GroupBadge
-          title="Bucket management"
-          testId="permission-badge-bucket-management"
-          items={bucketManagement.map((p) => ({
-            key: p,
-            label: BUCKET_PERMISSION_LABELS[p].label,
-          }))}
-        />
-      )}
-      {bucketInfo.length > 0 && (
-        <GroupBadge
-          title="Bucket info"
-          testId="permission-badge-bucket-info"
-          items={bucketInfo.map((p) => ({
-            key: p,
-            label: BUCKET_INFO_PERMISSION_LABELS[p].label,
-          }))}
+      {groups.length > 1 && (
+        <OverflowBadge
+          label={`+${groups.length} more`}
+          testId="permission-badge-overflow"
+          sections={groups}
         />
       )}
     </div>
   );
 }
 
-function GroupBadge({
-  title,
-  testId,
-  items,
-}: {
-  title: string;
-  testId: string;
-  items: { key: string; label: string }[];
-}) {
+function BucketBadges({ scope, buckets }: { scope: AccessKey['bucketScope']; buckets: string[] }) {
+  if (scope === 'all') {
+    return (
+      <Badge color="grey" size="sm">
+        All Buckets
+      </Badge>
+    );
+  }
+
+  if (buckets.length === 0) {
+    return <span className="text-zinc-400">-</span>;
+  }
+
+  const [first, ...rest] = buckets;
+
   return (
-    <Badge
-      color="blue"
-      size="sm"
-      data-testid={testId}
-      description={
-        <>
-          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
-            {title}
-          </p>
-          <ul className="flex flex-col gap-0.5">
-            {items.map((item) => (
-              <li key={item.key} className="text-xs text-zinc-700">
-                {item.label}
-              </li>
-            ))}
-          </ul>
-        </>
-      }
-    >
-      {title}
-    </Badge>
+    <div className="flex flex-wrap items-center gap-1">
+      <Badge color="grey" size="sm">
+        {first}
+      </Badge>
+      {rest.length > 0 && (
+        <OverflowBadge
+          label={`+${rest.length}`}
+          testId="bucket-badge-overflow"
+          sections={[{ items: rest.map((b) => ({ key: b, label: b })) }]}
+        />
+      )}
+    </div>
   );
 }
 
@@ -391,7 +406,7 @@ export function AccessKeysTable({
         <Table.Header>
           <Table.Row>
             {selectable && (
-              <Table.Head className="w-0">
+              <Table.Head className="w-0 !pr-0">
                 <Checkbox checked={allSelected} onChange={toggleAll} aria-label="Select all keys" />
               </Table.Head>
             )}
@@ -423,7 +438,7 @@ export function AccessKeysTable({
                 className={isSelected ? 'bg-brand-50/40' : undefined}
               >
                 {selectable && (
-                  <Table.Cell className="w-0">
+                  <Table.Cell className="w-0 !pr-0">
                     <Checkbox
                       checked={isSelected}
                       onChange={() => toggleOne(key.id)}
@@ -461,19 +476,7 @@ export function AccessKeysTable({
                 {/* Buckets */}
                 {showBuckets && (
                   <Table.Cell className="hidden lg:table-cell">
-                    <div className="flex flex-wrap gap-1">
-                      {key.bucketScope === 'all' ? (
-                        <Badge color="grey" size="sm">
-                          All Buckets
-                        </Badge>
-                      ) : (
-                        (key.buckets ?? []).map((b) => (
-                          <Badge key={b} color="grey" size="sm">
-                            {b}
-                          </Badge>
-                        ))
-                      )}
-                    </div>
+                    <BucketBadges scope={key.bucketScope} buckets={key.buckets ?? []} />
                   </Table.Cell>
                 )}
 
