@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { MeResponse } from '@filone/shared';
 
 import {
   clearActiveOrgId,
@@ -8,18 +9,29 @@ import {
   switchToOrg,
   takeReconcileNotice,
 } from './active-org.js';
+import { queryClient, queryKeys } from './query-client.js';
 
 const ORG_A = '11111111-1111-1111-1111-111111111111';
 const ORG_B = '22222222-2222-2222-2222-222222222222';
 
 const reload = vi.fn();
 const assign = vi.fn();
+const navigate = vi.fn();
+
+// `switchToOrg` imports the router dynamically (see its own comment for why),
+// so this is what it gets back either way.
+vi.mock('../router.js', () => ({
+  router: { navigate: (...args: unknown[]) => navigate(...args) },
+}));
 
 describe('the active org stash', () => {
   beforeEach(() => {
     sessionStorage.clear();
     reload.mockClear();
     assign.mockClear();
+    navigate.mockReset();
+    navigate.mockResolvedValue(undefined);
+    queryClient.clear();
     // Only `reload` and `assign` are read on these paths, so the stub carries
     // nothing else.
     vi.stubGlobal('location', { reload, assign });
@@ -61,15 +73,77 @@ describe('the active org stash', () => {
   });
 
   describe('switching', () => {
-    it('stashes the choice and loads the console root', () => {
+    function seedMe(overrides: Partial<MeResponse>) {
+      queryClient.setQueryData(queryKeys.me, {
+        orgId: ORG_A,
+        memberships: [],
+        ...overrides,
+      } as unknown as MeResponse);
+    }
+
+    it('stashes the choice immediately, ahead of the navigation settling', () => {
       switchToOrg(ORG_B);
 
       expect(getActiveOrgId()).toBe(ORG_B);
-      // No query key carries an org dimension, so a fresh load is the only
-      // invalidation that cannot leak one org's cache into the other's view —
-      // and the root, because every path segment is org-scoped.
-      expect(assign).toHaveBeenCalledWith('/');
+    });
+
+    it('clears every cached query, so org A’s data cannot leak into org B’s view', () => {
+      const clearSpy = vi.spyOn(queryClient, 'clear');
+
+      switchToOrg(ORG_B);
+
+      expect(clearSpy).toHaveBeenCalled();
+    });
+
+    it('navigates to the target org’s dashboard by slug, once this tab’s cache knows it', async () => {
+      seedMe({
+        memberships: [
+          { orgId: ORG_A, orgName: 'A', role: 'owner', slug: 'org-a' } as never,
+          { orgId: ORG_B, orgName: 'B', role: 'owner', slug: 'org-b' } as never,
+        ],
+      });
+
+      switchToOrg(ORG_B);
+
+      await vi.waitFor(() => {
+        expect(navigate).toHaveBeenCalledWith({
+          to: '/$orgSlug/dashboard',
+          params: { orgSlug: 'org-b' },
+        });
+      });
+      // Not the old full-reload mechanism at all.
+      expect(assign).not.toHaveBeenCalled();
       expect(reload).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the unscoped dashboard when the target org has no slug yet', async () => {
+      // No `/me` cached at all — the state before the backend's slug backfill
+      // has run for this stage, or simply before the first `/me` of the
+      // session. Either way there is nothing to resolve a slug from.
+      switchToOrg(ORG_B);
+
+      await vi.waitFor(() => {
+        expect(navigate).toHaveBeenCalledWith({ to: '/dashboard' });
+      });
+    });
+
+    it('rolls the stash back when the navigation does not complete', async () => {
+      setActiveOrgId(ORG_A);
+      navigate.mockRejectedValue(new Error('navigation blocked'));
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      switchToOrg(ORG_B);
+      expect(getActiveOrgId()).toBe(ORG_B);
+
+      await vi.waitFor(() => expect(getActiveOrgId()).toBe(ORG_A));
+    });
+
+    it('clears the stash on rollback when there was no previous org', async () => {
+      navigate.mockRejectedValue(new Error('navigation blocked'));
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      switchToOrg(ORG_B);
+      await vi.waitFor(() => expect(getActiveOrgId()).toBeNull());
     });
   });
 
@@ -225,127 +299,5 @@ describe('recovering from a /me that refuses', () => {
     const stash = await freshStash();
 
     expect(stash.clearActiveOrgAfterRefusal(403)).toBe(false);
-  });
-});
-
-describe('a switch whose navigation never happens', () => {
-  beforeEach(() => {
-    sessionStorage.clear();
-    vi.resetModules();
-    vi.useFakeTimers();
-    reload.mockClear();
-    assign.mockClear();
-    vi.stubGlobal('location', { reload, assign });
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
-
-  it('rolls back so the tab keeps working in the org still on screen', async () => {
-    // The upload page installs a cancelable `beforeunload` while a transfer is
-    // running. A user who answers "stay on this page" leaves a tab that asked to
-    // switch and did not: without the rollback every apiRequest hangs forever
-    // and the switcher's rows stay inert.
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const stash = await import('./active-org.js');
-    stash.setActiveOrgId(ORG_A);
-    const seen: boolean[] = [];
-    stash.onSwitchingOrgChange((switching) => seen.push(switching));
-
-    stash.switchToOrg(ORG_B);
-    expect(stash.isSwitchingOrg()).toBe(true);
-    expect(stash.getActiveOrgId()).toBe(ORG_B);
-
-    await vi.runAllTimersAsync();
-
-    expect(stash.isSwitchingOrg()).toBe(false);
-    expect(stash.getActiveOrgId()).toBe(ORG_A);
-    // The switcher hears both edges, so its rows re-enable.
-    expect(seen).toStrictEqual([true, false]);
-  });
-
-  it('clears the stash again for a tab that had none before the switch', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const stash = await import('./active-org.js');
-
-    stash.switchToOrg(ORG_B);
-    await vi.runAllTimersAsync();
-
-    expect(stash.getActiveOrgId()).toBeNull();
-    expect(stash.isSwitchingOrg()).toBe(false);
-  });
-
-  it('stays latched when the page really is leaving', async () => {
-    const stash = await import('./active-org.js');
-    stash.setActiveOrgId(ORG_A);
-
-    stash.switchToOrg(ORG_B);
-    window.dispatchEvent(new Event('pagehide'));
-    await vi.runAllTimersAsync();
-
-    // The load is on its way: rolling back here would put the old org back
-    // under the page that is about to render the new one.
-    expect(stash.isSwitchingOrg()).toBe(true);
-    expect(stash.getActiveOrgId()).toBe(ORG_B);
-  });
-
-  it('reloads a page that comes back out of the back/forward cache', async () => {
-    // Same document, same heap: the latch is still up and the rollback timer is
-    // gone, so every request would be held and the switcher would stay
-    // disabled. The page is showing an org the user has left.
-    const stash = await import('./active-org.js');
-    stash.setActiveOrgId(ORG_A);
-
-    stash.switchToOrg(ORG_B);
-    window.dispatchEvent(new Event('pagehide'));
-    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
-
-    expect(reload).toHaveBeenCalled();
-  });
-
-  it('does not hand back an org the server refused', async () => {
-    // `/me` answered under another org, and the reload that recovery asks for
-    // was cancelled. Putting the stash back would re-attach the header the
-    // server has already declined to every later request, and each one would
-    // come back NOT_A_MEMBER — the state the clear exists to leave behind.
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const stash = await import('./active-org.js');
-    stash.setActiveOrgId(ORG_A);
-
-    expect(stash.reconcileActiveOrg(ORG_B, ORG_A)).toBe(true);
-    await vi.runAllTimersAsync();
-
-    expect(stash.getActiveOrgId()).toBeNull();
-    expect(stash.isSwitchingOrg()).toBe(false);
-  });
-
-  it('does not hand back an org /me refused outright', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const stash = await import('./active-org.js');
-    stash.setActiveOrgId(ORG_A);
-
-    expect(stash.clearActiveOrgAfterRefusal(403)).toBe(true);
-    await vi.runAllTimersAsync();
-
-    // `/me` is the one call whose answer could fix this tab, and it is refusing
-    // the header. The tab carries on in the caller's own org instead.
-    expect(stash.getActiveOrgId()).toBeNull();
-    expect(stash.isSwitchingOrg()).toBe(false);
-  });
-
-  it('leaves an ordinary load alone', async () => {
-    const stash = await import('./active-org.js');
-    stash.setActiveOrgId(ORG_A);
-
-    stash.switchToOrg(ORG_B);
-    window.dispatchEvent(new Event('pagehide'));
-    // A `pageshow` without `persisted` is a fresh document, which has no latch
-    // to clear and nothing to reload.
-    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: false }));
-
-    expect(reload).not.toHaveBeenCalled();
   });
 });

@@ -23,6 +23,7 @@ import {
 } from '@filone/shared';
 import { queryKeys } from '../lib/query-client.js';
 import { formatDate } from '../lib/time.js';
+import { useOrgSlug } from '../lib/use-org-path.js';
 
 const REGENERATE_ACTION = 'regenerate-recovery-code';
 
@@ -169,13 +170,14 @@ function RecoveryCodeSection() {
   // bounces here with ?action=regenerate-recovery-code.
   const search = useSearch({ strict: false }) as { action?: string };
   const navigate = useNavigate();
+  const orgSlug = useOrgSlug();
   const resumed = useRef(false);
   useEffect(() => {
     if (resumed.current || search.action !== REGENERATE_ACTION) return;
     resumed.current = true;
-    void navigate({ to: '/settings', replace: true });
+    void navigate({ to: '/$orgSlug/settings', params: { orgSlug }, replace: true });
     regenerate.mutate();
-  }, [search.action, navigate, regenerate]);
+  }, [search.action, navigate, orgSlug, regenerate]);
 
   return (
     <>
@@ -393,12 +395,13 @@ function PasskeySettings({ passkeys }: { passkeys: PasskeyEnrollment[] }) {
 function useClearStepUpAction(action: string) {
   const search = useSearch({ strict: false }) as { action?: string };
   const navigate = useNavigate();
+  const orgSlug = useOrgSlug();
   const cleared = useRef(false);
   useEffect(() => {
     if (cleared.current || search.action !== action) return;
     cleared.current = true;
-    void navigate({ to: '/settings', replace: true });
-  }, [search.action, navigate, action]);
+    void navigate({ to: '/$orgSlug/settings', params: { orgSlug }, replace: true });
+  }, [search.action, navigate, orgSlug, action]);
 }
 
 export function MfaSettings({ me }: { me: MeResponse }) {

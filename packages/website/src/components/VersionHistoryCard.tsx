@@ -3,6 +3,7 @@ import { ClockCounterClockwiseIcon } from '@phosphor-icons/react/dist/ssr';
 import { formatBytes } from '@filone/shared';
 import type { S3ObjectVersion, S3Region } from '@filone/shared';
 import { formatDateTime } from '../lib/time.js';
+import { useOrgSlug } from '../lib/use-org-path.js';
 import { Badge } from './Badge';
 
 // ---------------------------------------------------------------------------
@@ -52,11 +53,12 @@ function VersionRow({
   region: S3Region;
 }) {
   const navigate = useNavigate();
+  const orgSlug = useOrgSlug();
 
   function navigateToVersion() {
     void navigate({
-      to: '/buckets/$bucketName/objects',
-      params: { bucketName },
+      to: '/$orgSlug/buckets/$bucketName/objects',
+      params: { orgSlug, bucketName },
       search: { key: version.key, region, versionId: version.versionId },
     });
   }

@@ -20,7 +20,7 @@ function renderDialog(onClose = vi.fn()) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   seedPermissions(client, OrgRole.Owner, {
     orgName: 'Acme',
-    memberships: [{ orgId: 'org-1', orgName: 'Acme', role: OrgRole.Owner }],
+    memberships: [{ orgId: 'org-1', orgName: 'Acme', slug: 'acme', role: OrgRole.Owner }],
   });
   return {
     client,

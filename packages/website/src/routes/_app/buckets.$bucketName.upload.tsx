@@ -1,31 +1,10 @@
-import z from 'zod';
-import { S3Region } from '@filone/shared';
 import { createRoute } from '@tanstack/react-router';
 import { Route as appRoute } from '../_app';
-import { UploadObjectPage } from '../../pages/UploadObjectPage';
-import { RequirePermissionPage } from '../../components/RequirePermissionPage';
+import { redirectToActiveOrgPath } from '../../lib/legacy-route-redirect.js';
 
-const uploadObjectSearchSchema = z.object({
-  region: z.enum(S3Region),
-});
-
-function UploadObjectRoute() {
-  const { bucketName } = Route.useParams();
-  const { region } = Route.useSearch();
-  return (
-    <RequirePermissionPage
-      permission="objects.write"
-      title="Upload object"
-      deniedMessage="Uploading objects is not part of your role. You can browse and download what is already stored here."
-    >
-      <UploadObjectPage bucketName={bucketName} region={region} />
-    </RequirePermissionPage>
-  );
-}
-
+/** The pre-org-scoping URL. See `dashboard.tsx` for why this stays. */
 export const Route = createRoute({
   path: '/buckets/$bucketName/upload',
   getParentRoute: () => appRoute,
-  component: UploadObjectRoute,
-  validateSearch: uploadObjectSearchSchema,
+  beforeLoad: ({ location }) => redirectToActiveOrgPath(location.href),
 });

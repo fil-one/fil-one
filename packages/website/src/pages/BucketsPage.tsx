@@ -16,6 +16,7 @@ import { useDeleteBucket } from '../lib/use-delete-bucket.js';
 import { DEFAULT_BUCKET_SORT, EMPTY_BUCKET_FILTERS } from '../lib/bucket-table.js';
 import { RequirePermission } from '../components/RequirePermission';
 import { useHasPermission } from '../lib/use-permissions.js';
+import { useOrgSlug } from '../lib/use-org-path.js';
 
 // Mirrors BucketsTable's columns (labels and breakpoints) so the loading
 // placeholder drops the same columns at the same widths as the real table.
@@ -32,6 +33,7 @@ const SKELETON_COLUMNS: SkeletonColumn[] = [
 
 export function BucketsPage() {
   const navigate = useNavigate();
+  const orgSlug = useOrgSlug();
   const mayCreate = useHasPermission('buckets.create');
 
   const [filters, setFilters] = useState(EMPTY_BUCKET_FILTERS);
@@ -60,7 +62,7 @@ export function BucketsPage() {
         variant="ghost"
         size="sm"
         icon={PlusIcon}
-        onClick={() => navigate({ to: '/buckets/create' })}
+        onClick={() => navigate({ to: '/$orgSlug/buckets/create', params: { orgSlug } })}
       >
         Create bucket
       </Button>
@@ -122,7 +124,7 @@ export function BucketsPage() {
               id="buckets-empty-create-button"
               variant="primary"
               icon={PlusIcon}
-              onClick={() => navigate({ to: '/buckets/create' })}
+              onClick={() => navigate({ to: '/$orgSlug/buckets/create', params: { orgSlug } })}
             >
               Create bucket
             </Button>

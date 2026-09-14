@@ -22,6 +22,8 @@ export function seedPermissions(
   const me: MeResponse = {
     orgId: 'org-1',
     orgName: 'Acme',
+    slug: 'acme',
+    nameConfirmed: true,
     emailVerified: true,
     email: 'user@example.com',
     mfaEnrollments: [],

@@ -30,6 +30,7 @@ import { useHasPermission } from '../lib/use-permissions.js';
 import { useKeyRotation } from '../lib/use-key-rotation.js';
 import { useKeyActionScope } from '../lib/use-key-scope.js';
 import { useAccountDisabled } from '../lib/use-account-disabled.js';
+import { useOrgSlug } from '../lib/use-org-path.js';
 
 // ---------------------------------------------------------------------------
 // Tab 1: Access Keys
@@ -498,6 +499,7 @@ function CreateKeyAction({ onCreate }: { onCreate: () => void }) {
 export function ApiKeysPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const orgSlug = useOrgSlug();
   const queryClient = useQueryClient();
   const mayCreate = useHasPermission('keys.create');
   const rotation = useKeyRotation();
@@ -507,7 +509,8 @@ export function ApiKeysPage() {
   const { mayList, mayRevoke } = useKeyActionScope();
   const accountDisabled = useAccountDisabled();
 
-  const openCreateKey = () => void navigate({ to: '/api-keys/create' });
+  const openCreateKey = () =>
+    void navigate({ to: '/$orgSlug/api-keys/create', params: { orgSlug } });
 
   const { data, isPending, isError, error } = useQuery({
     queryKey: queryKeys.accessKeys,
