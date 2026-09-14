@@ -97,7 +97,7 @@ export function OverflowBadge({ label, color = 'grey', sections, testId }: Overf
         aria-expanded={open}
         aria-haspopup="dialog"
         onClick={toggle}
-        className="cursor-pointer"
+        className="cursor-pointer rounded-full focus-visible:brand-outline focus-visible:outline-offset-1"
       >
         <Badge color={color} size="sm">
           {label}

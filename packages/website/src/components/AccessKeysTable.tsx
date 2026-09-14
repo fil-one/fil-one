@@ -77,7 +77,7 @@ function PermissionBadges({
           type="button"
           data-testid="permission-badge-details"
           onClick={onShowDetails}
-          className="cursor-pointer"
+          className="cursor-pointer rounded-full focus-visible:brand-outline focus-visible:outline-offset-1"
         >
           <Badge color="grey" size="sm">
             +{extraCount} more
@@ -87,6 +87,8 @@ function PermissionBadges({
     </div>
   );
 }
+
+const BUCKET_BADGES_INLINE_MAX = 3;
 
 function BucketBadges({ scope, buckets }: { scope: AccessKey['bucketScope']; buckets: string[] }) {
   if (scope === 'all') {
@@ -101,13 +103,19 @@ function BucketBadges({ scope, buckets }: { scope: AccessKey['bucketScope']; buc
     return <span className="text-zinc-400">-</span>;
   }
 
-  const [first, ...rest] = buckets;
+  // Small overflows fit inline for free — collapsing behind a "+1" would cost
+  // a click to save no space at all. Only fall back to the popover once there
+  // is genuinely more than a glance can take in.
+  const shown = buckets.slice(0, BUCKET_BADGES_INLINE_MAX);
+  const rest = buckets.slice(BUCKET_BADGES_INLINE_MAX);
 
   return (
     <div className="flex flex-wrap items-center gap-1">
-      <Badge color="grey" size="sm">
-        {first}
-      </Badge>
+      {shown.map((bucket) => (
+        <Badge key={bucket} color="grey" size="sm">
+          {bucket}
+        </Badge>
+      ))}
       {rest.length > 0 && (
         <OverflowBadge
           label={`+${rest.length}`}
