@@ -32,8 +32,6 @@ export function useKeyRotation(): {
   cancel: () => void;
   /** Rotate the pending key. Refusals are reported through a toast. */
   confirm: () => Promise<void>;
-  /** True while a rotation is in flight, so a second confirm does nothing. */
-  rotating: boolean;
   /** The replacement's credential while it is on screen. */
   credentials: NewCredentials | null;
   /** The caller has saved it. */
@@ -88,7 +86,6 @@ export function useKeyRotation(): {
         // reported by onError
       }
     },
-    rotating: rotate.isPending,
     credentials,
     dismissCredentials: () => {
       setCredentials(null);

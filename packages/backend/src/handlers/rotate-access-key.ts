@@ -1,5 +1,5 @@
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
-import type { AttributeValue } from '@aws-sdk/client-dynamodb';
+import type { AttributeValue, TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
@@ -14,9 +14,7 @@ import {
 } from '@filone/shared';
 import type {
   AccessKeyPermission,
-  AccessKeyBucketScope,
   ErrorResponse,
-  GranularPermission,
   KeyRetentionResult,
   RotateAccessKeyResponse,
 } from '@filone/shared';
@@ -37,7 +35,7 @@ import {
   recordMintedKey,
   roleChangedResponse,
 } from '../lib/key-mint.ts';
-import type { KeyMinter, MintedKey } from '../lib/key-mint.ts';
+import type { KeyMinter, MintRecord, MintedKey } from '../lib/key-mint.ts';
 import { revokeAndReport } from '../lib/key-revocation.ts';
 import { keyScope, notYourKeyResponse, withinScope } from '../lib/key-scope.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
@@ -60,9 +58,6 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 
 const dynamo = getDynamoClient();
 
-/** Names this handler in the shared mint helpers' log lines. */
-const HANDLER = 'rotate-access-key';
-
 /**
  * Replace a key's credential and keep everything else about it.
  *
@@ -74,8 +69,8 @@ const HANDLER = 'rotate-access-key';
  * whose mint then failed with no credential at all.
  *
  * What carries over is everything the row records: permissions, granulars,
- * bucket scope, buckets, expiry and region. What changes is the credential, and
- * `createdBy`, which names whoever asked for this one.
+ * bucket scope, buckets, expiry, region and owner. What changes is the
+ * credential.
  *
  * The order of everything before the vendor call is `create-access-key.ts`'s,
  * for its reasons. What is new is that the key already exists, so the cap is
@@ -85,7 +80,7 @@ export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const prepared = await prepareRotation(event);
-  return 'refused' in prepared ? prepared.refused : await issueReplacement(prepared);
+  return 'keyId' in prepared ? await issueReplacement(prepared) : prepared;
 }
 
 /**
@@ -98,15 +93,13 @@ export async function baseHandler(
  */
 async function prepareRotation(
   event: AuthenticatedEvent,
-): Promise<Rotation | { refused: APIGatewayProxyStructuredResultV2 }> {
+): Promise<Rotation | APIGatewayProxyStructuredResultV2> {
   const keyId = event.pathParameters?.keyId;
   if (!keyId) {
-    return refused(
-      new ResponseBuilder()
-        .status(400)
-        .body<ErrorResponse>({ message: 'Missing keyId in path' })
-        .build(),
-    );
+    return new ResponseBuilder()
+      .status(400)
+      .body<ErrorResponse>({ message: 'Missing keyId in path' })
+      .build();
   }
 
   const { orgId, userId, membership } = getUserInfo(event);
@@ -122,12 +115,10 @@ async function prepareRotation(
     }),
   );
   if (!Item) {
-    return refused(
-      new ResponseBuilder()
-        .status(404)
-        .body<ErrorResponse>({ message: 'Access key not found' })
-        .build(),
-    );
+    return new ResponseBuilder()
+      .status(404)
+      .body<ErrorResponse>({ message: 'Access key not found' })
+      .build();
   }
 
   // Before the orchestrator is touched, as the revoke does it: minting a
@@ -135,7 +126,7 @@ async function prepareRotation(
   if (
     !withinScope(keyScope(event), { createdBy: Item.createdBy?.S, recovered: Item.recovered?.BOOL })
   ) {
-    return refused(notYourKeyResponse());
+    return notYourKeyResponse();
   }
 
   const stored = readStoredKey(Item, keyId);
@@ -144,7 +135,11 @@ async function prepareRotation(
   // what the replacement is minted from, and a row that records none cannot
   // produce one. Nothing at the vendor can be read back to fill the gap.
   const { permissions } = stored;
-  if (!permissions) return refused(unrecordedPermissionsResponse());
+  if (!permissions?.length) return unrecordedPermissionsResponse();
+
+  // A row already naming its replacement had a rotation land whose revoke did
+  // not. The replacement is the key to use; this one is only left to delete.
+  if (stored.replacedBy) return alreadyReplacedResponse();
 
   // The same question a role narrowing asks of a key its holder already has,
   // and the same answer: a key is reissued when its holder could mint it today.
@@ -152,36 +147,33 @@ async function prepareRotation(
     permissions,
     granularPermissions: stored.granularPermissions,
   });
-  if (!retention.retained) return refused(refusedRotation(retention));
+  if (!retention.retained) return refusedRotation(retention);
 
   if (hasExpired(stored.expiresAt)) {
-    return refused(
-      new ResponseBuilder()
-        .status(400)
-        .body<ErrorResponse>({
-          message: `This key expired on ${stored.expiresAt}. Create a new key instead of rotating it.`,
-        })
-        .build(),
-    );
+    return new ResponseBuilder()
+      .status(400)
+      .body<ErrorResponse>({
+        message: `This key expired on ${stored.expiresAt}. Create a new key instead of rotating it.`,
+      })
+      .build();
   }
 
   if (!isSupportedRegion(stored.region, process.env.FILONE_STAGE!)) {
-    return refused(unsupportedRegionResponse(stored.region));
+    return unsupportedRegionResponse(stored.region);
   }
 
   // Before ensureTenantReady, as the mint has it: the replacement is minted
   // upstream, so a fence checked only at the DynamoDB write would leave a live
   // credential behind.
-  if (await isOrgDeleting(orgId, { consistent: true })) return refused(accountDeletedResponse());
+  if (await isOrgDeleting(orgId, { consistent: true })) return accountDeletedResponse();
 
   const orchestrator = getOrchestratorForRegion(stored.region);
   const tenantId = await orchestrator.ensureTenantReady(orgId);
-  if (!tenantId) return refused(tenantNotReadyResponse());
+  if (!tenantId) return tenantNotReadyResponse();
 
   return {
     keyId,
-    stored,
-    permissions,
+    stored: { ...stored, permissions },
     orchestrator,
     tenantId,
     rotator: { orgId, userId, email: getVerifiedEmail(event) },
@@ -192,18 +184,22 @@ async function prepareRotation(
 async function issueReplacement({
   keyId,
   stored,
-  permissions,
   orchestrator,
   tenantId,
   rotator,
 }: Rotation): Promise<APIGatewayProxyStructuredResultV2> {
   const { orgId, userId, email } = rotator;
   const actor = userActor({ userId, email });
-  const minter: KeyMinter = {
-    orgId,
-    userId,
-    key: { permissions, granularPermissions: stored.granularPermissions },
-  };
+  // The replacement is the owner's key, so the owner is whose role the row
+  // write asserts and whose mint sequence it bumps: a narrowing of the owner's
+  // role that listed their keys a moment ago has to notice this row, and it
+  // fences on the owner's sequence, not the rotator's. The rotator's own
+  // authority was checked against the row before the vendor was called; they
+  // grant nothing here that the owner did not already hold. A row naming no
+  // owner falls back to the rotator, who is the only member it can be about.
+  const owner = stored.createdBy ?? userId;
+  const minter: KeyMinter = { orgId, userId: owner, key: stored };
+  const ownedByCaller = owner === userId;
 
   // Fail-closed and ahead of the vendor, for the mint's reason: no SigV4 key may
   // come into existence without a record that somebody asked for it. The intent
@@ -230,7 +226,7 @@ async function issueReplacement({
   try {
     replacement = await orchestrator.issueAccessKey(tenantId, {
       keyName: vendorKeyName,
-      permissions,
+      permissions: stored.permissions,
       granularPermissions: stored.granularPermissions,
       buckets: stored.bucketScope === 'specific' ? (stored.buckets ?? []) : undefined,
       expiresAt: stored.expiresAt ?? null,
@@ -256,26 +252,33 @@ async function issueReplacement({
     createdAt: replacement.createdAt,
     status: 'active',
     region: stored.region,
-    permissions,
+    permissions: stored.permissions,
     vendorKeyName,
     ...optionalKeyAttributes(stored),
     ...carriedAttribution(stored),
   };
 
-  const record = await recordMintedKey({ row, mint, minter });
+  // Claiming the source row in the same transaction is what serialises two
+  // rotations of one key: the second finds `replacedBy` set and its row does
+  // not land, so it hands its credential back. `attribute_exists` covers a key
+  // revoked between the read at the top and this write.
+  const record = await recordMintedKey({
+    row,
+    mint,
+    minter,
+    alongside: [claimSourceRow({ orgId, keyId, replacedBy: replacement.id })],
+  });
   if (!record.recorded) {
-    await discardUnrecordedKey({ minted, mint, minter, handler: HANDLER });
-    return record.reason === 'minter_role_changed'
-      ? roleChangedResponse('rotated')
-      : mintConflictResponse();
+    await discardUnrecordedKey({ minted, mint, minter });
+    return unrecordedResponse(record.reason, ownedByCaller);
   }
 
   // The row's own condition cannot refuse a demotion that landed just after the
   // write, so the rotation looks once more while it is the only request holding
   // the credential. `create-access-key.ts` explains the race in full.
   if (await keyExceedsCurrentRole(minter)) {
-    await discardRecordedKey({ minted, minter, actor, handler: HANDLER });
-    return roleChangedResponse('rotated');
+    await discardRecordedKey({ minted, minter, actor });
+    return ownerRoleChangedResponse(ownedByCaller);
   }
 
   // The old row is deleted here, inside the revocation's own audit completion,
@@ -314,70 +317,27 @@ async function issueReplacement({
 interface Rotation {
   /** The orchestrator's id for the key being replaced. */
   keyId: string;
-  stored: StoredKey;
-  /** The row's permission set, having been found present. */
-  permissions: AccessKeyPermission[];
+  /** The row, its permission set having been found present. */
+  stored: StoredKey & { permissions: AccessKeyPermission[] };
   orchestrator: ServiceOrchestrator;
   tenantId: string;
   /** Who asked. Everything the mint needs about them is derived from this. */
   rotator: { orgId: string; userId: string; email?: string };
 }
 
-/** A response the request stops at, tagged so the caller can tell it from a context. */
-function refused(response: APIGatewayProxyStructuredResultV2): {
-  refused: APIGatewayProxyStructuredResultV2;
-} {
-  return { refused: response };
-}
-
-/** What the stored row says the replacement has to carry. */
-interface StoredKey {
-  keyName: string;
-  /** Absent on a row written before the id was stored. */
-  accessKeyId?: string;
-  /** The name the vendor holds this key under, when a rotation gave it one. */
-  vendorKeyName?: string;
-  /** The key's owner, carried onto the replacement. Absent on a row older than roles. */
-  createdBy?: string;
-  creatorEmail?: string;
-  /** The original's attribution was a guess, so the replacement's is too. */
-  recovered?: boolean;
-  region: S3Region;
-  permissions?: AccessKeyPermission[];
-  granularPermissions?: GranularPermission[];
-  bucketScope?: AccessKeyBucketScope;
-  buckets?: string[];
-  expiresAt?: string;
-}
-
 /**
- * The row, read as the thing the replacement is minted from.
- *
- * A row with no `region` predates multi-region routing, so it takes
- * {@link DEFAULT_ACCESS_KEY_REGION}, the same fallback the revoke applies. `permissions` is deliberately left
- * possibly-absent rather than defaulted: an empty set would mint a key that can
- * do nothing, and the caller refuses the row instead.
- *
- * The attribution fields come along because the replacement keeps them: see
- * {@link carriedAttribution}.
+ * The stored row, with the two fallbacks a legacy row needs: a row written
+ * before the id was stored has no `keyName` to show, and one written before
+ * multi-region routing has no `region`, so it takes
+ * {@link DEFAULT_ACCESS_KEY_REGION}, the same fallback the revoke applies.
+ * Everything else is read as stored; `unmarshall` leaves an absent attribute
+ * absent, which is what the row write needs.
  */
+type StoredKey = Partial<AccessKeyRecord> & { keyName: string; region: S3Region };
+
 function readStoredKey(item: Record<string, AttributeValue>, keyId: string): StoredKey {
   const row = unmarshall(item) as Partial<AccessKeyRecord>;
-
-  return {
-    ...(row.accessKeyId ? { accessKeyId: row.accessKeyId } : {}),
-    ...(row.vendorKeyName ? { vendorKeyName: row.vendorKeyName } : {}),
-    ...(row.createdBy ? { createdBy: row.createdBy } : {}),
-    ...(row.creatorEmail ? { creatorEmail: row.creatorEmail } : {}),
-    ...(row.recovered ? { recovered: row.recovered } : {}),
-    ...(row.permissions?.length ? { permissions: row.permissions } : {}),
-    ...(row.granularPermissions ? { granularPermissions: row.granularPermissions } : {}),
-    ...(row.bucketScope ? { bucketScope: row.bucketScope } : {}),
-    ...(row.buckets ? { buckets: row.buckets } : {}),
-    ...(row.expiresAt ? { expiresAt: row.expiresAt } : {}),
-    keyName: row.keyName ?? keyId,
-    region: row.region ?? DEFAULT_ACCESS_KEY_REGION,
-  };
+  return { ...row, keyName: row.keyName ?? keyId, region: row.region ?? DEFAULT_ACCESS_KEY_REGION };
 }
 
 /**
@@ -421,6 +381,89 @@ function unrecordedPermissionsResponse(): APIGatewayProxyStructuredResultV2 {
     .body<ErrorResponse>({
       message:
         'What this key carries was never recorded, so it cannot be reissued. Create a replacement and delete this one.',
+    })
+    .build();
+}
+
+/**
+ * The row the replacement supersedes, claimed for exactly one replacement.
+ *
+ * One item doing two jobs, because a transaction may touch an item once: the
+ * condition refuses a row already claimed or already gone, and the update
+ * records which key took it. Nothing reads `replacedBy` on a request path
+ * except the next rotation of this row, which it refuses.
+ */
+function claimSourceRow({
+  orgId,
+  keyId,
+  replacedBy,
+}: {
+  orgId: string;
+  keyId: string;
+  replacedBy: string;
+}): { item: TransactWriteItem; label: string } {
+  return {
+    label: 'sourceRow',
+    item: {
+      Update: {
+        TableName: Resource.UserInfoTable.name,
+        Key: marshall({ pk: AccessKeyKeys.orgPk(orgId), sk: AccessKeyKeys.keySk(keyId) }),
+        UpdateExpression: 'SET replacedBy = :replacedBy',
+        ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(replacedBy)',
+        ExpressionAttributeValues: marshall({ ':replacedBy': replacedBy }),
+      },
+    },
+  };
+}
+
+/** What the caller hears when the replacement's row did not land, by why. */
+function unrecordedResponse(
+  reason: Exclude<MintRecord, { recorded: true }>['reason'],
+  ownedByCaller: boolean,
+): APIGatewayProxyStructuredResultV2 {
+  switch (reason) {
+    case 'minter_role_changed':
+      return ownerRoleChangedResponse(ownedByCaller);
+    case 'condition_failed':
+      return sourceClaimedResponse();
+    case 'write_conflict':
+      return mintConflictResponse();
+  }
+}
+
+/** Another request rotated or revoked this key first; the caller's list is stale. */
+function sourceClaimedResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(409)
+    .body<ErrorResponse>({
+      message: 'This key was rotated or deleted by another request. Refresh the list.',
+    })
+    .build();
+}
+
+/** The row already names its replacement, so there is nothing left to rotate. */
+function alreadyReplacedResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(409)
+    .body<ErrorResponse>({
+      message: 'This key has already been rotated. Use its replacement and delete this one.',
+    })
+    .build();
+}
+
+/**
+ * The role that has to hold the replacement moved mid-rotation. When that is
+ * the caller's own, the shared answer fits; when it is the owner's, telling the
+ * caller their role changed would be false, and what they can act on is the
+ * revoke.
+ */
+function ownerRoleChangedResponse(ownedByCaller: boolean): APIGatewayProxyStructuredResultV2 {
+  if (ownedByCaller) return roleChangedResponse();
+  return new ResponseBuilder()
+    .status(409)
+    .body<ErrorResponse>({
+      message: "This key's owner can no longer hold it after a role change. Revoke it instead.",
+      code: ApiErrorCode.FORBIDDEN_ROLE,
     })
     .build();
 }

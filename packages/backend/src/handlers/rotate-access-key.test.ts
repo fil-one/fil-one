@@ -7,7 +7,7 @@ import {
   TransactionCanceledException,
   TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
-import { unmarshall } from '@aws-sdk/util-dynamodb';
+import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { sstResourceMock } from '../test/sst-resource-mock.ts';
 import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
 
@@ -54,6 +54,7 @@ import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/er
 import { RevocationNotRecordedError } from '../lib/key-revocation.ts';
 import { buildEvent, membershipFor, stubMembershipRead } from '../test/lambda-test-utilities.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { OrgKeys } from '../lib/org-membership.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -63,41 +64,36 @@ const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 const KEY_ID = 'key-1';
 const TENANT_ID = 'aurora-t-1';
 
-type Attr = { S: string } | { BOOL: boolean } | { L: { S: string }[] };
-
 /**
  * A stored key row, as the list shows it: owned by the caller, carrying a
  * permission set, and scoped to two buckets.
  */
-function storedKey(overrides: Record<string, Attr | undefined> = {}) {
-  const item: Record<string, Attr> = {
-    pk: { S: 'ORG#org-1' },
-    sk: { S: `ACCESSKEY#${KEY_ID}` },
-    keyName: { S: 'My Key' },
-    accessKeyId: { S: 'AKIAOLD00000000' },
-    createdAt: { S: '2026-01-01T00:00:00Z' },
-    status: { S: 'active' },
-    region: { S: 'eu-west-1' },
-    createdBy: { S: USER_INFO.userId },
-    permissions: { L: [{ S: 'read' }, { S: 'write' }, { S: 'list' }] },
-    bucketScope: { S: 'specific' },
-    buckets: { L: [{ S: 'alpha' }, { S: 'beta' }] },
-  };
-  for (const [field, value] of Object.entries(overrides)) {
-    if (value === undefined) delete item[field];
-    else item[field] = value;
-  }
-  return item;
-}
+const STORED_KEY = {
+  pk: 'ORG#org-1',
+  sk: `ACCESSKEY#${KEY_ID}`,
+  keyName: 'My Key',
+  accessKeyId: 'AKIAOLD00000000',
+  createdAt: '2026-01-01T00:00:00Z',
+  status: 'active',
+  region: 'eu-west-1',
+  createdBy: USER_INFO.userId,
+  permissions: ['read', 'write', 'list'],
+  bucketScope: 'specific',
+  buckets: ['alpha', 'beta'],
+};
 
 /** `'absent'` rather than `undefined`, which a default parameter cannot tell from "not passed". */
 const NO_ROW = 'absent';
 
-/** The row the handler reads, built from {@link storedKey} so a test only says what differs. */
-function stubStoredKey(overrides: Record<string, Attr | undefined> | typeof NO_ROW = {}) {
+/** The row the handler reads. An override of `undefined` drops the attribute. */
+function stubStoredKey(overrides: Record<string, unknown> | typeof NO_ROW = {}) {
   ddbMock
-    .on(GetItemCommand, { Key: { pk: { S: 'ORG#org-1' }, sk: { S: `ACCESSKEY#${KEY_ID}` } } })
-    .resolves(overrides === NO_ROW ? {} : { Item: storedKey(overrides) });
+    .on(GetItemCommand, { Key: marshall({ pk: 'ORG#org-1', sk: `ACCESSKEY#${KEY_ID}` }) })
+    .resolves(
+      overrides === NO_ROW
+        ? {}
+        : { Item: marshall({ ...STORED_KEY, ...overrides }, { removeUndefinedValues: true }) },
+    );
 }
 
 function issuedAccessKey() {
@@ -124,6 +120,14 @@ function eventFor(role: OrgRole = OrgRole.Owner, keyId: string | typeof NO_KEY_I
   return Object.assign(event, {
     pathParameters: keyId === NO_KEY_ID ? undefined : { keyId },
   }) as unknown as AuthenticatedEvent;
+}
+
+/** The key's owner when that is not the caller, as the post-write recheck reads them. */
+const OWNER = { orgId: USER_INFO.orgId, userId: 'user-2' };
+
+/** The items of the mint transaction, so a test can say what rode alongside the row. */
+function mintItems() {
+  return transactions()[0].args[0].input.TransactItems ?? [];
 }
 
 /** Both writes a successful rotation makes, plus the role read between them. */
@@ -210,8 +214,8 @@ describe('rotate-access-key baseHandler', () => {
 
   it("carries the original's granulars, scope and expiry onto the new row", async () => {
     stubStoredKey({
-      granularPermissions: { L: [{ S: 'GetObjectVersion' }] },
-      expiresAt: { S: '2099-01-01' },
+      granularPermissions: ['GetObjectVersion'],
+      expiresAt: '2099-01-01',
     });
     stubWrites();
 
@@ -283,7 +287,7 @@ describe('rotate-access-key baseHandler', () => {
   });
 
   it('refuses a key the caller did not create', async () => {
-    stubStoredKey({ createdBy: { S: 'user-2' } });
+    stubStoredKey({ createdBy: 'user-2' });
 
     const result = await baseHandler(eventFor(OrgRole.Member));
 
@@ -293,20 +297,101 @@ describe('rotate-access-key baseHandler', () => {
   });
 
   it("rotates another member's key for a caller holding keys.manage_all", async () => {
-    stubStoredKey({ createdBy: { S: 'user-2' } });
+    stubStoredKey({ createdBy: OWNER.userId });
     stubWrites();
+    stubMembershipRead(ddbMock, { ...OWNER, role: OrgRole.Member });
 
     const result = await baseHandler(eventFor(OrgRole.Admin));
 
     expect(result.statusCode).toBe(201);
   });
 
+  it("fences the owner's keys, not the rotator's, when they differ", async () => {
+    // The replacement is the owner's key. A narrowing of the owner's role that
+    // listed their keys a moment ago has to notice this row, and it fences on
+    // the owner's mint sequence — bumping the Admin's would let it commit
+    // against a stale listing and leave a credential the owner's new role
+    // cannot hold.
+    stubStoredKey({ createdBy: OWNER.userId });
+    stubWrites();
+    stubMembershipRead(ddbMock, { ...OWNER, role: OrgRole.Member });
+
+    await baseHandler(eventFor(OrgRole.Admin));
+
+    const roleCheck = mintItems().find((item) => item.ConditionCheck);
+    const seqBump = mintItems().find((item) => item.Update?.TableName === 'OrgTable');
+    expect(roleCheck?.ConditionCheck?.Key?.sk).toStrictEqual({ S: OrgKeys.memberSk(OWNER.userId) });
+    expect(seqBump?.Update?.Key?.sk?.S).toMatch(new RegExp(`#${OWNER.userId}$`));
+  });
+
+  it("refuses when the owner's role can no longer hold the key", async () => {
+    stubStoredKey({ createdBy: OWNER.userId });
+    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+    // The owner was demoted just after the row landed.
+    stubMembershipRead(ddbMock, { ...OWNER, role: OrgRole.ReadOnly });
+
+    const result = await baseHandler(eventFor(OrgRole.Admin));
+
+    expect(result.statusCode).toBe(409);
+    expect(body(result).message).toContain('owner');
+    expect(mockDeleteAccessKey).toHaveBeenCalledWith(TENANT_ID, 'aurora-key-2');
+    expect(mockDeleteAccessKey).not.toHaveBeenCalledWith(TENANT_ID, KEY_ID);
+  });
+
+  it('claims the row it replaces in the same transaction as the new one', async () => {
+    stubStoredKey();
+    stubWrites();
+
+    await baseHandler(eventFor());
+
+    const claim = mintItems().find((item) => item.Update?.TableName === 'UserInfoTable');
+    expect(claim?.Update?.Key).toStrictEqual(
+      marshall({ pk: 'ORG#org-1', sk: `ACCESSKEY#${KEY_ID}` }),
+    );
+    expect(claim?.Update?.ConditionExpression).toContain('attribute_not_exists(replacedBy)');
+  });
+
+  it('lets only one of two overlapping rotations land', async () => {
+    // The second request read the same old row and minted its own replacement;
+    // the claim on the source row refuses it, so its credential goes back and
+    // the key it read is left alone.
+    stubStoredKey();
+    ddbMock.on(PutItemCommand).resolves({});
+    stubMembershipRead(ddbMock, { ...USER_INFO, role: OrgRole.Owner });
+    ddbMock.on(TransactWriteItemsCommand).rejects(
+      new TransactionCanceledException({
+        message: 'cancelled',
+        $metadata: {},
+        CancellationReasons: [{}, {}, {}, { Code: 'ConditionalCheckFailed' }, {}],
+      }),
+    );
+
+    const result = await baseHandler(eventFor());
+
+    expect(result.statusCode).toBe(409);
+    expect(body(result).message).toContain('another request');
+    expect(mockDeleteAccessKey).toHaveBeenCalledTimes(1);
+    expect(mockDeleteAccessKey).toHaveBeenCalledWith(TENANT_ID, 'aurora-key-2');
+  });
+
+  it('refuses a key that already names its replacement', async () => {
+    stubStoredKey({ replacedBy: 'aurora-key-9' });
+
+    const result = await baseHandler(eventFor());
+
+    expect(result.statusCode).toBe(409);
+    expect(body(result).message).toContain('already been rotated');
+    expect(mockIssueAccessKey).not.toHaveBeenCalled();
+  });
+
   it("leaves another member's key theirs after an Admin rotates it", async () => {
     // Moving `createdBy` to the Admin would drop the key out of its holder's
     // list and take away their right to revoke it, and the first they would
     // know of it is a client that stopped working.
-    stubStoredKey({ createdBy: { S: 'user-2' }, creatorEmail: { S: 'them@example.com' } });
+    stubStoredKey({ createdBy: OWNER.userId, creatorEmail: 'them@example.com' });
     stubWrites();
+    stubMembershipRead(ddbMock, { ...OWNER, role: OrgRole.Member });
 
     await baseHandler(eventFor(OrgRole.Admin));
 
@@ -329,7 +414,7 @@ describe('rotate-access-key baseHandler', () => {
 
   it('refuses a key carrying more than the caller could mint today', async () => {
     // `PutObjectRetention` needs `privileged.grant`, which only an Owner holds.
-    stubStoredKey({ granularPermissions: { L: [{ S: 'PutObjectRetention' }] } });
+    stubStoredKey({ granularPermissions: ['PutObjectRetention'] });
 
     const result = await baseHandler(eventFor(OrgRole.Admin));
 
@@ -358,7 +443,7 @@ describe('rotate-access-key baseHandler', () => {
   });
 
   it('refuses a key whose expiry has already passed', async () => {
-    stubStoredKey({ expiresAt: { S: '2020-01-01' } });
+    stubStoredKey({ expiresAt: '2020-01-01' });
 
     const result = await baseHandler(eventFor());
 
@@ -384,8 +469,8 @@ describe('rotate-access-key baseHandler', () => {
   it('leaves the key alone when the org is being deleted', async () => {
     stubStoredKey();
     ddbMock
-      .on(GetItemCommand, { Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } } })
-      .resolves({ Item: { pk: { S: 'ORG#org-1' }, deleting: { BOOL: true } } });
+      .on(GetItemCommand, { Key: marshall({ pk: 'ORG#org-1', sk: 'PROFILE' }) })
+      .resolves({ Item: marshall({ pk: 'ORG#org-1', deleting: true }) });
 
     const result = await baseHandler(eventFor());
 

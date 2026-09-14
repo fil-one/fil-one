@@ -205,6 +205,10 @@ async function orgAlreadyShowsKeyName({
         ':pk': { S: AccessKeyKeys.orgPk(orgId) },
         ':skPrefix': { S: AccessKeyKeys.keySkPrefix() },
       },
+      // A rotation that just landed its replacement under a suffixed vendor
+      // name has freed the console name at the vendor; an eventually
+      // consistent read here could miss that row and let a second key take it.
+      ConsistentRead: true,
     }),
   );
 

@@ -1002,6 +1002,22 @@ export default $config({
     //
     // Declared here rather than beside each route because the entries reference
     // the queues, tables and workers above, all of which have to exist first.
+    // Minting a key reaches the orchestrator and its SSM-held credentials and
+    // waits on a vendor call. Rotation does the same and then revokes, so both
+    // routes take one grant set. Thirty seconds is the mint's budget; if the pair
+    // starts crowding it, the revoke is the half that can move to a follow-up
+    // pass, because the caller already has their key.
+    const accessKeyMintRoute: RouteInfraConfig = {
+      extraEnv: orchestratorEnv,
+      permissions: [
+        {
+          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+          resources: [auroraApiKeySsmArn, ...orchestratorS3KeySsmArns],
+        },
+      ],
+      timeout: '30 seconds',
+    };
+
     const ROUTE_INFRA_CONFIGS: Partial<Record<RouteHandler, RouteInfraConfig>> = {
       // ── Buckets and objects ────────────────────────────────────────
       'list-buckets': {
@@ -1063,30 +1079,8 @@ export default $config({
       'list-access-keys': {
         provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       },
-      'create-access-key': {
-        extraEnv: orchestratorEnv,
-        permissions: [
-          {
-            actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-            resources: [auroraApiKeySsmArn, ...orchestratorS3KeySsmArns],
-          },
-        ],
-        timeout: '30 seconds',
-      },
-      // A rotation mints and then revokes, so it takes the mint's grants and
-      // makes two vendor calls inside one request. Thirty seconds is the mint's
-      // budget; if the pair starts crowding it, the revoke is the half that can
-      // move to a follow-up pass, because the caller already has their key.
-      'rotate-access-key': {
-        extraEnv: orchestratorEnv,
-        permissions: [
-          {
-            actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-            resources: [auroraApiKeySsmArn, ...orchestratorS3KeySsmArns],
-          },
-        ],
-        timeout: '30 seconds',
-      },
+      'create-access-key': accessKeyMintRoute,
+      'rotate-access-key': accessKeyMintRoute,
       'delete-access-key': {
         extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL, ...fthEnv, ...forgeEnv },
         permissions: [

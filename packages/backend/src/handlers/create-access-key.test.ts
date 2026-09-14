@@ -1207,6 +1207,9 @@ describe('create-access-key baseHandler', () => {
       expect(result.statusCode).toBe(409);
       expect(JSON.parse(result.body ?? '{}').message).toContain('already exists');
       expect(mockIssueAccessKey).not.toHaveBeenCalled();
+      // Consistently: a rotation that just landed has freed the name at the
+      // vendor, and a stale read here is the one way a second key takes it.
+      expect(ddbMock.commandCalls(QueryCommand)[0].args[0].input.ConsistentRead).toBe(true);
       // No intent either: nothing started, so there is no mint to read.
       expect(standaloneEvents()).toHaveLength(0);
     });

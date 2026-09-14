@@ -180,13 +180,9 @@ describe('ApiKeysPage — rotating a key', () => {
     mockGetUsage.mockResolvedValue({ tenantStatus: 'active' });
   });
 
-  /** Open the row menu and press one of its items. */
-  async function openRowMenu() {
-    fireEvent.click(await screen.findByRole('button', { name: 'Key actions' }));
-  }
-
-  it('asks first, then shows the new secret once', async () => {
-    mockApiRequest.mockImplementation((path: string, init?: { method?: string }) =>
+  /** The list, and a rotation that answers with new credentials. */
+  function stubRotation(previousKeyRevoked: boolean) {
+    mockApiRequest.mockImplementation((_path: string, init?: { method?: string }) =>
       init?.method === 'POST'
         ? Promise.resolve({
             id: 'key-2',
@@ -194,10 +190,19 @@ describe('ApiKeysPage — rotating a key', () => {
             accessKeyId: 'ACCESS_KEY_NEW999EXAMP',
             secretAccessKey: 'the-new-secret',
             createdAt: '2026-09-11T10:00:00Z',
-            previousKeyRevoked: true,
+            previousKeyRevoked,
           })
         : Promise.resolve({ keys: [key()] }),
     );
+  }
+
+  /** Open the row menu and press one of its items. */
+  async function openRowMenu() {
+    fireEvent.click(await screen.findByRole('button', { name: 'Key actions' }));
+  }
+
+  it('asks first, then shows the new secret once', async () => {
+    stubRotation(true);
 
     renderPage(OrgRole.Owner);
     await openRowMenu();
@@ -218,18 +223,7 @@ describe('ApiKeysPage — rotating a key', () => {
   });
 
   it('says so when the key it replaced is still live', async () => {
-    mockApiRequest.mockImplementation((path: string, init?: { method?: string }) =>
-      init?.method === 'POST'
-        ? Promise.resolve({
-            id: 'key-2',
-            keyName: 'my key',
-            accessKeyId: 'ACCESS_KEY_NEW999EXAMP',
-            secretAccessKey: 'the-new-secret',
-            createdAt: '2026-09-11T10:00:00Z',
-            previousKeyRevoked: false,
-          })
-        : Promise.resolve({ keys: [key()] }),
-    );
+    stubRotation(false);
 
     renderPage(OrgRole.Owner);
     await openRowMenu();

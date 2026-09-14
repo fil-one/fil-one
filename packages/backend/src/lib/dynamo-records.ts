@@ -97,6 +97,14 @@ export interface AccessKeyRecord {
    * the console shows.
    */
   vendorKeyName?: string;
+  /**
+   * The id of the key that replaced this one, written in the same transaction
+   * as the replacement's row. It is the claim that keeps two rotations of one
+   * key from both landing: the second finds it set and refuses. It survives
+   * only on a row whose revoke then failed, which the list still shows and the
+   * owner can still delete.
+   */
+  replacedBy?: string;
 }
 
 /**

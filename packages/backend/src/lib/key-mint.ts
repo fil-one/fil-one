@@ -1,4 +1,5 @@
 import { TransactionCanceledException } from '@aws-sdk/client-dynamodb';
+import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ApiErrorCode, NO_ROLE, auditKeyIdSuffix, canRetainAccessKey } from '@filone/shared';
@@ -44,7 +45,14 @@ export interface MintedKey {
   tenantId: string;
 }
 
-/** Who the creator-authority cap was evaluated for, and the key it admitted. */
+/**
+ * Whose key the row becomes, and what it carries.
+ *
+ * The row's write asserts this member's role on file can still hold the key and
+ * bumps their mint sequence, so a narrowing of their role that listed their keys
+ * a moment earlier notices the row and re-lists. On a create that is the caller;
+ * on a rotation it is the key's owner, who need not be the caller at all.
+ */
 export interface KeyMinter {
   orgId: string;
   userId: string;
@@ -66,7 +74,9 @@ export interface KeyMinter {
  */
 export type MintRecord =
   | { recorded: true }
-  | { recorded: false; reason: 'minter_role_changed' | 'write_conflict' };
+  | { recorded: false; reason: 'minter_role_changed' | 'write_conflict' }
+  /** A condition the caller put alongside the row refused, named by its label. */
+  | { recorded: false; reason: 'condition_failed'; label: string };
 
 /**
  * Write the key's row and the mint's completion event as one transaction, so
@@ -81,12 +91,19 @@ export async function recordMintedKey({
   mint,
   minter,
   recovered,
+  alongside = [],
 }: {
   row: AccessKeyRecord;
   mint: AuditCorrelation<'key.created'>;
   minter: KeyMinter;
   /** The credential existed at the vendor already and this write recovered its row. */
   recovered?: true;
+  /**
+   * Further items the transaction carries, each with the label its refusal
+   * reports as `condition_failed`. A rotation claims the row it replaces here,
+   * so two rotations of one key cannot both land.
+   */
+  alongside?: { item: TransactWriteItem; label: string }[];
 }): Promise<MintRecord> {
   try {
     await mint.complete({
@@ -105,6 +122,7 @@ export async function recordMintedKey({
         creatorRoleStillMintsCheck(minter),
         accessKeyMintSeqItem(minter),
         { Put: { TableName: Resource.UserInfoTable.name, Item: marshall(row) } },
+        ...alongside.map(({ item }) => item),
       ],
     });
     return { recorded: true };
@@ -112,9 +130,13 @@ export async function recordMintedKey({
     // The role check is item 0; `commitAudited` appends the audit Put last. The
     // unconditioned bump never cancels, but it holds a position, so it holds a
     // label.
-    if (cancelledLabels(err, ['minterRole', 'mintSeq', 'keyRow']).includes('minterRole')) {
+    const labels = ['minterRole', 'mintSeq', 'keyRow', ...alongside.map(({ label }) => label)];
+    const cancelled = cancelledLabels(err, labels);
+    if (cancelled.includes('minterRole')) {
       return { recorded: false, reason: 'minter_role_changed' };
     }
+    const refused = alongside.find(({ label }) => cancelled.includes(label));
+    if (refused) return { recorded: false, reason: 'condition_failed', label: refused.label };
     // A cancellation with no condition of ours in it is contention on the
     // sequence row: a second mint for this member, or the narrowing that asserts
     // it. Nothing landed, so the credential goes back rather than outliving the
