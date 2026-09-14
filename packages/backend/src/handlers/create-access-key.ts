@@ -84,6 +84,11 @@ export async function baseHandler(
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
 
+  // Before the intent, because nothing happened: a name the org already shows
+  // is a request that was never going to produce a key, and writing an intent
+  // for it would leave an operator reading a mint that never started.
+  if (await orgAlreadyShowsKeyName({ orgId, keyName, region })) return duplicateKeyNameResponse();
+
   // Fail-closed, and before the vendor: the credential is created at the storage
   // vendor before anything local is written, so no SigV4 key may come into
   // existence without a record that somebody asked for it. The intent cannot
@@ -169,6 +174,55 @@ export async function baseHandler(
 }
 
 /**
+ * Whether the org already lists a key under this name in this region.
+ *
+ * The vendor enforces name uniqueness per tenant, and until rotation shipped
+ * that was enough: a duplicate came back as a 409 and nothing local had to ask.
+ * A rotated key is minted under a suffixed vendor name, which frees the console
+ * name at the vendor while the row goes on showing it, so the vendor would now
+ * accept a second key the console would list twice under one name. This is the
+ * check that keeps the name unique where it is actually read.
+ *
+ * Not a lock: two creates racing on the same free name can both pass it, and
+ * the vendor only catches the pair whose name it still holds. A single-table
+ * design has nowhere to put a uniqueness constraint, and a duplicate display
+ * name is worth a narrow race rather than a second row to maintain.
+ */
+async function orgAlreadyShowsKeyName({
+  orgId,
+  keyName,
+  region,
+}: {
+  orgId: string;
+  keyName: string;
+  region: S3Region;
+}): Promise<boolean> {
+  const { Items } = await getDynamoClient().send(
+    new QueryCommand({
+      TableName: Resource.UserInfoTable.name,
+      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
+      ExpressionAttributeValues: {
+        ':pk': { S: AccessKeyKeys.orgPk(orgId) },
+        ':skPrefix': { S: AccessKeyKeys.keySkPrefix() },
+      },
+    }),
+  );
+
+  return (Items ?? []).some((item) => {
+    const itemRegion = (item.region?.S as S3Region | undefined) ?? DEFAULT_ACCESS_KEY_REGION;
+    return item.keyName?.S === keyName && itemRegion === region;
+  });
+}
+
+/** The name is taken, whoever is holding it. */
+function duplicateKeyNameResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(409)
+    .body<ErrorResponse>({ message: 'An access key with this name already exists' })
+    .build();
+}
+
+/**
  * The vendor would not mint it, and each refusal means something different.
  *
  * A duplicate name is the one that may have created a credential anyway, on an
@@ -184,10 +238,7 @@ async function handleMintRefusal(
 ): Promise<APIGatewayProxyStructuredResultV2> {
   if (err instanceof AccessKeyAlreadyExistsError) {
     await recoverDuplicateKey(attempt);
-    return new ResponseBuilder()
-      .status(409)
-      .body<ErrorResponse>({ message: 'An access key with this name already exists' })
-      .build();
+    return duplicateKeyNameResponse();
   }
   if (err instanceof AccessKeyValidationError) {
     await attempt.mint.complete({ outcome: 'failed' });
@@ -246,23 +297,7 @@ async function recoverDuplicateKey({
   mint,
   creator,
 }: MintAttempt): Promise<void> {
-  // Check if we already have a DynamoDB record for this key
-  const { Items: existingKeys } = await getDynamoClient().send(
-    new QueryCommand({
-      TableName: Resource.UserInfoTable.name,
-      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
-      ExpressionAttributeValues: {
-        ':pk': { S: AccessKeyKeys.orgPk(orgId) },
-        ':skPrefix': { S: AccessKeyKeys.keySkPrefix() },
-      },
-    }),
-  );
-
-  const alreadyInDb = existingKeys?.some((item) => {
-    const itemRegion = (item.region?.S as S3Region | undefined) ?? DEFAULT_ACCESS_KEY_REGION;
-    return item.keyName?.S === keyName && itemRegion === region;
-  });
-  if (alreadyInDb) {
+  if (await orgAlreadyShowsKeyName({ orgId, keyName, region })) {
     // A plain duplicate name: the vendor refused and there is nothing to
     // recover, so the correlation closes as the rejection it was.
     await mint.complete({ outcome: 'failed' });

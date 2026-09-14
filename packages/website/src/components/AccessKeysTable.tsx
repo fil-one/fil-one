@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { DotsThreeIcon, KeyIcon, PlusIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
+import {
+  ArrowsClockwiseIcon,
+  DotsThreeIcon,
+  KeyIcon,
+  PlusIcon,
+  TrashIcon,
+} from '@phosphor-icons/react/dist/ssr';
 
 import { IconBox } from './IconBox';
 
@@ -120,7 +126,7 @@ function GroupBadge({
   );
 }
 
-function ActionMenu({ onDelete }: { onDelete: () => void }) {
+function ActionMenu({ onRotate, onDelete }: { onRotate?: () => void; onDelete?: () => void }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, right: 0 });
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -165,17 +171,32 @@ function ActionMenu({ onDelete }: { onDelete: () => void }) {
           style={{ top: pos.top, right: pos.right }}
           className="fixed z-50 w-40 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg"
         >
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              onDelete();
-            }}
-            className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
-          >
-            <TrashIcon size={14} />
-            Delete
-          </button>
+          {onRotate && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onRotate();
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50"
+            >
+              <ArrowsClockwiseIcon size={14} />
+              Rotate
+            </button>
+          )}
+          {onDelete && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onDelete();
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+            >
+              <TrashIcon size={14} />
+              Delete
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -208,6 +229,17 @@ export type AccessKeysTableProps = {
    * `keys.manage_own`, so the answer is per key rather than per table.
    */
   canDelete?: (key: AccessKey) => boolean;
+  /**
+   * Reissue the credential and keep the rest of the key. Omitted, the menu
+   * carries only Delete, which is what the bucket-scoped table wants.
+   */
+  onRotate?: (id: string) => void;
+  /**
+   * Which rows may be rotated. Rotating is a mint, so this is narrower than
+   * {@link AccessKeysTableProps.canDelete}: a role that could no longer create
+   * the key is refused the replacement, and the caller answers per key.
+   */
+  canRotate?: (key: AccessKey) => boolean;
   onCreateOpen?: () => void;
   emptyTitle?: string;
   emptyDescription?: string;
@@ -221,13 +253,25 @@ export function AccessKeysTable({
   creatorFor,
   onDelete,
   canDelete,
+  onRotate,
+  canRotate,
   onCreateOpen,
   emptyTitle = 'No API keys yet',
   emptyDescription = 'Generate credentials to connect your applications via S3-compatible API',
 }: AccessKeysTableProps) {
   // The header follows the cells: a column whose every row is empty is a column
   // of whitespace with a screen-reader label attached to nothing.
-  const rowHasAction = (key: AccessKey) => Boolean(onDelete) && (canDelete?.(key) ?? true);
+  // The handlers themselves rather than booleans about them: building the
+  // closure is where the optional prop narrows, so nothing has to test
+  // `onRotate` twice to satisfy both the permission and the compiler.
+  const actionsFor = (key: AccessKey) => ({
+    onRotate: onRotate && (canRotate?.(key) ?? true) ? () => onRotate(key.id) : undefined,
+    onDelete: onDelete && (canDelete?.(key) ?? true) ? () => void onDelete(key.id) : undefined,
+  });
+  const rowHasAction = (key: AccessKey) => {
+    const actions = actionsFor(key);
+    return Boolean(actions.onRotate ?? actions.onDelete);
+  };
   const showActions = keys.some(rowHasAction);
   // Keys minted before attribution existed carry no `createdBy`, so a column
   // every row would em-dash is one nobody can read anything from.
@@ -356,9 +400,7 @@ export function AccessKeysTable({
             {/* Actions */}
             {showActions && (
               <Table.Cell className="text-right">
-                {rowHasAction(key) && onDelete && (
-                  <ActionMenu onDelete={() => void onDelete(key.id)} />
-                )}
+                {rowHasAction(key) && <ActionMenu {...actionsFor(key)} />}
               </Table.Cell>
             )}
           </Table.Row>

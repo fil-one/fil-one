@@ -124,6 +124,35 @@ export const WithDeleteAction: Story = {
 };
 
 /**
+ * Both row actions. Rotating reissues the credential and keeps the rest of the
+ * key, so it sits above the destructive one and carries no warning colour.
+ */
+export const WithRotateAndDeleteActions: Story = {
+  args: {
+    keys: mockKeys,
+    showBuckets: true,
+    showPermissions: true,
+    onDelete: () => Promise.resolve(),
+    onRotate: () => Promise.resolve(),
+  },
+};
+
+/**
+ * Rotating a key mints a replacement, so a caller whose role could no longer
+ * grant what the key carries is offered only the revoke. Here that is key 2.
+ */
+export const WithRotateOnSomeRows: Story = {
+  args: {
+    keys: mockKeys,
+    showBuckets: true,
+    showPermissions: true,
+    onDelete: () => Promise.resolve(),
+    onRotate: () => Promise.resolve(),
+    canRotate: (key: AccessKey) => key.id !== '2',
+  },
+};
+
+/**
  * What a role that cannot revoke keys sees: the same table with no actions
  * column, because the page passed no `onDelete`.
  */

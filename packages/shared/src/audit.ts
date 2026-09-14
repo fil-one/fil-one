@@ -169,10 +169,12 @@ export type AuditDetailRecord = { [field: string]: AuditDetailValue | undefined 
  * What took a key: the request that asked for it, or the pass that found it.
  *
  * Every revocation names one, so no reading of this field turns on its absence.
- * `user_requested` is a member revoking their own key. `role_narrowing` and
- * `member_removed` are the passes that take a key its holder did not ask about.
- * `stale_role_at_mint` is the odd one: the actor is the minting member, undoing
- * their own work on finding their role narrowed underneath it. Each revocation
+ * `user_requested` is a member revoking their own key. `rotation` is the same
+ * member replacing it: the credential they asked for is the new one, and this
+ * is what became of the old. `role_narrowing` and `member_removed` are the
+ * passes that take a key its holder did not ask about. `stale_role_at_mint` is
+ * the odd one: the actor is the minting member, undoing their own work on
+ * finding their role narrowed underneath it. Each revocation
  * writes its own `key.deleted` carrying this, and those per-key events are the
  * durable account: a pass that fails midway would otherwise leave revoked
  * credentials with nothing recording them.
@@ -182,6 +184,7 @@ export type AuditDetailRecord = { [field: string]: AuditDetailValue | undefined 
  */
 export type RevocationTrigger =
   | 'user_requested'
+  | 'rotation'
   | 'role_narrowing'
   | 'member_removed'
   | 'stale_role_at_mint';
@@ -272,6 +275,13 @@ export interface AuditEventDetails {
      * the vendor with no local row — this event is its only trace.
      */
     cleanupFailed?: boolean;
+    /**
+     * The key this one replaces, by the same characters `keyIdSuffix` carries.
+     * Present only on a rotation, and it is what joins this event to the
+     * `key.deleted` that follows it — without it the pair reads as an unrelated
+     * create and revoke a second apart.
+     */
+    replacedKeyIdSuffix?: string;
   };
   'key.deleted': {
     keyKind: AuditKeyKind;

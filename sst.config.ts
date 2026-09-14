@@ -1073,6 +1073,20 @@ export default $config({
         ],
         timeout: '30 seconds',
       },
+      // A rotation mints and then revokes, so it takes the mint's grants and
+      // makes two vendor calls inside one request. Thirty seconds is the mint's
+      // budget; if the pair starts crowding it, the revoke is the half that can
+      // move to a follow-up pass, because the caller already has their key.
+      'rotate-access-key': {
+        extraEnv: orchestratorEnv,
+        permissions: [
+          {
+            actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+            resources: [auroraApiKeySsmArn, ...orchestratorS3KeySsmArns],
+          },
+        ],
+        timeout: '30 seconds',
+      },
       'delete-access-key': {
         extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL, ...fthEnv, ...forgeEnv },
         permissions: [

@@ -247,3 +247,19 @@ export interface CreateAccessKeyResponse {
 export interface DeleteAccessKeyRequest {
   keyId: string;
 }
+
+/**
+ * What a rotation hands back: the replacement credential, and what became of
+ * the key it replaces.
+ *
+ * A rotation is a mint and a revoke against a vendor that cannot do both in one
+ * call, so the two can come apart. The secret exists only in this response, so a
+ * revoke that failed is reported rather than raised: the caller has a working
+ * key either way, and `previousKeyRevoked: false` tells them the old one is
+ * still live and still theirs to delete.
+ *
+ * `id` and `accessKeyId` are the replacement's. The key name is unchanged.
+ */
+export interface RotateAccessKeyResponse extends CreateAccessKeyResponse {
+  previousKeyRevoked: boolean;
+}
