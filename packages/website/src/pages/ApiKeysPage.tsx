@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 
 import {
   ArrowRightIcon,
@@ -22,7 +22,6 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Tab, TabList, TabPanel, TabPanels, Tabs } from '../components/Tabs';
 import { SaveCredentialsModal } from '../components/SaveCredentialsModal';
 import { TableSkeleton, type SkeletonColumn } from '../components/Table/TableSkeleton';
-import { useToast } from '../components/Toast';
 
 import type { AccessKey, ListAccessKeysResponse, S3Region } from '@filone/shared';
 
@@ -40,6 +39,7 @@ import { useKeyCreators } from '../lib/use-key-creators.js';
 import { LIST_GC_TIME, LIST_STALE_TIME, queryKeys } from '../lib/query-client.js';
 import { RequirePermission } from '../components/RequirePermission';
 import { useHasPermission } from '../lib/use-permissions.js';
+import { useKeyDeletion } from '../lib/use-key-deletion.js';
 import { useKeyRotation } from '../lib/use-key-rotation.js';
 import { useKeyActionScope } from '../lib/use-key-scope.js';
 import { useAccountDisabled } from '../lib/use-account-disabled.js';
@@ -452,29 +452,11 @@ function CreateKeyAction({ onCreate }: { onCreate: () => void }) {
   );
 }
 
-/** Copy for the delete-confirmation dialog, adapted to how many keys are selected. */
-function deleteDialogCopy(count: number) {
-  if (count > 1) {
-    return {
-      title: `Delete ${count} access keys`,
-      description: `These ${count} access keys will be permanently revoked. Any applications using them will lose access immediately.`,
-      confirmLabel: `Delete ${count} keys`,
-    };
-  }
-  return {
-    title: 'Delete access key',
-    description:
-      'This access key will be permanently revoked. Any applications using it will lose access immediately.',
-    confirmLabel: 'Delete key',
-  };
-}
-
 export function ApiKeysPage() {
-  const { toast } = useToast();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const mayCreate = useHasPermission('keys.create');
   const rotation = useKeyRotation();
+  const deletion = useKeyDeletion();
   // Listing is `keys.manage_own` and the server narrows the response to the
   // caller's own keys; `keys.manage_all` lifts that narrowing server-side and
   // asks nothing extra of this request. Revoking is per row.
@@ -498,41 +480,6 @@ export function ApiKeysPage() {
   const creatorFor = useKeyCreators(mayList);
 
   const [tabIndex, setTabIndex] = useState(0);
-  const [confirmDeleteIds, setConfirmDeleteIds] = useState<string[] | null>(null);
-
-  const deleteKeysMutation = useMutation({
-    mutationFn: (ids: string[]) =>
-      Promise.all(ids.map((id) => apiRequest(`/access-keys/${id}`, { method: 'DELETE' }))),
-    onSuccess: (_, ids) => {
-      const removed = new Set(ids);
-      queryClient.setQueryData<ListAccessKeysResponse>(queryKeys.accessKeys, (old) =>
-        old ? { keys: old.keys.filter((k) => !removed.has(k.id)) } : old,
-      );
-      void queryClient.invalidateQueries({ queryKey: queryKeys.accessKeys });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
-      toast.success(ids.length === 1 ? 'Access key deleted' : `${ids.length} access keys deleted`);
-    },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete keys');
-    },
-  });
-
-  async function handleDelete(id: string) {
-    setConfirmDeleteIds([id]);
-  }
-
-  async function handleBulkDelete(ids: string[]) {
-    setConfirmDeleteIds(ids);
-  }
-
-  async function confirmDeleteAction() {
-    if (!confirmDeleteIds) return;
-    try {
-      await deleteKeysMutation.mutateAsync(confirmDeleteIds);
-    } catch {
-      // error handled by mutation.onError
-    }
-  }
 
   // A disabled account gets the state and nothing else, the way the Buckets page
   // already does it: one Alert, no Create action, no tabs. Every key on this page
@@ -587,8 +534,8 @@ export function ApiKeysPage() {
               isError={isError}
               errorMessage={error?.message}
               onCreateOpen={mayCreate ? openCreateKey : undefined}
-              onDelete={handleDelete}
-              onBulkDelete={handleBulkDelete}
+              onDelete={(id) => Promise.resolve(deletion.request(id))}
+              onBulkDelete={(ids) => Promise.resolve(deletion.requestBulk(ids))}
               canRevoke={mayRevoke}
               onRotate={rotation.request}
               canRotate={rotation.canRotate}
@@ -602,10 +549,10 @@ export function ApiKeysPage() {
       </Tabs>
 
       <ConfirmDialog
-        open={confirmDeleteIds !== null}
-        onClose={() => setConfirmDeleteIds(null)}
-        onConfirm={confirmDeleteAction}
-        {...deleteDialogCopy(confirmDeleteIds?.length ?? 0)}
+        open={deletion.pendingIds !== null}
+        onClose={deletion.cancel}
+        onConfirm={deletion.confirm}
+        {...deletion.dialogCopy}
       />
 
       <ConfirmDialog
