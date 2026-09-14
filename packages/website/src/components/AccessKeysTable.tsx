@@ -10,11 +10,12 @@ import {
 
 import { IconBox } from './IconBox';
 
-import type { AccessKey, GranularPermission } from '@filone/shared';
+import type { AccessKey, GranularPermission, ObjectPermission } from '@filone/shared';
 import {
   BUCKET_INFO_PERMISSION_LABELS,
   BUCKET_PERMISSION_LABELS,
   GRANULAR_PERMISSION_LABELS,
+  GRANULAR_PERMISSION_MAP,
   getRegionLabel,
   isBucketInfoPermission,
   isBucketPermission,
@@ -26,9 +27,16 @@ import { Button } from './Button';
 import { Checkbox } from './Checkbox';
 import { CopyButton } from './CopyButton';
 import { IconButton } from './IconButton';
-import { OverflowBadge, type OverflowSection } from './OverflowBadge';
+import { OverflowBadge, PermissionChip, type OverflowSection } from './OverflowBadge';
 import { Table } from './Table/Table';
 import { formatDate } from '../lib/time.js';
+
+const OBJECT_PERMISSION_LABELS: Record<ObjectPermission, string> = {
+  read: 'Read',
+  write: 'Write',
+  list: 'List',
+  delete: 'Delete',
+};
 
 function StatusBadge({ status }: { status: AccessKey['status'] }) {
   return status === 'active' ? (
@@ -54,16 +62,6 @@ function PermissionBadges({
   const bucketInfo = permissions.filter(isBucketInfoPermission);
 
   const groups: (OverflowSection & { title: string; testId: string })[] = [];
-  if (granularPermissions.length > 0) {
-    groups.push({
-      title: 'Data protection',
-      testId: 'permission-badge-data-protection',
-      items: granularPermissions.map((g) => ({
-        key: g,
-        label: GRANULAR_PERMISSION_LABELS[g].label,
-      })),
-    });
-  }
   if (bucketManagement.length > 0) {
     groups.push({
       title: 'Bucket management',
@@ -88,9 +86,14 @@ function PermissionBadges({
   return (
     <div className="flex flex-wrap items-center gap-1">
       {objectPermissions.map((p) => (
-        <Badge key={p} color="blue" size="sm" className="capitalize">
-          {p}
-        </Badge>
+        <PermissionChip
+          key={p}
+          label={OBJECT_PERMISSION_LABELS[p]}
+          testId={`permission-badge-${p}`}
+          extras={GRANULAR_PERMISSION_MAP[p]
+            .filter((g) => granularPermissions.includes(g))
+            .map((g) => GRANULAR_PERMISSION_LABELS[g].label)}
+        />
       ))}
       {groups.length === 1 && (
         <OverflowBadge
