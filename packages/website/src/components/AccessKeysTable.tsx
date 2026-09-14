@@ -11,7 +11,7 @@ import {
 import { IconBox } from './IconBox';
 
 import type { AccessKey } from '@filone/shared';
-import { getRegionLabel, isBucketInfoPermission, isBucketPermission } from '@filone/shared';
+import { isBucketInfoPermission, isBucketPermission } from '@filone/shared';
 
 import { AccessKeyPermissionsDrawer } from './AccessKeyPermissionsDrawer';
 import { Badge } from './Badge';
@@ -438,16 +438,11 @@ export function AccessKeysTable({
                   </div>
                 </Table.Cell>
 
-                {/* Region — access keys are region-scoped */}
+                {/* Region — the code a caller configures their SDK with, not
+                    the marketing name: this table is for a technical audience. */}
                 {showRegion && (
-                  <Table.Cell className="hidden md:table-cell">
-                    {key.region ? (
-                      <Badge color="grey" size="sm" description={getRegionLabel(key.region)}>
-                        {key.region}
-                      </Badge>
-                    ) : (
-                      <span className="text-xs text-zinc-400">—</span>
-                    )}
+                  <Table.Cell className="hidden font-mono text-xs text-zinc-500 md:table-cell">
+                    {key.region ?? '—'}
                   </Table.Cell>
                 )}
 
