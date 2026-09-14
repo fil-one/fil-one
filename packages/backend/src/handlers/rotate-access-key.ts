@@ -3,8 +3,7 @@ import type { AttributeValue, TransactWriteItem } from '@aws-sdk/client-dynamodb
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
-import type { APIGatewayProxyStructuredResultV2, Context } from 'aws-lambda';
-import { setTimeout as sleep } from 'node:timers/promises';
+import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import {
   ApiErrorCode,
   NO_ROLE,
@@ -38,7 +37,6 @@ import {
 } from '../lib/key-mint.ts';
 import type { KeyMinter, MintRecord, MintedKey } from '../lib/key-mint.ts';
 import { revokeAndReport } from '../lib/key-revocation.ts';
-import type { RevokeAccessKeyArgs } from '../lib/key-revocation.ts';
 import { rotatorStillAuthorizedCheck } from '../lib/membership-changes.ts';
 import { keyScope, notYourKeyResponse, withinScope } from '../lib/key-scope.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
@@ -81,23 +79,10 @@ const dynamo = getDynamoClient();
  */
 export async function baseHandler(
   event: AuthenticatedEvent,
-  context?: Pick<Context, 'getRemainingTimeInMillis'>,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const prepared = await prepareRotation(event);
-  if (!('keyId' in prepared)) return prepared;
-  return await issueReplacement(prepared, context?.getRemainingTimeInMillis?.());
+  return 'keyId' in prepared ? await issueReplacement(prepared) : prepared;
 }
-
-/**
- * Time held back from the revoke of the old key so the response goes out.
- *
- * Once the replacement's row has landed, this response is the only copy of its
- * secret there will ever be. The revoke that follows is a vendor call, and an
- * invocation that timed out inside it would lose the secret to save a key the
- * caller can delete from the list. So the revoke gets the time that remains
- * minus this, and no more.
- */
-const RESPONSE_RESERVE_MS = 3_000;
 
 /**
  * Everything that can refuse a rotation before the vendor is touched, and the
@@ -197,10 +182,13 @@ async function prepareRotation(
 }
 
 /** Mint the replacement, record it, and take the key it supersedes. */
-async function issueReplacement(
-  { keyId, stored, orchestrator, tenantId, rotator }: Rotation,
-  remainingMs: number | undefined,
-): Promise<APIGatewayProxyStructuredResultV2> {
+async function issueReplacement({
+  keyId,
+  stored,
+  orchestrator,
+  tenantId,
+  rotator,
+}: Rotation): Promise<APIGatewayProxyStructuredResultV2> {
   const { orgId, userId, email } = rotator;
   const actor = userActor({ userId, email });
   // The replacement is the owner's key, so the owner is whose role the row
@@ -308,22 +296,19 @@ async function issueReplacement(
   // credential at the vendor with no local row whenever this call then failed,
   // which is the one outcome nobody can see. This way the worst case is two
   // listed keys, and the caller is told about it.
-  const previousKeyRevoked = await revokeWithinBudget(
-    {
-      orgId,
-      keyId,
-      accessKeyId: stored.accessKeyId,
-      // The name the vendor holds it under, which is what an operator reading the
-      // event would search for. The two differ once a key has been rotated before.
-      keyName: stored.vendorKeyName ?? stored.keyName,
-      region: stored.region,
-      orchestrator,
-      tenantId,
-      actor,
-      reason: 'rotation',
-    },
-    remainingMs,
-  );
+  const previousKeyRevoked = await revokeAndReport({
+    orgId,
+    keyId,
+    accessKeyId: stored.accessKeyId,
+    // The name the vendor holds it under, which is what an operator reading the
+    // event would search for. The two differ once a key has been rotated before.
+    keyName: stored.vendorKeyName ?? stored.keyName,
+    region: stored.region,
+    orchestrator,
+    tenantId,
+    actor,
+    reason: 'rotation',
+  });
 
   return new ResponseBuilder()
     .status(201)
@@ -523,53 +508,6 @@ async function releaseSourceClaim({
         error: err,
       },
     );
-  }
-}
-
-/**
- * Revoke the old key inside the time the invocation has left, or not at all.
- *
- * With no clock — a direct call from a test — the revoke simply runs. Otherwise
- * it gets what remains minus {@link RESPONSE_RESERVE_MS}; when that is nothing,
- * it is skipped, and when it runs out, the answer is that the old key survived.
- * Both leave the old row claimed and listed, and the response says so, which is
- * the state the console already knows how to show. A revoke abandoned mid-call
- * leaves its own intent dangling, which is what that record is for.
- */
-async function revokeWithinBudget(
-  args: RevokeAccessKeyArgs,
-  remainingMs: number | undefined,
-): Promise<boolean> {
-  if (remainingMs === undefined) return revokeAndReport(args);
-
-  const budgetMs = remainingMs - RESPONSE_RESERVE_MS;
-  if (budgetMs <= 0) {
-    console.warn(
-      '[rotate-access-key] No time left to revoke the rotated key; the response goes first',
-      {
-        orgId: args.orgId,
-        remainingMs,
-      },
-    );
-    return false;
-  }
-
-  const clock = new AbortController();
-  const expired = sleep(budgetMs, 'expired' as const, { signal: clock.signal }).catch(
-    () => 'expired' as const,
-  );
-  try {
-    const outcome = await Promise.race([revokeAndReport(args), expired]);
-    if (outcome === 'expired') {
-      console.error('[rotate-access-key] The revoke of the rotated key outran its budget', {
-        orgId: args.orgId,
-        budgetMs,
-      });
-      return false;
-    }
-    return outcome;
-  } finally {
-    clock.abort();
   }
 }
 

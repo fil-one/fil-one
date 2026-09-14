@@ -1004,9 +1004,7 @@ export default $config({
     // the queues, tables and workers above, all of which have to exist first.
     // Minting a key reaches the orchestrator and its SSM-held credentials and
     // waits on a vendor call. Rotation does the same and then revokes, so both
-    // routes take one grant set. Thirty seconds is the mint's budget; if the pair
-    // starts crowding it, the revoke is the half that can move to a follow-up
-    // pass, because the caller already has their key.
+    // routes take one grant set; rotation takes more time.
     const accessKeyMintRoute: RouteInfraConfig = {
       extraEnv: orchestratorEnv,
       permissions: [
@@ -1080,7 +1078,12 @@ export default $config({
         provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       },
       'create-access-key': accessKeyMintRoute,
-      'rotate-access-key': accessKeyMintRoute,
+      // Twice the mint's budget, because a rotation makes two vendor calls in one
+      // request and the second comes after the replacement's row has landed.
+      // From that point the response is the only copy of the secret there will
+      // ever be, and an invocation that timed out inside the revoke would lose
+      // it to save a key the caller can delete from the list.
+      'rotate-access-key': { ...accessKeyMintRoute, timeout: '60 seconds' },
       'delete-access-key': {
         extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL, ...fthEnv, ...forgeEnv },
         permissions: [

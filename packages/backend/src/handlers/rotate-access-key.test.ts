@@ -650,45 +650,6 @@ describe('rotate-access-key baseHandler', () => {
     expect(mockDeleteAccessKey).toHaveBeenCalledWith(TENANT_ID, 'aurora-key-2');
   });
 
-  it('skips the revoke when the response would not go out in time', async () => {
-    // Once the row has landed, this response is the only copy of the secret.
-    stubStoredKey();
-    stubWrites();
-
-    const result = await baseHandler(eventFor(), { getRemainingTimeInMillis: () => 1_000 });
-
-    expect(result.statusCode).toBe(201);
-    expect(body(result)).toMatchObject({
-      secretAccessKey: 'secret-abc-123',
-      previousKeyRevoked: false,
-    });
-    expect(mockDeleteAccessKey).not.toHaveBeenCalledWith(TENANT_ID, KEY_ID);
-  });
-
-  it('gives the revoke the time that remains and no more', async () => {
-    stubStoredKey();
-    stubWrites();
-    // The vendor never answers the revoke.
-    mockDeleteAccessKey.mockImplementation((_tenant: string, id: string) =>
-      id === KEY_ID ? new Promise(() => {}) : Promise.resolve(),
-    );
-
-    const result = await baseHandler(eventFor(), { getRemainingTimeInMillis: () => 3_050 });
-
-    expect(result.statusCode).toBe(201);
-    expect(body(result).previousKeyRevoked).toBe(false);
-  });
-
-  it('revokes when the invocation has time for it', async () => {
-    stubStoredKey();
-    stubWrites();
-
-    const result = await baseHandler(eventFor(), { getRemainingTimeInMillis: () => 30_000 });
-
-    expect(body(result).previousKeyRevoked).toBe(true);
-    expect(mockDeleteAccessKey).toHaveBeenCalledWith(TENANT_ID, KEY_ID);
-  });
-
   it('hands over the replacement even when the old key survives its revoke', async () => {
     stubStoredKey();
     stubWrites();
