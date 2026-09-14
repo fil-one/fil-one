@@ -19,8 +19,9 @@ export type MembersTabId = 'members' | 'invitations';
  * The people in an organization, and the invitations still out to more.
  *
  * Its own page now, reached from the org switcher — not a tab of an
- * "Organization" page that also held Billing and the org's name (that page is
- * gone; identity and rename live in the switcher, Billing is its own page).
+ * "Organization" page that also held Billing and the org's name (that page
+ * split apart under FIL-1094; identity, rename and the danger zone are back
+ * as their own page at `/organization`, and Billing is its own page too).
  * What is left is people: the roster every role can read, and Invitations for
  * the roles that can manage them, side by side as two tabs.
  *

@@ -535,6 +535,7 @@ export async function summarizeMemberships({
         slug: summary.slug,
         role: row.role,
         ...(summary.logoUrl ? { logoUrl: summary.logoUrl } : {}),
+        ...(row.joinedAt ? { joinedAt: row.joinedAt } : {}),
       };
     }),
   );
