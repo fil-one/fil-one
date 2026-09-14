@@ -142,6 +142,16 @@ export type AcceptInvitationRequest = z.infer<typeof AcceptInvitationSchema>;
 export interface AcceptInvitationResponse {
   orgId: string;
   orgName: string;
+  /**
+   * The org's URL-safe slug. The console seeds this straight into `/me`'s
+   * cached membership list before switching into the org, so the switch can
+   * resolve `/{slug}/dashboard` directly instead of falling back to the
+   * unscoped `/dashboard` (which would otherwise be the only path: this org
+   * was not in that cache before the accept call ever landed).
+   */
+  slug?: string;
+  /** The org's uploaded logo, if any. Falls back to a generated monogram, same as elsewhere. */
+  logoUrl?: string;
   role: OrgRole;
   /** The caller was already a member, so accepting changed only the invitation. */
   alreadyMember: boolean;
