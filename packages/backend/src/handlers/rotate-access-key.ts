@@ -255,6 +255,9 @@ async function issueReplacement({
     region: stored.region,
     permissions: stored.permissions,
     vendorKeyName,
+    // Who reissued it and when, beside the owner the row keeps.
+    rotatedBy: userId,
+    rotatedAt: replacement.createdAt,
     ...optionalKeyAttributes(stored),
     ...carriedAttribution(stored),
   };

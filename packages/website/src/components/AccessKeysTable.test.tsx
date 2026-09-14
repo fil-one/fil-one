@@ -115,3 +115,31 @@ describe('AccessKeysTable — the row menu', () => {
     expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
   });
 });
+
+describe('AccessKeysTable — who rotated a key', () => {
+  const names = (userId: string) =>
+    userId === 'user-1' ? { name: 'Ada Lovelace' } : { name: 'Grace Hopper' };
+
+  it('names the rotator beneath the owner', () => {
+    renderWithProviders(
+      <AccessKeysTable
+        keys={[
+          makeKey({ createdBy: 'user-1', rotatedBy: 'user-2', rotatedAt: '2026-09-11T10:00:00Z' }),
+        ]}
+        creatorFor={names}
+      />,
+    );
+
+    expect(screen.getByText('Ada Lovelace')).toBeInTheDocument();
+    expect(screen.getByText(/^Rotated by Grace Hopper on /)).toBeInTheDocument();
+  });
+
+  it('shows the column for a rotated key that names no owner', () => {
+    renderWithProviders(
+      <AccessKeysTable keys={[makeKey({ rotatedBy: 'user-2' })]} creatorFor={names} />,
+    );
+
+    expect(screen.getByText('Created by')).toBeInTheDocument();
+    expect(screen.getByText('Rotated by Grace Hopper')).toBeInTheDocument();
+  });
+});

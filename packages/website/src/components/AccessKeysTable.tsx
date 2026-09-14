@@ -126,6 +126,45 @@ function GroupBadge({
   );
 }
 
+/**
+ * The owner, and beneath them whoever last reissued the credential.
+ *
+ * The same two-tone split the members roster uses: the person is the value,
+ * the address identifies which one. A rotation keeps the owner, so the rotator
+ * gets a line of their own rather than the owner's — an Admin who reissued a
+ * member's key is named without the key changing hands.
+ */
+function Attribution({
+  accessKey,
+  creatorFor,
+}: {
+  accessKey: AccessKey;
+  creatorFor?: (userId: string) => { name: string; email?: string } | undefined;
+}) {
+  const creator = accessKey.createdBy ? creatorFor?.(accessKey.createdBy) : undefined;
+  const rotator = accessKey.rotatedBy ? creatorFor?.(accessKey.rotatedBy) : undefined;
+  return (
+    <>
+      {creator ? (
+        <>
+          <p className="text-xs text-zinc-700">{creator.name}</p>
+          {creator.email && creator.email !== creator.name && (
+            <p className="text-xs text-zinc-500">{creator.email}</p>
+          )}
+        </>
+      ) : (
+        <span className="text-xs text-zinc-400">—</span>
+      )}
+      {accessKey.rotatedBy && (
+        <p className="text-xs text-zinc-500">
+          Rotated{rotator ? ` by ${rotator.name}` : ''}
+          {accessKey.rotatedAt ? ` on ${formatDate(accessKey.rotatedAt)}` : ''}
+        </p>
+      )}
+    </>
+  );
+}
+
 function ActionMenu({ onRotate, onDelete }: { onRotate?: () => void; onDelete?: () => void }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, right: 0 });
@@ -274,8 +313,9 @@ export function AccessKeysTable({
   };
   const showActions = keys.some(rowHasAction);
   // Keys minted before attribution existed carry no `createdBy`, so a column
-  // every row would em-dash is one nobody can read anything from.
-  const showCreatedBy = Boolean(creatorFor) && keys.some((key) => key.createdBy);
+  // every row would em-dash is one nobody can read anything from. A rotation
+  // names its rotator even on such a row, which is something to read.
+  const showCreatedBy = Boolean(creatorFor) && keys.some((key) => key.createdBy || key.rotatedBy);
 
   if (keys.length === 0) {
     return (
@@ -368,22 +408,9 @@ export function AccessKeysTable({
               </Table.Cell>
             )}
 
-            {/* Created by — the same two-tone split the members roster uses:
-                the person is the value, the address identifies which one. */}
             {showCreatedBy && (
               <Table.Cell className="hidden lg:table-cell">
-                {(() => {
-                  const creator = key.createdBy ? creatorFor?.(key.createdBy) : undefined;
-                  if (!creator) return <span className="text-xs text-zinc-400">—</span>;
-                  return (
-                    <>
-                      <p className="text-xs text-zinc-700">{creator.name}</p>
-                      {creator.email && creator.email !== creator.name && (
-                        <p className="text-xs text-zinc-500">{creator.email}</p>
-                      )}
-                    </>
-                  );
-                })()}
+                <Attribution accessKey={key} creatorFor={creatorFor} />
               </Table.Cell>
             )}
 

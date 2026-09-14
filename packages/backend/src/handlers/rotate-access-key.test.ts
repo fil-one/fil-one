@@ -398,6 +398,9 @@ describe('rotate-access-key baseHandler', () => {
     expect(replacementRow()).toMatchObject({
       createdBy: 'user-2',
       creatorEmail: 'them@example.com',
+      // The Admin who reissued it is recorded beside the owner, not instead.
+      rotatedBy: USER_INFO.userId,
+      rotatedAt: '2026-09-11T10:00:00.000Z',
     });
   });
 

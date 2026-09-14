@@ -230,6 +230,13 @@ export interface AccessKey {
    * those are only ever listed to a caller holding `keys.manage_all`.
    */
   createdBy?: string;
+  /**
+   * Who last rotated the key and when. A rotation keeps `createdBy` with the
+   * owner, so without these the row says nothing about the credential having
+   * been reissued, or by whom. Absent on a key that was never rotated.
+   */
+  rotatedBy?: string;
+  rotatedAt?: string;
 }
 
 export interface ListAccessKeysResponse {

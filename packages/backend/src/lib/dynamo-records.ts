@@ -105,6 +105,13 @@ export interface AccessKeyRecord {
    * owner can still delete.
    */
   replacedBy?: string;
+  /**
+   * Who last rotated the key and when. Kept apart from `createdBy`, which stays
+   * with the owner across a rotation: an Admin reissuing a member's credential
+   * is recorded here, and the owner's list still shows the key as theirs.
+   */
+  rotatedBy?: string;
+  rotatedAt?: string;
 }
 
 /**

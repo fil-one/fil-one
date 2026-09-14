@@ -147,6 +147,9 @@ function toAccessKey(record: Record<string, unknown>): AccessKey {
     // Shipped so the console can gate the per-row revoke button on the same
     // rule the delete route enforces.
     ...(record.createdBy ? { createdBy: record.createdBy as string } : {}),
+    ...(record.rotatedBy
+      ? { rotatedBy: record.rotatedBy as string, rotatedAt: record.rotatedAt as string }
+      : {}),
   };
 }
 
