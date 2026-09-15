@@ -10,7 +10,7 @@ import { hasPendingInviteToken } from '../lib/invite-token.js';
  *
  * Org resolution — matching `$orgSlug` against `/me`'s memberships, and
  * rendering `AppShell` — lives one level down, in `_app/$orgSlug.tsx`. It
- * cannot run here: `/new` (first-run setup, before an org has a slug worth
+ * cannot run here: `/get-started` (first-run setup, before an org has a slug worth
  * putting in a URL) is a direct child of this route rather than of `$orgSlug`,
  * so this layer has to stay slug-agnostic.
  */
