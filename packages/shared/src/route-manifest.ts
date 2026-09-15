@@ -214,6 +214,20 @@ const MANIFEST = [
     category: 'authenticated',
     requires: 'keys.manage_own',
   },
+  // Rotating is a mint, so the gate is `keys.create` rather than the
+  // `keys.manage_own` its revoke half would ask for: a role that could not mint
+  // the replacement has no business issuing one. Every role holding
+  // `keys.create` holds `keys.manage_own` too, so the handler's own-key
+  // narrowing still answers for every caller this admits. The creator-authority
+  // cap runs in the handler against the permissions the stored key carries.
+  {
+    method: 'POST',
+    path: '/api/access-keys/{keyId}/rotate',
+    handler: 'rotate-access-key',
+    category: 'authenticated',
+    requires: 'keys.create',
+    capsInHandler: true,
+  },
   {
     method: 'GET',
     path: '/api/rag-api-keys',

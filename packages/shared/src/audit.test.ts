@@ -21,7 +21,8 @@ import { RAG_KEY_DISPLAY_PREFIX_LENGTH } from './api/rag-api-keys.ts';
  * viewer is written against this list.
  *
  * The first ten are M1's write path. `audit.exported` is the audit log v1 ADR's
- * addition and the only one written on a read path.
+ * addition and the only one written on a read path. `key.rotated` is the key
+ * rotation of FIL-1018, named in that ADR's section 9.
  */
 const ADR_EVENT_TYPES = [
   'org.created',
@@ -35,6 +36,7 @@ const ADR_EVENT_TYPES = [
   'key.created',
   'key.deleted',
   'audit.exported',
+  'key.rotated',
 ];
 
 describe('the event-type registry', () => {
@@ -74,6 +76,7 @@ describe('the event-type registry', () => {
       'member.role_changed',
       'member.removed',
       'ownership.transferred',
+      'key.rotated',
     ]);
     for (const type of TWO_PHASE_AUDIT_EVENT_TYPES) {
       expect(AUDIT_EVENT_TYPES).toContain(type);

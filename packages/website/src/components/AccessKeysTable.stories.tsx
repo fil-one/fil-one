@@ -124,6 +124,35 @@ export const WithDeleteAction: Story = {
 };
 
 /**
+ * Both row actions. Rotating reissues the credential and keeps the rest of the
+ * key, so it sits above the destructive one and carries no warning colour.
+ */
+export const WithRotateAndDeleteActions: Story = {
+  args: {
+    keys: mockKeys,
+    showBuckets: true,
+    showPermissions: true,
+    onDelete: () => Promise.resolve(),
+    onRotate: () => Promise.resolve(),
+  },
+};
+
+/**
+ * Rotating a key mints a replacement, so a caller whose role could no longer
+ * grant what the key carries is offered only the revoke. Here that is key 2.
+ */
+export const WithRotateOnSomeRows: Story = {
+  args: {
+    keys: mockKeys,
+    showBuckets: true,
+    showPermissions: true,
+    onDelete: () => Promise.resolve(),
+    onRotate: () => Promise.resolve(),
+    canRotate: (key: AccessKey) => key.id !== '2',
+  },
+};
+
+/**
  * What a role that cannot revoke keys sees: the same table with no actions
  * column, because the page passed no `onDelete`.
  */
@@ -145,13 +174,16 @@ export const EmptyWithoutKeyCreation: Story = {
 /**
  * A shared org, where the column says whose key each one is — the question an
  * operator asks after removing somebody, since removal does not revoke keys
- * (FIL-1021). Key 3 predates attribution and carries no `createdBy`.
+ * (FIL-1021). Key 3 predates attribution and carries no `createdBy`. Key 1 was
+ * rotated by somebody other than its owner, which the column says beneath them.
  */
 export const WithCreators: Story = {
   args: {
-    keys: mockKeys.map((key, i) =>
-      i === 2 ? key : { ...key, createdBy: i === 0 ? 'user-1' : 'user-2' },
-    ),
+    keys: mockKeys.map((key, i) => {
+      if (i === 2) return key;
+      const owned = { ...key, createdBy: i === 0 ? 'user-1' : 'user-2' };
+      return i === 0 ? { ...owned, rotatedBy: 'user-2', rotatedAt: '2026-09-11T10:00:00Z' } : owned;
+    }),
     showRegion: true,
     creatorFor: (userId: string) =>
       userId === 'user-1'

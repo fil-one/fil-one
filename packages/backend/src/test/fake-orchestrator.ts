@@ -19,6 +19,7 @@ export interface FakeOrchestrator {
   getTenantInfo: ReturnType<typeof vi.fn>;
   getBucketUsageMetrics: ReturnType<typeof vi.fn>;
   getBucket: ReturnType<typeof vi.fn>;
+  listBuckets: ReturnType<typeof vi.fn>;
 }
 
 export interface FakeOrchestratorOpts {
@@ -40,7 +41,9 @@ export interface FakeOrchestratorOpts {
   bucketMetrics?: StorageUsageSample[] | Error;
   /** Bucket resolved by `getBucket`; `null` = not found. Defaults to `null`. */
   bucket?: BucketDetails | null;
-  /** When true, both `getTenantUsageMetrics` and `getTenantInfo` reject. */
+  /** Bucket names returned by `listBuckets`. Defaults to none. */
+  buckets?: string[];
+  /** When true, `getTenantUsageMetrics`, `getTenantInfo` and `listBuckets` reject. */
   failUsage?: boolean;
 }
 
@@ -53,14 +56,8 @@ export interface FakeOrchestratorOpts {
  */
 export function fakeOrchestrator(id: string, opts: FakeOrchestratorOpts = {}): FakeOrchestrator {
   const { ready = true, status = 'active', region = S3Region.EuWest1, failUsage = false } = opts;
-  const info: TenantInfo = {
-    bucketCount: opts.info?.bucketCount ?? 0,
-    bucketLimit: opts.info?.bucketLimit ?? 100,
-    keyCount: opts.info?.keyCount ?? 0,
-    accessKeyLimit: opts.info?.accessKeyLimit ?? 300,
-    status: opts.info?.status,
-  };
-  const bucketMetrics = opts.bucketMetrics ?? [];
+  const regionDown = () => vi.fn().mockRejectedValue(new Error('region down'));
+
   return {
     id,
     region,
@@ -72,17 +69,31 @@ export function fakeOrchestrator(id: string, opts: FakeOrchestratorOpts = {}): F
     getTenantStatus: vi.fn(async () => ({ kind: 'ok', status })),
     updateTenantStatus: vi.fn().mockResolvedValue(undefined),
     getTenantUsageMetrics: failUsage
-      ? vi.fn().mockRejectedValue(new Error('region down'))
+      ? regionDown()
       : vi.fn().mockResolvedValue({ storage: opts.storage ?? [], egress: opts.egress ?? [] }),
-    getTenantInfo: failUsage
-      ? vi.fn().mockRejectedValue(new Error('region down'))
-      : vi.fn().mockResolvedValue(info),
-    getBucketUsageMetrics:
-      bucketMetrics instanceof Error
-        ? vi.fn().mockRejectedValue(bucketMetrics)
-        : vi.fn().mockResolvedValue(bucketMetrics),
+    getTenantInfo: failUsage ? regionDown() : vi.fn().mockResolvedValue(buildTenantInfo(opts.info)),
+    getBucketUsageMetrics: fakeBucketMetrics(opts.bucketMetrics),
     getBucket: vi.fn().mockResolvedValue(opts.bucket ?? null),
+    listBuckets: failUsage
+      ? regionDown()
+      : vi.fn().mockResolvedValue((opts.buckets ?? []).map((bucketName) => ({ bucketName }))),
   };
+}
+
+function buildTenantInfo(info: Partial<TenantInfo> = {}): TenantInfo {
+  return {
+    bucketCount: info.bucketCount ?? 0,
+    bucketLimit: info.bucketLimit ?? 100,
+    keyCount: info.keyCount ?? 0,
+    accessKeyLimit: info.accessKeyLimit ?? 300,
+    status: info.status,
+  };
+}
+
+function fakeBucketMetrics(bucketMetrics: StorageUsageSample[] | Error = []) {
+  return bucketMetrics instanceof Error
+    ? vi.fn().mockRejectedValue(bucketMetrics)
+    : vi.fn().mockResolvedValue(bucketMetrics);
 }
 
 /** The PROFILE item a mocked `getOrgProfile` should resolve for the given org. */
