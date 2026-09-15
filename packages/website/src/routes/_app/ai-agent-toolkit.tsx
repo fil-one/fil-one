@@ -1,10 +1,10 @@
 import { createRoute } from '@tanstack/react-router';
-
 import { Route as appRoute } from '../_app';
-import { AiAgentToolkitPage } from '../../pages/AiAgentToolkitPage';
+import { redirectToActiveOrgPath } from '../../lib/legacy-route-redirect.js';
 
+/** The pre-org-scoping URL. See `dashboard.tsx` for why this stays. */
 export const Route = createRoute({
   path: '/ai-agent-toolkit',
   getParentRoute: () => appRoute,
-  component: AiAgentToolkitPage,
+  beforeLoad: ({ location }) => redirectToActiveOrgPath(location.href),
 });

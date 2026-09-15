@@ -1,22 +1,10 @@
 import { createRoute } from '@tanstack/react-router';
 import { Route as appRoute } from '../_app';
-import { CreateBucketPage } from '../../pages/CreateBucketPage';
-import { RequirePermissionPage } from '../../components/RequirePermissionPage';
+import { redirectToActiveOrgPath } from '../../lib/legacy-route-redirect.js';
 
-function CreateBucketRoute() {
-  return (
-    <RequirePermissionPage
-      permission="buckets.create"
-      title="Create bucket"
-      deniedMessage="Creating buckets is not part of your role. Ask an organization owner or admin to create one."
-    >
-      <CreateBucketPage />
-    </RequirePermissionPage>
-  );
-}
-
+/** The pre-org-scoping URL. See `dashboard.tsx` for why this stays. */
 export const Route = createRoute({
   path: '/buckets/create',
   getParentRoute: () => appRoute,
-  component: CreateBucketRoute,
+  beforeLoad: ({ location }) => redirectToActiveOrgPath(location.href),
 });
