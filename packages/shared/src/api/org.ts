@@ -52,14 +52,23 @@ export const OrgNameSchema = z
 /**
  * `PATCH /api/org` — renaming the organization, which is `org.rename` and
  * therefore its own endpoint rather than a field on the profile a member
- * updates about themselves.
+ * updates about themselves. `logoUrl`, when present, is a second, independent
+ * change this same call may carry — `org.rename` still gates it, same as the
+ * name — and must already point at a file `POST /api/org/logo-upload-url`
+ * put there, same as `CreateOrgSchema` below.
  */
-export const UpdateOrgSchema = z.object({ name: OrgNameSchema });
+export const UpdateOrgSchema = z.object({
+  name: OrgNameSchema,
+  logoUrl: z.string().url().optional(),
+});
 
 export type UpdateOrgRequest = z.infer<typeof UpdateOrgSchema>;
 
 export interface UpdateOrgResponse {
   name: string;
+  /** Re-derived from `name` on every rename, so a caller that changed the name needs this to update its own URL. */
+  slug?: string;
+  logoUrl?: string;
 }
 
 /**

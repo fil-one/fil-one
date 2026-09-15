@@ -77,9 +77,12 @@ describe('OrgSwitcher', () => {
     );
 
     // The server returns them in key order, which is org id order — arbitrary
-    // to everyone but the database.
-    const names = screen.getAllByRole('button').map((b) => b.textContent);
-    expect(names).toEqual(['Acme', 'Zenith']);
+    // to everyone but the database. `textContent` would also pick up the
+    // aria-hidden avatar's initial, so the accessible name is what's compared.
+    const buttons = screen.getAllByRole('button');
+    expect(buttons).toHaveLength(2);
+    expect(buttons[0]).toHaveAccessibleName('Acme');
+    expect(buttons[1]).toHaveAccessibleName('Zenith');
   });
 
   it('scrolls rather than growing past its dropdown', () => {

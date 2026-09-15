@@ -169,7 +169,7 @@ describe('SidebarNav — the org switcher', () => {
     // `inMenu` marks the active row with `aria-checked`, not `aria-current` —
     // see `OrgSwitcher`'s own comment on the two mount shapes.
     const active = screen.getByTestId('org-switcher').querySelector(`[aria-checked="true"]`);
-    expect(active?.textContent).toBe('Acme');
+    expect(active).toHaveAccessibleName('Acme');
   });
 
   it('offers the caller’s other org', () => {
@@ -177,10 +177,10 @@ describe('SidebarNav — the org switcher', () => {
 
     // `inMenu` (this mount point) gives each row `role="menuitemradio"`
     // rather than a plain button role — see `OrgSwitcher`'s own comment.
-    const names = within(screen.getByTestId('org-switcher'))
-      .getAllByRole('menuitemradio')
-      .map((b) => b.textContent);
-    expect(names).toEqual(['Acme', 'Globex']);
+    const rows = within(screen.getByTestId('org-switcher')).getAllByRole('menuitemradio');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveAccessibleName('Acme');
+    expect(rows[1]).toHaveAccessibleName('Globex');
   });
 });
 

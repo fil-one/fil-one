@@ -10,6 +10,13 @@ export type DeleteAccountModalProps = {
   open: boolean;
   onClose: () => void;
   orgName: string;
+  /**
+   * Whether this is the caller's only organization. Deleting an org always
+   * destroys its data; it only takes the caller's login down with it when
+   * they have nowhere else to land — otherwise they keep their account and
+   * simply lose this one org.
+   */
+  soleMembership: boolean;
   /** Called once the deletion is accepted, so the caller can leave the app. */
   onDeleted: () => void;
 };
@@ -24,7 +31,13 @@ type Step = 'warn' | 'confirm';
  * route can answer 401 step_up_required after the user already holds a code, and
  * losing it would force a resend they are rate-limited on.
  */
-export function DeleteAccountModal({ open, onClose, orgName, onDeleted }: DeleteAccountModalProps) {
+export function DeleteAccountModal({
+  open,
+  onClose,
+  orgName,
+  soleMembership,
+  onDeleted,
+}: DeleteAccountModalProps) {
   const [step, setStep] = useState<Step>('warn');
   const [code, setCode] = useState('');
   const [typedOrgName, setTypedOrgName] = useState('');
@@ -95,7 +108,11 @@ export function DeleteAccountModal({ open, onClose, orgName, onDeleted }: Delete
           <Alert
             variant="red"
             title="This cannot be undone"
-            description="Every bucket, object, access key and API key is destroyed, any subscription is cancelled, and your sign-in stops working. There is no restore."
+            description={
+              soleMembership
+                ? 'Every bucket, object, access key and API key is destroyed, and any subscription is cancelled. This is your only organization, so your sign-in stops working too. There is no restore.'
+                : 'Every bucket, object, access key and API key is destroyed, and any subscription is cancelled. You keep your account and sign-in — you only lose access to this organization. There is no restore.'
+            }
           />
 
           {step === 'warn' ? (
