@@ -6,12 +6,20 @@ import type { Permission } from '../permissions.ts';
 export interface OrgMembershipSummary {
   orgId: string;
   orgName: string;
+  /** URL-safe identifier for this org, unique across the platform — what routes are scoped by. */
+  slug: string;
   role: OrgRole;
+  /** Uploaded logo, if any. Absent falls back to a generated monogram, same as `MeResponse.picture` does for the user. */
+  logoUrl?: string;
 }
 
 export interface MeResponse {
   orgId: string;
   orgName: string;
+  /** URL-safe identifier for the active org — what routes are scoped by. */
+  slug: string;
+  /** The active org's uploaded logo, if any. Falls back to a generated monogram. */
+  logoUrl?: string;
   emailVerified: boolean;
   email?: string;
   name?: string;
@@ -38,6 +46,18 @@ export interface MeResponse {
   permissions?: readonly Permission[];
   /** Every org the caller belongs to, for the org switcher. */
   memberships?: OrgMembershipSummary[];
+  /**
+   * Whether anyone has ever named this organization, as opposed to accepting the
+   * name derived for them at signup. False only for an organization created
+   * after this field shipped and never renamed since, which is what sends a new
+   * account through the naming step.
+   *
+   * Absent on the stored row reads as true, so every organization that predates
+   * the field is left alone rather than sent back through onboarding. Optional
+   * here for the same reason: a payload that omits it is a confirmed org, and
+   * only an explicit `false` sends the caller through the naming step.
+   */
+  nameConfirmed?: boolean;
   /**
    * Whether the organizations beta is switched on for this caller — their own
    * allowlist row, or {@link MeResponse.orgId}'s. Computed server-side like

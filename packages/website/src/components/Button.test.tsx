@@ -8,6 +8,9 @@ vi.mock('@tanstack/react-router', () => ({
       {children}
     </a>
   ),
+  // `BaseLink` reads the active org's slug through this to prefix internal
+  // `href`s; no org context here, so the unprefixed path is what renders.
+  useParams: () => ({}),
 }));
 
 describe('Button', () => {

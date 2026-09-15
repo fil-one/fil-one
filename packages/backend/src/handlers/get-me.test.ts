@@ -90,7 +90,7 @@ function ownerTail(orgName: string) {
     userId: MOCK_USER_ID,
     role: OrgRole.Owner,
     permissions: [...ROLE_PERMISSIONS[OrgRole.Owner]],
-    memberships: [{ orgId: MOCK_ORG_ID, orgName, role: OrgRole.Owner }],
+    memberships: [{ orgId: MOCK_ORG_ID, orgName, slug: '', role: OrgRole.Owner }],
     orgsBeta: false,
   };
 }
@@ -182,6 +182,8 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
+        slug: '',
+        nameConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         mfaEnrollments: [],
@@ -205,6 +207,8 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
+        slug: '',
+        nameConfirmed: true,
         emailVerified: false,
         email: MOCK_EMAIL,
         mfaEnrollments: [],
@@ -230,6 +234,8 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: '',
+        slug: '',
+        nameConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         mfaEnrollments: [],
@@ -273,6 +279,8 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
+        slug: '',
+        nameConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         mfaEnrollments: [
@@ -310,6 +318,8 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
+        slug: '',
+        nameConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         mfaEnrollments: [],
@@ -357,6 +367,8 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
+        slug: '',
+        nameConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         mfaEnrollments: [],
@@ -433,7 +445,7 @@ describe('GET /api/me handler', () => {
         userId: string;
         role: OrgRole;
         permissions: string[];
-        memberships: Array<{ orgId: string; orgName: string; role: OrgRole }>;
+        memberships: Array<{ orgId: string; orgName: string; slug: string; role: OrgRole }>;
       };
     }
 
@@ -455,7 +467,7 @@ describe('GET /api/me handler', () => {
       expect(body.role).toBe(OrgRole.ReadOnly);
       expect(body.permissions).toStrictEqual([...ROLE_PERMISSIONS[OrgRole.ReadOnly]]);
       expect(body.memberships).toStrictEqual([
-        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', role: OrgRole.ReadOnly },
+        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', slug: '', role: OrgRole.ReadOnly },
       ]);
     });
 
@@ -474,8 +486,8 @@ describe('GET /api/me handler', () => {
       const body = parseBody(await handler(authenticatedEvent(), buildContext()));
 
       expect(body.memberships).toStrictEqual([
-        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', role: OrgRole.Owner },
-        { orgId: secondOrgId, orgName: 'Second Corp', role: OrgRole.Member },
+        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', slug: '', role: OrgRole.Owner },
+        { orgId: secondOrgId, orgName: 'Second Corp', slug: '', role: OrgRole.Member },
       ]);
     });
 
@@ -516,8 +528,8 @@ describe('GET /api/me handler', () => {
 
       expect((result as { statusCode: number }).statusCode).toBe(200);
       expect(parseBody(result).memberships).toStrictEqual([
-        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', role: OrgRole.Owner },
-        { orgId: secondOrgId, orgName: '', role: OrgRole.Member },
+        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', slug: '', role: OrgRole.Owner },
+        { orgId: secondOrgId, orgName: '', slug: '', role: OrgRole.Member },
       ]);
       consoleError.mockRestore();
     });

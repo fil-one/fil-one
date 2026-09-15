@@ -274,6 +274,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "OrgLogoBucket": {
+      "name": string
+      "type": "sst.aws.Bucket"
+    }
     "OrgTable": {
       "name": string
       "type": "sst.aws.Dynamo"
