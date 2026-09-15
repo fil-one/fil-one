@@ -46,9 +46,10 @@ function WelcomeRoute() {
       suggestedName={me?.orgName ?? ''}
       email={me?.email}
       // The org has had a slug since it was created, well before naming — so
-      // this can go straight to the org-scoped page rather than through the
-      // `/new` legacy stub's extra redirect hop.
-      onNamed={() => void navigate({ href: me?.slug ? `/${me.slug}/new` : '/new' })}
+      // this always has one to build the org-scoped href with. The dashboard
+      // fallback mirrors the one above rather than pointing at a route that
+      // doesn't exist for the (practically unreachable) case it's missing.
+      onNamed={() => void navigate({ href: me?.slug ? `/${me.slug}/get-started` : '/dashboard' })}
     />
   );
 }
