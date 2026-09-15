@@ -19,6 +19,15 @@ vi.mock('./Banner', () => ({
   Banner: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
+// The content window's bottom-bar controls are covered on their own; here they
+// are stubbed like the sidebar, so the shell's drawer/scroll/focus behaviour is
+// tested without their toast and query dependencies.
+vi.mock('./ReportBugButton', () => ({
+  ReportBugButton: () => <button type="button">Report a bug</button>,
+}));
+
+vi.mock('./SystemStatusPill', () => ({ SystemStatusPill: () => null }));
+
 vi.mock('../lib/api', () => ({
   getUsage: vi.fn(),
   getBilling: vi.fn(),
