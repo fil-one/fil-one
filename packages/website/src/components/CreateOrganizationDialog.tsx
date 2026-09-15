@@ -53,15 +53,18 @@ function useOrgLogoUpload() {
     setError(null);
     setUploading(true);
     try {
-      const { uploadUrl, logoUrl: uploadedUrl } = await presignOrgLogoUpload({
+      const {
+        uploadUrl,
+        fields,
+        logoUrl: uploadedUrl,
+      } = await presignOrgLogoUpload({
         contentType: file.type as LogoContentType,
       });
-      const putResponse = await fetch(uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': file.type },
-        body: file,
-      });
-      if (!putResponse.ok) throw new Error('Upload failed');
+      const form = new FormData();
+      for (const [key, value] of Object.entries(fields)) form.append(key, value);
+      form.append('file', file);
+      const postResponse = await fetch(uploadUrl, { method: 'POST', body: form });
+      if (!postResponse.ok) throw new Error('Upload failed');
       setLogoUrl(uploadedUrl);
     } catch (err) {
       setError(errorMessageOf(err, 'Failed to upload the logo'));

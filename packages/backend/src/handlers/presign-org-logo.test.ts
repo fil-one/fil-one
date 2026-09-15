@@ -24,9 +24,9 @@ vi.mock('jose', () => ({
   createRemoteJWKSet: vi.fn((_url: unknown) => 'mock-jwks'),
 }));
 
-const mockGetSignedUrl = vi.fn();
-vi.mock('@aws-sdk/s3-request-presigner', () => ({
-  getSignedUrl: (...args: unknown[]) => mockGetSignedUrl(...args),
+const mockCreatePresignedPost = vi.fn();
+vi.mock('@aws-sdk/s3-presigned-post', () => ({
+  createPresignedPost: (...args: unknown[]) => mockCreatePresignedPost(...args),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
@@ -111,7 +111,10 @@ describe('POST /api/org/logo-upload-url handler', () => {
         },
       });
 
-    mockGetSignedUrl.mockResolvedValue('https://org-logo-bucket.s3.us-east-1.amazonaws.com/signed');
+    mockCreatePresignedPost.mockResolvedValue({
+      url: 'https://org-logo-bucket.s3.us-east-1.amazonaws.com/signed',
+      fields: { key: 'logos/mock', policy: 'mock-policy', signature: 'mock-signature' },
+    });
     // authMiddleware's own deletion-fence read of the caller's active org
     // profile — unrelated to the logo this route presigns a home for.
     ddbMock
@@ -129,20 +132,23 @@ describe('POST /api/org/logo-upload-url handler', () => {
     expect(result.statusCode).toBe(200);
     const body = JSON.parse((result as { body: string }).body);
     expect(body.uploadUrl).toBe('https://org-logo-bucket.s3.us-east-1.amazonaws.com/signed');
+    expect(body.fields).toMatchObject({ key: 'logos/mock' });
     expect(body.logoUrl).toMatch(
       /^https:\/\/OrgLogoBucket\.s3\.us-east-1\.amazonaws\.com\/logos\/[0-9a-f-]+$/,
     );
   });
 
-  it('presigns a PUT with the requested content type', async () => {
+  it('presigns a POST with the requested content type and a size ceiling', async () => {
     await handler(presignEvent({ contentType: 'image/webp' }), buildContext());
 
-    expect(mockGetSignedUrl).toHaveBeenCalledTimes(1);
-    const [, command] = mockGetSignedUrl.mock.calls[0];
-    expect(command.input).toMatchObject({
+    expect(mockCreatePresignedPost).toHaveBeenCalledTimes(1);
+    const [, options] = mockCreatePresignedPost.mock.calls[0];
+    expect(options).toMatchObject({
       Bucket: 'OrgLogoBucket',
-      ContentType: 'image/webp',
+      Fields: { 'Content-Type': 'image/webp' },
     });
+    expect(options.Conditions).toContainEqual(['eq', '$Content-Type', 'image/webp']);
+    expect(options.Conditions).toContainEqual(expect.arrayContaining(['content-length-range']));
   });
 
   it.each([['image/gif'], ['application/pdf'], ['']])(
@@ -151,7 +157,7 @@ describe('POST /api/org/logo-upload-url handler', () => {
       const result = await handler(presignEvent({ contentType }), buildContext());
 
       expect(result.statusCode).toBe(400);
-      expect(mockGetSignedUrl).not.toHaveBeenCalled();
+      expect(mockCreatePresignedPost).not.toHaveBeenCalled();
     },
   );
 

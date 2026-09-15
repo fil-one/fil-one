@@ -30,6 +30,11 @@ vi.mock('jose', () => ({
   createRemoteJWKSet: vi.fn((_url: unknown) => 'mock-jwks'),
 }));
 
+const mockIsUploadedOrgLogoUrl = vi.fn();
+vi.mock('../lib/org-logo-storage.ts', () => ({
+  isUploadedOrgLogoUrl: (...args: unknown[]) => mockIsUploadedOrgLogoUrl(...args),
+}));
+
 const ddbMock = mockClient(DynamoDBClient);
 
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
@@ -112,6 +117,7 @@ describe('POST /api/org handler', () => {
     mockJwtVerify.mockResolvedValue({
       payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: true },
     });
+    mockIsUploadedOrgLogoUrl.mockResolvedValue(true);
 
     ddbMock
       .on(GetItemCommand, {
@@ -211,6 +217,19 @@ describe('POST /api/org handler', () => {
     const body = JSON.parse((result as { body: string }).body);
     expect(body).not.toHaveProperty('logoUrl');
     expect(profilePut().Item).not.toHaveProperty('logoUrl');
+    expect(mockIsUploadedOrgLogoUrl).not.toHaveBeenCalled();
+  });
+
+  it('rejects a logo URL the presign step never minted', async () => {
+    mockIsUploadedOrgLogoUrl.mockResolvedValue(false);
+
+    const result = await handler(
+      createOrgEvent({ name: 'New Co', logoUrl: 'https://attacker.example/tracker.png' }),
+      buildContext(),
+    );
+
+    expect(result.statusCode).toBe(400);
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
   });
 
   it('records an org.created event distinct from a signup', async () => {

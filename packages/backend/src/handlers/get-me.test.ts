@@ -36,6 +36,15 @@ vi.mock('jose', () => ({
   createRemoteJWKSet: vi.fn((_url: unknown) => 'mock-jwks'),
 }));
 
+// Every other test in this file fixes an org profile with no `slug` — the
+// pre-backfill shape this module exists to repair — so it defaults to a
+// no-op that leaves the response exactly as it read before this backfill
+// existed. The one test that cares about the backfill itself overrides it.
+const mockEnsureOrgSlug = vi.fn();
+vi.mock('../lib/org-slug.ts', () => ({
+  ensureOrgSlug: (...args: unknown[]) => mockEnsureOrgSlug(...args),
+}));
+
 const ddbMock = mockClient(DynamoDBClient);
 
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
@@ -126,6 +135,7 @@ describe('GET /api/me handler', () => {
 
     mockGetMfaEnrollments.mockResolvedValue([]);
     mockGetPasskeyAuthenticators.mockResolvedValue([]);
+    mockEnsureOrgSlug.mockResolvedValue('');
 
     // Auth middleware: resolve existing user
     ddbMock
@@ -192,6 +202,43 @@ describe('GET /api/me handler', () => {
         ...ownerTail('Example Corp'),
       }),
     });
+  });
+
+  it('backfills a slug for an org profile that predates the field', async () => {
+    profileResolves();
+    mockEnsureOrgSlug.mockResolvedValue('example-corp');
+
+    const result = await handler(authenticatedEvent(), buildContext());
+
+    expect(mockEnsureOrgSlug).toHaveBeenCalledWith({ orgId: MOCK_ORG_ID, name: 'Example Corp' });
+    const body = JSON.parse((result as { body: string }).body);
+    expect(body.slug).toBe('example-corp');
+    expect(body.memberships).toContainEqual(
+      expect.objectContaining({ orgId: MOCK_ORG_ID, slug: 'example-corp' }),
+    );
+  });
+
+  it('does not backfill a slug an org profile already has', async () => {
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+      })
+      .resolves({
+        Item: {
+          pk: { S: `ORG#${MOCK_ORG_ID}` },
+          sk: { S: 'PROFILE' },
+          name: { S: 'Example Corp' },
+          slug: { S: 'example-corp' },
+          auroraSetupStatus: { S: FINAL_SETUP_STATUS },
+        },
+      });
+
+    const result = await handler(authenticatedEvent(), buildContext());
+
+    expect(mockEnsureOrgSlug).not.toHaveBeenCalled();
+    const body = JSON.parse((result as { body: string }).body);
+    expect(body.slug).toBe('example-corp');
   });
 
   it('returns 200 with emailVerified false for unverified users (verified-email gate opt-out)', async () => {

@@ -1,6 +1,12 @@
-import { GetItemCommand, type TransactWriteItem } from '@aws-sdk/client-dynamodb';
+import {
+  GetItemCommand,
+  TransactionCanceledException,
+  TransactWriteItemsCommand,
+  type TransactWriteItem,
+} from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.ts';
+import { getOrgProfile } from './org-profile.ts';
 
 /**
  * Org slugs: the URL-safe identifier every org-scoped route is keyed by
@@ -130,4 +136,141 @@ export async function reserveOrgSlug({
 
   const fallback = `${base}-${crypto.randomUUID().slice(0, 8)}`;
   return { slug: fallback, reservationItem: reservationItem(fallback, orgId, tableName) };
+}
+
+/**
+ * Thrown by a {@link withSlugReservationRetry} `attempt` to report that its
+ * transaction was cancelled specifically because the reservation it carried
+ * lost a race — a concurrent create or rename claimed the candidate between
+ * the availability probe and this transaction's commit. Anything else the
+ * transaction can fail for should propagate as itself, not this.
+ */
+export class SlugReservationLost extends Error {
+  constructor() {
+    super('The slug reservation lost a race with a concurrent create or rename');
+    this.name = 'SlugReservationLost';
+  }
+}
+
+/**
+ * Whether the `reservationItem` at `index` of a cancelled transaction's own
+ * item list is what failed its condition — the same positional check
+ * `update-org.ts`'s `renameConditionFailed` makes for the name item, applied
+ * here to whichever index the caller placed the slug reservation at.
+ */
+export function slugReservationConditionFailed(err: unknown, index: number): boolean {
+  return (
+    err instanceof TransactionCanceledException &&
+    err.CancellationReasons?.[index]?.Code === 'ConditionalCheckFailed'
+  );
+}
+
+/** Bounded retries for a reservation that keeps losing races — never loops forever. */
+const MAX_SLUG_RESERVATION_RETRIES = 5;
+
+/**
+ * Reserve a slug for `orgId` and hand it to `attempt`, retrying with a fresh
+ * candidate whenever `attempt` reports — by throwing {@link SlugReservationLost}
+ * — that its transaction was cancelled because this reservation specifically
+ * lost a race.
+ *
+ * The probe in {@link reserveOrgSlug} only narrows the search; the write's own
+ * `attribute_not_exists(pk)` condition is the real uniqueness check, and two
+ * concurrent creates or renames that probed the same available candidate will
+ * have exactly one of them lose it here. Without a retry that loser's whole
+ * request fails — an otherwise valid signup or rename surfacing as a server
+ * error over a slug collision neither caller could see coming.
+ *
+ * `attempt` is responsible for recognizing its own cancellation: it knows
+ * where in its own transaction it placed the reservation item, this function
+ * does not.
+ */
+export async function withSlugReservationRetry<T>({
+  orgId,
+  name,
+  tableName = Resource.OrgTable.name,
+  attempt,
+}: {
+  orgId: string;
+  name: string;
+  tableName?: string;
+  attempt: (reserved: ReservedOrgSlug) => Promise<T>;
+}): Promise<T> {
+  for (let i = 0; i < MAX_SLUG_RESERVATION_RETRIES; i++) {
+    const reserved = await reserveOrgSlug({ orgId, name, tableName });
+    try {
+      return await attempt(reserved);
+    } catch (err) {
+      const isLastAttempt = i === MAX_SLUG_RESERVATION_RETRIES - 1;
+      if (!(err instanceof SlugReservationLost) || isLastAttempt) throw err;
+    }
+  }
+  // Unreachable — the loop above always returns or throws.
+  throw new SlugReservationLost();
+}
+
+/**
+ * Backfill a slug for an org profile that predates the field, from the read
+ * path rather than only via the standalone `backfill-org-slugs.ts` script.
+ *
+ * Deploying org-scoped routing depends on every existing org having a slug —
+ * `legacy-route-redirect.ts` has nothing to build a scoped URL from
+ * otherwise, and the bookmark or Auth0 callback that lands there renders a
+ * not-found page. The standalone script closes that gap for the whole table
+ * in one pass, but nothing in this repo wires it into a deploy, so a stage
+ * that ships this route before the script has been run locks every
+ * pre-existing account out until an operator remembers to run it. Calling
+ * this from `GET /api/me` closes the same gap per-org, on whichever request
+ * touches it first, with no deploy-ordering dependency at all — the script
+ * remains useful for warming a stage in bulk, but nothing depends on it
+ * having run.
+ *
+ * The write is conditioned on the row still lacking a slug, so two requests
+ * racing this for the same org — or this racing a rename — leave the
+ * winner's slug in place. When this call is the loser, the condition names
+ * the row's current slug as the reason: read it back and return that,
+ * rather than treating "someone already gave it one" as a failure.
+ */
+export async function ensureOrgSlug({
+  orgId,
+  name,
+}: {
+  orgId: string;
+  name: string;
+}): Promise<string> {
+  return withSlugReservationRetry({
+    orgId,
+    name,
+    attempt: async ({ slug, reservationItem }) => {
+      try {
+        await getDynamoClient().send(
+          new TransactWriteItemsCommand({
+            TransactItems: [
+              {
+                Update: {
+                  TableName: Resource.UserInfoTable.name,
+                  Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+                  UpdateExpression: 'SET slug = :slug',
+                  ConditionExpression: 'attribute_not_exists(slug)',
+                  ExpressionAttributeValues: { ':slug': { S: slug } },
+                },
+              },
+              reservationItem,
+            ],
+          }),
+        );
+        return slug;
+      } catch (err) {
+        if (slugReservationConditionFailed(err, 0)) {
+          // Not this reservation losing a race — the profile row already has
+          // a slug, written by whoever got there first. Read it back instead
+          // of erroring a caller who only wanted one to exist.
+          const profile = await getOrgProfile(orgId, { consistentRead: true });
+          return profile?.slug?.S || slug;
+        }
+        if (slugReservationConditionFailed(err, 1)) throw new SlugReservationLost();
+        throw err;
+      }
+    },
+  });
 }

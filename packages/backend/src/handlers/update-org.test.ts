@@ -212,7 +212,7 @@ describe('PATCH /api/org handler', () => {
 
     expect(result).toMatchObject({
       statusCode: 200,
-      body: JSON.stringify({ name: 'New Corp' }),
+      body: JSON.stringify({ name: 'New Corp', slug: 'new-corp' }),
     });
     expect(updateInput()).toMatchObject({
       TableName: 'UserInfoTable',

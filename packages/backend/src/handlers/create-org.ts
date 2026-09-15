@@ -2,9 +2,10 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { CreateOrgSchema, OrgRole } from '@filone/shared';
-import type { CreateOrgResponse } from '@filone/shared';
+import type { CreateOrgResponse, ErrorResponse } from '@filone/shared';
 import { createAdditionalOrg } from '../lib/account-creation.ts';
 import { SanitizedOrgNameSchema } from '../lib/org-name-validation.ts';
+import { isUploadedOrgLogoUrl } from '../lib/org-logo-storage.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
@@ -45,6 +46,18 @@ export async function baseHandler(
   const parsed = parseJsonBody(event.body, CreateOrgBodySchema);
   if ('error' in parsed) return parsed.error;
   const { name, logoUrl } = parsed.data;
+
+  // `logoUrl` is client-supplied, so its only trust is being a URL the
+  // presign step actually minted — never a caller-chosen host that every
+  // member's browser would then be made to contact.
+  if (logoUrl !== undefined && !(await isUploadedOrgLogoUrl(logoUrl))) {
+    return new ResponseBuilder()
+      .status(400)
+      .body<ErrorResponse>({
+        message: 'logoUrl must be a URL returned by the logo upload endpoint',
+      })
+      .build();
+  }
 
   const created = await createAdditionalOrg({ userId, orgName: name, logoUrl, email });
 

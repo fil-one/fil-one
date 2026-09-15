@@ -17,7 +17,7 @@ import { queryKeys } from '../lib/query-client.js';
  * two different products.
  */
 const textButton =
-  'rounded-xs font-medium text-brand-600 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600';
+  'rounded-md font-medium text-brand-600 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600';
 
 type WelcomePageProps = {
   /** The derived name the account was created with, as the field's starting value. */
@@ -120,8 +120,9 @@ export function WelcomePage({ suggestedName, email, onNamed }: WelcomePageProps)
         <Button
           type="submit"
           variant="primary"
+          size="lg"
           disabled={rename.isPending || name.trim() === ''}
-          className="mt-6 w-full justify-center py-3.5"
+          className="mt-6 w-full justify-center"
         >
           {rename.isPending ? 'Creating...' : 'Create organization'}
         </Button>

@@ -1,4 +1,8 @@
-import { GetItemCommand, TransactionCanceledException } from '@aws-sdk/client-dynamodb';
+import {
+  GetItemCommand,
+  TransactionCanceledException,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
@@ -11,7 +15,12 @@ import { getDynamoClient } from '../lib/ddb-client.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import { SanitizedOrgNameSchema } from '../lib/org-name-validation.ts';
-import { releaseOrgSlugItem, reserveOrgSlug } from '../lib/org-slug.ts';
+import {
+  releaseOrgSlugItem,
+  SlugReservationLost,
+  slugReservationConditionFailed,
+  withSlugReservationRetry,
+} from '../lib/org-slug.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -57,34 +66,65 @@ export async function baseHandler(
 
   // Submitting the form unchanged is what the Settings page does on every save,
   // and there is nothing to record: an event saying an org was renamed from
-  // "Acme" to "Acme" is noise in the log a customer reads.
+  // "Acme" to "Acme" is noise in the log a customer reads. But a new account
+  // that accepts its prefilled suggested name unchanged still has to confirm
+  // it — the name already matches, so this is the only write that will ever
+  // flip `nameConfirmed`, and skipping it strands that account re-redirected
+  // to `/welcome` on every load.
   if (previous.name === name) {
-    return new ResponseBuilder().status(200).body<UpdateOrgResponse>({ name }).build();
+    if (!previous.nameConfirmed) await confirmName(profileKey);
+    return new ResponseBuilder()
+      .status(200)
+      .body<UpdateOrgResponse>({ name, ...(previous.slug ? { slug: previous.slug } : {}) })
+      .build();
   }
 
   // Re-slugified alongside the name: the slug is derived from it, so a rename
   // that kept the old slug would route the new name through words nobody
   // typed. Reserved before the transaction, the same read-then-plan-the-write
   // split `reserveOrgSlug` always does — this call commits nothing.
-  const { slug, reservationItem } = await reserveOrgSlug({ orgId, name });
+  //
+  // Wrapped in a retry: two concurrent renames (or a rename racing a fresh
+  // signup) can probe the same available slug, and only one of their
+  // reservations actually lands. Without a retry the loser's otherwise valid
+  // rename surfaces as a server error over a slug collision it could not see
+  // coming.
+  let nameConflict = false;
+  const slug = await withSlugReservationRetry({
+    orgId,
+    name,
+    attempt: async ({ slug, reservationItem }) => {
+      try {
+        await renameOrg({
+          key: profileKey,
+          orgId,
+          name,
+          slug,
+          previousName: previous.name,
+          previousSlug: previous.slug,
+          reservationItem,
+          actor: userActor({ userId, email }),
+        });
+      } catch (err) {
+        if (renameConditionFailed(err)) {
+          // The org's own row moved, not the slug — nothing to retry with a
+          // fresh candidate. Stop the retry loop by returning normally; the
+          // check below reports the conflict.
+          nameConflict = true;
+          return slug;
+        }
+        // The reservation is always the transaction's last item.
+        const reservationIndex = previous.slug ? 2 : 1;
+        if (slugReservationConditionFailed(err, reservationIndex)) throw new SlugReservationLost();
+        throw err;
+      }
+      return slug;
+    },
+  });
 
-  try {
-    await renameOrg({
-      key: profileKey,
-      orgId,
-      name,
-      slug,
-      previousName: previous.name,
-      previousSlug: previous.slug,
-      reservationItem,
-      actor: userActor({ userId, email }),
-    });
-  } catch (err) {
-    if (renameConditionFailed(err)) return await renameConflictResponse(profileKey);
-    throw err;
-  }
+  if (nameConflict) return await renameConflictResponse(profileKey);
 
-  return new ResponseBuilder().status(200).body<UpdateOrgResponse>({ name }).build();
+  return new ResponseBuilder().status(200).body<UpdateOrgResponse>({ name, slug }).build();
 }
 
 type OrgProfileKey = Record<'pk' | 'sk', { S: string }>;
@@ -105,17 +145,39 @@ function orgProfileKey(orgId: string): OrgProfileKey {
  * predates the slug backfill has none yet, which the rename gives it for the
  * first time rather than releasing a reservation that was never made.
  */
-async function readOrgNameAndSlug(key: OrgProfileKey): Promise<{ name?: string; slug?: string }> {
+async function readOrgNameAndSlug(
+  key: OrgProfileKey,
+): Promise<{ name?: string; slug?: string; nameConfirmed: boolean }> {
   const { Item } = await getDynamoClient().send(
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: key,
-      ProjectionExpression: '#name, slug',
+      ProjectionExpression: '#name, slug, nameConfirmed',
       ExpressionAttributeNames: { '#name': 'name' },
       ConsistentRead: true,
     }),
   );
-  return { name: Item?.name?.S, slug: Item?.slug?.S };
+  return {
+    name: Item?.name?.S,
+    slug: Item?.slug?.S,
+    nameConfirmed: Item?.nameConfirmed?.BOOL ?? false,
+  };
+}
+
+/**
+ * Flip `nameConfirmed` on its own, for the submit-unchanged path: the name
+ * and slug are already correct, so nothing else about the profile row needs
+ * to move, and there is no rename to audit — the org's name never changed.
+ */
+async function confirmName(key: OrgProfileKey): Promise<void> {
+  await getDynamoClient().send(
+    new UpdateItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: key,
+      UpdateExpression: 'SET nameConfirmed = :confirmed',
+      ExpressionAttributeValues: { ':confirmed': { BOOL: true } },
+    }),
+  );
 }
 
 /**

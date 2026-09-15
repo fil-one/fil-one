@@ -34,13 +34,13 @@ export async function baseHandler(
   const parsed = parseJsonBody(event.body, PresignOrgLogoSchema);
   if ('error' in parsed) return parsed.error;
 
-  const { uploadUrl, logoUrl } = await presignOrgLogoUpload({
+  const { uploadUrl, fields, logoUrl } = await presignOrgLogoUpload({
     contentType: parsed.data.contentType,
   });
 
   return new ResponseBuilder()
     .status(200)
-    .body<PresignOrgLogoResponse>({ uploadUrl, logoUrl })
+    .body<PresignOrgLogoResponse>({ uploadUrl, fields, logoUrl })
     .build();
 }
 

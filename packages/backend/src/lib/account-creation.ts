@@ -6,7 +6,11 @@ import { getDynamoClient } from './ddb-client.ts';
 import { OrgKeys } from './org-membership.ts';
 import type { OrgMembership } from './org-membership.ts';
 import { OrgSetupStatus } from './org-setup-status.ts';
-import { reserveOrgSlug } from './org-slug.ts';
+import {
+  SlugReservationLost,
+  slugReservationConditionFailed,
+  withSlugReservationRetry,
+} from './org-slug.ts';
 
 export interface NewAccountParams {
   sub: string;
@@ -44,28 +48,50 @@ export async function createNewUserAndOrg({
   name,
 }: NewAccountParams): Promise<OrgMembership> {
   const now = new Date().toISOString();
-  const { slug, reservationItem } = await reserveOrgSlug({ orgId, name: orgName });
 
   // Spans three tables: identity and profiles in UserInfoTable, membership and
   // the owner count in OrgTable, the event in AuditTable. The event rides the
   // same transaction as the rows it describes, so an org cannot come into
   // existence unrecorded.
-  //
-  // The one write where the log yields rather than blocks. This runs inside the
-  // auth middleware, so an AuditTable outage that cancelled the transaction
-  // would fail every new customer's first login as a 401 and send them round the
-  // auth loop again — an unrecorded org is recoverable, an account nobody can
-  // create is not. The retry lands the seven rows and counts the dropped event.
-  await commitAudited({
-    onAuditFailure: 'retry-without-audit',
-    event: auditEvent({
-      type: 'org.created',
-      actor: userActor({ userId, email }),
-      orgId,
-      subject: AuditSubjects.org(orgId),
-      details: { orgName, source: 'signup' },
-    }),
-    items: accountRows({ sub, userId, orgId, orgName, slug, email, name, now, reservationItem }),
+  await withSlugReservationRetry({
+    orgId,
+    name: orgName,
+    attempt: async ({ slug, reservationItem }) => {
+      const items = accountRows({
+        sub,
+        userId,
+        orgId,
+        orgName,
+        slug,
+        email,
+        name,
+        now,
+        reservationItem,
+      });
+      try {
+        // The one write where the log yields rather than blocks. This runs
+        // inside the auth middleware, so an AuditTable outage that cancelled
+        // the transaction would fail every new customer's first login as a
+        // 401 and send them round the auth loop again — an unrecorded org is
+        // recoverable, an account nobody can create is not. The retry lands
+        // the seven rows and counts the dropped event.
+        await commitAudited({
+          onAuditFailure: 'retry-without-audit',
+          event: auditEvent({
+            type: 'org.created',
+            actor: userActor({ userId, email }),
+            orgId,
+            subject: AuditSubjects.org(orgId),
+            details: { orgName, source: 'signup' },
+          }),
+          items,
+        });
+      } catch (err) {
+        // The reservation is always the transaction's last item.
+        if (slugReservationConditionFailed(err, items.length - 1)) throw new SlugReservationLost();
+        throw err;
+      }
+    },
   });
 
   return { orgId, userId, role: OrgRole.Owner, joinedAt: now, source: 'signup' };
@@ -103,79 +129,92 @@ export async function createAdditionalOrg({
 }: CreateAdditionalOrgParams): Promise<CreatedOrg> {
   const orgId = crypto.randomUUID();
   const now = new Date().toISOString();
-  const { slug, reservationItem } = await reserveOrgSlug({ orgId, name: orgName });
 
   const userInfoTableName = Resource.UserInfoTable.name;
   const orgTableName = Resource.OrgTable.name;
 
-  const items: TransactWriteItem[] = [
-    {
-      // Create-only, the same guard `accountRows` puts on the identity row:
-      // `orgId` is a fresh UUID, so a collision here would mean the id was
-      // reused, not that the org already existed.
-      Put: {
-        TableName: userInfoTableName,
-        Item: {
-          pk: { S: `ORG#${orgId}` },
-          sk: { S: 'PROFILE' },
-          name: { S: orgName },
-          slug: { S: slug },
-          // Named on the way in, unlike signup's derived name — there is no
-          // naming step to send this org through.
-          nameConfirmed: { BOOL: true },
-          auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
-          createdBy: { S: userId },
-          createdAt: { S: now },
-          ...(logoUrl ? { logoUrl: { S: logoUrl } } : {}),
+  const slug = await withSlugReservationRetry({
+    orgId,
+    name: orgName,
+    attempt: async ({ slug, reservationItem }) => {
+      const items: TransactWriteItem[] = [
+        {
+          // Create-only, the same guard `accountRows` puts on the identity row:
+          // `orgId` is a fresh UUID, so a collision here would mean the id was
+          // reused, not that the org already existed.
+          Put: {
+            TableName: userInfoTableName,
+            Item: {
+              pk: { S: `ORG#${orgId}` },
+              sk: { S: 'PROFILE' },
+              name: { S: orgName },
+              slug: { S: slug },
+              // Named on the way in, unlike signup's derived name — there is no
+              // naming step to send this org through.
+              nameConfirmed: { BOOL: true },
+              auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
+              createdBy: { S: userId },
+              createdAt: { S: now },
+              ...(logoUrl ? { logoUrl: { S: logoUrl } } : {}),
+            },
+            ConditionExpression: 'attribute_not_exists(pk)',
+          },
         },
-        ConditionExpression: 'attribute_not_exists(pk)',
-      },
-    },
-    {
-      Put: {
-        TableName: orgTableName,
-        Item: {
-          pk: { S: OrgKeys.orgPk(orgId) },
-          sk: { S: OrgKeys.orgMetaSk() },
-          ownerCount: { N: '1' },
+        {
+          Put: {
+            TableName: orgTableName,
+            Item: {
+              pk: { S: OrgKeys.orgPk(orgId) },
+              sk: { S: OrgKeys.orgMetaSk() },
+              ownerCount: { N: '1' },
+            },
+          },
         },
-      },
-    },
-    {
-      Put: {
-        TableName: orgTableName,
-        Item: {
-          pk: { S: OrgKeys.orgPk(orgId) },
-          sk: { S: OrgKeys.memberSk(userId) },
-          role: { S: OrgRole.Owner },
-          joinedAt: { S: now },
-          source: { S: 'manual' },
+        {
+          Put: {
+            TableName: orgTableName,
+            Item: {
+              pk: { S: OrgKeys.orgPk(orgId) },
+              sk: { S: OrgKeys.memberSk(userId) },
+              role: { S: OrgRole.Owner },
+              joinedAt: { S: now },
+              source: { S: 'manual' },
+            },
+          },
         },
-      },
-    },
-    {
-      Put: {
-        TableName: orgTableName,
-        Item: {
-          pk: { S: OrgKeys.userPk(userId) },
-          sk: { S: OrgKeys.membershipSk(orgId) },
-          role: { S: OrgRole.Owner },
-          joinedAt: { S: now },
+        {
+          Put: {
+            TableName: orgTableName,
+            Item: {
+              pk: { S: OrgKeys.userPk(userId) },
+              sk: { S: OrgKeys.membershipSk(orgId) },
+              role: { S: OrgRole.Owner },
+              joinedAt: { S: now },
+            },
+          },
         },
-      },
-    },
-    reservationItem,
-  ];
+        reservationItem,
+      ];
 
-  await commitAudited({
-    items,
-    event: auditEvent({
-      type: 'org.created',
-      actor: userActor({ userId, email }),
-      orgId,
-      subject: AuditSubjects.org(orgId),
-      details: { orgName, source: 'manual' },
-    }),
+      try {
+        await commitAudited({
+          items,
+          event: auditEvent({
+            type: 'org.created',
+            actor: userActor({ userId, email }),
+            orgId,
+            subject: AuditSubjects.org(orgId),
+            details: { orgName, source: 'manual' },
+          }),
+        });
+      } catch (err) {
+        // The reservation is always the transaction's last item.
+        if (slugReservationConditionFailed(err, items.length - 1)) throw new SlugReservationLost();
+        throw err;
+      }
+
+      return slug;
+    },
   });
 
   return { orgId, orgName, slug, ...(logoUrl ? { logoUrl } : {}) };

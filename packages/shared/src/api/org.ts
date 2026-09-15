@@ -60,6 +60,12 @@ export type UpdateOrgRequest = z.infer<typeof UpdateOrgSchema>;
 
 export interface UpdateOrgResponse {
   name: string;
+  /**
+   * Absent only for a pre-slug org whose name was confirmed unchanged before
+   * the backfill reached it; present on every actual rename, since renaming
+   * always assigns one.
+   */
+  slug?: string;
 }
 
 /**
@@ -94,8 +100,15 @@ export const PresignOrgLogoSchema = z.object({
 export type PresignOrgLogoRequest = z.infer<typeof PresignOrgLogoSchema>;
 
 export interface PresignOrgLogoResponse {
-  /** Where the client PUTs the file. */
+  /** Where the client POSTs the file, as a multipart form. */
   uploadUrl: string;
+  /**
+   * The form fields the POST must carry alongside the file, including the
+   * policy and signature that bind the upload to this content type and to
+   * `ORG_LOGO_MAX_BYTES`. The client sends these unchanged; only `file` (last)
+   * is theirs to append.
+   */
+  fields: Record<string, string>;
   /** The public URL to read it back from afterward, and what gets sent to `CreateOrgRequest.logoUrl`. */
   logoUrl: string;
 }
