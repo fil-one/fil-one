@@ -45,7 +45,7 @@ export default defineConfig(({ mode }) => {
     server: {
       ...(proxyTarget && {
         proxy: {
-          '/api': {
+          '^/api(/|$)': {
             target: proxyTarget,
             changeOrigin: true,
             headers: { 'X-Dev-Origin': 'https://localhost:5173' },
