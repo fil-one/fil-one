@@ -101,8 +101,7 @@ export function createFthManagementClient(config: FthManagementClientConfig): Ft
     responseInterceptors: [],
     errorInterceptors: [],
   };
-  const request: RequestFn = (method, pathTemplate, pathParams, opts) =>
-    runRequest(ctx, { method, pathTemplate, pathParams, opts });
+  const request: RequestFn = (spec) => runRequest(ctx, spec);
 
   return {
     ...buildEndpointMethods(request),
@@ -272,55 +271,50 @@ interface RequestContext {
   errorInterceptors: ErrorInterceptor[];
 }
 
-// Everything one request needs beyond its method and path. `signal` is the
-// caller's deadline; the other three shape the wire request.
-interface RequestOpts {
+// Everything one request needs. `signal` is the caller's deadline; the rest
+// shape the wire request.
+interface RequestSpec {
+  method: string;
+  pathTemplate: string;
+  pathParams?: Record<string, string>;
   body?: unknown;
   idempotencyKey?: string;
   query?: URLSearchParams;
   signal?: AbortSignal;
 }
 
+// Takes the rendered path because runRequest also needs it for the error it
+// builds on a failed response.
 function buildHttpRequest(
   ctx: RequestContext,
-  method: string,
   path: string,
-  opts: RequestOpts,
+  spec: Omit<RequestSpec, 'pathTemplate' | 'pathParams'>,
 ): Request {
   const headers = new Headers({
     Authorization: `Bearer ${ctx.token}`,
     Accept: 'application/json',
   });
-  if (opts.idempotencyKey) headers.set('Idempotency-Key', opts.idempotencyKey);
+  if (spec.idempotencyKey) headers.set('Idempotency-Key', spec.idempotencyKey);
 
-  const init: RequestInit = { method, headers, signal: opts.signal };
-  if (opts.body !== undefined) {
+  const init: RequestInit = { method: spec.method, headers, signal: spec.signal };
+  if (spec.body !== undefined) {
     headers.set('Content-Type', 'application/json');
-    init.body = JSON.stringify(opts.body);
+    init.body = JSON.stringify(spec.body);
   }
 
   let url = `${ctx.baseUrl}${path}`;
-  if (opts.query) {
-    const qs = opts.query.toString();
+  if (spec.query) {
+    const qs = spec.query.toString();
     if (qs) url = `${url}?${qs}`;
   }
 
   return new Request(url, init);
 }
 
-interface RequestSpec {
-  method: string;
-  pathTemplate: string;
-  pathParams: Record<string, string>;
-  opts?: RequestOpts;
-}
-
-async function runRequest<T>(
-  ctx: RequestContext,
-  { method, pathTemplate, pathParams, opts = {} }: RequestSpec,
-): Promise<T> {
+async function runRequest<T>(ctx: RequestContext, spec: RequestSpec): Promise<T> {
+  const { method, pathTemplate, pathParams } = spec;
   const path = renderPath(pathTemplate, pathParams);
-  let httpRequest = buildHttpRequest(ctx, method, path, opts);
+  let httpRequest = buildHttpRequest(ctx, path, spec);
   const interceptorOpts: InterceptorOptions = { url: pathTemplate };
 
   for (const fn of ctx.requestInterceptors) {
@@ -380,108 +374,97 @@ async function runErrorInterceptors(
   return error;
 }
 
-type RequestFn = <T>(
-  method: string,
-  pathTemplate: string,
-  pathParams: Record<string, string>,
-  opts?: RequestOpts,
-) => Promise<T>;
+type RequestFn = <T>(spec: RequestSpec) => Promise<T>;
 
 function buildEndpointMethods(request: RequestFn): Omit<FthManagementClient, 'interceptors'> {
   return {
     createClient: (args, requestOptions) =>
-      request<FthClientRecord>(
-        'POST',
-        '/management/v1/clients',
-        {},
-        {
-          body: { externalId: args.externalId, displayName: args.displayName },
-          idempotencyKey: args.idempotencyKey,
-          signal: requestOptions?.signal,
-        },
-      ),
+      request<FthClientRecord>({
+        method: 'POST',
+        pathTemplate: '/management/v1/clients',
+        body: { externalId: args.externalId, displayName: args.displayName },
+        idempotencyKey: args.idempotencyKey,
+        signal: requestOptions?.signal,
+      }),
     getClient: (clientRef, requestOptions) =>
-      request<FthClientRecord>(
-        'GET',
-        '/management/v1/clients/{clientRef}',
-        { clientRef },
-        { signal: requestOptions?.signal },
-      ),
+      request<FthClientRecord>({
+        method: 'GET',
+        pathTemplate: '/management/v1/clients/{clientRef}',
+        pathParams: { clientRef },
+        signal: requestOptions?.signal,
+      }),
     updateClientStatus: (clientRef, args, requestOptions) =>
-      request<void>(
-        'PATCH',
-        '/management/v1/clients/{clientRef}',
-        { clientRef },
-        {
-          body: {
-            status: args.status,
-            ...(args.displayName !== undefined && { displayName: args.displayName }),
-          },
-          idempotencyKey: args.idempotencyKey,
-          signal: requestOptions?.signal,
+      request<void>({
+        method: 'PATCH',
+        pathTemplate: '/management/v1/clients/{clientRef}',
+        pathParams: { clientRef },
+        body: {
+          status: args.status,
+          ...(args.displayName !== undefined && { displayName: args.displayName }),
         },
-      ),
+        idempotencyKey: args.idempotencyKey,
+        signal: requestOptions?.signal,
+      }),
     deleteClient: (clientRef, requestOptions) =>
-      request<void>(
-        'DELETE',
-        '/management/v1/clients/{clientRef}',
-        { clientRef },
-        { signal: requestOptions?.signal },
-      ),
+      request<void>({
+        method: 'DELETE',
+        pathTemplate: '/management/v1/clients/{clientRef}',
+        pathParams: { clientRef },
+        signal: requestOptions?.signal,
+      }),
 
     createStorageUser: (clientRef, args, requestOptions) =>
-      request<FthStorageUser>(
-        'POST',
-        '/management/v1/clients/{clientRef}/storage-users',
-        { clientRef },
-        {
-          body: {
-            email: args.email,
-            displayName: args.displayName,
-            userCode: args.userCode,
-            role: args.role,
-            issueS3Credentials: args.issueS3Credentials,
-          },
-          idempotencyKey: args.idempotencyKey,
-          signal: requestOptions?.signal,
+      request<FthStorageUser>({
+        method: 'POST',
+        pathTemplate: '/management/v1/clients/{clientRef}/storage-users',
+        pathParams: { clientRef },
+        body: {
+          email: args.email,
+          displayName: args.displayName,
+          userCode: args.userCode,
+          role: args.role,
+          issueS3Credentials: args.issueS3Credentials,
         },
-      ),
+        idempotencyKey: args.idempotencyKey,
+        signal: requestOptions?.signal,
+      }),
     listStorageUsers: async (clientRef, requestOptions) => {
-      const res = await request<FthListResponse<FthStorageUser>>(
-        'GET',
-        '/management/v1/clients/{clientRef}/storage-users',
-        { clientRef },
-        { signal: requestOptions?.signal },
-      );
+      const res = await request<FthListResponse<FthStorageUser>>({
+        method: 'GET',
+        pathTemplate: '/management/v1/clients/{clientRef}/storage-users',
+        pathParams: { clientRef },
+        signal: requestOptions?.signal,
+      });
       return res.items ?? [];
     },
     getStorageUser: (clientRef, userRef, requestOptions) =>
-      request<FthStorageUser>(
-        'GET',
-        '/management/v1/clients/{clientRef}/storage-users/{userRef}',
-        { clientRef, userRef },
-        { signal: requestOptions?.signal },
-      ),
+      request<FthStorageUser>({
+        method: 'GET',
+        pathTemplate: '/management/v1/clients/{clientRef}/storage-users/{userRef}',
+        pathParams: { clientRef, userRef },
+        signal: requestOptions?.signal,
+      }),
 
     ...buildAccessKeyMethods(request),
 
     getClientMetricsTimeseries: (clientRef, query, requestOptions) => {
       const params = new URLSearchParams({ from: query.from, to: query.to });
       if (query.interval) params.set('interval', query.interval);
-      return request<FthMetricsTimeseriesResponse>(
-        'GET',
-        '/management/v1/clients/{clientRef}/metrics/timeseries',
-        { clientRef },
-        { query: params, signal: requestOptions?.signal },
-      );
+      return request<FthMetricsTimeseriesResponse>({
+        method: 'GET',
+        pathTemplate: '/management/v1/clients/{clientRef}/metrics/timeseries',
+        pathParams: { clientRef },
+        query: params,
+        signal: requestOptions?.signal,
+      });
     },
     getClientMetricsCurrent: (clientRef, requestOptions) =>
-      request<FthMetricsCurrentResponse>(
-        'GET',
-        '/management/v1/clients/{clientRef}/metrics/current',
-        { clientRef },
-        { signal: requestOptions?.signal },
-      ),
+      request<FthMetricsCurrentResponse>({
+        method: 'GET',
+        pathTemplate: '/management/v1/clients/{clientRef}/metrics/current',
+        pathParams: { clientRef },
+        signal: requestOptions?.signal,
+      }),
   };
 }
 
@@ -493,48 +476,47 @@ function buildAccessKeyMethods(
 > {
   return {
     createAccessKey: (clientRef, userRef, args, requestOptions) =>
-      request<FthAccessKeyWithSecret>(
-        'POST',
-        '/management/v1/clients/{clientRef}/storage-users/{userRef}/access-keys',
-        { clientRef, userRef },
-        {
-          body: {
-            name: args.name,
-            permissions: args.permissions,
-            buckets: args.buckets,
-            expiresAt: args.expiresAt,
-          },
-          idempotencyKey: args.idempotencyKey,
-          signal: requestOptions?.signal,
+      request<FthAccessKeyWithSecret>({
+        method: 'POST',
+        pathTemplate: '/management/v1/clients/{clientRef}/storage-users/{userRef}/access-keys',
+        pathParams: { clientRef, userRef },
+        body: {
+          name: args.name,
+          permissions: args.permissions,
+          buckets: args.buckets,
+          expiresAt: args.expiresAt,
         },
-      ),
+        idempotencyKey: args.idempotencyKey,
+        signal: requestOptions?.signal,
+      }),
     listAccessKeys: async (clientRef, requestOptions) => {
-      const res = await request<FthListResponse<FthAccessKey>>(
-        'GET',
-        '/management/v1/clients/{clientRef}/access-keys',
-        { clientRef },
-        { signal: requestOptions?.signal },
-      );
+      const res = await request<FthListResponse<FthAccessKey>>({
+        method: 'GET',
+        pathTemplate: '/management/v1/clients/{clientRef}/access-keys',
+        pathParams: { clientRef },
+        signal: requestOptions?.signal,
+      });
       return res.items ?? [];
     },
     getAccessKey: (clientRef, accessKeyId, requestOptions) =>
-      request<FthAccessKey>(
-        'GET',
-        '/management/v1/clients/{clientRef}/access-keys/{accessKeyId}',
-        { clientRef, accessKeyId },
-        { signal: requestOptions?.signal },
-      ),
+      request<FthAccessKey>({
+        method: 'GET',
+        pathTemplate: '/management/v1/clients/{clientRef}/access-keys/{accessKeyId}',
+        pathParams: { clientRef, accessKeyId },
+        signal: requestOptions?.signal,
+      }),
     deleteAccessKey: (clientRef, accessKeyId, requestOptions) =>
-      request<void>(
-        'DELETE',
-        '/management/v1/clients/{clientRef}/access-keys/{accessKeyId}',
-        { clientRef, accessKeyId },
-        { idempotencyKey: requestOptions?.idempotencyKey, signal: requestOptions?.signal },
-      ),
+      request<void>({
+        method: 'DELETE',
+        pathTemplate: '/management/v1/clients/{clientRef}/access-keys/{accessKeyId}',
+        pathParams: { clientRef, accessKeyId },
+        idempotencyKey: requestOptions?.idempotencyKey,
+        signal: requestOptions?.signal,
+      }),
   };
 }
 
-function renderPath(template: string, params: Record<string, string>): string {
+function renderPath(template: string, params: Record<string, string> = {}): string {
   return template.replace(/\{([^}]+)\}/g, (_, name: string) => {
     const value = params[name];
     if (value === undefined) {
