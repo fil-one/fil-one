@@ -1096,4 +1096,60 @@ describe('processTenantSetup signal forwarding', () => {
 
     expect(mockSetupAuroraTenant).toHaveBeenCalledTimes(1);
   });
+
+  it('passes the caller signal to the SSM lookup recovering a duplicate token', async () => {
+    vi.useFakeTimers();
+    try {
+      ddbMock.on(GetItemCommand).resolves(
+        orgProfileItem({
+          auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
+          auroraTenantId: { S: 'aurora-t-5' },
+        }),
+      );
+      mockCreateAuroraTenantApiKey.mockRejectedValue(new FakeDuplicateTokenNameError());
+      const paramNotFound = new Error('Parameter not found');
+      paramNotFound.name = 'ParameterNotFound';
+      ssmMock.on(GetParameterCommand).rejects(paramNotFound);
+
+      const promise = processTenantSetup('org-1', { signal });
+      promise.catch(() => {}); // suppress unhandled-rejection while timers advance
+      await vi.runAllTimersAsync();
+      await promise.catch(() => {});
+
+      // aws-sdk-client-mock types `args` as the one-element `[command]` tuple,
+      // but the recorded sinon call carries every argument `send` received.
+      const sentOptions = (
+        ssmMock.commandCalls(GetParameterCommand)[0] as unknown as { args: unknown[] }
+      ).args[1];
+      expect(sentOptions).toEqual({ abortSignal: signal });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops polling the setup state when the signal is aborted during a backoff', async () => {
+    vi.useFakeTimers();
+    try {
+      ddbMock.on(GetItemCommand).resolves(
+        orgProfileItem({
+          auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
+          auroraTenantId: { S: 'aurora-t-1' },
+        }),
+      );
+      const controller = new AbortController();
+      mockSetupAuroraTenant.mockResolvedValue({ lastSetupStep: 'PENDING' });
+
+      const promise = processTenantSetup('org-1', { signal: controller.signal });
+      promise.catch(() => {}); // suppress unhandled-rejection while timers advance
+      // Land inside the first 100 ms backoff, then let the deadline pass.
+      await vi.advanceTimersByTimeAsync(50);
+      controller.abort();
+      await vi.runAllTimersAsync();
+      await promise.catch(() => {});
+
+      expect(mockSetupAuroraTenant).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

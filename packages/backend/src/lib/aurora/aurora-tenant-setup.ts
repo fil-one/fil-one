@@ -250,9 +250,10 @@ async function runSetup(
   let lastSetupStep: string | undefined;
   for (const wait of [0, ...RUN_SETUP_POLL_BACKOFFS_MS]) {
     // A deadline that passed during the previous poll ends the loop here, before
-    // the backoff sleep, instead of after it with an aborted request.
+    // the backoff sleep, instead of after it with an aborted request. A deadline
+    // that passes during the sleep itself aborts the sleep.
     signal?.throwIfAborted();
-    if (wait > 0) await sleep(wait);
+    if (wait > 0) await sleep(wait, signal);
     ({ lastSetupStep } = await setupAuroraTenant({ tenantId: auroraTenantId, signal }));
     if (lastSetupStep === 'FINISHED') break;
   }
@@ -289,7 +290,7 @@ async function createAndStoreApiKey(
         `Aurora tenant API token "filone-${orgId}" already exists for tenant ${auroraTenantId}, checking SSM`,
       );
 
-      if (await ssmHasParameter(ssmName)) {
+      if (await ssmHasParameter(ssmName, signal)) {
         // A previous attempt completed end-to-end; just advance status.
         await advanceStatus({
           orgProfileKey,
@@ -349,7 +350,7 @@ async function createAndStoreS3AccessKey(
       );
 
       const ssmName = `/filone/${stage}/aurora-s3/access-key/${auroraTenantId}`;
-      if (!(await ssmHasParameter(ssmName))) {
+      if (!(await ssmHasParameter(ssmName, signal))) {
         // Secret is lost — re-throw so the message goes to DLQ for manual investigation
         throw err;
       }
@@ -402,11 +403,11 @@ interface AdvanceStatusOptions {
 // DLQ is the right outcome).
 const SSM_POLL_BACKOFFS_MS = [20, 50, 100, 250, 500];
 
-async function ssmHasParameter(name: string): Promise<boolean> {
+async function ssmHasParameter(name: string, signal?: AbortSignal): Promise<boolean> {
   for (const wait of [0, ...SSM_POLL_BACKOFFS_MS]) {
-    if (wait > 0) await sleep(wait);
+    if (wait > 0) await sleep(wait, signal);
     try {
-      await ssm.send(new GetParameterCommand({ Name: name }));
+      await ssm.send(new GetParameterCommand({ Name: name }), { abortSignal: signal });
       return true;
     } catch (err) {
       if ((err as { name?: string }).name !== 'ParameterNotFound') {
@@ -417,7 +418,26 @@ async function ssmHasParameter(name: string): Promise<boolean> {
   return false;
 }
 
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+// Rejects with the signal's reason when the deadline passes mid-wait, so a
+// backoff never outlives the request that scheduled it.
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    // Throwing inside the executor rejects the promise.
+    signal?.throwIfAborted();
+
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal!.reason);
+    };
+
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
 
 // Increments the per-org failure counter atomically. When the count first crosses the stuck
 // threshold (newCount === SETUP_FAILURE_ALERT_THRESHOLD), kicks off a one-shot scan + EMF emission
