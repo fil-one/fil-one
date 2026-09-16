@@ -278,6 +278,7 @@ abstract class FilOneOrchestrator implements OrchestratorCore {
       {
         bucketName: args.bucketName,
         objectLockEnabled: args.lock === true,
+        ...(args.policy ? { policy: args.policy } : {}),
       },
       requestOptions,
     );
