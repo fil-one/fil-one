@@ -98,27 +98,45 @@ export interface FilOneOrchestratorConfig {
 const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
 
 export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): ServiceOrchestrator {
-  const client = resolveClient(config);
-  const setupDeps: TenantSetupDeps = {
-    client,
-    id: config.id,
-    stage: config.stage,
-    region: config.region,
-  };
-  const tenantIdAttribute = `${config.id}TenantId`;
+  return new FilOneOrchestrator(config);
+}
+
+class FilOneOrchestrator implements ServiceOrchestrator {
+  readonly id: string;
+  readonly region: S3Region;
+  readonly accessModel = 'scoped-keys';
+
+  private readonly config: FilOneOrchestratorConfig;
+  private readonly client: Client;
+  private readonly setupDeps: TenantSetupDeps;
+  private readonly tenantIdAttribute: string;
+
+  constructor(config: FilOneOrchestratorConfig) {
+    this.config = config;
+    this.id = config.id;
+    this.region = config.region;
+    this.client = resolveClient(config);
+    this.setupDeps = {
+      client: this.client,
+      id: config.id,
+      stage: config.stage,
+      region: config.region,
+    };
+    this.tenantIdAttribute = `${config.id}TenantId`;
+  }
 
   // Same lowercase-dashed status values as the contract, so no mapping is
   // needed. Setting the same status twice is a no-op upstream.
-  const setTenantStatus = async (
+  private async setTenantStatus(
     tenantId: string,
     status: TenantStatus,
     {
       allowMissing,
       ...requestOptions
     }: { allowMissing?: boolean } & OrchestratorRequestOptions = {},
-  ): Promise<void> => {
+  ): Promise<void> {
     const { error, response } = await postTenantsByTenantIdStatus({
-      client,
+      client: this.client,
       path: { tenantId },
       body: { status },
       throwOnError: false,
@@ -127,119 +145,402 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
     if (!error) return;
     if (allowMissing && response?.status === 404) return;
     throw new Error(`Failed to set tenant ${tenantId} status to "${status}"`, { cause: error });
-  };
+  }
 
-  const getS3ClientContext = async (
+  async getS3ClientContext(
     tenantId: string,
     requestOptions?: OrchestratorRequestOptions,
-  ): Promise<S3ClientContext> => {
+  ): Promise<S3ClientContext> {
     const credentials = await getConsoleS3Credentials(
       {
-        orchestratorId: config.id,
-        stage: config.stage,
+        orchestratorId: this.id,
+        stage: this.config.stage,
         tenantId,
       },
       requestOptions,
     );
     return {
-      endpointUrl: config.s3EndpointUrl,
-      region: config.region,
+      endpointUrl: this.config.s3EndpointUrl,
+      region: this.region,
       credentials,
       forcePathStyle: true,
-      orchestratorId: config.id,
+      orchestratorId: this.id,
       tenantId,
     };
-  };
+  }
 
-  return {
-    id: config.id,
-    region: config.region,
-    accessModel: 'scoped-keys',
+  async ensureTenantReady(
+    orgId: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<string | null> {
+    return ensureManagementTenantReady(this.setupDeps, orgId, requestOptions);
+  }
 
-    async ensureTenantReady(
-      orgId: string,
-      requestOptions?: OrchestratorRequestOptions,
-    ): Promise<string | null> {
-      return ensureManagementTenantReady(setupDeps, orgId, requestOptions);
-    },
+  isTenantReady(orgProfile: OrgProfileItem | undefined): string | null {
+    // The attribute is written last in setup, so its presence means the
+    // tenant is fully provisioned (see tenant-setup.ts).
+    return orgProfile?.[this.tenantIdAttribute]?.S ?? null;
+  }
 
-    isTenantReady(orgProfile: OrgProfileItem | undefined): string | null {
-      // The attribute is written last in setup, so its presence means the
-      // tenant is fully provisioned (see tenant-setup.ts).
-      return orgProfile?.[tenantIdAttribute]?.S ?? null;
-    },
+  async updateTenantStatus(
+    tenantId: string,
+    status: TenantStatus,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<void> {
+    await this.setTenantStatus(tenantId, status, requestOptions);
+  }
 
-    async updateTenantStatus(
-      tenantId: string,
-      status: TenantStatus,
-      requestOptions?: OrchestratorRequestOptions,
-    ): Promise<void> {
-      await setTenantStatus(tenantId, status, requestOptions);
-    },
+  async deleteTenant(tenantId: string, requestOptions?: OrchestratorRequestOptions): Promise<void> {
+    // The caller's signal also stops the retry loop: once the deadline has
+    // passed, every further attempt would abort on arrival.
+    await pRetry(
+      async () => {
+        // Precondition only, so a 404 here must not skip the DELETE: a pass that
+        // failed partway leaves resources the DELETE still has to collect.
+        await this.setTenantStatus(tenantId, 'disabled', {
+          allowMissing: true,
+          ...requestOptions,
+        });
 
-    async deleteTenant(
-      tenantId: string,
-      requestOptions?: OrchestratorRequestOptions,
-    ): Promise<void> {
-      // The caller's signal also stops the retry loop: once the deadline has
-      // passed, every further attempt would abort on arrival.
-      await pRetry(
-        async () => {
-          // Precondition only, so a 404 here must not skip the DELETE: a pass that
-          // failed partway leaves resources the DELETE still has to collect.
-          await setTenantStatus(tenantId, 'disabled', {
-            allowMissing: true,
-            ...requestOptions,
-          });
-
-          const { error, response } = await deleteTenantsByTenantId({
-            client,
-            path: { tenantId },
-            throwOnError: false,
-            ...requestOptions,
-          });
-          // Already deleted answers 204; a 404 means the same.
-          if (error && response?.status !== 404) {
-            throw new Error(`Failed to delete ${config.id} tenant ${tenantId}`, { cause: error });
-          }
-        },
-        { ...TENANT_DELETE_RETRY, signal: requestOptions?.signal },
-      );
-    },
-
-    async getTenantStatus(
-      tenantId: string,
-      requestOptions?: OrchestratorRequestOptions,
-    ): Promise<TenantStatusProbe> {
-      try {
-        const { data, error, response } = await getTenantsByTenantId({
-          client,
+        const { error, response } = await deleteTenantsByTenantId({
+          client: this.client,
           path: { tenantId },
           throwOnError: false,
           ...requestOptions,
         });
-        if (error || !data) {
-          if (response?.status === 404) return { kind: 'not_found' };
-          return {
-            kind: 'error',
-            cause: error ?? new Error(`Empty tenant response for ${tenantId}`),
-          };
+        // Already deleted answers 204; a 404 means the same.
+        if (error && response?.status !== 404) {
+          throw new Error(`Failed to delete ${this.id} tenant ${tenantId}`, { cause: error });
         }
-        return { kind: 'ok', status: normalizeStatus(data.status) };
-      } catch (cause) {
-        // With `throwOnError: false` a transport failure, including our own
-        // deadline, comes back as an error result with `response` undefined
-        // and is handled above. This catch is only for bugs in the SDK or in
-        // the response mapping.
-        return { kind: 'error', cause };
-      }
-    },
+      },
+      { ...TENANT_DELETE_RETRY, signal: requestOptions?.signal },
+    );
+  }
 
-    getS3ClientContext,
-    ...buildBucketMethods(config, getS3ClientContext),
-    ...buildAccessKeyMethods(client, config.id),
-    ...buildMetricsMethods(client),
-  } satisfies ServiceOrchestrator;
+  async getTenantStatus(
+    tenantId: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<TenantStatusProbe> {
+    try {
+      const { data, error, response } = await getTenantsByTenantId({
+        client: this.client,
+        path: { tenantId },
+        throwOnError: false,
+        ...requestOptions,
+      });
+      if (error || !data) {
+        if (response?.status === 404) return { kind: 'not_found' };
+        return {
+          kind: 'error',
+          cause: error ?? new Error(`Empty tenant response for ${tenantId}`),
+        };
+      }
+      return { kind: 'ok', status: normalizeStatus(data.status) };
+    } catch (cause) {
+      // With `throwOnError: false` a transport failure, including our own
+      // deadline, comes back as an error result with `response` undefined
+      // and is handled above. This catch is only for bugs in the SDK or in
+      // the response mapping.
+      return { kind: 'error', cause };
+    }
+  }
+
+  // Data-plane bucket operations against the S3 gateway with the console key.
+  async createBucket(
+    tenantId: string,
+    args: CreateBucketArgs,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<void> {
+    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    const s3 = createS3Client(ctx);
+    await s3CreateBucket(
+      s3,
+      {
+        bucketName: args.bucketName,
+        objectLockEnabled: args.lock === true,
+      },
+      requestOptions,
+    );
+
+    // The signal on the retry options stops retrying once the deadline has
+    // passed, instead of burning the remaining attempts on instant aborts.
+    const retryOpts = { ...BUCKET_CONFIG_RETRY, signal: requestOptions?.signal };
+    try {
+      if (args.versioning) {
+        await pRetry(
+          () => setBucketVersioning(s3, args.bucketName, true, requestOptions),
+          retryOpts,
+        );
+      }
+      if (args.retention?.enabled) {
+        const retention = args.retention;
+        await pRetry(
+          () =>
+            putObjectLockConfiguration(
+              s3,
+              {
+                bucketName: args.bucketName,
+                mode: retention.mode,
+                duration: retention.duration,
+                durationType: retention.durationType,
+              },
+              requestOptions,
+            ),
+          retryOpts,
+        );
+      }
+    } catch (err) {
+      throw new BucketConfigurationError(args.bucketName, { cause: err });
+    }
+  }
+
+  async deleteBucket(
+    tenantId: string,
+    bucketName: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<void> {
+    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    const s3 = createS3Client(ctx);
+    await s3DeleteBucket(s3, bucketName, requestOptions);
+  }
+
+  async listBuckets(
+    tenantId: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<BucketSummary[]> {
+    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    const s3 = createS3Client(ctx);
+    const { buckets } = await s3ListBuckets(s3, requestOptions);
+    // Versioning and object-lock both cost a call per bucket; neither is
+    // returned here (see aurora/fth-orchestrator.ts). getBucket loads both
+    // for the one bucket the detail page actually needs them for.
+    return buckets.map((b) => ({
+      bucketName: b.name,
+      region: this.region,
+      createdAt: b.createdAt,
+      isPublic: false,
+      // The contract mandates server-side encryption by default.
+      encrypted: true,
+    }));
+  }
+
+  async getBucket(
+    tenantId: string,
+    bucketName: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<BucketDetails | null> {
+    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    const s3 = createS3Client(ctx);
+    const { buckets } = await s3ListBuckets(s3, requestOptions);
+    const match = buckets.find((b) => b.name === bucketName);
+    if (!match) return null;
+
+    const [versioning, lock] = await Promise.all([
+      getBucketVersioning(s3, bucketName, requestOptions),
+      getBucketObjectLock(s3, bucketName, requestOptions),
+    ]);
+
+    return {
+      bucketName,
+      region: this.region,
+      createdAt: match.createdAt,
+      isPublic: false,
+      versioning,
+      encrypted: true,
+      objectLockEnabled: lock?.objectLockEnabled ?? false,
+      ...(lock?.defaultRetention && { defaultRetention: lock.defaultRetention }),
+      ...(lock?.retentionDuration != null && { retentionDuration: lock.retentionDuration }),
+      ...(lock?.retentionDurationType && { retentionDurationType: lock.retentionDurationType }),
+    };
+  }
+
+  async issueAccessKey(
+    tenantId: string,
+    keyOpts: IssueAccessKeyOpts,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<IssuedAccessKey> {
+    const permissions = buildPermissions(keyOpts.permissions, keyOpts.granularPermissions);
+    const buckets = keyOpts.buckets ?? [];
+
+    console.log(
+      `Creating ${this.id} access key "${keyOpts.keyName}" for tenant ${tenantId} with permissions ` +
+        `[${permissions.join(', ')}] and bucket scopes [${buckets.join(', ')}]`,
+    );
+
+    const { data, error, response } = await postTenantsByTenantIdAccessKeys({
+      client: this.client,
+      path: { tenantId },
+      body: {
+        name: keyOpts.keyName,
+        // buildPermissions only emits actions from the contract's enum.
+        permissions: permissions as CreateAccessKeyRequest['permissions'],
+        buckets,
+        expiresAt: keyOpts.expiresAt ?? null,
+      },
+      throwOnError: false,
+      ...requestOptions,
+    });
+
+    if (error || !data) {
+      if (response?.status === 409) {
+        throw new AccessKeyAlreadyExistsError({ cause: error });
+      }
+      if (response?.status === 400 || response?.status === 422) {
+        throw new AccessKeyValidationError(
+          extractApiMessage(error) ??
+            'Invalid access key request. Check the key name and try again.',
+          { cause: error },
+        );
+      }
+      throw new Error(
+        `Failed to create ${this.id} access key "${keyOpts.keyName}" for tenant ${tenantId}`,
+        { cause: error },
+      );
+    }
+
+    return {
+      // The contract has no identifier separate from the accessKeyId.
+      id: data.accessKeyId,
+      accessKeyId: data.accessKeyId,
+      accessKeySecret: data.secretAccessKey,
+      createdAt: data.createdAt,
+    };
+  }
+
+  async findAccessKeyByName(
+    tenantId: string,
+    keyName: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ) {
+    const { data, error } = await getTenantsByTenantIdAccessKeys({
+      client: this.client,
+      path: { tenantId },
+      throwOnError: false,
+      ...requestOptions,
+    });
+    if (error) {
+      throw new Error(`Failed to list ${this.id} access keys for tenant ${tenantId}`, {
+        cause: error,
+      });
+    }
+    const match = (data?.items ?? []).find((k) => k.name === keyName);
+    if (!match) return undefined;
+    return {
+      id: match.accessKeyId,
+      accessKeyId: match.accessKeyId,
+      createdAt: match.createdAt,
+    };
+  }
+
+  async deleteAccessKey(
+    tenantId: string,
+    keyId: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<void> {
+    const { error, response } = await deleteTenantsByTenantIdAccessKeysByAccessKeyId({
+      client: this.client,
+      path: { tenantId, accessKeyId: keyId },
+      throwOnError: false,
+      ...requestOptions,
+    });
+    if (error) {
+      if (response?.status === 404) {
+        // The contract 404s only when the tenant is missing (key-level
+        // deletes are 204 even when already gone) — either way the key no
+        // longer exists, which is what the interface's idempotency needs.
+        console.log(
+          `${this.id} access key "${keyId}" not found for tenant ${tenantId}, treating as already deleted`,
+        );
+        return;
+      }
+      throw new Error(`Failed to delete ${this.id} access key "${keyId}" for tenant ${tenantId}`, {
+        cause: error,
+      });
+    }
+  }
+
+  async getTenantUsageMetrics(
+    tenantId: string,
+    metricsOpts: GetTenantUsageMetricsOptions,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<TenantUsageMetrics> {
+    const { data, error } = await getTenantsByTenantIdMetrics({
+      client: this.client,
+      path: { tenantId },
+      query: {
+        from: metricsOpts.from,
+        to: metricsOpts.to,
+        window: mapIntervalToWindow(metricsOpts.interval ?? '1d'),
+      },
+      throwOnError: false,
+      ...requestOptions,
+    });
+    if (error || !data) {
+      throw new Error(`Failed to fetch usage metrics for tenant ${tenantId}`, { cause: error });
+    }
+    return {
+      storage: mapStorageSamples(data),
+      egress: data.egress.samples.map((s) => ({
+        timestamp: new Date(s.timestamp).toISOString(),
+        bytesUsed: s.bytesEgressed,
+      })),
+      // The contract also returns ingress; the interface doesn't model it.
+    };
+  }
+
+  async getTenantInfo(
+    tenantId: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<TenantInfo> {
+    const { data, error } = await getTenantsByTenantId({
+      client: this.client,
+      path: { tenantId },
+      throwOnError: false,
+      ...requestOptions,
+    });
+    if (error || !data) {
+      throw new Error(`Failed to fetch tenant info for ${tenantId}`, { cause: error });
+    }
+    return {
+      bucketCount: data.bucketCount ?? 0,
+      bucketLimit: data.bucketLimit ?? 0,
+      keyCount: data.accessKeyCount ?? 0,
+      accessKeyLimit: data.accessKeyLimit ?? 0,
+      status: normalizeStatus(data.status),
+    };
+  }
+
+  async getBucketUsageMetrics(
+    tenantId: string,
+    bucketName: string,
+    metricsOpts: GetTenantUsageMetricsOptions,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<StorageUsageSample[]> {
+    // Unlike aurora/fth, no client-side ownership gate is needed: the
+    // contract obliges the orchestrator to verify the bucket belongs to the
+    // tenant and return 404 otherwise.
+    const { data, error, response } = await getTenantsByTenantIdBucketsByBucketNameMetrics({
+      client: this.client,
+      path: { tenantId, bucketName },
+      query: {
+        from: metricsOpts.from,
+        to: metricsOpts.to,
+        window: mapIntervalToWindow(metricsOpts.interval ?? '1d'),
+      },
+      throwOnError: false,
+      ...requestOptions,
+    });
+    if (error || !data) {
+      if (response?.status === 404) {
+        throw new BucketNotFoundError(bucketName, { cause: error });
+      }
+      throw new Error(
+        `Failed to fetch usage metrics for bucket "${bucketName}" (tenant ${tenantId})`,
+        { cause: error },
+      );
+    }
+    return mapStorageSamples(data);
+  }
 }
 
 function resolveClient(config: FilOneOrchestratorConfig): Client {
@@ -254,327 +555,6 @@ function resolveClient(config: FilOneOrchestratorConfig): Client {
   });
   instrumentClient(client, { apiName: `${config.id}-management` });
   return client;
-}
-
-// Data-plane bucket operations against the S3 gateway with the console key.
-function buildBucketMethods(
-  config: FilOneOrchestratorConfig,
-  getS3ClientContext: (
-    tenantId: string,
-    requestOptions?: OrchestratorRequestOptions,
-  ) => Promise<S3ClientContext>,
-): Pick<ServiceOrchestrator, 'createBucket' | 'deleteBucket' | 'listBuckets' | 'getBucket'> {
-  return {
-    async createBucket(
-      tenantId: string,
-      args: CreateBucketArgs,
-      requestOptions?: OrchestratorRequestOptions,
-    ): Promise<void> {
-      const ctx = await getS3ClientContext(tenantId, requestOptions);
-      const s3 = createS3Client(ctx);
-      await s3CreateBucket(
-        s3,
-        {
-          bucketName: args.bucketName,
-          objectLockEnabled: args.lock === true,
-        },
-        requestOptions,
-      );
-
-      // The signal on the retry options stops retrying once the deadline has
-      // passed, instead of burning the remaining attempts on instant aborts.
-      const retryOpts = { ...BUCKET_CONFIG_RETRY, signal: requestOptions?.signal };
-      try {
-        if (args.versioning) {
-          await pRetry(
-            () => setBucketVersioning(s3, args.bucketName, true, requestOptions),
-            retryOpts,
-          );
-        }
-        if (args.retention?.enabled) {
-          const retention = args.retention;
-          await pRetry(
-            () =>
-              putObjectLockConfiguration(
-                s3,
-                {
-                  bucketName: args.bucketName,
-                  mode: retention.mode,
-                  duration: retention.duration,
-                  durationType: retention.durationType,
-                },
-                requestOptions,
-              ),
-            retryOpts,
-          );
-        }
-      } catch (err) {
-        throw new BucketConfigurationError(args.bucketName, { cause: err });
-      }
-    },
-
-    async deleteBucket(
-      tenantId: string,
-      bucketName: string,
-      requestOptions?: OrchestratorRequestOptions,
-    ): Promise<void> {
-      const ctx = await getS3ClientContext(tenantId, requestOptions);
-      const s3 = createS3Client(ctx);
-      await s3DeleteBucket(s3, bucketName, requestOptions);
-    },
-
-    async listBuckets(
-      tenantId: string,
-      requestOptions?: OrchestratorRequestOptions,
-    ): Promise<BucketSummary[]> {
-      const ctx = await getS3ClientContext(tenantId, requestOptions);
-      const s3 = createS3Client(ctx);
-      const { buckets } = await s3ListBuckets(s3, requestOptions);
-      // Versioning and object-lock both cost a call per bucket; neither is
-      // returned here (see aurora/fth-orchestrator.ts). getBucket loads both
-      // for the one bucket the detail page actually needs them for.
-      return buckets.map((b) => ({
-        bucketName: b.name,
-        region: config.region,
-        createdAt: b.createdAt,
-        isPublic: false,
-        // The contract mandates server-side encryption by default.
-        encrypted: true,
-      }));
-    },
-
-    async getBucket(
-      tenantId: string,
-      bucketName: string,
-      requestOptions?: OrchestratorRequestOptions,
-    ): Promise<BucketDetails | null> {
-      const ctx = await getS3ClientContext(tenantId, requestOptions);
-      const s3 = createS3Client(ctx);
-      const { buckets } = await s3ListBuckets(s3, requestOptions);
-      const match = buckets.find((b) => b.name === bucketName);
-      if (!match) return null;
-
-      const [versioning, lock] = await Promise.all([
-        getBucketVersioning(s3, bucketName, requestOptions),
-        getBucketObjectLock(s3, bucketName, requestOptions),
-      ]);
-
-      return {
-        bucketName,
-        region: config.region,
-        createdAt: match.createdAt,
-        isPublic: false,
-        versioning,
-        encrypted: true,
-        objectLockEnabled: lock?.objectLockEnabled ?? false,
-        ...(lock?.defaultRetention && { defaultRetention: lock.defaultRetention }),
-        ...(lock?.retentionDuration != null && { retentionDuration: lock.retentionDuration }),
-        ...(lock?.retentionDurationType && { retentionDurationType: lock.retentionDurationType }),
-      };
-    },
-  };
-}
-
-function buildAccessKeyMethods(
-  client: Client,
-  orchestratorId: string,
-): Pick<ServiceOrchestrator, 'issueAccessKey' | 'findAccessKeyByName' | 'deleteAccessKey'> {
-  return {
-    async issueAccessKey(
-      tenantId: string,
-      keyOpts: IssueAccessKeyOpts,
-      requestOptions?: OrchestratorRequestOptions,
-    ): Promise<IssuedAccessKey> {
-      const permissions = buildPermissions(keyOpts.permissions, keyOpts.granularPermissions);
-      const buckets = keyOpts.buckets ?? [];
-
-      console.log(
-        `Creating ${orchestratorId} access key "${keyOpts.keyName}" for tenant ${tenantId} with permissions ` +
-          `[${permissions.join(', ')}] and bucket scopes [${buckets.join(', ')}]`,
-      );
-
-      const { data, error, response } = await postTenantsByTenantIdAccessKeys({
-        client,
-        path: { tenantId },
-        body: {
-          name: keyOpts.keyName,
-          // buildPermissions only emits actions from the contract's enum.
-          permissions: permissions as CreateAccessKeyRequest['permissions'],
-          buckets,
-          expiresAt: keyOpts.expiresAt ?? null,
-        },
-        throwOnError: false,
-        ...requestOptions,
-      });
-
-      if (error || !data) {
-        if (response?.status === 409) {
-          throw new AccessKeyAlreadyExistsError({ cause: error });
-        }
-        if (response?.status === 400 || response?.status === 422) {
-          throw new AccessKeyValidationError(
-            extractApiMessage(error) ??
-              'Invalid access key request. Check the key name and try again.',
-            { cause: error },
-          );
-        }
-        throw new Error(
-          `Failed to create ${orchestratorId} access key "${keyOpts.keyName}" for tenant ${tenantId}`,
-          { cause: error },
-        );
-      }
-
-      return {
-        // The contract has no identifier separate from the accessKeyId.
-        id: data.accessKeyId,
-        accessKeyId: data.accessKeyId,
-        accessKeySecret: data.secretAccessKey,
-        createdAt: data.createdAt,
-      };
-    },
-
-    async findAccessKeyByName(
-      tenantId: string,
-      keyName: string,
-      requestOptions?: OrchestratorRequestOptions,
-    ) {
-      const { data, error } = await getTenantsByTenantIdAccessKeys({
-        client,
-        path: { tenantId },
-        throwOnError: false,
-        ...requestOptions,
-      });
-      if (error) {
-        throw new Error(`Failed to list ${orchestratorId} access keys for tenant ${tenantId}`, {
-          cause: error,
-        });
-      }
-      const match = (data?.items ?? []).find((k) => k.name === keyName);
-      if (!match) return undefined;
-      return {
-        id: match.accessKeyId,
-        accessKeyId: match.accessKeyId,
-        createdAt: match.createdAt,
-      };
-    },
-
-    async deleteAccessKey(
-      tenantId: string,
-      keyId: string,
-      requestOptions?: OrchestratorRequestOptions,
-    ): Promise<void> {
-      const { error, response } = await deleteTenantsByTenantIdAccessKeysByAccessKeyId({
-        client,
-        path: { tenantId, accessKeyId: keyId },
-        throwOnError: false,
-        ...requestOptions,
-      });
-      if (error) {
-        if (response?.status === 404) {
-          // The contract 404s only when the tenant is missing (key-level
-          // deletes are 204 even when already gone) — either way the key no
-          // longer exists, which is what the interface's idempotency needs.
-          console.log(
-            `${orchestratorId} access key "${keyId}" not found for tenant ${tenantId}, treating as already deleted`,
-          );
-          return;
-        }
-        throw new Error(
-          `Failed to delete ${orchestratorId} access key "${keyId}" for tenant ${tenantId}`,
-          { cause: error },
-        );
-      }
-    },
-  };
-}
-
-function buildMetricsMethods(
-  client: Client,
-): Pick<ServiceOrchestrator, 'getTenantUsageMetrics' | 'getTenantInfo' | 'getBucketUsageMetrics'> {
-  return {
-    async getTenantUsageMetrics(
-      tenantId: string,
-      metricsOpts: GetTenantUsageMetricsOptions,
-      requestOptions?: OrchestratorRequestOptions,
-    ): Promise<TenantUsageMetrics> {
-      const { data, error } = await getTenantsByTenantIdMetrics({
-        client,
-        path: { tenantId },
-        query: {
-          from: metricsOpts.from,
-          to: metricsOpts.to,
-          window: mapIntervalToWindow(metricsOpts.interval ?? '1d'),
-        },
-        throwOnError: false,
-        ...requestOptions,
-      });
-      if (error || !data) {
-        throw new Error(`Failed to fetch usage metrics for tenant ${tenantId}`, { cause: error });
-      }
-      return {
-        storage: mapStorageSamples(data),
-        egress: data.egress.samples.map((s) => ({
-          timestamp: new Date(s.timestamp).toISOString(),
-          bytesUsed: s.bytesEgressed,
-        })),
-        // The contract also returns ingress; the interface doesn't model it.
-      };
-    },
-
-    async getTenantInfo(
-      tenantId: string,
-      requestOptions?: OrchestratorRequestOptions,
-    ): Promise<TenantInfo> {
-      const { data, error } = await getTenantsByTenantId({
-        client,
-        path: { tenantId },
-        throwOnError: false,
-        ...requestOptions,
-      });
-      if (error || !data) {
-        throw new Error(`Failed to fetch tenant info for ${tenantId}`, { cause: error });
-      }
-      return {
-        bucketCount: data.bucketCount ?? 0,
-        bucketLimit: data.bucketLimit ?? 0,
-        keyCount: data.accessKeyCount ?? 0,
-        accessKeyLimit: data.accessKeyLimit ?? 0,
-        status: normalizeStatus(data.status),
-      };
-    },
-
-    async getBucketUsageMetrics(
-      tenantId: string,
-      bucketName: string,
-      metricsOpts: GetTenantUsageMetricsOptions,
-      requestOptions?: OrchestratorRequestOptions,
-    ): Promise<StorageUsageSample[]> {
-      // Unlike aurora/fth, no client-side ownership gate is needed: the
-      // contract obliges the orchestrator to verify the bucket belongs to the
-      // tenant and return 404 otherwise.
-      const { data, error, response } = await getTenantsByTenantIdBucketsByBucketNameMetrics({
-        client,
-        path: { tenantId, bucketName },
-        query: {
-          from: metricsOpts.from,
-          to: metricsOpts.to,
-          window: mapIntervalToWindow(metricsOpts.interval ?? '1d'),
-        },
-        throwOnError: false,
-        ...requestOptions,
-      });
-      if (error || !data) {
-        if (response?.status === 404) {
-          throw new BucketNotFoundError(bucketName, { cause: error });
-        }
-        throw new Error(
-          `Failed to fetch usage metrics for bucket "${bucketName}" (tenant ${tenantId})`,
-          { cause: error },
-        );
-      }
-      return mapStorageSamples(data);
-    },
-  };
 }
 
 const MANAGEMENT_TENANT_STATUSES: readonly TenantStatus[] = ['active', 'write-locked', 'disabled'];
