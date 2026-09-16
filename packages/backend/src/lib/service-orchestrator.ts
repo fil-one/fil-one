@@ -16,15 +16,9 @@ import type { OrgProfileItem } from './org-profile.ts';
 // and the budget outlasts that writer. A 404 is not retried — see deleteTenant.
 export const TENANT_DELETE_RETRY = { retries: 3 } as const;
 
-/**
- * Per-call options a caller passes to bound one orchestrator operation. The
- * caller owns the budget: an API handler mints one signal per invocation and
- * hands it to every orchestrator call it makes, so a hung upstream fails that
- * call and the handler's own error handling runs, instead of the Lambda
- * timeout killing the handler with nothing logged.
- */
+/** Per-call options a caller passes to bound one orchestrator operation. */
 export interface OrchestratorRequestOptions {
-  /** Aborts every upstream request (HTTP or S3) the operation makes. */
+  /** Lets the caller abort every upstream request (HTTP or S3) the operation makes. */
   signal?: AbortSignal;
 }
 
@@ -297,7 +291,7 @@ export interface ServiceOrchestrator {
     opts?: OrchestratorRequestOptions,
   ): Promise<void>;
 
-  getS3ClientContext(tenantId: string): Promise<S3ClientContext>;
+  getS3ClientContext(tenantId: string, opts?: OrchestratorRequestOptions): Promise<S3ClientContext>;
 
   /**
    * Returns the tenant's storage and egress usage as normalized time series
