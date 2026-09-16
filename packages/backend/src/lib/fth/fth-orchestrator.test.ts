@@ -1379,6 +1379,46 @@ describe('fthOrchestrator signal forwarding', () => {
     });
   });
 
+  const credentialLookups = {
+    getS3ClientContext: (signal: AbortSignal) =>
+      fthOrchestrator.getS3ClientContext(fthClientId, { signal }),
+    createBucket: (signal: AbortSignal) =>
+      fthOrchestrator.createBucket(fthClientId, { bucketName: 'b' }, { signal }),
+    deleteBucket: (signal: AbortSignal) =>
+      fthOrchestrator.deleteBucket(fthClientId, 'b', { signal }),
+    listBuckets: (signal: AbortSignal) => fthOrchestrator.listBuckets(fthClientId, { signal }),
+    getBucket: (signal: AbortSignal) => fthOrchestrator.getBucket(fthClientId, 'b', { signal }),
+  };
+
+  for (const [method, invoke] of Object.entries(credentialLookups)) {
+    it(`${method} forwards the signal to a cold SSM credential lookup`, async () => {
+      s3Mock.on(CreateBucketCommand).resolves({});
+      s3Mock.on(DeleteBucketCommand).resolves({});
+      s3Mock.on(ListBucketsCommand).resolves({ Buckets: [] });
+
+      await invoke(signal);
+
+      expect(sendOptionsOf(ssmMock.commandCalls(GetParameterCommand))).toEqual({
+        abortSignal: signal,
+      });
+    });
+
+    it(`${method} propagates cancellation while SSM is pending`, async () => {
+      const controller = new AbortController();
+      const reason = new Error('Caller cancelled the credential lookup');
+      ssmMock.reset();
+      ssmMock.send.callsFake((...args: unknown[]) => {
+        const abortSignal = (args[1] as { abortSignal?: AbortSignal })?.abortSignal;
+        return new Promise<never>((_resolve, reject) => {
+          abortSignal?.addEventListener('abort', () => reject(abortSignal.reason), { once: true });
+          controller.abort(reason);
+        });
+      });
+
+      await expect(invoke(controller.signal)).rejects.toBe(reason);
+    });
+  }
+
   it('listBuckets forwards the signal to S3 ListBuckets', async () => {
     s3Mock.on(ListBucketsCommand).resolves({ Buckets: [] });
 
