@@ -71,8 +71,9 @@ export interface TenantSetupDeps {
 // Returns the tenantId on success, or null on any setup failure so the
 // handler can return the standard 503 tenant-not-ready response. Setup
 // resumes from whatever step is next on the user's retry.
-// `requestOptions.signal` bounds every Management API call the setup makes,
-// including the rollback delete.
+// `requestOptions.signal` bounds every upstream call the setup makes: the
+// Management API calls (including the rollback delete) and the DynamoDB and
+// SSM reads and writes.
 export async function ensureTenantReady(
   deps: TenantSetupDeps,
   orgId: string,
@@ -110,6 +111,7 @@ async function processTenantSetup(
       Key: key,
       ConsistentRead: true,
     }),
+    { abortSignal: requestOptions?.signal },
   );
   const existingTenantId = existing.Item?.[tenantIdAttribute]?.S;
   if (existingTenantId) {
@@ -146,6 +148,7 @@ async function processTenantSetup(
         Type: 'SecureString',
         Overwrite: true,
       }),
+      { abortSignal: requestOptions?.signal },
     );
   }
 
@@ -170,6 +173,7 @@ async function processTenantSetup(
           ':now': { S: new Date().toISOString() },
         },
       }),
+      { abortSignal: requestOptions?.signal },
     );
   } catch (err) {
     await resolveRefusedTenantWrite({
@@ -261,7 +265,7 @@ async function createConsoleAccessKey(
     );
   }
 
-  const stashed = await readStashedAccessKeyId(deps, orgId);
+  const stashed = await readStashedAccessKeyId(deps, orgId, requestOptions);
   if (stashed === existing.accessKeyId) {
     // The previous run completed the SSM write; nothing left to stock.
     return null;
@@ -301,10 +305,12 @@ async function createConsoleAccessKey(
 async function readStashedAccessKeyId(
   deps: TenantSetupDeps,
   orgId: string,
+  requestOptions?: OrchestratorRequestOptions,
 ): Promise<string | undefined> {
   try {
     const result = await ssm.send(
       new GetParameterCommand({ Name: consoleKeySsmPath(deps, orgId), WithDecryption: true }),
+      { abortSignal: requestOptions?.signal },
     );
     if (!result.Parameter?.Value) return undefined;
     const parsed: unknown = JSON.parse(result.Parameter.Value);

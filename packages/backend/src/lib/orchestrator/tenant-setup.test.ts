@@ -411,8 +411,14 @@ describe('ensureTenantReady', () => {
 
 describe('signal forwarding', () => {
   // The caller's deadline. Never aborted here: these tests check it reaches
-  // every Management API call, not what happens when it fires.
+  // every upstream call, not what happens when it fires.
   const signal = new AbortController().signal;
+
+  // aws-sdk-client-mock types `args` as the one-element `[command]` tuple,
+  // but the recorded sinon call carries every argument `send` received.
+  function sendOptionsOf(calls: Array<{ args: unknown[] }>): unknown {
+    return calls[0].args[1];
+  }
 
   it('passes the caller signal to the tenant PUT and the console-key POST', async () => {
     stubHappyPath();
@@ -422,6 +428,23 @@ describe('signal forwarding', () => {
     const mocks = [mockPutTenant, mockCreateAccessKey];
     const firstArgs = mocks.map((m) => m.mock.calls[0]?.[0]);
     expect(firstArgs).toEqual(mocks.map(() => expect.objectContaining({ signal })));
+  });
+
+  it('passes the caller signal to the profile read, the SSM write and the pointer write', async () => {
+    stubHappyPath();
+
+    await ensureTenantReady(deps, orgId, { signal });
+
+    const sent = [
+      sendOptionsOf(ddbMock.commandCalls(GetItemCommand)),
+      sendOptionsOf(ssmMock.commandCalls(PutParameterCommand)),
+      sendOptionsOf(ddbMock.commandCalls(UpdateItemCommand)),
+    ];
+    expect(sent).toEqual([
+      { abortSignal: signal },
+      { abortSignal: signal },
+      { abortSignal: signal },
+    ]);
   });
 
   it('passes the caller signal to the rollback DELETE when the pointer write is refused', async () => {
@@ -443,7 +466,7 @@ describe('signal forwarding', () => {
     }
   });
 
-  it('passes the caller signal to every call of the 409 recovery path', async () => {
+  it('passes the caller signal to every upstream call of the 409 recovery path', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     stubHappyPath();
     mockCreateAccessKey
@@ -493,10 +516,18 @@ describe('signal forwarding', () => {
       const options = [
         mockCreateAccessKey.mock.calls[0]?.[0],
         mockListAccessKeys.mock.calls[0]?.[0],
+        // The SSM read that decides between reusing and rotating the key.
+        sendOptionsOf(ssmMock.commandCalls(GetParameterCommand)),
         mockDeleteAccessKey.mock.calls[0]?.[0],
         mockCreateAccessKey.mock.calls[1]?.[0],
       ];
-      expect(options).toEqual(options.map(() => expect.objectContaining({ signal })));
+      expect(options).toEqual([
+        expect.objectContaining({ signal }),
+        expect.objectContaining({ signal }),
+        { abortSignal: signal },
+        expect.objectContaining({ signal }),
+        expect.objectContaining({ signal }),
+      ]);
     } finally {
       log.mockRestore();
     }
