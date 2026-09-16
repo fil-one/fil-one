@@ -10,7 +10,7 @@ import {
 
 import { IconBox } from './IconBox';
 
-import type { AccessKey, GranularPermission } from '@filone/shared';
+import type { AccessKey, AccessKeyPermission, GranularPermission } from '@filone/shared';
 import {
   BUCKET_INFO_PERMISSION_LABELS,
   BUCKET_PERMISSION_LABELS,
@@ -44,7 +44,7 @@ function PermissionBadges({
   permissions,
   granularPermissions,
 }: {
-  permissions: AccessKey['permissions'];
+  permissions: AccessKeyPermission[];
   granularPermissions: GranularPermission[];
 }) {
   const objectPermissions = permissions.filter(isObjectPermission);
