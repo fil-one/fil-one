@@ -82,3 +82,70 @@ export class TrialEntitlementError extends Error {
     this.name = 'TrialEntitlementError';
   }
 }
+
+// ── Bucket policies and principals (`iam` access model) ──────────────────
+
+// The bucket exists and has no policy. Its own class rather than a null from
+// every caller because the write path needs it too: a DELETE of a policy that
+// is not there is this, and a bucket that is not there is BucketNotFoundError.
+export class PolicyNotFoundError extends Error {
+  readonly bucketName: string;
+  constructor(bucketName: string, options?: ErrorOptions) {
+    super(`Bucket "${bucketName}" has no policy`, options);
+    this.name = 'PolicyNotFoundError';
+    this.bucketName = bucketName;
+  }
+}
+
+// The ETag the write carried no longer matches the stored policy, or the write
+// asked to create a first policy where one exists. Nothing was written. Never
+// retried here: the caller has to read the current document and decide again.
+export class PolicyPreconditionFailedError extends Error {
+  readonly bucketName: string;
+  constructor(bucketName: string, options?: ErrorOptions) {
+    super(`The policy of bucket "${bucketName}" changed since it was read`, options);
+    this.name = 'PolicyPreconditionFailedError';
+    this.bucketName = bucketName;
+  }
+}
+
+// The storage system could not take its lock within its timeout because another
+// change to the same principal or policy was in flight. Nothing was written, and
+// the same request may be retried.
+export class PolicyConflictError extends Error {
+  constructor(options?: ErrorOptions) {
+    super('Another change to this policy was in flight', options);
+    this.name = 'PolicyConflictError';
+  }
+}
+
+// The storage system refused the document or the principal id. The message is
+// the upstream one and is safe to show: it names the statement or field at
+// fault and nothing about the tenant.
+export class PolicyValidationError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'PolicyValidationError';
+  }
+}
+
+// A policy write failed after the storage system had published revocations for
+// it, so it committed nothing and the old policy stays in force. Retrying the
+// same write is the documented recovery: each publish carries a fresh nonce.
+export class PolicyPublishError extends Error {
+  constructor(options?: ErrorOptions) {
+    super('The storage system could not publish the policy change', options);
+    this.name = 'PolicyPublishError';
+  }
+}
+
+// A key or statement named a principal the tenant does not have: the member was
+// never synced, or was removed.
+export class PrincipalNotFoundError extends Error {
+  readonly principalId: string;
+  constructor(principalId: string, options?: ErrorOptions) {
+    super(`Principal "${principalId}" does not exist at the storage system`, options);
+    this.name = 'PrincipalNotFoundError';
+    this.principalId = principalId;
+  }
+}

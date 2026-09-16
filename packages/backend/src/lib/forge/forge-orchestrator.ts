@@ -16,7 +16,7 @@
 // are linked only on non-production stages, so eager construction would crash
 // production at import time.
 
-import { getS3Endpoint, S3Region } from '@filone/shared';
+import { getRegionAccessModel, getS3Endpoint, S3Region } from '@filone/shared';
 import { createFilOneOrchestrator } from '../orchestrator/orchestrator.ts';
 import type { ServiceOrchestrator } from '../service-orchestrator.ts';
 
@@ -51,5 +51,8 @@ export function createForgeOrchestrator(
     s3EndpointUrl: s3.endpointUrl ?? getS3Endpoint(region, stage),
     s3PresignEndpointUrl: s3.presignEndpointUrl,
     api,
+    // The shared switch decides the model per region; the orchestrator only
+    // carries it, so the console and the handlers can never disagree.
+    accessModel: getRegionAccessModel(region),
   });
 }
