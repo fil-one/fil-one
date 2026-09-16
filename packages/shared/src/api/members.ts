@@ -82,6 +82,8 @@ export interface UpdateMemberRoleResponse {
    * a key minted since the preview and omit one revoked since.
    */
   revokedKeys?: AccessKeySummary[];
+  /** The bucket policies the change rewrote, per `iam` region. Absent when no region serves `iam`. */
+  policySync?: PolicySyncReport[];
 }
 
 /**
@@ -113,6 +115,27 @@ export interface RemoveMemberResponse {
    * removal of somebody holding none reads as the empty answer it is.
    */
   revokedKeys?: AccessKeySummary[];
+  /**
+   * The `iam` regions where the member's principal was removed, taking their
+   * keys and every statement naming them with it. Named only when there were
+   * any.
+   */
+  principalsRemoved?: S3Region[];
+}
+
+/**
+ * What a role change reached at one `iam` region's bucket policies.
+ *
+ * Owners and Admins reach every bucket only because the console names them on
+ * every bucket's policy, so a promotion or demotion rewrites one policy per
+ * bucket in the region. That cannot be atomic: the report says which buckets
+ * took the new roster and which did not, and the retry is the same request.
+ */
+export interface PolicySyncReport {
+  region: S3Region;
+  bucketsReached: number;
+  /** The buckets whose policy could not be written, by name. */
+  bucketsFailed: string[];
 }
 
 /**
