@@ -16,7 +16,6 @@ import type { OrgProfileItem } from './org-profile.ts';
 // and the budget outlasts that writer. A 404 is not retried — see deleteTenant.
 export const TENANT_DELETE_RETRY = { retries: 3 } as const;
 
-/** Per-call options a caller passes to bound one orchestrator operation. */
 export interface OrchestratorRequestOptions {
   /** Lets the caller abort every upstream request (HTTP or S3) the operation makes. */
   signal?: AbortSignal;
@@ -200,7 +199,10 @@ export interface ServiceOrchestrator {
    * @returns The resolved `tenantId` once the tenant is fully provisioned,
    *          or `null` if setup is still in progress or has failed.
    */
-  ensureTenantReady(orgId: string, opts?: OrchestratorRequestOptions): Promise<string | null>;
+  ensureTenantReady(
+    orgId: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<string | null>;
 
   /**
    * Side-effect-free readiness check: extracts this orchestrator's `tenantId`
@@ -223,18 +225,21 @@ export interface ServiceOrchestrator {
   createBucket(
     tenantId: string,
     args: CreateBucketArgs,
-    opts?: OrchestratorRequestOptions,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<void>;
   deleteBucket(
     tenantId: string,
     bucketName: string,
-    opts?: OrchestratorRequestOptions,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<void>;
-  listBuckets(tenantId: string, opts?: OrchestratorRequestOptions): Promise<BucketSummary[]>;
+  listBuckets(
+    tenantId: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<BucketSummary[]>;
   getBucket(
     tenantId: string,
     bucketName: string,
-    opts?: OrchestratorRequestOptions,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketDetails | null>;
 
   /**
@@ -246,7 +251,7 @@ export interface ServiceOrchestrator {
   updateTenantStatus(
     tenantId: string,
     status: TenantStatus,
-    opts?: OrchestratorRequestOptions,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<void>;
 
   /**
@@ -258,7 +263,7 @@ export interface ServiceOrchestrator {
    * The disable is only the delete's precondition, so its 404 must not skip the
    * delete — a partially-failed pass leaves resources still to collect.
    */
-  deleteTenant(tenantId: string, opts?: OrchestratorRequestOptions): Promise<void>;
+  deleteTenant(tenantId: string, requestOptions?: OrchestratorRequestOptions): Promise<void>;
 
   /**
    * Reads the tenant's current live status from this orchestrator's API. Like
@@ -267,17 +272,20 @@ export interface ServiceOrchestrator {
    * transport/server failures are returned as `{ kind: 'error' }` so background
    * jobs can classify them (see {@link TenantStatusProbe}).
    */
-  getTenantStatus(tenantId: string, opts?: OrchestratorRequestOptions): Promise<TenantStatusProbe>;
+  getTenantStatus(
+    tenantId: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<TenantStatusProbe>;
 
   issueAccessKey(
     tenantId: string,
     keyOpts: IssueAccessKeyOpts,
-    opts?: OrchestratorRequestOptions,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<IssuedAccessKey>;
   findAccessKeyByName(
     tenantId: string,
     keyName: string,
-    opts?: OrchestratorRequestOptions,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<{ id: string; accessKeyId: string; createdAt: string } | undefined>;
 
   /**
@@ -288,10 +296,13 @@ export interface ServiceOrchestrator {
   deleteAccessKey(
     tenantId: string,
     keyId: string,
-    opts?: OrchestratorRequestOptions,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<void>;
 
-  getS3ClientContext(tenantId: string, opts?: OrchestratorRequestOptions): Promise<S3ClientContext>;
+  getS3ClientContext(
+    tenantId: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<S3ClientContext>;
 
   /**
    * Returns the tenant's storage and egress usage as normalized time series
@@ -301,14 +312,14 @@ export interface ServiceOrchestrator {
   getTenantUsageMetrics(
     tenantId: string,
     metricsOpts: GetTenantUsageMetricsOptions,
-    opts?: OrchestratorRequestOptions,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<TenantUsageMetrics>;
 
   /**
    * Returns the tenant's quota and status snapshot (bucket/key counts and
    * limits, lifecycle status). Read-only. Backs the usage dashboard.
    */
-  getTenantInfo(tenantId: string, opts?: OrchestratorRequestOptions): Promise<TenantInfo>;
+  getTenantInfo(tenantId: string, requestOptions?: OrchestratorRequestOptions): Promise<TenantInfo>;
 
   /**
    * Returns a single bucket's storage usage as a normalized time series over
@@ -321,6 +332,6 @@ export interface ServiceOrchestrator {
     tenantId: string,
     bucketName: string,
     metricsOpts: GetTenantUsageMetricsOptions,
-    opts?: OrchestratorRequestOptions,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<StorageUsageSample[]>;
 }
