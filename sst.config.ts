@@ -1069,6 +1069,13 @@ export default $config({
         permissions: bucketReadPermissions,
         extraEnv: orchestratorEnv,
       },
+      // Bucket policies live at the storage system and are read and written
+      // over the management API under the partner key, so the routes need the
+      // orchestrator endpoints and nothing from SSM. Dark until a region
+      // declares the `iam` access model.
+      'get-bucket-policy': { extraEnv: orchestratorEnv },
+      'put-bucket-policy': { extraEnv: orchestratorEnv, timeout: '30 seconds' },
+      'delete-bucket-policy': { extraEnv: orchestratorEnv, timeout: '30 seconds' },
 
       // ── Keys ───────────────────────────────────────────────────────
       // The RAG API key routes take no entry: they are named bearer tokens
