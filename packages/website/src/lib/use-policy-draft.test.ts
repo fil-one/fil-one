@@ -50,6 +50,8 @@ describe('usePolicyDraft', () => {
     expect(result.current.statements).toStrictEqual([read]);
     expect(result.current.dirty).toBe(true);
     expect(result.current.stale).toBe(true);
+    // A save sends the ETag the edits were made against, so the server refuses it.
+    expect(result.current.etag).toBe('"v2"');
 
     act(() => result.current.reset());
     expect(result.current.statements).toStrictEqual([]);
