@@ -15,6 +15,7 @@ import { BucketPropertyCards } from '../components/BucketPropertiesCard';
 import { ObjectBrowser, countObjects } from '../components/ObjectBrowser';
 import { EmptyBucketAction } from '../components/EmptyBucketAction';
 import { BucketAccessTab } from '../components/BucketAccessTab';
+import { BucketPolicyTab } from '../components/BucketPolicyTab';
 import type { S3ObjectVersion, S3Region } from '@filone/shared';
 import { getS3Endpoint, formatBytes } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
@@ -26,6 +27,7 @@ import type {
   ListAccessKeysResponse,
   BucketAnalyticsResponse,
 } from '@filone/shared';
+import { isIamRegion } from '../lib/access-model.js';
 import { apiRequest } from '../lib/api.js';
 import { formatDateTime } from '../lib/time.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
@@ -342,6 +344,10 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   const mayDelete = useHasPermission('objects.delete');
   const { mayList: mayListKeys } = useKeyActionScope();
   const mayCreateKeys = useHasPermission('keys.create');
+  // The policy tab exists where a policy can: a region serving the `iam`
+  // access model, for a role that may edit one. Reading takes the same
+  // permission as editing, so the tab is absent rather than read-only.
+  const showPolicyTab = useHasPermission('buckets.policy_manage') && isIamRegion(region);
 
   const setCurrentPrefix = useCallback(
     (newPrefix: string) => {
@@ -502,6 +508,9 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               API Keys
             </Tab>
           )}
+          {/* Headless UI pairs tabs to panels by order, so this and its panel
+              below sit behind the identical condition. */}
+          {showPolicyTab && <Tab testId="bucket-policy-tab">Policy</Tab>}
         </TabList>
 
         <TabPanels>
@@ -534,6 +543,11 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
                 accessKeysErrorMessage={accessKeysQuery.error?.message}
                 onCreateOpen={() => setAddKeyOpen(true)}
               />
+            </TabPanel>
+          )}
+          {showPolicyTab && (
+            <TabPanel>
+              <BucketPolicyTab bucketName={bucketName} region={region} />
             </TabPanel>
           )}
         </TabPanels>
