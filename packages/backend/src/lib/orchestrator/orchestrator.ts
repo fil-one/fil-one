@@ -269,6 +269,7 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
       {
         bucketName: args.bucketName,
         objectLockEnabled: args.lock === true,
+        ...(args.policy ? { policy: args.policy } : {}),
       },
       requestOptions,
     );
