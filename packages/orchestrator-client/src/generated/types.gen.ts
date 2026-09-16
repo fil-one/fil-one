@@ -99,6 +99,10 @@ export type UpdateTenantStatusRequest = {
  * uploads in a bucket. (Same AWS quirk as `s3:ListBucket`
  * above: the name says "Bucket" but the action operates on
  * uploads within it.)
+ * * `s3:ListMultipartUploadParts` — list the parts of an
+ * in-progress multipart upload.
+ * * `s3:AbortMultipartUpload` — abort an in-progress multipart
+ * upload.
  * * `s3:DeleteObject` — delete an object.
  * * `s3:DeleteObjectVersion` — delete a specific object version.
  *
@@ -117,19 +121,110 @@ export type AccessKeyPermission =
   | 's3:ListBucket'
   | 's3:ListBucketVersions'
   | 's3:ListBucketMultipartUploads'
+  | 's3:ListMultipartUploadParts'
+  | 's3:AbortMultipartUpload'
   | 's3:DeleteObject'
   | 's3:DeleteObjectVersion';
 
+/**
+ * Caller-supplied, opaque, unique within the tenant. FilOne uses
+ * its member user id. The value `*` is reserved for the policy
+ * wildcard and must be rejected (422).
+ *
+ */
+export type PrincipalId = string;
+
+export type Principal = {
+  principalId: PrincipalId;
+  createdAt: string;
+};
+
+export type PrincipalList = {
+  items: Array<Principal>;
+};
+
+/**
+ * An action a bucket policy statement may carry: every
+ * `AccessKeyPermission` except the three bucket-level actions
+ * (`s3:CreateBucket`, `s3:DeleteBucket`, `s3:ListAllMyBuckets`),
+ * plus `s3:*`, which stands for all of the others and never for
+ * those three.
+ *
+ */
+export type PolicyAction =
+  | 's3:GetObject'
+  | 's3:GetObjectVersion'
+  | 's3:GetObjectRetention'
+  | 's3:GetObjectLegalHold'
+  | 's3:ListBucket'
+  | 's3:ListBucketVersions'
+  | 's3:ListBucketMultipartUploads'
+  | 's3:ListMultipartUploadParts'
+  | 's3:PutObject'
+  | 's3:AbortMultipartUpload'
+  | 's3:PutObjectRetention'
+  | 's3:PutObjectLegalHold'
+  | 's3:DeleteObject'
+  | 's3:DeleteObjectVersion'
+  | 's3:*';
+
+export type PolicyStatement = {
+  /**
+   * Optional label. Stored and returned; nothing evaluates it.
+   */
+  sid?: string;
+  effect: 'allow' | 'deny';
+  /**
+   * The principals the statement applies to: a list of principal
+   * ids, or the bare string `*` for every live principal of the
+   * tenant. `*` inside a list is rejected (422).
+   *
+   */
+  principal: '*' | Array<PrincipalId>;
+  action: Array<PolicyAction>;
+};
+
+/**
+ * A bucket's policy, reduced to what the orchestrator evaluates.
+ * There is no `resource` field: the document governs the bucket it
+ * is stored on. A principal's effective actions are the union of
+ * the `allow` statements naming them minus the union of the `deny`
+ * statements naming them; an explicit deny wins.
+ *
+ */
+export type BucketPolicy = {
+  statement: Array<PolicyStatement>;
+};
+
+export type PrincipalPolicies = {
+  items: Array<{
+    bucketName: BucketName;
+    etag: string;
+    policy: BucketPolicy;
+  }>;
+};
+
+export type PrincipalAccess = {
+  buckets: Array<{
+    name: BucketName;
+    actions: Array<PolicyAction>;
+  }>;
+};
+
 export type CreateAccessKeyRequest = {
   /**
-   * Unique within the tenant.
+   * Unique within the tenant for a service key; unique within the principal for a principal-bound key.
    */
   name: string;
-  permissions: Array<AccessKeyPermission>;
+  principalId?: PrincipalId;
+  /**
+   * Required for a service key. Must be absent when `principalId` is set.
+   */
+  permissions?: Array<AccessKeyPermission>;
   /**
    * Optional. When set and non-empty, the key may only operate on
    * these buckets. Omit (or pass an empty array) for tenant-wide
-   * access.
+   * access. Must be absent when `principalId` is set.
    *
    */
   buckets?: Array<BucketName>;
@@ -147,7 +242,14 @@ export type AccessKey = {
    */
   accessKeyId: string;
   name: string;
-  permissions: Array<AccessKeyPermission>;
+  /**
+   * Set on a principal-bound key. Such a key carries no `permissions` or `buckets`.
+   */
+  principal?: PrincipalId;
+  /**
+   * Present on a service key, absent on a principal-bound key.
+   */
+  permissions?: Array<AccessKeyPermission>;
   /**
    * Empty or omitted when the key has tenant-wide access.
    */
@@ -231,6 +333,20 @@ export type TenantId2 = TenantId;
 export type AccessKeyId = string;
 
 export type BucketName2 = BucketName;
+
+export type PrincipalId2 = PrincipalId;
+
+/**
+ * The ETag the last read of the policy returned. Required unless
+ * `If-None-Match: *` is sent.
+ *
+ */
+export type IfMatch = string;
+
+/**
+ * The literal `*`, to create the bucket's first policy. Any other value is 400.
+ */
+export type IfNoneMatch = '*';
 
 /**
  * Start of the query range (inclusive), RFC 3339. Service Orchestrators
@@ -557,6 +673,452 @@ export type GetTenantsByTenantIdAccessKeysByAccessKeyIdResponses = {
 
 export type GetTenantsByTenantIdAccessKeysByAccessKeyIdResponse =
   GetTenantsByTenantIdAccessKeysByAccessKeyIdResponses[keyof GetTenantsByTenantIdAccessKeysByAccessKeyIdResponses];
+
+export type GetTenantsByTenantIdPrincipalsData = {
+  body?: never;
+  path: {
+    tenantId: TenantId;
+  };
+  query?: never;
+  url: '/tenants/{tenantId}/principals';
+};
+
+export type GetTenantsByTenantIdPrincipalsErrors = {
+  /**
+   * Missing or invalid bearer token, or token not authorised for this tenant.
+   */
+  401: Error;
+  /**
+   * Resource not found.
+   */
+  404: Error;
+};
+
+export type GetTenantsByTenantIdPrincipalsError =
+  GetTenantsByTenantIdPrincipalsErrors[keyof GetTenantsByTenantIdPrincipalsErrors];
+
+export type GetTenantsByTenantIdPrincipalsResponses = {
+  /**
+   * The tenant's live principals.
+   */
+  200: PrincipalList;
+};
+
+export type GetTenantsByTenantIdPrincipalsResponse =
+  GetTenantsByTenantIdPrincipalsResponses[keyof GetTenantsByTenantIdPrincipalsResponses];
+
+export type DeleteTenantsByTenantIdPrincipalsByPrincipalIdData = {
+  body?: never;
+  path: {
+    tenantId: TenantId;
+    principalId: PrincipalId;
+  };
+  query?: never;
+  url: '/tenants/{tenantId}/principals/{principalId}';
+};
+
+export type DeleteTenantsByTenantIdPrincipalsByPrincipalIdErrors = {
+  /**
+   * Missing or invalid bearer token, or token not authorised for this tenant.
+   */
+  401: Error;
+  /**
+   * Resource not found.
+   */
+  404: Error;
+  /**
+   * The write could not take its lock within the orchestrator's
+   * timeout, because another change to the same principal or policy
+   * is in flight. Nothing was written; the caller retries.
+   *
+   */
+  409: Error;
+};
+
+export type DeleteTenantsByTenantIdPrincipalsByPrincipalIdError =
+  DeleteTenantsByTenantIdPrincipalsByPrincipalIdErrors[keyof DeleteTenantsByTenantIdPrincipalsByPrincipalIdErrors];
+
+export type DeleteTenantsByTenantIdPrincipalsByPrincipalIdResponses = {
+  /**
+   * Removed (or already absent).
+   */
+  204: void;
+};
+
+export type DeleteTenantsByTenantIdPrincipalsByPrincipalIdResponse =
+  DeleteTenantsByTenantIdPrincipalsByPrincipalIdResponses[keyof DeleteTenantsByTenantIdPrincipalsByPrincipalIdResponses];
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdData = {
+  body?: never;
+  path: {
+    tenantId: TenantId;
+    principalId: PrincipalId;
+  };
+  query?: never;
+  url: '/tenants/{tenantId}/principals/{principalId}';
+};
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdErrors = {
+  /**
+   * Missing or invalid bearer token, or token not authorised for this tenant.
+   */
+  401: Error;
+  /**
+   * Resource not found.
+   */
+  404: Error;
+};
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdError =
+  GetTenantsByTenantIdPrincipalsByPrincipalIdErrors[keyof GetTenantsByTenantIdPrincipalsByPrincipalIdErrors];
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdResponses = {
+  /**
+   * Principal details.
+   */
+  200: Principal;
+};
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdResponse =
+  GetTenantsByTenantIdPrincipalsByPrincipalIdResponses[keyof GetTenantsByTenantIdPrincipalsByPrincipalIdResponses];
+
+export type PutTenantsByTenantIdPrincipalsByPrincipalIdData = {
+  body?: never;
+  path: {
+    tenantId: TenantId;
+    principalId: PrincipalId;
+  };
+  query?: never;
+  url: '/tenants/{tenantId}/principals/{principalId}';
+};
+
+export type PutTenantsByTenantIdPrincipalsByPrincipalIdErrors = {
+  /**
+   * Missing or invalid bearer token, or token not authorised for this tenant.
+   */
+  401: Error;
+  /**
+   * Resource not found.
+   */
+  404: Error;
+  /**
+   * The write could not take its lock within the orchestrator's
+   * timeout, because another change to the same principal or policy
+   * is in flight. Nothing was written; the caller retries.
+   *
+   */
+  409: Error;
+  /**
+   * Request body is well-formed but fails semantic validation
+   * (missing required field, value out of range, enum mismatch,
+   * cross-field constraint, etc.).
+   *
+   */
+  422: Error;
+};
+
+export type PutTenantsByTenantIdPrincipalsByPrincipalIdError =
+  PutTenantsByTenantIdPrincipalsByPrincipalIdErrors[keyof PutTenantsByTenantIdPrincipalsByPrincipalIdErrors];
+
+export type PutTenantsByTenantIdPrincipalsByPrincipalIdResponses = {
+  /**
+   * The principal already existed.
+   */
+  200: Principal;
+  /**
+   * Principal created.
+   */
+  201: Principal;
+};
+
+export type PutTenantsByTenantIdPrincipalsByPrincipalIdResponse =
+  PutTenantsByTenantIdPrincipalsByPrincipalIdResponses[keyof PutTenantsByTenantIdPrincipalsByPrincipalIdResponses];
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysData = {
+  body?: never;
+  path: {
+    tenantId: TenantId;
+    principalId: PrincipalId;
+  };
+  query?: never;
+  url: '/tenants/{tenantId}/principals/{principalId}/access-keys';
+};
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysErrors = {
+  /**
+   * Missing or invalid bearer token, or token not authorised for this tenant.
+   */
+  401: Error;
+  /**
+   * Resource not found.
+   */
+  404: Error;
+};
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysError =
+  GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysErrors[keyof GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysErrors];
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysResponses = {
+  /**
+   * The keys bound to this principal (without secrets).
+   */
+  200: AccessKeyList;
+};
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysResponse =
+  GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysResponses[keyof GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysResponses];
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesData = {
+  body?: never;
+  path: {
+    tenantId: TenantId;
+    principalId: PrincipalId;
+  };
+  query?: never;
+  url: '/tenants/{tenantId}/principals/{principalId}/policies';
+};
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesErrors = {
+  /**
+   * Missing or invalid bearer token, or token not authorised for this tenant.
+   */
+  401: Error;
+  /**
+   * Resource not found.
+   */
+  404: Error;
+};
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesError =
+  GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesErrors[keyof GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesErrors];
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesResponses = {
+  /**
+   * The policies, each with its bucket and current ETag.
+   */
+  200: PrincipalPolicies;
+};
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesResponse =
+  GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesResponses[keyof GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesResponses];
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessData = {
+  body?: never;
+  path: {
+    tenantId: TenantId;
+    principalId: PrincipalId;
+  };
+  query?: never;
+  url: '/tenants/{tenantId}/principals/{principalId}/access';
+};
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessErrors = {
+  /**
+   * Missing or invalid bearer token, or token not authorised for this tenant.
+   */
+  401: Error;
+  /**
+   * Resource not found.
+   */
+  404: Error;
+};
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessError =
+  GetTenantsByTenantIdPrincipalsByPrincipalIdAccessErrors[keyof GetTenantsByTenantIdPrincipalsByPrincipalIdAccessErrors];
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessResponses = {
+  /**
+   * The principal's reach.
+   */
+  200: PrincipalAccess;
+};
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessResponse =
+  GetTenantsByTenantIdPrincipalsByPrincipalIdAccessResponses[keyof GetTenantsByTenantIdPrincipalsByPrincipalIdAccessResponses];
+
+export type DeleteTenantsByTenantIdBucketsByBucketNamePolicyData = {
+  body?: never;
+  headers?: {
+    /**
+     * The ETag the last read of the policy returned. Required unless
+     * `If-None-Match: *` is sent.
+     *
+     */
+    'If-Match'?: string;
+  };
+  path: {
+    tenantId: TenantId;
+    bucketName: BucketName;
+  };
+  query?: never;
+  url: '/tenants/{tenantId}/buckets/{bucketName}/policy';
+};
+
+export type DeleteTenantsByTenantIdBucketsByBucketNamePolicyErrors = {
+  /**
+   * Malformed request — invalid query parameter, path parameter, or
+   * unparseable JSON body. Body validation errors return 422 instead.
+   *
+   */
+  400: Error;
+  /**
+   * Missing or invalid bearer token, or token not authorised for this tenant.
+   */
+  401: Error;
+  /**
+   * The bucket does not exist or belongs to another tenant, or the
+   * bucket exists and has no policy. The body's `code` is
+   * `PolicyNotFound` in the second case, so callers can tell the two
+   * apart.
+   *
+   */
+  404: Error;
+  /**
+   * The write could not take its lock within the orchestrator's
+   * timeout, because another change to the same principal or policy
+   * is in flight. Nothing was written; the caller retries.
+   *
+   */
+  409: Error;
+  /**
+   * The ETag did not match the stored policy, or `If-None-Match: *`
+   * was sent and a policy exists. Nothing was written.
+   *
+   */
+  412: Error;
+  /**
+   * Unexpected server error.
+   */
+  500: Error;
+};
+
+export type DeleteTenantsByTenantIdBucketsByBucketNamePolicyError =
+  DeleteTenantsByTenantIdBucketsByBucketNamePolicyErrors[keyof DeleteTenantsByTenantIdBucketsByBucketNamePolicyErrors];
+
+export type DeleteTenantsByTenantIdBucketsByBucketNamePolicyResponses = {
+  /**
+   * Policy deleted.
+   */
+  204: void;
+};
+
+export type DeleteTenantsByTenantIdBucketsByBucketNamePolicyResponse =
+  DeleteTenantsByTenantIdBucketsByBucketNamePolicyResponses[keyof DeleteTenantsByTenantIdBucketsByBucketNamePolicyResponses];
+
+export type GetTenantsByTenantIdBucketsByBucketNamePolicyData = {
+  body?: never;
+  path: {
+    tenantId: TenantId;
+    bucketName: BucketName;
+  };
+  query?: never;
+  url: '/tenants/{tenantId}/buckets/{bucketName}/policy';
+};
+
+export type GetTenantsByTenantIdBucketsByBucketNamePolicyErrors = {
+  /**
+   * Missing or invalid bearer token, or token not authorised for this tenant.
+   */
+  401: Error;
+  /**
+   * The bucket does not exist or belongs to another tenant, or the
+   * bucket exists and has no policy. The body's `code` is
+   * `PolicyNotFound` in the second case, so callers can tell the two
+   * apart.
+   *
+   */
+  404: Error;
+};
+
+export type GetTenantsByTenantIdBucketsByBucketNamePolicyError =
+  GetTenantsByTenantIdBucketsByBucketNamePolicyErrors[keyof GetTenantsByTenantIdBucketsByBucketNamePolicyErrors];
+
+export type GetTenantsByTenantIdBucketsByBucketNamePolicyResponses = {
+  /**
+   * The policy.
+   */
+  200: BucketPolicy;
+};
+
+export type GetTenantsByTenantIdBucketsByBucketNamePolicyResponse =
+  GetTenantsByTenantIdBucketsByBucketNamePolicyResponses[keyof GetTenantsByTenantIdBucketsByBucketNamePolicyResponses];
+
+export type PutTenantsByTenantIdBucketsByBucketNamePolicyData = {
+  body: BucketPolicy;
+  headers?: {
+    /**
+     * The ETag the last read of the policy returned. Required unless
+     * `If-None-Match: *` is sent.
+     *
+     */
+    'If-Match'?: string;
+    /**
+     * The literal `*`, to create the bucket's first policy. Any other value is 400.
+     */
+    'If-None-Match'?: '*';
+  };
+  path: {
+    tenantId: TenantId;
+    bucketName: BucketName;
+  };
+  query?: never;
+  url: '/tenants/{tenantId}/buckets/{bucketName}/policy';
+};
+
+export type PutTenantsByTenantIdBucketsByBucketNamePolicyErrors = {
+  /**
+   * Malformed request — invalid query parameter, path parameter, or
+   * unparseable JSON body. Body validation errors return 422 instead.
+   *
+   */
+  400: Error;
+  /**
+   * Missing or invalid bearer token, or token not authorised for this tenant.
+   */
+  401: Error;
+  /**
+   * Resource not found.
+   */
+  404: Error;
+  /**
+   * The write could not take its lock within the orchestrator's
+   * timeout, because another change to the same principal or policy
+   * is in flight. Nothing was written; the caller retries.
+   *
+   */
+  409: Error;
+  /**
+   * The ETag did not match the stored policy, or `If-None-Match: *`
+   * was sent and a policy exists. Nothing was written.
+   *
+   */
+  412: Error;
+  /**
+   * Request body is well-formed but fails semantic validation
+   * (missing required field, value out of range, enum mismatch,
+   * cross-field constraint, etc.).
+   *
+   */
+  422: Error;
+  /**
+   * Unexpected server error.
+   */
+  500: Error;
+};
+
+export type PutTenantsByTenantIdBucketsByBucketNamePolicyError =
+  PutTenantsByTenantIdBucketsByBucketNamePolicyErrors[keyof PutTenantsByTenantIdBucketsByBucketNamePolicyErrors];
+
+export type PutTenantsByTenantIdBucketsByBucketNamePolicyResponses = {
+  /**
+   * Policy replaced.
+   */
+  200: unknown;
+  /**
+   * Policy created.
+   */
+  201: unknown;
+};
 
 export type GetTenantsByTenantIdMetricsData = {
   body?: never;
