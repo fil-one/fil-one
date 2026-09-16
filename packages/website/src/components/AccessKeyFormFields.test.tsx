@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole, S3Region } from '@filone/shared';
@@ -7,6 +7,9 @@ import { ToastProvider } from './Toast';
 import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 import { AccessKeyFormFields } from './AccessKeyFormFields.js';
 import { seedPermissions } from '../lib/test-permissions.js';
+
+const mockIsIam = vi.fn(() => false);
+vi.mock('../lib/access-model.js', () => ({ isIamRegion: () => mockIsIam() }));
 
 function Harness({ apply }: { apply: (form: ReturnType<typeof useAccessKeyForm>) => void }) {
   const form = useAccessKeyForm({ region: S3Region.UsEast1, onSuccess: () => {} });
@@ -53,5 +56,24 @@ describe('AccessKeyFormFields — reserved key name', () => {
     expect(
       await screen.findByText('Names starting with "filone-console" are reserved for FilOne.'),
     ).toBeInTheDocument();
+  });
+});
+
+describe('AccessKeyFormFields — on a region serving the iam access model', () => {
+  it('asks for no permissions or bucket scope, and says what the key follows instead', async () => {
+    mockIsIam.mockReturnValue(true);
+    try {
+      renderForm(() => {});
+      expect(
+        await screen.findByText(
+          "This key acts as you. What it can reach is decided by each bucket's policy.",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByText('What can this key do?')).not.toBeInTheDocument();
+      expect(screen.queryByText('Which buckets can this key access?')).not.toBeInTheDocument();
+      expect(screen.getByText('Key name')).toBeInTheDocument();
+    } finally {
+      mockIsIam.mockReturnValue(false);
+    }
   });
 });
