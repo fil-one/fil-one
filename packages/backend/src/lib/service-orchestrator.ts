@@ -9,6 +9,16 @@ import type {
 } from '@filone/shared';
 import type { S3ClientContext } from './s3-client.ts';
 import type { OrgProfileItem } from './org-profile.ts';
+import type { IamMethods } from './iam-orchestrator.ts';
+
+export type {
+  IamMethods,
+  IssueMemberKeyOpts,
+  IssuedMemberKey,
+  MemberPolicy,
+  PolicyPrecondition,
+  StoredBucketPolicy,
+} from './iam-orchestrator.ts';
 
 // Retry budget for {@link ServiceOrchestrator.deleteTenant}. A DELETE 409s
 // unless the tenant is already `disabled`; both calls are synchronous, so a 409
@@ -152,6 +162,16 @@ export interface TenantInfo {
  * Each implementation handles tenant provisioning, bucket lifecycle,
  * access-key issuance, and presigning for a service orchestrator in a single region.
  *
+ * ## Access models
+ *
+ * {@link ServiceOrchestrator} is a union on `accessModel` over this core. A
+ * `scoped-keys` orchestrator is the core alone: every key carries its own
+ * permission set and bucket list. An `iam` orchestrator adds {@link IamMethods}
+ * under `iam`: members are principals, buckets carry policies, and a key bound
+ * to a principal is authorized from those policies on every request. A caller
+ * that needs the arm narrows on `accessModel`; every other caller sees the
+ * core and compiles unchanged.
+ *
  * ## orgId vs tenantId
  *
  * - `orgId` is our internal org identifier — a UUID generated on a user's
@@ -170,7 +190,7 @@ export interface TenantInfo {
  * calls, and callers are expected to have resolved org → tenant via
  * ensure/isReady first.
  */
-export interface ServiceOrchestrator {
+export interface OrchestratorCore {
   /**
    * The orchestrator's unique identifier (e.g. `aurora`, `fth`, etc.). It
    * should have the format `^[a-z][a-zA-Z0-9_]*$`.
@@ -182,7 +202,8 @@ export interface ServiceOrchestrator {
    * How this backend decides what a credential may do, and therefore which
    * rules the console applies to it. Every orchestrator serves `scoped-keys`
    * today; see {@link getRegionAccessModel}, which answers the same question
-   * for callers holding a region rather than an orchestrator.
+   * for callers holding a region rather than an orchestrator, and which the
+   * registry hands each orchestrator so the two cannot disagree.
    */
   readonly accessModel: AccessModel;
 
@@ -335,3 +356,16 @@ export interface ServiceOrchestrator {
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<StorageUsageSample[]>;
 }
+
+/** The parent RFC's model: a key is authorized from what it was created with. */
+export interface ScopedKeysOrchestrator extends OrchestratorCore {
+  readonly accessModel: 'scoped-keys';
+}
+
+/** The RFC#30 model: principals, bucket policies, and keys bound to a principal. */
+export interface IamOrchestrator extends OrchestratorCore {
+  readonly accessModel: 'iam';
+  readonly iam: IamMethods;
+}
+
+export type ServiceOrchestrator = ScopedKeysOrchestrator | IamOrchestrator;
