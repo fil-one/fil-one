@@ -19,7 +19,7 @@ import { ragAllowlistKey } from '../middleware/rag-access.ts';
 import { scrubOrgRecords } from '../lib/deletion-scrub.ts';
 import { tearDownStripe } from '../lib/deletion-stripe-teardown.ts';
 import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.ts';
-import { ORCHESTRATOR_SETUP_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
+import { ORCHESTRATOR_JOB_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
 
 const LOG = '[account-deletion-worker]';
 
@@ -128,7 +128,7 @@ async function deleteTenants(orgId: string, tenantIds: Record<string, string>): 
     }
 
     await orchestrator.deleteTenant(tenantId, {
-      signal: AbortSignal.timeout(ORCHESTRATOR_SETUP_TIMEOUT_MS),
+      signal: AbortSignal.timeout(ORCHESTRATOR_JOB_TIMEOUT_MS),
     });
     console.log(`${LOG} tenant deleted`, { orgId, orchestratorId, tenantId });
   }

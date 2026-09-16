@@ -25,10 +25,18 @@ export const TENANT_DELETE_RETRY = { retries: 3 } as const;
 // share of slow-but-successful calls now fails fast; that is the trade-off.
 export const ORCHESTRATOR_REQUEST_TIMEOUT_MS = 8_000;
 
-// Budget for tenant provisioning, for the mutations on 30 s and 60 s routes,
-// and for background jobs. Aurora tenant create and S3 setup were measured up
-// to 25 s over the same four weeks.
+// Budget for tenant provisioning and for the mutations on 30 s and 60 s
+// routes. Aurora tenant create and S3 setup were measured up to 25 s over the
+// same four weeks.
 export const ORCHESTRATOR_SETUP_TIMEOUT_MS = 25_000;
+
+// Budget for one orchestrator call made by a background job. Nobody is waiting
+// on the answer, so a job can wait longer than an interactive route, but the
+// call still has to leave the job room to finish its own work: the usage
+// reporting worker mints this per org and then reports to Stripe and syncs the
+// trial lock inside a 60 s Lambda. The other jobs mint it per item inside a
+// loop, so it is what one hung tenant costs before the loop moves on.
+export const ORCHESTRATOR_JOB_TIMEOUT_MS = 30_000;
 
 export interface OrchestratorRequestOptions {
   /** Lets the caller abort every upstream request (HTTP or S3) the operation makes. */
