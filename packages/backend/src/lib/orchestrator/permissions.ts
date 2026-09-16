@@ -10,9 +10,9 @@ const ALWAYS_PERMISSIONS: readonly string[] = ['s3:ListAllMyBuckets'];
 // cousin of FTH_BASE_PERMISSIONS (fth-orchestrator.ts) but deliberately not
 // shared: the Management API enum has no s3:GetBucketVersioning /
 // s3:GetBucketObjectLockConfiguration actions, so those FilOne permissions
-// map to nothing here — sending them would draw a 422. Flagged against the
-// spec; until it grows those actions, orchestrators are expected to authorize
-// bucket-config reads implicitly for tenant-scoped keys.
+// map to nothing here — sending them would draw a 422. Bucket-config reads
+// classify as ListBucket (fil-one/RFC#30), so a key holding s3:ListBucket
+// already covers them.
 const BASE_PERMISSIONS: Record<AccessKeyPermission, readonly string[]> = {
   read: ['s3:GetObject', 's3:ListBucket'],
   write: ['s3:PutObject'],
