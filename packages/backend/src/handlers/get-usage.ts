@@ -7,6 +7,7 @@ import { keyScope } from '../lib/key-scope.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import { getProvisionedRegions } from '../lib/region-helpers.ts';
 import type { ServiceOrchestrator, TenantInfo } from '../lib/service-orchestrator.ts';
+import { ORCHESTRATOR_REQUEST_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -50,11 +51,16 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   const thirtyDaysAgo = new Date(now.getTime());
   thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
 
+  // One deadline for every upstream call this request makes, so a hung region
+  // fails its own leg below instead of holding the handler until the Lambda
+  // timeout kills it with nothing logged.
+  const signal = AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS);
+
   // Swallow per-orchestrator errors so one region's outage still renders the
   // rest: settle every fetch, log the failures, and keep the successes.
   const settled = await Promise.allSettled(
     regions.map(({ orchestrator, tenantId }) =>
-      fetchRegionUsage(orchestrator, tenantId, thirtyDaysAgo, now),
+      fetchRegionUsage(orchestrator, tenantId, thirtyDaysAgo, now, signal),
     ),
   );
 
@@ -128,15 +134,16 @@ async function fetchRegionUsage(
   tenantId: string,
   from: Date,
   to: Date,
+  signal: AbortSignal,
 ): Promise<RegionUsage> {
   const [metrics, info, buckets] = await Promise.all([
-    orchestrator.getTenantUsageMetrics(tenantId, {
-      from: from.toISOString(),
-      to: to.toISOString(),
-      interval: '1d',
-    }),
-    orchestrator.getTenantInfo(tenantId),
-    orchestrator.listBuckets(tenantId),
+    orchestrator.getTenantUsageMetrics(
+      tenantId,
+      { from: from.toISOString(), to: to.toISOString(), interval: '1d' },
+      { signal },
+    ),
+    orchestrator.getTenantInfo(tenantId, { signal }),
+    orchestrator.listBuckets(tenantId, { signal }),
   ]);
 
   // Storage is point-in-time: take the most recent reading. Egress is

@@ -3,6 +3,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { UsageDataPoint, UsageTrendsPeriod, UsageTrendsResponse } from '@filone/shared';
 import type { ServiceOrchestrator, StorageUsageSample } from '../lib/service-orchestrator.ts';
+import { ORCHESTRATOR_REQUEST_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
@@ -96,11 +97,16 @@ async function buildTimeSeries(
   granularity.rewind(from, points - 1);
   granularity.toStartOfBucket(from);
 
+  // One deadline for every region's fetch, so a hung region fails its own leg
+  // (swallowed in fetchSamplesByBucket) instead of holding the handler until
+  // the Lambda timeout kills it with nothing logged.
+  const signal = AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS);
+
   // Fetch each region's series and index them by bucket, then sum across
   // regions per bucket for the org-wide trend.
   const perRegion = await Promise.all(
     regions.map(({ orchestrator, tenantId }) =>
-      fetchSamplesByBucket({ orchestrator, tenantId, from, to: now, granularity }),
+      fetchSamplesByBucket({ orchestrator, tenantId, from, to: now, granularity, signal }),
     ),
   );
 
@@ -135,6 +141,7 @@ type FetchSamplesArgs = {
   from: Date;
   to: Date;
   granularity: Granularity;
+  signal: AbortSignal;
 };
 
 type SamplesByBucket = {
@@ -165,14 +172,15 @@ async function fetchSamplesByBucket({
   from,
   to,
   granularity,
+  signal,
 }: FetchSamplesArgs): Promise<SamplesByBucket> {
   // Swallow errors so one region's outage still renders the rest.
   try {
-    const { storage, egress } = await orchestrator.getTenantUsageMetrics(tenantId, {
-      from: from.toISOString(),
-      to: to.toISOString(),
-      interval: granularity.interval,
-    });
+    const { storage, egress } = await orchestrator.getTenantUsageMetrics(
+      tenantId,
+      { from: from.toISOString(), to: to.toISOString(), interval: granularity.interval },
+      { signal },
+    );
 
     const storageByBucket = new Map<string, StorageUsageSample>();
     for (const s of storage) {

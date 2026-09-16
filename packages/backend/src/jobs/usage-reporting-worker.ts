@@ -19,6 +19,7 @@ import { STRIPE_METADATA_KEYS } from '../lib/stripe-metadata.ts';
 import { reportOrgUsage, type AggregateUsage } from '../lib/org-usage-report.ts';
 import { isOrgDeletedOrDeleting } from '../lib/org-profile.ts';
 import { syncTenantStatusInProvisionedRegions } from '../lib/region-helpers.ts';
+import { ORCHESTRATOR_SETUP_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
 
 const dynamo = getDynamoClient();
 
@@ -114,6 +115,9 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     currentPeriodStart,
     to: now,
     meterEventName,
+    // One deadline per org for every region's metrics fetch; the worker has a
+    // 60 s budget and re-runs on schedule.
+    signal: AbortSignal.timeout(ORCHESTRATOR_SETUP_TIMEOUT_MS),
   });
   if (!usage) return;
 

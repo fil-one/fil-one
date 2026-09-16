@@ -75,6 +75,7 @@ describe('get-bucket-analytics baseHandler', () => {
       AURORA_TENANT_ID,
       'my-bucket',
       expect.any(Object),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 

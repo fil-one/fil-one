@@ -36,7 +36,11 @@ describe('syncTenantStatusInProvisionedRegions', () => {
 
     await syncTenantStatusInProvisionedRegions('org-1', 'write-locked');
 
-    expect(aurora.updateTenantStatus).toHaveBeenCalledWith('aurora:org-1', 'write-locked');
+    expect(aurora.updateTenantStatus).toHaveBeenCalledWith(
+      'aurora:org-1',
+      'write-locked',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('skips the update when the region status already matches', async () => {
@@ -109,7 +113,11 @@ describe('syncTenantStatusInProvisionedRegions', () => {
 
     await syncTenantStatusInProvisionedRegions('org-1', 'active');
 
-    expect(aurora.updateTenantStatus).toHaveBeenCalledWith('aurora:org-1', 'active');
+    expect(aurora.updateTenantStatus).toHaveBeenCalledWith(
+      'aurora:org-1',
+      'active',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('escalates a write-locked tenant to disabled', async () => {
@@ -118,7 +126,11 @@ describe('syncTenantStatusInProvisionedRegions', () => {
 
     await syncTenantStatusInProvisionedRegions('org-1', 'disabled');
 
-    expect(aurora.updateTenantStatus).toHaveBeenCalledWith('aurora:org-1', 'disabled');
+    expect(aurora.updateTenantStatus).toHaveBeenCalledWith(
+      'aurora:org-1',
+      'disabled',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('retries a transient probe error and syncs the region', async () => {
@@ -133,7 +145,11 @@ describe('syncTenantStatusInProvisionedRegions', () => {
     await vi.runAllTimersAsync();
     await promise;
 
-    expect(aurora.updateTenantStatus).toHaveBeenCalledWith('aurora:org-1', 'write-locked');
+    expect(aurora.updateTenantStatus).toHaveBeenCalledWith(
+      'aurora:org-1',
+      'write-locked',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('returns an error outcome when the probe keeps failing past all retries (1 initial + 3 retries)', async () => {
@@ -163,7 +179,11 @@ describe('syncTenantStatusInProvisionedRegions', () => {
     await vi.runAllTimersAsync();
     await promise;
 
-    expect(fth.updateTenantStatus).toHaveBeenCalledWith('fth:org-1', 'write-locked');
+    expect(fth.updateTenantStatus).toHaveBeenCalledWith(
+      'fth:org-1',
+      'write-locked',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('returns an error outcome with the cause when updateTenantStatus keeps failing past all retries (1 initial + 3 retries)', async () => {

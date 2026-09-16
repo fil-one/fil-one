@@ -4,6 +4,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ApiErrorCode, S3_REGION } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import { ORCHESTRATOR_REQUEST_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
 import { BucketNotEmptyError } from '../lib/errors.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
@@ -38,7 +39,9 @@ export async function baseHandler(
   }
 
   try {
-    await orchestrator.deleteBucket(tenantId, bucketName);
+    await orchestrator.deleteBucket(tenantId, bucketName, {
+      signal: AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS),
+    });
   } catch (err) {
     if (err instanceof BucketNotEmptyError) {
       return new ResponseBuilder()

@@ -138,7 +138,11 @@ describe('delete-access-key baseHandler', () => {
 
     expect(result.statusCode).toBe(204);
     expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('eu-west-1');
-    expect(auroraDeleteAccessKey).toHaveBeenCalledWith('aurora-t-1', KEY_ID);
+    expect(auroraDeleteAccessKey).toHaveBeenCalledWith(
+      'aurora-t-1',
+      KEY_ID,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(fthDeleteAccessKey).not.toHaveBeenCalled();
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
   });
@@ -153,7 +157,11 @@ describe('delete-access-key baseHandler', () => {
 
     expect(result.statusCode).toBe(204);
     expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('us-east-1');
-    expect(fthDeleteAccessKey).toHaveBeenCalledWith('fth-t-1', KEY_ID);
+    expect(fthDeleteAccessKey).toHaveBeenCalledWith(
+      'fth-t-1',
+      KEY_ID,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(auroraDeleteAccessKey).not.toHaveBeenCalled();
   });
 
@@ -167,7 +175,11 @@ describe('delete-access-key baseHandler', () => {
 
     expect(result.statusCode).toBe(204);
     expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('eu-west-1');
-    expect(auroraDeleteAccessKey).toHaveBeenCalledWith('aurora-t-1', KEY_ID);
+    expect(auroraDeleteAccessKey).toHaveBeenCalledWith(
+      'aurora-t-1',
+      KEY_ID,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('returns 503 and does not delete the row when tenant is not ready', async () => {
@@ -258,7 +270,11 @@ describe('delete-access-key baseHandler', () => {
     const result = (await baseHandler(eventWithKey(KEY_ID))) as { statusCode: number };
 
     expect(result.statusCode).toBe(204);
-    expect(auroraDeleteAccessKey).toHaveBeenCalledWith('aurora-t-1', KEY_ID);
+    expect(auroraDeleteAccessKey).toHaveBeenCalledWith(
+      'aurora-t-1',
+      KEY_ID,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('deletes the row when the event item is the half the table refused', async () => {

@@ -2,6 +2,7 @@ import pRetry, { type Options as RetryOptions } from 'p-retry';
 import { getAvailableOrchestrators } from './service-orchestrator-registry.ts';
 import { getOrgProfile } from './org-profile.ts';
 import type { ServiceOrchestrator } from './service-orchestrator.ts';
+import { ORCHESTRATOR_REQUEST_TIMEOUT_MS } from './service-orchestrator.ts';
 import type { TenantStatus } from '@filone/shared/src/api/tenants.ts';
 
 export interface ProvisionedRegion {
@@ -101,9 +102,13 @@ async function syncRegionTenantStatus({
   const base = { orchestratorId: orchestrator.id, tenantId };
   try {
     // getTenantStatus never throws; surface `error` probes as exceptions so
-    // pRetry can ride out transient orchestrator outages.
+    // pRetry can ride out transient orchestrator outages. Each attempt gets a
+    // fresh deadline: the retry budget above already bounds the whole sync,
+    // and a hung probe must fail the attempt rather than the Lambda.
     const probe = await pRetry(async () => {
-      const result = await orchestrator.getTenantStatus(tenantId);
+      const result = await orchestrator.getTenantStatus(tenantId, {
+        signal: AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS),
+      });
       if (result.kind === 'error') {
         throw new Error(`${orchestrator.id} status probe failed for tenant ${tenantId}`, {
           cause: result.cause,
@@ -136,7 +141,13 @@ async function syncRegionTenantStatus({
     // failures are safe to retry here rather than inside each orchestrator.
     // Retrying at this level keeps the whole status-sync retry budget
     // (probe + update) in one place.
-    await pRetry(() => orchestrator.updateTenantStatus(tenantId, desired), retry);
+    await pRetry(
+      () =>
+        orchestrator.updateTenantStatus(tenantId, desired, {
+          signal: AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS),
+        }),
+      retry,
+    );
     return { ...base, outcome: 'updated' };
   } catch (cause) {
     console.error('[region-helpers] tenant status sync failed', {

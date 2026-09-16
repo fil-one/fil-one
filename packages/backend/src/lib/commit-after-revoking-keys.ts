@@ -82,6 +82,7 @@ export async function commitAfterRevokingKeys<T extends RevocationAuditEventType
   onCancelled,
   onRefused,
   notifyMember,
+  signal,
 }: {
   /** The membership write, behind whatever fence the caller placed as item 0. */
   items: TransactWriteItem[];
@@ -114,6 +115,8 @@ export async function commitAfterRevokingKeys<T extends RevocationAuditEventType
   onRefused: (refused: AccessKeySummary[], revoked: AccessKeySummary[]) => Response;
   /** Omitted by the flow whose key holder IS the caller, already answered. */
   notifyMember?: (revoked: AccessKeySummary[]) => Promise<void>;
+  /** The caller's deadline, shared by every vendor call in the revocation pass. */
+  signal?: AbortSignal;
 }): Promise<CommitOutcome> {
   // `onCancelled` runs outside every `try` here: a thrown `OrgDeletingError` is
   // the fence's 410 and must reach the error handler unwrapped. So each write
@@ -152,7 +155,7 @@ export async function commitAfterRevokingKeys<T extends RevocationAuditEventType
     details,
   });
 
-  const pass = await revokeMemberKeys({ orgId, orgProfile, keys, actor, reason: trigger });
+  const pass = await revokeMemberKeys({ orgId, orgProfile, keys, actor, reason: trigger, signal });
   // An indexed access over the union cannot be narrowed to prove the one field,
   // so this is the one place the ids merge is asserted rather than checked.
   const revokedIds = (

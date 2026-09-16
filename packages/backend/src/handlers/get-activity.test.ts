@@ -153,7 +153,10 @@ describe('get-activity baseHandler', () => {
       ],
     });
 
-    expect(mockListBuckets).toHaveBeenCalledWith(AURORA_TENANT_ID);
+    expect(mockListBuckets).toHaveBeenCalledWith(
+      AURORA_TENANT_ID,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('respects the limit query parameter', async () => {
@@ -362,8 +365,14 @@ describe('get-activity baseHandler', () => {
         'eu-bucket',
         'us-bucket',
       ]);
-      expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t');
-      expect(fth.listBuckets).toHaveBeenCalledWith('fth-t');
+      expect(aurora.listBuckets).toHaveBeenCalledWith(
+        'aurora-t',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+      expect(fth.listBuckets).toHaveBeenCalledWith(
+        'fth-t',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
     });
 
     it('skips orchestrators whose tenant is not ready', async () => {
@@ -585,5 +594,76 @@ describe('key activity follows the keys pages scope', () => {
     await keyNamesFor(OrgRole.ReadOnly);
 
     expect(emittedPhases()).not.toContain('fetchAccessKeyActivities');
+  });
+});
+
+describe('get-activity baseHandler (request deadline)', () => {
+  const euBucket = { bucketName: 'eu-bucket', createdAt: '2026-01-01T00:00:00Z' };
+  let aurora: ReturnType<typeof createMockedOrchestrator>;
+  let fth: ReturnType<typeof createMockedOrchestrator>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ddbMock.reset();
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+    aurora = createMockedOrchestrator({
+      id: 'aurora',
+      region: 'eu-west-1',
+      tenantId: 'aurora-t',
+      buckets: [euBucket],
+    });
+    fth = createMockedOrchestrator({ id: 'fth', region: 'us-east-1', tenantId: 'fth-t' });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+  });
+
+  // One budget per request: every region gets the same signal, so the slowest
+  // region cannot hold the handler past what the fastest one saw.
+  it('hands every region the same deadline signal', async () => {
+    await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const [, auroraOpts] = aurora.listBuckets.mock.calls[0] as [string, { signal: AbortSignal }];
+    const [, fthOpts] = fth.listBuckets.mock.calls[0] as [string, { signal: AbortSignal }];
+    expect(fthOpts).toStrictEqual({ signal: auroraOpts.signal });
+  });
+
+  // The 2026-09-16 incident: one region hung until the Lambda timeout killed
+  // the handler and the user got a 500. With a deadline the hung leg fails on
+  // its own and the other region still renders.
+  it("returns the healthy region's activities when the other region hits the deadline", async () => {
+    fth.listBuckets.mockRejectedValue(
+      new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+    );
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+      expect({
+        statusCode: result.statusCode,
+        resourceNames: JSON.parse(String(result.body)).activities.map(
+          (a: { resourceName: string }) => a.resourceName,
+        ),
+      }).toStrictEqual({ statusCode: 200, resourceNames: ['eu-bucket'] });
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it('logs the region that hit the deadline so the hang is not silent', async () => {
+    fth.listBuckets.mockRejectedValue(
+      new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+    );
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+      expect(error).toHaveBeenCalledWith(
+        '[get-activity] Failed to list buckets',
+        expect.objectContaining({ region: 'us-east-1', tenantId: 'fth-t' }),
+      );
+    } finally {
+      error.mockRestore();
+    }
   });
 });

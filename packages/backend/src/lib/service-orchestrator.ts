@@ -16,6 +16,20 @@ import type { OrgProfileItem } from './org-profile.ts';
 // and the budget outlasts that writer. A 404 is not retried — see deleteTenant.
 export const TENANT_DELETE_RETRY = { retries: 3 } as const;
 
+// Budget for every orchestrator call a request on a 10 s route makes, minted
+// once per invocation and shared by all of them, so sequential calls inside
+// one handler are bounded together. Sized so a hung upstream fails the call
+// and the handler's own error handling runs, instead of the Lambda timeout
+// killing the handler with nothing logged. Below the 9.4 s the slowest
+// successful Aurora call took in the four weeks before 2026-09-16, so a small
+// share of slow-but-successful calls now fails fast; that is the trade-off.
+export const ORCHESTRATOR_REQUEST_TIMEOUT_MS = 8_000;
+
+// Budget for tenant provisioning, for the mutations on 30 s and 60 s routes,
+// and for background jobs. Aurora tenant create and S3 setup were measured up
+// to 25 s over the same four weeks.
+export const ORCHESTRATOR_SETUP_TIMEOUT_MS = 25_000;
+
 export interface OrchestratorRequestOptions {
   /** Lets the caller abort every upstream request (HTTP or S3) the operation makes. */
   signal?: AbortSignal;

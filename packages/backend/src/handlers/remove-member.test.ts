@@ -624,9 +624,10 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     const result = await handler(removeEvent(), buildContext());
 
     expect(result).toMatchObject({ statusCode: 200 });
+    const deadline = expect.objectContaining({ signal: expect.any(AbortSignal) });
     expect(mockDeleteAccessKey.mock.calls).toStrictEqual([
-      ['tenant:us-east-1', 'key-0'],
-      ['tenant:us-east-1', 'key-1'],
+      ['tenant:us-east-1', 'key-0', deadline],
+      ['tenant:us-east-1', 'key-1', deadline],
     ]);
     // The admin doing this is not the key holder, so the response is the only
     // place they learn which credentials the removal destroyed.

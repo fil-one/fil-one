@@ -3,6 +3,7 @@ import { reportMetric } from '../lib/metrics.ts';
 import { getOrgProfile, isOrgDeletedOrDeleting, type OrgProfileItem } from '../lib/org-profile.ts';
 import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.ts';
 import type { ServiceOrchestrator } from '../lib/service-orchestrator.ts';
+import { ORCHESTRATOR_SETUP_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
 import { scanSubscriptions } from '../lib/subscription-store.ts';
 
 interface ActiveCandidate {
@@ -111,7 +112,9 @@ async function evaluateCandidate(
     }
 
     stats.checked += 1;
-    const probe = await orchestrator.getTenantStatus(tenantId);
+    const probe = await orchestrator.getTenantStatus(tenantId, {
+      signal: AbortSignal.timeout(ORCHESTRATOR_SETUP_TIMEOUT_MS),
+    });
     if (probe.kind === 'error') {
       stats.probeFailed += 1;
       console.error('[subscription-drift-checker] probe failed', {

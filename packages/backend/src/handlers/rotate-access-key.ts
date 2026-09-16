@@ -49,6 +49,7 @@ import {
 import { vendorNameForRotation } from '../lib/rotation-key-name.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import type { IssuedAccessKey, ServiceOrchestrator } from '../lib/service-orchestrator.ts';
+import { ORCHESTRATOR_SETUP_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -169,7 +170,12 @@ async function prepareRotation(
   if (await isOrgDeleting(orgId, { consistent: true })) return accountDeletedResponse();
 
   const orchestrator = getOrchestratorForRegion(stored.region);
-  const tenantId = await orchestrator.ensureTenantReady(orgId);
+  // One deadline for every upstream call the rotation makes: tenant setup,
+  // the mint, and the revocation of the key it replaces. This route has 60 s;
+  // a hung vendor fails the call and answers the user instead of the Lambda
+  // timeout killing the handler.
+  const signal = AbortSignal.timeout(ORCHESTRATOR_SETUP_TIMEOUT_MS);
+  const tenantId = await orchestrator.ensureTenantReady(orgId, { signal });
   if (!tenantId) return tenantNotReadyResponse();
 
   return {
@@ -177,6 +183,7 @@ async function prepareRotation(
     stored: { ...stored, permissions },
     orchestrator,
     tenantId,
+    signal,
     rotator: { orgId, userId, email: getVerifiedEmail(event) },
   };
 }
@@ -188,6 +195,7 @@ async function issueReplacement({
   orchestrator,
   tenantId,
   rotator,
+  signal,
 }: Rotation): Promise<APIGatewayProxyStructuredResultV2> {
   const { orgId, userId, email } = rotator;
   const actor = userActor({ userId, email });
@@ -226,13 +234,17 @@ async function issueReplacement({
 
   let replacement: IssuedAccessKey;
   try {
-    replacement = await orchestrator.issueAccessKey(tenantId, {
-      keyName: vendorKeyName,
-      permissions: stored.permissions,
-      granularPermissions: stored.granularPermissions,
-      buckets: stored.bucketScope === 'specific' ? (stored.buckets ?? []) : undefined,
-      expiresAt: stored.expiresAt ?? null,
-    });
+    replacement = await orchestrator.issueAccessKey(
+      tenantId,
+      {
+        keyName: vendorKeyName,
+        permissions: stored.permissions,
+        granularPermissions: stored.granularPermissions,
+        buckets: stored.bucketScope === 'specific' ? (stored.buckets ?? []) : undefined,
+        expiresAt: stored.expiresAt ?? null,
+      },
+      { signal },
+    );
   } catch (err) {
     return await handleMintRefusal(err, mint);
   }
@@ -273,7 +285,7 @@ async function issueReplacement({
     ],
   });
   if (!record.recorded) {
-    await discardUnrecordedKey({ minted, mint, minter });
+    await discardUnrecordedKey({ minted, mint, minter, signal });
     return unrecordedResponse(record, ownedByCaller);
   }
 
@@ -285,7 +297,7 @@ async function issueReplacement({
     // place it would strand the key: live, listed, and refused every rotation
     // as already rotated. Released only once the credential is gone, so a
     // claim never points at nothing while a credential still exists.
-    if (await discardRecordedKey({ minted, minter, actor })) {
+    if (await discardRecordedKey({ minted, minter, actor, signal })) {
       await releaseSourceClaim({ orgId, keyId, replacedBy: replacement.id });
     }
     return ownerRoleChangedResponse(ownedByCaller);
@@ -308,6 +320,7 @@ async function issueReplacement({
     tenantId,
     actor,
     reason: 'rotation',
+    signal,
   });
 
   return new ResponseBuilder()
@@ -333,6 +346,8 @@ interface Rotation {
   tenantId: string;
   /** Who asked. Everything the mint needs about them is derived from this. */
   rotator: { orgId: string; userId: string; email?: string };
+  /** One deadline for every vendor call the rotation makes. */
+  signal: AbortSignal;
 }
 
 /**
