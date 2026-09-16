@@ -16,6 +16,11 @@ import type { OrgProfileItem } from './org-profile.ts';
 // and the budget outlasts that writer. A 404 is not retried — see deleteTenant.
 export const TENANT_DELETE_RETRY = { retries: 3 } as const;
 
+export interface OrchestratorRequestOptions {
+  /** Lets the caller abort every upstream request (HTTP or S3) the operation makes. */
+  signal?: AbortSignal;
+}
+
 /**
  * Object-lock and retention state. Neither orchestrator's bucket *list* carries
  * it, and a per-bucket read on every row would mean an N+1 on a page every user
@@ -194,7 +199,10 @@ export interface ServiceOrchestrator {
    * @returns The resolved `tenantId` once the tenant is fully provisioned,
    *          or `null` if setup is still in progress or has failed.
    */
-  ensureTenantReady(orgId: string): Promise<string | null>;
+  ensureTenantReady(
+    orgId: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<string | null>;
 
   /**
    * Side-effect-free readiness check: extracts this orchestrator's `tenantId`
@@ -214,10 +222,25 @@ export interface ServiceOrchestrator {
    */
   isTenantReady(orgProfile: OrgProfileItem | undefined): string | null;
 
-  createBucket(tenantId: string, args: CreateBucketArgs): Promise<void>;
-  deleteBucket(tenantId: string, bucketName: string): Promise<void>;
-  listBuckets(tenantId: string): Promise<BucketSummary[]>;
-  getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null>;
+  createBucket(
+    tenantId: string,
+    args: CreateBucketArgs,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<void>;
+  deleteBucket(
+    tenantId: string,
+    bucketName: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<void>;
+  listBuckets(
+    tenantId: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<BucketSummary[]>;
+  getBucket(
+    tenantId: string,
+    bucketName: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<BucketDetails | null>;
 
   /**
    * Sets the tenant's status on this orchestrator's API (e.g. locking or
@@ -225,7 +248,11 @@ export interface ServiceOrchestrator {
    * methods this is stateless and takes a `tenantId` directly — it calls the
    * orchestrator API only and does not write to DDB.
    */
-  updateTenantStatus(tenantId: string, status: TenantStatus): Promise<void>;
+  updateTenantStatus(
+    tenantId: string,
+    status: TenantStatus,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<void>;
 
   /**
    * Permanently deletes the tenant and everything it owns (buckets, objects,
@@ -236,7 +263,7 @@ export interface ServiceOrchestrator {
    * The disable is only the delete's precondition, so its 404 must not skip the
    * delete — a partially-failed pass leaves resources still to collect.
    */
-  deleteTenant(tenantId: string): Promise<void>;
+  deleteTenant(tenantId: string, requestOptions?: OrchestratorRequestOptions): Promise<void>;
 
   /**
    * Reads the tenant's current live status from this orchestrator's API. Like
@@ -245,12 +272,20 @@ export interface ServiceOrchestrator {
    * transport/server failures are returned as `{ kind: 'error' }` so background
    * jobs can classify them (see {@link TenantStatusProbe}).
    */
-  getTenantStatus(tenantId: string): Promise<TenantStatusProbe>;
+  getTenantStatus(
+    tenantId: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<TenantStatusProbe>;
 
-  issueAccessKey(tenantId: string, opts: IssueAccessKeyOpts): Promise<IssuedAccessKey>;
+  issueAccessKey(
+    tenantId: string,
+    keyOpts: IssueAccessKeyOpts,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<IssuedAccessKey>;
   findAccessKeyByName(
     tenantId: string,
     keyName: string,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<{ id: string; accessKeyId: string; createdAt: string } | undefined>;
 
   /**
@@ -258,9 +293,16 @@ export interface ServiceOrchestrator {
    * (already deleted upstream) is treated as success, not an error. Any other
    * failure should propagate so the caller can leave the DDB row intact.
    */
-  deleteAccessKey(tenantId: string, keyId: string): Promise<void>;
+  deleteAccessKey(
+    tenantId: string,
+    keyId: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<void>;
 
-  getS3ClientContext(tenantId: string): Promise<S3ClientContext>;
+  getS3ClientContext(
+    tenantId: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<S3ClientContext>;
 
   /**
    * Returns the tenant's storage and egress usage as normalized time series
@@ -269,14 +311,15 @@ export interface ServiceOrchestrator {
    */
   getTenantUsageMetrics(
     tenantId: string,
-    opts: GetTenantUsageMetricsOptions,
+    metricsOpts: GetTenantUsageMetricsOptions,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<TenantUsageMetrics>;
 
   /**
    * Returns the tenant's quota and status snapshot (bucket/key counts and
    * limits, lifecycle status). Read-only. Backs the usage dashboard.
    */
-  getTenantInfo(tenantId: string): Promise<TenantInfo>;
+  getTenantInfo(tenantId: string, requestOptions?: OrchestratorRequestOptions): Promise<TenantInfo>;
 
   /**
    * Returns a single bucket's storage usage as a normalized time series over
@@ -288,6 +331,7 @@ export interface ServiceOrchestrator {
   getBucketUsageMetrics(
     tenantId: string,
     bucketName: string,
-    opts: GetTenantUsageMetricsOptions,
+    metricsOpts: GetTenantUsageMetricsOptions,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<StorageUsageSample[]>;
 }
