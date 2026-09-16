@@ -11,7 +11,7 @@ import { Resource } from 'sst';
 import { getDynamoClient } from '../ddb-client.ts';
 import { OrgDeletingError } from '../org-profile.ts';
 import { resolveRefusedTenantWrite } from '../tenant-setup-fence.ts';
-import type { FthManagementClient } from './fth-management-client.ts';
+import type { FthManagementClient, FthRequestOptions } from './fth-management-client.ts';
 
 export const FTH_FULL_PERMISSIONS = [
   's3:CreateBucket',
@@ -53,13 +53,15 @@ const ssm = new SSMClient({});
 // Public entry point for synchronous tenant setup from request handlers.
 // Returns the fthTenantId on success, or null on any setup failure so the
 // handler can return the standard 503 tenant-not-ready response. The state
-// machine resumes from whatever step is next on the user's retry.
+// machine resumes from whatever step is next on the user's retry. `opts.signal`
+// bounds every FTH call the setup makes, including the rollback delete.
 export async function ensureTenantReady(
   client: FthManagementClient,
   orgId: string,
+  opts?: FthRequestOptions,
 ): Promise<string | null> {
   try {
-    return await processTenantSetup(client, orgId);
+    return await processTenantSetup(client, orgId, opts);
   } catch (err) {
     // Not a setup failure: retrying will never succeed, so it must not become
     // a "try again in a moment".
@@ -78,7 +80,11 @@ export async function ensureTenantReady(
 // (failure-count tracking, partial-progress resumption, transitional
 // statuses from FthTenantSetupStatus) before relying on this in
 // production. See aurora-tenant-setup.ts for the pattern to mirror.
-async function processTenantSetup(client: FthManagementClient, orgId: string): Promise<string> {
+async function processTenantSetup(
+  client: FthManagementClient,
+  orgId: string,
+  opts?: FthRequestOptions,
+): Promise<string> {
   const stage = process.env.FILONE_STAGE!;
   const key = { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } };
 
@@ -100,38 +106,50 @@ async function processTenantSetup(client: FthManagementClient, orgId: string): P
   // would leave every one of them orphaned.
   if (existing.Item?.deleting?.BOOL === true) throw new OrgDeletingError(orgId);
 
-  const fthClient = await client.createClient({
-    externalId: orgId,
-    displayName: `FilOne ${stage} ${orgId}`,
-    idempotencyKey: orgId,
-  });
+  const fthClient = await client.createClient(
+    {
+      externalId: orgId,
+      displayName: `FilOne ${stage} ${orgId}`,
+      idempotencyKey: orgId,
+    },
+    opts,
+  );
   const tenantId = String(fthClient.id);
 
-  const storageUser = await client.createStorageUser(tenantId, {
-    // The FTH `users.email` column has a global unique index, so scope the
-    // synthetic email by tenantId (which is itself unique per FTH client)
-    email: `console-${stage}-${tenantId}@filone.internal`,
-    displayName: 'FilOne Console User',
-    userCode: FTH_CONSOLE_USER_CODE,
-    role: 'storage_user',
-    issueS3Credentials: false,
-    idempotencyKey: `console-${stage}-${tenantId}`,
-  });
+  const storageUser = await client.createStorageUser(
+    tenantId,
+    {
+      // The FTH `users.email` column has a global unique index, so scope the
+      // synthetic email by tenantId (which is itself unique per FTH client)
+      email: `console-${stage}-${tenantId}@filone.internal`,
+      displayName: 'FilOne Console User',
+      userCode: FTH_CONSOLE_USER_CODE,
+      role: 'storage_user',
+      issueS3Credentials: false,
+      idempotencyKey: `console-${stage}-${tenantId}`,
+    },
+    opts,
+  );
 
-  const accessKey = await client.createAccessKey(tenantId, storageUser.id, {
-    name: FTH_CONSOLE_KEY_NAME,
-    permissions: [...FTH_FULL_PERMISSIONS],
-    buckets: [],
-    expiresAt: null,
-    // Scoped to the tenant and storage user rather than to orgId. A key derived from orgId alone
-    // stays constant while the path does not. An org that gets re-provisioned onto a new FTH client
-    // and storage user would replay such a key against a path it was never minted for, and fail
-    // with 409 "idempotency key replay with different payload" — permanently, since nothing about
-    // the key would ever change again. The `-v2` segment covers the payload change that came with
-    // FTH_CONSOLE_KEY_NAME: a tenant whose setup crashed between this call and the fthTenantId
-    // write would otherwise replay the pre-v2 key with the new payload and 409 forever.
-    idempotencyKey: `console-key-v2-${stage}-${tenantId}-${storageUser.id}`,
-  });
+  const accessKey = await client.createAccessKey(
+    tenantId,
+    storageUser.id,
+    {
+      name: FTH_CONSOLE_KEY_NAME,
+      permissions: [...FTH_FULL_PERMISSIONS],
+      buckets: [],
+      expiresAt: null,
+      // Scoped to the tenant and storage user rather than to orgId. A key derived from orgId alone
+      // stays constant while the path does not. An org that gets re-provisioned onto a new FTH client
+      // and storage user would replay such a key against a path it was never minted for, and fail
+      // with 409 "idempotency key replay with different payload" — permanently, since nothing about
+      // the key would ever change again. The `-v2` segment covers the payload change that came with
+      // FTH_CONSOLE_KEY_NAME: a tenant whose setup crashed between this call and the fthTenantId
+      // write would otherwise replay the pre-v2 key with the new payload and 409 forever.
+      idempotencyKey: `console-key-v2-${stage}-${tenantId}-${storageUser.id}`,
+    },
+    opts,
+  );
 
   await ssm.send(
     new PutParameterCommand({
@@ -170,7 +188,7 @@ async function processTenantSetup(client: FthManagementClient, orgId: string): P
       orchestratorId: 'fth',
       tenantId,
       err,
-      deleteTenant: () => client.deleteClient(tenantId),
+      deleteTenant: () => client.deleteClient(tenantId, opts),
     });
   }
 

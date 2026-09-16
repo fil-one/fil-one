@@ -11,40 +11,67 @@ export * from './fth-api-errors.ts';
 // service-orchestrator.ts. Matches FTH's TenantStatus enum.
 export type FthClientStatus = 'active' | 'write-locked' | 'disabled';
 
+/**
+ * Per-request options that never reach the wire. `args` payloads are request
+ * bodies, so the signal rides in this trailing bag instead.
+ */
+export interface FthRequestOptions {
+  /** Aborts the request. The caller owns the deadline, see OrchestratorRequestOptions. */
+  signal?: AbortSignal;
+}
+
 export interface FthManagementClient {
-  createClient(args: CreateClientArgs): Promise<FthClientRecord>;
-  getClient(clientRef: string): Promise<FthClientRecord>;
+  createClient(args: CreateClientArgs, opts?: FthRequestOptions): Promise<FthClientRecord>;
+  getClient(clientRef: string, opts?: FthRequestOptions): Promise<FthClientRecord>;
   updateClientStatus(
     clientRef: string,
     args: { status: FthClientStatus; displayName?: string; idempotencyKey?: string },
+    opts?: FthRequestOptions,
   ): Promise<void>;
   // No idempotency key: a repeat DELETE of a resolvable ref already answers
   // 204, and a cached key would replay a 409 instead of retrying it.
-  deleteClient(clientRef: string): Promise<void>;
+  deleteClient(clientRef: string, opts?: FthRequestOptions): Promise<void>;
 
-  createStorageUser(clientRef: string, args: CreateStorageUserArgs): Promise<FthStorageUser>;
-  listStorageUsers(clientRef: string): Promise<FthStorageUser[]>;
-  getStorageUser(clientRef: string, userRef: string): Promise<FthStorageUser>;
+  createStorageUser(
+    clientRef: string,
+    args: CreateStorageUserArgs,
+    opts?: FthRequestOptions,
+  ): Promise<FthStorageUser>;
+  listStorageUsers(clientRef: string, opts?: FthRequestOptions): Promise<FthStorageUser[]>;
+  getStorageUser(
+    clientRef: string,
+    userRef: string,
+    opts?: FthRequestOptions,
+  ): Promise<FthStorageUser>;
 
   createAccessKey(
     clientRef: string,
     userRef: string,
     args: CreateAccessKeyArgs,
+    opts?: FthRequestOptions,
   ): Promise<FthAccessKeyWithSecret>;
-  listAccessKeys(clientRef: string): Promise<FthAccessKey[]>;
-  getAccessKey(clientRef: string, accessKeyId: string): Promise<FthAccessKey>;
+  listAccessKeys(clientRef: string, opts?: FthRequestOptions): Promise<FthAccessKey[]>;
+  getAccessKey(
+    clientRef: string,
+    accessKeyId: string,
+    opts?: FthRequestOptions,
+  ): Promise<FthAccessKey>;
   deleteAccessKey(
     clientRef: string,
     accessKeyId: string,
-    opts?: { idempotencyKey?: string },
+    opts?: { idempotencyKey?: string } & FthRequestOptions,
   ): Promise<void>;
 
   getClientMetricsTimeseries(
     clientRef: string,
     query: { from: string; to: string; interval?: string },
+    opts?: FthRequestOptions,
   ): Promise<FthMetricsTimeseriesResponse>;
 
-  getClientMetricsCurrent(clientRef: string): Promise<FthMetricsCurrentResponse>;
+  getClientMetricsCurrent(
+    clientRef: string,
+    opts?: FthRequestOptions,
+  ): Promise<FthMetricsCurrentResponse>;
 
   interceptors: {
     request: { use(fn: RequestInterceptor): number };
@@ -239,15 +266,20 @@ interface RequestContext {
   errorInterceptors: ErrorInterceptor[];
 }
 
+// Everything one request needs beyond its method and path. `signal` is the
+// caller's deadline; the other three shape the wire request.
+interface RequestOpts {
+  body?: unknown;
+  idempotencyKey?: string;
+  query?: URLSearchParams;
+  signal?: AbortSignal;
+}
+
 function buildHttpRequest(
   ctx: RequestContext,
   method: string,
   path: string,
-  opts: {
-    body?: unknown;
-    idempotencyKey?: string;
-    query?: URLSearchParams;
-  },
+  opts: RequestOpts,
 ): Request {
   const headers = new Headers({
     Authorization: `Bearer ${ctx.token}`,
@@ -255,7 +287,7 @@ function buildHttpRequest(
   });
   if (opts.idempotencyKey) headers.set('Idempotency-Key', opts.idempotencyKey);
 
-  const init: RequestInit = { method, headers };
+  const init: RequestInit = { method, headers, signal: opts.signal };
   if (opts.body !== undefined) {
     headers.set('Content-Type', 'application/json');
     init.body = JSON.stringify(opts.body);
@@ -274,11 +306,7 @@ interface RequestSpec {
   method: string;
   pathTemplate: string;
   pathParams: Record<string, string>;
-  opts?: {
-    body?: unknown;
-    idempotencyKey?: string;
-    query?: URLSearchParams;
-  };
+  opts?: RequestOpts;
 }
 
 async function runRequest<T>(
@@ -350,16 +378,12 @@ type RequestFn = <T>(
   method: string,
   pathTemplate: string,
   pathParams: Record<string, string>,
-  opts?: {
-    body?: unknown;
-    idempotencyKey?: string;
-    query?: URLSearchParams;
-  },
+  opts?: RequestOpts,
 ) => Promise<T>;
 
 function buildEndpointMethods(request: RequestFn): Omit<FthManagementClient, 'interceptors'> {
   return {
-    createClient: (args) =>
+    createClient: (args, opts) =>
       request<FthClientRecord>(
         'POST',
         '/management/v1/clients',
@@ -367,11 +391,17 @@ function buildEndpointMethods(request: RequestFn): Omit<FthManagementClient, 'in
         {
           body: { externalId: args.externalId, displayName: args.displayName },
           idempotencyKey: args.idempotencyKey,
+          signal: opts?.signal,
         },
       ),
-    getClient: (clientRef) =>
-      request<FthClientRecord>('GET', '/management/v1/clients/{clientRef}', { clientRef }),
-    updateClientStatus: (clientRef, args) =>
+    getClient: (clientRef, opts) =>
+      request<FthClientRecord>(
+        'GET',
+        '/management/v1/clients/{clientRef}',
+        { clientRef },
+        { signal: opts?.signal },
+      ),
+    updateClientStatus: (clientRef, args, opts) =>
       request<void>(
         'PATCH',
         '/management/v1/clients/{clientRef}',
@@ -382,12 +412,18 @@ function buildEndpointMethods(request: RequestFn): Omit<FthManagementClient, 'in
             ...(args.displayName !== undefined && { displayName: args.displayName }),
           },
           idempotencyKey: args.idempotencyKey,
+          signal: opts?.signal,
         },
       ),
-    deleteClient: (clientRef) =>
-      request<void>('DELETE', '/management/v1/clients/{clientRef}', { clientRef }),
+    deleteClient: (clientRef, opts) =>
+      request<void>(
+        'DELETE',
+        '/management/v1/clients/{clientRef}',
+        { clientRef },
+        { signal: opts?.signal },
+      ),
 
-    createStorageUser: (clientRef, args) =>
+    createStorageUser: (clientRef, args, opts) =>
       request<FthStorageUser>(
         'POST',
         '/management/v1/clients/{clientRef}/storage-users',
@@ -401,39 +437,44 @@ function buildEndpointMethods(request: RequestFn): Omit<FthManagementClient, 'in
             issueS3Credentials: args.issueS3Credentials,
           },
           idempotencyKey: args.idempotencyKey,
+          signal: opts?.signal,
         },
       ),
-    listStorageUsers: async (clientRef) => {
+    listStorageUsers: async (clientRef, opts) => {
       const res = await request<FthListResponse<FthStorageUser>>(
         'GET',
         '/management/v1/clients/{clientRef}/storage-users',
         { clientRef },
+        { signal: opts?.signal },
       );
       return res.items ?? [];
     },
-    getStorageUser: (clientRef, userRef) =>
-      request<FthStorageUser>('GET', '/management/v1/clients/{clientRef}/storage-users/{userRef}', {
-        clientRef,
-        userRef,
-      }),
+    getStorageUser: (clientRef, userRef, opts) =>
+      request<FthStorageUser>(
+        'GET',
+        '/management/v1/clients/{clientRef}/storage-users/{userRef}',
+        { clientRef, userRef },
+        { signal: opts?.signal },
+      ),
 
     ...buildAccessKeyMethods(request),
 
-    getClientMetricsTimeseries: (clientRef, query) => {
+    getClientMetricsTimeseries: (clientRef, query, opts) => {
       const params = new URLSearchParams({ from: query.from, to: query.to });
       if (query.interval) params.set('interval', query.interval);
       return request<FthMetricsTimeseriesResponse>(
         'GET',
         '/management/v1/clients/{clientRef}/metrics/timeseries',
         { clientRef },
-        { query: params },
+        { query: params, signal: opts?.signal },
       );
     },
-    getClientMetricsCurrent: (clientRef) =>
+    getClientMetricsCurrent: (clientRef, opts) =>
       request<FthMetricsCurrentResponse>(
         'GET',
         '/management/v1/clients/{clientRef}/metrics/current',
         { clientRef },
+        { signal: opts?.signal },
       ),
   };
 }
@@ -445,7 +486,7 @@ function buildAccessKeyMethods(
   'createAccessKey' | 'listAccessKeys' | 'getAccessKey' | 'deleteAccessKey'
 > {
   return {
-    createAccessKey: (clientRef, userRef, args) =>
+    createAccessKey: (clientRef, userRef, args, opts) =>
       request<FthAccessKeyWithSecret>(
         'POST',
         '/management/v1/clients/{clientRef}/storage-users/{userRef}/access-keys',
@@ -458,27 +499,31 @@ function buildAccessKeyMethods(
             expiresAt: args.expiresAt,
           },
           idempotencyKey: args.idempotencyKey,
+          signal: opts?.signal,
         },
       ),
-    listAccessKeys: async (clientRef) => {
+    listAccessKeys: async (clientRef, opts) => {
       const res = await request<FthListResponse<FthAccessKey>>(
         'GET',
         '/management/v1/clients/{clientRef}/access-keys',
         { clientRef },
+        { signal: opts?.signal },
       );
       return res.items ?? [];
     },
-    getAccessKey: (clientRef, accessKeyId) =>
-      request<FthAccessKey>('GET', '/management/v1/clients/{clientRef}/access-keys/{accessKeyId}', {
-        clientRef,
-        accessKeyId,
-      }),
+    getAccessKey: (clientRef, accessKeyId, opts) =>
+      request<FthAccessKey>(
+        'GET',
+        '/management/v1/clients/{clientRef}/access-keys/{accessKeyId}',
+        { clientRef, accessKeyId },
+        { signal: opts?.signal },
+      ),
     deleteAccessKey: (clientRef, accessKeyId, opts) =>
       request<void>(
         'DELETE',
         '/management/v1/clients/{clientRef}/access-keys/{accessKeyId}',
         { clientRef, accessKeyId },
-        { idempotencyKey: opts?.idempotencyKey },
+        { idempotencyKey: opts?.idempotencyKey, signal: opts?.signal },
       ),
   };
 }

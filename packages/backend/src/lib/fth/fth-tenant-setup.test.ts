@@ -40,6 +40,9 @@ import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 const orgId = '00000000-0000-0000-0000-000000000001';
 const fthClientId = '42';
 const serviceUserId = '7';
+// The caller's deadline. Never aborted here: these tests check it reaches every
+// FTH call, not what happens when it fires.
+const signal = new AbortController().signal;
 
 function profileItem(attrs: Record<string, string>) {
   return Object.fromEntries(Object.entries(attrs).map(([k, v]) => [k, { S: v }]));
@@ -108,8 +111,10 @@ describe('ensureTenantReady', () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
       try {
-        await expect(ensureTenantReady(fthClient, orgId)).rejects.toBeInstanceOf(OrgDeletingError);
-        expect(mockFthClient.deleteClient).toHaveBeenCalledWith(fthClientId);
+        await expect(ensureTenantReady(fthClient, orgId, { signal })).rejects.toBeInstanceOf(
+          OrgDeletingError,
+        );
+        expect(mockFthClient.deleteClient).toHaveBeenCalledWith(fthClientId, { signal });
       } finally {
         warn.mockRestore();
       }
@@ -125,8 +130,8 @@ describe('ensureTenantReady', () => {
       const error = vi.spyOn(console, 'error').mockImplementation(() => {});
 
       try {
-        await expect(ensureTenantReady(fthClient, orgId)).resolves.toBeNull();
-        expect(mockFthClient.deleteClient).toHaveBeenCalledWith(fthClientId);
+        await expect(ensureTenantReady(fthClient, orgId, { signal })).resolves.toBeNull();
+        expect(mockFthClient.deleteClient).toHaveBeenCalledWith(fthClientId, { signal });
       } finally {
         warn.mockRestore();
         error.mockRestore();
@@ -178,14 +183,17 @@ describe('ensureTenantReady', () => {
     ssmMock.on(PutParameterCommand).resolves({});
     stubSetupApiCalls();
 
-    const result = await ensureTenantReady(fthClient, orgId);
+    const result = await ensureTenantReady(fthClient, orgId, { signal });
 
     expect(result).toBe(fthClientId);
-    expect(mockFthClient.createClient).toHaveBeenCalledWith({
-      externalId: orgId,
-      displayName: `FilOne test ${orgId}`,
-      idempotencyKey: orgId,
-    });
+    expect(mockFthClient.createClient).toHaveBeenCalledWith(
+      {
+        externalId: orgId,
+        displayName: `FilOne test ${orgId}`,
+        idempotencyKey: orgId,
+      },
+      { signal },
+    );
     expect(mockFthClient.createStorageUser).toHaveBeenCalledWith(
       fthClientId,
       expect.objectContaining({
@@ -195,6 +203,7 @@ describe('ensureTenantReady', () => {
         issueS3Credentials: false,
         idempotencyKey: `console-test-${fthClientId}`,
       }),
+      { signal },
     );
     expect(mockFthClient.createAccessKey).toHaveBeenCalledWith(
       fthClientId,
@@ -203,6 +212,7 @@ describe('ensureTenantReady', () => {
         name: 'filone-console-v2',
         idempotencyKey: `console-key-v2-test-${fthClientId}-${serviceUserId}`,
       }),
+      { signal },
     );
 
     const putCalls = ssmMock.commandCalls(PutParameterCommand);
