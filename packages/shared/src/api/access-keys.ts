@@ -211,6 +211,23 @@ export const CreateAccessKeySchema = z
 
 export type CreateAccessKeyRequest = z.infer<typeof CreateAccessKeySchema>;
 
+/**
+ * The create request on a region serving the `iam` access model. A key there
+ * belongs to the caller's principal and carries no permissions or bucket list,
+ * so the form asks for a name and an expiry and nothing else. The name rules
+ * are {@link CreateAccessKeySchema}'s; the region is validated by the handler
+ * against the access model it serves.
+ */
+export const CreatePrincipalAccessKeySchema = z
+  .object({
+    keyName: CreateAccessKeySchema.shape.keyName,
+    region: z.enum(S3Region),
+    expiresAt: CreateAccessKeySchema.shape.expiresAt,
+  })
+  .strict();
+
+export type CreatePrincipalAccessKeyRequest = z.infer<typeof CreatePrincipalAccessKeySchema>;
+
 export interface AccessKey {
   id: string;
   keyName: string;
@@ -218,10 +235,20 @@ export interface AccessKey {
   createdAt: string;
   lastUsedAt?: string;
   status: AccessKeyStatus;
-  permissions: AccessKeyPermission[];
+  /**
+   * What the key carries. Absent on a principal-bound key, whose authority is
+   * whatever the bucket policies give its member at request time.
+   */
+  permissions?: AccessKeyPermission[];
   granularPermissions?: GranularPermission[];
-  bucketScope: AccessKeyBucketScope;
+  bucketScope?: AccessKeyBucketScope;
   buckets?: string[];
+  /**
+   * The member this key is bound to, on a region serving the `iam` access
+   * model. Set on every key minted there; such a key holds no permissions or
+   * bucket list of its own.
+   */
+  principalId?: string;
   region?: S3Region;
   expiresAt?: string | null;
   /**
@@ -249,6 +276,8 @@ export interface CreateAccessKeyResponse {
   accessKeyId: string;
   secretAccessKey: string;
   createdAt: string;
+  /** Set when the key was bound to the caller's principal. See {@link AccessKey.principalId}. */
+  principalId?: string;
 }
 
 export interface DeleteAccessKeyRequest {

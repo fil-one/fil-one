@@ -141,6 +141,11 @@ function requirementFor(
 export interface AccessKeyPermissions {
   permissions?: readonly string[] | undefined;
   granularPermissions?: readonly string[] | undefined;
+  /**
+   * The member a key is bound to on an `iam` region. Such a key records no
+   * permission set because it has none of its own.
+   */
+  principalId?: string | undefined;
 }
 
 /**
@@ -182,9 +187,11 @@ export type KeyRetentionResult =
  * nor revoke it, since `keys.manage_own` is what scopes the list and the
  * delete.
  *
- * A row recording no permission set cannot be placed inside the new role, so it
- * goes. Bucket scope is never compared: it is the creator's choice at mint time
- * and no role caps it.
+ * A principal-bound key is kept by any role that can mint: it carries nothing
+ * of its own, so a narrowing has nothing to compare, and what its holder may do
+ * follows the bucket policies live. A row recording no permission set and no
+ * principal cannot be placed inside the new role, so it goes. Bucket scope is
+ * never compared: it is the creator's choice at mint time and no role caps it.
  *
  * The caller decides whose keys to ask about. A row with no `createdBy` belongs
  * to nobody the console can name and is outside this rule entirely.
@@ -193,6 +200,7 @@ export function canRetainAccessKey(role: string, key: AccessKeyPermissions): Key
   if (!roleHasPermission(role, 'keys.create')) {
     return { retained: false, reason: 'role_cannot_mint' };
   }
+  if (key.principalId) return { retained: true };
   if (!key.permissions) return { retained: false, reason: 'permissions_unrecorded' };
 
   const excess = excessKeyPermissions(role, {
