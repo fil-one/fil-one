@@ -36,6 +36,8 @@ export interface MemberAccessKey {
   createdBy?: string;
   permissions?: AccessKeyRecord['permissions'];
   granularPermissions?: AccessKeyRecord['granularPermissions'];
+  /** Set on a principal-bound key, which a narrowing keeps under any role that can mint. */
+  principalId?: string;
 }
 
 /** A key the member could no longer mint, and why. */
@@ -201,5 +203,6 @@ function toMemberAccessKey(record: Partial<AccessKeyRecord>): MemberAccessKey {
     ...(record.createdBy ? { createdBy: record.createdBy } : {}),
     ...(record.permissions ? { permissions: record.permissions } : {}),
     ...(record.granularPermissions ? { granularPermissions: record.granularPermissions } : {}),
+    ...(record.principalId ? { principalId: record.principalId } : {}),
   };
 }

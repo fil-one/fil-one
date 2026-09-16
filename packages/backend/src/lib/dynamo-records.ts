@@ -70,6 +70,14 @@ export interface AccessKeyRecord {
   granularPermissions?: GranularPermission[];
   bucketScope?: AccessKeyBucketScope;
   buckets?: string[];
+  /**
+   * The member this key is bound to, on a region serving the `iam` access
+   * model. Such a row records no `permissions`, `bucketScope` or `buckets`: the
+   * key carries nothing of its own, and what its holder may do is whatever the
+   * bucket policies give them at request time. Always the same as `createdBy`
+   * today; kept apart because it is what the storage system knows the key by.
+   */
+  principalId?: string;
   expiresAt?: string;
   /** The FilOne user who minted the key. Absent on keys older than roles. */
   createdBy?: string;

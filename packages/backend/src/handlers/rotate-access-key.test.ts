@@ -520,6 +520,16 @@ describe('rotate-access-key baseHandler', () => {
     expect(mockIssueAccessKey).not.toHaveBeenCalled();
   });
 
+  it('refuses to rotate a principal-bound key, which has no permission set to reissue from', async () => {
+    stubStoredKey({ permissions: undefined, principalId: 'user-1' });
+
+    const result = await baseHandler(eventFor());
+
+    expect(result.statusCode).toBe(409);
+    expect(body(result).message).toContain('bucket policies');
+    expect(mockIssueAccessKey).not.toHaveBeenCalled();
+  });
+
   it('refuses a row that never recorded what its key carries', async () => {
     stubStoredKey({ permissions: undefined });
 
