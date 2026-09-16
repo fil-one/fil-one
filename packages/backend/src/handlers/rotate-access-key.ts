@@ -323,11 +323,23 @@ async function issueReplacement({
     signal,
   });
 
+  return rotatedResponse(stored.keyName, replacement, previousKeyRevoked);
+}
+
+/**
+ * The replacement credential, returned once. `keyName` is the local name the
+ * caller knows the key by, not the vendor name the rotation minted it under.
+ */
+function rotatedResponse(
+  keyName: string,
+  replacement: IssuedAccessKey,
+  previousKeyRevoked: boolean,
+): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(201)
     .body<RotateAccessKeyResponse>({
       id: replacement.id,
-      keyName: stored.keyName,
+      keyName,
       accessKeyId: replacement.accessKeyId,
       secretAccessKey: replacement.accessKeySecret,
       createdAt: replacement.createdAt,

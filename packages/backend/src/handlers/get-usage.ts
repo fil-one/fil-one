@@ -60,7 +60,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   // rest: settle every fetch, log the failures, and keep the successes.
   const settled = await Promise.allSettled(
     regions.map(({ orchestrator, tenantId }) =>
-      fetchRegionUsage(orchestrator, tenantId, thirtyDaysAgo, now, signal),
+      fetchRegionUsage(orchestrator, tenantId, { from: thirtyDaysAgo, to: now }, signal),
     ),
   );
 
@@ -132,10 +132,10 @@ function aggregateRegionUsages(regionUsages: RegionUsage[], accessKeyCount: numb
 async function fetchRegionUsage(
   orchestrator: ServiceOrchestrator,
   tenantId: string,
-  from: Date,
-  to: Date,
+  window: { from: Date; to: Date },
   signal: AbortSignal,
 ): Promise<RegionUsage> {
+  const { from, to } = window;
   const [metrics, info, buckets] = await Promise.all([
     orchestrator.getTenantUsageMetrics(
       tenantId,
