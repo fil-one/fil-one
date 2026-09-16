@@ -138,3 +138,28 @@ describe('instrumentClient', () => {
     });
   });
 });
+
+describe('instrumentClient deadline classification', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // `AbortSignal.timeout` rejects fetch with exactly this DOMException.
+  function timingOutFetch(): typeof fetch {
+    return vi
+      .fn<typeof fetch>()
+      .mockRejectedValue(
+        new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+      );
+  }
+
+  it('reports metric with statusGroup "timeout" when fetch rejects with a TimeoutError', async () => {
+    const client = buildInstrumentedClient(timingOutFetch());
+
+    await client.getClient('org-1').catch(() => {});
+
+    expect(reportedMetrics()).toEqual([
+      expect.objectContaining({ apiName: 'fth-management', statusGroup: 'timeout' }),
+    ]);
+  });
+});
