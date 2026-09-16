@@ -36,6 +36,12 @@ export const PERMISSIONS = [
   'buckets.create',
   /** Delete a bucket. */
   'buckets.delete',
+  /**
+   * Read and edit a bucket's policy on a region that serves the `iam` access
+   * model. Reading takes the same permission as editing: a member learns their
+   * own reach from the bucket list, and the policy names other people.
+   */
+  'buckets.policy_manage',
   /** View, download, and mint read presigns for objects. */
   'objects.read',
   /** Upload objects (console and presign). */
@@ -92,6 +98,7 @@ export const ROLE_PERMISSIONS: Record<OrgRole, readonly Permission[]> = Object.f
     'buckets.read',
     'buckets.create',
     'buckets.delete',
+    'buckets.policy_manage',
     'objects.read',
     'objects.write',
     'objects.delete',
@@ -110,6 +117,7 @@ export const ROLE_PERMISSIONS: Record<OrgRole, readonly Permission[]> = Object.f
     'buckets.read',
     'buckets.create',
     'buckets.delete',
+    'buckets.policy_manage',
     'objects.read',
     'objects.write',
     'objects.delete',

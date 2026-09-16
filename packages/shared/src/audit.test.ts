@@ -37,6 +37,9 @@ const ADR_EVENT_TYPES = [
   'key.deleted',
   'audit.exported',
   'key.rotated',
+  'bucket_policy.created',
+  'bucket_policy.updated',
+  'bucket_policy.deleted',
 ];
 
 describe('the event-type registry', () => {
@@ -77,6 +80,9 @@ describe('the event-type registry', () => {
       'member.removed',
       'ownership.transferred',
       'key.rotated',
+      'bucket_policy.created',
+      'bucket_policy.updated',
+      'bucket_policy.deleted',
     ]);
     for (const type of TWO_PHASE_AUDIT_EVENT_TYPES) {
       expect(AUDIT_EVENT_TYPES).toContain(type);
