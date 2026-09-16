@@ -53,15 +53,15 @@ const ssm = new SSMClient({});
 // Public entry point for synchronous tenant setup from request handlers.
 // Returns the fthTenantId on success, or null on any setup failure so the
 // handler can return the standard 503 tenant-not-ready response. The state
-// machine resumes from whatever step is next on the user's retry. `opts.signal`
+// machine resumes from whatever step is next on the user's retry. `requestOptions.signal`
 // bounds every FTH call the setup makes, including the rollback delete.
 export async function ensureTenantReady(
   client: FthManagementClient,
   orgId: string,
-  opts?: FthRequestOptions,
+  requestOptions?: FthRequestOptions,
 ): Promise<string | null> {
   try {
-    return await processTenantSetup(client, orgId, opts);
+    return await processTenantSetup(client, orgId, requestOptions);
   } catch (err) {
     // Not a setup failure: retrying will never succeed, so it must not become
     // a "try again in a moment".
@@ -83,7 +83,7 @@ export async function ensureTenantReady(
 async function processTenantSetup(
   client: FthManagementClient,
   orgId: string,
-  opts?: FthRequestOptions,
+  requestOptions?: FthRequestOptions,
 ): Promise<string> {
   const stage = process.env.FILONE_STAGE!;
   const key = { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } };
@@ -112,7 +112,7 @@ async function processTenantSetup(
       displayName: `FilOne ${stage} ${orgId}`,
       idempotencyKey: orgId,
     },
-    opts,
+    requestOptions,
   );
   const tenantId = String(fthClient.id);
 
@@ -128,7 +128,7 @@ async function processTenantSetup(
       issueS3Credentials: false,
       idempotencyKey: `console-${stage}-${tenantId}`,
     },
-    opts,
+    requestOptions,
   );
 
   const accessKey = await client.createAccessKey(
@@ -148,7 +148,7 @@ async function processTenantSetup(
       // write would otherwise replay the pre-v2 key with the new payload and 409 forever.
       idempotencyKey: `console-key-v2-${stage}-${tenantId}-${storageUser.id}`,
     },
-    opts,
+    requestOptions,
   );
 
   await ssm.send(
@@ -188,7 +188,7 @@ async function processTenantSetup(
       orchestratorId: 'fth',
       tenantId,
       err,
-      deleteTenant: () => client.deleteClient(tenantId, opts),
+      deleteTenant: () => client.deleteClient(tenantId, requestOptions),
     });
   }
 

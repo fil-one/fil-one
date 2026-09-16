@@ -111,9 +111,9 @@ class FthOrchestrator implements ServiceOrchestrator {
 
   async ensureTenantReady(
     orgId: string,
-    opts?: OrchestratorRequestOptions,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<string | null> {
-    return ensureFthTenantReady(this.client, orgId, opts);
+    return ensureFthTenantReady(this.client, orgId, requestOptions);
   }
 
   isTenantReady(orgProfile: OrgProfileItem | undefined): string | null {
@@ -126,21 +126,21 @@ class FthOrchestrator implements ServiceOrchestrator {
   async updateTenantStatus(
     tenantId: string,
     status: TenantStatus,
-    opts?: OrchestratorRequestOptions,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<void> {
     // FTH uses the same lowercase-dashed status values, so no mapping is needed.
     // A status PATCH is naturally idempotent, so no idempotency key is sent;
     // transient failures are retried by the caller (region-helpers).
-    await this.client.updateClientStatus(tenantId, { status }, opts);
+    await this.client.updateClientStatus(tenantId, { status }, requestOptions);
   }
 
-  async deleteTenant(tenantId: string, opts?: OrchestratorRequestOptions): Promise<void> {
+  async deleteTenant(tenantId: string, requestOptions?: OrchestratorRequestOptions): Promise<void> {
     // The caller's signal also stops the retry loop: once the deadline has
     // passed, every further attempt would abort on arrival.
     await pRetry(
       async () => {
         try {
-          await this.client.updateClientStatus(tenantId, { status: 'disabled' }, opts);
+          await this.client.updateClientStatus(tenantId, { status: 'disabled' }, requestOptions);
         } catch (err) {
           // Precondition only, so a not-found here must not skip the delete.
           if (!(err instanceof FthNotFoundError)) {
@@ -149,23 +149,23 @@ class FthOrchestrator implements ServiceOrchestrator {
         }
 
         try {
-          await this.client.deleteClient(tenantId, opts);
+          await this.client.deleteClient(tenantId, requestOptions);
         } catch (err) {
           // Already deleted answers 204; a not-found means the same.
           if (err instanceof FthNotFoundError) return;
           throw new Error(`Failed to delete FTH tenant ${tenantId}`, { cause: err });
         }
       },
-      { ...TENANT_DELETE_RETRY, signal: opts?.signal },
+      { ...TENANT_DELETE_RETRY, signal: requestOptions?.signal },
     );
   }
 
   async getTenantStatus(
     tenantId: string,
-    opts?: OrchestratorRequestOptions,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<TenantStatusProbe> {
     try {
-      const record = await this.client.getClient(tenantId, opts);
+      const record = await this.client.getClient(tenantId, requestOptions);
       return { kind: 'ok', status: normalizeFthStatus(record.status) };
     } catch (cause) {
       if (cause instanceof FthNotFoundError) return { kind: 'not_found' };
@@ -193,26 +193,25 @@ class FthOrchestrator implements ServiceOrchestrator {
   async createBucket(
     tenantId: string,
     args: CreateBucketArgs,
-    opts?: OrchestratorRequestOptions,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<void> {
     const ctx = await this.getS3ClientContext(tenantId);
     const s3 = createS3Client(ctx);
-    const send = { abortSignal: opts?.signal };
     await s3CreateBucket(
       s3,
       {
         bucketName: args.bucketName,
         objectLockEnabled: args.lock === true,
       },
-      send,
+      requestOptions,
     );
 
     // The signal on the retry options stops retrying once the deadline has
     // passed, instead of burning the remaining attempts on instant aborts.
-    const retry = { ...BUCKET_CONFIG_RETRY, signal: opts?.signal };
+    const retry = { ...BUCKET_CONFIG_RETRY, signal: requestOptions?.signal };
     try {
       if (args.versioning) {
-        await pRetry(() => setBucketVersioning(s3, args.bucketName, true, send), retry);
+        await pRetry(() => setBucketVersioning(s3, args.bucketName, true, requestOptions), retry);
       }
       if (args.retention?.enabled) {
         const retention = args.retention;
@@ -226,7 +225,7 @@ class FthOrchestrator implements ServiceOrchestrator {
                 duration: retention.duration,
                 durationType: retention.durationType,
               },
-              send,
+              requestOptions,
             ),
           retry,
         );
@@ -239,21 +238,24 @@ class FthOrchestrator implements ServiceOrchestrator {
   async deleteBucket(
     tenantId: string,
     bucketName: string,
-    opts?: OrchestratorRequestOptions,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<void> {
     const ctx = await this.getS3ClientContext(tenantId);
     const s3 = createS3Client(ctx);
-    await s3DeleteBucket(s3, bucketName, { abortSignal: opts?.signal });
+    await s3DeleteBucket(s3, bucketName, requestOptions);
   }
 
-  async listBuckets(tenantId: string, opts?: OrchestratorRequestOptions): Promise<BucketSummary[]> {
+  async listBuckets(
+    tenantId: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<BucketSummary[]> {
     // Versioning and object-lock both cost a GetBucket*/GetObjectLockConfiguration
     // call per bucket, an N+1 nobody wants to pay just to render a list. Neither
     // is returned here; getBucket loads both for the one bucket the detail page
     // actually needs them for.
     const ctx = await this.getS3ClientContext(tenantId);
     const s3 = createS3Client(ctx);
-    const { buckets } = await s3ListBuckets(s3, { abortSignal: opts?.signal });
+    const { buckets } = await s3ListBuckets(s3, requestOptions);
 
     return buckets.map((b) => ({
       bucketName: b.name,
@@ -267,18 +269,17 @@ class FthOrchestrator implements ServiceOrchestrator {
   async getBucket(
     tenantId: string,
     bucketName: string,
-    opts?: OrchestratorRequestOptions,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketDetails | null> {
     const ctx = await this.getS3ClientContext(tenantId);
     const s3 = createS3Client(ctx);
-    const send = { abortSignal: opts?.signal };
-    const { buckets } = await s3ListBuckets(s3, send);
+    const { buckets } = await s3ListBuckets(s3, requestOptions);
     const match = buckets.find((b) => b.name === bucketName);
     if (!match) return null;
 
     const [versioning, lock] = await Promise.all([
-      getBucketVersioning(s3, bucketName, send),
-      getBucketObjectLock(s3, bucketName, send),
+      getBucketVersioning(s3, bucketName, requestOptions),
+      getBucketObjectLock(s3, bucketName, requestOptions),
     ]);
 
     return {
@@ -298,9 +299,9 @@ class FthOrchestrator implements ServiceOrchestrator {
   async issueAccessKey(
     tenantId: string,
     keyOpts: IssueAccessKeyOpts,
-    opts?: OrchestratorRequestOptions,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<IssuedAccessKey> {
-    const storageUserId = await this.getFthConsoleStorageUserId(tenantId, opts);
+    const storageUserId = await this.getFthConsoleStorageUserId(tenantId, requestOptions);
 
     const permissions = buildFthPermissions(keyOpts.permissions, keyOpts.granularPermissions);
     const buckets = keyOpts.buckets ?? [];
@@ -326,7 +327,7 @@ class FthOrchestrator implements ServiceOrchestrator {
           ...request,
           idempotencyKey: idempotencyKeyFor(tenantId, storageUserId, request),
         },
-        opts,
+        requestOptions,
       );
 
       return {
@@ -352,8 +353,12 @@ class FthOrchestrator implements ServiceOrchestrator {
     }
   }
 
-  async findAccessKeyByName(tenantId: string, keyName: string, opts?: OrchestratorRequestOptions) {
-    const keys = await this.client.listAccessKeys(tenantId, opts);
+  async findAccessKeyByName(
+    tenantId: string,
+    keyName: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ) {
+    const keys = await this.client.listAccessKeys(tenantId, requestOptions);
     const match = keys.find((k) => k.name === keyName);
     if (!match) return undefined;
     return {
@@ -366,12 +371,12 @@ class FthOrchestrator implements ServiceOrchestrator {
   async deleteAccessKey(
     tenantId: string,
     keyId: string,
-    opts?: OrchestratorRequestOptions,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<void> {
     try {
       await this.client.deleteAccessKey(tenantId, keyId, {
         idempotencyKey: `delete-${keyId}`,
-        signal: opts?.signal,
+        signal: requestOptions?.signal,
       });
     } catch (err) {
       if (err instanceof FthNotFoundError) {
@@ -389,7 +394,7 @@ class FthOrchestrator implements ServiceOrchestrator {
   async getTenantUsageMetrics(
     tenantId: string,
     metricsOpts: GetTenantUsageMetricsOptions,
-    opts?: OrchestratorRequestOptions,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<TenantUsageMetrics> {
     const res = await this.client.getClientMetricsTimeseries(
       tenantId,
@@ -398,7 +403,7 @@ class FthOrchestrator implements ServiceOrchestrator {
         to: metricsOpts.to,
         interval: metricsOpts.interval ?? '1d',
       },
-      opts,
+      requestOptions,
     );
     const points = res.points ?? [];
     const storage = points
@@ -417,8 +422,11 @@ class FthOrchestrator implements ServiceOrchestrator {
     return { storage, egress };
   }
 
-  async getTenantInfo(tenantId: string, opts?: OrchestratorRequestOptions): Promise<TenantInfo> {
-    const c = await this.client.getClient(tenantId, opts);
+  async getTenantInfo(
+    tenantId: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<TenantInfo> {
+    const c = await this.client.getClient(tenantId, requestOptions);
     return {
       bucketCount: c.bucketCount ?? 0,
       bucketLimit: c.bucketLimit ?? 0,
@@ -432,19 +440,19 @@ class FthOrchestrator implements ServiceOrchestrator {
     tenantId: string,
     bucketName: string,
     _metricsOpts: GetTenantUsageMetricsOptions,
-    opts?: OrchestratorRequestOptions,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<StorageUsageSample[]> {
     // Ownership check (tenant-scoped): only the owning tenant's S3 client lists
     // the bucket. A snapshot miss alone can't distinguish "not owned" from
     // "owned but absent from the current breakdown" (e.g. an empty bucket), so
     // confirm existence before reading metrics.
-    const bucket = await this.getBucket(tenantId, bucketName, opts);
+    const bucket = await this.getBucket(tenantId, bucketName, requestOptions);
     if (!bucket) throw new BucketNotFoundError(bucketName);
 
     // FTH has no per-bucket time series; the current-snapshot `by_bucket`
     // breakdown is the finest per-bucket reading available. A bucket can appear
     // once per storage tier, so fold all matching rows into one sample.
-    const snapshot = await this.client.getClientMetricsCurrent(tenantId, opts);
+    const snapshot = await this.client.getClientMetricsCurrent(tenantId, requestOptions);
     const rows = (snapshot.usage?.by_bucket ?? []).filter((b) => b.bucket === bucketName);
     if (rows.length === 0) return [];
 
@@ -458,12 +466,12 @@ class FthOrchestrator implements ServiceOrchestrator {
 
   private async getFthConsoleStorageUserId(
     tenantId: string,
-    opts?: OrchestratorRequestOptions,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<string> {
     const cached = this.consoleStorageUserCache.get(tenantId);
     if (cached) return cached;
 
-    const users = await this.client.listStorageUsers(tenantId, opts);
+    const users = await this.client.listStorageUsers(tenantId, requestOptions);
     const consoleUser = users.find((u) => u.userCode === FTH_CONSOLE_USER_CODE);
     if (!consoleUser) {
       throw new Error(

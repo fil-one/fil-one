@@ -575,7 +575,7 @@ describe('FthClient request signal', () => {
   // Every method, invoked with the request options as its last argument.
   const methods: Record<
     string,
-    (client: FthManagementClient, opts: { signal: AbortSignal }) => Promise<unknown>
+    (client: FthManagementClient, requestOptions: { signal: AbortSignal }) => Promise<unknown>
   > = {
     createClient: (c, o) => c.createClient(args.createClientArgs, o),
     getClient: (c, o) => c.getClient('ref', o),
