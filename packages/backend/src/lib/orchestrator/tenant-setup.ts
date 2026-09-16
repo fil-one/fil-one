@@ -17,6 +17,7 @@ import { Resource } from 'sst';
 import { getDynamoClient } from '../ddb-client.ts';
 import { OrgDeletingError } from '../org-profile.ts';
 import { resolveRefusedTenantWrite } from '../tenant-setup-fence.ts';
+import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
 import {
   deleteTenantsByTenantId,
   deleteTenantsByTenantIdAccessKeysByAccessKeyId,
@@ -69,13 +70,15 @@ export interface TenantSetupDeps {
 // Public entry point for synchronous tenant setup from request handlers.
 // Returns the tenantId on success, or null on any setup failure so the
 // handler can return the standard 503 tenant-not-ready response. Setup
-// resumes from whatever step is next on the user's retry.
+// resumes from whatever step is next on the user's retry. `opts.signal` bounds
+// every Management API call the setup makes, including the rollback delete.
 export async function ensureTenantReady(
   deps: TenantSetupDeps,
   orgId: string,
+  opts?: OrchestratorRequestOptions,
 ): Promise<string | null> {
   try {
-    return await processTenantSetup(deps, orgId);
+    return await processTenantSetup(deps, orgId, opts?.signal);
   } catch (err) {
     // Not a setup failure: retrying will never succeed, so it must not become
     // a "try again in a moment".
@@ -91,7 +94,11 @@ export async function ensureTenantReady(
   }
 }
 
-async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise<string> {
+async function processTenantSetup(
+  deps: TenantSetupDeps,
+  orgId: string,
+  signal?: AbortSignal,
+): Promise<string> {
   const { client, id, region } = deps;
   const tenantIdAttribute = `${id}TenantId`;
   const key = { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } };
@@ -117,6 +124,7 @@ async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise
   // crash gets a 200 with the existing tenant instead of an error.
   const { error: putError } = await putTenantsByTenantId({
     client,
+    signal,
     path: { tenantId: orgId },
     body: { region },
     throwOnError: false,
@@ -125,7 +133,7 @@ async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise
     throw new Error(`Failed to provision tenant ${orgId}`, { cause: putError });
   }
 
-  const consoleKey = await createConsoleAccessKey(deps, orgId);
+  const consoleKey = await createConsoleAccessKey(deps, orgId, signal);
   if (consoleKey) {
     await ssm.send(
       new PutParameterCommand({
@@ -171,6 +179,7 @@ async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise
       deleteTenant: async () => {
         const { error } = await deleteTenantsByTenantId({
           client,
+          signal,
           path: { tenantId: orgId },
           throwOnError: false,
         });
@@ -201,6 +210,7 @@ async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise
 async function createConsoleAccessKey(
   deps: TenantSetupDeps,
   orgId: string,
+  signal?: AbortSignal,
 ): Promise<CreatedAccessKey | null> {
   const { client } = deps;
   const createArgs: CreateAccessKeyRequest = {
@@ -212,6 +222,7 @@ async function createConsoleAccessKey(
 
   const created = await postTenantsByTenantIdAccessKeys({
     client,
+    signal,
     path: { tenantId: orgId },
     body: createArgs,
     throwOnError: false,
@@ -230,6 +241,7 @@ async function createConsoleAccessKey(
   // between key creation and the SSM write leaves an unrecoverable secret).
   const { data: listData, error: listError } = await getTenantsByTenantIdAccessKeys({
     client,
+    signal,
     path: { tenantId: orgId },
     throwOnError: false,
   });
@@ -260,6 +272,7 @@ async function createConsoleAccessKey(
   );
   const { error: deleteError } = await deleteTenantsByTenantIdAccessKeysByAccessKeyId({
     client,
+    signal,
     path: { tenantId: orgId, accessKeyId: existing.accessKeyId },
     throwOnError: false,
   });
@@ -271,6 +284,7 @@ async function createConsoleAccessKey(
 
   const recreated = await postTenantsByTenantIdAccessKeys({
     client,
+    signal,
     path: { tenantId: orgId },
     body: createArgs,
     throwOnError: false,
