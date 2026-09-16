@@ -6,8 +6,14 @@ import type {
   DeleteTenantsByTenantIdAccessKeysByAccessKeyIdData,
   DeleteTenantsByTenantIdAccessKeysByAccessKeyIdErrors,
   DeleteTenantsByTenantIdAccessKeysByAccessKeyIdResponses,
+  DeleteTenantsByTenantIdBucketsByBucketNamePolicyData,
+  DeleteTenantsByTenantIdBucketsByBucketNamePolicyErrors,
+  DeleteTenantsByTenantIdBucketsByBucketNamePolicyResponses,
   DeleteTenantsByTenantIdData,
   DeleteTenantsByTenantIdErrors,
+  DeleteTenantsByTenantIdPrincipalsByPrincipalIdData,
+  DeleteTenantsByTenantIdPrincipalsByPrincipalIdErrors,
+  DeleteTenantsByTenantIdPrincipalsByPrincipalIdResponses,
   DeleteTenantsByTenantIdResponses,
   GetTenantsByTenantIdAccessKeysByAccessKeyIdData,
   GetTenantsByTenantIdAccessKeysByAccessKeyIdErrors,
@@ -18,11 +24,29 @@ import type {
   GetTenantsByTenantIdBucketsByBucketNameMetricsData,
   GetTenantsByTenantIdBucketsByBucketNameMetricsErrors,
   GetTenantsByTenantIdBucketsByBucketNameMetricsResponses,
+  GetTenantsByTenantIdBucketsByBucketNamePolicyData,
+  GetTenantsByTenantIdBucketsByBucketNamePolicyErrors,
+  GetTenantsByTenantIdBucketsByBucketNamePolicyResponses,
   GetTenantsByTenantIdData,
   GetTenantsByTenantIdErrors,
   GetTenantsByTenantIdMetricsData,
   GetTenantsByTenantIdMetricsErrors,
   GetTenantsByTenantIdMetricsResponses,
+  GetTenantsByTenantIdPrincipalsByPrincipalIdAccessData,
+  GetTenantsByTenantIdPrincipalsByPrincipalIdAccessErrors,
+  GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysData,
+  GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysErrors,
+  GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysResponses,
+  GetTenantsByTenantIdPrincipalsByPrincipalIdAccessResponses,
+  GetTenantsByTenantIdPrincipalsByPrincipalIdData,
+  GetTenantsByTenantIdPrincipalsByPrincipalIdErrors,
+  GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesData,
+  GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesErrors,
+  GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesResponses,
+  GetTenantsByTenantIdPrincipalsByPrincipalIdResponses,
+  GetTenantsByTenantIdPrincipalsData,
+  GetTenantsByTenantIdPrincipalsErrors,
+  GetTenantsByTenantIdPrincipalsResponses,
   GetTenantsByTenantIdResponses,
   PostTenantsByTenantIdAccessKeysData,
   PostTenantsByTenantIdAccessKeysErrors,
@@ -30,8 +54,14 @@ import type {
   PostTenantsByTenantIdStatusData,
   PostTenantsByTenantIdStatusErrors,
   PostTenantsByTenantIdStatusResponses,
+  PutTenantsByTenantIdBucketsByBucketNamePolicyData,
+  PutTenantsByTenantIdBucketsByBucketNamePolicyErrors,
+  PutTenantsByTenantIdBucketsByBucketNamePolicyResponses,
   PutTenantsByTenantIdData,
   PutTenantsByTenantIdErrors,
+  PutTenantsByTenantIdPrincipalsByPrincipalIdData,
+  PutTenantsByTenantIdPrincipalsByPrincipalIdErrors,
+  PutTenantsByTenantIdPrincipalsByPrincipalIdResponses,
   PutTenantsByTenantIdResponses,
 } from './types.gen.ts';
 
@@ -193,9 +223,24 @@ export const getTenantsByTenantIdAccessKeys = <ThrowOnError extends boolean = fa
 /**
  * Create an S3 access key
  *
- * Provisions an AWS Sig V4 access-key pair scoped by the supplied
- * permissions and (optionally) a list of buckets. The
- * `secretAccessKey` is returned only in this response.
+ * Provisions an AWS Sig V4 access-key pair. The `secretAccessKey`
+ * is returned only in this response.
+ *
+ * The body takes one of two shapes, and the shape decides the kind
+ * of key:
+ *
+ * * `{ name, permissions, buckets?, expiresAt? }` — a **service
+ * key**, authorized from the permissions and buckets it was
+ * created with.
+ * * `{ name, principalId, expiresAt? }` — a **principal-bound
+ * key** (`iam` access model), authorized on every request from
+ * the bucket policies naming that principal. The orchestrator
+ * must reject (422) a body carrying `principalId` together with
+ * `permissions` or `buckets`, and a `principalId` that is not a
+ * live principal of the tenant.
+ *
+ * A service key's name is unique within the tenant; a
+ * principal-bound key's name is unique within its principal.
  *
  */
 export const postTenantsByTenantIdAccessKeys = <ThrowOnError extends boolean = false>(
@@ -255,6 +300,232 @@ export const getTenantsByTenantIdAccessKeysByAccessKeyId = <ThrowOnError extends
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/tenants/{tenantId}/access-keys/{accessKeyId}',
     ...options,
+  });
+
+/**
+ * List principals
+ */
+export const getTenantsByTenantIdPrincipals = <ThrowOnError extends boolean = false>(
+  options: Options<GetTenantsByTenantIdPrincipalsData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetTenantsByTenantIdPrincipalsResponses,
+    GetTenantsByTenantIdPrincipalsErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/principals',
+    ...options,
+  });
+
+/**
+ * Remove a principal
+ *
+ * Removes the principal, deletes every access key bound to it, and
+ * strips it from every bucket policy statement naming it. A
+ * statement left with no principal is dropped, and a policy left
+ * with no statement is deleted. Answers 204 for a principal that is
+ * already gone or never existed.
+ *
+ */
+export const deleteTenantsByTenantIdPrincipalsByPrincipalId = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<DeleteTenantsByTenantIdPrincipalsByPrincipalIdData, ThrowOnError>,
+) =>
+  (options.client ?? client).delete<
+    DeleteTenantsByTenantIdPrincipalsByPrincipalIdResponses,
+    DeleteTenantsByTenantIdPrincipalsByPrincipalIdErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/principals/{principalId}',
+    ...options,
+  });
+
+/**
+ * Get a principal
+ */
+export const getTenantsByTenantIdPrincipalsByPrincipalId = <ThrowOnError extends boolean = false>(
+  options: Options<GetTenantsByTenantIdPrincipalsByPrincipalIdData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetTenantsByTenantIdPrincipalsByPrincipalIdResponses,
+    GetTenantsByTenantIdPrincipalsByPrincipalIdErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/principals/{principalId}',
+    ...options,
+  });
+
+/**
+ * Create a principal
+ *
+ * Creates the principal, or answers 200 when it already exists.
+ * Idempotent. A principal carries no permissions, no role, and no
+ * key material: it is the identity a key can bind to and a policy
+ * statement can name. Creating one after it was removed revives
+ * the id with no keys and named in no statement.
+ *
+ */
+export const putTenantsByTenantIdPrincipalsByPrincipalId = <ThrowOnError extends boolean = false>(
+  options: Options<PutTenantsByTenantIdPrincipalsByPrincipalIdData, ThrowOnError>,
+) =>
+  (options.client ?? client).put<
+    PutTenantsByTenantIdPrincipalsByPrincipalIdResponses,
+    PutTenantsByTenantIdPrincipalsByPrincipalIdErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/principals/{principalId}',
+    ...options,
+  });
+
+/**
+ * List a principal's access keys
+ */
+export const getTenantsByTenantIdPrincipalsByPrincipalIdAccessKeys = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysResponses,
+    GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/principals/{principalId}/access-keys',
+    ...options,
+  });
+
+/**
+ * Bucket policies naming a principal
+ *
+ * Every bucket policy with a statement naming the principal or `*`.
+ */
+export const getTenantsByTenantIdPrincipalsByPrincipalIdPolicies = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesResponses,
+    GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/principals/{principalId}/policies',
+    ...options,
+  });
+
+/**
+ * A principal's effective actions per bucket
+ *
+ * For every bucket whose policy gives the principal at least one
+ * action, the sorted effective set: the union of the `allow`
+ * statements naming them or `*`, minus the union of the `deny`
+ * statements naming them or `*`. Buckets with an empty set are
+ * omitted. Computed from the orchestrator's own tables on every
+ * call, so the answer is consistent with its last write.
+ *
+ */
+export const getTenantsByTenantIdPrincipalsByPrincipalIdAccess = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<GetTenantsByTenantIdPrincipalsByPrincipalIdAccessData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetTenantsByTenantIdPrincipalsByPrincipalIdAccessResponses,
+    GetTenantsByTenantIdPrincipalsByPrincipalIdAccessErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/principals/{principalId}/access',
+    ...options,
+  });
+
+/**
+ * Delete a bucket's policy
+ *
+ * Carries `If-Match` with the ETag the last read returned; a
+ * mismatch is 412 and nothing is written. A bucket with no policy
+ * is 404 with a `PolicyNotFound` code.
+ *
+ */
+export const deleteTenantsByTenantIdBucketsByBucketNamePolicy = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<DeleteTenantsByTenantIdBucketsByBucketNamePolicyData, ThrowOnError>,
+) =>
+  (options.client ?? client).delete<
+    DeleteTenantsByTenantIdBucketsByBucketNamePolicyResponses,
+    DeleteTenantsByTenantIdBucketsByBucketNamePolicyErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/buckets/{bucketName}/policy',
+    ...options,
+  });
+
+/**
+ * Read a bucket's policy
+ *
+ * Returns the stored document and, in the `ETag` header, a strong
+ * validator over its canonical encoding. Callers treat the ETag as
+ * opaque and send it back on the next write.
+ *
+ */
+export const getTenantsByTenantIdBucketsByBucketNamePolicy = <ThrowOnError extends boolean = false>(
+  options: Options<GetTenantsByTenantIdBucketsByBucketNamePolicyData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetTenantsByTenantIdBucketsByBucketNamePolicyResponses,
+    GetTenantsByTenantIdBucketsByBucketNamePolicyErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/buckets/{bucketName}/policy',
+    ...options,
+  });
+
+/**
+ * Create or replace a bucket's policy
+ *
+ * Compare-and-set. The request carries exactly one precondition:
+ * `If-Match` with the ETag the last read returned, or
+ * `If-None-Match: *` to create the bucket's first policy. A request
+ * with neither, with both, or with another `If-None-Match` value is
+ * 400. A mismatch, or `If-None-Match: *` when a policy exists, is
+ * 412 and nothing is written.
+ *
+ * The orchestrator validates the document: every action in the
+ * policy vocabulary or `s3:*`; every principal `*` or a live
+ * principal of the tenant; no empty statement or action list; no
+ * field outside the schema. A failing document is 422.
+ *
+ * Before acknowledging, the orchestrator invalidates the cached
+ * authority of every key bound to a principal whose effective
+ * actions changed, so the write is visible at the S3 gateway
+ * within its propagation bound.
+ *
+ */
+export const putTenantsByTenantIdBucketsByBucketNamePolicy = <ThrowOnError extends boolean = false>(
+  options: Options<PutTenantsByTenantIdBucketsByBucketNamePolicyData, ThrowOnError>,
+) =>
+  (options.client ?? client).put<
+    PutTenantsByTenantIdBucketsByBucketNamePolicyResponses,
+    PutTenantsByTenantIdBucketsByBucketNamePolicyErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/buckets/{bucketName}/policy',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
   });
 
 /**
