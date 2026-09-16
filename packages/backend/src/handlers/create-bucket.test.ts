@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockClient } from 'aws-sdk-client-mock';
+import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { unmarshall } from '@aws-sdk/util-dynamodb';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('sst', () => ({
-  Resource: {
-    UserInfoTable: { name: 'UserInfoTable' },
-  },
-}));
+vi.mock('sst', () => sstResourceMock());
 
 const mockEnsureTenantReady = vi.fn();
 const mockCreateBucket = vi.fn();
@@ -17,16 +17,29 @@ const mockGetOrchestratorForRegion = vi.fn();
 const mockOrchestrator = {
   id: 'aurora',
   region: 'eu-west-1',
+  accessModel: 'scoped-keys',
   ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
   createBucket: (...args: unknown[]) => mockCreateBucket(...args),
 };
 
+// One region serves the `iam` model in these tests, so the roster policy the
+// create carries can be asserted while every real region is still dark.
+const IAM_REGION = 'us-east-9';
+const iamOrchestrator = {
+  ...mockOrchestrator,
+  id: 'forgeDev',
+  region: IAM_REGION,
+  accessModel: 'iam',
+};
+
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
-  getOrchestratorForRegion: (...args: unknown[]) => {
-    mockGetOrchestratorForRegion(...args);
-    return mockOrchestrator;
+  getOrchestratorForRegion: (region: string) => {
+    mockGetOrchestratorForRegion(region);
+    return region === IAM_REGION ? iamOrchestrator : mockOrchestrator;
   },
 }));
+
+const ddbMock = mockClient(DynamoDBClient);
 
 const mockIsOrgDeleting = vi.fn(
   async (_orgId: string, _options?: { consistent?: boolean }) => false,
@@ -37,10 +50,27 @@ vi.mock('../lib/org-profile.ts', async () => ({
   isOrgDeleting: (...args: Parameters<typeof mockIsOrgDeleting>) => mockIsOrgDeleting(...args),
 }));
 
+const mockListMembers = vi.fn(async (_orgId: string) => [] as { userId: string; role: string }[]);
+vi.mock('../lib/org-membership.ts', () => ({
+  listMembers: (orgId: string) => mockListMembers(orgId),
+}));
+
 import { baseHandler } from './create-bucket.ts';
-import { BucketAlreadyExistsError, BucketConfigurationError } from '../lib/errors.ts';
+import {
+  BucketAlreadyExistsError,
+  BucketConfigurationError,
+  PolicyValidationError,
+} from '../lib/errors.ts';
 import { buildEvent } from '../test/lambda-test-utilities.ts';
-import { S3_REGION, S3Region } from '@filone/shared';
+import {
+  OrgRole,
+  ROSTER_ADMIN_ACTIONS,
+  ROSTER_ADMINS_SID,
+  ROSTER_CREATOR_SID,
+  ROSTER_OWNERS_SID,
+  S3_REGION,
+  S3Region,
+} from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -59,6 +89,8 @@ function validBody() {
 describe('create-bucket baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    ddbMock.reset();
+    ddbMock.on(PutItemCommand).resolves({});
     mockEnsureTenantReady.mockResolvedValue('aurora-t-1');
     mockIsOrgDeleting.mockResolvedValue(false);
   });
@@ -256,5 +288,83 @@ describe('create-bucket baseHandler', () => {
     } finally {
       process.env.FILONE_STAGE = previous;
     }
+  });
+
+  describe('on a region serving the iam access model', () => {
+    const iamBody = () => JSON.stringify({ bucketName: 'my-bucket', region: IAM_REGION });
+
+    it('carries the roster policy on the create, with the creator in a statement of their own', async () => {
+      mockCreateBucket.mockResolvedValue(undefined);
+      mockListMembers.mockResolvedValue([
+        { userId: 'owner-1', role: OrgRole.Owner },
+        { userId: 'admin-1', role: OrgRole.Admin },
+        { userId: 'user-1', role: OrgRole.Member },
+        { userId: 'reader-1', role: OrgRole.ReadOnly },
+      ]);
+
+      const result = await baseHandler(buildEvent({ body: iamBody(), userInfo: USER_INFO }));
+
+      expect(result.statusCode).toBe(201);
+      expect(mockListMembers).toHaveBeenCalledWith('org-1');
+      expect(mockCreateBucket).toHaveBeenCalledWith(
+        'aurora-t-1',
+        expect.objectContaining({
+          policy: {
+            statement: [
+              { sid: ROSTER_OWNERS_SID, effect: 'allow', principal: ['owner-1'], action: ['s3:*'] },
+              {
+                sid: ROSTER_ADMINS_SID,
+                effect: 'allow',
+                principal: ['admin-1'],
+                action: ROSTER_ADMIN_ACTIONS,
+              },
+              {
+                sid: ROSTER_CREATOR_SID,
+                effect: 'allow',
+                principal: ['user-1'],
+                action: ROSTER_ADMIN_ACTIONS,
+              },
+            ],
+          },
+        }),
+      );
+    });
+
+    it('records the first policy as a bucket-created write, intent before completion', async () => {
+      mockCreateBucket.mockResolvedValue(undefined);
+      mockListMembers.mockResolvedValue([{ userId: 'user-1', role: OrgRole.Owner }]);
+
+      await baseHandler(buildEvent({ body: iamBody(), userInfo: USER_INFO }));
+
+      const events = ddbMock
+        .commandCalls(PutItemCommand)
+        .map((call) => unmarshall(call.args[0].input.Item ?? {}));
+      expect(events.map((e) => [e.type, e.phase])).toStrictEqual([
+        ['bucket_policy.created', 'intent'],
+        ['bucket_policy.created', 'completion'],
+      ]);
+      expect(events[0]!.details).toMatchObject({ region: IAM_REGION, trigger: 'bucket_created' });
+      expect(events[1]).toMatchObject({ outcome: 'succeeded', details: { statements: 1 } });
+    });
+
+    it('answers 400 when the storage system refuses the policy, since no bucket was created', async () => {
+      mockListMembers.mockResolvedValue([{ userId: 'user-1', role: OrgRole.Owner }]);
+      mockCreateBucket.mockRejectedValue(new PolicyValidationError('unknown principal'));
+
+      const result = await baseHandler(buildEvent({ body: iamBody(), userInfo: USER_INFO }));
+
+      expect(result.statusCode).toBe(400);
+      expect(JSON.parse(result.body as string).message).toBe('unknown principal');
+    });
+  });
+
+  it('carries no policy, reads no roster and writes no event on a scoped-keys region', async () => {
+    mockCreateBucket.mockResolvedValue(undefined);
+
+    await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO }));
+
+    expect(mockListMembers).not.toHaveBeenCalled();
+    expect(mockCreateBucket.mock.calls[0]![1]).not.toHaveProperty('policy');
+    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
   });
 });
