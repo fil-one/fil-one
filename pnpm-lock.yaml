@@ -175,9 +175,6 @@ importers:
       '@middy/http-header-normalizer':
         specifier: ^7.2.2
         version: 7.2.2
-      '@smithy/types':
-        specifier: 4.13.1
-        version: 4.13.1
       disposable-domains:
         specifier: ^2.0.1
         version: 2.0.1

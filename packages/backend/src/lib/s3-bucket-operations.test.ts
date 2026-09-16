@@ -25,6 +25,7 @@ import {
   putObjectLockConfiguration,
   setBucketVersioning,
   deleteBucket,
+  type S3RequestOptions,
 } from './s3-bucket-operations.ts';
 import { createS3Client } from './s3-client.ts';
 import { BucketAlreadyExistsError, BucketNotEmptyError } from './errors.ts';
@@ -481,7 +482,6 @@ describe('s3 bucket operations', () => {
 
   describe('abortSignal forwarding', () => {
     const signal = new AbortController().signal;
-    const send = { abortSignal: signal };
     const body = {
       transformToByteArray: vi.fn().mockResolvedValue(new Uint8Array()),
     } as unknown as GetObjectCommandOutput['Body'];
@@ -496,90 +496,90 @@ describe('s3 bucket operations', () => {
     // argument, so the loop stays free of aws-sdk-client-mock generics.
     const operations: Array<{
       name: string;
-      run: () => Promise<unknown>;
+      run: (requestOptions: S3RequestOptions) => Promise<unknown>;
       sentOptions: () => unknown;
     }> = [
       {
         name: 'createBucket',
-        run: () => {
+        run: (requestOptions) => {
           s3Mock.on(CreateBucketCommand).resolves({});
-          return createBucket(s3, { bucketName: 'b' }, send);
+          return createBucket(s3, { bucketName: 'b' }, requestOptions);
         },
         sentOptions: () => sendOptionsOf(s3Mock.commandCalls(CreateBucketCommand)),
       },
       {
         name: 'listBuckets',
-        run: () => {
+        run: (requestOptions) => {
           s3Mock.on(ListBucketsCommand).resolves({ Buckets: [] });
-          return listBuckets(s3, send);
+          return listBuckets(s3, requestOptions);
         },
         sentOptions: () => sendOptionsOf(s3Mock.commandCalls(ListBucketsCommand)),
       },
       {
         name: 'setBucketVersioning',
-        run: () => {
+        run: (requestOptions) => {
           s3Mock.on(PutBucketVersioningCommand).resolves({});
-          return setBucketVersioning(s3, 'b', true, send);
+          return setBucketVersioning(s3, 'b', true, requestOptions);
         },
         sentOptions: () => sendOptionsOf(s3Mock.commandCalls(PutBucketVersioningCommand)),
       },
       {
         name: 'putObjectLockConfiguration',
-        run: () => {
+        run: (requestOptions) => {
           s3Mock.on(PutObjectLockConfigurationCommand).resolves({});
           return putObjectLockConfiguration(
             s3,
             { bucketName: 'b', mode: 'governance', duration: 1, durationType: 'd' },
-            send,
+            requestOptions,
           );
         },
         sentOptions: () => sendOptionsOf(s3Mock.commandCalls(PutObjectLockConfigurationCommand)),
       },
       {
         name: 'getBucketVersioningStatus',
-        run: () => {
+        run: (requestOptions) => {
           s3Mock.on(GetBucketVersioningCommand).resolves({});
-          return getBucketVersioningStatus(s3, 'b', send);
+          return getBucketVersioningStatus(s3, 'b', requestOptions);
         },
         sentOptions: () => sendOptionsOf(s3Mock.commandCalls(GetBucketVersioningCommand)),
       },
       {
         name: 'getBucketVersioning',
-        run: () => {
+        run: (requestOptions) => {
           s3Mock.on(GetBucketVersioningCommand).resolves({});
-          return getBucketVersioning(s3, 'b', send);
+          return getBucketVersioning(s3, 'b', requestOptions);
         },
         sentOptions: () => sendOptionsOf(s3Mock.commandCalls(GetBucketVersioningCommand)),
       },
       {
         name: 'getBucketObjectLock',
-        run: () => {
+        run: (requestOptions) => {
           s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
-          return getBucketObjectLock(s3, 'b', send);
+          return getBucketObjectLock(s3, 'b', requestOptions);
         },
         sentOptions: () => sendOptionsOf(s3Mock.commandCalls(GetObjectLockConfigurationCommand)),
       },
       {
         name: 'listObjects',
-        run: () => {
+        run: (requestOptions) => {
           s3Mock.on(ListObjectsV2Command).resolves({});
-          return listObjects({ s3, bucket: 'b', abortSignal: signal });
+          return listObjects({ s3, bucket: 'b', ...requestOptions });
         },
         sentOptions: () => sendOptionsOf(s3Mock.commandCalls(ListObjectsV2Command)),
       },
       {
         name: 'getObjectBytes',
-        run: () => {
+        run: (requestOptions) => {
           s3Mock.on(GetObjectCommand).resolves({ Body: body });
-          return getObjectBytes(s3, 'b', 'k', send);
+          return getObjectBytes(s3, 'b', 'k', requestOptions);
         },
         sentOptions: () => sendOptionsOf(s3Mock.commandCalls(GetObjectCommand)),
       },
       {
         name: 'deleteBucket',
-        run: () => {
+        run: (requestOptions) => {
           s3Mock.on(DeleteBucketCommand).resolves({});
-          return deleteBucket(s3, 'b', send);
+          return deleteBucket(s3, 'b', requestOptions);
         },
         sentOptions: () => sendOptionsOf(s3Mock.commandCalls(DeleteBucketCommand)),
       },
@@ -587,7 +587,7 @@ describe('s3 bucket operations', () => {
 
     for (const { name, run, sentOptions } of operations) {
       it(`${name} forwards abortSignal to S3Client.send`, async () => {
-        await run();
+        await run({ signal });
 
         expect(sentOptions()).toEqual({ abortSignal: signal });
       });
