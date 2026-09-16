@@ -65,6 +65,7 @@ import {
   BucketNotEmptyError,
   BucketNotFoundError,
 } from '../errors.ts';
+import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
 import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
 import { instrumentClient } from './metrics.ts';
 import { createFilOneOrchestrator, type FilOneOrchestratorConfig } from './orchestrator.ts';
@@ -918,85 +919,85 @@ describe('signal forwarding', () => {
   // checks every one of them received the caller's signal in its options.
   const managementCases: Array<{
     name: string;
-    run: () => Promise<unknown>;
+    run: (requestOptions: OrchestratorRequestOptions) => Promise<unknown>;
     mocks: Array<{ mock: { calls: unknown[][] } }>;
   }> = [
     {
       name: 'updateTenantStatus',
-      run: () => {
+      run: (requestOptions) => {
         mockSetStatus.mockResolvedValue(noContent());
-        return orchestrator.updateTenantStatus(tenantId, 'active', { signal });
+        return orchestrator.updateTenantStatus(tenantId, 'active', requestOptions);
       },
       mocks: [mockSetStatus],
     },
     {
       name: 'deleteTenant',
-      run: () => {
+      run: (requestOptions) => {
         mockSetStatus.mockResolvedValue(noContent());
         mockDeleteTenant.mockResolvedValue(noContent());
-        return orchestrator.deleteTenant(tenantId, { signal });
+        return orchestrator.deleteTenant(tenantId, requestOptions);
       },
       mocks: [mockSetStatus, mockDeleteTenant],
     },
     {
       name: 'getTenantStatus',
-      run: () => {
+      run: (requestOptions) => {
         mockGetTenant.mockResolvedValue(ok({ status: 'active' }));
-        return orchestrator.getTenantStatus(tenantId, { signal });
+        return orchestrator.getTenantStatus(tenantId, requestOptions);
       },
       mocks: [mockGetTenant],
     },
     {
       name: 'issueAccessKey',
-      run: () => {
+      run: (requestOptions) => {
         mockCreateAccessKey.mockResolvedValue(
           ok({ accessKeyId: 'AK', secretAccessKey: 'SK', createdAt: '2026-01-01T00:00:00Z' }, 201),
         );
         return orchestrator.issueAccessKey(
           tenantId,
           { keyName: 'k', permissions: ['read'] },
-          { signal },
+          requestOptions,
         );
       },
       mocks: [mockCreateAccessKey],
     },
     {
       name: 'findAccessKeyByName',
-      run: () => {
+      run: (requestOptions) => {
         mockListAccessKeys.mockResolvedValue(ok({ items: [] }));
-        return orchestrator.findAccessKeyByName(tenantId, 'k', { signal });
+        return orchestrator.findAccessKeyByName(tenantId, 'k', requestOptions);
       },
       mocks: [mockListAccessKeys],
     },
     {
       name: 'deleteAccessKey',
-      run: () => {
+      run: (requestOptions) => {
         mockDeleteAccessKey.mockResolvedValue(noContent());
-        return orchestrator.deleteAccessKey(tenantId, 'AK', { signal });
+        return orchestrator.deleteAccessKey(tenantId, 'AK', requestOptions);
       },
       mocks: [mockDeleteAccessKey],
     },
     {
       name: 'getTenantUsageMetrics',
-      run: () => {
+      run: (requestOptions) => {
         mockGetTenantMetrics.mockResolvedValue(ok(emptyMetrics));
-        return orchestrator.getTenantUsageMetrics(tenantId, range, { signal });
+        return orchestrator.getTenantUsageMetrics(tenantId, range, requestOptions);
       },
       mocks: [mockGetTenantMetrics],
     },
     {
       name: 'getTenantInfo',
-      run: () => {
+      run: (requestOptions) => {
         mockGetTenant.mockResolvedValue(ok({ status: 'active' }));
-        return orchestrator.getTenantInfo(tenantId, { signal });
+        return orchestrator.getTenantInfo(tenantId, requestOptions);
       },
       mocks: [mockGetTenant],
     },
     {
       name: 'getBucketUsageMetrics',
-      run: () => {
+      run: (requestOptions) => {
         mockGetBucketMetrics.mockResolvedValue(ok(emptyMetrics));
-        return orchestrator.getBucketUsageMetrics(tenantId, 'b', range, { signal });
+        return orchestrator.getBucketUsageMetrics(tenantId, 'b', range, requestOptions);
       },
       mocks: [mockGetBucketMetrics],
     },
@@ -1004,7 +1005,7 @@ describe('signal forwarding', () => {
 
   for (const { name, run, mocks } of managementCases) {
     it(`${name} passes the caller's signal to every Management API call`, async () => {
-      await run();
+      await run({ signal });
 
       const firstArgs = mocks.map((m) => m.mock.calls[0]?.[0]);
       expect(firstArgs).toEqual(mocks.map(() => expect.objectContaining({ signal })));

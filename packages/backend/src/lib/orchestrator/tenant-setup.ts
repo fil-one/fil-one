@@ -70,15 +70,16 @@ export interface TenantSetupDeps {
 // Public entry point for synchronous tenant setup from request handlers.
 // Returns the tenantId on success, or null on any setup failure so the
 // handler can return the standard 503 tenant-not-ready response. Setup
-// resumes from whatever step is next on the user's retry. `opts.signal` bounds
-// every Management API call the setup makes, including the rollback delete.
+// resumes from whatever step is next on the user's retry.
+// `requestOptions.signal` bounds every Management API call the setup makes,
+// including the rollback delete.
 export async function ensureTenantReady(
   deps: TenantSetupDeps,
   orgId: string,
-  opts?: OrchestratorRequestOptions,
+  requestOptions?: OrchestratorRequestOptions,
 ): Promise<string | null> {
   try {
-    return await processTenantSetup(deps, orgId, opts?.signal);
+    return await processTenantSetup(deps, orgId, requestOptions);
   } catch (err) {
     // Not a setup failure: retrying will never succeed, so it must not become
     // a "try again in a moment".
@@ -97,7 +98,7 @@ export async function ensureTenantReady(
 async function processTenantSetup(
   deps: TenantSetupDeps,
   orgId: string,
-  signal?: AbortSignal,
+  requestOptions?: OrchestratorRequestOptions,
 ): Promise<string> {
   const { client, id, region } = deps;
   const tenantIdAttribute = `${id}TenantId`;
@@ -124,16 +125,16 @@ async function processTenantSetup(
   // crash gets a 200 with the existing tenant instead of an error.
   const { error: putError } = await putTenantsByTenantId({
     client,
-    signal,
     path: { tenantId: orgId },
     body: { region },
     throwOnError: false,
+    ...requestOptions,
   });
   if (putError) {
     throw new Error(`Failed to provision tenant ${orgId}`, { cause: putError });
   }
 
-  const consoleKey = await createConsoleAccessKey(deps, orgId, signal);
+  const consoleKey = await createConsoleAccessKey(deps, orgId, requestOptions);
   if (consoleKey) {
     await ssm.send(
       new PutParameterCommand({
@@ -179,9 +180,9 @@ async function processTenantSetup(
       deleteTenant: async () => {
         const { error } = await deleteTenantsByTenantId({
           client,
-          signal,
           path: { tenantId: orgId },
           throwOnError: false,
+          ...requestOptions,
         });
         if (error) throw new Error(`Failed to delete tenant ${orgId}`, { cause: error });
       },
@@ -210,7 +211,7 @@ async function processTenantSetup(
 async function createConsoleAccessKey(
   deps: TenantSetupDeps,
   orgId: string,
-  signal?: AbortSignal,
+  requestOptions?: OrchestratorRequestOptions,
 ): Promise<CreatedAccessKey | null> {
   const { client } = deps;
   const createArgs: CreateAccessKeyRequest = {
@@ -222,10 +223,10 @@ async function createConsoleAccessKey(
 
   const created = await postTenantsByTenantIdAccessKeys({
     client,
-    signal,
     path: { tenantId: orgId },
     body: createArgs,
     throwOnError: false,
+    ...requestOptions,
   });
   if (!created.error && created.data) {
     return created.data;
@@ -241,9 +242,9 @@ async function createConsoleAccessKey(
   // between key creation and the SSM write leaves an unrecoverable secret).
   const { data: listData, error: listError } = await getTenantsByTenantIdAccessKeys({
     client,
-    signal,
     path: { tenantId: orgId },
     throwOnError: false,
+    ...requestOptions,
   });
   if (listError) {
     throw new Error(`Failed to list access keys for tenant ${orgId} during console-key recovery`, {
@@ -272,9 +273,9 @@ async function createConsoleAccessKey(
   );
   const { error: deleteError } = await deleteTenantsByTenantIdAccessKeysByAccessKeyId({
     client,
-    signal,
     path: { tenantId: orgId, accessKeyId: existing.accessKeyId },
     throwOnError: false,
+    ...requestOptions,
   });
   if (deleteError) {
     throw new Error(`Failed to delete stale console access key for tenant ${orgId}`, {
@@ -284,10 +285,10 @@ async function createConsoleAccessKey(
 
   const recreated = await postTenantsByTenantIdAccessKeys({
     client,
-    signal,
     path: { tenantId: orgId },
     body: createArgs,
     throwOnError: false,
+    ...requestOptions,
   });
   if (recreated.error || !recreated.data) {
     throw new Error(`Failed to re-create console access key for tenant ${orgId}`, {
