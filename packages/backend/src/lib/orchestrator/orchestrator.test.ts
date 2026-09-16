@@ -1012,6 +1012,14 @@ describe('signal forwarding', () => {
     });
   }
 
+  it('getS3ClientContext forwards the signal to the SSM credential read', async () => {
+    await orchestrator.getS3ClientContext(tenantId, { signal });
+
+    expect(sendOptionsOf(ssmMock.commandCalls(GetParameterCommand))).toEqual({
+      abortSignal: signal,
+    });
+  });
+
   it('listBuckets forwards the signal to S3 ListBuckets', async () => {
     s3Mock.on(ListBucketsCommand).resolves({ Buckets: [] });
 

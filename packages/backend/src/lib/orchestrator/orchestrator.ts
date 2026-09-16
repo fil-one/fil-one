@@ -129,12 +129,18 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
     throw new Error(`Failed to set tenant ${tenantId} status to "${status}"`, { cause: error });
   };
 
-  const getS3ClientContext = async (tenantId: string): Promise<S3ClientContext> => {
-    const credentials = await getConsoleS3Credentials({
-      orchestratorId: config.id,
-      stage: config.stage,
-      tenantId,
-    });
+  const getS3ClientContext = async (
+    tenantId: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<S3ClientContext> => {
+    const credentials = await getConsoleS3Credentials(
+      {
+        orchestratorId: config.id,
+        stage: config.stage,
+        tenantId,
+      },
+      requestOptions,
+    );
     return {
       endpointUrl: config.s3EndpointUrl,
       region: config.region,
@@ -253,7 +259,10 @@ function resolveClient(config: FilOneOrchestratorConfig): Client {
 // Data-plane bucket operations against the S3 gateway with the console key.
 function buildBucketMethods(
   config: FilOneOrchestratorConfig,
-  getS3ClientContext: (tenantId: string) => Promise<S3ClientContext>,
+  getS3ClientContext: (
+    tenantId: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ) => Promise<S3ClientContext>,
 ): Pick<ServiceOrchestrator, 'createBucket' | 'deleteBucket' | 'listBuckets' | 'getBucket'> {
   return {
     async createBucket(
@@ -261,7 +270,7 @@ function buildBucketMethods(
       args: CreateBucketArgs,
       requestOptions?: OrchestratorRequestOptions,
     ): Promise<void> {
-      const ctx = await getS3ClientContext(tenantId);
+      const ctx = await getS3ClientContext(tenantId, requestOptions);
       const s3 = createS3Client(ctx);
       await s3CreateBucket(
         s3,
@@ -309,7 +318,7 @@ function buildBucketMethods(
       bucketName: string,
       requestOptions?: OrchestratorRequestOptions,
     ): Promise<void> {
-      const ctx = await getS3ClientContext(tenantId);
+      const ctx = await getS3ClientContext(tenantId, requestOptions);
       const s3 = createS3Client(ctx);
       await s3DeleteBucket(s3, bucketName, requestOptions);
     },
@@ -318,7 +327,7 @@ function buildBucketMethods(
       tenantId: string,
       requestOptions?: OrchestratorRequestOptions,
     ): Promise<BucketSummary[]> {
-      const ctx = await getS3ClientContext(tenantId);
+      const ctx = await getS3ClientContext(tenantId, requestOptions);
       const s3 = createS3Client(ctx);
       const { buckets } = await s3ListBuckets(s3, requestOptions);
       // Versioning and object-lock both cost a call per bucket; neither is
@@ -339,7 +348,7 @@ function buildBucketMethods(
       bucketName: string,
       requestOptions?: OrchestratorRequestOptions,
     ): Promise<BucketDetails | null> {
-      const ctx = await getS3ClientContext(tenantId);
+      const ctx = await getS3ClientContext(tenantId, requestOptions);
       const s3 = createS3Client(ctx);
       const { buckets } = await s3ListBuckets(s3, requestOptions);
       const match = buckets.find((b) => b.name === bucketName);
