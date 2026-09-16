@@ -593,6 +593,7 @@ describe('the caps routes apply on top of their declared permission', () => {
     // A roster rather than a count, so a route that starts declaring a cap
     // arrives here and has to be given cases rather than passing on a number.
     expect(capped).toStrictEqual([
+      'put-bucket-policy',
       'create-access-key',
       'rotate-access-key',
       'update-member-role',
@@ -723,6 +724,56 @@ describe('the caps routes apply on top of their declared permission', () => {
       expect(result.body).toContain(keyPermission);
     },
   );
+
+  /**
+   * Writing a bucket policy clears `buckets.policy_manage` in the chain and
+   * then reads the body: a statement that grants a retention or legal-hold
+   * write, or `s3:*` which covers both, needs `privileged.grant`. The cap runs
+   * before the region is consulted, which is why it answers while no region
+   * serves policies: an Owner is let through to the region check, an Admin is
+   * refused with the code the console renders.
+   */
+  describe('granting a retention write through a policy needs privileged.grant', () => {
+    const policyWrite = (action: string): RouteRequest => ({
+      body: JSON.stringify({
+        policy: { statement: [{ effect: 'allow', principal: [USER_ID], action: [action] }] },
+      }),
+      pathParameters: { name: 'photos' },
+      queryStringParameters: { region: 'eu-west-1' },
+    });
+    const editors = Object.values(OrgRole).filter((role) =>
+      roleHasPermission(role, 'buckets.policy_manage'),
+    );
+
+    it.each(editors)('%s may grant an ordinary read', async (role) => {
+      const result = await invokeRoute(routeFor('put-bucket-policy'), {
+        membership: membershipFor(ORG_ID, USER_ID, role),
+        request: policyWrite('s3:GetObject'),
+      });
+
+      expect(errorCode(result)).not.toBe(ApiErrorCode.RETENTION_GRANT_FORBIDDEN);
+    });
+
+    it.each(
+      editors.flatMap((role) =>
+        ['s3:PutObjectRetention', 's3:PutObjectLegalHold', 's3:*'].map(
+          (action) => [role, action] as const,
+        ),
+      ),
+    )('%s granting %s only with privileged.grant', async (role, action) => {
+      const result = await invokeRoute(routeFor('put-bucket-policy'), {
+        membership: membershipFor(ORG_ID, USER_ID, role),
+        request: policyWrite(action),
+      });
+
+      if (roleHasPermission(role, 'privileged.grant')) {
+        expect(errorCode(result)).not.toBe(ApiErrorCode.RETENTION_GRANT_FORBIDDEN);
+        return;
+      }
+      expect(result.statusCode).toBe(403);
+      expect(errorCode(result)).toBe(ApiErrorCode.RETENTION_GRANT_FORBIDDEN);
+    });
+  });
 
   /**
    * The other cap in this stack is a ceiling on who the caller may reach.

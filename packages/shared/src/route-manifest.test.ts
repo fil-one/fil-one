@@ -84,9 +84,12 @@ describe('ROUTE_MANIFEST', () => {
     // own authority in the handler, and rotate-access-key caps the replacement
     // the same way against the row it reissues; the member and invitation
     // routes gate on `members.manage` and cap the reach at the caller's own
-    // role. The manifest states both halves in each case.
+    // role. put-bucket-policy gates on `buckets.policy_manage` and caps a
+    // statement that newly grants a retention write at `privileged.grant`. The
+    // manifest states both halves in each case.
     const capped = entries.filter((route) => route.capsInHandler);
     expect(capped.map((route) => route.handler)).toStrictEqual([
+      'put-bucket-policy',
       'create-access-key',
       'rotate-access-key',
       'update-member-role',
