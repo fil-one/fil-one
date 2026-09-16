@@ -25,10 +25,25 @@ export const TENANT_DELETE_RETRY = { retries: 3 } as const;
 // share of slow-but-successful calls now fails fast; that is the trade-off.
 export const ORCHESTRATOR_REQUEST_TIMEOUT_MS = 8_000;
 
-// Budget for tenant provisioning and for the mutations on 30 s and 60 s
-// routes. Aurora tenant create and S3 setup were measured up to 25 s over the
-// same four weeks.
-export const ORCHESTRATOR_SETUP_TIMEOUT_MS = 25_000;
+// Budget for tenant provisioning and for the mutations on 30 s and 60 s routes.
+// Aurora tenant create and S3 setup were measured up to 25 s over the same four
+// weeks, and this is deliberately below that: a 30 s route has to hold this
+// budget, the cleanup budget below, and a margin for the response, so the last
+// five seconds of the measured tail are what a runnable compensating path
+// costs. Setups in that slice now fail and are retried by the caller.
+export const ORCHESTRATOR_SETUP_TIMEOUT_MS = 20_000;
+
+// Budget for the upstream call that undoes work the request already did: the
+// key deletion after a refused row write, the tenant DELETE after a refused
+// profile write, the revocation of a rotated key. Minted fresh at the point of
+// use rather than shared with the work being undone, because the deadline that
+// expired is usually why the compensating path is running at all.
+export const ORCHESTRATOR_CLEANUP_TIMEOUT_MS = 8_000;
+
+/** Minted at the point of use, so the budget starts when the cleanup does. */
+export function cleanupDeadline(): AbortSignal {
+  return AbortSignal.timeout(ORCHESTRATOR_CLEANUP_TIMEOUT_MS);
+}
 
 // Budget for one orchestrator call made by a background job. Nobody is waiting
 // on the answer, so a job can wait longer than an interactive route, but the

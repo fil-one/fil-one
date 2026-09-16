@@ -174,6 +174,20 @@ describe('rotate-access-key baseHandler', () => {
     mockDeleteAccessKey.mockResolvedValue(undefined);
   });
 
+  it('revokes the old key under a deadline of its own', async () => {
+    // The route is sized for two vendor calls. Sharing one budget means a mint
+    // that ran long answers `previousKeyRevoked: false`, leaving live exactly
+    // the credential the user asked to retire.
+    stubStoredKey();
+    stubWrites();
+
+    await baseHandler(eventFor());
+
+    const mintSignal = (mockIssueAccessKey.mock.calls[0]![2] as { signal: AbortSignal }).signal;
+    const revokeSignal = (mockDeleteAccessKey.mock.calls[0]![2] as { signal: AbortSignal }).signal;
+    expect(revokeSignal).not.toBe(mintSignal);
+  });
+
   it('mints a replacement carrying everything the key already had', async () => {
     stubStoredKey();
     stubWrites();

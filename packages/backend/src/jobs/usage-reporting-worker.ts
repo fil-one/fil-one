@@ -19,7 +19,10 @@ import { STRIPE_METADATA_KEYS } from '../lib/stripe-metadata.ts';
 import { reportOrgUsage, type AggregateUsage } from '../lib/org-usage-report.ts';
 import { isOrgDeletedOrDeleting } from '../lib/org-profile.ts';
 import { syncTenantStatusInProvisionedRegions } from '../lib/region-helpers.ts';
-import { ORCHESTRATOR_JOB_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
+import {
+  ORCHESTRATOR_JOB_TIMEOUT_MS,
+  ORCHESTRATOR_REQUEST_TIMEOUT_MS,
+} from '../lib/service-orchestrator.ts';
 
 const dynamo = getDynamoClient();
 
@@ -58,7 +61,13 @@ async function enforceTenantLocks({
     desired = 'active';
   }
 
-  const outcomes = await syncTenantStatusInProvisionedRegions(orgId, desired);
+  // The request budget, not the job budget the usage report above already
+  // spent: this runs after that call inside the same 60 s Lambda, and two 30 s
+  // budgets in sequence would fill it. The sync makes at most two round-trips
+  // per region.
+  const outcomes = await syncTenantStatusInProvisionedRegions(orgId, desired, {
+    signal: AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS),
+  });
 
   const updated = outcomes.filter((o) => o.outcome === 'updated');
   if (updated.length > 0) {

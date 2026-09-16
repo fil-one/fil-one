@@ -49,7 +49,7 @@ import {
 import { vendorNameForRotation } from '../lib/rotation-key-name.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import type { IssuedAccessKey, ServiceOrchestrator } from '../lib/service-orchestrator.ts';
-import { ORCHESTRATOR_SETUP_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
+import { cleanupDeadline, ORCHESTRATOR_SETUP_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -170,10 +170,11 @@ async function prepareRotation(
   if (await isOrgDeleting(orgId, { consistent: true })) return accountDeletedResponse();
 
   const orchestrator = getOrchestratorForRegion(stored.region);
-  // One deadline for every upstream call the rotation makes: tenant setup,
-  // the mint, and the revocation of the key it replaces. This route has 60 s;
-  // a hung vendor fails the call and answers the user instead of the Lambda
-  // timeout killing the handler.
+  // One deadline for tenant setup and the mint. Revoking the key being replaced
+  // gets its own, because it runs after the mint and a rotation that spent this
+  // budget minting would otherwise revoke nothing and answer
+  // `previousKeyRevoked: false` — leaving live exactly the credential the user
+  // asked to retire. This route has 60 s, which holds both.
   const signal = AbortSignal.timeout(ORCHESTRATOR_SETUP_TIMEOUT_MS);
   const tenantId = await orchestrator.ensureTenantReady(orgId, { signal });
   if (!tenantId) return tenantNotReadyResponse();
@@ -285,7 +286,7 @@ async function issueReplacement({
     ],
   });
   if (!record.recorded) {
-    await discardUnrecordedKey({ minted, mint, minter, signal });
+    await discardUnrecordedKey({ minted, mint, minter, signal: cleanupDeadline() });
     return unrecordedResponse(record, ownedByCaller);
   }
 
@@ -297,7 +298,7 @@ async function issueReplacement({
     // place it would strand the key: live, listed, and refused every rotation
     // as already rotated. Released only once the credential is gone, so a
     // claim never points at nothing while a credential still exists.
-    if (await discardRecordedKey({ minted, minter, actor, signal })) {
+    if (await discardRecordedKey({ minted, minter, actor, signal: cleanupDeadline() })) {
       await releaseSourceClaim({ orgId, keyId, replacedBy: replacement.id });
     }
     return ownerRoleChangedResponse(ownedByCaller);
@@ -320,7 +321,7 @@ async function issueReplacement({
     tenantId,
     actor,
     reason: 'rotation',
-    signal,
+    signal: cleanupDeadline(),
   });
 
   return rotatedResponse(stored.keyName, replacement, previousKeyRevoked);
@@ -358,7 +359,7 @@ interface Rotation {
   tenantId: string;
   /** Who asked. Everything the mint needs about them is derived from this. */
   rotator: { orgId: string; userId: string; email?: string };
-  /** One deadline for every vendor call the rotation makes. */
+  /** The mint's deadline. Revoke and the discards mint their own. */
   signal: AbortSignal;
 }
 

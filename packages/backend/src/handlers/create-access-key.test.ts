@@ -1213,6 +1213,45 @@ describe('create-access-key baseHandler', () => {
     });
   });
 
+  describe('the compensating delete gets a deadline of its own', () => {
+    // The mint's budget is usually spent by the time a discard runs — a
+    // request that shared it would leave a live credential no row names.
+    const signalOf = (calls: unknown[][], index: number): AbortSignal =>
+      (calls[0]![index] as { signal: AbortSignal }).signal;
+
+    it('does not hand the unrecorded discard the mint deadline', async () => {
+      ddbMock
+        .on(TransactWriteItemsCommand)
+        .rejects(cancelledWith(['None', 'TransactionConflict', 'None', 'None']));
+
+      await baseHandler(
+        buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO }),
+      );
+
+      expect(signalOf(mockDeleteAccessKey.mock.calls, 2)).not.toBe(
+        signalOf(mockIssueAccessKey.mock.calls, 2),
+      );
+    });
+
+    it('does not hand the recorded discard the mint deadline', async () => {
+      stubCreatorRole(OrgRole.Admin);
+
+      await baseHandler(
+        buildEvent({
+          body: validBody({ keyName: 'My Key', ...PRIVILEGED }),
+          userInfo: {
+            ...USER_INFO,
+            membership: membershipFor(USER_INFO.orgId, USER_INFO.userId, OrgRole.Owner),
+          },
+        }),
+      );
+
+      expect(signalOf(mockDeleteAccessKey.mock.calls, 2)).not.toBe(
+        signalOf(mockIssueAccessKey.mock.calls, 2),
+      );
+    });
+  });
+
   describe('a name the org already shows', () => {
     // The vendor's own uniqueness check stopped being enough when rotation
     // shipped: a rotated key is minted under a suffixed vendor name, so the

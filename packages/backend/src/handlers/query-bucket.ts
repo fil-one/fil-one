@@ -7,7 +7,7 @@ import { ApiErrorCode, QueryBucketSchema, S3Region, isSupportedRegion } from '@f
 import { S3VectorsStore, complete, embed } from '@filone/rag-shared';
 import type { VectorQueryResult } from '@filone/rag-shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
-import { ORCHESTRATOR_SETUP_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
+import { ORCHESTRATOR_REQUEST_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
 import { getBucketRagEnablement } from '../lib/bucket-rag-enablement.ts';
 import { RAGKeys } from '../lib/dynamo-records.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
@@ -93,8 +93,11 @@ export async function baseHandler(
   if (!tenantId) return tenantNotReadyResponse();
 
   // Enforce tenant/org scope: a bucket the caller's tenant does not own is 404.
+  // The request budget, as every other read uses: the route's 30 s is for the
+  // embedding, the vector search and the completion that follow, and a lookup
+  // allowed to run to the setup budget would leave them a few seconds.
   const bucket = await orchestrator.getBucket(tenantId, bucketName, {
-    signal: AbortSignal.timeout(ORCHESTRATOR_SETUP_TIMEOUT_MS),
+    signal: AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS),
   });
   if (!bucket) {
     return new ResponseBuilder()
