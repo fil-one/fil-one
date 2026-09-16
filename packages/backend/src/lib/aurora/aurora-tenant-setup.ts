@@ -22,6 +22,7 @@ import { OrgSetupStatus, isOrgSetupComplete } from '../org-setup-status.ts';
 import { scanAndEmitStuckTenantCount } from '../stuck-tenant-metric.ts';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ResponseBuilder } from '../response-builder.ts';
+import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
 
 export { OrgSetupStatus };
 
@@ -49,9 +50,12 @@ type EnsureTenantReadyResult =
 // processTenantSetup, increments the per-org failure counter (best-effort)
 // and re-throws so the handler can return a 503 to the user. The state
 // machine resumes from whatever step is next on the user's retry.
-export async function ensureTenantReady(orgId: string): Promise<EnsureTenantReadyResult> {
+export async function ensureTenantReady(
+  orgId: string,
+  opts?: OrchestratorRequestOptions,
+): Promise<EnsureTenantReadyResult> {
   try {
-    const { auroraTenantId } = await processTenantSetup(orgId);
+    const { auroraTenantId } = await processTenantSetup(orgId, opts);
     return { ok: true, auroraTenantId };
   } catch (err) {
     // Not a setup failure: retrying will never succeed, so it must neither
@@ -83,7 +87,13 @@ export async function ensureTenantReady(orgId: string): Promise<EnsureTenantRead
   }
 }
 
-export async function processTenantSetup(orgId: string): Promise<{ auroraTenantId: string }> {
+// `opts.signal` bounds every Aurora call the setup makes, including each poll
+// of the setup state; the DynamoDB and SSM writes between them are not bounded.
+export async function processTenantSetup(
+  orgId: string,
+  opts?: OrchestratorRequestOptions,
+): Promise<{ auroraTenantId: string }> {
+  const signal = opts?.signal;
   const orgProfileKey = {
     pk: { S: `ORG#${orgId}` },
     sk: { S: 'PROFILE' },
@@ -119,32 +129,32 @@ export async function processTenantSetup(orgId: string): Promise<{ auroraTenantI
     case OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED: {
       const auroraTenantId = orgProfile.auroraTenantId?.S;
       assert(auroraTenantId, `auroraTenantId missing in org profile for org ${orgId}`);
-      await createAndStoreS3AccessKey(orgId, auroraTenantId, orgProfileKey);
+      await createAndStoreS3AccessKey(orgId, auroraTenantId, orgProfileKey, signal);
       return { auroraTenantId };
     }
 
     case OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE: {
       const auroraTenantId = orgProfile.auroraTenantId?.S;
       assert(auroraTenantId, `auroraTenantId missing in org profile for org ${orgId}`);
-      await createAndStoreApiKey(orgId, auroraTenantId, orgProfileKey);
-      await createAndStoreS3AccessKey(orgId, auroraTenantId, orgProfileKey);
+      await createAndStoreApiKey(orgId, auroraTenantId, orgProfileKey, signal);
+      await createAndStoreS3AccessKey(orgId, auroraTenantId, orgProfileKey, signal);
       return { auroraTenantId };
     }
 
     case OrgSetupStatus.FILONE_ORG_CREATED: {
-      const auroraTenantId = await createTenant(orgId, orgName, orgProfileKey);
-      await runSetupAndMeasure(orgId, auroraTenantId, orgProfileKey);
-      await createAndStoreApiKey(orgId, auroraTenantId, orgProfileKey);
-      await createAndStoreS3AccessKey(orgId, auroraTenantId, orgProfileKey);
+      const auroraTenantId = await createTenant(orgId, orgName, orgProfileKey, signal);
+      await runSetupAndMeasure(orgId, auroraTenantId, orgProfileKey, signal);
+      await createAndStoreApiKey(orgId, auroraTenantId, orgProfileKey, signal);
+      await createAndStoreS3AccessKey(orgId, auroraTenantId, orgProfileKey, signal);
       return { auroraTenantId };
     }
 
     case OrgSetupStatus.AURORA_TENANT_CREATED: {
       const auroraTenantId = orgProfile.auroraTenantId?.S;
       assert(auroraTenantId, `auroraTenantId missing in org profile for org ${orgId}`);
-      await runSetup(orgId, auroraTenantId, orgProfileKey);
-      await createAndStoreApiKey(orgId, auroraTenantId, orgProfileKey);
-      await createAndStoreS3AccessKey(orgId, auroraTenantId, orgProfileKey);
+      await runSetup(orgId, auroraTenantId, orgProfileKey, signal);
+      await createAndStoreApiKey(orgId, auroraTenantId, orgProfileKey, signal);
+      await createAndStoreS3AccessKey(orgId, auroraTenantId, orgProfileKey, signal);
       return { auroraTenantId };
     }
 
@@ -157,8 +167,9 @@ async function createTenant(
   orgId: string,
   displayName: string,
   orgProfileKey: OrgProfileKey,
+  signal?: AbortSignal,
 ): Promise<string> {
-  const { auroraTenantId } = await createAuroraTenant({ orgId, displayName });
+  const { auroraTenantId } = await createAuroraTenant({ orgId, displayName, signal });
 
   const result = await advanceStatus({
     orgProfileKey,
@@ -198,10 +209,11 @@ async function runSetupAndMeasure(
   orgId: string,
   auroraTenantId: string,
   orgProfileKey: OrgProfileKey,
+  signal?: AbortSignal,
 ): Promise<void> {
   const start = performance.now();
   try {
-    await runSetup(orgId, auroraTenantId, orgProfileKey);
+    await runSetup(orgId, auroraTenantId, orgProfileKey, signal);
   } finally {
     reportAuroraTenantSetupDuration(performance.now() - start);
   }
@@ -233,11 +245,15 @@ async function runSetup(
   orgId: string,
   auroraTenantId: string,
   orgProfileKey: OrgProfileKey,
+  signal?: AbortSignal,
 ): Promise<void> {
   let lastSetupStep: string | undefined;
   for (const wait of [0, ...RUN_SETUP_POLL_BACKOFFS_MS]) {
+    // A deadline that passed during the previous poll ends the loop here, before
+    // the backoff sleep, instead of after it with an aborted request.
+    signal?.throwIfAborted();
     if (wait > 0) await sleep(wait);
-    ({ lastSetupStep } = await setupAuroraTenant({ tenantId: auroraTenantId }));
+    ({ lastSetupStep } = await setupAuroraTenant({ tenantId: auroraTenantId, signal }));
     if (lastSetupStep === 'FINISHED') break;
   }
 
@@ -258,13 +274,14 @@ async function createAndStoreApiKey(
   orgId: string,
   auroraTenantId: string,
   orgProfileKey: OrgProfileKey,
+  signal?: AbortSignal,
 ): Promise<void> {
   const stage = process.env.FILONE_STAGE!;
   const ssmName = `/filone/${stage}/aurora-portal/tenant-api-key/${auroraTenantId}`;
 
   let token: string;
   try {
-    const result = await createAuroraTenantApiKey({ tenantId: auroraTenantId, orgId });
+    const result = await createAuroraTenantApiKey({ tenantId: auroraTenantId, orgId, signal });
     token = result.token;
   } catch (err) {
     if (err instanceof DuplicateTokenNameError) {
@@ -310,6 +327,7 @@ async function createAndStoreS3AccessKey(
   orgId: string,
   auroraTenantId: string,
   orgProfileKey: OrgProfileKey,
+  signal?: AbortSignal,
 ): Promise<void> {
   const stage = process.env.FILONE_STAGE!;
 
@@ -320,6 +338,7 @@ async function createAndStoreS3AccessKey(
       tenantId: auroraTenantId,
       keyName: 'filone-console',
       permissions: [...ACCESS_KEY_PERMISSIONS],
+      signal,
     });
     accessKeyId = result.accessKeyId;
     accessKeySecret = result.accessKeySecret;

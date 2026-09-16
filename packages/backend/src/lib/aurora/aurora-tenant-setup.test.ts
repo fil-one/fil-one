@@ -1040,3 +1040,60 @@ describe('ensureTenantReady', () => {
     expect(addCalls).toHaveLength(1);
   });
 });
+
+describe('processTenantSetup signal forwarding', () => {
+  // The caller's deadline. Aborted only in the polling test below.
+  const signal = new AbortController().signal;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ddbMock.reset();
+    ssmMock.reset();
+  });
+
+  it('passes the caller signal to every Aurora call of the full pipeline', async () => {
+    ddbMock.on(GetItemCommand).resolves(
+      orgProfileItem({
+        auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
+        name: { S: 'Test Org' },
+      }),
+    );
+    ddbMock.on(UpdateItemCommand).resolves({});
+    ssmMock.on(PutParameterCommand).resolves({});
+    mockCreateAuroraTenant.mockResolvedValue({ auroraTenantId: 'aurora-t-1' });
+    mockSetupAuroraTenant.mockResolvedValue({ lastSetupStep: 'FINISHED' });
+    mockCreateAuroraTenantApiKey.mockResolvedValue({ token: 'atp_secret', tokenId: 'tok-1' });
+    setupDefaultS3AccessKeyMock();
+
+    await processTenantSetup('org-1', { signal });
+
+    const mocks = [
+      mockCreateAuroraTenant,
+      mockSetupAuroraTenant,
+      mockCreateAuroraTenantApiKey,
+      mockCreateAuroraAccessKey,
+    ];
+    const firstArgs = mocks.map((m) => m.mock.calls[0]?.[0]);
+    expect(firstArgs).toEqual(mocks.map(() => expect.objectContaining({ signal })));
+  });
+
+  it('stops polling the setup state once the signal is aborted', async () => {
+    ddbMock.on(GetItemCommand).resolves(
+      orgProfileItem({
+        auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
+        auroraTenantId: { S: 'aurora-t-1' },
+      }),
+    );
+    const controller = new AbortController();
+    // The deadline passes during the first poll; the loop must not sleep and
+    // poll again.
+    mockSetupAuroraTenant.mockImplementation(async () => {
+      controller.abort();
+      return { lastSetupStep: 'PENDING' };
+    });
+
+    await processTenantSetup('org-1', { signal: controller.signal }).catch(() => {});
+
+    expect(mockSetupAuroraTenant).toHaveBeenCalledTimes(1);
+  });
+});

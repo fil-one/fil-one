@@ -56,6 +56,8 @@ export interface CreateAuroraBucketOptions {
     duration: number;
     durationType: RetentionDurationType;
   };
+  /** Aborts the portal request. The caller owns the deadline. */
+  signal?: AbortSignal;
 }
 
 export async function createAuroraBucket({
@@ -64,11 +66,13 @@ export async function createAuroraBucket({
   versioning,
   lock,
   retention,
+  signal,
 }: CreateAuroraBucketOptions): Promise<void> {
   const client = await createPortalClient(tenantId);
 
   const { error, response } = await createBucket({
     client,
+    signal,
     path: { tenantId },
     body: {
       name: bucketName,
@@ -141,6 +145,8 @@ export interface CreateAuroraAccessKeyOptions {
   granularPermissions?: GranularPermission[];
   buckets?: string[];
   expiresAt?: string | null;
+  /** Aborts the portal request. The caller owns the deadline. */
+  signal?: AbortSignal;
 }
 export interface CreateAuroraAccessKeyResult {
   id: string;
@@ -156,11 +162,13 @@ export async function createAuroraAccessKey({
   granularPermissions,
   buckets,
   expiresAt,
+  signal,
 }: CreateAuroraAccessKeyOptions): Promise<CreateAuroraAccessKeyResult> {
   const client = await createPortalClient(tenantId);
 
   const { data, error, response } = await createS3AccessKey({
     client,
+    signal,
     path: { tenantId },
     body: {
       name: keyName,
@@ -228,15 +236,19 @@ export interface FindAuroraAccessKeyResult {
 export async function findAuroraAccessKeyByName({
   tenantId,
   keyName,
+  signal,
 }: {
   tenantId: string;
   keyName: string;
+  /** Aborts both portal requests. The caller owns the deadline. */
+  signal?: AbortSignal;
 }): Promise<FindAuroraAccessKeyResult | undefined> {
   const client = await createPortalClient(tenantId);
 
   // Step 1: List all access keys and find by name
   const { data: listData, error: listError } = await listS3AccessKeys({
     client,
+    signal,
     path: { tenantId },
     throwOnError: false,
   });
@@ -261,6 +273,7 @@ export async function findAuroraAccessKeyByName({
   // Step 2: Get full details by internal ID (list doesn't include accessKeyId)
   const { data: detailData, error: detailError } = await getS3AccessKey({
     client,
+    signal,
     path: { tenantId, accessKeyId: match.id },
     throwOnError: false,
   });
@@ -299,14 +312,18 @@ export async function findAuroraAccessKeyByName({
 export async function deleteAuroraAccessKey({
   tenantId,
   auroraKeyId,
+  signal,
 }: {
   tenantId: string;
   auroraKeyId: string;
+  /** Aborts the portal request. The caller owns the deadline. */
+  signal?: AbortSignal;
 }): Promise<void> {
   const client = await createPortalClient(tenantId);
 
   const { error, response } = await deleteS3AccessKey({
     client,
+    signal,
     path: { tenantId, accessKeyId: auroraKeyId },
     throwOnError: false,
   });
@@ -359,14 +376,18 @@ export async function getAuroraPortalApiKey(stage: string, tenantId: string): Pr
 export async function deleteAuroraBucket({
   tenantId,
   bucketName,
+  signal,
 }: {
   tenantId: string;
   bucketName: string;
+  /** Aborts the portal request. The caller owns the deadline. */
+  signal?: AbortSignal;
 }): Promise<void> {
   const client = await createPortalClient(tenantId);
 
   const { error, response } = await deleteBucket({
     client,
+    signal,
     path: { tenantId, bucketName },
     throwOnError: false,
   });
