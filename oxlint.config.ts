@@ -80,16 +80,6 @@ export default defineConfig({
       },
     },
     {
-      // Threading a request signal through every method put the Management API
-      // orchestrator over both caps. orchestrator-deadlines/orchestrator-class
-      // moves the methods onto a class and drops this entry.
-      files: ['packages/backend/src/lib/orchestrator/orchestrator.ts'],
-      rules: {
-        'max-lines': 'off',
-        'max-lines-per-function': 'off',
-      },
-    },
-    {
       files: ['**/*.test.ts', '**/*.test.tsx', '**/*.spec.ts', '**/*.spec.tsx'],
       rules: {
         'max-lines': 'off',
