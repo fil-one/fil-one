@@ -256,12 +256,13 @@ describe('ensureTenantReady', () => {
     await ensureTenantReady(deps, orgId);
 
     const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
-    expect(permissions).toHaveLength(15);
+    expect(permissions).toHaveLength(17);
     expect(permissions).toContain('s3:ListBucketMultipartUploads');
-    // The contract enum (unlike FTH) has no bucket-config actions.
+    // The contract enum carries no bucket-config actions at all: the reads
+    // classify as ListBucket (fil-one/RFC#30) and there are no writes.
     expect(permissions).not.toContain('s3:GetBucketVersioning');
-    expect(permissions).not.toContain('s3:PutBucketVersioning');
     expect(permissions).not.toContain('s3:GetBucketObjectLockConfiguration');
+    expect(permissions).not.toContain('s3:PutBucketVersioning');
     expect(permissions).not.toContain('s3:PutBucketObjectLockConfiguration');
   });
 
