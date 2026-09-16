@@ -352,15 +352,19 @@ authorized it.
 
 **A scoped member creates a bucket.**
 
-1. `POST /api/buckets` creates the bucket over S3 with the tenant-wide
-   credential, then writes the bucket's policy with the create-only token, and
-   answers the member after both calls succeed.
-2. The policy names the org's current Owners and Admins in one Allow, and the
-   creator in another with the actions their role permits. An unscoped creator
-   is already in the first statement.
-3. A bucket without a policy is reachable by the tenant-wide credential only,
-   so a failure between the two calls leaves a bucket no member can see, and the
-   retry writes the policy.
+1. `POST /api/buckets` builds the bucket's first policy and sends it,
+   base64-encoded, in the `x-bucket-policy` header of the S3 create request,
+   signed with the tenant-wide credential along with the rest of the request.
+   The storage system validates the document, creates the bucket and stores the
+   policy in one transaction, and refuses the create when the document fails.
+   No bucket outlives a failed write of the policy its create carried.
+2. The policy names the org's current Owners in one Allow with every action,
+   and its Admins and the creator in another with every action but the two
+   retention writes. An Owner who creates the bucket is already in the first
+   statement.
+3. A bucket created by a generic S3 client holding a service key carries no
+   header and starts with no policy, so only service keys reach it until an
+   Owner or Admin writes one from the policy tab.
 
 **Removal.**
 
