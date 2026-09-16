@@ -86,6 +86,12 @@ export function usePolicyDraft(snapshot: BucketPolicySnapshot | null | undefined
   return {
     statements: state.statements,
     hasUnsavedEdits: state.hasUnsavedEdits,
+    /**
+     * The ETag of the document the draft was seeded from, which is what a save
+     * sends: a write against a newer document the user never saw must lose,
+     * even when the query has since refetched it.
+     */
+    etag: state.seededEtag ?? undefined,
     /** Whether the snapshot has changed since the draft was seeded. */
     isStale: etag !== state.seededEtag && state.hasUnsavedEdits,
     addStatement: (statement: PolicyStatement) => dispatch({ type: 'add', statement }),
@@ -94,5 +100,11 @@ export function usePolicyDraft(snapshot: BucketPolicySnapshot | null | undefined
     removeStatement: (index: number) => dispatch({ type: 'remove', index }),
     /** Drop the edits and take the snapshot's statements again. */
     reset: () => dispatch({ type: 'reset' }),
+    /**
+     * A save landed: seed from what was written, so the draft is clean under
+     * the new ETag before the refetch confirms it.
+     */
+    acceptSaved: (saved: BucketPolicySnapshot | null) =>
+      dispatch({ type: 'seed', snapshot: saved }),
   };
 }
