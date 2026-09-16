@@ -69,7 +69,7 @@ export function instrumentApiClient<ApiName extends string>(
   });
 
   client.interceptors.error.use((error, response, request, requestOptions) => {
-    // Only emit for network errors (response is undefined).
+    // Only emit when no response arrived (a network error or our own deadline).
     // For HTTP errors, the response interceptor already emitted the metric.
     // The request is undefined when the error was thrown while building it.
     if (response === undefined && request !== undefined) {
@@ -82,7 +82,7 @@ export function instrumentApiClient<ApiName extends string>(
         durationMetricName: options.durationMetricName,
         requestCountMetricName: options.requestCountMetricName,
         endpoint,
-        statusGroup: 'network_error',
+        statusGroup: isDeadlineAbort(error) ? 'timeout' : 'network_error',
         statusCode: undefined,
         duration,
       });
@@ -95,6 +95,17 @@ export function instrumentApiClient<ApiName extends string>(
 function statusGroup(status: number): string {
   const group = Math.floor(status / 100);
   return `${group}xx`;
+}
+
+// `AbortSignal.timeout` rejects fetch with a DOMException named TimeoutError.
+// Reported apart from other network errors so a hung upstream is telling on
+// dashboards: a connection that never answered looks nothing like one that
+// was refused or reset. Matched on the name alone, because DOMException is
+// not an Error subclass on every runtime.
+function isDeadlineAbort(error: unknown): boolean {
+  return (
+    typeof error === 'object' && error !== null && 'name' in error && error.name === 'TimeoutError'
+  );
 }
 
 function reportApiMetric(data: {
