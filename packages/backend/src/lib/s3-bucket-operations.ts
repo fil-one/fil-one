@@ -12,21 +12,34 @@ import {
   PutObjectLockConfigurationCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import type { HttpHandlerOptions } from '@smithy/types';
 import type { RetentionDurationType, RetentionMode, S3Object } from '@filone/shared';
 import { BucketAlreadyExistsError, BucketNotEmptyError } from './errors.ts';
+
+/**
+ * The subset of `S3Client.send` options this module forwards. Callers pass a
+ * deadline signal so a hung S3 endpoint fails the call instead of holding the
+ * Lambda open until its own timeout.
+ */
+export type S3SendOptions = Pick<HttpHandlerOptions, 'abortSignal'>;
 
 export interface CreateBucketOptions {
   bucketName: string;
   objectLockEnabled?: boolean;
 }
 
-export async function createBucket(s3: S3Client, options: CreateBucketOptions): Promise<void> {
+export async function createBucket(
+  s3: S3Client,
+  options: CreateBucketOptions,
+  send?: S3SendOptions,
+): Promise<void> {
   try {
     await s3.send(
       new CreateBucketCommand({
         Bucket: options.bucketName,
         ...(options.objectLockEnabled && { ObjectLockEnabledForBucket: true }),
       }),
+      send,
     );
   } catch (err) {
     const name = (err as { name?: string }).name;
@@ -41,8 +54,8 @@ export interface ListBucketsResult {
   buckets: Array<{ name: string; createdAt: string }>;
 }
 
-export async function listBuckets(s3: S3Client): Promise<ListBucketsResult> {
-  const result = await s3.send(new ListBucketsCommand({}));
+export async function listBuckets(s3: S3Client, send?: S3SendOptions): Promise<ListBucketsResult> {
+  const result = await s3.send(new ListBucketsCommand({}), send);
   return {
     buckets: (result.Buckets ?? []).map((b) => ({
       name: b.Name!,
@@ -63,12 +76,14 @@ export async function setBucketVersioning(
   s3: S3Client,
   bucketName: string,
   enabled = true,
+  send?: S3SendOptions,
 ): Promise<void> {
   await s3.send(
     new PutBucketVersioningCommand({
       Bucket: bucketName,
       VersioningConfiguration: { Status: enabled ? 'Enabled' : 'Suspended' },
     }),
+    send,
   );
 }
 
@@ -82,6 +97,7 @@ export interface PutObjectLockConfigurationOptions {
 export async function putObjectLockConfiguration(
   s3: S3Client,
   options: PutObjectLockConfigurationOptions,
+  send?: S3SendOptions,
 ): Promise<void> {
   await s3.send(
     new PutObjectLockConfigurationCommand({
@@ -98,6 +114,7 @@ export async function putObjectLockConfiguration(
         },
       },
     }),
+    send,
   );
 }
 
@@ -114,14 +131,19 @@ export type BucketVersioningStatus = 'Enabled' | 'Suspended' | 'Never';
 export async function getBucketVersioningStatus(
   s3: S3Client,
   bucketName: string,
+  send?: S3SendOptions,
 ): Promise<BucketVersioningStatus> {
-  const result = await s3.send(new GetBucketVersioningCommand({ Bucket: bucketName }));
+  const result = await s3.send(new GetBucketVersioningCommand({ Bucket: bucketName }), send);
   if (result.Status === 'Enabled' || result.Status === 'Suspended') return result.Status;
   return 'Never';
 }
 
-export async function getBucketVersioning(s3: S3Client, bucketName: string): Promise<boolean> {
-  return (await getBucketVersioningStatus(s3, bucketName)) === 'Enabled';
+export async function getBucketVersioning(
+  s3: S3Client,
+  bucketName: string,
+  send?: S3SendOptions,
+): Promise<boolean> {
+  return (await getBucketVersioningStatus(s3, bucketName, send)) === 'Enabled';
 }
 
 export interface BucketObjectLockState {
@@ -134,9 +156,13 @@ export interface BucketObjectLockState {
 export async function getBucketObjectLock(
   s3: S3Client,
   bucketName: string,
+  send?: S3SendOptions,
 ): Promise<BucketObjectLockState | null> {
   try {
-    const result = await s3.send(new GetObjectLockConfigurationCommand({ Bucket: bucketName }));
+    const result = await s3.send(
+      new GetObjectLockConfigurationCommand({ Bucket: bucketName }),
+      send,
+    );
     const cfg = result.ObjectLockConfiguration;
     const defaultRetention = cfg?.Rule?.DefaultRetention;
     return {
@@ -159,7 +185,7 @@ export async function getBucketObjectLock(
   }
 }
 
-export interface ListObjectsOptions {
+export interface ListObjectsOptions extends S3SendOptions {
   s3: S3Client;
   bucket: string;
   prefix?: string;
@@ -175,7 +201,7 @@ export interface ListObjectsResult {
 }
 
 export async function listObjects(options: ListObjectsOptions): Promise<ListObjectsResult> {
-  const { s3, bucket, prefix, delimiter, maxKeys, continuationToken } = options;
+  const { s3, bucket, prefix, delimiter, maxKeys, continuationToken, abortSignal } = options;
 
   const result = await s3.send(
     new ListObjectsV2Command({
@@ -185,6 +211,7 @@ export async function listObjects(options: ListObjectsOptions): Promise<ListObje
       ...(maxKeys && { MaxKeys: maxKeys }),
       ...(continuationToken && { ContinuationToken: continuationToken }),
     }),
+    { abortSignal },
   );
 
   const objects: S3Object[] = (result.Contents ?? []).map((item) => ({
@@ -217,8 +244,9 @@ export async function getObjectBytes(
   s3: S3Client,
   bucket: string,
   key: string,
+  send?: S3SendOptions,
 ): Promise<GetObjectBytesResult> {
-  const result = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  const result = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }), send);
   if (!result.Body) {
     throw new Error(`Object "${key}" in bucket "${bucket}" returned an empty body`);
   }
@@ -229,12 +257,17 @@ export async function getObjectBytes(
   };
 }
 
-export async function deleteBucket(s3: S3Client, bucketName: string): Promise<void> {
+export async function deleteBucket(
+  s3: S3Client,
+  bucketName: string,
+  send?: S3SendOptions,
+): Promise<void> {
   try {
     await s3.send(
       new DeleteBucketCommand({
         Bucket: bucketName,
       }),
+      send,
     );
   } catch (err) {
     const name = (err as { name?: string }).name;
