@@ -132,6 +132,13 @@ async function prepareRotation(
 
   const stored = readStoredKey(Item, keyId);
 
+  // A principal-bound key carries no permission set to reissue from; it is
+  // replaced by minting a new key and deleting this one, which the console
+  // offers as its own flow. Refused here so the answer below, about a row that
+  // never recorded its permissions, is not given for a key that has none by
+  // design.
+  if (stored.principalId) return principalBoundRotationResponse();
+
   // Read off the row before anything else asks about it: the permission set is
   // what the replacement is minted from, and a row that records none cannot
   // produce one. Nothing at the vendor can be read back to fill the gap.
@@ -417,6 +424,16 @@ function hasExpired(expiresAt: string | undefined): boolean {
  * built from it. Every such row predates attribution or was rebuilt after a
  * vendor conflict, and `keys.manage_all` is the only scope that sees one.
  */
+function principalBoundRotationResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(409)
+    .body<ErrorResponse>({
+      message:
+        'This key follows the bucket policies rather than a permission set of its own. Create a new key and delete this one instead of rotating it.',
+    })
+    .build();
+}
+
 function unrecordedPermissionsResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(409)
