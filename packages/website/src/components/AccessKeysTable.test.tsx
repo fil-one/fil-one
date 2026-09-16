@@ -35,6 +35,18 @@ describe('AccessKeysTable — bucket-info permissions', () => {
   });
 });
 
+describe('AccessKeysTable — a principal-bound key', () => {
+  it('shows the key following the bucket policies rather than a permission set', () => {
+    const keys = [
+      makeKey({ permissions: undefined, bucketScope: undefined, principalId: 'user-1' }),
+    ];
+    renderWithProviders(<AccessKeysTable keys={keys} showPermissions showBuckets />);
+    expect(screen.getByTestId('permission-badge-follows-policy')).toBeInTheDocument();
+    expect(screen.getByText('Per bucket policy')).toBeInTheDocument();
+    expect(screen.queryByText('All Buckets')).not.toBeInTheDocument();
+  });
+});
+
 describe('AccessKeysTable — the controls a caller may not use', () => {
   // The table's own gating is prop-driven: a page that finds the caller cannot
   // mint or revoke keys passes undefined, and the surface disappears. That is
