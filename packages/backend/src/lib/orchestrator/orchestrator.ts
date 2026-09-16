@@ -48,6 +48,8 @@ import type {
 } from '../service-orchestrator.ts';
 import { TENANT_DELETE_RETRY } from '../service-orchestrator.ts';
 import type { OrgProfileItem } from '../org-profile.ts';
+import { registerMemberPrincipals } from './principals.ts';
+import { mapIntervalToWindow, mapStorageSamples, normalizeStatus } from './metrics-mapping.ts';
 import type { S3ClientContext } from '../s3-client.ts';
 import { createS3Client } from '../s3-client.ts';
 import {
@@ -72,7 +74,6 @@ import {
   postTenantsByTenantIdStatus,
   type Client,
   type CreateAccessKeyRequest,
-  type Metrics,
 } from '@filone/orchestrator-client';
 import { instrumentClient } from './metrics.ts';
 
@@ -574,6 +575,17 @@ class IamFilOneOrchestrator extends FilOneOrchestrator implements IamOrchestrato
   readonly accessModel = 'iam' as const;
   // Field initializers run after the base constructor, so `client` is set.
   readonly iam: IamMethods = buildIamMethods(this.client, this.id);
+
+  /**
+   * Provisioning, plus the principals the tenant's policies will name — a
+   * member the storage system does not know cannot be named on a bucket
+   * policy, and the first policy rides on the bucket's own create.
+   */
+  override async ensureTenantReady(orgId: string, opts?: OrchestratorRequestOptions) {
+    const tenantId = await super.ensureTenantReady(orgId, opts);
+    if (tenantId) await registerMemberPrincipals(this.iam, this.id, orgId, tenantId);
+    return tenantId;
+  }
 }
 
 function resolveClient(config: FilOneOrchestratorConfig): Client {
@@ -588,31 +600,4 @@ function resolveClient(config: FilOneOrchestratorConfig): Client {
   });
   instrumentClient(client, { apiName: `${config.id}-management` });
   return client;
-}
-
-const MANAGEMENT_TENANT_STATUSES: readonly TenantStatus[] = ['active', 'write-locked', 'disabled'];
-
-// The contract's status enum is closed, but defend against noncompliant
-// orchestrators: unknown values surface as `undefined` rather than leaking a
-// string TenantStatus doesn't model.
-function normalizeStatus(status: string | undefined): TenantStatus | undefined {
-  return MANAGEMENT_TENANT_STATUSES.find((s) => s === status);
-}
-
-// The interface expresses sampling as an interval like '1d'/'1h'; the
-// contract only accepts `<integer>h` windows. Same permissive posture as
-// aurora: convert day intervals, pass hour intervals through, and let the API
-// reject anything else with a 400.
-function mapIntervalToWindow(interval: string): string {
-  const days = /^(\d+)d$/.exec(interval);
-  if (days) return `${Number(days[1]) * 24}h`;
-  return interval;
-}
-
-function mapStorageSamples(metrics: Metrics): StorageUsageSample[] {
-  return metrics.storage.samples.map((s) => ({
-    timestamp: new Date(s.timestamp).toISOString(),
-    bytesUsed: s.bytesUsed,
-    objectCount: s.objectCount,
-  }));
 }
