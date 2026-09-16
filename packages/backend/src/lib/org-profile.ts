@@ -154,3 +154,70 @@ export async function resolveOrgName(orgId: string): Promise<string> {
     return '';
   }
 }
+
+/**
+ * The attribute recording which members are registered as principals at one
+ * orchestrator. Per-orchestrator, matching the `${id}TenantId` convention
+ * tenant-setup writes to the same row.
+ */
+function principalsAttribute(orchestratorId: string): string {
+  return `${orchestratorId}Principals`;
+}
+
+/**
+ * The members already registered as principals at this orchestrator. Reads the
+ * pre-fetched profile row, so callers that already hold one pay nothing.
+ */
+export function registeredPrincipals(
+  profile: OrgProfileItem | undefined,
+  orchestratorId: string,
+): Set<string> {
+  return new Set(profile?.[principalsAttribute(orchestratorId)]?.SS ?? []);
+}
+
+/**
+ * Records `userIds` as registered. `ADD` on a string set is a union, so an id
+ * already present is a no-op and concurrent callers converge without a
+ * read-modify-write race — the set can never hold a duplicate.
+ */
+export async function addRegisteredPrincipals(
+  orgId: string,
+  orchestratorId: string,
+  userIds: string[],
+): Promise<void> {
+  if (userIds.length === 0) return;
+  await sendDeletionGuardedWrite(orgId, [
+    {
+      Update: {
+        TableName: Resource.UserInfoTable.name,
+        Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+        UpdateExpression: 'ADD #principals :ids',
+        ExpressionAttributeNames: { '#principals': principalsAttribute(orchestratorId) },
+        ExpressionAttributeValues: { ':ids': { SS: [...new Set(userIds)] } },
+      },
+    },
+  ]);
+}
+
+/**
+ * Drops one id, keeping the set in step with the orchestrator after a principal
+ * is removed. `DELETE` that empties the set removes the attribute, which
+ * {@link registeredPrincipals} reads back as empty.
+ */
+export async function removeRegisteredPrincipal(
+  orgId: string,
+  orchestratorId: string,
+  userId: string,
+): Promise<void> {
+  await sendDeletionGuardedWrite(orgId, [
+    {
+      Update: {
+        TableName: Resource.UserInfoTable.name,
+        Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+        UpdateExpression: 'DELETE #principals :ids',
+        ExpressionAttributeNames: { '#principals': principalsAttribute(orchestratorId) },
+        ExpressionAttributeValues: { ':ids': { SS: [userId] } },
+      },
+    },
+  ]);
+}

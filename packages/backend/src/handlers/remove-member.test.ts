@@ -34,6 +34,9 @@ vi.mock('jose', () => ({
 // suite has no reason to stand up.
 const mockDeleteAccessKey = vi.fn();
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
+  // No region serves the `iam` access model here, so the roster fan-out and
+  // the principal removal find nothing to reach.
+  getAvailableOrchestrators: () => [],
   getOrchestratorForRegion: (region: string) => ({
     id: region === 'us-east-1' ? 'fth' : 'aurora',
     region,
@@ -41,6 +44,19 @@ vi.mock('../lib/service-orchestrator-registry.ts', () => ({
     isTenantReady: () => `tenant:${region}`,
     deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
   }),
+}));
+
+// The principal removal on `iam` regions, stubbed so the suite can assert its
+// place in the order and what its refusal does; its own suite covers the call.
+const mockRemovePrincipals = vi.fn(async (_args: unknown) => ({
+  removed: [] as string[],
+  failed: [] as string[],
+}));
+vi.mock('../lib/iam-policy-fanout.ts', async () => ({
+  ...(await vi.importActual<typeof import('../lib/iam-policy-fanout.ts')>(
+    '../lib/iam-policy-fanout.ts',
+  )),
+  removeMemberPrincipals: (args: unknown) => mockRemovePrincipals(args),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
@@ -774,5 +790,68 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     const result = await handler(removeEvent(null), buildContext());
 
     expect(result).toMatchObject({ statusCode: 400 });
+  });
+});
+
+describe('the principal on iam regions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ddbMock.reset();
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockJwtVerify.mockResolvedValue({
+      payload: { sub: MOCK_SUB, email: EMAIL, email_verified: true },
+    });
+    ddbMock.on(GetItemCommand).resolves({});
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+      })
+      .resolves({
+        Item: {
+          pk: { S: `SUB#${MOCK_SUB}` },
+          sk: { S: 'IDENTITY' },
+          userId: { S: USER_ID },
+          orgId: { S: ORG_ID },
+        },
+      });
+    mockRemovePrincipals.mockResolvedValue({ removed: [], failed: [] });
+    callerHolds(OrgRole.Owner);
+    targetHolds(OrgRole.Member);
+  });
+
+  it('removes the principal before the rows go, and names the regions it reached', async () => {
+    const order: string[] = [];
+    mockRemovePrincipals.mockImplementation(async () => {
+      order.push('principal');
+      return { removed: [S3Region.UsEast9], failed: [] };
+    });
+    ddbMock.on(TransactWriteItemsCommand).callsFake(() => {
+      order.push('transaction');
+      return {};
+    });
+
+    const result = await handler(removeEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 200 });
+    expect(order).toStrictEqual(['principal', 'transaction']);
+    expect(mockRemovePrincipals).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: TARGET_ID }),
+    );
+    expect(JSON.parse((result as { body: string }).body).principalsRemoved).toStrictEqual([
+      S3Region.UsEast9,
+    ]);
+  });
+
+  it('leaves the member in the org when a region refuses to remove the principal', async () => {
+    mockRemovePrincipals.mockResolvedValue({ removed: [], failed: [S3Region.UsEast9] });
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+    const result = await handler(removeEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 502 });
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
   });
 });

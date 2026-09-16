@@ -2,9 +2,15 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { NO_ROLE, OrgRole } from '@filone/shared';
-import type { AccessKeySummary, RemoveMemberResponse } from '@filone/shared';
+import type {
+  AccessKeySummary,
+  ErrorResponse,
+  RemoveMemberResponse,
+  S3Region,
+} from '@filone/shared';
 import { AuditSubjects, userActor } from '../lib/audit.ts';
 import { commitAfterRevokingKeys } from '../lib/commit-after-revoking-keys.ts';
+import { removeMemberPrincipals } from '../lib/iam-policy-fanout.ts';
 import { notifyRevokedKeys } from '../lib/key-revocation-email.ts';
 import { reviewKeysForRoleChange } from '../lib/member-keys.ts';
 import { requireManageableMember } from '../lib/manageable-member.ts';
@@ -128,6 +134,14 @@ export async function baseHandler(
   const { keysToRevoke, fence } = await reviewKeysForRoleChange(orgId, targetUserId, NO_ROLE);
   const changedBy = actorEmail ?? userId;
 
+  // On an `iam` region the principal goes first, taking its keys and every
+  // statement naming it with it at the storage system. A region that refuses
+  // leaves the member in the org, like a vendor refusing a key below: a
+  // re-invited member keeps the same user id, and statements left behind would
+  // hand their old access back on the new invitation.
+  const principals = await removeMemberPrincipals({ orgId, orgProfile, userId: targetUserId });
+  if (principals.failed.length > 0) return principalRemovalRefusedResponse(principals.failed);
+
   const committed = await commitAfterRevokingKeys({
     items,
     keys: keysToRevoke,
@@ -169,7 +183,18 @@ export async function baseHandler(
     changedBy,
     later,
     revoked: committed.revoked,
+    principalsRemoved: principals.removed,
   });
+}
+
+/** A region would not remove the principal, so the membership stays; the same DELETE tries again. */
+function principalRemovalRefusedResponse(regions: S3Region[]): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(502)
+    .body<ErrorResponse>({
+      message: `The member could not be removed from ${regions.join(', ')}, so they are still in this organization. Try again.`,
+    })
+    .build();
 }
 
 /**
@@ -209,6 +234,7 @@ async function finishRemoval({
   changedBy,
   later,
   revoked,
+  principalsRemoved,
 }: {
   orgId: string;
   orgProfile: OrgProfileItem | undefined;
@@ -218,6 +244,8 @@ async function finishRemoval({
   /** The revoked invitations the transaction had no room for. */
   later: InvitationRecord[];
   revoked: AccessKeySummary[];
+  /** The `iam` regions whose principal went with the membership. */
+  principalsRemoved: S3Region[];
 }): Promise<APIGatewayProxyStructuredResultV2> {
   await revokeDeferred(later);
   await notifyRevokedKeys({
@@ -235,7 +263,10 @@ async function finishRemoval({
     .body<RemoveMemberResponse>(
       // Named only when there are any, so removing somebody who held no key
       // answers with the empty body rather than an empty list.
-      revoked.length > 0 ? { revokedKeys: revoked } : {},
+      {
+        ...(revoked.length > 0 ? { revokedKeys: revoked } : {}),
+        ...(principalsRemoved.length > 0 ? { principalsRemoved } : {}),
+      },
     )
     .build();
 }

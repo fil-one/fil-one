@@ -34,6 +34,9 @@ vi.mock('jose', () => ({
 // no reason to stand up.
 const mockDeleteAccessKey = vi.fn();
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
+  // No region serves the `iam` access model here, so the roster fan-out and
+  // the principal removal find nothing to reach.
+  getAvailableOrchestrators: () => [],
   getOrchestratorForRegion: (region: string) => ({
     id: region === 'us-east-1' ? 'fth' : 'aurora',
     region,
@@ -41,6 +44,16 @@ vi.mock('../lib/service-orchestrator-registry.ts', () => ({
     isTenantReady: () => `tenant:${region}`,
     deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
   }),
+}));
+
+// The roster rewrite on `iam` regions, stubbed so the suite can assert when it
+// runs relative to the role row; its own suite covers what it writes.
+const mockSyncRoster = vi.fn(async (_args: unknown) => [] as unknown[]);
+vi.mock('../lib/iam-policy-fanout.ts', async () => ({
+  ...(await vi.importActual<typeof import('../lib/iam-policy-fanout.ts')>(
+    '../lib/iam-policy-fanout.ts',
+  )),
+  syncRosterStatements: (args: unknown) => mockSyncRoster(args),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
@@ -903,5 +916,126 @@ describe('a narrowing revokes the keys the new role could not mint', () => {
 
     expect(result).toMatchObject({ statusCode: 200 });
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('the roster statements on iam regions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ddbMock.reset();
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockJwtVerify.mockResolvedValue({
+      payload: { sub: MOCK_SUB, email: EMAIL, email_verified: true },
+    });
+    ddbMock.on(GetItemCommand).resolves({});
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+      })
+      .resolves({
+        Item: {
+          pk: { S: `SUB#${MOCK_SUB}` },
+          sk: { S: 'IDENTITY' },
+          userId: { S: USER_ID },
+          orgId: { S: ORG_ID },
+        },
+      });
+    ddbMock.on(PutItemCommand).resolves({});
+    mockSyncRoster.mockResolvedValue([]);
+    callerHolds(OrgRole.Owner);
+  });
+
+  function recordingOrder() {
+    const order: string[] = [];
+    mockSyncRoster.mockImplementation(async () => {
+      order.push('roster');
+      return [{ region: S3Region.UsEast9, bucketsReached: 2, bucketsFailed: [] }];
+    });
+    ddbMock.on(TransactWriteItemsCommand).callsFake(() => {
+      order.push('transaction');
+      return {};
+    });
+    return order;
+  }
+
+  it('rewrites the roster before the role row on a demotion out of Admin, at the new role', async () => {
+    targetHolds(OrgRole.Admin);
+    const order = recordingOrder();
+
+    const result = await handler(roleEvent(OrgRole.Member), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 200 });
+    expect(order).toStrictEqual(['roster', 'transaction']);
+    expect(mockSyncRoster).toHaveBeenCalledWith(
+      expect.objectContaining({ orgId: ORG_ID, roster: { owners: [], admins: [] } }),
+    );
+    expect(body(result).policySync).toStrictEqual([
+      { region: S3Region.UsEast9, bucketsReached: 2, bucketsFailed: [] },
+    ]);
+  });
+
+  it('rewrites the roster after the role row on a promotion into Admin', async () => {
+    targetHolds(OrgRole.Member);
+    const order = recordingOrder();
+
+    const result = await handler(roleEvent(OrgRole.Admin), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 200 });
+    expect(order).toStrictEqual(['transaction', 'roster']);
+    expect(mockSyncRoster).toHaveBeenCalledWith(
+      expect.objectContaining({ roster: { owners: [], admins: [TARGET_ID] } }),
+    );
+  });
+
+  it('puts the roster back when a demotion rewrote the policies and its role row did not land', async () => {
+    targetHolds(OrgRole.Admin);
+    // The membership rows still show the target as an Admin, which is what the
+    // restore writes back.
+    ddbMock
+      .on(QueryCommand, {
+        TableName: 'OrgTable',
+        ExpressionAttributeValues: {
+          ':pk': { S: OrgKeys.orgPk(ORG_ID) },
+          ':skPrefix': { S: 'MEMBER#' },
+        },
+      })
+      .resolves({
+        Items: [
+          {
+            pk: { S: OrgKeys.orgPk(ORG_ID) },
+            sk: { S: OrgKeys.memberSk(TARGET_ID) },
+            role: { S: OrgRole.Admin },
+            joinedAt: { S: '2026-01-01T00:00:00.000Z' },
+          },
+        ],
+      });
+    ddbMock
+      .on(TransactWriteItemsCommand)
+      .rejects(new Error('ProvisionedThroughputExceededException'));
+
+    const result = await handler(roleEvent(OrgRole.Member), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 500 });
+    const rosters = mockSyncRoster.mock.calls.map(
+      (call) => (call[0] as { roster: unknown }).roster,
+    );
+    expect(rosters).toStrictEqual([
+      { owners: [], admins: [] },
+      { owners: [], admins: [TARGET_ID] },
+    ]);
+  });
+
+  it('rewrites nothing for a change that touches neither Owner nor Admin', async () => {
+    targetHolds(OrgRole.Member);
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+    const result = await handler(roleEvent(OrgRole.ReadOnly), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 200 });
+    expect(mockSyncRoster).not.toHaveBeenCalled();
+    expect(body(result)).not.toHaveProperty('policySync');
   });
 });
