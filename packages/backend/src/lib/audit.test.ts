@@ -69,6 +69,15 @@ const DETAILS: { [T in AuditEventType]: AuditEventDetails[T] } = {
     actorId: USER_ID,
     rowCount: 12,
   },
+  'bucket_policy.created': {
+    region: 'us-east-9',
+    bucketName: 'photos',
+    trigger: 'bucket_created',
+    statements: 2,
+    principals: 3,
+  },
+  'bucket_policy.updated': { region: 'us-east-9', bucketName: 'photos', trigger: 'policy_edit' },
+  'bucket_policy.deleted': { region: 'us-east-9', bucketName: 'photos', trigger: 'policy_edit' },
 };
 
 function renamed(): AuditEventRecord<'org.renamed'> {
