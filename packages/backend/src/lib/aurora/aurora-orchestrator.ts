@@ -172,7 +172,7 @@ export const auroraOrchestrator = {
   },
 
   async listBuckets(tenantId: string, opts?: OrchestratorRequestOptions): Promise<BucketSummary[]> {
-    const client = await createPortalClient(tenantId);
+    const client = await createPortalClient(tenantId, { signal: opts?.signal });
     const { data, error } = await listBuckets({
       client,
       signal: opts?.signal,
@@ -202,7 +202,7 @@ export const auroraOrchestrator = {
     bucketName: string,
     opts?: OrchestratorRequestOptions,
   ): Promise<BucketDetails | null> {
-    const client = await createPortalClient(tenantId);
+    const client = await createPortalClient(tenantId, { signal: opts?.signal });
     const { data, error, response } = await getBucketInfo({
       client,
       signal: opts?.signal,

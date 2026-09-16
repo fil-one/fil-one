@@ -877,3 +877,65 @@ describe('signal forwarding', () => {
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Portal API-key lookup cancellation
+// ---------------------------------------------------------------------------
+
+describe('portal wrappers signal forwarding', () => {
+  const signal = new AbortController().signal;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ssmMock.reset();
+    _resetSsmCacheForTesting();
+    setupSsmMock();
+    mockPostBucket.mockResolvedValue({});
+    mockDeleteBucket.mockResolvedValue({});
+    mockDeleteAccessKey.mockResolvedValue({});
+    mockGetAccessKeys.mockResolvedValue({ data: { items: [] } });
+    mockPostAccessKeys.mockResolvedValue({
+      data: {
+        accessKey: {
+          id: 'k',
+          accessKeyId: 'AK',
+          accessKeySecret: 'secret',
+          createdAt: '2026-01-01T00:00:00Z',
+        },
+      },
+    });
+  });
+
+  // aws-sdk-client-mock types `args` as the one-element `[command]` tuple,
+  // but the recorded sinon call carries every argument `send` received.
+  const sentOptions = () =>
+    (ssmMock.commandCalls(GetParameterCommand)[0] as unknown as { args: unknown[] }).args[1];
+
+  // The API key comes from SSM before any portal request goes out, so a cold
+  // cache must not outlive the caller's deadline either.
+  const cases: Record<string, () => Promise<unknown>> = {
+    createAuroraBucket: () =>
+      createAuroraBucket({ tenantId: 'tenant-1', bucketName: 'my-bucket', signal }),
+    createAuroraAccessKey: () =>
+      createAuroraAccessKey({
+        tenantId: 'tenant-1',
+        keyName: 'my-key',
+        permissions: [...ACCESS_KEY_PERMISSIONS],
+        signal,
+      }),
+    findAuroraAccessKeyByName: () =>
+      findAuroraAccessKeyByName({ tenantId: 'tenant-1', keyName: 'my-key', signal }),
+    deleteAuroraAccessKey: () =>
+      deleteAuroraAccessKey({ tenantId: 'tenant-1', auroraKeyId: 'k', signal }),
+    deleteAuroraBucket: () =>
+      deleteAuroraBucket({ tenantId: 'tenant-1', bucketName: 'my-bucket', signal }),
+  };
+
+  for (const [name, run] of Object.entries(cases)) {
+    it(`${name} forwards the signal to the SSM key lookup`, async () => {
+      await run();
+
+      expect(sentOptions()).toEqual({ abortSignal: signal });
+    });
+  }
+});

@@ -1052,4 +1052,25 @@ describe('auroraOrchestrator signal forwarding', () => {
       expect(firstArgs).toEqual(mocks.map(() => expect.objectContaining({ signal })));
     });
   }
+
+  // Both methods build their own portal client, so the signal has to reach the
+  // API-key lookup that happens before the portal request.
+  const portalClientCases: Record<string, () => Promise<unknown>> = {
+    listBuckets: () => {
+      mockPortalListBuckets.mockResolvedValue({ data: { items: [] }, error: undefined });
+      return auroraOrchestrator.listBuckets('t', { signal });
+    },
+    getBucket: () => {
+      mockPortalGetBucketInfo.mockResolvedValue(bucketInfo);
+      return auroraOrchestrator.getBucket('t', 'b', { signal });
+    },
+  };
+
+  for (const [name, run] of Object.entries(portalClientCases)) {
+    it(`${name} forwards the caller's signal to the portal client lookup`, async () => {
+      await run();
+
+      expect(mockCreatePortalClient).toHaveBeenCalledWith('t', { signal });
+    });
+  }
 });
