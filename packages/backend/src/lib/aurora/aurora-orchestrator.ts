@@ -46,6 +46,7 @@ import type {
   GetTenantUsageMetricsOptions,
   IssueAccessKeyOpts,
   IssuedAccessKey,
+  OrchestratorRequestOptions,
   ServiceOrchestrator,
   TenantStatusProbe,
   StorageUsageSample,
@@ -81,8 +82,11 @@ export const auroraOrchestrator = {
   region: S3Region.EuWest1 as S3RegionType,
   accessModel: 'scoped-keys',
 
-  async ensureTenantReady(orgId): Promise<string | null> {
-    const result = await ensureAuroraTenantReady(orgId);
+  async ensureTenantReady(
+    orgId: string,
+    opts?: OrchestratorRequestOptions,
+  ): Promise<string | null> {
+    const result = await ensureAuroraTenantReady(orgId, opts);
     if (result.ok) return result.auroraTenantId;
     return null;
   },
@@ -94,25 +98,42 @@ export const auroraOrchestrator = {
     return tenantId;
   },
 
-  async updateTenantStatus(tenantId: string, status: TenantStatus): Promise<void> {
-    await updateAuroraTenantStatusApi({ tenantId, status: mapToModelsTenantStatus(status) });
+  async updateTenantStatus(
+    tenantId: string,
+    status: TenantStatus,
+    opts?: OrchestratorRequestOptions,
+  ): Promise<void> {
+    await updateAuroraTenantStatusApi({
+      tenantId,
+      status: mapToModelsTenantStatus(status),
+      signal: opts?.signal,
+    });
   },
 
-  async deleteTenant(tenantId: string): Promise<void> {
-    await pRetry(async () => {
-      // allowMissing: a tenant that is already gone needs no disabling.
-      await updateAuroraTenantStatusApi({
-        tenantId,
-        status: mapToModelsTenantStatus('disabled'),
-        allowMissing: true,
-      });
-      // TODO(FIL-919): delete the tenant once Aurora's Backoffice API exposes a
-      // DELETE. Until then buckets and objects survive the teardown.
-    }, TENANT_DELETE_RETRY);
+  async deleteTenant(tenantId: string, opts?: OrchestratorRequestOptions): Promise<void> {
+    // The caller's signal also stops the retry loop: once the deadline has
+    // passed, every further attempt would abort on arrival.
+    await pRetry(
+      async () => {
+        // allowMissing: a tenant that is already gone needs no disabling.
+        await updateAuroraTenantStatusApi({
+          tenantId,
+          status: mapToModelsTenantStatus('disabled'),
+          allowMissing: true,
+          signal: opts?.signal,
+        });
+        // TODO(FIL-919): delete the tenant once Aurora's Backoffice API exposes a
+        // DELETE. Until then buckets and objects survive the teardown.
+      },
+      { ...TENANT_DELETE_RETRY, signal: opts?.signal },
+    );
   },
 
-  async getTenantStatus(tenantId: string): Promise<TenantStatusProbe> {
-    const result = await getAuroraTenantStatusApi({ tenantId });
+  async getTenantStatus(
+    tenantId: string,
+    opts?: OrchestratorRequestOptions,
+  ): Promise<TenantStatusProbe> {
+    const result = await getAuroraTenantStatusApi({ tenantId, signal: opts?.signal });
     if (result.kind !== 'ok') return result;
     return {
       kind: 'ok',
@@ -120,7 +141,11 @@ export const auroraOrchestrator = {
     };
   },
 
-  async createBucket(tenantId: string, args: CreateBucketArgs): Promise<void> {
+  async createBucket(
+    tenantId: string,
+    args: CreateBucketArgs,
+    opts?: OrchestratorRequestOptions,
+  ): Promise<void> {
     await createAuroraBucket({
       tenantId,
       bucketName: args.bucketName,
@@ -134,17 +159,23 @@ export const auroraOrchestrator = {
             durationType: RetentionDurationType;
           }
         | undefined,
+      signal: opts?.signal,
     });
   },
 
-  async deleteBucket(tenantId: string, bucketName: string): Promise<void> {
-    await deleteAuroraBucket({ tenantId, bucketName });
+  async deleteBucket(
+    tenantId: string,
+    bucketName: string,
+    opts?: OrchestratorRequestOptions,
+  ): Promise<void> {
+    await deleteAuroraBucket({ tenantId, bucketName, signal: opts?.signal });
   },
 
-  async listBuckets(tenantId: string): Promise<BucketSummary[]> {
-    const client = await createPortalClient(tenantId);
+  async listBuckets(tenantId: string, opts?: OrchestratorRequestOptions): Promise<BucketSummary[]> {
+    const client = await createPortalClient(tenantId, { signal: opts?.signal });
     const { data, error } = await listBuckets({
       client,
+      signal: opts?.signal,
       path: { tenantId },
       throwOnError: false,
     });
@@ -166,10 +197,15 @@ export const auroraOrchestrator = {
       }));
   },
 
-  async getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null> {
-    const client = await createPortalClient(tenantId);
+  async getBucket(
+    tenantId: string,
+    bucketName: string,
+    opts?: OrchestratorRequestOptions,
+  ): Promise<BucketDetails | null> {
+    const client = await createPortalClient(tenantId, { signal: opts?.signal });
     const { data, error, response } = await getBucketInfo({
       client,
+      signal: opts?.signal,
       path: { tenantId, bucketName },
       throwOnError: false,
     });
@@ -198,14 +234,19 @@ export const auroraOrchestrator = {
     };
   },
 
-  async issueAccessKey(tenantId: string, opts: IssueAccessKeyOpts): Promise<IssuedAccessKey> {
+  async issueAccessKey(
+    tenantId: string,
+    keyOpts: IssueAccessKeyOpts,
+    opts?: OrchestratorRequestOptions,
+  ): Promise<IssuedAccessKey> {
     const key = await createAuroraAccessKey({
       tenantId,
-      keyName: opts.keyName,
-      permissions: opts.permissions as AccessKeyPermission[],
-      granularPermissions: opts.granularPermissions as GranularPermission[] | undefined,
-      buckets: opts.buckets,
-      expiresAt: opts.expiresAt,
+      keyName: keyOpts.keyName,
+      permissions: keyOpts.permissions as AccessKeyPermission[],
+      granularPermissions: keyOpts.granularPermissions as GranularPermission[] | undefined,
+      buckets: keyOpts.buckets,
+      expiresAt: keyOpts.expiresAt,
+      signal: opts?.signal,
     });
     return {
       id: key.id,
@@ -215,12 +256,16 @@ export const auroraOrchestrator = {
     };
   },
 
-  async findAccessKeyByName(tenantId: string, keyName: string) {
-    return findAuroraAccessKeyByName({ tenantId, keyName });
+  async findAccessKeyByName(tenantId: string, keyName: string, opts?: OrchestratorRequestOptions) {
+    return findAuroraAccessKeyByName({ tenantId, keyName, signal: opts?.signal });
   },
 
-  async deleteAccessKey(tenantId: string, keyId: string): Promise<void> {
-    await deleteAuroraAccessKey({ tenantId, auroraKeyId: keyId });
+  async deleteAccessKey(
+    tenantId: string,
+    keyId: string,
+    opts?: OrchestratorRequestOptions,
+  ): Promise<void> {
+    await deleteAuroraAccessKey({ tenantId, auroraKeyId: keyId, signal: opts?.signal });
   },
 
   async getS3ClientContext(tenantId: string): Promise<S3ClientContext> {
@@ -242,14 +287,16 @@ export const auroraOrchestrator = {
 
   async getTenantUsageMetrics(
     tenantId: string,
-    opts: GetTenantUsageMetricsOptions,
+    metricsOpts: GetTenantUsageMetricsOptions,
+    opts?: OrchestratorRequestOptions,
   ): Promise<TenantUsageMetrics> {
-    const window = mapIntervalToAuroraWindow(opts.interval ?? '1d');
-    const { from, to } = opts;
+    const window = mapIntervalToAuroraWindow(metricsOpts.interval ?? '1d');
+    const { from, to } = metricsOpts;
+    const signal = opts?.signal;
 
     const [storageSamples, operationsSamples] = await Promise.all([
-      getStorageSamples({ tenantId, from, to, window }),
-      getOperationsSamples({ tenantId, from, to, window }),
+      getStorageSamples({ tenantId, from, to, window, signal }),
+      getOperationsSamples({ tenantId, from, to, window, signal }),
     ]);
 
     const storage = storageSamples
@@ -270,8 +317,8 @@ export const auroraOrchestrator = {
     return { storage, egress };
   },
 
-  async getTenantInfo(tenantId: string): Promise<TenantInfo> {
-    const info = await getTenantInfo({ tenantId });
+  async getTenantInfo(tenantId: string, opts?: OrchestratorRequestOptions): Promise<TenantInfo> {
+    const info = await getTenantInfo({ tenantId, signal: opts?.signal });
     return {
       bucketCount: info.bucketCount ?? 0,
       bucketLimit: info.bucketQuantityLimit ?? 100,
@@ -284,20 +331,22 @@ export const auroraOrchestrator = {
   async getBucketUsageMetrics(
     tenantId: string,
     bucketName: string,
-    opts: GetTenantUsageMetricsOptions,
+    metricsOpts: GetTenantUsageMetricsOptions,
+    opts?: OrchestratorRequestOptions,
   ): Promise<StorageUsageSample[]> {
     // getBucketStorageSamples queries Aurora metrics globally by bucket name, so
     // gate it behind a tenant-scoped ownership check: only the owning tenant's
     // Portal client resolves the bucket (404 -> null otherwise).
-    const bucket = await auroraOrchestrator.getBucket(tenantId, bucketName);
+    const bucket = await auroraOrchestrator.getBucket(tenantId, bucketName, opts);
     if (!bucket) throw new BucketNotFoundError(bucketName);
-    const auroraInterval = mapIntervalToAuroraWindow(opts.interval ?? '1d');
+    const auroraInterval = mapIntervalToAuroraWindow(metricsOpts.interval ?? '1d');
 
     const samples = await getBucketStorageSamples({
       bucketName,
-      from: opts.from,
-      to: opts.to,
+      from: metricsOpts.from,
+      to: metricsOpts.to,
       window: auroraInterval,
+      signal: opts?.signal,
     });
 
     return samples
