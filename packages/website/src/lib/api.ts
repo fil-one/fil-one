@@ -701,9 +701,20 @@ export function getInvoices(): Promise<ListInvoicesResponse> {
 
 // ── Access Keys API ──────────────────────────────────────────────────────────
 
-import type { CreateAccessKeyRequest, CreateAccessKeyResponse } from '@filone/shared';
+import type {
+  CreateAccessKeyRequest,
+  CreateAccessKeyResponse,
+  CreatePrincipalAccessKeyRequest,
+} from '@filone/shared';
 
-export function createAccessKey(body: CreateAccessKeyRequest): Promise<CreateAccessKeyResponse> {
+/**
+ * Mint an S3 access key. On a region serving the `iam` access model the body
+ * is the principal-bound shape: a name and an expiry, since the key carries
+ * whatever the bucket policies give its member.
+ */
+export function createAccessKey(
+  body: CreateAccessKeyRequest | CreatePrincipalAccessKeyRequest,
+): Promise<CreateAccessKeyResponse> {
   return apiRequest<CreateAccessKeyResponse>('/access-keys', {
     method: 'POST',
     body: JSON.stringify(body),
