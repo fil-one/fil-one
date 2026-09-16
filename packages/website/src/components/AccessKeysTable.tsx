@@ -383,7 +383,15 @@ export function AccessKeysTable({
             {showBuckets && (
               <Table.Cell className="hidden lg:table-cell">
                 <div className="flex flex-wrap gap-1">
-                  {key.type === 'principal' ? null : key.bucketScope === 'all' ? (
+                  {key.type === 'principal' ? (
+                    <Badge
+                      color="grey"
+                      size="sm"
+                      description="The buckets whose policy names its holder."
+                    >
+                      Per bucket policy
+                    </Badge>
+                  ) : key.bucketScope === 'all' ? (
                     <Badge color="grey" size="sm">
                       All Buckets
                     </Badge>
@@ -398,10 +406,20 @@ export function AccessKeysTable({
               </Table.Cell>
             )}
 
-            {/* Permissions */}
+            {/* Permissions. A principal-bound key carries none of its own: what
+                it may do follows the bucket policies naming its holder. */}
             {showPermissions && (
               <Table.Cell className="hidden md:table-cell">
-                {key.type === 'service' && (
+                {key.type === 'principal' ? (
+                  <Badge
+                    color="grey"
+                    size="sm"
+                    data-testid="permission-badge-follows-policy"
+                    description="This key inherits the policy of every bucket it touches."
+                  >
+                    Follows bucket policy
+                  </Badge>
+                ) : (
                   <PermissionBadges
                     permissions={key.permissions ?? []}
                     granularPermissions={key.granularPermissions ?? []}

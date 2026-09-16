@@ -14,6 +14,7 @@ import {
   CreateAccessKeySchema,
   DOCS_URL,
   getRegionLabel,
+  CreatePrincipalAccessKeySchema,
 } from '@filone/shared';
 import type {
   CreateBucketResponse,
@@ -113,7 +114,7 @@ export function CreateBucketPage() {
 
   // eslint-disable-next-line complexity/complexity
   async function handleSubmit() {
-    if (createKeyToggled && form.permissions.length === 0) return;
+    if (createKeyToggled && !form.iam && form.permissions.length === 0) return;
 
     const bucketBody = {
       bucketName: bucketName.trim(),
@@ -164,15 +165,11 @@ export function CreateBucketPage() {
 
     // Step 2: Optionally create API key scoped to this bucket
     if (createKeyToggled) {
-      const keyBody = {
-        keyName: form.keyName.trim(),
-        permissions: form.permissions,
-        bucketScope: form.bucketScope,
-        buckets: form.bucketScope === 'specific' ? form.selectedBuckets : undefined,
-        region,
-        expiresAt: form.expiresAt,
-      };
-      const parsed = CreateAccessKeySchema.safeParse(keyBody);
+      // The form's own payload: on an `iam` region a name and an expiry, since
+      // the key carries whatever the bucket policies give its holder.
+      const parsed = (form.iam ? CreatePrincipalAccessKeySchema : CreateAccessKeySchema).safeParse(
+        form.payload,
+      );
       if (!parsed.success) {
         toast.error(parsed.error.issues[0].message);
         setCreating(false);
@@ -223,8 +220,9 @@ export function CreateBucketPage() {
   const accessKeyFormValid =
     !createKeyToggled ||
     (accessKeyNameValid &&
-      form.permissions.length > 0 &&
-      (form.bucketScope !== 'specific' || form.selectedBuckets.length > 0));
+      (form.iam ||
+        (form.permissions.length > 0 &&
+          (form.bucketScope !== 'specific' || form.selectedBuckets.length > 0))));
 
   const canSubmit =
     bucketName.trim().length > 0 && !bucketNameError && !creating && accessKeyFormValid;
