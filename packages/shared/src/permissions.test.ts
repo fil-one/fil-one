@@ -28,6 +28,7 @@ const MATRIX: Record<Permission, OrgRole[]> = {
   'buckets.read': [OrgRole.Owner, OrgRole.Admin, OrgRole.Member, OrgRole.ReadOnly],
   'buckets.create': [OrgRole.Owner, OrgRole.Admin, OrgRole.Member],
   'buckets.delete': [OrgRole.Owner, OrgRole.Admin],
+  'buckets.policy_manage': [OrgRole.Owner, OrgRole.Admin],
   'objects.read': [OrgRole.Owner, OrgRole.Admin, OrgRole.Member, OrgRole.ReadOnly],
   'objects.write': [OrgRole.Owner, OrgRole.Admin, OrgRole.Member],
   'objects.delete': [OrgRole.Owner, OrgRole.Admin, OrgRole.Member],
