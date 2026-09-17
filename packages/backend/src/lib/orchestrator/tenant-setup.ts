@@ -98,9 +98,11 @@ export async function ensureTenantReady(
     console.error('[tenant-setup] setup failed', {
       orchestratorId: deps.id,
       orgId,
-      // No longer derivable from the orgId by eye, and it is the id to search
-      // for on the orchestrator side.
-      tenantId,
+      // Both ids, because which one the orchestrator knows depends on when the
+      // org was provisioned: an org from before the derivation shipped is
+      // stored under its orgId, and this failure can precede the PROFILE read
+      // that would say so.
+      derivedTenantId: tenantId,
       error: format(err),
     });
     // TODO: record failure counter / emit metric here (mirror
