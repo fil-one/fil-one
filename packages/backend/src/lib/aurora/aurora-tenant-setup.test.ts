@@ -32,7 +32,7 @@ const { FakeDuplicateTokenNameError } = vi.hoisted(() => {
   return { FakeDuplicateTokenNameError };
 });
 
-vi.mock('./aurora-backoffice.js', () => ({
+vi.mock('./aurora-backoffice.ts', () => ({
   createAuroraTenant: (...args: unknown[]) => mockCreateAuroraTenant(...args),
   setupAuroraTenant: (...args: unknown[]) => mockSetupAuroraTenant(...args),
   createAuroraTenantApiKey: (...args: unknown[]) => mockCreateAuroraTenantApiKey(...args),
@@ -41,17 +41,17 @@ vi.mock('./aurora-backoffice.js', () => ({
 
 const mockCreateAuroraAccessKey = vi.fn();
 
-vi.mock('./aurora-portal.js', () => ({
+vi.mock('./aurora-portal.ts', () => ({
   createAuroraAccessKey: (...args: unknown[]) => mockCreateAuroraAccessKey(...args),
 }));
 
 const mockReportMetric = vi.fn();
-vi.mock('../metrics.js', () => ({
+vi.mock('../metrics.ts', () => ({
   reportMetric: (...args: unknown[]) => mockReportMetric(...args),
 }));
 
 const mockScanAndEmitStuckTenantCount = vi.fn().mockResolvedValue(undefined);
-vi.mock('../stuck-tenant-metric.js', () => ({
+vi.mock('../stuck-tenant-metric.ts', () => ({
   scanAndEmitStuckTenantCount: (...args: unknown[]) => mockScanAndEmitStuckTenantCount(...args),
 }));
 
@@ -66,8 +66,8 @@ import {
   processTenantSetup,
   recordSetupFailure,
   OrgSetupStatus,
-} from './aurora-tenant-setup.js';
-import { OrgDeletingError } from '../org-profile.js';
+} from './aurora-tenant-setup.ts';
+import { OrgDeletingError } from '../org-profile.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1038,5 +1038,118 @@ describe('ensureTenantReady', () => {
           'ADD auroraSetupFailureCount :one SET updatedAt = :now',
       );
     expect(addCalls).toHaveLength(1);
+  });
+});
+
+describe('processTenantSetup signal forwarding', () => {
+  // The caller's deadline. Aborted only in the polling test below.
+  const signal = new AbortController().signal;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ddbMock.reset();
+    ssmMock.reset();
+  });
+
+  it('passes the caller signal to every Aurora call of the full pipeline', async () => {
+    ddbMock.on(GetItemCommand).resolves(
+      orgProfileItem({
+        auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
+        name: { S: 'Test Org' },
+      }),
+    );
+    ddbMock.on(UpdateItemCommand).resolves({});
+    ssmMock.on(PutParameterCommand).resolves({});
+    mockCreateAuroraTenant.mockResolvedValue({ auroraTenantId: 'aurora-t-1' });
+    mockSetupAuroraTenant.mockResolvedValue({ lastSetupStep: 'FINISHED' });
+    mockCreateAuroraTenantApiKey.mockResolvedValue({ token: 'atp_secret', tokenId: 'tok-1' });
+    setupDefaultS3AccessKeyMock();
+
+    await processTenantSetup('org-1', { signal });
+
+    const mocks = [
+      mockCreateAuroraTenant,
+      mockSetupAuroraTenant,
+      mockCreateAuroraTenantApiKey,
+      mockCreateAuroraAccessKey,
+    ];
+    const firstArgs = mocks.map((m) => m.mock.calls[0]?.[0]);
+    expect(firstArgs).toEqual(mocks.map(() => expect.objectContaining({ signal })));
+  });
+
+  it('stops polling the setup state once the signal is aborted', async () => {
+    ddbMock.on(GetItemCommand).resolves(
+      orgProfileItem({
+        auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
+        auroraTenantId: { S: 'aurora-t-1' },
+      }),
+    );
+    const controller = new AbortController();
+    // The deadline passes during the first poll; the loop must not sleep and
+    // poll again.
+    mockSetupAuroraTenant.mockImplementation(async () => {
+      controller.abort();
+      return { lastSetupStep: 'PENDING' };
+    });
+
+    await processTenantSetup('org-1', { signal: controller.signal }).catch(() => {});
+
+    expect(mockSetupAuroraTenant).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes the caller signal to the SSM lookup recovering a duplicate token', async () => {
+    vi.useFakeTimers();
+    try {
+      ddbMock.on(GetItemCommand).resolves(
+        orgProfileItem({
+          auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
+          auroraTenantId: { S: 'aurora-t-5' },
+        }),
+      );
+      mockCreateAuroraTenantApiKey.mockRejectedValue(new FakeDuplicateTokenNameError());
+      const paramNotFound = new Error('Parameter not found');
+      paramNotFound.name = 'ParameterNotFound';
+      ssmMock.on(GetParameterCommand).rejects(paramNotFound);
+
+      const promise = processTenantSetup('org-1', { signal });
+      promise.catch(() => {}); // suppress unhandled-rejection while timers advance
+      await vi.runAllTimersAsync();
+      await promise.catch(() => {});
+
+      // aws-sdk-client-mock types `args` as the one-element `[command]` tuple,
+      // but the recorded sinon call carries every argument `send` received.
+      const sentOptions = (
+        ssmMock.commandCalls(GetParameterCommand)[0] as unknown as { args: unknown[] }
+      ).args[1];
+      expect(sentOptions).toEqual({ abortSignal: signal });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops polling the setup state when the signal is aborted during a backoff', async () => {
+    vi.useFakeTimers();
+    try {
+      ddbMock.on(GetItemCommand).resolves(
+        orgProfileItem({
+          auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
+          auroraTenantId: { S: 'aurora-t-1' },
+        }),
+      );
+      const controller = new AbortController();
+      mockSetupAuroraTenant.mockResolvedValue({ lastSetupStep: 'PENDING' });
+
+      const promise = processTenantSetup('org-1', { signal: controller.signal });
+      promise.catch(() => {}); // suppress unhandled-rejection while timers advance
+      // Land inside the first 100 ms backoff, then let the deadline pass.
+      await vi.advanceTimersByTimeAsync(50);
+      controller.abort();
+      await vi.runAllTimersAsync();
+      await promise.catch(() => {});
+
+      expect(mockSetupAuroraTenant).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

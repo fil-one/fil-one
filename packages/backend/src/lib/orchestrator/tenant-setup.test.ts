@@ -34,8 +34,8 @@ const ssmMock = mockClient(SSMClient);
 // SDK calls are module-mocked, so the client value is just forwarded — a sentinel is enough.
 const client = 'mock-management-client' as unknown as Client;
 
-import { ensureTenantReady, CONSOLE_KEY_NAME } from './tenant-setup.js';
-import { OrgDeletingError } from '../org-profile.js';
+import { ensureTenantReady, CONSOLE_KEY_NAME } from './tenant-setup.ts';
+import { OrgDeletingError } from '../org-profile.ts';
 import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
@@ -405,6 +405,131 @@ describe('ensureTenantReady', () => {
     );
     for (const call of [...errorSpy.mock.calls, ...logSpy.mock.calls]) {
       expect(JSON.stringify(call)).not.toContain('SKTEST');
+    }
+  });
+});
+
+describe('signal forwarding', () => {
+  // The caller's deadline. Never aborted here: these tests check it reaches
+  // every upstream call, not what happens when it fires.
+  const signal = new AbortController().signal;
+
+  // aws-sdk-client-mock types `args` as the one-element `[command]` tuple,
+  // but the recorded sinon call carries every argument `send` received.
+  function sendOptionsOf(calls: Array<{ args: unknown[] }>): unknown {
+    return calls[0].args[1];
+  }
+
+  it('passes the caller signal to the tenant PUT and the console-key POST', async () => {
+    stubHappyPath();
+
+    await ensureTenantReady(deps, orgId, { signal });
+
+    const mocks = [mockPutTenant, mockCreateAccessKey];
+    const firstArgs = mocks.map((m) => m.mock.calls[0]?.[0]);
+    expect(firstArgs).toEqual(mocks.map(() => expect.objectContaining({ signal })));
+  });
+
+  it('passes the caller signal to the profile read, the SSM write and the pointer write', async () => {
+    stubHappyPath();
+
+    await ensureTenantReady(deps, orgId, { signal });
+
+    const sent = [
+      sendOptionsOf(ddbMock.commandCalls(GetItemCommand)),
+      sendOptionsOf(ssmMock.commandCalls(PutParameterCommand)),
+      sendOptionsOf(ddbMock.commandCalls(UpdateItemCommand)),
+    ];
+    expect(sent).toEqual([
+      { abortSignal: signal },
+      { abortSignal: signal },
+      { abortSignal: signal },
+    ]);
+  });
+
+  it('passes the caller signal to the rollback DELETE when the pointer write is refused', async () => {
+    stubHappyPath();
+    ddbMock.on(UpdateItemCommand).rejects(
+      new ConditionalCheckFailedException({
+        message: 'refused',
+        $metadata: {},
+        Item: { deleting: { BOOL: true } },
+      } as never),
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      await ensureTenantReady(deps, orgId, { signal }).catch(() => {});
+      expect(mockDeleteTenant).toHaveBeenCalledWith(expect.objectContaining({ signal }));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('passes the caller signal to every upstream call of the 409 recovery path', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    stubHappyPath();
+    mockCreateAccessKey
+      .mockResolvedValueOnce({
+        data: undefined,
+        error: { message: 'duplicate' },
+        response: { status: 409 },
+      })
+      .mockResolvedValue({
+        data: {
+          accessKeyId: 'AKIAFRESH',
+          secretAccessKey: 'SKFRESH',
+          name: CONSOLE_KEY_NAME,
+          permissions: [],
+          buckets: [],
+          createdAt: '2026-01-02T00:00:00Z',
+        },
+        error: undefined,
+        response: { status: 201 },
+      });
+    mockListAccessKeys.mockResolvedValue({
+      data: {
+        items: [
+          {
+            accessKeyId: 'AKIAOLD',
+            name: CONSOLE_KEY_NAME,
+            permissions: [],
+            createdAt: '2026-01-01T00:00:00Z',
+          },
+        ],
+      },
+      error: undefined,
+      response: { status: 200 },
+    });
+    mockDeleteAccessKey.mockResolvedValue({
+      data: undefined,
+      error: undefined,
+      response: { status: 204 },
+    });
+    const notFound = new Error('not found');
+    notFound.name = 'ParameterNotFound';
+    ssmMock.on(GetParameterCommand).rejects(notFound);
+
+    try {
+      await ensureTenantReady(deps, orgId, { signal });
+
+      const options = [
+        mockCreateAccessKey.mock.calls[0]?.[0],
+        mockListAccessKeys.mock.calls[0]?.[0],
+        // The SSM read that decides between reusing and rotating the key.
+        sendOptionsOf(ssmMock.commandCalls(GetParameterCommand)),
+        mockDeleteAccessKey.mock.calls[0]?.[0],
+        mockCreateAccessKey.mock.calls[1]?.[0],
+      ];
+      expect(options).toEqual([
+        expect.objectContaining({ signal }),
+        expect.objectContaining({ signal }),
+        { abortSignal: signal },
+        expect.objectContaining({ signal }),
+        expect.objectContaining({ signal }),
+      ]);
+    } finally {
+      log.mockRestore();
     }
   });
 });

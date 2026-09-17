@@ -1,4 +1,4 @@
-import { instrumentApiClient, type InstrumentableClient } from '../api-client-metrics.js';
+import { instrumentApiClient, type InstrumentableClient } from '../api-client-metrics.ts';
 
 // Unlike fth-api-metrics.ts, the apiName is an open string: this module backs
 // a reusable orchestrator factory, so the name is derived from the configured

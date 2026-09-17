@@ -17,9 +17,9 @@ import {
   type VectorStore,
   type VectorStoreChunk,
 } from '@filone/rag-shared';
-import { getObjectBytes, listObjects } from '../lib/s3-bucket-operations.js';
-import { updateBucketTelemetry } from '../lib/bucket-rag-enablement.js';
-import { resolveContentType } from './rag-content-type.js';
+import { getObjectBytes, listObjects } from '../lib/s3-bucket-operations.ts';
+import { updateBucketTelemetry } from '../lib/bucket-rag-enablement.ts';
+import { resolveContentType } from './rag-content-type.ts';
 import {
   clearCheckpoint,
   deleteManifestEntry,
@@ -28,7 +28,7 @@ import {
   saveCheckpoint,
   saveManifestEntry,
   type ManifestEntry,
-} from './rag-indexer-manifest.js';
+} from './rag-indexer-manifest.ts';
 
 const LOG = '[rag-indexer-helpers]';
 

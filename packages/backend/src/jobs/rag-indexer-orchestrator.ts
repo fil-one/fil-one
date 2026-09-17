@@ -8,10 +8,10 @@ import { ScanCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { Resource } from 'sst';
-import { getDynamoClient } from '../lib/ddb-client.js';
-import { reportMetric } from '../lib/metrics.js';
-import { RAGKeys } from '../lib/dynamo-records.js';
-import type { RagIndexerBucketRef, RagIndexerWorkerPayload } from './rag-indexer-worker.js';
+import { getDynamoClient } from '../lib/ddb-client.ts';
+import { reportMetric } from '../lib/metrics.ts';
+import { RAGKeys } from '../lib/dynamo-records.ts';
+import type { RagIndexerBucketRef, RagIndexerWorkerPayload } from './rag-indexer-worker.ts';
 import type { S3Region } from '@filone/shared';
 
 const dynamo = getDynamoClient();

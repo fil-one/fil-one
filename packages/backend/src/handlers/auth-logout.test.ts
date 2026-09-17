@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { buildEvent, buildContext } from '../test/lambda-test-utilities.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -12,7 +12,7 @@ vi.mock('sst', () => ({
   },
 }));
 
-vi.mock('../lib/auth-secrets.js', () => ({
+vi.mock('../lib/auth-secrets.ts', () => ({
   getAuthSecrets: () => ({
     AUTH0_CLIENT_ID: 'test-client-id',
     AUTH0_CLIENT_SECRET: 'test-client-secret',
@@ -24,7 +24,7 @@ process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.ALLOWED_REDIRECT_ORIGINS =
   'https://app.fil.one,https://app.filone.ai,https://staging.fil.one';
 
-import { handler } from './auth-logout.js';
+import { handler } from './auth-logout.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

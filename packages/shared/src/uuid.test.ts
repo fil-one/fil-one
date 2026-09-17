@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isUuid } from './uuid.js';
+import { isUuid } from './uuid.ts';
 
 describe('isUuid', () => {
   it('accepts an id the platform mints', () => {

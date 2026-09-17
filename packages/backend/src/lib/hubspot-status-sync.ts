@@ -1,6 +1,6 @@
-import { HUBSPOT_WEBHOOK_RETRY, upsertContactSubscriptionStatus } from './hubspot-client.js';
-import type { HubSpotLifecycleStatus } from './hubspot-lifecycle-status.js';
-import { emitHubSpotLiveWriteFailed } from './hubspot-metrics.js';
+import { HUBSPOT_WEBHOOK_RETRY, upsertContactSubscriptionStatus } from './hubspot-client.ts';
+import type { HubSpotLifecycleStatus } from './hubspot-lifecycle-status.ts';
+import { emitHubSpotLiveWriteFailed } from './hubspot-metrics.ts';
 
 /**
  * Mirrors a subscription status onto the customer's HubSpot contact (FIL-828).

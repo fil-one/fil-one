@@ -1,8 +1,8 @@
 import pRetry, { type Options as RetryOptions } from 'p-retry';
-import { getAvailableOrchestrators } from './service-orchestrator-registry.js';
-import { getOrgProfile } from './org-profile.js';
-import type { ServiceOrchestrator } from './service-orchestrator.js';
-import type { TenantStatus } from '@filone/shared/src/api/tenants.js';
+import { getAvailableOrchestrators } from './service-orchestrator-registry.ts';
+import { getOrgProfile } from './org-profile.ts';
+import type { ServiceOrchestrator } from './service-orchestrator.ts';
+import type { TenantStatus } from '@filone/shared/src/api/tenants.ts';
 
 export interface ProvisionedRegion {
   orchestrator: ServiceOrchestrator;

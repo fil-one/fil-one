@@ -61,7 +61,7 @@ const DEGRADED: ListBucketsResponse = {
 
 const DEGRADED_MESSAGE = 'Cannot list buckets in the us-east-1 region. Please try again later.';
 
-function renderPage(role = OrgRole.Owner) {
+function renderPage(role: OrgRole = OrgRole.Owner) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   // Delete is gated on `buckets.delete`, so the caller's role has to be in the
   // cache before the rows render or the control is absent for the wrong reason.
@@ -82,7 +82,7 @@ function renderPage(role = OrgRole.Owner) {
 
 // Resolves once the bucket list has rendered and its action menu is open, so
 // the "Delete bucket" menu item is present.
-async function renderPageWithBucketMenuOpen(role = OrgRole.Owner) {
+async function renderPageWithBucketMenuOpen(role: OrgRole = OrgRole.Owner) {
   mockApiResponses();
   renderPage(role);
   fireEvent.click(await screen.findByRole('button', { name: 'Bucket actions' }));

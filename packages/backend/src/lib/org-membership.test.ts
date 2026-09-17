@@ -2,13 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
 import { OrgRole, permissionsForRole } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { stubMembershipList } from '../test/lambda-test-utilities.js';
+import { stubMembershipList } from '../test/lambda-test-utilities.ts';
 import {
   OrgKeys,
   listMembers,
@@ -16,7 +16,7 @@ import {
   listMembershipRows,
   resolveMembership,
   summarizeMemberships,
-} from './org-membership.js';
+} from './org-membership.ts';
 
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
 const USER_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';

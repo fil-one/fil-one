@@ -72,6 +72,9 @@ importers:
       '@aws-sdk/client-s3':
         specifier: ^3.1031.0
         version: 3.1031.0
+      '@aws-sdk/client-s3vectors':
+        specifier: ^3.1031.0
+        version: 3.1073.0
       '@aws-sdk/client-ssm':
         specifier: ^3.1031.0
         version: 3.1031.0
@@ -94,6 +97,9 @@ importers:
       '@filone/backend':
         specifier: workspace:*
         version: link:../packages/backend
+      '@filone/rag-shared':
+        specifier: workspace:*
+        version: link:../packages/rag-shared
       '@filone/shared':
         specifier: workspace:*
         version: link:../packages/shared

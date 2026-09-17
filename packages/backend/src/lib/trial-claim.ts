@@ -11,12 +11,12 @@
 // So the eligibility test and the claim live here, and the two callers differ
 // only in what they do with the outcome.
 
-import { listMemberships } from './org-membership.js';
-import type { SubscriptionRecord } from './dynamo-records.js';
-import { emitTrialClaimBlockedByLegacyRow } from './stripe-webhook-metrics.js';
-import { legacyRowExists, readSubscription } from './subscription-store.js';
-import { ensureTrialEntitlement } from './trial-entitlement.js';
-import type { UserInfo } from './user-context.js';
+import { listMemberships } from './org-membership.ts';
+import type { SubscriptionRecord } from './dynamo-records.ts';
+import { emitTrialClaimBlockedByLegacyRow } from './stripe-webhook-metrics.ts';
+import { legacyRowExists, readSubscription } from './subscription-store.ts';
+import { ensureTrialEntitlement } from './trial-entitlement.ts';
+import type { UserInfo } from './user-context.ts';
 
 export type TrialClaimOutcome =
   /** A trial now exists for this org. */

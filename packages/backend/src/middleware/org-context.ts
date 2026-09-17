@@ -1,10 +1,10 @@
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ORG_ID_HEADER, isUuid } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
-import { accountDeletedResponse, ResponseBuilder } from '../lib/response-builder.js';
-import { getRequestHeader } from '../lib/request-headers.js';
-import { getOrgProfile } from '../lib/org-profile.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
+import { accountDeletedResponse, ResponseBuilder } from '../lib/response-builder.ts';
+import { getRequestHeader } from '../lib/request-headers.ts';
+import { getOrgProfile } from '../lib/org-profile.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
 
 /**
  * Which organization a request is about.

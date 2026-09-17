@@ -1,4 +1,4 @@
-import { reportMetric } from './metrics.js';
+import { reportMetric } from './metrics.ts';
 
 /**
  * Gauge-style out-of-sync signal: every usage-worker run emits 1 when it

@@ -15,12 +15,12 @@ import {
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { ApiErrorCode, OrgRole, Stage } from '@filone/shared';
-import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../lib/org-setup-status.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
-import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
-import { expectErrorResponse } from '../test/assert-helpers.js';
-import { auditItemIn, hasAuditItem } from '../test/audit-assertions.js';
+import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../lib/org-setup-status.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
+import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.ts';
+import { expectErrorResponse } from '../test/assert-helpers.ts';
+import { auditItemIn, hasAuditItem } from '../test/audit-assertions.ts';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -52,7 +52,7 @@ vi.spyOn(crypto, 'randomUUID').mockImplementation(
 
 vi.mock('sst', () => sstResourceMock());
 
-vi.mock('../lib/auth-secrets.js', () => ({
+vi.mock('../lib/auth-secrets.ts', () => ({
   getAuthSecrets: () => ({
     AUTH0_CLIENT_ID: 'test-client-id',
     AUTH0_CLIENT_SECRET: 'test-client-secret',
@@ -65,7 +65,7 @@ vi.mock('../lib/auth-secrets.js', () => ({
 // a claim on the login path is caught here instead of reaching Stripe — the
 // tests below require it to stay unused.
 const mockEnsureTrialEntitlement = vi.fn();
-vi.mock('../lib/trial-entitlement.js', () => ({
+vi.mock('../lib/trial-entitlement.ts', () => ({
   ensureTrialEntitlement: (args: unknown) => mockEnsureTrialEntitlement(args),
 }));
 
@@ -88,8 +88,8 @@ process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
 // Import after all mocks are set up
-import { authMiddleware } from './auth.js';
-import { authorize } from './authorize.js';
+import { authMiddleware } from './auth.ts';
+import { authorize } from './authorize.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -882,6 +882,10 @@ describe('authMiddleware', () => {
             Item: {
               pk: { S: `ORG#${MOCK_ORG_ID}` },
               sk: { S: expect.any(String) },
+              // The event-type index, stamped on every write so the viewer's
+              // type filter can never miss an event that was already stored.
+              gsi1pk: { S: `ORG#${MOCK_ORG_ID}#TYPE#org.created` },
+              gsi1sk: { S: expect.any(String) },
               eventId: { S: expect.any(String) },
               type: { S: 'org.created' },
               // No email: this ID token carries no `email_verified` claim, and

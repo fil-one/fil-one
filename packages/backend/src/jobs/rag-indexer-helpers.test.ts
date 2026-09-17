@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { VectorStore } from '@filone/rag-shared';
-import type { ListObjectsResult } from '../lib/s3-bucket-operations.js';
-import type { ManifestEntry } from './rag-indexer-manifest.js';
+import type { ListObjectsResult } from '../lib/s3-bucket-operations.ts';
+import type { ManifestEntry } from './rag-indexer-manifest.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -36,12 +36,12 @@ const {
   mockUpdateBucketTelemetry: vi.fn(),
 }));
 
-vi.mock('../lib/s3-bucket-operations.js', () => ({
+vi.mock('../lib/s3-bucket-operations.ts', () => ({
   listObjects: mockListObjects,
   getObjectBytes: mockGetObjectBytes,
 }));
 
-vi.mock('../lib/bucket-rag-enablement.js', () => ({
+vi.mock('../lib/bucket-rag-enablement.ts', () => ({
   updateBucketTelemetry: mockUpdateBucketTelemetry,
 }));
 
@@ -51,7 +51,7 @@ vi.mock('@filone/rag-shared', () => ({
   embedMany: mockEmbedMany,
 }));
 
-vi.mock('./rag-indexer-manifest.js', () => ({
+vi.mock('./rag-indexer-manifest.ts', () => ({
   loadManifest: mockLoadManifest,
   saveManifestEntry: mockSaveManifestEntry,
   deleteManifestEntry: mockDeleteManifestEntry,
@@ -60,7 +60,7 @@ vi.mock('./rag-indexer-manifest.js', () => ({
   clearCheckpoint: mockClearCheckpoint,
 }));
 
-import { indexBucket } from './rag-indexer-helpers.js';
+import { indexBucket } from './rag-indexer-helpers.ts';
 import { S3Region } from '@filone/shared';
 
 // ---------------------------------------------------------------------------

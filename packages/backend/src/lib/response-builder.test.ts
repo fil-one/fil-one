@@ -6,7 +6,7 @@ import {
   makeClearCookieHeader,
   ResponseBuilder,
   COOKIE_ATTRIBUTES,
-} from './response-builder.js';
+} from './response-builder.ts';
 
 describe('makeCookieHeader', () => {
   it('returns correct format with HttpOnly, Secure, SameSite, Path, Max-Age', () => {

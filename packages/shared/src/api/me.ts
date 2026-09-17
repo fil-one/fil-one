@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import type { OrgRole } from './org.js';
-import type { Permission } from '../permissions.js';
+import type { OrgRole } from './org.ts';
+import type { Permission } from '../permissions.ts';
 
 /** One row of `MeResponse.memberships` — an org the caller belongs to. */
 export interface OrgMembershipSummary {

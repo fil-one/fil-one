@@ -5,12 +5,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CopySimpleIcon, DatabaseIcon, PlusIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { AccessKeysTable } from '../components/AccessKeysTable';
+import { Alert } from '../components/Alert';
 import { Button } from '../components/Button';
 import { Heading } from '../components/Heading/Heading';
 import { PageLayout } from '../components/PageLayout.js';
 import { CodeBlock } from '../components/CodeBlock';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Tab, TabList, TabPanel, TabPanels, Tabs } from '../components/Tabs';
+import { SaveCredentialsModal } from '../components/SaveCredentialsModal';
 import { TableSkeleton, type SkeletonColumn } from '../components/Table/TableSkeleton';
 import { useToast } from '../components/Toast';
 
@@ -25,7 +27,9 @@ import { useCopyToClipboard } from '../lib/use-copy-to-clipboard.js';
 import { LIST_GC_TIME, LIST_STALE_TIME, queryKeys } from '../lib/query-client.js';
 import { RequirePermission } from '../components/RequirePermission';
 import { useHasPermission } from '../lib/use-permissions.js';
+import { useKeyRotation } from '../lib/use-key-rotation.js';
 import { useKeyActionScope } from '../lib/use-key-scope.js';
+import { useAccountDisabled } from '../lib/use-account-disabled.js';
 
 // ---------------------------------------------------------------------------
 // Tab 1: Access Keys
@@ -52,6 +56,10 @@ type AccessKeysTabProps = {
   onDelete?: (id: string) => Promise<void>;
   /** Whether a row's Revoke belongs to this caller. */
   canRevoke?: (key: AccessKey) => boolean;
+  /** Absent for a role that cannot mint keys — the table drops the action. */
+  onRotate?: (id: string) => void;
+  /** Whether this caller could still mint the key, and so may reissue it. */
+  canRotate?: (key: AccessKey) => boolean;
   creatorFor?: (userId: string) => { name: string; email?: string } | undefined;
 };
 
@@ -60,6 +68,8 @@ function AccessKeysTab({
   onCreateOpen,
   onDelete,
   canRevoke,
+  onRotate,
+  canRotate,
   creatorFor,
 }: AccessKeysTabProps) {
   return (
@@ -77,6 +87,8 @@ function AccessKeysTab({
         showPermissions
         onDelete={onDelete}
         canDelete={canRevoke}
+        onRotate={onRotate}
+        canRotate={canRotate}
         creatorFor={creatorFor}
         onCreateOpen={onCreateOpen}
       />
@@ -106,6 +118,8 @@ function AccessKeysPanel({
   onCreateOpen,
   onDelete,
   canRevoke,
+  onRotate,
+  canRotate,
   creatorFor,
 }: AccessKeysTabProps & {
   mayList: boolean;
@@ -135,8 +149,8 @@ function AccessKeysPanel({
 
   if (isError) {
     return (
-      <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-        {errorMessage ?? 'Failed to load access keys'}
+      <div className="mt-4">
+        <Alert variant="red" description={errorMessage ?? 'Failed to load access keys'} />
       </div>
     );
   }
@@ -147,6 +161,8 @@ function AccessKeysPanel({
       onCreateOpen={onCreateOpen}
       onDelete={onDelete}
       canRevoke={canRevoke}
+      onRotate={onRotate}
+      canRotate={canRotate}
       creatorFor={creatorFor}
     />
   );
@@ -484,10 +500,12 @@ export function ApiKeysPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const mayCreate = useHasPermission('keys.create');
+  const rotation = useKeyRotation();
   // Listing is `keys.manage_own` and the server narrows the response to the
   // caller's own keys; `keys.manage_all` lifts that narrowing server-side and
   // asks nothing extra of this request. Revoking is per row.
   const { mayList, mayRevoke } = useKeyActionScope();
+  const accountDisabled = useAccountDisabled();
 
   const openCreateKey = () => void navigate({ to: '/api-keys/create' });
 
@@ -535,6 +553,31 @@ export function ApiKeysPage() {
     }
   }
 
+  // A disabled account gets the state and nothing else, the way the Buckets page
+  // already does it: one Alert, no Create action, no tabs. Every key on this page
+  // is refused while the account is disabled, and Connection details documents
+  // how to connect with credentials that currently cannot connect. Offering
+  // either is offering a way in that is not there. Restoring the account is the
+  // only move, and the shell's banner is already pointing at it.
+  //
+  // Deliberately narrower than `isError`: a transient keys failure keeps the
+  // behaviour below, where the panel carries the error and the static
+  // Connection details tab beside it survives.
+  if (accountDisabled) {
+    return (
+      <PageLayout
+        title="API Keys"
+        headingId="api-keys-heading"
+        description="Manage credentials and connect via S3-compatible API"
+      >
+        <Alert
+          variant="red"
+          description="Your subscription has been canceled. Please reactivate to regain access."
+        />
+      </PageLayout>
+    );
+  }
+
   // The whole page used to be replaced by a spinner or an error card. Both
   // states now live in the keys panel: the Connection details tab is static
   // documentation that works whatever the keys request did, and the action slot
@@ -548,8 +591,8 @@ export function ApiKeysPage() {
     >
       <Tabs>
         <TabList>
-          <Tab testId="api-keys-tab">
-            API keys {!isPending && keys.length > 0 && `(${keys.length})`}
+          <Tab testId="api-keys-tab" count={isPending ? undefined : keys.length}>
+            API keys
           </Tab>
           <Tab testId="connection-details-tab">Connection details</Tab>
         </TabList>
@@ -565,6 +608,8 @@ export function ApiKeysPage() {
               onCreateOpen={mayCreate ? openCreateKey : undefined}
               onDelete={handleDelete}
               canRevoke={mayRevoke}
+              onRotate={rotation.request}
+              canRotate={rotation.canRotate}
               creatorFor={creatorFor}
             />
           </TabPanel>
@@ -582,6 +627,23 @@ export function ApiKeysPage() {
         description="This access key will be permanently revoked. Any applications using it will lose access immediately."
         confirmLabel="Delete key"
       />
+
+      <ConfirmDialog
+        open={rotation.pendingKeyId !== null}
+        onClose={rotation.cancel}
+        onConfirm={rotation.confirm}
+        title="Rotate access key"
+        description="The key keeps its name, permissions and buckets, and gets a new access key ID and secret. The current secret stops working as soon as the new one is issued, so update anything using it."
+        confirmLabel="Rotate key"
+      />
+
+      {rotation.credentials && (
+        <SaveCredentialsModal
+          open={true}
+          onDone={rotation.dismissCredentials}
+          credentials={rotation.credentials}
+        />
+      )}
     </PageLayout>
   );
 }

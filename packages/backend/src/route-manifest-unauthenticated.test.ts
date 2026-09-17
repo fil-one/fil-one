@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { APIGatewayProxyResultV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ROUTE_MANIFEST } from '@filone/shared';
-import { sstResourceMock } from './test/sst-resource-mock.js';
-import { buildContext, buildEvent } from './test/lambda-test-utilities.js';
+import { sstResourceMock } from './test/sst-resource-mock.ts';
+import { buildContext, buildEvent } from './test/lambda-test-utilities.ts';
 
 /**
  * What each route answers a caller who presents nothing at all: no cookies, no
@@ -44,6 +44,7 @@ vi.mock('sst', () =>
     DeletionChallengeTable: { name: 'DeletionChallengeTable' },
     DeletionCodeHmacKey: { value: 'test-deletion-hmac-key' },
     ForgeManagementApiToken: { value: 'test-forge-token' },
+    ForgeDevManagementApiToken: { value: 'test-forge-dev-token' },
     FthManagementApiToken: { value: 'test-fth-token' },
     RagIndexerTable: { name: 'RagIndexerTable' },
     RagVectorBucket: { name: 'RagVectorBucket' },
@@ -58,7 +59,7 @@ vi.mock('sst', () =>
 // refusing first cannot do it quietly: it fails on the call it should never
 // have reached. Nothing in this file is supposed to touch either — a request
 // with no credentials is settled from what is on the event.
-vi.mock('./lib/ddb-client.js', () => ({
+vi.mock('./lib/ddb-client.ts', () => ({
   getDynamoClient: () => ({
     send: () => Promise.reject(new Error('DynamoDB is unreachable in this test')),
   }),

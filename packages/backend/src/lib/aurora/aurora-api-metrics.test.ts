@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createClient, createBucket, listBuckets } from '@filone/aurora-portal-client';
-import { type MetricEvent, reportMetric } from '../metrics.js';
-import { instrumentClient } from './aurora-api-metrics.js';
+import { type MetricEvent, reportMetric } from '../metrics.ts';
+import { instrumentClient } from './aurora-api-metrics.ts';
 
-vi.mock('../metrics.js', () => ({
+vi.mock('../metrics.ts', () => ({
   reportMetric: vi.fn(),
 }));
 
@@ -154,4 +154,37 @@ describe('instrumentClient', () => {
 
     expect(reportedMetrics()[0].AuroraApiDuration).toBeGreaterThanOrEqual(0);
   });
+});
+
+describe('instrumentClient deadline classification', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // `AbortSignal.timeout` rejects fetch with the DOMException. Runtimes where
+  // DOMException does not extend Error reject with the same shape minus the
+  // prototype, and both must classify as a timeout.
+  const timeoutRejections: Record<string, unknown> = {
+    'a DOMException named TimeoutError': new DOMException(
+      'The operation was aborted due to timeout',
+      'TimeoutError',
+    ),
+    'a non-Error value named TimeoutError': { name: 'TimeoutError' },
+  };
+
+  for (const [description, rejection] of Object.entries(timeoutRejections)) {
+    it(`reports metric with statusGroup "timeout" when fetch rejects with ${description}`, async () => {
+      const client = createClient({
+        baseUrl: 'https://example.com/api',
+        fetch: vi.fn<typeof fetch>().mockRejectedValue(rejection),
+      });
+      instrumentClient(client, { apiName: 'aurora-portal' });
+
+      await listBuckets({ client, path: { tenantId: 'tenant-1' }, throwOnError: false });
+
+      expect(reportedMetrics()).toEqual([
+        expect.objectContaining({ apiName: 'aurora-portal', statusGroup: 'timeout' }),
+      ]);
+    });
+  }
 });

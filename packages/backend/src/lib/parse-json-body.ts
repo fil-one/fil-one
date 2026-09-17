@@ -1,6 +1,6 @@
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ErrorResponse } from '@filone/shared';
-import { ResponseBuilder } from './response-builder.js';
+import { ResponseBuilder } from './response-builder.ts';
 
 /**
  * A parsed request body, or the 400 that says why it is not one.

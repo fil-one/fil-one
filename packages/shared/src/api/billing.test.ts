@@ -3,7 +3,7 @@ import {
   ActivateSubscriptionRequestSchema,
   SubscriptionStatus,
   mapStripeStatus,
-} from './billing.js';
+} from './billing.ts';
 
 describe('mapStripeStatus', () => {
   it('maps active → Active', () => {

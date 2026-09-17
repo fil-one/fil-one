@@ -8,12 +8,13 @@ import { z } from 'zod';
  * row carries. Those rows are converted to `owner` as they move into OrgTable —
  * every pre-conversion account is an org of one.
  */
-export enum OrgRole {
-  Owner = 'owner',
-  Admin = 'admin',
-  Member = 'member',
-  ReadOnly = 'readonly',
-}
+export const OrgRole = {
+  Owner: 'owner',
+  Admin: 'admin',
+  Member: 'member',
+  ReadOnly: 'readonly',
+} as const;
+export type OrgRole = (typeof OrgRole)[keyof typeof OrgRole];
 
 /** Whether a stored value (e.g. a DynamoDB attribute) is one of the four roles. */
 export function isOrgRole(value: unknown): value is OrgRole {

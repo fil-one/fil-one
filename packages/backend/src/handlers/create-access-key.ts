@@ -1,13 +1,9 @@
-import { QueryCommand } from '@aws-sdk/client-dynamodb';
-import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import {
-  ApiErrorCode,
   CreateAccessKeySchema,
   S3Region,
-  auditKeyIdSuffix,
   excessKeyPermissions,
   isSupportedRegion,
 } from '@filone/shared';
@@ -16,30 +12,40 @@ import type {
   CreateAccessKeyResponse,
   ErrorResponse,
 } from '@filone/shared';
-import { Resource } from 'sst';
-import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.js';
-import type { AuditCorrelation } from '../lib/audit.js';
-import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
-import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.js';
-import type { IssuedAccessKey, ServiceOrchestrator } from '../lib/service-orchestrator.js';
-import { getDynamoClient } from '../lib/ddb-client.js';
-import { isOrgDeleting } from '../lib/org-profile.js';
-import { parseJsonBody } from '../lib/parse-json-body.js';
+import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
+import {
+  discardRecordedKey,
+  discardUnrecordedKey,
+  exceedsRoleResponse,
+  keyExceedsCurrentRole,
+  mintConflictResponse,
+  optionalKeyAttributes,
+  recordMintedKey,
+  roleChangedResponse,
+} from '../lib/key-mint.ts';
+import type { KeyMinter, MintedKey } from '../lib/key-mint.ts';
+import { listOrgAccessKeys } from '../lib/member-keys.ts';
+import type { AuditCorrelation } from '../lib/audit.ts';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
+import type { IssuedAccessKey, ServiceOrchestrator } from '../lib/service-orchestrator.ts';
+import { isOrgDeleting } from '../lib/org-profile.ts';
+import { parseJsonBody } from '../lib/parse-json-body.ts';
 import {
   accountDeletedResponse,
   ResponseBuilder,
   tenantNotReadyResponse,
   unsupportedRegionResponse,
-} from '../lib/response-builder.js';
-import { AccessKeyKeys, keyAttribution } from '../lib/dynamo-records.js';
-import type { AccessKeyRecord } from '../lib/dynamo-records.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize, requireOrgMembershipMiddleware } from '../middleware/authorize.js';
-import { csrfMiddleware } from '../middleware/csrf.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
+} from '../lib/response-builder.ts';
+import { AccessKeyKeys, keyAttribution } from '../lib/dynamo-records.ts';
+import type { AccessKeyRecord } from '../lib/dynamo-records.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize, requireOrgMembershipMiddleware } from '../middleware/authorize.ts';
+import { csrfMiddleware } from '../middleware/csrf.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
+import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
 
 // TODO: Refactor the handler, reducing its complexity and removing the ignore eslint directive.
 // https://linear.app/filecoin-foundation/issue/FIL-320/refactor-create-access-key-handler
@@ -57,6 +63,9 @@ export async function baseHandler(
   if (denied) return denied;
 
   const { orgId, userId } = getUserInfo(event);
+  // What the cap above admitted. The key row's write asserts the role on file
+  // can still grant it, and the read after that write asks again.
+  const creator = { orgId, userId, key: { permissions, granularPermissions } };
   const creatorEmail = getVerifiedEmail(event);
   const attribution = keyAttribution({ userId, creatorEmail });
   const actor = userActor({ userId, email: creatorEmail });
@@ -72,6 +81,11 @@ export async function baseHandler(
   const orchestrator = getOrchestratorForRegion(region);
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
+
+  // Before the intent, because nothing happened: a name the org already shows
+  // is a request that was never going to produce a key, and writing an intent
+  // for it would leave an operator reading a mint that never started.
+  if (await orgAlreadyShowsKeyName({ orgId, keyName, region })) return duplicateKeyNameResponse();
 
   // Fail-closed, and before the vendor: the credential is created at the storage
   // vendor before anything local is written, so no SigV4 key may come into
@@ -98,37 +112,28 @@ export async function baseHandler(
       expiresAt,
     });
   } catch (err) {
-    if (err instanceof AccessKeyAlreadyExistsError) {
-      await recoverDuplicateKey({
-        orgId,
-        tenantId,
-        keyName,
-        region,
-        orchestrator,
-        attribution,
-        mint,
-      });
-      return new ResponseBuilder()
-        .status(409)
-        .body<ErrorResponse>({ message: 'An access key with this name already exists' })
-        .build();
-    }
-    if (err instanceof AccessKeyValidationError) {
-      // The vendor refused the request. Closing the correlation is what says so:
-      // an intent with no completion means the process died mid-flight.
-      await mint.complete({ outcome: 'failed' });
-      return new ResponseBuilder()
-        .status(400)
-        .body<ErrorResponse>({ message: err.message })
-        .build();
-    }
-    // Left dangling on purpose: an unhandled vendor error is the case where
-    // nobody knows whether a credential exists, and that is what the operator
-    // needs to see.
-    throw err;
+    return await handleMintRefusal(err, {
+      orgId,
+      tenantId,
+      keyName,
+      region,
+      orchestrator,
+      attribution,
+      mint,
+      creator,
+    });
   }
 
-  await recordMintedKey({
+  const mintedKey: MintedKey = {
+    keyId: accessKey.id,
+    accessKeyId: accessKey.accessKeyId,
+    keyName,
+    region,
+    orchestrator,
+    tenantId,
+  };
+
+  const record = await recordMintedKey({
     row: {
       pk: AccessKeyKeys.orgPk(orgId),
       sk: AccessKeyKeys.keySk(accessKey.id),
@@ -138,15 +143,21 @@ export async function baseHandler(
       status: 'active',
       region,
       permissions,
-      ...(granularPermissions?.length ? { granularPermissions } : {}),
-      bucketScope,
-      ...(buckets ? { buckets } : {}),
-      ...(expiresAt ? { expiresAt } : {}),
+      ...optionalKeyAttributes({ granularPermissions, bucketScope, buckets, expiresAt }),
       ...attribution,
     },
-    accessKeyId: accessKey.accessKeyId,
     mint,
+    minter: creator,
   });
+  if (!record.recorded) {
+    await discardUnrecordedKey({ minted: mintedKey, mint, minter: creator });
+    return record.reason === 'minter_role_changed' ? roleChangedResponse() : mintConflictResponse();
+  }
+
+  if (await keyExceedsCurrentRole(creator)) {
+    await discardRecordedKey({ minted: mintedKey, minter: creator, actor });
+    return roleChangedResponse();
+  }
 
   return new ResponseBuilder()
     .status(201)
@@ -161,34 +172,73 @@ export async function baseHandler(
 }
 
 /**
- * Write the key's row and the completion event as one transaction, so the
- * record of a live credential cannot be the half that fails.
+ * Whether the org already lists a key under this name in this region.
  *
- * Both mint paths land here — the ordinary one and the duplicate recovery — so
- * a key row and its event are written the same way whichever attempt produced
- * the credential.
+ * The vendor enforces name uniqueness per tenant, and until rotation shipped
+ * that was enough: a duplicate came back as a 409 and nothing local had to ask.
+ * A rotated key is minted under a suffixed vendor name, which frees the console
+ * name at the vendor while the row goes on showing it, so the vendor would now
+ * accept a second key the console would list twice under one name. This is the
+ * check that keeps the name unique where it is actually read.
+ *
+ * Through `listOrgAccessKeys`, which follows `LastEvaluatedKey` to the end and
+ * reads consistently on every page: a single Query answers one page, and a
+ * rotation that just landed its replacement has freed the name at the vendor,
+ * so a row this check does not see is a name a second key takes.
+ *
+ * Not a lock: two creates racing on the same free name can both pass it, and
+ * the vendor only catches the pair whose name it still holds. A single-table
+ * design has nowhere to put a uniqueness constraint, and a duplicate display
+ * name is worth a narrow race rather than a second row to maintain.
  */
-async function recordMintedKey({
-  row,
-  accessKeyId,
-  mint,
-  recovered,
+async function orgAlreadyShowsKeyName({
+  orgId,
+  keyName,
+  region,
 }: {
-  row: Record<string, unknown>;
-  accessKeyId: string;
-  mint: AuditCorrelation<'key.created'>;
-  recovered?: true;
-}): Promise<void> {
-  await mint.complete({
-    outcome: 'succeeded',
-    details: {
-      // The id the console shows, by its last characters only.
-      keyIdSuffix: auditKeyIdSuffix('s3', accessKeyId),
-      ...(recovered ? { recovered } : {}),
-    },
-    items: [{ Put: { TableName: Resource.UserInfoTable.name, Item: marshall(row) } }],
-  });
+  orgId: string;
+  keyName: string;
+  region: S3Region;
+}): Promise<boolean> {
+  const keys = await listOrgAccessKeys(orgId);
+  return keys.some((key) => key.keyName === keyName && key.region === region);
 }
+
+/** The name is taken, whoever is holding it. */
+function duplicateKeyNameResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(409)
+    .body<ErrorResponse>({ message: 'An access key with this name already exists' })
+    .build();
+}
+
+/**
+ * The vendor would not mint it, and each refusal means something different.
+ *
+ * A duplicate name is the one that may have created a credential anyway, on an
+ * earlier attempt whose row never landed, so it goes through the recovery. A
+ * validation error is the vendor rejecting the request, and closing the
+ * correlation is what records that. Anything else leaves the intent dangling on
+ * purpose: nobody knows whether a credential exists, which is what the operator
+ * needs to see.
+ */
+async function handleMintRefusal(
+  err: unknown,
+  attempt: MintAttempt,
+): Promise<APIGatewayProxyStructuredResultV2> {
+  if (err instanceof AccessKeyAlreadyExistsError) {
+    await recoverDuplicateKey(attempt);
+    return duplicateKeyNameResponse();
+  }
+  if (err instanceof AccessKeyValidationError) {
+    await attempt.mint.complete({ outcome: 'failed' });
+    return new ResponseBuilder().status(400).body<ErrorResponse>({ message: err.message }).build();
+  }
+  throw err;
+}
+
+/**
+
 
 /**
  * The creator-authority cap: the requested key permissions are intersected with
@@ -211,17 +261,11 @@ function checkCreatorAuthority(
   const excess = excessKeyPermissions(getUserInfo(event).membership?.role ?? '', request);
   if (excess.length === 0) return undefined;
 
-  const named = excess.map(({ keyPermission }) => keyPermission).join(', ');
-  return new ResponseBuilder()
-    .status(403)
-    .body<ErrorResponse>({
-      message: `A key cannot carry more than you do. Your role does not permit: ${named}.`,
-      code: ApiErrorCode.FORBIDDEN_ROLE,
-    })
-    .build();
+  return exceedsRoleResponse(excess);
 }
 
-interface RecoverDuplicateKeyParams {
+/** What one attempt to mint had in hand when the vendor refused it. */
+interface MintAttempt {
   orgId: string;
   tenantId: string;
   keyName: string;
@@ -230,6 +274,7 @@ interface RecoverDuplicateKeyParams {
   attribution: Pick<AccessKeyRecord, 'createdBy' | 'creatorEmail' | 'policyVersion'>;
   /** The intent this attempt already wrote — every exit here closes it. */
   mint: AuditCorrelation<'key.created'>;
+  creator: KeyMinter;
 }
 
 async function recoverDuplicateKey({
@@ -240,24 +285,9 @@ async function recoverDuplicateKey({
   orchestrator,
   attribution,
   mint,
-}: RecoverDuplicateKeyParams): Promise<void> {
-  // Check if we already have a DynamoDB record for this key
-  const { Items: existingKeys } = await getDynamoClient().send(
-    new QueryCommand({
-      TableName: Resource.UserInfoTable.name,
-      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
-      ExpressionAttributeValues: {
-        ':pk': { S: AccessKeyKeys.orgPk(orgId) },
-        ':skPrefix': { S: AccessKeyKeys.keySkPrefix() },
-      },
-    }),
-  );
-
-  const alreadyInDb = existingKeys?.some((item) => {
-    const itemRegion = (item.region?.S as S3Region | undefined) ?? S3Region.EuWest1;
-    return item.keyName?.S === keyName && itemRegion === region;
-  });
-  if (alreadyInDb) {
+  creator,
+}: MintAttempt): Promise<void> {
+  if (await orgAlreadyShowsKeyName({ orgId, keyName, region })) {
     // A plain duplicate name: the vendor refused and there is nothing to
     // recover, so the correlation closes as the rejection it was.
     await mint.complete({ outcome: 'failed' });
@@ -278,10 +308,19 @@ async function recoverDuplicateKey({
     return;
   }
 
+  const minted: MintedKey = {
+    keyId: recovered.id,
+    accessKeyId: recovered.accessKeyId,
+    keyName,
+    region,
+    orchestrator,
+    tenantId,
+  };
+
   // The completion the earlier attempt never got to write. It closes this
   // request's intent, and `recovered` says the credential it names was minted
   // by a request whose own intent is still dangling.
-  await recordMintedKey({
+  const record = await recordMintedKey({
     row: {
       pk: AccessKeyKeys.orgPk(orgId),
       sk: AccessKeyKeys.keySk(recovered.id),
@@ -299,10 +338,16 @@ async function recoverDuplicateKey({
       ...attribution,
       recovered: true,
     },
-    accessKeyId: recovered.accessKeyId,
     mint,
+    minter: creator,
     recovered: true,
   });
+  // This path answers 409 either way; a row that did not land just leaves no
+  // credential behind it.
+  if (!record.recorded) {
+    await discardUnrecordedKey({ minted, mint, minter: creator });
+    return;
+  }
 
   console.warn(
     `Recovered DynamoDB record for access key "${keyName}" (id=${recovered.id}) for org ${orgId} using ${orchestrator.id} orchestrator`,

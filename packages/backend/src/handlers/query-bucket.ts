@@ -6,21 +6,21 @@ import type { ErrorResponse, QueryBucketResponse } from '@filone/shared';
 import { ApiErrorCode, QueryBucketSchema, S3Region, isSupportedRegion } from '@filone/shared';
 import { S3VectorsStore, complete, embed } from '@filone/rag-shared';
 import type { VectorQueryResult } from '@filone/rag-shared';
-import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
-import { getBucketRagEnablement } from '../lib/bucket-rag-enablement.js';
-import { RAGKeys } from '../lib/dynamo-records.js';
-import { getOrgProfile } from '../lib/org-profile.js';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import { getBucketRagEnablement } from '../lib/bucket-rag-enablement.ts';
+import { RAGKeys } from '../lib/dynamo-records.ts';
+import { getOrgProfile } from '../lib/org-profile.ts';
 import {
   ResponseBuilder,
   tenantNotReadyResponse,
   unsupportedRegionResponse,
-} from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
-import { ragQueryAuthMiddleware } from '../middleware/rag-query-auth.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { ragAccessMiddleware } from '../middleware/rag-access.js';
-import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
+} from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo } from '../lib/user-context.ts';
+import { ragQueryAuthMiddleware } from '../middleware/rag-query-auth.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
+import { ragAccessMiddleware } from '../middleware/rag-access.ts';
+import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
 
 /**
  * Message returned when a bucket has no index, or retrieval yields no chunks.

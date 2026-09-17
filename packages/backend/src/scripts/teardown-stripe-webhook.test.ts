@@ -19,7 +19,7 @@ vi.mock('stripe', () => ({
 
 const ssmMock = mockClient(SSMClient);
 
-import { teardownStripeWebhook } from './teardown-stripe-webhook.js';
+import { teardownStripeWebhook } from './teardown-stripe-webhook.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -4,10 +4,10 @@ import {
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
-import { getDynamoClient } from './ddb-client.js';
-import { createBillingTrial } from './create-billing-trial.js';
-import { normalizeEmailForEntitlement } from './email-normalization.js';
-import { TrialEntitlementError } from './errors.js';
+import { getDynamoClient } from './ddb-client.ts';
+import { createBillingTrial } from './create-billing-trial.ts';
+import { normalizeEmailForEntitlement } from './email-normalization.ts';
+import { TrialEntitlementError } from './errors.ts';
 
 export interface EnsureTrialEntitlementParams {
   sub: string;

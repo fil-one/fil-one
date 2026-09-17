@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import { PROD_CONSOLE_ALIAS_HOSTS, PROD_CONSOLE_HOST, Stage } from '@filone/shared';
-import { resolveAuth0Domain } from './auth0-domain.js';
+import { resolveAuth0Domain } from './auth0-domain.ts';
 
 const CONFIGURED = 'dev-tenant.us.auth0.com';
 

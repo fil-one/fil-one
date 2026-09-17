@@ -1,9 +1,9 @@
 import { ScanCommand } from '@aws-sdk/client-dynamodb';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
-import { getDynamoClient } from './ddb-client.js';
-import { reportMetric } from './metrics.js';
-import { FINAL_SETUP_STATUS } from './org-setup-status.js';
+import { getDynamoClient } from './ddb-client.ts';
+import { reportMetric } from './metrics.ts';
+import { FINAL_SETUP_STATUS } from './org-setup-status.ts';
 
 const dynamo = getDynamoClient();
 

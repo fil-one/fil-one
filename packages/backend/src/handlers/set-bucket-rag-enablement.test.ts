@@ -14,7 +14,7 @@ const mockGetOrchestratorForRegion = vi.fn();
 
 let orch: FakeOrchestrator;
 
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (...args: unknown[]) => mockGetOrchestratorForRegion(...args),
 }));
 
@@ -25,17 +25,17 @@ const mockIsOrgDeleting = vi.fn(
   async (_orgId: string, _options?: { consistent?: boolean }) => false,
 );
 
-vi.mock('../lib/org-profile.js', async () => ({
-  ...(await vi.importActual<typeof import('../lib/org-profile.js')>('../lib/org-profile.js')),
+vi.mock('../lib/org-profile.ts', async () => ({
+  ...(await vi.importActual<typeof import('../lib/org-profile.ts')>('../lib/org-profile.ts')),
   getOrgProfile: (...args: Parameters<typeof mockGetOrgProfile>) => mockGetOrgProfile(...args),
   isOrgDeleting: (...args: Parameters<typeof mockIsOrgDeleting>) => mockIsOrgDeleting(...args),
 }));
 
 const mockGetEnablement = vi.fn();
 const mockSetEnablement = vi.fn();
-vi.mock('../lib/bucket-rag-enablement.js', async () => {
-  const actual = await vi.importActual<typeof import('../lib/bucket-rag-enablement.js')>(
-    '../lib/bucket-rag-enablement.js',
+vi.mock('../lib/bucket-rag-enablement.ts', async () => {
+  const actual = await vi.importActual<typeof import('../lib/bucket-rag-enablement.ts')>(
+    '../lib/bucket-rag-enablement.ts',
   );
   return {
     ...actual,
@@ -46,12 +46,12 @@ vi.mock('../lib/bucket-rag-enablement.js', async () => {
 
 process.env.FILONE_STAGE = 'test';
 
-import { baseHandler } from './set-bucket-rag-enablement.js';
-import { buildEvent, membershipFor } from '../test/lambda-test-utilities.js';
-import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.js';
+import { baseHandler } from './set-bucket-rag-enablement.ts';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
+import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.ts';
 import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import type { BucketRAGEnablementRecord } from '../lib/dynamo-records.js';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import type { BucketRAGEnablementRecord } from '../lib/dynamo-records.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

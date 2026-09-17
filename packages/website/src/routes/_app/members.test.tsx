@@ -1,89 +1,33 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { OrgRole } from '@filone/shared';
-import type { MeResponse } from '@filone/shared';
+import { isRedirect } from '@tanstack/react-router';
 
-// The route's parent is the whole app layout; the gate under test does not need
-// it, and importing it would drag the router in.
+// The route's parent is the whole app layout, which this route never renders
+// inside — it has no component, only a `beforeLoad` to call.
 vi.mock('../_app', () => ({ Route: {} }));
 
-// The page itself is covered by MembersPage.test.tsx. Here it only has to be
-// distinguishable from the two refusals.
-vi.mock('../../pages/MembersPage', () => ({
-  MembersPage: () => <div data-testid="members-page" />,
-}));
-
-vi.mock('../../lib/api.js', () => ({ getMe: vi.fn() }));
-
 import { Route } from './members';
-import { seedPermissions } from '../../lib/test-permissions.js';
 
-const MembersRoute = Route.options.component as () => React.ReactElement | null;
-
-const SOLO = [{ orgId: 'org-1', orgName: 'Acme', role: OrgRole.Owner }];
-const TWO_ORGS = [
-  { orgId: 'org-1', orgName: 'Acme', role: OrgRole.Owner },
-  { orgId: 'org-2', orgName: 'Globex', role: OrgRole.Member },
-];
-
-function renderRoute(role: OrgRole, overrides: Partial<MeResponse>) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  seedPermissions(client, role, overrides);
-  return render(
-    <QueryClientProvider client={client}>
-      <MembersRoute />
-    </QueryClientProvider>,
-  );
+/** What `beforeLoad` threw, called without the context bag this route ignores. */
+function runBeforeLoad(): unknown {
+  try {
+    (Route.options.beforeLoad as () => void)();
+  } catch (err) {
+    return err;
+  }
+  return null;
 }
 
-describe('the /members route, reached by URL', () => {
-  it('opens for a solo org in the beta', () => {
-    renderRoute(OrgRole.Owner, { memberships: SOLO, orgsBeta: true });
+// The roster is a tab of `/organization` now (FIL-1094), and this path is kept
+// as a redirect for the bookmarks and links that still name it. The E2E specs
+// go straight to `/organization`, so this is the only thing holding it.
+describe('the /members redirect', () => {
+  it('sends every caller to the Organization page, replacing the entry', () => {
+    const thrown = runBeforeLoad();
+    expect(isRedirect(thrown)).toBe(true);
 
-    expect(screen.getByTestId('members-page')).toBeTruthy();
-  });
-
-  it('opens for a caller in more than one org', () => {
-    renderRoute(OrgRole.Member, { memberships: TWO_ORGS, orgsBeta: false });
-
-    expect(screen.getByTestId('members-page')).toBeTruthy();
-  });
-
-  it('says the feature is off for a solo org outside the beta', () => {
-    // The gentler of the two refusals available: this caller holds
-    // `members.read`, so the role denial would be a lie. The heading still
-    // renders, so the URL does not land on a blank page.
-    renderRoute(OrgRole.Owner, { memberships: SOLO, orgsBeta: false });
-
-    expect(screen.getByTestId('members-not-enabled')).toBeTruthy();
-    expect(screen.queryByTestId('members-page')).toBeNull();
-    expect(screen.queryByTestId('page-permission-denied')).toBeNull();
-    expect(screen.getByRole('heading', { name: 'Members' })).toBeTruthy();
-  });
-
-  it('still refuses the role when the surface exists but the role cannot read it', () => {
-    // The surface gate does not replace the permission — it precedes it.
-    renderRoute(OrgRole.Owner, {
-      memberships: TWO_ORGS,
-      orgsBeta: true,
-      permissions: [],
-    });
-
-    expect(screen.getByTestId('page-permission-denied')).toBeTruthy();
-    expect(screen.queryByTestId('members-page')).toBeNull();
-  });
-
-  it('renders the heading and nothing else while /me is in flight', () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={client}>
-        <MembersRoute />
-      </QueryClientProvider>,
-    );
-
-    expect(screen.getByRole('heading', { name: 'Members' })).toBeTruthy();
-    expect(screen.queryByTestId('members-not-enabled')).toBeNull();
-    expect(screen.queryByTestId('members-page')).toBeNull();
+    // Both of the options this route states. `statusCode` is `redirect()`'s own
+    // default and would be asserting the router rather than the route.
+    const { to, replace } = (thrown as { options: { to?: string; replace?: boolean } }).options;
+    expect({ to, replace }).toEqual({ to: '/organization', replace: true });
   });
 });

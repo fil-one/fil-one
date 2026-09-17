@@ -136,7 +136,7 @@ function RagPipelineView({
   return (
     <div data-testid="rag-pipeline-page" className="px-10 py-12 pb-20">
       <div className="space-y-8">
-        <Heading tag="h1" size="2xl" description="Turn any bucket into a queryable knowledge base.">
+        <Heading tag="h1" description="Turn any bucket into a queryable knowledge base.">
           Bucket Intelligence
         </Heading>
 

@@ -19,13 +19,13 @@ vi.mock('sst', () => ({
 // (via lib/region-helpers.js, which is left real). Mocking getAvailableOrchestrators
 // lets us drive fake orchestrators end-to-end.
 const mockGetAvailableOrchestrators = vi.fn();
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getAvailableOrchestrators: (...args: unknown[]) => mockGetAvailableOrchestrators(...args),
 }));
 
 const mockIsOrgDeletedOrDeleting = vi.fn(async (_orgId: string) => false);
 
-vi.mock('../lib/org-profile.js', () => ({
+vi.mock('../lib/org-profile.ts', () => ({
   getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
   isOrgDeletedOrDeleting: (orgId: string) => mockIsOrgDeletedOrDeleting(orgId),
 }));
@@ -34,12 +34,12 @@ process.env.FILONE_STAGE = 'test';
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { handler } from './grace-period-enforcer.js';
+import { handler } from './grace-period-enforcer.ts';
 import {
   fakeOrchestrator,
   tenantFor as fakeTenantFor,
   type FakeOrchestrator,
-} from '../test/fake-orchestrator.js';
+} from '../test/fake-orchestrator.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

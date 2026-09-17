@@ -36,7 +36,7 @@ function key(over: Partial<AccessKey> = {}): AccessKey {
 
 function renderTab(
   props: Partial<React.ComponentProps<typeof BucketAccessTab>> = {},
-  role = OrgRole.Owner,
+  role: OrgRole = OrgRole.Owner,
 ) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   seedPermissions(client, role);

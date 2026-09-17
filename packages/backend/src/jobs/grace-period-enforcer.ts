@@ -1,10 +1,10 @@
 import { SubscriptionStatus } from '@filone/shared';
-import { isOrgDeletedOrDeleting } from '../lib/org-profile.js';
+import { isOrgDeletedOrDeleting } from '../lib/org-profile.ts';
 import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
-} from '../lib/region-helpers.js';
-import { scanSubscriptions, updateSubscriptionByUser } from '../lib/subscription-store.js';
+} from '../lib/region-helpers.ts';
+import { scanSubscriptions, updateSubscriptionByUser } from '../lib/subscription-store.ts';
 
 type Action = 'cancel' | 'write_lock';
 

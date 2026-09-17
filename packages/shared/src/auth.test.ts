@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildAuth0AuthorizeUrl } from './auth.js';
-import type { Auth0LoginUrlOptions } from './auth.js';
+import { buildAuth0AuthorizeUrl } from './auth.ts';
+import type { Auth0LoginUrlOptions } from './auth.ts';
 
 const baseOptions: Auth0LoginUrlOptions = {
   domain: 'test.auth0.com',

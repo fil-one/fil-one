@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
+import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.ts';
 import {
   expectErrorResponse,
   expectRefreshedCookies,
   REFRESHED_TOKENS,
-} from '../test/assert-helpers.js';
-import { csrfMiddleware } from './csrf.js';
+} from '../test/assert-helpers.ts';
+import { csrfMiddleware } from './csrf.ts';
 
 describe('csrfMiddleware', () => {
   describe('safe methods', () => {

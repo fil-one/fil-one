@@ -1,4 +1,8 @@
 @layer components {
+  /* Deliberately not a scroll container. `overflow-x` here also makes the
+     block axis a scroll box, which clips the two things that sit outside this
+     element's padding box: the selected tab's `-mb-px`, which is what puts its
+     underline over the grey line rather than under it, and the focus ring. */
   .tabs-list {
     @apply flex border-b border-zinc-200;
   }
@@ -19,6 +23,23 @@
     &[data-disabled] {
       @apply cursor-not-allowed text-zinc-300;
     }
+  }
+
+  /* The count that follows a tab's label. Set one step back from the label at
+     every state, so the pair reads as one thing with the number subordinate:
+     lighter weight, lighter grey, and the label's own colour once the tab is
+     selected. Tabular figures keep the row from twitching as counts change. */
+  .tab-count {
+    @apply ml-1.5 font-normal tabular-nums text-zinc-400 transition-colors;
+  }
+
+  .tab-item:hover .tab-count {
+    @apply text-zinc-500;
+  }
+
+  .tab-item[data-selected] .tab-count,
+  .tab-item[data-disabled] .tab-count {
+    @apply text-current;
   }
 
   .tab-panels {

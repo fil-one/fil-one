@@ -11,7 +11,8 @@
 
 import type { ScanCommandInput } from '@aws-sdk/client-dynamodb';
 
-import { BillingKeys, REKEY_ATTRIBUTES } from './billing-rekey.ts';
+import { SubscriptionKeys } from '@filone/backend/src/lib/subscription-store.ts';
+import { REKEY_ATTRIBUTES } from './billing-rekey.ts';
 
 /**
  * Every subscription row, whichever key shape it carries.
@@ -29,7 +30,7 @@ export function buildBackfillScanInput(tableName: string): ScanCommandInput {
   return {
     TableName: tableName,
     FilterExpression: 'sk = :subscription',
-    ExpressionAttributeValues: { ':subscription': { S: BillingKeys.subscriptionSk() } },
+    ExpressionAttributeValues: { ':subscription': { S: SubscriptionKeys.sk() } },
     ConsistentRead: true,
   };
 }
@@ -55,8 +56,8 @@ export function buildRevertScanInput(tableName: string): ScanCommandInput {
     FilterExpression: 'sk = :subscription AND begins_with(pk, :orgPrefix)',
     ProjectionExpression: `pk, ${REKEY_ATTRIBUTES.from}`,
     ExpressionAttributeValues: {
-      ':subscription': { S: BillingKeys.subscriptionSk() },
-      ':orgPrefix': { S: BillingKeys.orgPkPrefix() },
+      ':subscription': { S: SubscriptionKeys.sk() },
+      ':orgPrefix': { S: SubscriptionKeys.orgPkPrefix() },
     },
     ConsistentRead: true,
   };

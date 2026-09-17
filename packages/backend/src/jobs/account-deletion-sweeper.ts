@@ -1,10 +1,10 @@
 import { ScanCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
-import { invokeAccountDeletionWorker } from '../lib/account-deletion-invoke.js';
-import { getDynamoClient } from '../lib/ddb-client.js';
-import { DELETION_STATUS } from '../lib/deletion-record.js';
-import { reportMetric } from '../lib/metrics.js';
+import { invokeAccountDeletionWorker } from '../lib/account-deletion-invoke.ts';
+import { getDynamoClient } from '../lib/ddb-client.ts';
+import { BLOCKED_ATTEMPTS, DELETION_STATUS } from '../lib/deletion-record.ts';
+import { reportMetric } from '../lib/metrics.ts';
 
 const LOG = '[account-deletion-sweeper]';
 
@@ -15,9 +15,6 @@ const LOG = '[account-deletion-sweeper]';
  * start of each pass or a healthy long purge looks stale.
  */
 const STALE_AFTER_MINUTES = 30;
-
-/** Passes beyond which a teardown is not retrying, it is blocked. */
-const BLOCKED_ATTEMPTS = 10;
 
 const HOUR_MS = 60 * 60 * 1000;
 

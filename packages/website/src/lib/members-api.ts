@@ -5,6 +5,8 @@ import type {
   ListInvitationsResponse,
   ListMembersResponse,
   OrgRole,
+  RemoveMemberResponse,
+  RoleChangePreviewResponse,
   TransferOwnershipResponse,
   UpdateMemberRoleResponse,
 } from '@filone/shared';
@@ -38,12 +40,29 @@ export function updateMemberRole(userId: string, role: OrgRole): Promise<UpdateM
 }
 
 /**
- * Remove a member from the org. Their access keys keep working: narrowing keys a
- * departing member already minted is the M2 legacy transition, and the removal
- * dialog says so rather than implying a revocation this call does not make.
+ * What a role change would revoke, before it happens.
+ *
+ * A key carries its own permission set, fixed when it was minted, so a member
+ * moving to a narrower role keeps whatever their keys already hold until the
+ * change takes them away. This is the list, so the admin confirms a change they
+ * can see the consequences of.
  */
-export function removeMember(userId: string): Promise<void> {
-  return apiRequest<void>(`/org/members/${encodeURIComponent(userId)}`, { method: 'DELETE' });
+export function getRoleChangePreview(
+  userId: string,
+  role: OrgRole,
+): Promise<RoleChangePreviewResponse> {
+  return apiRequest<RoleChangePreviewResponse>(
+    `/org/members/${encodeURIComponent(userId)}/role-change-preview?role=${encodeURIComponent(role)}`,
+  );
+}
+
+/**
+ * Remove a member from the org.
+ */
+export function removeMember(userId: string): Promise<RemoveMemberResponse> {
+  return apiRequest<RemoveMemberResponse>(`/org/members/${encodeURIComponent(userId)}`, {
+    method: 'DELETE',
+  });
 }
 
 export function listInvitations(): Promise<ListInvitationsResponse> {

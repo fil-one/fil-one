@@ -9,19 +9,21 @@ import { z } from 'zod';
  * every delete marker. Only `allVersions` can leave a versioned bucket empty
  * enough for DeleteBucket to succeed.
  */
-export enum BulkDeleteScope {
-  Current = 'current',
-  AllVersions = 'allVersions',
-}
+export const BulkDeleteScope = {
+  Current: 'current',
+  AllVersions: 'allVersions',
+} as const;
+export type BulkDeleteScope = (typeof BulkDeleteScope)[keyof typeof BulkDeleteScope];
 
-export enum BulkDeleteJobStatus {
-  Pending = 'pending',
-  Running = 'running',
-  Completed = 'completed',
+export const BulkDeleteJobStatus = {
+  Pending: 'pending',
+  Running: 'running',
+  Completed: 'completed',
   /** Ran to completion, but some objects could not be deleted (see `failures`). */
-  CompletedWithErrors = 'completedWithErrors',
-  Failed = 'failed',
-}
+  CompletedWithErrors: 'completedWithErrors',
+  Failed: 'failed',
+} as const;
+export type BulkDeleteJobStatus = (typeof BulkDeleteJobStatus)[keyof typeof BulkDeleteJobStatus];
 
 export const TERMINAL_BULK_DELETE_STATUSES: readonly BulkDeleteJobStatus[] = [
   BulkDeleteJobStatus.Completed,

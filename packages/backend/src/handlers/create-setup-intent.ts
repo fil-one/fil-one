@@ -5,21 +5,21 @@ import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import { ApiErrorCode } from '@filone/shared';
 import type { CreateSetupIntentResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
-import { getStripeClient } from '../lib/stripe-client.js';
-import { emitTrialClaimBlockedByLegacyRow } from '../lib/stripe-webhook-metrics.js';
+import { getStripeClient } from '../lib/stripe-client.ts';
+import { emitTrialClaimBlockedByLegacyRow } from '../lib/stripe-webhook-metrics.ts';
 import {
   legacyRowExists,
   readSubscription,
   updateSubscription,
   writeSubscription,
-} from '../lib/subscription-store.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { csrfMiddleware } from '../middleware/csrf.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+} from '../lib/subscription-store.ts';
+import { ResponseBuilder } from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { csrfMiddleware } from '../middleware/csrf.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 
 // Exported for unit testing (without the auth/csrf middleware chain).
 export async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {

@@ -9,18 +9,18 @@ import {
   mapStripeStatus,
 } from '@filone/shared';
 import type { ActivateSubscriptionResponse } from '@filone/shared';
-import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.js';
-import { readSubscription } from '../lib/subscription-store.js';
-import type { SubscriptionRecord } from '../lib/dynamo-records.js';
-import { saveBillingRecord, unlockAllProvisionedRegions } from '../lib/billing-activation.js';
-import { isOrgDeleting } from '../lib/org-profile.js';
-import { accountDeletedResponse, ResponseBuilder } from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { csrfMiddleware } from '../middleware/csrf.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.ts';
+import { readSubscription } from '../lib/subscription-store.ts';
+import type { SubscriptionRecord } from '../lib/dynamo-records.ts';
+import { saveBillingRecord, unlockAllProvisionedRegions } from '../lib/billing-activation.ts';
+import { isOrgDeleting } from '../lib/org-profile.ts';
+import { accountDeletedResponse, ResponseBuilder } from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { csrfMiddleware } from '../middleware/csrf.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 
 type PaymentMethodResolution = string | APIGatewayProxyResultV2;
 

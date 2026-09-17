@@ -21,7 +21,7 @@ import {
   createDeletionChallenge,
   hashDeletionCode,
   RESEND_COOLDOWN_SECONDS,
-} from './deletion-challenge.js';
+} from './deletion-challenge.ts';
 
 const ORG = 'org-1';
 const USER = 'user-1';

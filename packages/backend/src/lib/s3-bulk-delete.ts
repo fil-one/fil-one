@@ -13,7 +13,7 @@ import {
   type S3Client,
 } from '@aws-sdk/client-s3';
 import { BulkDeleteScope, type BulkDeleteFailure } from '@filone/shared';
-import type { BucketVersioningStatus } from './s3-bucket-operations.js';
+import type { BucketVersioningStatus } from './s3-bucket-operations.ts';
 
 /** S3 caps DeleteObjects at 1000 keys per request. */
 const MULTI_DELETE_BATCH_SIZE = 1000;

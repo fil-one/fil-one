@@ -5,17 +5,17 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { UpdateOrgSchema } from '@filone/shared';
 import type { AuditActor, ErrorResponse, UpdateOrgResponse } from '@filone/shared';
 import { Resource } from 'sst';
-import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.js';
-import { getDynamoClient } from '../lib/ddb-client.js';
-import { parseJsonBody } from '../lib/parse-json-body.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
-import { SanitizedOrgNameSchema } from '../lib/org-name-validation.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { csrfMiddleware } from '../middleware/csrf.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.ts';
+import { getDynamoClient } from '../lib/ddb-client.ts';
+import { parseJsonBody } from '../lib/parse-json-body.ts';
+import { ResponseBuilder } from '../lib/response-builder.ts';
+import { SanitizedOrgNameSchema } from '../lib/org-name-validation.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { csrfMiddleware } from '../middleware/csrf.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 
 /**
  * The wire shape with the stored shape's sanitization folded in, so one parse

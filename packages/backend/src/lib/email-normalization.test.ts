@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeEmailForEntitlement } from './email-normalization.js';
+import { normalizeEmailForEntitlement } from './email-normalization.ts';
 
 describe('normalizeEmailForEntitlement', () => {
   describe('Gmail family (gmail.com, googlemail.com)', () => {

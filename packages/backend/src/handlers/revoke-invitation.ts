@@ -2,17 +2,21 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ApiErrorCode, canManageTargetRole } from '@filone/shared';
-import type { ErrorResponse, OrgRole } from '@filone/shared';
-import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.js';
-import { readInvitation, retireInvitationItems } from '../lib/invitations.js';
-import { cancelledLabels } from '../lib/membership-changes.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { csrfMiddleware } from '../middleware/csrf.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+import type { ErrorResponse } from '@filone/shared';
+import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.ts';
+import { readInvitation, retireInvitationItems } from '../lib/invitations.ts';
+import { cancelledLabels } from '../lib/membership-changes.ts';
+import {
+  ResponseBuilder,
+  badRequestResponse,
+  beyondCeilingResponse,
+} from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { csrfMiddleware } from '../middleware/csrf.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 
 /**
  * DELETE /api/org/invitations/{inviteId} — withdraw an invitation.
@@ -32,7 +36,7 @@ export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const inviteId = event.pathParameters?.inviteId;
-  if (!inviteId) return badRequestResponse();
+  if (!inviteId) return badRequestResponse('Missing inviteId in path');
 
   const { orgId, userId, membership } = getUserInfo(event);
   const actorEmail = getVerifiedEmail(event);
@@ -44,7 +48,7 @@ export async function baseHandler(
 
   // `authorize('members.manage')` refused every caller without a membership row.
   if (!canManageTargetRole(membership!.role, invitation.role)) {
-    return beyondCeilingResponse(invitation.role);
+    return beyondCeilingResponse(`manage an invitation for ${invitation.role}`);
   }
 
   try {
@@ -71,13 +75,6 @@ export async function baseHandler(
   return { statusCode: 204, body: '' };
 }
 
-function badRequestResponse(): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder()
-    .status(400)
-    .body<ErrorResponse>({ message: 'Missing inviteId in path' })
-    .build();
-}
-
 /**
  * Unknown, already accepted, already revoked: one answer. The console's remedy
  * is the same for all three — reload the list — and telling them apart would
@@ -99,16 +96,6 @@ function acceptedFirstResponse(): APIGatewayProxyStructuredResultV2 {
     .body<ErrorResponse>({
       message: 'That invitation was accepted before it could be revoked.',
       code: ApiErrorCode.INVITE_NOT_FOUND,
-    })
-    .build();
-}
-
-function beyondCeilingResponse(role: OrgRole): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder()
-    .status(403)
-    .body<ErrorResponse>({
-      message: `Your role in this organization cannot manage an invitation for ${role}.`,
-      code: ApiErrorCode.FORBIDDEN_ROLE,
     })
     .build();
 }

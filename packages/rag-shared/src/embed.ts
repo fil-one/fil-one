@@ -1,6 +1,6 @@
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 
-import { EMBEDDING_DIMENSION, EMBEDDING_MODEL_ID } from './constants.js';
+import { EMBEDDING_DIMENSION, EMBEDDING_MODEL_ID } from './constants.ts';
 
 /**
  * The shape Amazon Titan Text Embeddings V2 returns in its response body.

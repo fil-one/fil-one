@@ -9,11 +9,11 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { OrgRole, isOrgRole } from '@filone/shared';
 import { Resource } from 'sst';
-import { getDynamoClient } from '../lib/ddb-client.js';
-import { reportMetric } from '../lib/metrics.js';
-import { OWNER_SET_REV_ATTRIBUTE } from '../lib/membership-changes.js';
-import { OrgKeys } from '../lib/org-membership.js';
-import { isOrgDeletedOrDeleting } from '../lib/org-profile.js';
+import { getDynamoClient } from '../lib/ddb-client.ts';
+import { reportMetric } from '../lib/metrics.ts';
+import { OWNER_SET_REV_ATTRIBUTE } from '../lib/membership-changes.ts';
+import { OrgKeys } from '../lib/org-membership.ts';
+import { isOrgDeletedOrDeleting } from '../lib/org-profile.ts';
 
 /**
  * Recounts every org's Owners and repairs a diverged `ownerCount`.

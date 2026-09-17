@@ -3,7 +3,7 @@ import {
   calculateAverageUsage,
   mergeStorageSamples,
   sortStorageSamplesByTimestamp,
-} from './usage-calculator.js';
+} from './usage-calculator.ts';
 import { TB_BYTES } from '@filone/shared';
 
 describe('calculateAverageUsage', () => {

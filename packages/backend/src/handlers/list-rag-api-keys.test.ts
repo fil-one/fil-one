@@ -12,8 +12,8 @@ vi.mock('sst', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 import { OrgRole } from '@filone/shared';
-import { baseHandler } from './list-rag-api-keys.js';
-import { buildEvent, membershipFor } from '../test/lambda-test-utilities.js';
+import { baseHandler } from './list-rag-api-keys.ts';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1', emailVerified: true };
 

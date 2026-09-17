@@ -7,8 +7,8 @@ import {
   BEDROCK_ANTHROPIC_VERSION,
   COMPLETION_MAX_TOKENS,
   COMPLETION_MODEL_ID,
-} from './constants.js';
-import { complete } from './complete.js';
+} from './constants.ts';
+import { complete } from './complete.ts';
 
 const bedrockMock = mockClient(BedrockRuntimeClient);
 

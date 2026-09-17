@@ -1,4 +1,4 @@
-import { OrgRole, isOrgRole } from './api/org.js';
+import { OrgRole, isOrgRole } from './api/org.ts';
 
 /**
  * The console permission registry: the vocabulary every authorization check
@@ -48,8 +48,17 @@ export const PERMISSIONS = [
   'keys.manage_own',
   /** List and revoke every key in the org. */
   'keys.manage_all',
-  /** Read the org's audit log (viewer ships in M2). */
+  /** Read the org's audit log. */
   'audit.view',
+  /**
+   * Download the org's audit log as a CSV.
+   *
+   * Separate from reading it because it is a different act: exporting takes the
+   * history out of the system, where nothing FilOne runs can see what happens
+   * to it next. The two are granted to the same roles today, and the split is
+   * what lets that change without touching a handler.
+   */
+  'audit.export',
   /**
    * Manage privileged-operation grants — the M2 grant-management authority.
    * Holding it confers no privileged operation; it is the right to grant one to
@@ -90,6 +99,7 @@ export const ROLE_PERMISSIONS: Record<OrgRole, readonly Permission[]> = Object.f
     'keys.manage_own',
     'keys.manage_all',
     'audit.view',
+    'audit.export',
     'privileged.grant',
   ] as const),
   [OrgRole.Admin]: Object.freeze([
@@ -107,6 +117,7 @@ export const ROLE_PERMISSIONS: Record<OrgRole, readonly Permission[]> = Object.f
     'keys.manage_own',
     'keys.manage_all',
     'audit.view',
+    'audit.export',
   ] as const),
   [OrgRole.Member]: Object.freeze([
     'members.read',
@@ -180,6 +191,28 @@ export function canManageTargetRole(actorRole: string, targetRole: string): bool
     ? roleHasPermission(actorRole, 'owners.manage')
     : roleHasPermission(actorRole, 'members.manage');
 }
+
+/**
+ * Whether moving from one role to another takes a permission away.
+ *
+ * A widening can strand nothing: every key its holder could mint before, they
+ * could mint after. A narrowing is the change that has to look at what they
+ * already hold. Asked of the permission sets rather than of {@link ROLE_RANK},
+ * so the registry stays the single answer to what a role may do.
+ */
+export function roleNarrows(fromRole: string, toRole: string): boolean {
+  const after = new Set<Permission>(permissionsForRole(toRole));
+  return permissionsForRole(fromRole).some((permission) => !after.has(permission));
+}
+
+/**
+ * The role of somebody who holds none: not a member, or a membership row with
+ * no role on it. This names the convention already in use — the handlers spell
+ * it `membership?.role ?? ''` — rather than introducing one, so
+ * {@link permissionsForRole} fails closed for it exactly as it always has, and
+ * {@link roleNarrows} reads a lost membership as the narrowing to nothing.
+ */
+export const NO_ROLE = '';
 
 /**
  * Whether an actor may move a member from one role to another. A role change is

@@ -6,7 +6,7 @@ import {
   type TransactWriteItem,
 } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
-import { getDynamoClient } from './ddb-client.js';
+import { getDynamoClient } from './ddb-client.ts';
 
 const dynamo = getDynamoClient();
 
@@ -105,9 +105,17 @@ export async function sendDeletionGuardedWrite(
  * TransactWriteItems. Must be item 0, since CancellationReasons is positional.
  */
 export function orgNotDeletingCheck(orgId: string): TransactWriteItem {
+  return orgNotDeletingCheckIn(Resource.UserInfoTable.name, orgId);
+}
+
+/**
+ * The same guard against a named UserInfoTable, for operator scripts that run
+ * outside `sst shell` and resolve the table name themselves.
+ */
+export function orgNotDeletingCheckIn(userInfoTableName: string, orgId: string): TransactWriteItem {
   return {
     ConditionCheck: {
-      TableName: Resource.UserInfoTable.name,
+      TableName: userInfoTableName,
       Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
       // A ConditionCheck on a missing item reads every attribute as absent, so
       // attribute_not_exists(deleting) alone would pass for an org that has no

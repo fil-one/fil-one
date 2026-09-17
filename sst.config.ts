@@ -60,13 +60,17 @@ export default $config({
     const stripeMeterEventName = 'gb_month_meter';
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
     const fthManagementApiToken = new sst.Secret('FthManagementApiToken');
-    // linked on non-production stages.
+    // Forge tokens are linked on non-production stages only. Each Forge network
+    // has its own Hilt, so each one we talk to carries its own token.
     const forgeManagementApiToken =
       isStaging || isEphemeralStage ? new sst.Secret('ForgeManagementApiToken') : undefined;
+    const forgeDevManagementApiToken =
+      isStaging || isEphemeralStage ? new sst.Secret('ForgeDevManagementApiToken') : undefined;
     const managementApiTokens = [
       auroraBackofficeToken,
       fthManagementApiToken,
       ...(forgeManagementApiToken ? [forgeManagementApiToken] : []),
+      ...(forgeDevManagementApiToken ? [forgeDevManagementApiToken] : []),
     ];
     const grafanaLokiAuth = new sst.Secret('GrafanaLokiAuth');
     const hubSpotServiceKey = new sst.Secret('HubSpotServiceKey');
@@ -149,16 +153,28 @@ export default $config({
     // profile, or billing row that happened to share a partition. Written only
     // through lib/audit.ts, which appends an event in the same transaction as
     // the mutation it records.
-    // Handlers reach this table with the same allResources link every route
-    // uses, so they hold dynamodb:* on it. Narrowing the audit grant to
-    // PutItem/Query is follow-up work: it is the one table where a handler
-    // holding DeleteItem contradicts the append-only claim.
+    // Routes reach it through the narrowed auditLog link below rather than
+    // through the table itself, because the Dynamo component's own link grants
+    // dynamodb:* and this is the one table where a handler holding DeleteItem
+    // contradicts the append-only claim.
     const auditTable = new sst.aws.Dynamo('AuditTable', {
       fields: {
         pk: 'string',
         sk: 'string',
+        // The event-type index: ORG#{orgId}#TYPE#{type} / {createdAt}#{eventId}.
+        // Org-scoped partition key, so a type-filtered query can never read
+        // across orgs, and the base sort key format, so it still gets its date
+        // range from a BETWEEN rather than a scan.
+        gsi1pk: 'string',
+        gsi1sk: 'string',
       },
       primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
+      // Projection defaults to ALL. The item is a few hundred bytes and the
+      // point of the index is that one query answers the request; KEYS_ONLY
+      // would turn every page into a batch of reads against the base table.
+      globalIndexes: {
+        byType: { hashKey: 'gsi1pk', rangeKey: 'gsi1sk' },
+      },
       ttl: 'ttl',
       transform: {
         table: {
@@ -174,6 +190,39 @@ export default $config({
           deletionProtectionEnabled: isProduction,
         },
       },
+    });
+
+    // How everything reaches AuditTable: the table's name, and the two actions
+    // an append-only log needs. Linking the Dynamo component directly would
+    // grant dynamodb:* on the table and its index, DeleteItem and UpdateItem
+    // included, which is the difference between an application that cannot
+    // modify an audit entry and one that merely does not.
+    //
+    // TransactWriteItems needs the underlying PutItem on each item it writes,
+    // so commitAudited works unchanged. No Scan: nothing reads this table
+    // without naming an org.
+    //
+    // Two statements because DynamoDB splits along the same line. A query may
+    // name the table or one of its indexes, so Query needs both ARNs; a write
+    // may only ever name the table, and granting PutItem on an index ARN would
+    // be a permission that can never match. The index is maintained by
+    // DynamoDB itself as the write lands, under its own permissions rather than
+    // the caller's.
+    //
+    // The one exception is the account deletion worker, which destroys an org's
+    // partition and takes DeleteItem on top of this link.
+    const auditLog = new sst.Linkable('AuditLog', {
+      properties: { name: auditTable.name },
+      include: [
+        sst.aws.permission({
+          actions: ['dynamodb:Query'],
+          resources: [auditTable.arn, $interpolate`${auditTable.arn}/index/*`],
+        }),
+        sst.aws.permission({
+          actions: ['dynamodb:PutItem'],
+          resources: [auditTable.arn],
+        }),
+      ],
     });
 
     // RAG indexer's own store: per-object chunk manifests
@@ -610,7 +659,7 @@ export default $config({
       userInfoTable,
       bulkDeleteTable,
       orgTable,
-      auditTable,
+      auditLog,
       userFilesBucket,
       ragVectorBucket,
       auth0ClientId,
@@ -648,10 +697,12 @@ export default $config({
       FTH_MANAGEMENT_API_URL: 'https://api.fortilyx.com',
     };
 
-    // Forge (Management-API) — non-prod only. One shared endpoint serves every
-    // Forge region; the region is sent per-tenant in the PUT /tenants body.
+    // Forge (Management-API) — non-prod only. One endpoint per Forge network,
+    // serving every region in it; the region is sent per-tenant in the PUT
+    // /tenants body.
     const forgeEnv = {
-      FORGE_MANAGEMENT_API_URL: isProduction ? '' : 'https://hilt.staging.fil.one',
+      FORGE_MANAGEMENT_API_URL: isProduction ? '' : 'https://auth.staging.fil-forge.com',
+      FORGE_DEV_MANAGEMENT_API_URL: isProduction ? '' : 'https://auth.latest.dev.fil-forge.com',
     };
 
     // Everything the service-orchestrator layer needs at runtime. FILONE_STAGE
@@ -666,7 +717,13 @@ export default $config({
     const auroraS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/*`;
     const fthS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/fth-s3/*`;
     const forgeS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/forge-s3/*`;
-    const orchestratorS3KeySsmArns = [auroraS3KeySsmArn, fthS3KeySsmArn, forgeS3KeySsmArn];
+    const forgeDevS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/forgeDev-s3/*`;
+    const orchestratorS3KeySsmArns = [
+      auroraS3KeySsmArn,
+      fthS3KeySsmArn,
+      forgeS3KeySsmArn,
+      forgeDevS3KeySsmArn,
+    ];
     // Per-tenant console S3 access keys (getConsoleS3Credentials), needed by
     // handlers that talk to the S3 data plane directly (presign, indexing, …).
     const s3DataPlanePermissions: sst.aws.FunctionPermissionArgs[] = [
@@ -680,7 +737,7 @@ export default $config({
     const bucketReadPermissions: sst.aws.FunctionPermissionArgs[] = [
       {
         actions: ['ssm:GetParameter'],
-        resources: [auroraApiKeySsmArn, fthS3KeySsmArn, forgeS3KeySsmArn],
+        resources: [auroraApiKeySsmArn, fthS3KeySsmArn, forgeS3KeySsmArn, forgeDevS3KeySsmArn],
       },
     ];
 
@@ -863,8 +920,10 @@ export default $config({
         userInfoTable,
         ragIndexerTable,
         ragVectorBucket,
+        auditLog,
         stripeSecretKey,
         stripePriceId,
+        orgTable,
         ...managementApiTokens,
         ...mgmtRuntimeResources,
       ],
@@ -881,6 +940,12 @@ export default $config({
       permissions: [
         ...ragPermissions,
         { actions: ['sqs:SendMessage'], resources: [accountDeletionDlq.arn] },
+        // The one credential in the system that may remove an audit entry. The
+        // auditLog link above deliberately withholds this from every route, and
+        // the teardown is the one place where deleting is the point: an org
+        // that asked to be erased must not leave a record of who belonged to it
+        // and what they did.
+        { actions: ['dynamodb:DeleteItem'], resources: [auditTable.arn] },
       ],
     });
 
@@ -937,6 +1002,20 @@ export default $config({
     //
     // Declared here rather than beside each route because the entries reference
     // the queues, tables and workers above, all of which have to exist first.
+    // Minting a key reaches the orchestrator and its SSM-held credentials and
+    // waits on a vendor call. Rotation does the same and then revokes, so both
+    // routes take one grant set; rotation takes more time.
+    const accessKeyMintRoute: RouteInfraConfig = {
+      extraEnv: orchestratorEnv,
+      permissions: [
+        {
+          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+          resources: [auroraApiKeySsmArn, ...orchestratorS3KeySsmArns],
+        },
+      ],
+      timeout: '30 seconds',
+    };
+
     const ROUTE_INFRA_CONFIGS: Partial<Record<RouteHandler, RouteInfraConfig>> = {
       // ── Buckets and objects ────────────────────────────────────────
       'list-buckets': {
@@ -998,16 +1077,13 @@ export default $config({
       'list-access-keys': {
         provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       },
-      'create-access-key': {
-        extraEnv: orchestratorEnv,
-        permissions: [
-          {
-            actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-            resources: [auroraApiKeySsmArn, ...orchestratorS3KeySsmArns],
-          },
-        ],
-        timeout: '30 seconds',
-      },
+      'create-access-key': accessKeyMintRoute,
+      // Twice the mint's budget, because a rotation makes two vendor calls in one
+      // request and the second comes after the replacement's row has landed.
+      // From that point the response is the only copy of the secret there will
+      // ever be, and an invocation that timed out inside the revoke would lose
+      // it to save a key the caller can delete from the list.
+      'rotate-access-key': { ...accessKeyMintRoute, timeout: '60 seconds' },
       'delete-access-key': {
         extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL, ...fthEnv, ...forgeEnv },
         permissions: [
@@ -1016,6 +1092,27 @@ export default $config({
             resources: [auroraApiKeySsmArn],
           },
         ],
+      },
+
+      // ── Members ────────────────────────────────────────────────────
+      // A narrowing revokes the keys the member could no longer mint, in
+      // whichever regions hold them, and emails the member that their client
+      // just stopped working. So this route reaches every orchestrator and the
+      // mail credential. Removal and ownership transfer revoke as well, and take
+      // the same grants in the PR that gives them that.
+      //
+      // Thirty seconds rather than the ten `addRoute` defaults to: a narrowing
+      // reads the org's key rows and revokes each key the new role could not
+      // mint in turn, and each revocation is a vendor call plus an audit write.
+      // A tenant may hold up to 300 keys, so this is a bound for ordinary orgs
+      // rather than for every org; a member holding hundreds needs a worker,
+      // which is FIL-1017 follow-up work. A timeout during the pass is safe by
+      // design — the role is unwritten and the retry finds fewer keys.
+      'update-member-role': {
+        extraEnv: orchestratorEnv,
+        permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+        ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
+        timeout: '30 seconds',
       },
 
       // ── RAG ────────────────────────────────────────────────────────
@@ -1192,9 +1289,6 @@ export default $config({
         ],
       },
       'stripe-webhook': {
-        // HubSpot key: the webhook mirrors subscription status onto the contact
-        // so lifecycle sequences can tell a paying customer from a trial (FIL-828).
-        extraLink: [hubSpotServiceKey],
         extraEnv: {
           ...orchestratorEnv,
           STRIPE_WEBHOOK_SECRET_SSM_PATH: $interpolate`/filone/${$app.stage}/stripe-webhook-secret`,
@@ -1337,19 +1431,22 @@ export default $config({
     // webhook writes, and counts contacts HubSpot cannot match at all.
     const hubSpotContactSync = createFn('HubSpotContactSync', {
       handler: 'packages/backend/src/jobs/hubspot-contact-sync.handler',
-      // stripePriceId is unused here but getBillingSecrets() reads both keys in
-      // one literal, so omitting it throws on the first getStripeClient() call.
-      link: [billingTable, hubSpotServiceKey, stripeSecretKey, stripePriceId],
+      // The addresses it bootstraps contacts on come off UserInfoTable's PROFILE
+      // rows; Stripe is no longer read, so its secrets are no longer linked.
+      link: [billingTable, userInfoTable, hubSpotServiceKey],
       timeout: '300 seconds',
       memory: '256 MB',
     });
 
     new sst.aws.CronV2('HubSpotContactSyncCron', {
-      // Every 6 hours at :30 (00:30, 06:30, 12:30, 18:30 UTC) — offset from the
-      // other BillingTable scanners (usage 07/19, grace 08/20, drift 10/22) so
-      // the full-table Scans do not overlap. This 6h period is the worst-case
-      // propagation lag documented for ops on the HubSpot property itself.
-      schedule: 'cron(30 0/6 * * ? *)',
+      // Hourly at :30 — offset from the other BillingTable scanners (usage
+      // 07/19, grace 08/20, drift 10/22, all on the hour) so the full-table
+      // Scans do not overlap. `rate(1 hour)` would fire at whatever offset the
+      // deploy landed on and collide with them. This 1h period is the worst-case
+      // propagation lag for ops on the HubSpot property; each run reconciles at
+      // most MAX_CONTACTS_PER_RUN rows, so the frequency is also what sets how
+      // fast a backfill backlog drains.
+      schedule: 'cron(30 * * * ? *)',
       function: hubSpotContactSync.arn,
     });
 
@@ -1370,8 +1467,209 @@ export default $config({
       function: ownerCountDriftChecker.arn,
     });
 
+    // ── S3 Audit Broker billing-read role ───────────────────────────
+    // Cross-account role the abuse-detection broker (s3-auditbroker, account
+    // 654654381893) assumes for billing context on incidents: the detector
+    // Lambda's `billing_lookup_role_arn` and the operator console's
+    // `S3AB_BILLING_ROLE_ARN`. Read-only, and exactly the two calls the
+    // broker's billing lookup makes: Scan on UserInfoTable + GetItem on
+    // BillingTable. Referencing the table resources directly (rather than
+    // pinning physical names) keeps the grant on the live tables — this
+    // account also holds an orphaned duplicate table pair the role must not
+    // match.
+    //
+    // The respond role below is the Phase 3 counterpart (tenant-key SSM read
+    // + quarantine bucket writes) — provisioning it starts the mint slice of
+    // that phase (s3-auditbroker docs/vercel-deployment-guide.md §2).
+    let s3abBillingReadRoleArn: $util.Output<string> | undefined;
+    let s3abRespondRoleArn: $util.Output<string> | undefined;
+    if (isStaging || isProduction) {
+      const vercelTeamSlug = 'filecoin-foundations-projects';
+      const vercelProjectName = 's3-auditbroker-visualizer';
+      const vercelOidcClaimPrefix = `oidc.vercel.com/${vercelTeamSlug}`;
+      // Mirrors the broker's own read roles: preview deployments may reach
+      // staging billing data, never production's.
+      const vercelEnvironments = isProduction ? ['production'] : ['production', 'preview'];
+      // Both broker instances live in 654654381893; each stage trusts the
+      // instance that serves it. The principal is pinned to the role's unique
+      // id at policy-write time, so recreating the detector role on the broker
+      // side silently breaks this trust until the stage is redeployed.
+      const brokerDetectorExecRoleArn = isProduction
+        ? 'arn:aws:iam::654654381893:role/s3-auditbroker-prod-detector-exec'
+        : 'arn:aws:iam::654654381893:role/s3-auditbroker-detector-exec';
+
+      // The OIDC provider is account-wide (one per URL) and owned OUTSIDE
+      // this stack. It must not be created here: a lookup-or-create would
+      // flip the provider between a data source and a managed resource across
+      // deploys, so the deploy after the creating one would drop it from
+      // Pulumi state and delete it on removable stages, breaking both roles'
+      // Vercel trust. Provision it once per account — the s3-auditbroker
+      // tooling does this (scripts/vercel_setup.sh, `aws-oidc` phase), or:
+      //   aws iam create-open-id-connect-provider \
+      //     --url https://oidc.vercel.com/<team-slug> \
+      //     --client-id-list https://vercel.com/<team-slug>
+      let vercelOidcArn: string;
+      try {
+        const existing = await aws.iam.getOpenIdConnectProvider({
+          url: `https://${vercelOidcClaimPrefix}`,
+        });
+        vercelOidcArn = existing.arn;
+      } catch {
+        throw new Error(
+          `Vercel OIDC provider https://${vercelOidcClaimPrefix} not found in this account. ` +
+            'It is owned outside this stack — create it once per account (see the comment ' +
+            'above this throw) and re-deploy.',
+        );
+      }
+
+      const s3abBillingReadRole = new aws.iam.Role('S3abBillingReadRole', {
+        name: 'filone-console-visualizer-billing-read',
+        assumeRolePolicy: $jsonStringify({
+          Version: '2012-10-17',
+          Statement: [
+            {
+              Effect: 'Allow',
+              Principal: { Federated: vercelOidcArn },
+              Action: 'sts:AssumeRoleWithWebIdentity',
+              Condition: {
+                StringEquals: {
+                  [`${vercelOidcClaimPrefix}:aud`]: `https://vercel.com/${vercelTeamSlug}`,
+                  [`${vercelOidcClaimPrefix}:sub`]: vercelEnvironments.map(
+                    (env) =>
+                      `owner:${vercelTeamSlug}:project:${vercelProjectName}:environment:${env}`,
+                  ),
+                },
+              },
+            },
+            {
+              Effect: 'Allow',
+              Principal: { AWS: brokerDetectorExecRoleArn },
+              Action: 'sts:AssumeRole',
+            },
+          ],
+        }),
+        inlinePolicies: [
+          {
+            name: 's3ab-billing-read',
+            policy: $jsonStringify({
+              Version: '2012-10-17',
+              Statement: [
+                {
+                  Effect: 'Allow',
+                  Action: ['dynamodb:Scan'],
+                  Resource: [userInfoTable.arn],
+                },
+                {
+                  Effect: 'Allow',
+                  Action: ['dynamodb:GetItem'],
+                  Resource: [billingTable.arn],
+                },
+              ],
+            }),
+          },
+        ],
+      });
+      s3abBillingReadRoleArn = s3abBillingReadRole.arn;
+
+      // ── S3 Audit Broker respond role (Phase 3, armed actions) ──────
+      // What the RESPONSE ARMED surfaces assume to mint tenant-key preview
+      // URLs and quarantine objects. Its own role, separate from billing-read,
+      // so CloudTrail cleanly splits "read the evidence" from "acted on a
+      // tenant". Trusted for:
+      //  - the console's Vercel OIDC identity — production deployments ONLY,
+      //    on every stage: preview deployments run with bypass auth and must
+      //    never arm; and
+      //  - the human responder's SSO role, so the CLI response scripts
+      //    (preview_url.py, quarantine_object.py) can assume it via STS.
+      //    Note: AssumeRole requires BOTH this role's trust policy and an identity
+      //    policy on the caller that allows sts:AssumeRole (even same-account).
+      //    If the SSO permission set doesn't grant sts:AssumeRole, add it there.
+      //    SSO role names carry a random suffix and are recreated if the
+      //    permission set is reprovisioned — re-pin here if assumption starts
+      //    failing.
+      // Assumers must set RoleSessionName to the operator's identity so
+      // CloudTrail and the incident receipts agree on *who* acted.
+      const responderSsoRoleArn = isProduction
+        ? 'arn:aws:iam::811430801166:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_ReadOnlyAccess_e180918ff18ef597'
+        : 'arn:aws:iam::654654381893:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_AdministratorAccess_983a3f40ae4c07e1';
+
+      // Operator-created (deliberately outside IaC state, like the evidence it
+      // holds) and not yet created in either account. Bucket names are global,
+      // so the stages cannot share one. The s3:ResourceAccount condition below
+      // keeps the grant inert until the bucket exists *in this account* — a
+      // third party claiming the global name gains nothing.
+      const quarantineBucketName = isProduction
+        ? 'filone-ir-quarantine'
+        : 'filone-ir-quarantine-staging';
+
+      const s3abRespondRole = new aws.iam.Role('S3abRespondRole', {
+        name: 'filone-console-visualizer-respond',
+        assumeRolePolicy: $jsonStringify({
+          Version: '2012-10-17',
+          Statement: [
+            {
+              Effect: 'Allow',
+              Principal: { Federated: vercelOidcArn },
+              Action: 'sts:AssumeRoleWithWebIdentity',
+              Condition: {
+                StringEquals: {
+                  [`${vercelOidcClaimPrefix}:aud`]: `https://vercel.com/${vercelTeamSlug}`,
+                  [`${vercelOidcClaimPrefix}:sub`]: `owner:${vercelTeamSlug}:project:${vercelProjectName}:environment:production`,
+                },
+              },
+            },
+            {
+              Effect: 'Allow',
+              Principal: { AWS: responderSsoRoleArn },
+              Action: 'sts:AssumeRole',
+            },
+          ],
+        }),
+        inlinePolicies: [
+          {
+            name: 's3ab-respond',
+            policy: $jsonStringify({
+              Version: '2012-10-17',
+              Statement: [
+                {
+                  // Mint: read a tenant's console S3 key to presign a
+                  // short-lived preview URL, plus tenant listing
+                  // (list_tenant_ids). The shared constant covers every SP
+                  // backend's key subtree (aurora-s3, fth-s3, forge-s3) and
+                  // stays in sync as backends are added.
+                  Sid: 'MintTenantKeyRead',
+                  Effect: 'Allow',
+                  Action: ['ssm:GetParameter', 'ssm:GetParametersByPath'],
+                  Resource: orchestratorS3KeySsmArns,
+                },
+                {
+                  // Quarantine: preserve evidence (Put), verify/restore (Get,
+                  // List). No DeleteObject — evidence stays.
+                  Sid: 'QuarantineEvidence',
+                  Effect: 'Allow',
+                  Action: ['s3:PutObject', 's3:GetObject', 's3:ListBucket'],
+                  Resource: [
+                    `arn:aws:s3:::${quarantineBucketName}`,
+                    `arn:aws:s3:::${quarantineBucketName}/*`,
+                  ],
+                  Condition: {
+                    StringEquals: {
+                      's3:ResourceAccount': aws.getCallerIdentityOutput({}).accountId,
+                    },
+                  },
+                },
+              ],
+            }),
+          },
+        ],
+      });
+      s3abRespondRoleArn = s3abRespondRole.arn;
+    }
+
     return {
       baseUrl: siteUrl,
+      ...(s3abBillingReadRoleArn ? { s3abBillingReadRoleArn } : {}),
+      ...(s3abRespondRoleArn ? { s3abRespondRoleArn } : {}),
     };
   },
 });

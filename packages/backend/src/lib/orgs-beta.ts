@@ -1,6 +1,7 @@
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
-import { getDynamoClient } from './ddb-client.js';
+import { getDynamoClient } from './ddb-client.ts';
+import { OrgKeys } from './org-membership.ts';
 
 /**
  * The organizations beta flag, which gates one thing: creating an invitation.
@@ -25,7 +26,10 @@ import { getDynamoClient } from './ddb-client.js';
  */
 
 /** The sort key both rows share, so the two lookups cannot disagree on the flag. */
-const ORGS_BETA_SK = 'ORGS_BETA';
+export const ORGS_BETA_SK = 'ORGS_BETA';
+
+/** The partition-key prefix of the per-person row. bin/orgs-beta.ts builds the same key. */
+export const ALLOWLIST_PK_PREFIX = 'ALLOWLIST#';
 
 /**
  * Whether the caller may create invitations: their own allowlist row, or their
@@ -50,8 +54,10 @@ export async function hasOrgsBetaAccess({
   orgId: string;
 }): Promise<boolean> {
   const [byEmail, byOrg] = await Promise.all([
-    verifiedEmail ? rowExists(`ALLOWLIST#${verifiedEmail.toLowerCase()}`) : Promise.resolve(false),
-    rowExists(`ORG#${orgId}`),
+    verifiedEmail
+      ? rowExists(`${ALLOWLIST_PK_PREFIX}${verifiedEmail.toLowerCase()}`)
+      : Promise.resolve(false),
+    rowExists(OrgKeys.orgPk(orgId)),
   ]);
   return byEmail || byOrg;
 }

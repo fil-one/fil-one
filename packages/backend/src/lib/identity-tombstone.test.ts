@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isIdentityTombstoned } from './identity-tombstone.js';
+import { isIdentityTombstoned } from './identity-tombstone.ts';
 
 describe('isIdentityTombstoned', () => {
   it('reads the deletedAt stamp the scrub writes', () => {

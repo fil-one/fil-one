@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { OrgRole } from './api/org.js';
+import { OrgRole } from './api/org.ts';
 import {
   PERMISSIONS,
   ROLE_PERMISSIONS,
@@ -8,8 +8,8 @@ import {
   canManageTargetRole,
   permissionsForRole,
   roleHasPermission,
-} from './permissions.js';
-import type { Permission } from './permissions.js';
+} from './permissions.ts';
+import type { Permission } from './permissions.ts';
 
 /**
  * The capability matrix, transcribed from the ADR as a table rather than as
@@ -35,6 +35,7 @@ const MATRIX: Record<Permission, OrgRole[]> = {
   'keys.manage_own': [OrgRole.Owner, OrgRole.Admin, OrgRole.Member],
   'keys.manage_all': [OrgRole.Owner, OrgRole.Admin],
   'audit.view': [OrgRole.Owner, OrgRole.Admin],
+  'audit.export': [OrgRole.Owner, OrgRole.Admin],
   'privileged.grant': [OrgRole.Owner],
 };
 

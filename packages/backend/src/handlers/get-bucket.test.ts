@@ -14,19 +14,19 @@ const mockGetOrchestratorForRegion = vi.fn();
 
 let orch: FakeOrchestrator;
 
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (...args: unknown[]) => mockGetOrchestratorForRegion(...args),
 }));
 
-vi.mock('../lib/org-profile.js', () => ({
+vi.mock('../lib/org-profile.ts', () => ({
   getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
 }));
 
 process.env.FILONE_STAGE = 'test';
 
-import { baseHandler } from './get-bucket.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
-import { fakeOrchestrator, tenantFor, type FakeOrchestrator } from '../test/fake-orchestrator.js';
+import { baseHandler } from './get-bucket.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
+import { fakeOrchestrator, tenantFor, type FakeOrchestrator } from '../test/fake-orchestrator.ts';
 import { S3_REGION, S3Region } from '@filone/shared';
 
 // ---------------------------------------------------------------------------

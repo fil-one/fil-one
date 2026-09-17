@@ -5,7 +5,7 @@
 
 import type { BucketSortKey, SortDirection } from '@filone/shared';
 import { getRegionLabel } from '@filone/shared';
-import type { BucketSummary } from './service-orchestrator.js';
+import type { BucketSummary } from './service-orchestrator.ts';
 
 export function filterBucketsByName(buckets: BucketSummary[], search: string): BucketSummary[] {
   const query = search.trim().toLowerCase();

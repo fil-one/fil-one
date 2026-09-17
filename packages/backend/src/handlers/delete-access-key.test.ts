@@ -8,8 +8,8 @@ import {
   TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
-import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
+import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
@@ -33,23 +33,24 @@ const fthMock = {
   deleteAccessKey: (...args: unknown[]) => fthDeleteAccessKey(...args),
 };
 
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (region: string) => {
     mockGetOrchestratorForRegion(region);
     return region === 'us-east-1' ? fthMock : auroraMock;
   },
 }));
 
-vi.mock('../lib/org-profile.js', () => ({
+vi.mock('../lib/org-profile.ts', () => ({
   getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
 
 import { ApiErrorCode, OrgRole } from '@filone/shared';
-import { baseHandler } from './delete-access-key.js';
-import { buildEvent, membershipFor } from '../test/lambda-test-utilities.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
+import { baseHandler } from './delete-access-key.ts';
+import { RevocationNotRecordedError } from '../lib/key-revocation.ts';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 const KEY_ID = 'key-1';
@@ -303,7 +304,12 @@ describe('delete-access-key baseHandler', () => {
     auroraIsTenantReady.mockReturnValue('aurora-t-1');
     auroraDeleteAccessKey.mockResolvedValue(undefined);
 
-    await expect(baseHandler(eventWithKey(KEY_ID))).rejects.toThrow('DynamoDB unavailable');
+    // Named rather than raw: the credential is gone and only the record failed,
+    // which is what tells a revocation pass this is not a live key
+    // (`lib/revoke-member-keys.ts`). The cause carries what actually broke.
+    const failure = await baseHandler(eventWithKey(KEY_ID)).catch((err: unknown) => err);
+    expect(failure).toBeInstanceOf(RevocationNotRecordedError);
+    expect((failure as Error).cause).toMatchObject({ message: 'DynamoDB unavailable' });
 
     // The intent is the record of what happened at the vendor. Without it,
     // a revoked credential whose row survived would leave no trace at all.

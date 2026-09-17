@@ -20,8 +20,8 @@ import {
   getMarketingPreference,
   upsertContactSubscriptionStatus,
   updateSubscriptionStatus,
-} from './hubspot-client.js';
-import { HubSpotLifecycleStatus } from './hubspot-lifecycle-status.js';
+} from './hubspot-client.ts';
+import { HubSpotLifecycleStatus } from './hubspot-lifecycle-status.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

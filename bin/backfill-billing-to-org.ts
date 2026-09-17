@@ -108,8 +108,8 @@ import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { decodeRow, scanAll, text, transactWithRetry } from './lib/dynamo.ts';
 import { acquireRunLock, BILLING_REKEY_LOCK_PK, forceUnlock } from './lib/run-lock.ts';
 import { assertStageResources, awsRegionForStage, resolveStageTables } from './lib/stage.ts';
+import { SubscriptionKeys } from '@filone/backend/src/lib/subscription-store.ts';
 import {
-  BillingKeys,
   buildCopyTransactItems,
   classifyOrgBilling,
   formatAppliedResolutions,
@@ -275,12 +275,12 @@ async function rereadOrg(state: OrgBillingState): Promise<OrgBillingState> {
     const row2 = await readRow(row.pk);
     if (row2) fresh.push(row2);
   }
-  const orgRow = await readRow(BillingKeys.orgPk(state.orgId));
+  const orgRow = await readRow(SubscriptionKeys.orgPk(state.orgId));
 
   const reread = rereadOrgState(state.orgId, fresh, orgRow);
   for (const row of reread.refiled) {
     console.log(
-      `  REFILED ${row.pk} — now names ${row.orgId ? BillingKeys.orgPk(row.orgId) : 'no org'}, not ${BillingKeys.orgPk(state.orgId)}; left for the next run`,
+      `  REFILED ${row.pk} — now names ${row.orgId ? SubscriptionKeys.orgPk(row.orgId) : 'no org'}, not ${SubscriptionKeys.orgPk(state.orgId)}; left for the next run`,
     );
   }
 
@@ -291,7 +291,7 @@ async function readRow(pk: string): Promise<SubscriptionRow | undefined> {
   const { Item } = await dynamo.send(
     new GetItemCommand({
       TableName: billingTable,
-      Key: { pk: { S: pk }, sk: { S: BillingKeys.subscriptionSk() } },
+      Key: { pk: { S: pk }, sk: { S: SubscriptionKeys.sk() } },
       ConsistentRead: true,
     }),
   );
@@ -324,7 +324,7 @@ type ApplyOutcome = 'copied' | 'raced' | 'skipped';
  * conflicts are retried; anything else stops the run.
  */
 async function applyCopy(plan: CopyPlan, now: string): Promise<ApplyOutcome> {
-  const label = `${BillingKeys.orgPk(plan.orgId)} <- ${plan.source.pk}`;
+  const label = `${SubscriptionKeys.orgPk(plan.orgId)} <- ${plan.source.pk}`;
 
   const conditionFailed = await transactWithRetry(
     dynamo,
@@ -349,7 +349,7 @@ function describe(plan: CopyPlan): string {
       ? `updatedAt=${plan.sourceUpdatedAt ?? '(none)'}`
       : `updatedAt=${plan.sourceUpdatedAt ?? '(none)'} (copy carried ${plan.copiedUpdatedAt ?? '(none)'})`;
   const superseded = plan.supersedes?.length ? ` superseding ${plan.supersedes.join(', ')}` : '';
-  return `${BillingKeys.orgPk(plan.orgId)} <- ${plan.source.pk} ${source}${superseded}`;
+  return `${SubscriptionKeys.orgPk(plan.orgId)} <- ${plan.source.pk} ${source}${superseded}`;
 }
 
 /**

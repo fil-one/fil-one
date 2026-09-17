@@ -4,13 +4,13 @@ import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import { OrgRole, isOrgRole } from '@filone/shared';
 import type { OrgMembershipSource, OrgMembershipSummary } from '@filone/shared';
-import { getDynamoClient } from './ddb-client.js';
-import { resolveOrgName } from './org-profile.js';
+import { getDynamoClient } from './ddb-client.ts';
+import { resolveOrgName } from './org-profile.ts';
 
 /**
  * Organization membership, in OrgTable.
  *
- * Three row shapes, all pk/sk (the table has no GSIs, like every other table
+ * Four row shapes, all pk/sk (the table has no GSIs, like every other table
  * here), plus one key reserved for SSO:
  * - `ORG#{orgId}` / `MEMBER#{userId}` — the authoritative membership: role,
  *   when and how the member joined.
@@ -22,6 +22,10 @@ import { resolveOrgName } from './org-profile.js';
  * - `ORG#{orgId}` / `META` — org-level counters owned by this module, starting
  *   with `ownerCount`, the last-Owner invariant. It sits beside the rows it
  *   counts so every owner-set transaction is single-table.
+ * - `ORG#{orgId}` / `ACCESSKEY_MINT_SEQ#{userId}` — how many access-key rows have
+ *   landed for the member, which a role narrowing asserts is unchanged since it
+ *   listed their keys. It outlives the membership on purpose
+ *   (`lib/access-key-mint-seq.ts`).
  *
  * Two more shapes belong to invitations, and their key builders are here beside
  * the membership ones because an accept transaction writes both families at
@@ -38,6 +42,12 @@ import { resolveOrgName } from './org-profile.js';
  * The org profile row stays in UserInfoTable (`ORG#{orgId}/PROFILE`), so the
  * transactions that change an org's name and its membership span both tables.
  */
+
+/** The org partition prefix, shared by the builder and the scan filters in bin/. */
+const orgPkPrefix = (): string => 'ORG#';
+
+/** The user partition prefix, shared by the builder and the scan filters in bin/. */
+const userPkPrefix = (): string => 'USER#';
 
 /** The canonical membership sort-key prefix, shared by the builder and the parser. */
 const memberSkPrefix = (): string => 'MEMBER#';
@@ -57,9 +67,15 @@ const inviteSkPrefix = (): string => 'INVITE#';
 const inviteAddrSkPrefix = (): string => 'INVITEADDR#';
 
 export const OrgKeys = {
-  orgPk: (orgId: string): string => `ORG#${orgId}`,
+  orgPk: (orgId: string): string => `${orgPkPrefix()}${orgId}`,
+  orgPkPrefix,
   memberSk: (userId: string): string => `${memberSkPrefix()}${userId}`,
   memberSkPrefix,
+  /**
+   * The member's access-key mint sequence. Built and compared only, never
+   * parsed back — no reader walks these rows.
+   */
+  accessKeyMintSeqSk: (userId: string): string => `ACCESSKEY_MINT_SEQ#${userId}`,
   /**
    * Inverse of {@link memberSk}. User ids are UUIDs, so the same no-`#` check as
    * {@link parseMembershipSk} makes the split unambiguous; returns undefined for
@@ -74,7 +90,8 @@ export const OrgKeys = {
     return userId && !userId.includes('#') ? userId : undefined;
   },
   orgMetaSk: (): string => 'META',
-  userPk: (userId: string): string => `USER#${userId}`,
+  userPk: (userId: string): string => `${userPkPrefix()}${userId}`,
+  userPkPrefix,
   membershipSk: (orgId: string): string => `MEMBERSHIP#${orgId}`,
   membershipSkPrefix,
   /**
@@ -253,6 +270,24 @@ export async function readOwnerCount(orgId: string): Promise<number | undefined>
   if (stored === undefined) return undefined;
   const ownerCount = Number(stored);
   return Number.isFinite(ownerCount) ? ownerCount : undefined;
+}
+
+/**
+ * The counter as an explanation of a cancellation that already happened.
+ *
+ * A read that fails explains nothing, so it reads as unknown rather than
+ * throwing. The callers are failure paths that already owe an answer naming the
+ * keys they revoked, and those keys are gone whatever this read does — a
+ * rejection escaping here would lose that answer and leave the operator with a
+ * bare 500.
+ */
+export async function readOwnerCountForDiagnosis(orgId: string): Promise<number | undefined> {
+  try {
+    return await readOwnerCount(orgId);
+  } catch (err) {
+    console.error('[org-membership] ownerCount could not be read', { orgId, error: err });
+    return undefined;
+  }
 }
 
 /**

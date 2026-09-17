@@ -10,7 +10,7 @@
 // max-lines cap, so this is a sibling module for the same reason
 // ./billing-scan.ts is one.
 
-import { BillingKeys } from './billing-rekey.ts';
+import { SubscriptionKeys } from '@filone/backend/src/lib/subscription-store.ts';
 import type {
   BillingAnomalyReason,
   BillingPlan,
@@ -82,12 +82,12 @@ export function dispositionReread(plan: BillingPlan): RereadDisposition {
     return {
       outcome: 'anomaly',
       reason: plan.reason,
-      message: `${BillingKeys.orgPk(plan.orgId)} [${plan.reason}] ${plan.detail}`,
+      message: `${SubscriptionKeys.orgPk(plan.orgId)} [${plan.reason}] ${plan.detail}`,
     };
   }
 
   return {
     outcome: 'skipped',
-    message: `${BillingKeys.orgPk(plan.orgId)} — no longer needs a copy (${plan.origin})`,
+    message: `${SubscriptionKeys.orgPk(plan.orgId)} — no longer needs a copy (${plan.origin})`,
   };
 }

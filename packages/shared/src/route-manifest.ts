@@ -1,4 +1,4 @@
-import type { Permission } from './permissions.js';
+import type { Permission } from './permissions.ts';
 
 /**
  * Every API route, its authentication category, and what it requires of the
@@ -214,6 +214,20 @@ const MANIFEST = [
     category: 'authenticated',
     requires: 'keys.manage_own',
   },
+  // Rotating is a mint, so the gate is `keys.create` rather than the
+  // `keys.manage_own` its revoke half would ask for: a role that could not mint
+  // the replacement has no business issuing one. Every role holding
+  // `keys.create` holds `keys.manage_own` too, so the handler's own-key
+  // narrowing still answers for every caller this admits. The creator-authority
+  // cap runs in the handler against the permissions the stored key carries.
+  {
+    method: 'POST',
+    path: '/api/access-keys/{keyId}/rotate',
+    handler: 'rotate-access-key',
+    category: 'authenticated',
+    requires: 'keys.create',
+    capsInHandler: true,
+  },
   {
     method: 'GET',
     path: '/api/rag-api-keys',
@@ -302,6 +316,17 @@ const MANIFEST = [
     method: 'DELETE',
     path: '/api/org/members/{userId}',
     handler: 'remove-member',
+    category: 'authenticated',
+    requires: 'members.manage',
+    capsInHandler: true,
+  },
+  // What the PATCH would revoke, read before it happens. Same gate and same
+  // ceiling as the PATCH itself: it names the target's access keys, which
+  // nobody who could not change their role has any business reading.
+  {
+    method: 'GET',
+    path: '/api/org/members/{userId}/role-change-preview',
+    handler: 'get-role-change-preview',
     category: 'authenticated',
     requires: 'members.manage',
     capsInHandler: true,
@@ -488,6 +513,31 @@ const MANIFEST = [
     handler: 'get-activity',
     category: 'authenticated',
     requires: 'buckets.read',
+  },
+
+  // ── Audit log ────────────────────────────────────────────────────
+  // The org's recorded history, written in the same transaction as the mutation
+  // it describes. Two routes rather than one taking `format=csv`, so the
+  // manifest states each gate declaratively: this permission depends on which
+  // endpoint was called, not on the request body, which is what the
+  // `in-handler` escape hatch is for. Keeping them apart also keeps the row cap
+  // and the `audit.exported` write on the route that has them.
+  //
+  // Both queries scope to the org resolved from the caller's membership, never
+  // from a request parameter.
+  {
+    method: 'GET',
+    path: '/api/audit',
+    handler: 'list-audit-events',
+    category: 'authenticated',
+    requires: 'audit.view',
+  },
+  {
+    method: 'GET',
+    path: '/api/audit/export',
+    handler: 'export-audit-events',
+    category: 'authenticated',
+    requires: 'audit.export',
   },
 
   // ── Billing ──────────────────────────────────────────────────────

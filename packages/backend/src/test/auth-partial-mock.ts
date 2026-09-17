@@ -3,7 +3,7 @@
  * uses:
  *
  * ```ts
- * vi.mock('../middleware/auth.js', () => authPartialMock());
+ * vi.mock('../middleware/auth.ts', () => authPartialMock());
  * ```
  *
  * A `vi.mock` factory replaces the whole module, so the stub has to supply every

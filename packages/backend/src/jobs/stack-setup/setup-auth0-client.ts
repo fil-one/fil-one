@@ -6,8 +6,8 @@
  */
 import { Resource } from 'sst';
 import { MARKETING_URL_BY_CONSOLE_ORIGIN, logoutReturnTo } from '@filone/shared';
-import { getAuth0ManagementToken } from './auth0-mgmt-token.js';
-import { throwIfNotOk } from '../../lib/auth0-management.js';
+import { getAuth0ManagementToken } from './auth0-mgmt-token.ts';
+import { throwIfNotOk } from '../../lib/auth0-management.ts';
 
 interface Auth0Client {
   callbacks?: string[];

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
-import { getRequestHeader } from './request-headers.js';
+import { getRequestHeader } from './request-headers.ts';
 
 function eventWith(headers: Record<string, string>): APIGatewayProxyEventV2 {
   return { headers } as unknown as APIGatewayProxyEventV2;

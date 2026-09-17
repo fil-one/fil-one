@@ -14,14 +14,14 @@ vi.mock('sst', () => ({
 }));
 
 const mockCreateBillingTrial = vi.fn();
-vi.mock('./create-billing-trial.js', () => ({
+vi.mock('./create-billing-trial.ts', () => ({
   createBillingTrial: (args: unknown) => mockCreateBillingTrial(args),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { ensureTrialEntitlement } from './trial-entitlement.js';
-import { TrialEntitlementError } from './errors.js';
+import { ensureTrialEntitlement } from './trial-entitlement.ts';
+import { TrialEntitlementError } from './errors.ts';
 
 const BASE = {
   sub: 'auth0|sub-1',

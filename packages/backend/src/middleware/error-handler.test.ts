@@ -2,9 +2,9 @@ import { describe, it, expect, vi } from 'vitest';
 import type { Request } from '@middy/core';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, Context } from 'aws-lambda';
 import { ApiErrorCode } from '@filone/shared';
-import { errorHandlerMiddleware } from './error-handler.js';
-import { OrgDeletingError } from '../lib/org-profile.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import { errorHandlerMiddleware } from './error-handler.ts';
+import { OrgDeletingError } from '../lib/org-profile.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
 
 type ErrorRequest = Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>;
 

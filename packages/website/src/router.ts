@@ -16,6 +16,7 @@ import { Route as apiKeysRoute } from './routes/_app/api-keys.js';
 import { Route as createApiKeyRoute } from './routes/_app/api-keys.create.js';
 import { Route as billingRoute } from './routes/_app/billing.js';
 import { Route as membersRoute } from './routes/_app/members.js';
+import { Route as organizationRoute } from './routes/_app/organization.js';
 import { Route as settingsRoute } from './routes/_app/settings.js';
 import { Route as supportRoute } from './routes/_app/support.js';
 import { Route as bucketIntelligenceRoute } from './routes/_app/bucket-intelligence.js';
@@ -42,6 +43,7 @@ const routeTree = rootRoute.addChildren([
     createApiKeyRoute,
     billingRoute,
     membersRoute,
+    organizationRoute,
     settingsRoute,
     supportRoute,
     bucketIntelligenceRoute,

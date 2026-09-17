@@ -3,8 +3,8 @@ import { Uint8ArrayBlobAdapter } from '@smithy/util-stream';
 import { mockClient } from 'aws-sdk-client-mock';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { EMBEDDING_DIMENSION, EMBEDDING_MODEL_ID } from './constants.js';
-import { embed, embedMany } from './embed.js';
+import { EMBEDDING_DIMENSION, EMBEDDING_MODEL_ID } from './constants.ts';
+import { embed, embedMany } from './embed.ts';
 
 const bedrockMock = mockClient(BedrockRuntimeClient);
 

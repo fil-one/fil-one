@@ -13,17 +13,17 @@ vi.mock('sst', () => ({
   },
 }));
 
-vi.mock('./trial-entitlement.js', () => ({ ensureTrialEntitlement: vi.fn() }));
-vi.mock('./org-membership.js', () => ({ listMemberships: vi.fn() }));
-vi.mock('./stripe-webhook-metrics.js', () => ({ emitTrialClaimBlockedByLegacyRow: vi.fn() }));
+vi.mock('./trial-entitlement.ts', () => ({ ensureTrialEntitlement: vi.fn() }));
+vi.mock('./org-membership.ts', () => ({ listMemberships: vi.fn() }));
+vi.mock('./stripe-webhook-metrics.ts', () => ({ emitTrialClaimBlockedByLegacyRow: vi.fn() }));
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { claimTrialIfEligible } from './trial-claim.js';
-import { listMemberships } from './org-membership.js';
-import { emitTrialClaimBlockedByLegacyRow } from './stripe-webhook-metrics.js';
-import { ensureTrialEntitlement } from './trial-entitlement.js';
-import type { UserInfo } from './user-context.js';
+import { claimTrialIfEligible } from './trial-claim.ts';
+import { listMemberships } from './org-membership.ts';
+import { emitTrialClaimBlockedByLegacyRow } from './stripe-webhook-metrics.ts';
+import { ensureTrialEntitlement } from './trial-entitlement.ts';
+import type { UserInfo } from './user-context.ts';
 
 const mockEnsureTrialEntitlement = vi.mocked(ensureTrialEntitlement);
 const mockListMemberships = vi.mocked(listMemberships);

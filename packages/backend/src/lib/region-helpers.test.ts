@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockGetAvailableOrchestrators = vi.fn();
-vi.mock('./service-orchestrator-registry.js', () => ({
+vi.mock('./service-orchestrator-registry.ts', () => ({
   getAvailableOrchestrators: (...args: unknown[]) => mockGetAvailableOrchestrators(...args),
 }));
 
 const mockGetOrgProfile = vi.fn(async (orgId: string) => fakeOrgProfile(orgId));
-vi.mock('./org-profile.js', () => ({
+vi.mock('./org-profile.ts', () => ({
   getOrgProfile: (...args: unknown[]) => mockGetOrgProfile(...(args as [string])),
 }));
 
@@ -18,8 +18,8 @@ import {
   syncTenantStatusInProvisionedRegions,
   WEBHOOK_STATUS_SYNC_RETRY,
   type RegionSyncOutcome,
-} from './region-helpers.js';
-import { fakeOrchestrator, fakeOrgProfile } from '../test/fake-orchestrator.js';
+} from './region-helpers.ts';
+import { fakeOrchestrator, fakeOrgProfile } from '../test/fake-orchestrator.ts';
 
 describe('syncTenantStatusInProvisionedRegions', () => {
   beforeEach(() => {

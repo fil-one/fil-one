@@ -15,7 +15,7 @@ vi.mock('sst', () => ({
 // Authorization header is present.
 const mockCookieBefore = vi.fn();
 const mockCookieAfter = vi.fn();
-vi.mock('./auth.js', () => ({
+vi.mock('./auth.ts', () => ({
   authMiddleware: vi.fn(() => ({ before: mockCookieBefore, after: mockCookieAfter })),
   withRefreshedCookies: (
     _request: unknown,
@@ -30,9 +30,9 @@ vi.mock('./auth.js', () => ({
 }));
 
 import { ApiErrorCode, OrgRole } from '@filone/shared';
-import { ragQueryAuthMiddleware } from './rag-query-auth.js';
-import { hashRagKeyToken, RagApiKeyKeys } from '../lib/rag-api-keys.js';
-import { OrgKeys } from '../lib/org-membership.js';
+import { ragQueryAuthMiddleware } from './rag-query-auth.ts';
+import { hashRagKeyToken, RagApiKeyKeys } from '../lib/rag-api-keys.ts';
+import { OrgKeys } from '../lib/org-membership.ts';
 import {
   buildEvent,
   buildMiddyRequest,
@@ -40,8 +40,8 @@ import {
   NO_MEMBERSHIP,
   stubAbsentMembershipRead,
   stubMembershipRead,
-} from '../test/lambda-test-utilities.js';
-import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.js';
+} from '../test/lambda-test-utilities.ts';
+import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.ts';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 
 const ddbMock = mockClient(DynamoDBClient);

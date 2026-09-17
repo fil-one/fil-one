@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { OrgRole } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -10,7 +10,7 @@ import { sstResourceMock } from '../test/sst-resource-mock.js';
 
 const mockGetPasskeyAuthenticators = vi.fn();
 const mockDeleteAuthenticationMethod = vi.fn();
-vi.mock('../lib/auth0-management.js', () => ({
+vi.mock('../lib/auth0-management.ts', () => ({
   getConnectionType: (sub: string) => sub.split('|')[0] ?? 'unknown',
   getPasskeyAuthenticators: (...args: unknown[]) => mockGetPasskeyAuthenticators(...args),
   deleteAuthenticationMethod: (...args: unknown[]) => mockDeleteAuthenticationMethod(...args),
@@ -18,7 +18,7 @@ vi.mock('../lib/auth0-management.js', () => ({
 
 vi.mock('sst', () => sstResourceMock());
 
-vi.mock('../lib/auth-secrets.js', () => ({
+vi.mock('../lib/auth-secrets.ts', () => ({
   getAuthSecrets: () => ({
     AUTH0_CLIENT_ID: 'test-client-id',
     AUTH0_CLIENT_SECRET: 'test-client-secret',
@@ -37,8 +37,8 @@ const ddbMock = mockClient(DynamoDBClient);
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
-import { handler } from './delete-passkey.js';
-import { buildEvent, buildContext, stubMembershipRead } from '../test/lambda-test-utilities.js';
+import { handler } from './delete-passkey.ts';
+import { buildEvent, buildContext, stubMembershipRead } from '../test/lambda-test-utilities.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

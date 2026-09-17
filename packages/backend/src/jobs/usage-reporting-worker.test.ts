@@ -8,7 +8,7 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
-import type { UsageReportingWorkerPayload } from './usage-reporting-worker.js';
+import type { UsageReportingWorkerPayload } from './usage-reporting-worker.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -24,7 +24,7 @@ vi.mock('sst', () => ({
 const mockMeterEventsCreate = vi.fn().mockResolvedValue({});
 const mockCustomersUpdate = vi.fn().mockResolvedValue({});
 const mockGetCustomerExistence = vi.hoisted(() => vi.fn());
-vi.mock('../lib/stripe-client.js', () => ({
+vi.mock('../lib/stripe-client.ts', () => ({
   getStripeClient: () => ({
     billing: {
       meterEvents: { create: mockMeterEventsCreate },
@@ -42,11 +42,11 @@ vi.mock('../lib/stripe-client.js', () => ({
 
 const mockEmitStripeCustomersOutOfSync = vi.hoisted(() => vi.fn());
 const mockStartDeletion = vi.fn(async (_params: unknown) => undefined);
-vi.mock('../lib/deletion-from-stripe.js', () => ({
+vi.mock('../lib/deletion-from-stripe.ts', () => ({
   startDeletionFromStripe: (params: unknown) => mockStartDeletion(params),
 }));
 
-vi.mock('../lib/usage-worker-metrics.js', () => ({
+vi.mock('../lib/usage-worker-metrics.ts', () => ({
   emitStripeCustomersOutOfSync: (...args: unknown[]) => mockEmitStripeCustomersOutOfSync(...args),
 }));
 
@@ -94,14 +94,14 @@ const {
     },
   };
 });
-vi.mock('../lib/aurora/aurora-orchestrator.js', () => ({ auroraOrchestrator }));
-vi.mock('../lib/fth/fth-orchestrator.js', () => ({ fthOrchestrator }));
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/aurora/aurora-orchestrator.ts', () => ({ auroraOrchestrator }));
+vi.mock('../lib/fth/fth-orchestrator.ts', () => ({ createFthOrchestrator: () => fthOrchestrator }));
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getAvailableOrchestrators: () => [auroraOrchestrator, fthOrchestrator],
 }));
 const mockIsOrgDeletedOrDeleting = vi.fn(async (_orgId: string) => false);
 
-vi.mock('../lib/org-profile.js', () => ({
+vi.mock('../lib/org-profile.ts', () => ({
   getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
   isOrgDeletedOrDeleting: (orgId: string) => mockIsOrgDeletedOrDeleting(orgId),
 }));
@@ -112,7 +112,7 @@ process.env.STRIPE_METER_EVENT_NAME = 'storage_usage';
 // Registry is mocked, so the value is irrelevant — only presence matters.
 process.env.FILONE_STAGE = 'test';
 
-import { handler } from './usage-reporting-worker.js';
+import { handler } from './usage-reporting-worker.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

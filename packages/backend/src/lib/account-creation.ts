@@ -1,11 +1,11 @@
 import { UpdateItemCommand, type TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
 import { OrgRole } from '@filone/shared';
-import { AuditSubjects, auditEvent, commitAudited, userActor } from './audit.js';
-import { getDynamoClient } from './ddb-client.js';
-import { OrgKeys } from './org-membership.js';
-import type { OrgMembership } from './org-membership.js';
-import { OrgSetupStatus } from './org-setup-status.js';
+import { AuditSubjects, auditEvent, commitAudited, userActor } from './audit.ts';
+import { getDynamoClient } from './ddb-client.ts';
+import { OrgKeys } from './org-membership.ts';
+import type { OrgMembership } from './org-membership.ts';
+import { OrgSetupStatus } from './org-setup-status.ts';
 
 export interface NewAccountParams {
   sub: string;

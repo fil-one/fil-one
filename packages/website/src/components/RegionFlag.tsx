@@ -54,6 +54,7 @@ const FLAGS: Record<S3Region, () => React.JSX.Element> = {
   [S3Region.EuWest1]: FranceFlag,
   [S3Region.UsEast1]: UnitedStatesFlag,
   [S3Region.EuCentral3]: NetherlandsFlag,
+  [S3Region.UsEast9]: UnitedStatesFlag,
 };
 
 type RegionFlagProps = {

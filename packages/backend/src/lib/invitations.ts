@@ -10,9 +10,9 @@ import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import { INVITATION_STATUSES, INVITE_EXPIRY_DAYS, isOrgRole } from '@filone/shared';
 import type { InvitationStatus, InvitationSummary, OrgRole } from '@filone/shared';
-import { TRANSACT_WRITE_ITEM_LIMIT } from './audit.js';
-import { getDynamoClient } from './ddb-client.js';
-import { OrgKeys } from './org-membership.js';
+import { TRANSACT_WRITE_ITEM_LIMIT } from './audit.ts';
+import { getDynamoClient } from './ddb-client.ts';
+import { OrgKeys } from './org-membership.ts';
 
 /**
  * The invitation record and its lifecycle: two OrgTable rows per invitation,
@@ -289,9 +289,12 @@ const INVITATION_ROW_LIMIT = 20_000;
 
 /** Thrown when an org's invitation partition exceeds {@link INVITATION_ROW_LIMIT}. */
 export class InvitationListTooLargeError extends Error {
-  constructor(readonly orgId: string) {
+  readonly orgId: string;
+
+  constructor(orgId: string) {
     super(`Organization ${orgId} holds more than ${INVITATION_ROW_LIMIT} invitation rows`);
     this.name = 'InvitationListTooLargeError';
+    this.orgId = orgId;
   }
 }
 

@@ -1,4 +1,4 @@
-import type { StorageUsageSample } from './service-orchestrator.js';
+import type { StorageUsageSample } from './service-orchestrator.ts';
 
 export interface UsageCalculationResult {
   averageStorageBytesUsed: number;

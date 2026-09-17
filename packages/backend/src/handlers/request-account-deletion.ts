@@ -6,17 +6,17 @@ import type { ErrorResponse, RequestAccountDeletionResponse } from '@filone/shar
 import {
   isSelfServeDeletionEnabled,
   selfServeDeletionUnavailable,
-} from '../lib/account-deletion-flag.js';
-import { createDeletionChallenge } from '../lib/deletion-challenge.js';
-import { sendDeletionCodeEmail } from '../lib/deletion-email.js';
-import { getOrgProfile, isOrgDeleting } from '../lib/org-profile.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { csrfMiddleware } from '../middleware/csrf.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+} from '../lib/account-deletion-flag.ts';
+import { createDeletionChallenge } from '../lib/deletion-challenge.ts';
+import { sendDeletionCodeEmail } from '../lib/deletion-email.ts';
+import { getOrgProfile, isOrgDeleting } from '../lib/org-profile.ts';
+import { ResponseBuilder } from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { csrfMiddleware } from '../middleware/csrf.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 
 /**
  * Issues the account-deletion verification code. Deliberately NOT behind

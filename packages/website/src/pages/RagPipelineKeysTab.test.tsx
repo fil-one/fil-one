@@ -61,7 +61,7 @@ function bucket(over: Partial<RagBucket> = {}): RagBucket {
   };
 }
 
-function renderTab(buckets: RagBucket[] = [bucket()], role = OrgRole.Owner) {
+function renderTab(buckets: RagBucket[] = [bucket()], role: OrgRole = OrgRole.Owner) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   // Key controls are gated on `keys.*`, so the caller's role has to be known
   // before the tab renders.

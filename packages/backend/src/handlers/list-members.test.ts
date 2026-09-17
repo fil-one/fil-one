@@ -3,11 +3,11 @@ import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
 import { OrgRole } from '@filone/shared';
 import type { MemberSummary } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
-vi.mock('../lib/auth-secrets.js', () => ({
+vi.mock('../lib/auth-secrets.ts', () => ({
   getAuthSecrets: () => ({
     AUTH0_CLIENT_ID: 'test-client-id',
     AUTH0_CLIENT_SECRET: 'test-client-secret',
@@ -26,14 +26,14 @@ const ddbMock = mockClient(DynamoDBClient);
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
-import { handler } from './list-members.js';
-import { OrgKeys } from '../lib/org-membership.js';
+import { handler } from './list-members.ts';
+import { OrgKeys } from '../lib/org-membership.ts';
 import {
   buildEvent,
   buildContext,
   NO_MEMBERSHIP,
   stubMembershipRead,
-} from '../test/lambda-test-utilities.js';
+} from '../test/lambda-test-utilities.ts';
 
 const MOCK_SUB = 'auth0|member';
 const ORG_ID = '11111111-2222-3333-4444-555555555555';

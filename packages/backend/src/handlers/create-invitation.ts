@@ -9,8 +9,8 @@ import {
   canManageTargetRole,
 } from '@filone/shared';
 import type { CreateInvitationResponse, ErrorResponse, OrgRole } from '@filone/shared';
-import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.js';
-import { sendInvitationEmail } from '../lib/invite-mailer.js';
+import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.ts';
+import { sendInvitationEmail } from '../lib/invite-mailer.ts';
 import {
   hashInviteToken,
   invitationRows,
@@ -26,23 +26,23 @@ import {
   readInviteAddressClaim,
   retireInvitationItems,
   revokeDeferred,
-} from '../lib/invitations.js';
-import type { InvitationRecord } from '../lib/invitations.js';
+} from '../lib/invitations.ts';
+import type { InvitationRecord } from '../lib/invitations.ts';
 import {
   OrgDeletingError,
   isGuardRejection,
   orgNotDeletingCheck,
   resolveOrgName,
-} from '../lib/org-profile.js';
-import { hasOrgsBetaAccess } from '../lib/orgs-beta.js';
-import { parseJsonBody } from '../lib/parse-json-body.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { csrfMiddleware } from '../middleware/csrf.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+} from '../lib/org-profile.ts';
+import { hasOrgsBetaAccess } from '../lib/orgs-beta.ts';
+import { parseJsonBody } from '../lib/parse-json-body.ts';
+import { ResponseBuilder, beyondCeilingResponse } from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { csrfMiddleware } from '../middleware/csrf.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 
 /**
  * POST /api/org/invitations — invite an email address to the organization.
@@ -96,7 +96,9 @@ export async function baseHandler(
 
   // `authorize('members.manage')` refused every caller without a membership row.
   const callerRole = membership!.role;
-  if (!canManageTargetRole(callerRole, role)) return beyondCeilingResponse(role);
+  if (!canManageTargetRole(callerRole, role)) {
+    return beyondCeilingResponse(`invite someone as ${role}`);
+  }
 
   if (!(await hasOrgsBetaAccess({ verifiedEmail: inviterEmail, orgId }))) return betaOnlyResponse();
 
@@ -241,16 +243,6 @@ function newInvitation({
  */
 function acceptUrl(token: string): string {
   return `${process.env.WEBSITE_URL}/invite/accept#token=${encodeURIComponent(token)}`;
-}
-
-function beyondCeilingResponse(role: OrgRole): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder()
-    .status(403)
-    .body<ErrorResponse>({
-      message: `Your role in this organization cannot invite someone as ${role}.`,
-      code: ApiErrorCode.FORBIDDEN_ROLE,
-    })
-    .build();
 }
 
 /**

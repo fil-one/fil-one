@@ -1,4 +1,5 @@
 import { ArrowUpRightIcon } from '@phosphor-icons/react/dist/ssr';
+import type { AnchorHTMLAttributes } from 'react';
 import { clsx } from 'clsx';
 
 import { BaseLink, type BaseLinkProps } from './BaseLink';
@@ -15,6 +16,13 @@ export type ButtonProps = {
   /** Overrides the size-derived icon size (px) when a glyph needs more presence. */
   iconSize?: number;
   href?: BaseLinkProps['href'];
+  /**
+   * Whether an external `href` gets the trailing arrow that marks a trip out of
+   * the console. On by default, and turned off for a link that is not a
+   * navigation: a download opens a file rather than taking you somewhere, so the
+   * arrow would be describing the wrong thing.
+   */
+  externalIcon?: boolean;
   size?: ButtonSize;
   children: React.ReactNode;
 } & React.ComponentPropsWithoutRef<'button'>;
@@ -59,6 +67,7 @@ export function Button({
   children,
   disabled,
   href,
+  externalIcon = true,
   size = 'md',
   id,
   ...rest
@@ -82,10 +91,18 @@ export function Button({
     );
   }
 
+  // `rest` reaches the anchor too: without it a link button silently dropped
+  // every attribute a caller passed, `aria-label` included, so a row of
+  // identically-labelled links had nothing to tell them apart. The cast is the
+  // element swap and nothing more — these props are typed against `button`
+  // because that is what this component usually renders, and the handlers among
+  // them differ only in the element their event carries.
+  const linkProps = rest as AnchorHTMLAttributes<HTMLAnchorElement>;
+
   return (
-    <BaseLink id={id} className={classes} href={href}>
+    <BaseLink id={id} className={classes} href={href} {...linkProps}>
       <ButtonInner
-        isExternalLink={isExternalHref(href)}
+        isExternalLink={externalIcon && isExternalHref(href)}
         icon={icon}
         iconPosition={iconPosition}
         iconSize={iconSize}

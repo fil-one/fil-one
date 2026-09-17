@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { OrgRole, ROLE_PERMISSIONS } from '@filone/shared';
-import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.ts';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -11,7 +11,7 @@ import { sstResourceMock } from '../test/sst-resource-mock.js';
 
 vi.mock('sst', () => sstResourceMock());
 
-vi.mock('../lib/auth-secrets.js', () => ({
+vi.mock('../lib/auth-secrets.ts', () => ({
   getAuthSecrets: () => ({
     AUTH0_CLIENT_ID: 'test-client-id',
     AUTH0_CLIENT_SECRET: 'test-client-secret',
@@ -20,7 +20,7 @@ vi.mock('../lib/auth-secrets.js', () => ({
 
 const mockGetMfaEnrollments = vi.fn();
 const mockGetPasskeyAuthenticators = vi.fn();
-vi.mock('../lib/auth0-management.js', async (importOriginal) => {
+vi.mock('../lib/auth0-management.ts', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
@@ -41,14 +41,14 @@ const ddbMock = mockClient(DynamoDBClient);
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
-import { handler } from './get-me.js';
+import { handler } from './get-me.ts';
 import {
   buildEvent,
   buildContext,
   stubAbsentMembershipRead,
   stubMembershipList,
   stubMembershipRead,
-} from '../test/lambda-test-utilities.js';
+} from '../test/lambda-test-utilities.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

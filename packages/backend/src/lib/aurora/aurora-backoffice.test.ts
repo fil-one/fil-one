@@ -8,19 +8,21 @@ import {
   DuplicateTokenNameError,
   updateTenantStatus,
   getBucketStorageSamples,
-} from './aurora-backoffice.js';
+  getTenantInfo,
+  getTenantStatus,
+} from './aurora-backoffice.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../auth-secrets.js', () => ({
+vi.mock('../auth-secrets.ts', () => ({
   getAuroraBackofficeSecrets: () => ({
     AURORA_BACKOFFICE_TOKEN: 'test-aurora-token',
   }),
 }));
 
-vi.mock('./aurora-api-metrics.js', () => ({
+vi.mock('./aurora-api-metrics.ts', () => ({
   instrumentClient: vi.fn(),
 }));
 
@@ -33,6 +35,7 @@ const mockGetStorage = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockGetOperations = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockSetTenantStatus = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockGetBucketStorageMetrics = vi.fn((_options: Record<string, unknown>) => ({}));
+const mockGetTenant = vi.fn((_options: Record<string, unknown>) => ({}));
 
 vi.mock('@filone/aurora-backoffice-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
@@ -43,6 +46,7 @@ vi.mock('@filone/aurora-backoffice-client', () => ({
   setupS3Component: (options: Record<string, unknown>) => mockSetupS3Component(options),
   createTenantToken: (options: Record<string, unknown>) => mockPostTokens(options),
   setTenantStatus: (options: Record<string, unknown>) => mockSetTenantStatus(options),
+  getTenant: (options: Record<string, unknown>) => mockGetTenant(options),
   getBucketStorageMetrics: (options: Record<string, unknown>) =>
     mockGetBucketStorageMetrics(options),
 }));
@@ -736,5 +740,145 @@ describe('updateTenantStatus', () => {
     await expect(
       updateTenantStatus({ tenantId: 'tenant-1', status: 'DISABLED', allowMissing: true }),
     ).rejects.toThrow('Aurora status update failed for tenant tenant-1');
+  });
+});
+
+describe('signal forwarding', () => {
+  // The caller's deadline. Never aborted here: these tests check it reaches the
+  // backoffice request, not what happens when it fires.
+  const signal = new AbortController().signal;
+  const range = { from: '2026-01-01T00:00:00Z', to: '2026-01-02T00:00:00Z' };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const cases: Array<{
+    name: string;
+    run: () => Promise<unknown>;
+    mocks: Array<{ mock: { calls: unknown[][] } }>;
+  }> = [
+    {
+      name: 'createAuroraTenant',
+      run: () => {
+        mockPostTenants.mockResolvedValue({ data: { id: 't' }, error: undefined });
+        return createAuroraTenant({ orgId: 'org-1', displayName: 'Org', signal });
+      },
+      mocks: [mockPostTenants],
+    },
+    {
+      name: 'createAuroraTenant on a 409 lookup',
+      run: () => {
+        mockPostTenants.mockResolvedValue({
+          data: undefined,
+          error: {},
+          response: { status: 409 },
+        });
+        mockGetTenants.mockResolvedValue({
+          data: { items: [{ id: 't', name: 'org-1' }] },
+          error: undefined,
+        });
+        return createAuroraTenant({ orgId: 'org-1', displayName: 'Org', signal });
+      },
+      mocks: [mockPostTenants, mockGetTenants],
+    },
+    {
+      name: 'setupAuroraTenant',
+      run: () => {
+        mockSetupS3Component.mockResolvedValue({
+          data: { lastSetupStep: 'FINISHED' },
+          error: undefined,
+        });
+        return setupAuroraTenant({ tenantId: 't', signal });
+      },
+      mocks: [mockSetupS3Component],
+    },
+    {
+      name: 'createAuroraTenantApiKey',
+      run: () => {
+        mockPostTokens.mockResolvedValue({ data: { token: 'tok', id: 'id' }, error: undefined });
+        return createAuroraTenantApiKey({ tenantId: 't', orgId: 'org-1', signal });
+      },
+      mocks: [mockPostTokens],
+    },
+    {
+      name: 'getStorageSamples',
+      run: () => {
+        mockGetStorage.mockResolvedValue({ data: { samples: [] }, error: undefined });
+        return getStorageSamples({ tenantId: 't', ...range, signal });
+      },
+      mocks: [mockGetStorage],
+    },
+    {
+      name: 'getBucketStorageSamples',
+      run: () => {
+        mockGetBucketStorageMetrics.mockResolvedValue({ data: { samples: [] }, error: undefined });
+        return getBucketStorageSamples({ bucketName: 'b', ...range, signal });
+      },
+      mocks: [mockGetBucketStorageMetrics],
+    },
+    {
+      name: 'getOperationsSamples',
+      run: () => {
+        mockGetOperations.mockResolvedValue({ data: { series: [] }, error: undefined });
+        return getOperationsSamples({ tenantId: 't', ...range, signal });
+      },
+      mocks: [mockGetOperations],
+    },
+    {
+      name: 'getTenantInfo',
+      run: () => {
+        mockGetTenant.mockResolvedValue({ data: { id: 't' }, error: undefined });
+        return getTenantInfo({ tenantId: 't', signal });
+      },
+      mocks: [mockGetTenant],
+    },
+    {
+      name: 'getTenantStatus',
+      run: () => {
+        mockGetTenant.mockResolvedValue({
+          data: { status: 'ACTIVE' },
+          error: undefined,
+          response: { status: 200 },
+        });
+        return getTenantStatus({ tenantId: 't', signal });
+      },
+      mocks: [mockGetTenant],
+    },
+    {
+      name: 'updateTenantStatus',
+      run: () => {
+        mockSetTenantStatus.mockResolvedValue({ error: undefined });
+        return updateTenantStatus({ tenantId: 't', status: 'ACTIVE', signal });
+      },
+      mocks: [mockSetTenantStatus],
+    },
+  ];
+
+  for (const { name, run, mocks } of cases) {
+    it(`${name} passes the caller's signal to every backoffice request`, async () => {
+      await run();
+
+      const firstArgs = mocks.map((m) => m.mock.calls[0]?.[0]);
+      expect(firstArgs).toEqual(mocks.map(() => expect.objectContaining({ signal })));
+    });
+  }
+
+  it('getStorageSamples passes the signal to each split range request', async () => {
+    mockGetStorage.mockResolvedValue({ data: { samples: [] }, error: undefined });
+
+    // 62 days: two ranges under the 40-day cap.
+    await getStorageSamples({
+      tenantId: 't',
+      from: '2026-01-01T00:00:00Z',
+      to: '2026-03-04T00:00:00Z',
+      signal,
+    });
+
+    const options = mockGetStorage.mock.calls.map(([o]) => o);
+    expect(options).toEqual([
+      expect.objectContaining({ signal }),
+      expect.objectContaining({ signal }),
+    ]);
   });
 });

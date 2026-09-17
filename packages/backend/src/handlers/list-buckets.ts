@@ -9,17 +9,17 @@ import type {
   SortDirection,
 } from '@filone/shared';
 import { BUCKET_SORT_KEYS, listBucketsUnavailableMessage, SORT_DIRECTIONS } from '@filone/shared';
-import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.js';
-import { getOrgProfile } from '../lib/org-profile.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
-import type { BucketSummary } from '../lib/service-orchestrator.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
-import { filterBucketsByName, sortBuckets } from '../lib/bucket-list.js';
+import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.ts';
+import { getOrgProfile } from '../lib/org-profile.ts';
+import { ResponseBuilder } from '../lib/response-builder.ts';
+import type { BucketSummary } from '../lib/service-orchestrator.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
+import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
+import { filterBucketsByName, sortBuckets } from '../lib/bucket-list.ts';
 
 function parseSortKey(value: string | undefined): BucketSortKey {
   return BUCKET_SORT_KEYS.find((key) => key === value) ?? 'bucketName';

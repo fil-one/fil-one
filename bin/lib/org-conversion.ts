@@ -1,40 +1,23 @@
 // Pure helpers for the org-membership conversion (IAM M1, FIL-1013): what to do
 // with each org, and the exact DynamoDB items that carry it out. Everything here
-// is a function of its arguments — no AWS client, no `Resource`, no clock — so
+// is a function of its arguments (no AWS client, no `Resource`, no clock), so
 // the conversion's decisions are testable without a table.
 //
 // The runners are ./convert-orgs-to-orgtable.ts and ./revert-org-conversion.ts;
 // the procedure is docs/OrgConversionRunbook.md.
 //
-// KEY BUILDERS ARE MIRRORED, NOT IMPORTED. The canonical definitions live in
-// packages/backend/src/lib/org-membership.ts (`OrgKeys`), the role values in
-// packages/shared/src/api/org.ts (`OrgRole`), and the deletion guard in
-// packages/backend/src/lib/org-profile.ts (`orgNotDeletingCheck`). Scripts in bin/ run as
-// `node ./bin/<script>.ts` under Node's type stripping, which resolves neither
-// the backend's `./x.js` specifiers (no .js -> .ts fallback) nor the `OrgRole`
-// enum (not erasable syntax), so a bin script cannot import from either package
-// — the same constraint bin/backfill-access-key-granular-permissions.ts records
-// for its permission map.
-//
-// The mirror does not drift silently: ./org-conversion.test.ts imports both
-// canonical sources and asserts the values here equal them. Vitest resolves the
-// workspace packages that Node's type stripping cannot, so the test can hold
-// the runtime mirror to the definitions it copies.
+// The OrgTable key builders come from packages/backend/src/lib/org-membership.ts,
+// the role values from @filone/shared and the deletion guard from
+// packages/backend/src/lib/org-profile.ts, so a key or role that changes in the
+// backend changes here in the same commit. Only the UserInfoTable sort keys are
+// spelled out below: the backend writes them as literals and exports nothing
+// for a script to import.
 
 import type { AttributeValue, TransactWriteItem } from '@aws-sdk/client-dynamodb';
-
-/** OrgTable keys — mirror of `OrgKeys` in packages/backend/src/lib/org-membership.ts. */
-export const OrgKeys = {
-  orgPk: (orgId: string): string => `ORG#${orgId}`,
-  orgPkPrefix: (): string => 'ORG#',
-  memberSk: (userId: string): string => `MEMBER#${userId}`,
-  memberSkPrefix: (): string => 'MEMBER#',
-  orgMetaSk: (): string => 'META',
-  userPk: (userId: string): string => `USER#${userId}`,
-  userPkPrefix: (): string => 'USER#',
-  membershipSk: (orgId: string): string => `MEMBERSHIP#${orgId}`,
-  membershipSkPrefix: (): string => 'MEMBERSHIP#',
-} as const;
+import { OrgRole } from '@filone/shared';
+import type { OrgMembershipSource } from '@filone/shared';
+import { OrgKeys } from '@filone/backend/src/lib/org-membership.ts';
+import { orgNotDeletingCheckIn } from '@filone/backend/src/lib/org-profile.ts';
 
 /**
  * The UserInfoTable rows this conversion reads. Org and user profiles share the
@@ -47,12 +30,12 @@ export const UserInfoKeys = {
   deletionSk: (): string => 'DELETION',
 } as const;
 
-/** Mirror of `OrgRole.Owner` — what every converted membership becomes. */
-export const CONVERTED_ROLE = 'owner';
-/** Mirror of `OrgRole.Admin` — the value every pre-M1 membership row carries. */
-export const LEGACY_ROLE = 'admin';
-/** Mirror of `OrgMembershipSource` — how a converted member came to be a member. */
-export const CONVERSION_SOURCE = 'conversion';
+/** What every converted membership becomes. */
+export const CONVERTED_ROLE: OrgRole = OrgRole.Owner;
+/** The value every pre-M1 membership row carries. */
+export const LEGACY_ROLE: OrgRole = OrgRole.Admin;
+/** How a converted member came to be a member. */
+export const CONVERSION_SOURCE: OrgMembershipSource = 'conversion';
 
 /**
  * The `joinedAt` written when neither the legacy row nor the org profile
@@ -74,16 +57,6 @@ export function parseOrgPk(pk: string): string | undefined {
 /** `USER#{userId}` -> userId. */
 export function parseUserPk(pk: string): string | undefined {
   return parsePrefixed(pk, OrgKeys.userPkPrefix());
-}
-
-/** `MEMBER#{userId}` -> userId. */
-export function parseMemberSk(sk: string): string | undefined {
-  return parsePrefixed(sk, OrgKeys.memberSkPrefix());
-}
-
-/** `MEMBERSHIP#{orgId}` -> orgId, the inverse item's half of the same membership. */
-export function parseMembershipSk(sk: string): string | undefined {
-  return parsePrefixed(sk, OrgKeys.membershipSkPrefix());
 }
 
 function parsePrefixed(value: string, prefix: string): string | undefined {
@@ -347,17 +320,13 @@ function anomaly(orgId: string, reason: AnomalyReason, detail: string): AnomalyP
 
 /**
  * The guard against converting an org account deletion has taken over, as the
- * two transaction items that enforce it — a mirror of `orgNotDeletingCheck` in
- * packages/backend/src/lib/org-profile.ts, widened by the DELETION record the
- * same way `classifyOrg` reads both signals.
+ * two transaction items that enforce it: the backend's `orgNotDeletingCheckIn`
+ * on the profile row, widened by the DELETION record the same way `classifyOrg`
+ * reads both signals.
  *
  * The scan decides which orgs are being deleted; a deletion that starts between
  * the scan and the write would go unnoticed without these, and converting an org
  * mid-teardown puts back the membership teardown just removed.
- *
- * A ConditionCheck on a missing item reads every attribute as absent, so
- * `attribute_not_exists(deleting)` alone would pass for an org that has no
- * profile row: `attribute_exists(pk)` refuses that case instead.
  *
  * Items 0 and 1 of every conversion transaction, since CancellationReasons is
  * positional and {@link deletionGuardFailed} reads those two indexes.
@@ -367,13 +336,7 @@ export function orgNotDeletingChecks(
   userInfoTableName: string,
 ): TransactWriteItem[] {
   return [
-    {
-      ConditionCheck: {
-        TableName: userInfoTableName,
-        Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: UserInfoKeys.profileSk() } },
-        ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
-      },
-    },
+    orgNotDeletingCheckIn(userInfoTableName, orgId),
     {
       ConditionCheck: {
         TableName: userInfoTableName,

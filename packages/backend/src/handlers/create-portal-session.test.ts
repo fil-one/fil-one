@@ -14,15 +14,15 @@ vi.mock('sst', () => ({
 }));
 
 const mockSessionsCreate = vi.fn();
-vi.mock('../lib/stripe-client.js', () => ({
+vi.mock('../lib/stripe-client.ts', () => ({
   getStripeClient: () => ({ billingPortal: { sessions: { create: mockSessionsCreate } } }),
   getBillingSecrets: () => ({ STRIPE_SECRET_KEY: 'sk_test_fake' }),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { baseHandler } from './create-portal-session.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import { baseHandler } from './create-portal-session.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 const ORG_KEY = { pk: { S: 'ORG#org-1' }, sk: { S: 'SUBSCRIPTION' } };

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { BucketNotFoundError } from '../lib/errors.js';
+import { BucketNotFoundError } from '../lib/errors.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -14,11 +14,11 @@ vi.mock('sst', () => ({
 }));
 
 const mockGetOrchestratorForRegion = vi.fn();
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (...args: unknown[]) => mockGetOrchestratorForRegion(...args),
 }));
 
-vi.mock('../lib/org-profile.js', () => ({
+vi.mock('../lib/org-profile.ts', () => ({
   getOrgProfile: vi.fn(async (orgId: string) => fakeOrgProfile(orgId)),
 }));
 
@@ -26,9 +26,9 @@ process.env.FILONE_STAGE = 'test';
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { baseHandler } from './get-bucket-analytics.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
-import { fakeOrchestrator, fakeOrgProfile, tenantFor } from '../test/fake-orchestrator.js';
+import { baseHandler } from './get-bucket-analytics.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
+import { fakeOrchestrator, fakeOrgProfile, tenantFor } from '../test/fake-orchestrator.ts';
 import { S3Region } from '@filone/shared';
 
 // ---------------------------------------------------------------------------

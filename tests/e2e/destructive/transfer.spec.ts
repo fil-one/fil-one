@@ -18,9 +18,10 @@ import {
 // `POST /api/org/transfer` is the one org route behind a step-up
 // (`requireMfaIfEnrolled`): it wants an authentication newer than five minutes,
 // and answers a stale session with 401 `step_up_required`. The console then
-// leaves for `/login?acr_values=…&max_age=0`, comes back to `/members` with the
-// action it stashed, and reopens this dialog for the same member — so the test
-// signs in again in the middle, the way auth.setup.ts signs in at the start.
+// leaves for `/login?acr_values=…&max_age=0`, comes back to `/organization`
+// with the action it stashed, and reopens this dialog for the same member — so
+// the test signs in again in the middle, the way auth.setup.ts signs in at the
+// start.
 //
 // Whether the step-up fires depends on how long ago `auth.setup.ts` ran, which
 // no test can decide: a suite that reaches this spec inside five minutes gets a
@@ -89,7 +90,7 @@ test.describe('trial owner transfers the organization', () => {
   test('trial owner hands the organization to another member', async ({ page }) => {
     test.setTimeout(TRANSFER_TEST_TIMEOUT_MS);
 
-    await page.goto('/members');
+    await page.goto('/organization');
     const successorRow = memberRow(page, successorUserId);
     await expect(successorRow).toHaveAttribute('data-member-role', 'admin');
 
@@ -108,7 +109,9 @@ test.describe('trial owner transfers the organization', () => {
       await reauthenticateThroughAuth0(page);
       // The step-up stash brings the caller back to the page they left, with the
       // member the transfer was about named in `?action=`.
-      await page.waitForURL((url) => url.pathname === '/members', { timeout: AUTH0_TIMEOUT_MS });
+      await page.waitForURL((url) => url.pathname === '/organization', {
+        timeout: AUTH0_TIMEOUT_MS,
+      });
       // Reopened rather than resubmitted: the change nobody can reverse on their
       // own is not fired off the back of a redirect.
       await expect(page.getByTestId('transfer-dialog')).toBeVisible();
@@ -199,7 +202,7 @@ async function reauthenticateThroughAuth0(page: Page): Promise<void> {
  */
 async function skipPasskeyEnrollmentIfOffered(page: Page): Promise<void> {
   const skip = page.locator('button[value="abort-passkey-enrollment"]');
-  const landed = new Set(['/dashboard', '/members']);
+  const landed = new Set(['/dashboard', '/organization']);
 
   await Promise.race([
     skip.waitFor({ state: 'visible' }).catch(() => {}),

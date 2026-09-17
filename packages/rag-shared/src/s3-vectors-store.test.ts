@@ -13,8 +13,8 @@ import { createHash } from 'node:crypto';
 import { mockClient } from 'aws-sdk-client-mock';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { EMBEDDING_DIMENSION, MAX_METADATA_BYTES } from './constants.js';
-import { S3VectorsStore } from './s3-vectors-store.js';
+import { EMBEDDING_DIMENSION, MAX_METADATA_BYTES } from './constants.ts';
+import { S3VectorsStore } from './s3-vectors-store.ts';
 
 const VECTOR_BUCKET = 'rag-vectors';
 const ORG = 'org-abc';

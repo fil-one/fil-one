@@ -7,15 +7,15 @@ import type {
 } from 'aws-lambda';
 import { ORG_ID_HEADER, S3Region } from '@filone/shared';
 import type { ErrorResponse, Permission } from '@filone/shared';
-import { isOrgDeleting } from '../lib/org-profile.js';
-import { accountDeletedResponse, ResponseBuilder } from '../lib/response-builder.js';
-import { getRequestHeader } from '../lib/request-headers.js';
-import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.js';
-import { findRagKeyByToken, ragKeyAllowsBucket, touchRagKeyLastUsed } from '../lib/rag-api-keys.js';
-import { resolveMembership } from '../lib/org-membership.js';
-import { authMiddleware, membershipUnavailableResponse, withRefreshedCookies } from './auth.js';
-import type { AuthInternal, AuthMiddlewareOptions } from './auth.js';
-import { requireMembership, requirePermission } from './authorize.js';
+import { isOrgDeleting } from '../lib/org-profile.ts';
+import { accountDeletedResponse, ResponseBuilder } from '../lib/response-builder.ts';
+import { getRequestHeader } from '../lib/request-headers.ts';
+import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.ts';
+import { findRagKeyByToken, ragKeyAllowsBucket, touchRagKeyLastUsed } from '../lib/rag-api-keys.ts';
+import { resolveMembership } from '../lib/org-membership.ts';
+import { authMiddleware, membershipUnavailableResponse, withRefreshedCookies } from './auth.ts';
+import type { AuthInternal, AuthMiddlewareOptions } from './auth.ts';
+import { requireMembership, requirePermission } from './authorize.ts';
 
 /**
  * Auth dispatcher for the RAG query endpoint: cookie session OR RAG API key.

@@ -10,13 +10,13 @@ import {
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import pRetry from 'p-retry';
 import { Resource } from 'sst';
-import { getDynamoClient } from './ddb-client.js';
+import { getDynamoClient } from './ddb-client.ts';
 import {
   deletionChallengeKey,
   hashDeletionCode,
   MAX_VERIFY_ATTEMPTS,
-} from './deletion-challenge.js';
-import { DELETION_STATUS, DELETION_TRIGGER, type DeletionTrigger } from './deletion-record.js';
+} from './deletion-challenge.ts';
+import { DELETION_STATUS, DELETION_TRIGGER, type DeletionTrigger } from './deletion-record.ts';
 
 /** Matches the budget sendDeletionGuardedWrite uses for the same conflict. */
 const CONFLICT_RETRY = { retries: 2, minTimeout: 50, randomize: true } as const;

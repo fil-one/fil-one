@@ -5,7 +5,7 @@ import {
   BulkDeleteScope,
   CreateBulkDeleteJobSchema,
   isTerminalBulkDeleteStatus,
-} from './bulk-delete.js';
+} from './bulk-delete.ts';
 
 const idempotencyKey = '3f1a6b2c-8d4e-4f0a-9b3c-1d2e3f4a5b6c';
 

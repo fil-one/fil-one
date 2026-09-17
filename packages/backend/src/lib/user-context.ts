@@ -1,5 +1,5 @@
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
-import type { OrgMembership } from './org-membership.js';
+import type { OrgMembership } from './org-membership.ts';
 
 export interface UserInfo {
   sub: string;

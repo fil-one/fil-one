@@ -12,8 +12,8 @@ import {
   PutObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { createS3Client } from './s3-client.js';
-import type { S3ClientContext } from './s3-client.js';
+import { createS3Client } from './s3-client.ts';
+import type { S3ClientContext } from './s3-client.ts';
 
 // ── Presigned URL generators ────────────────────────────────────────
 

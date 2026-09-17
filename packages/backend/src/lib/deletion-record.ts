@@ -3,6 +3,9 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 export const DELETION_STATUS = { pending: 'PENDING', done: 'DONE' } as const;
 export type DeletionStatus = (typeof DELETION_STATUS)[keyof typeof DELETION_STATUS];
 
+/** Passes beyond which a teardown is not retrying, it is blocked. */
+export const BLOCKED_ATTEMPTS = 10;
+
 /**
  * What committed the deletion. The receipt has to distinguish a user's own
  * request from an admin deleting the org's Stripe customer, which is the standing

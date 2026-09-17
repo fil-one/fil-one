@@ -23,7 +23,7 @@ import {
   orgNotDeletingCheck,
   OrgDeletingError,
   sendDeletionGuardedWrite,
-} from './org-profile.js';
+} from './org-profile.ts';
 
 describe('getOrgProfile', () => {
   beforeEach(() => {

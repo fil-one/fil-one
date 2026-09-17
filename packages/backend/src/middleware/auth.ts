@@ -8,7 +8,7 @@ import type {
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
 import { Resource } from 'sst';
-import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.js';
+import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.ts';
 import { ApiErrorCode } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
 import {
@@ -18,15 +18,15 @@ import {
   makeCookieHeader,
   makeHintCookieHeader,
   ResponseBuilder,
-} from '../lib/response-builder.js';
-import { getAuthSecrets } from '../lib/auth-secrets.js';
-import { resolveAuth0Domain } from '../lib/auth0-domain.js';
-import { getDynamoClient } from '../lib/ddb-client.js';
-import { createNewUserAndOrg, stampVerifiedEmail } from '../lib/account-creation.js';
-import { resolveMembership } from '../lib/org-membership.js';
-import type { OrgMembership } from '../lib/org-membership.js';
-import { deriveOrgName } from '../lib/suggest-org-name.js';
-import { enforceIdentityProvider, resolveActiveOrg } from './org-context.js';
+} from '../lib/response-builder.ts';
+import { getAuthSecrets } from '../lib/auth-secrets.ts';
+import { resolveAuth0Domain } from '../lib/auth0-domain.ts';
+import { getDynamoClient } from '../lib/ddb-client.ts';
+import { createNewUserAndOrg, stampVerifiedEmail } from '../lib/account-creation.ts';
+import { resolveMembership } from '../lib/org-membership.ts';
+import type { OrgMembership } from '../lib/org-membership.ts';
+import { deriveOrgName } from '../lib/suggest-org-name.ts';
+import { enforceIdentityProvider, resolveActiveOrg } from './org-context.ts';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -94,10 +94,10 @@ function getJWKS(domain: string): ReturnType<typeof createRemoteJWKSet> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-import { parseCookies } from '../lib/cookies.js';
+import { parseCookies } from '../lib/cookies.ts';
 import { CSRF_COOKIE_NAME } from '@filone/shared';
-import { AccountDeletedError, isIdentityTombstoned } from '../lib/identity-tombstone.js';
-import { isOrgDeleting } from '../lib/org-profile.js';
+import { AccountDeletedError, isIdentityTombstoned } from '../lib/identity-tombstone.ts';
+import { isOrgDeleting } from '../lib/org-profile.ts';
 
 function unauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder().status(401).body<ErrorResponse>({ message: 'Unauthorized' }).build();
