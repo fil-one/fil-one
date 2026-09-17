@@ -25,7 +25,9 @@ info:
     Every operation is safely retryable end-to-end:
 
       * `PUT /tenants/{tenantId}` returns the existing tenant when
-        called with a `tenantId` that already exists.
+        called with a `tenantId` that already exists and the same
+        `region`. A call naming a different `region` returns 409; a
+        tenant cannot move between regions.
       * `POST /tenants/{tenantId}/status` is a no-op when the tenant is
         already in the requested status.
       * `DELETE /tenants/{tenantId}` returns 204 even if the tenant is
@@ -64,9 +66,14 @@ paths:
         available.
 
         Idempotent on `tenantId`: a second call with the same identifier
-        returns the existing tenant rather than failing. The `tenantId`
-        is supplied by FilOne (a UUID) in the URL path and reused as the
-        `{tenantId}` path parameter in all subsequent calls.
+        and the same `region` returns the existing tenant rather than
+        failing. The `tenantId` is supplied by FilOne (a UUID) in the URL
+        path and reused as the `{tenantId}` path parameter in all
+        subsequent calls.
+
+        A tenant is bound to its region for life. A second call naming a
+        different `region` returns 409 and must not move, recreate, or
+        duplicate the tenant.
       security:
         - PartnerKey: []
       requestBody:
@@ -90,6 +97,15 @@ paths:
                 $ref: '#/components/schemas/Tenant'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: |
+            The tenant already exists in a different region. The response
+            body carries the code `RegionMismatch`, and its `message`
+            names the region the tenant is provisioned in.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
@@ -499,6 +515,14 @@ components:
           $ref: '#/components/schemas/TenantId'
         status:
           $ref: '#/components/schemas/TenantStatus'
+        region:
+          type: string
+          minLength: 1
+          description: |
+            Region the tenant is provisioned in, as supplied on create.
+            Lets the caller confirm where a tenant landed without keeping
+            its own record, which matters when one FilOne deployment
+            drives Service Orchestrators in more than one region.
         bucketCount:
           type: integer
           minimum: 0
