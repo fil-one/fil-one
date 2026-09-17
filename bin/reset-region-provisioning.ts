@@ -50,7 +50,10 @@
 //
 // It deliberately does NOT call the orchestrators: upstream tenants, buckets
 // and access keys are left in place, because the reset assumes they are already
-// gone.
+// gone. Honour that assumption: on a Management API region the tenant id is
+// derived from (orgId, region) and an account provisioned before that derivation
+// shipped holds a legacy id equal to its orgId, so re-provisioning a live
+// upstream tenant mints a second one beside it rather than re-adopting it.
 //
 // There is no DynamoDB PITR, so the printed plan is the only audit trail —
 // capture stdout, e.g. `| tee reset-region.log`.

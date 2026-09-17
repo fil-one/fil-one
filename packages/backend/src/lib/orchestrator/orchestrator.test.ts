@@ -71,8 +71,10 @@ import { instrumentClient } from './metrics.ts';
 import { createFilOneOrchestrator, type FilOneOrchestratorConfig } from './orchestrator.ts';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
-// tenantId === orgId for Management API orchestrators (client-supplied UUID).
-const tenantId = orgId;
+// The stored tenant id, opaque to the orchestrator: setup derives it per
+// (org, region) — see orchestrator/tenant-id.ts — so it is not the orgId.
+// A distinct literal here is what catches a future conflation of the two.
+const tenantId = '9f3d0c2a-1111-5222-8333-444455556666';
 
 // hey-api result-shape helpers.
 function ok<T>(data: T, status = 200) {

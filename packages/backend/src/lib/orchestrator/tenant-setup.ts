@@ -4,19 +4,24 @@
 //
 // The Management API contract makes this much simpler than Aurora's state
 // machine: PUT /tenants/{tenantId} is synchronous and idempotent on a
-// CLIENT-SUPPLIED UUID, and FilOne uses the orgId verbatim — so tenantId ===
-// orgId and there is no upstream-minted identifier to persist mid-flight.
+// CLIENT-SUPPLIED UUID, so there is no upstream-minted identifier to persist
+// mid-flight. FilOne derives that UUID from (orgId, region) — see tenant-id.ts
+// for why it is not the orgId itself and why the derivation may never change.
 // Every step is idempotent or recoverable on retry, which is why presence of
 // the `${id}TenantId` PROFILE attribute (written last) is sufficient to mean
-// "fully provisioned, console credentials stashed in SSM".
+// "fully provisioned, console credentials stashed in SSM" — and why an org
+// provisioned before the derivation shipped keeps its legacy id (= orgId)
+// forever: the stored attribute short-circuits setup before anything derives.
 
 import { format } from 'node:util';
 import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand, PutParameterCommand } from '@aws-sdk/client-ssm';
 import { Resource } from 'sst';
+import type { S3Region } from '@filone/shared';
 import { getDynamoClient } from '../ddb-client.ts';
 import { OrgDeletingError } from '../org-profile.ts';
 import { resolveRefusedTenantWrite } from '../tenant-setup-fence.ts';
+import { tenantIdFor } from './tenant-id.ts';
 import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
 import {
   deleteTenantsByTenantId,
@@ -63,8 +68,12 @@ export interface TenantSetupDeps {
   /** Orchestrator id — drives the SSM path (`${id}-s3`) and PROFILE attribute (`${id}TenantId`). */
   id: string;
   stage: string;
-  /** Region the tenant is provisioned in, sent on `PUT /tenants/{tenantId}`. */
-  region: string;
+  /**
+   * Region the tenant is provisioned in, sent on `PUT /tenants/{tenantId}` and
+   * hashed into the tenant id. Typed as the enum because a typo would derive a
+   * plausible-looking wrong id rather than fail.
+   */
+  region: S3Region;
 }
 
 // Public entry point for synchronous tenant setup from request handlers.
@@ -79,8 +88,9 @@ export async function ensureTenantReady(
   orgId: string,
   requestOptions?: OrchestratorRequestOptions,
 ): Promise<string | null> {
+  const tenantId = tenantIdFor(orgId, deps.region);
   try {
-    return await processTenantSetup(deps, orgId, requestOptions);
+    return await processTenantSetup(deps, orgId, tenantId, requestOptions);
   } catch (err) {
     // Not a setup failure: retrying will never succeed, so it must not become
     // a "try again in a moment".
@@ -88,6 +98,9 @@ export async function ensureTenantReady(
     console.error('[tenant-setup] setup failed', {
       orchestratorId: deps.id,
       orgId,
+      // No longer derivable from the orgId by eye, and it is the id to search
+      // for on the orchestrator side.
+      tenantId,
       error: format(err),
     });
     // TODO: record failure counter / emit metric here (mirror
@@ -99,6 +112,7 @@ export async function ensureTenantReady(
 async function processTenantSetup(
   deps: TenantSetupDeps,
   orgId: string,
+  tenantId: string,
   requestOptions?: OrchestratorRequestOptions,
 ): Promise<string> {
   const { client, id, region } = deps;
@@ -123,24 +137,25 @@ async function processTenantSetup(
   // would leave every one of them orphaned.
   if (existing.Item?.deleting?.BOOL === true) throw new OrgDeletingError(orgId);
 
-  // Idempotent on the client-supplied tenantId (= orgId): a retry after a
-  // crash gets a 200 with the existing tenant instead of an error.
+  // Idempotent on the client-supplied tenantId: a retry after a crash derives
+  // the same id (tenant-id.ts) and gets a 200 with the existing tenant instead
+  // of an error.
   const { error: putError } = await putTenantsByTenantId({
     client,
-    path: { tenantId: orgId },
+    path: { tenantId },
     body: { region },
     throwOnError: false,
     ...requestOptions,
   });
   if (putError) {
-    throw new Error(`Failed to provision tenant ${orgId}`, { cause: putError });
+    throw new Error(`Failed to provision tenant ${tenantId} for org ${orgId}`, { cause: putError });
   }
 
-  const consoleKey = await createConsoleAccessKey(deps, orgId, requestOptions);
+  const consoleKey = await createConsoleAccessKey(deps, tenantId, requestOptions);
   if (consoleKey) {
     await ssm.send(
       new PutParameterCommand({
-        Name: consoleKeySsmPath(deps, orgId),
+        Name: consoleKeySsmPath(deps, tenantId),
         Value: JSON.stringify({
           accessKeyId: consoleKey.accessKeyId,
           secretAccessKey: consoleKey.secretAccessKey,
@@ -169,7 +184,7 @@ async function processTenantSetup(
           '#tenantIdAttr': tenantIdAttribute,
         },
         ExpressionAttributeValues: {
-          ':tenantId': { S: orgId },
+          ':tenantId': { S: tenantId },
           ':now': { S: new Date().toISOString() },
         },
       }),
@@ -179,21 +194,21 @@ async function processTenantSetup(
     await resolveRefusedTenantWrite({
       orgId,
       orchestratorId: id,
-      tenantId: orgId,
+      tenantId,
       err,
       deleteTenant: async () => {
         const { error } = await deleteTenantsByTenantId({
           client,
-          path: { tenantId: orgId },
+          path: { tenantId },
           throwOnError: false,
           ...requestOptions,
         });
-        if (error) throw new Error(`Failed to delete tenant ${orgId}`, { cause: error });
+        if (error) throw new Error(`Failed to delete tenant ${tenantId}`, { cause: error });
       },
     });
   }
 
-  return orgId;
+  return tenantId;
 }
 
 // Creates the per-tenant `filone-console` system key. Returns the created key
@@ -214,7 +229,7 @@ async function processTenantSetup(
 // claim lock would close it entirely — future work, matching FTH's TODO.
 async function createConsoleAccessKey(
   deps: TenantSetupDeps,
-  orgId: string,
+  tenantId: string,
   requestOptions?: OrchestratorRequestOptions,
 ): Promise<CreatedAccessKey | null> {
   const { client } = deps;
@@ -227,7 +242,7 @@ async function createConsoleAccessKey(
 
   const created = await postTenantsByTenantIdAccessKeys({
     client,
-    path: { tenantId: orgId },
+    path: { tenantId },
     body: createArgs,
     throwOnError: false,
     ...requestOptions,
@@ -236,7 +251,7 @@ async function createConsoleAccessKey(
     return created.data;
   }
   if (created.response?.status !== 409) {
-    throw new Error(`Failed to create console access key for tenant ${orgId}`, {
+    throw new Error(`Failed to create console access key for tenant ${tenantId}`, {
       cause: created.error,
     });
   }
@@ -246,56 +261,59 @@ async function createConsoleAccessKey(
   // between key creation and the SSM write leaves an unrecoverable secret).
   const { data: listData, error: listError } = await getTenantsByTenantIdAccessKeys({
     client,
-    path: { tenantId: orgId },
+    path: { tenantId },
     throwOnError: false,
     ...requestOptions,
   });
   if (listError) {
-    throw new Error(`Failed to list access keys for tenant ${orgId} during console-key recovery`, {
-      cause: listError,
-    });
+    throw new Error(
+      `Failed to list access keys for tenant ${tenantId} during console-key recovery`,
+      {
+        cause: listError,
+      },
+    );
   }
   const existing = (listData?.items ?? []).find((k) => k.name === CONSOLE_KEY_NAME);
   if (!existing) {
     // 409 for a name that doesn't appear in the listing — upstream is
     // inconsistent; surface the conflict rather than guessing.
     throw new Error(
-      `Console key "${CONSOLE_KEY_NAME}" conflicted for tenant ${orgId} but is absent from the key listing`,
+      `Console key "${CONSOLE_KEY_NAME}" conflicted for tenant ${tenantId} but is absent from the key listing`,
       { cause: created.error },
     );
   }
 
-  const stashed = await readStashedAccessKeyId(deps, orgId, requestOptions);
+  const stashed = await readStashedAccessKeyId(deps, tenantId, requestOptions);
   if (stashed === existing.accessKeyId) {
     // The previous run completed the SSM write; nothing left to stock.
     return null;
   }
 
   console.log(
-    `[tenant-setup] console key "${CONSOLE_KEY_NAME}" exists for tenant ${orgId} ` +
+    `[tenant-setup] console key "${CONSOLE_KEY_NAME}" exists for tenant ${tenantId} ` +
       `but SSM holds ${stashed ? 'stale' : 'no'} credentials; rotating the key`,
   );
   const { error: deleteError } = await deleteTenantsByTenantIdAccessKeysByAccessKeyId({
     client,
-    path: { tenantId: orgId, accessKeyId: existing.accessKeyId },
+    path: { tenantId, accessKeyId: existing.accessKeyId },
     throwOnError: false,
     ...requestOptions,
   });
   if (deleteError) {
-    throw new Error(`Failed to delete stale console access key for tenant ${orgId}`, {
+    throw new Error(`Failed to delete stale console access key for tenant ${tenantId}`, {
       cause: deleteError,
     });
   }
 
   const recreated = await postTenantsByTenantIdAccessKeys({
     client,
-    path: { tenantId: orgId },
+    path: { tenantId },
     body: createArgs,
     throwOnError: false,
     ...requestOptions,
   });
   if (recreated.error || !recreated.data) {
-    throw new Error(`Failed to re-create console access key for tenant ${orgId}`, {
+    throw new Error(`Failed to re-create console access key for tenant ${tenantId}`, {
       cause: recreated.error,
     });
   }
@@ -304,12 +322,12 @@ async function createConsoleAccessKey(
 
 async function readStashedAccessKeyId(
   deps: TenantSetupDeps,
-  orgId: string,
+  tenantId: string,
   requestOptions?: OrchestratorRequestOptions,
 ): Promise<string | undefined> {
   try {
     const result = await ssm.send(
-      new GetParameterCommand({ Name: consoleKeySsmPath(deps, orgId), WithDecryption: true }),
+      new GetParameterCommand({ Name: consoleKeySsmPath(deps, tenantId), WithDecryption: true }),
       { abortSignal: requestOptions?.signal },
     );
     if (!result.Parameter?.Value) return undefined;

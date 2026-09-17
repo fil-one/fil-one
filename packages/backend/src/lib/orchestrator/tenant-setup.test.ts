@@ -35,12 +35,17 @@ const ssmMock = mockClient(SSMClient);
 const client = 'mock-management-client' as unknown as Client;
 
 import { ensureTenantReady, CONSOLE_KEY_NAME } from './tenant-setup.ts';
+import { tenantIdFor } from './tenant-id.ts';
+import { S3Region } from '@filone/shared';
 import { OrgDeletingError } from '../org-profile.ts';
 import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
-const deps = { client, id: 'forge', stage: 'test', region: 'us-east-1' };
-const ssmPath = `/filone/test/forge-s3/access-key/${orgId}`;
+const deps = { client, id: 'forge', stage: 'test', region: S3Region.UsEast1 };
+// Derived, never the orgId — that is the property under test. Imported rather
+// than hardcoded; the pinned value lives in tenant-id.test.ts.
+const tenantId = tenantIdFor(orgId, deps.region);
+const ssmPath = `/filone/test/forge-s3/access-key/${tenantId}`;
 
 function profileItem(attrs: Record<string, string>) {
   return Object.fromEntries(Object.entries(attrs).map(([k, v]) => [k, { S: v }]));
@@ -52,7 +57,7 @@ function stubHappyPath() {
   ssmMock.on(PutParameterCommand).resolves({});
   mockPutTenant.mockResolvedValue({
     data: {
-      tenantId: orgId,
+      tenantId,
       status: 'active',
       bucketCount: 0,
       bucketLimit: 100,
@@ -84,14 +89,40 @@ beforeEach(() => {
 });
 
 describe('ensureTenantReady', () => {
-  it('returns the stored tenantId without provisioning when the attribute is set', async () => {
+  // Grandfathering. Orgs provisioned before ids were derived carry an attribute
+  // equal to the orgId; the stored value is authoritative and there is no
+  // migration path, because the contract has no tenant rename.
+  const storedIdCases: Record<string, string> = {
+    'a legacy id equal to the orgId': orgId,
+    'a derived id': tenantId,
+  };
+  for (const [description, stored] of Object.entries(storedIdCases)) {
+    it(`returns the stored tenantId when the attribute holds ${description}`, async () => {
+      ddbMock.on(GetItemCommand).resolves({ Item: profileItem({ forgeTenantId: stored }) });
+
+      await expect(ensureTenantReady(deps, orgId)).resolves.toBe(stored);
+    });
+
+    it(`makes no upstream call when the attribute holds ${description}`, async () => {
+      stubHappyPath(); // every upstream call armed, and still must go unused
+      ddbMock.on(GetItemCommand).resolves({ Item: profileItem({ forgeTenantId: stored }) });
+
+      await ensureTenantReady(deps, orgId);
+
+      expect({
+        put: mockPutTenant.mock.calls.length,
+        createKey: mockCreateAccessKey.mock.calls.length,
+        ssmWrites: ssmMock.commandCalls(PutParameterCommand).length,
+        pointerWrites: ddbMock.commandCalls(UpdateItemCommand).length,
+      }).toStrictEqual({ put: 0, createKey: 0, ssmWrites: 0, pointerWrites: 0 });
+    });
+  }
+
+  it('reads the profile consistently, so a just-finished setup is seen', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: profileItem({ forgeTenantId: orgId }) });
 
-    const result = await ensureTenantReady(deps, orgId);
+    await ensureTenantReady(deps, orgId);
 
-    expect(result).toBe(orgId);
-    expect(mockPutTenant).not.toHaveBeenCalled();
-    // The read must be strongly consistent so a just-finished setup is seen.
     expect(ddbMock.commandCalls(GetItemCommand)[0].args[0].input.ConsistentRead).toBe(true);
   });
 
@@ -137,7 +168,7 @@ describe('ensureTenantReady', () => {
       try {
         await expect(ensureTenantReady(deps, orgId)).rejects.toBeInstanceOf(OrgDeletingError);
         expect(mockDeleteTenant).toHaveBeenCalledWith(
-          expect.objectContaining({ path: { tenantId: orgId } }),
+          expect.objectContaining({ path: { tenantId } }),
         );
       } finally {
         warn.mockRestore();
@@ -158,7 +189,7 @@ describe('ensureTenantReady', () => {
         // buckets against a tenant nothing recorded.
         await expect(ensureTenantReady(deps, orgId)).resolves.toBeNull();
         expect(mockDeleteTenant).toHaveBeenCalledWith(
-          expect.objectContaining({ path: { tenantId: orgId } }),
+          expect.objectContaining({ path: { tenantId } }),
         );
       } finally {
         warn.mockRestore();
@@ -187,12 +218,12 @@ describe('ensureTenantReady', () => {
 
     const result = await ensureTenantReady(deps, orgId);
 
-    expect(result).toBe(orgId);
-    // tenantId is the orgId verbatim (client-supplied UUID).
+    expect(result).toBe(tenantId);
+    // The client-supplied UUID is derived per (org, region), never the orgId.
     expect(mockPutTenant).toHaveBeenCalledWith(
       expect.objectContaining({
         client,
-        path: { tenantId: orgId },
+        path: { tenantId },
         body: { region: 'us-east-1' },
         throwOnError: false,
       }),
@@ -200,7 +231,7 @@ describe('ensureTenantReady', () => {
     expect(mockCreateAccessKey).toHaveBeenCalledWith(
       expect.objectContaining({
         client,
-        path: { tenantId: orgId },
+        path: { tenantId },
         body: expect.objectContaining({
           name: CONSOLE_KEY_NAME,
           permissions: expect.arrayContaining(['s3:CreateBucket', 's3:GetObject', 's3:PutObject']),
@@ -228,26 +259,49 @@ describe('ensureTenantReady', () => {
       '#tenantIdAttr': 'forgeTenantId',
     });
     expect(updateCalls[0].args[0].input.ExpressionAttributeValues).toMatchObject({
-      ':tenantId': { S: orgId },
+      ':tenantId': { S: tenantId },
     });
   });
 
-  it('scopes the SSM path and PROFILE attribute per id', async () => {
-    // Region-encoded ids (multi-region Forge) must not collide across regions and
-    // must produce a valid hyphenated DynamoDB attribute name via ExpressionAttributeNames.
-    const regionDeps = { ...deps, id: 'forge' };
+  it('scopes the SSM path per id', async () => {
     stubHappyPath();
 
-    const result = await ensureTenantReady(regionDeps, orgId);
+    await ensureTenantReady({ ...deps, id: 'forgeDev' }, orgId);
 
-    expect(result).toBe(orgId);
     expect(ssmMock.commandCalls(PutParameterCommand)[0].args[0].input.Name).toBe(
-      `/filone/test/forge-s3/access-key/${orgId}`,
+      `/filone/test/forgeDev-s3/access-key/${tenantId}`,
     );
-    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(updateCalls[0].args[0].input.ExpressionAttributeNames).toMatchObject({
-      '#tenantIdAttr': 'forgeTenantId',
-    });
+  });
+
+  // The regression this module exists for. One Hilt serves every region in its
+  // network, and a tenant is bound to its region for life, so sending the same
+  // id for two regions would lock the org out of the second one permanently
+  // (409 RegionMismatch).
+  it('sends a distinct tenantId for each region of one org', async () => {
+    const regions = [S3Region.EuCentral3, S3Region.UsEast9];
+
+    const sent: string[] = [];
+    for (const region of regions) {
+      ddbMock.reset();
+      ssmMock.reset();
+      vi.clearAllMocks();
+      stubHappyPath();
+      await ensureTenantReady({ ...deps, region }, orgId);
+      sent.push((mockPutTenant.mock.calls[0][0].path as { tenantId: string }).tenantId);
+    }
+
+    // Asserted as distinctness, not as agreement with tenantIdFor: comparing
+    // against the helper would pass even if the helper collapsed both regions
+    // onto one id, which is the exact bug this guards.
+    expect(new Set(sent).size).toBe(regions.length);
+  });
+
+  it('never sends the orgId itself as the tenantId', async () => {
+    stubHappyPath();
+
+    await ensureTenantReady(deps, orgId);
+
+    expect(mockPutTenant.mock.calls[0][0].path).not.toStrictEqual({ tenantId: orgId });
   });
 
   it('requests only s3:* actions from the contract enum for the console key', async () => {
@@ -317,7 +371,7 @@ describe('ensureTenantReady', () => {
 
       const result = await ensureTenantReady(deps, orgId);
 
-      expect(result).toBe(orgId);
+      expect(result).toBe(tenantId);
       expect(mockDeleteAccessKey).not.toHaveBeenCalled();
       expect(mockCreateAccessKey).toHaveBeenCalledTimes(1);
       // Nothing to restock: the previous run completed the SSM write.
@@ -334,9 +388,9 @@ describe('ensureTenantReady', () => {
 
       const result = await ensureTenantReady(deps, orgId);
 
-      expect(result).toBe(orgId);
+      expect(result).toBe(tenantId);
       expect(mockDeleteAccessKey).toHaveBeenCalledWith(
-        expect.objectContaining({ path: { tenantId: orgId, accessKeyId: 'AKIAOLD' } }),
+        expect.objectContaining({ path: { tenantId, accessKeyId: 'AKIAOLD' } }),
       );
       expect(mockCreateAccessKey).toHaveBeenCalledTimes(2);
       const putCalls = ssmMock.commandCalls(PutParameterCommand);
@@ -357,9 +411,9 @@ describe('ensureTenantReady', () => {
 
       const result = await ensureTenantReady(deps, orgId);
 
-      expect(result).toBe(orgId);
+      expect(result).toBe(tenantId);
       expect(mockDeleteAccessKey).toHaveBeenCalledWith(
-        expect.objectContaining({ path: { tenantId: orgId, accessKeyId: 'AKIAOLD' } }),
+        expect.objectContaining({ path: { tenantId, accessKeyId: 'AKIAOLD' } }),
       );
       expect(mockCreateAccessKey).toHaveBeenCalledTimes(2);
     });
