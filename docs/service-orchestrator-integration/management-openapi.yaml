@@ -509,7 +509,16 @@ components:
     Tenant:
       type: object
       required:
-        [tenantId, status, region, bucketCount, bucketLimit, accessKeyCount, accessKeyLimit, createdAt]
+        [
+          tenantId,
+          status,
+          region,
+          bucketCount,
+          bucketLimit,
+          accessKeyCount,
+          accessKeyLimit,
+          createdAt,
+        ]
       properties:
         tenantId:
           $ref: '#/components/schemas/TenantId'
@@ -520,9 +529,6 @@ components:
           minLength: 1
           description: |
             Region the tenant is provisioned in, as supplied on create.
-            Lets the caller confirm where a tenant landed without keeping
-            its own record, which matters when one FilOne deployment
-            drives Service Orchestrators in more than one region.
         bucketCount:
           type: integer
           minimum: 0
