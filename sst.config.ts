@@ -732,8 +732,9 @@ export default $config({
         resources: orchestratorS3KeySsmArns,
       },
     ];
-    // Per-tenant credentials for the bucket read path (getBucket/listBuckets):
-    // Aurora resolves its portal API key from SSM, FTH its console S3 key.
+    // Per-tenant credentials for the bucket read path (getBucket/listBuckets,
+    // and the usage dashboard's bucket count): Aurora resolves its portal API
+    // key from SSM, FTH its console S3 key.
     const bucketReadPermissions: sst.aws.FunctionPermissionArgs[] = [
       {
         actions: ['ssm:GetParameter'],
@@ -1236,9 +1237,12 @@ export default $config({
       },
 
       // ── Usage and dashboard ────────────────────────────────────────
+      // Counts buckets from each region's live listing (FIL-996), so it takes the
+      // bucket read path's credentials. Usage metrics and tenant info go through
+      // the backoffice client's linked secret and need no SSM of their own.
       'get-usage': {
         extraEnv: orchestratorEnv,
-        permissions: s3DataPlanePermissions,
+        permissions: bucketReadPermissions,
         provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       },
       'get-usage-trends': {
