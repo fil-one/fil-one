@@ -32,7 +32,7 @@ function parseSortDirection(value: string | undefined): SortDirection {
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const { orgId } = getUserInfo(event);
+  const { orgId, userId } = getUserInfo(event);
   const { search, region } = event.queryStringParameters ?? {};
   const sortKey = parseSortKey(event.queryStringParameters?.sortKey);
   const sortDirection = parseSortDirection(event.queryStringParameters?.sortDirection);
@@ -54,7 +54,12 @@ export async function baseHandler(
   // Fail open (FIL-1049): one region's ListBuckets 403 used to collapse the whole request into a
   // generic 500, hiding the healthy regions' buckets. Return what answered, name what did not.
   const settled = await Promise.allSettled(
-    ready.map(({ orchestrator, tenantId }) => orchestrator.listBuckets(tenantId)),
+    // `actAs` scopes the listing to the member on a region serving the `iam`
+    // access model, where a bucket is reachable only through a policy naming
+    // them; every other region ignores it and answers tenant-wide as before.
+    ready.map(({ orchestrator, tenantId }) =>
+      orchestrator.listBuckets(tenantId, { actAs: userId }),
+    ),
   );
 
   const buckets: BucketSummary[] = [];

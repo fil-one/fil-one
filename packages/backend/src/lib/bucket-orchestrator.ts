@@ -1,6 +1,6 @@
 import type { BucketPolicy, RetentionDurationType, RetentionMode, S3Region } from '@filone/shared';
 import type { S3ClientContext } from './s3-client.ts';
-import type { OrchestratorRequestOptions } from './service-orchestrator.ts';
+import type { OrchestratorRequestOptions, S3ActorOptions } from './service-orchestrator.ts';
 
 /**
  * Object-lock and retention state. Neither orchestrator's bucket *list* carries
@@ -67,10 +67,7 @@ export interface BucketOrchestrator {
     bucketName: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void>;
-  listBuckets(
-    tenantId: string,
-    requestOptions?: OrchestratorRequestOptions,
-  ): Promise<BucketSummary[]>;
+  listBuckets(tenantId: string, requestOptions?: S3ActorOptions): Promise<BucketSummary[]>;
   getBucket(
     tenantId: string,
     bucketName: string,

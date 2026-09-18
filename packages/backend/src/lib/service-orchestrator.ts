@@ -50,6 +50,21 @@ export interface OrchestratorRequestOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * A call the console makes on behalf of one member, rather than tenant-wide.
+ *
+ * Omitting `actAs` — what the roster fan-out, the usage handler and the
+ * activity feed all do — asks for the tenant's whole set, as before.
+ */
+export interface S3ActorOptions extends OrchestratorRequestOptions {
+  /**
+   * The console user the call acts for. Honoured by a region serving the `iam`
+   * access model and ignored elsewhere, so a region that flips models cannot
+   * break its callers in either direction.
+   */
+  actAs?: string;
+}
+
 /** Which orchestrator this is, and the region it serves. */
 export interface OrchestratorCore {
   /**
