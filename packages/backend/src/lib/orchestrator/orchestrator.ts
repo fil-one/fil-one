@@ -20,7 +20,6 @@ import {
   type TenantSetupDeps,
 } from './tenant-setup.ts';
 import { buildPermissions } from './permissions.ts';
-import { buildIamMethods } from './iam.ts';
 import { extractApiMessage } from './api-message.ts';
 import {
   AccessKeyAlreadyExistsError,
@@ -33,15 +32,11 @@ import type {
   BucketSummary,
   CreateBucketArgs,
   GetTenantUsageMetricsOptions,
-  IamMethods,
-  IamOrchestrator,
   IssueAccessKeyOpts,
   IssuedAccessKey,
   OrchestratorCore,
   OrchestratorRequestOptions,
   S3ActorOptions,
-  ScopedKeysOrchestrator,
-  ServiceOrchestrator,
   StorageUsageSample,
   TenantInfo,
   TenantStatusProbe,
@@ -49,7 +44,6 @@ import type {
 } from '../service-orchestrator.ts';
 import { TENANT_DELETE_RETRY } from '../service-orchestrator.ts';
 import type { OrgProfileItem } from '../org-profile.ts';
-import { registerMemberPrincipals } from './principals.ts';
 import { mapIntervalToWindow, mapStorageSamples, normalizeStatus } from './metrics-mapping.ts';
 import type { S3ClientContext } from '../s3-client.ts';
 import { createS3Client } from '../s3-client.ts';
@@ -63,6 +57,7 @@ import {
   getBucketObjectLock,
 } from '../s3-bucket-operations.ts';
 import { getConsoleS3Credentials } from '../s3-credentials.ts';
+import type { S3Credentials } from '../s3-credentials.ts';
 import {
   createClient,
   deleteTenantsByTenantId,
@@ -112,22 +107,16 @@ export interface FilOneOrchestratorConfig {
 // partially configured (which would surface as a dead-end BucketConfigurationError).
 const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
 
-export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): ServiceOrchestrator {
-  return config.accessModel === 'iam'
-    ? new IamFilOneOrchestrator(config)
-    : new ScopedKeysFilOneOrchestrator(config);
-}
-
 // The core every arm shares. `implements OrchestratorCore` rather than
 // ServiceOrchestrator: the latter is a union, and a class may only implement an
 // object type. Each subclass implements its own arm, so an arm that forgot its
 // members would not compile.
-abstract class FilOneOrchestrator implements OrchestratorCore {
+export abstract class FilOneOrchestrator implements OrchestratorCore {
   abstract readonly accessModel: AccessModel;
   readonly id: string;
   readonly region: S3Region;
 
-  private readonly config: FilOneOrchestratorConfig;
+  protected readonly config: FilOneOrchestratorConfig;
   protected readonly client: Client;
   private readonly setupDeps: TenantSetupDeps;
   private readonly tenantIdAttribute: string;
@@ -170,16 +159,9 @@ abstract class FilOneOrchestrator implements OrchestratorCore {
 
   async getS3ClientContext(
     tenantId: string,
-    requestOptions?: OrchestratorRequestOptions,
+    requestOptions?: S3ActorOptions,
   ): Promise<S3ClientContext> {
-    const credentials = await getConsoleS3Credentials(
-      {
-        orchestratorId: this.id,
-        stage: this.config.stage,
-        tenantId,
-      },
-      requestOptions,
-    );
+    const credentials = await this.s3Credentials(tenantId, requestOptions);
     return {
       endpointUrl: this.config.s3EndpointUrl,
       region: this.region,
@@ -188,6 +170,25 @@ abstract class FilOneOrchestrator implements OrchestratorCore {
       orchestratorId: this.id,
       tenantId,
     };
+  }
+
+  /**
+   * The credential this orchestrator signs with: the tenant's console key.
+   *
+   * The `iam` arm overrides this to sign as a member when the caller names one.
+   */
+  protected s3Credentials(
+    tenantId: string,
+    requestOptions?: S3ActorOptions,
+  ): Promise<S3Credentials> {
+    return getConsoleS3Credentials(
+      {
+        orchestratorId: this.id,
+        stage: this.config.stage,
+        tenantId,
+      },
+      requestOptions,
+    );
   }
 
   async ensureTenantReady(
@@ -568,57 +569,6 @@ abstract class FilOneOrchestrator implements OrchestratorCore {
 // The two arms. `as const` on each discriminant is load-bearing: the abstract
 // declaration would otherwise widen the initializer back to AccessModel and the
 // union would stop narrowing.
-class ScopedKeysFilOneOrchestrator extends FilOneOrchestrator implements ScopedKeysOrchestrator {
-  readonly accessModel = 'scoped-keys' as const;
-}
-
-class IamFilOneOrchestrator extends FilOneOrchestrator implements IamOrchestrator {
-  readonly accessModel = 'iam' as const;
-  // Field initializers run after the base constructor, so `client` is set.
-  readonly iam: IamMethods = buildIamMethods(this.client, this.id);
-
-  /**
-   * Provisioning, plus the principals the tenant's policies will name — a
-   * member the storage system does not know cannot be named on a bucket
-   * policy, and the first policy rides on the bucket's own create.
-   */
-  override async ensureTenantReady(orgId: string, opts?: OrchestratorRequestOptions) {
-    const tenantId = await super.ensureTenantReady(orgId, opts);
-    if (tenantId) await registerMemberPrincipals(this.iam, this.id, orgId, tenantId);
-    return tenantId;
-  }
-
-  /**
-   * The tenant's buckets, or one member's when the caller names a member.
-   *
-   * The console filters because the data plane does not: every principal holds
-   * `s3:ListAllMyBuckets`, so the gateway answers with the tenant's whole set
-   * by design (RFC#30) and a principal-bound key would return the same names.
-   * The reachable set comes from the storage system's own evaluation, so it
-   * agrees with its last policy write.
-   *
-   * A bucket carrying no policy is reachable by unscoped callers alone, who
-   * name no member and so are never filtered here. The console writes a policy
-   * on every bucket it creates; one that arrives without it, or loses it, is
-   * visible to an Owner or an Admin and to nobody else.
-   */
-  override async listBuckets(
-    tenantId: string,
-    requestOptions?: S3ActorOptions,
-  ): Promise<BucketSummary[]> {
-    if (!requestOptions?.actAs) return super.listBuckets(tenantId, requestOptions);
-    // One promise, so a failed access lookup rejects the whole leg and the
-    // caller's fan-out reports the region as unavailable. Answering unfiltered
-    // would hand the member every bucket name in the tenant.
-    const [buckets, access] = await Promise.all([
-      super.listBuckets(tenantId, requestOptions),
-      this.iam.resolveMemberAccess(tenantId, requestOptions.actAs),
-    ]);
-    const reachable = new Set(access.map((entry) => entry.bucketName));
-    return buckets.filter((bucket) => reachable.has(bucket.bucketName));
-  }
-}
-
 function resolveClient(config: FilOneOrchestratorConfig): Client {
   if ('client' in config.api) return config.api.client;
   const { baseUrl, accessToken: token, fetch } = config.api;

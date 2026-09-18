@@ -17,7 +17,7 @@
 // production at import time.
 
 import { getRegionAccessModel, getS3Endpoint, S3Region } from '@filone/shared';
-import { createFilOneOrchestrator } from '../orchestrator/orchestrator.ts';
+import { createFilOneOrchestrator } from '../orchestrator/arms.ts';
 import type { ServiceOrchestrator } from '../service-orchestrator.ts';
 
 /** Management API endpoint and bearer credential of one Forge network's Hilt. */
