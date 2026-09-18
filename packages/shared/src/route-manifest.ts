@@ -118,6 +118,33 @@ const MANIFEST = [
     category: 'authenticated',
     requires: 'buckets.read',
   },
+  // The bucket's policy, on a region serving the `iam` access model. Reading
+  // takes the same permission as writing: the document names other members,
+  // and a member learns their own reach from the bucket list. The PUT narrows
+  // further in the handler: a statement granting a retention or legal-hold
+  // write needs `privileged.grant`, which depends on the body.
+  {
+    method: 'GET',
+    path: '/api/buckets/{name}/policy',
+    handler: 'get-bucket-policy',
+    category: 'authenticated',
+    requires: 'buckets.policy_manage',
+  },
+  {
+    method: 'PUT',
+    path: '/api/buckets/{name}/policy',
+    handler: 'put-bucket-policy',
+    category: 'authenticated',
+    requires: 'buckets.policy_manage',
+    capsInHandler: true,
+  },
+  {
+    method: 'DELETE',
+    path: '/api/buckets/{name}/policy',
+    handler: 'delete-bucket-policy',
+    category: 'authenticated',
+    requires: 'buckets.policy_manage',
+  },
   {
     method: 'GET',
     path: '/api/buckets/{name}/rag/enabled',
