@@ -27,6 +27,9 @@ describe('PolicyStatementCard', () => {
 
     expect(screen.getByText('Allow')).toBeInTheDocument();
     expect(screen.getByText('team')).toBeInTheDocument();
+    expect(
+      screen.getByText('Ada and Ben can read objects, list objects, and write objects'),
+    ).toBeInTheDocument();
     expect(screen.getByText('Ada')).toBeInTheDocument();
     expect(screen.getByText('Ben')).toBeInTheDocument();
     expect(screen.getByTestId('policy-actions-read')).toBeInTheDocument();
@@ -39,7 +42,9 @@ describe('PolicyStatementCard', () => {
     renderCard({ effect: 'deny', principal: '*', action: ['s3:DeleteObject'] }, { index: 2 });
 
     expect(screen.getByText('Deny')).toBeInTheDocument();
-    expect(screen.getByText('Statement 3')).toBeInTheDocument();
+    expect(
+      screen.getByText('Everyone in this organization cannot delete objects'),
+    ).toBeInTheDocument();
     expect(screen.getByText('Everyone in this organization')).toBeInTheDocument();
   });
 
@@ -76,9 +81,12 @@ describe('PolicyStatementCard', () => {
         onRemove={onRemove}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Edit Statement 1' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Remove Statement 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Statement 1' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Edit statement' }));
     expect(onEdit).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Statement 1' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove statement' }));
     expect(onRemove).toHaveBeenCalledTimes(1);
   });
 });

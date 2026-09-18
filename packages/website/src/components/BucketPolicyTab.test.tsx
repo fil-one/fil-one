@@ -98,7 +98,8 @@ describe('BucketPolicyTab', () => {
     renderTab();
     await screen.findByText('team');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Remove team' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for team' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove statement' }));
     expect(await screen.findByText('This policy has no statements')).toBeInTheDocument();
     expect(screen.getByTestId('policy-save-bar')).toBeInTheDocument();
 
@@ -148,7 +149,8 @@ describe('BucketPolicyTab', () => {
     renderTab();
     await screen.findByText('team');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Remove team' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for team' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove statement' }));
     fireEvent.click(screen.getAllByRole('button', { name: 'Add statement' })[0]!);
     fireEvent.click(await screen.findByRole('radio', { name: 'Everyone in this organization' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Read objects' }));
@@ -177,7 +179,8 @@ describe('BucketPolicyTab', () => {
   it('sends the etag the draft was read at, and stops saving once a newer document arrived', async () => {
     const { client } = renderTab();
     await screen.findByText('team');
-    fireEvent.click(screen.getByRole('button', { name: 'Remove team' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for team' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove statement' }));
     await screen.findByTestId('policy-save-bar');
 
     // Another writer landed and a background refetch picked it up.
