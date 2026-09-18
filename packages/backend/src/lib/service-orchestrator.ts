@@ -340,10 +340,7 @@ export interface OrchestratorCore {
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void>;
 
-  getS3ClientContext(
-    tenantId: string,
-    requestOptions?: OrchestratorRequestOptions,
-  ): Promise<S3ClientContext>;
+  getS3ClientContext(tenantId: string, requestOptions?: S3ActorOptions): Promise<S3ClientContext>;
 
   /**
    * Returns the tenant's storage and egress usage as normalized time series

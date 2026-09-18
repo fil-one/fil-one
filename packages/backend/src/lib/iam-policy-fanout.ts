@@ -20,6 +20,7 @@ import type { StoredBucketPolicy } from './iam-orchestrator.ts';
 import { listMembers } from './org-membership.ts';
 import type { OrgProfileItem } from './org-profile.ts';
 import { removeRegisteredPrincipal } from './org-profile.ts';
+import { deleteMemberS3Credentials } from './s3-credentials.ts';
 import { getAvailableOrchestrators } from './service-orchestrator-registry.ts';
 import type { IamOrchestrator } from './service-orchestrator.ts';
 
@@ -278,6 +279,22 @@ export async function removeMemberPrincipals({
           // A stale entry only costs a skipped re-registration for a member who
           // is no longer in the org, so the removal itself still stands.
           console.error('[iam-policy-fanout] Could not prune a registered principal', {
+            region,
+            userId,
+            error,
+          });
+        }),
+        // The console's own key for this member dies with the principal. Only
+        // for a region that removed it: one that refused still has the key live.
+        deleteMemberS3Credentials({
+          orchestratorId: id,
+          stage: process.env.FILONE_STAGE!,
+          tenantId: regions[index]!.tenantId,
+          userId,
+        }).catch((error: unknown) => {
+          // A parameter left behind costs a signing failure for someone no
+          // longer in the org, and the next mint's name collision repairs it.
+          console.error('[iam-policy-fanout] Could not delete a member credential', {
             region,
             userId,
             error,

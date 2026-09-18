@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { SSMClient, DeleteParameterCommand } from '@aws-sdk/client-ssm';
 import { mockClient } from 'aws-sdk-client-mock';
 import { OrgRole, ROSTER_ADMINS_SID, ROSTER_OWNERS_SID, S3Region } from '@filone/shared';
 import type { BucketPolicy } from '@filone/shared';
@@ -36,6 +37,8 @@ import {
 } from './iam-policy-fanout.ts';
 
 const ddbMock = mockClient(DynamoDBClient);
+const ssmMock = mockClient(SSMClient);
+process.env.FILONE_STAGE = 'test';
 const orgProfile = { pk: { S: `ORG#${ORG_ID}` } };
 const roster = { owners: ['owner-1'], admins: ['admin-1'] };
 
@@ -46,6 +49,7 @@ const team: BucketPolicy = {
 beforeEach(() => {
   vi.clearAllMocks();
   ddbMock.reset();
+  ssmMock.reset();
   ddbMock.on(PutItemCommand).resolves({});
   iam.principals.clear();
   iam.policies.clear();
@@ -188,5 +192,45 @@ describe('removeMemberPrincipals', () => {
     await expect(
       removeMemberPrincipals({ orgId: 'org-1', orgProfile: undefined, userId: 'member-1' }),
     ).resolves.toStrictEqual({ removed: [], failed: [] });
+  });
+
+  it("deletes the member's console credential on every region that removed them", async () => {
+    iam.seedPrincipal(TENANT, 'member-1');
+    ssmMock.on(DeleteParameterCommand).resolves({});
+
+    await removeMemberPrincipals({ orgId: 'org-1', orgProfile, userId: 'member-1' });
+
+    const [call] = ssmMock.commandCalls(DeleteParameterCommand);
+    expect(call!.args[0]!.input).toStrictEqual({
+      Name: `/filone/test/forgeDev-s3/member-key/${TENANT}/member-1`,
+    });
+  });
+
+  it('leaves no credential behind for a region that refused the removal', async () => {
+    iam.seedPrincipal(TENANT, 'member-1');
+    ssmMock.on(DeleteParameterCommand).resolves({});
+    iam.failNext('removeMember', new Error('vendor down'));
+
+    await removeMemberPrincipals({ orgId: 'org-1', orgProfile, userId: 'member-1' });
+
+    // The principal still holds the key there, so the credential has to stay.
+    expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(0);
+  });
+
+  it('still reports the region removed when the credential delete fails', async () => {
+    iam.seedPrincipal(TENANT, 'member-1');
+    ssmMock.on(DeleteParameterCommand).rejects(new Error('ssm down'));
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    // A parameter left behind costs a signing failure for someone who is no
+    // longer in the org; the removal itself still stands.
+    await expect(
+      removeMemberPrincipals({ orgId: 'org-1', orgProfile, userId: 'member-1' }),
+    ).resolves.toStrictEqual({ removed: [S3Region.UsEast9], failed: [] });
+    expect(consoleError).toHaveBeenCalledWith(
+      '[iam-policy-fanout] Could not delete a member credential',
+      expect.objectContaining({ userId: 'member-1' }),
+    );
+    consoleError.mockRestore();
   });
 });

@@ -40,3 +40,9 @@ coverage/
 # Sentry Config File
 .env.sentry-build-plugin
 .auth
+
+# Credentials and local scratch. The partner key reaches every tenant through
+# the Management API; it belongs in SST secrets, never in the tree.
+/partner-key.txt
+/swagger.json
+/*-review-notes.md
