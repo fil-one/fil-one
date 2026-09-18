@@ -724,12 +724,24 @@ export default $config({
       forgeS3KeySsmArn,
       forgeDevS3KeySsmArn,
     ];
+    // Per-member principal-bound credentials on `iam` regions, minted lazily on
+    // a member's first signing request. Scoped to the `member-key/` subtree so a
+    // request-path handler cannot overwrite a tenant's own console key, which
+    // lives beside it under `access-key/`.
+    const orchestratorMemberKeySsmArns = [
+      $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/forge-s3/member-key/*`,
+      $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/forgeDev-s3/member-key/*`,
+    ];
     // Per-tenant console S3 access keys (getConsoleS3Credentials), needed by
     // handlers that talk to the S3 data plane directly (presign, indexing, …).
     const s3DataPlanePermissions: sst.aws.FunctionPermissionArgs[] = [
       {
         actions: ['ssm:GetParameter'],
         resources: orchestratorS3KeySsmArns,
+      },
+      {
+        actions: ['ssm:PutParameter'],
+        resources: orchestratorMemberKeySsmArns,
       },
     ];
     // Per-tenant credentials for the bucket read path (getBucket/listBuckets,
@@ -739,6 +751,10 @@ export default $config({
       {
         actions: ['ssm:GetParameter'],
         resources: [auroraApiKeySsmArn, fthS3KeySsmArn, forgeS3KeySsmArn, forgeDevS3KeySsmArn],
+      },
+      {
+        actions: ['ssm:PutParameter'],
+        resources: orchestratorMemberKeySsmArns,
       },
     ];
 
@@ -1121,6 +1137,16 @@ export default $config({
         permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
         ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
         timeout: '30 seconds',
+      },
+
+      // Removing a member drops their principal on every ready `iam` region,
+      // and with it the console credential bound to it. Needs the orchestrator
+      // environment to reach those regions at all.
+      'remove-member': {
+        extraEnv: orchestratorEnv,
+        permissions: [
+          { actions: ['ssm:DeleteParameter'], resources: orchestratorMemberKeySsmArns },
+        ],
       },
 
       // ── RAG ────────────────────────────────────────────────────────

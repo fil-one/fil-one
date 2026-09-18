@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import { SSMClient, GetParameterCommand, PutParameterCommand } from '@aws-sdk/client-ssm';
 import {
   S3Client,
   CreateBucketCommand,
@@ -35,6 +35,7 @@ const mockDeleteTenant = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetTenantMetrics = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetBucketMetrics = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetPrincipalAccess = vi.fn((_o: Record<string, unknown>) => ({}));
+const mockPutPrincipal = vi.fn((_o: Record<string, unknown>) => ({}));
 
 vi.mock('@filone/orchestrator-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
@@ -50,6 +51,7 @@ vi.mock('@filone/orchestrator-client', () => ({
     mockGetBucketMetrics(o),
   getTenantsByTenantIdPrincipalsByPrincipalIdAccess: (o: Record<string, unknown>) =>
     mockGetPrincipalAccess(o),
+  putTenantsByTenantIdPrincipalsByPrincipalId: (o: Record<string, unknown>) => mockPutPrincipal(o),
 }));
 
 vi.mock('./metrics.ts', () => ({
@@ -71,7 +73,8 @@ import {
 import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
 import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
 import { instrumentClient } from './metrics.ts';
-import { createFilOneOrchestrator, type FilOneOrchestratorConfig } from './orchestrator.ts';
+import { createFilOneOrchestrator } from './arms.ts';
+import { type FilOneOrchestratorConfig } from './orchestrator.ts';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 // tenantId === orgId for Management API orchestrators (client-supplied UUID).
@@ -534,6 +537,125 @@ describe('listBuckets', () => {
         encrypted: true,
       },
     ]);
+  });
+});
+
+describe('member credentials on an iam region', () => {
+  const iamOrchestrator = buildOrchestrator({ accessModel: 'iam' });
+  const member = 'user-1';
+  const memberPath = `/filone/test/forge-s3/member-key/${tenantId}/${member}`;
+  const notFound = Object.assign(new Error('not found'), { name: 'ParameterNotFound' });
+
+  const issued = (accessKeyId: string) => ({
+    data: {
+      accessKeyId,
+      secretAccessKey: `secret-${accessKeyId}`,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      principal: member,
+    },
+    error: undefined,
+    response: { status: 201 },
+  });
+
+  beforeEach(() => {
+    mockPutPrincipal.mockReturnValue(noContent(201));
+    ssmMock.on(PutParameterCommand).resolves({});
+  });
+
+  it('signs with the tenant key when no member is named', async () => {
+    stubS3Credentials();
+
+    const ctx = await iamOrchestrator.getS3ClientContext(tenantId);
+
+    expect(ctx.credentials).toStrictEqual({ accessKeyId: 'AK1', secretAccessKey: 'SK1' });
+    expect(mockCreateAccessKey).not.toHaveBeenCalled();
+  });
+
+  it('reads the named member credential from its own parameter', async () => {
+    ssmMock.on(GetParameterCommand, { Name: memberPath }).resolves({
+      Parameter: { Value: JSON.stringify({ accessKeyId: 'AKM', secretAccessKey: 'SKM' }) },
+    });
+
+    const ctx = await iamOrchestrator.getS3ClientContext(tenantId, { actAs: member });
+
+    expect(ctx.credentials).toStrictEqual({ accessKeyId: 'AKM', secretAccessKey: 'SKM' });
+    // Everything else about the context is the tenant's.
+    expect(ctx).toMatchObject({ orchestratorId: 'forge', tenantId, forcePathStyle: true });
+  });
+
+  it('registers the principal and mints the key on first use', async () => {
+    ssmMock.on(GetParameterCommand).rejects(notFound);
+    mockCreateAccessKey.mockReturnValue(issued('AKNEW'));
+
+    const ctx = await iamOrchestrator.getS3ClientContext(tenantId, { actAs: member });
+
+    expect(mockPutPrincipal).toHaveBeenCalledWith(
+      expect.objectContaining({ path: { tenantId, principalId: member } }),
+    );
+    expect(mockCreateAccessKey).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: { name: `filone-console/${member}`, principalId: member, expiresAt: null },
+      }),
+    );
+    expect(ctx.credentials).toStrictEqual({
+      accessKeyId: 'AKNEW',
+      secretAccessKey: 'secret-AKNEW',
+    });
+    const [put] = ssmMock.commandCalls(PutParameterCommand);
+    expect(put!.args[0]!.input).toMatchObject({ Name: memberPath, Type: 'SecureString' });
+  });
+
+  it('recovers a key whose secret was never stored', async () => {
+    ssmMock.on(GetParameterCommand).rejects(notFound);
+    // The mint collides on the deterministic name: a previous request died
+    // between creating the key and writing its secret.
+    mockCreateAccessKey.mockReturnValueOnce(fail(409)).mockReturnValue(issued('AKFRESH'));
+    mockListAccessKeys.mockReturnValue({
+      data: {
+        items: [
+          {
+            accessKeyId: 'AKORPHAN',
+            name: `filone-console/${member}`,
+            createdAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      },
+      error: undefined,
+      response: { status: 200 },
+    });
+    mockDeleteAccessKey.mockReturnValue(noContent());
+
+    const ctx = await iamOrchestrator.getS3ClientContext(tenantId, { actAs: member });
+
+    expect(mockDeleteAccessKey).toHaveBeenCalledWith(
+      expect.objectContaining({ path: { tenantId, accessKeyId: 'AKORPHAN' } }),
+    );
+    expect(ctx.credentials.accessKeyId).toBe('AKFRESH');
+  });
+
+  it('propagates the conflict when no key of that name is listed', async () => {
+    ssmMock.on(GetParameterCommand).rejects(notFound);
+    mockCreateAccessKey.mockReturnValue(fail(409));
+    mockListAccessKeys.mockReturnValue({
+      data: { items: [] },
+      error: undefined,
+      response: { status: 200 },
+    });
+
+    await expect(
+      iamOrchestrator.getS3ClientContext(tenantId, { actAs: member }),
+    ).rejects.toBeInstanceOf(AccessKeyAlreadyExistsError);
+    expect(mockDeleteAccessKey).not.toHaveBeenCalled();
+  });
+
+  it('ignores the named member on a scoped-keys region', async () => {
+    stubS3Credentials();
+
+    const ctx = await orchestrator.getS3ClientContext(tenantId, { actAs: member });
+
+    expect(ctx.credentials).toStrictEqual({ accessKeyId: 'AK1', secretAccessKey: 'SK1' });
+    expect(mockCreateAccessKey).not.toHaveBeenCalled();
+    expect(mockPutPrincipal).not.toHaveBeenCalled();
   });
 });
 
