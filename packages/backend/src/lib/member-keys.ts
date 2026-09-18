@@ -1,7 +1,7 @@
 import { QueryCommand } from '@aws-sdk/client-dynamodb';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
-import { NO_ROLE, S3Region, auditKeyIdSuffix, canRetainAccessKey } from '@filone/shared';
+import { NO_ROLE, auditKeyIdSuffix, canRetainAccessKey } from '@filone/shared';
 import type {
   AccessKeyRevocationReason,
   AccessKeySummary,
@@ -12,16 +12,17 @@ import { Resource } from 'sst';
 import { readAccessKeyMintSeq } from './access-key-mint-seq.ts';
 import type { KeyMintFence } from './access-key-mint-seq.ts';
 import { getDynamoClient } from './ddb-client.ts';
-import { AccessKeyKeys, DEFAULT_ACCESS_KEY_REGION } from './dynamo-records.ts';
+import { AccessKeyKeys, accessKeyOrchestratorId } from './dynamo-records.ts';
+import { regionsForOrchestrator } from './service-orchestrator-ids.ts';
 import type { AccessKeyRecord } from './dynamo-records.ts';
 
 /**
  * An org's access-key rows, and which of them a member could still mint.
  *
- * Every key row lives in the same `ORG#{orgId}` partition whatever region holds
+ * Every key row lives in the same `ORG#{orgId}` partition whatever network holds
  * the credential, and `UserInfoTable` carries no secondary index, so asking
  * "which keys does this member hold" is one paged Query and a filter in memory.
- * The region on the row decides which orchestrator revokes it, nothing else.
+ * The network on the row decides which orchestrator revokes it, nothing else.
  */
 
 /** One access-key row, as the revocation pass and the preview both read it. */
@@ -31,7 +32,8 @@ export interface MemberAccessKey {
   keyName: string;
   /** What the console lists. Absent only on rows written before it was stored. */
   accessKeyId?: string;
-  region: S3Region;
+  /** The storage network holding the credential, which is what revokes it. */
+  orchestratorId: string;
   createdAt: string;
   createdBy?: string;
   permissions?: AccessKeyRecord['permissions'];
@@ -183,7 +185,7 @@ export function summarizeAccessKey(key: AccessKeyToRevoke): AccessKeySummary {
     id: key.id,
     keyName: key.keyName,
     ...(key.accessKeyId ? { accessKeyIdSuffix: auditKeyIdSuffix('s3', key.accessKeyId) } : {}),
-    region: key.region,
+    regions: regionsForOrchestrator(key.orchestratorId, process.env.FILONE_STAGE!),
     createdAt: key.createdAt,
     reason: key.reason,
     excess: key.excess.map(({ keyPermission }) => keyPermission),
@@ -195,7 +197,7 @@ function toMemberAccessKey(record: Partial<AccessKeyRecord>): MemberAccessKey {
   return {
     id: sk.slice(AccessKeyKeys.keySkPrefix().length),
     keyName: record.keyName ?? '',
-    region: record.region ?? DEFAULT_ACCESS_KEY_REGION,
+    orchestratorId: accessKeyOrchestratorId(record),
     createdAt: record.createdAt ?? '',
     ...(record.accessKeyId ? { accessKeyId: record.accessKeyId } : {}),
     ...(record.createdBy ? { createdBy: record.createdBy } : {}),

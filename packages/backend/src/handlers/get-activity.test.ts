@@ -47,7 +47,7 @@ function createMockedOrchestrator(opts: {
 }) {
   return {
     id: opts.id,
-    region: opts.region,
+    regions: [opts.region],
     isTenantReady: vi.fn().mockReturnValue(opts.tenantId),
     listBuckets: vi.fn().mockResolvedValue(opts.buckets ?? []),
   };
@@ -433,7 +433,7 @@ describe('get-activity baseHandler', () => {
       }
     });
 
-    it('emits per-region listBuckets durations', async () => {
+    it('emits per-orchestrator listBuckets durations', async () => {
       ddbMock.on(QueryCommand).resolves({ Items: [] });
       const aurora = createMockedOrchestrator({
         id: 'aurora',
@@ -447,12 +447,9 @@ describe('get-activity baseHandler', () => {
 
       for (const name of ['ListBucketsDuration']) {
         const events = emittedMetrics(name);
-        expect(events.map((e) => String(e.region)).sort()).toStrictEqual([
-          'eu-west-1',
-          'us-east-1',
-        ]);
+        expect(events.map((e) => String(e.orchestrator)).sort()).toStrictEqual(['aurora', 'fth']);
         for (const event of events) {
-          expect(event._aws.CloudWatchMetrics[0].Dimensions).toStrictEqual([['region']]);
+          expect(event._aws.CloudWatchMetrics[0].Dimensions).toStrictEqual([['orchestrator']]);
           expect(event[name]).toBeGreaterThanOrEqual(0);
         }
       }
@@ -482,7 +479,7 @@ describe('get-activity baseHandler', () => {
       expect(emittedMetrics('GetActivityDuration')).toStrictEqual([]);
     });
 
-    it('skips ListBucketsDuration for a region whose listBuckets fails', async () => {
+    it('skips ListBucketsDuration for an orchestrator whose listBuckets fails', async () => {
       ddbMock.on(QueryCommand).resolves({ Items: [] });
       const aurora = createMockedOrchestrator({
         id: 'aurora',
@@ -495,8 +492,8 @@ describe('get-activity baseHandler', () => {
 
       await baseHandler(buildEvent({ userInfo: USER_INFO }));
 
-      expect(emittedMetrics('ListBucketsDuration').map((e) => e.region)).toStrictEqual([
-        'eu-west-1',
+      expect(emittedMetrics('ListBucketsDuration').map((e) => e.orchestrator)).toStrictEqual([
+        'aurora',
       ]);
       // The error is swallowed per-region, so the surrounding phase still succeeds.
       expect(emittedPhases()).toContain('fetchBucketActivities');

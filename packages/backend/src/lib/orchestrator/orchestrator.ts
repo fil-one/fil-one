@@ -10,11 +10,13 @@
 //   - control-plane (ensureTenantReady, issueAccessKey, tenant status/info,
 //     usage metrics, ...) calls the Management API.
 //   - data-plane (createBucket, listBuckets, getBucket, getS3ClientContext)
-//     speaks S3 directly against the orchestrator's S3 gateway using the
-//     `filone-console` system key stashed in SSM during setup.
+//     speaks S3 directly against the S3 gateway of the region named in the
+//     call, using the `filone-console` system key stashed in SSM during setup.
+//     The tenant is region-free, so that one key works at every region's
+//     gateway; only the endpoint and signing region change.
 
 import pRetry from 'p-retry';
-import type { S3Region, TenantStatus } from '@filone/shared';
+import { getS3Endpoint, type S3Region, type TenantStatus } from '@filone/shared';
 import {
   ensureTenantReady as ensureManagementTenantReady,
   type TenantSetupDeps,
@@ -66,9 +68,14 @@ import {
   postTenantsByTenantIdStatus,
   type Client,
   type CreateAccessKeyRequest,
-  type Metrics,
 } from '@filone/orchestrator-client';
 import { instrumentClient } from './metrics.ts';
+import {
+  extractApiMessage,
+  mapIntervalToWindow,
+  mapStorageSamples,
+  normalizeStatus,
+} from './mapping.ts';
 
 export interface FilOneOrchestratorConfig {
   /**
@@ -79,11 +86,13 @@ export interface FilOneOrchestratorConfig {
    * (registry entry, sst.config IAM blocks) must honor the same derivations.
    */
   id: string;
-  region: S3Region;
+  /**
+   * The regions the network serves. Data-plane calls name one of them; the
+   * S3 gateway endpoint is derived from it with `getS3Endpoint`.
+   */
+  regions: S3Region[];
   /** Deployment stage — explicit (rather than read from process.env) so instances are testable. */
   stage: string;
-  /** S3 gateway endpoint for the data plane, e.g. `https://s3.{region}.filonecontent.com`. */
-  s3EndpointUrl: string;
   /**
    * Control-plane Management API access: either connection settings (the
    * factory builds and instruments a client) or a pre-built client (used by
@@ -103,7 +112,7 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
 
 class FilOneOrchestrator implements ServiceOrchestrator {
   readonly id: string;
-  readonly region: S3Region;
+  readonly regions: S3Region[];
   readonly accessModel = 'scoped-keys';
 
   private readonly config: FilOneOrchestratorConfig;
@@ -113,14 +122,16 @@ class FilOneOrchestrator implements ServiceOrchestrator {
 
   constructor(config: FilOneOrchestratorConfig) {
     this.config = config;
+    if (config.regions.length === 0) {
+      throw new Error(`Orchestrator "${config.id}" must serve at least one region.`);
+    }
     this.id = config.id;
-    this.region = config.region;
+    this.regions = config.regions;
     this.client = resolveClient(config);
     this.setupDeps = {
       client: this.client,
       id: config.id,
       stage: config.stage,
-      region: config.region,
     };
     this.tenantIdAttribute = `${config.id}TenantId`;
   }
@@ -147,10 +158,39 @@ class FilOneOrchestrator implements ServiceOrchestrator {
     throw new Error(`Failed to set tenant ${tenantId} status to "${status}"`, { cause: error });
   }
 
+  // The gateway labels every listed bucket with the region serving it. A
+  // listing that omits the label can only be trusted on a single-region
+  // network, where there is one answer; on a multi-region one it is a gateway
+  // bug that would misfile the bucket, so it is refused rather than guessed.
+  private bucketRegion(bucket: { name: string; region?: string }): S3Region {
+    if (bucket.region) {
+      if (!this.regions.includes(bucket.region as S3Region)) {
+        throw new Error(
+          `Bucket "${bucket.name}" is served by region "${bucket.region}", which orchestrator "${this.id}" does not serve.`,
+        );
+      }
+      return bucket.region as S3Region;
+    }
+    if (this.regions.length === 1) return this.regions[0]!;
+    throw new Error(
+      `Bucket "${bucket.name}" was listed without a region by multi-region orchestrator "${this.id}".`,
+    );
+  }
+
+  // A region this network does not serve has no gateway to send the request to;
+  // reaching one is a routing bug upstream, not something to sign for anyway.
+  private assertServes(region: S3Region): void {
+    if (!this.regions.includes(region)) {
+      throw new Error(`Orchestrator "${this.id}" does not serve region "${region}".`);
+    }
+  }
+
   async getS3ClientContext(
     tenantId: string,
+    region: S3Region,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<S3ClientContext> {
+    this.assertServes(region);
     const credentials = await getConsoleS3Credentials(
       {
         orchestratorId: this.id,
@@ -160,8 +200,8 @@ class FilOneOrchestrator implements ServiceOrchestrator {
       requestOptions,
     );
     return {
-      endpointUrl: this.config.s3EndpointUrl,
-      region: this.region,
+      endpointUrl: getS3Endpoint(region, this.config.stage),
+      region,
       credentials,
       forcePathStyle: true,
       orchestratorId: this.id,
@@ -248,10 +288,11 @@ class FilOneOrchestrator implements ServiceOrchestrator {
   // Data-plane bucket operations against the S3 gateway with the console key.
   async createBucket(
     tenantId: string,
+    region: S3Region,
     args: CreateBucketArgs,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void> {
-    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    const ctx = await this.getS3ClientContext(tenantId, region, requestOptions);
     const s3 = createS3Client(ctx);
     await s3CreateBucket(
       s3,
@@ -296,10 +337,11 @@ class FilOneOrchestrator implements ServiceOrchestrator {
 
   async deleteBucket(
     tenantId: string,
+    region: S3Region,
     bucketName: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void> {
-    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    const ctx = await this.getS3ClientContext(tenantId, region, requestOptions);
     const s3 = createS3Client(ctx);
     await s3DeleteBucket(s3, bucketName, requestOptions);
   }
@@ -308,7 +350,10 @@ class FilOneOrchestrator implements ServiceOrchestrator {
     tenantId: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketSummary[]> {
-    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    // ListBuckets is account-wide at every gateway of the network, so any
+    // region's endpoint returns the tenant's buckets in all of them, each
+    // labelled with the region serving it.
+    const ctx = await this.getS3ClientContext(tenantId, this.regions[0]!, requestOptions);
     const s3 = createS3Client(ctx);
     const { buckets } = await s3ListBuckets(s3, requestOptions);
     // Versioning and object-lock both cost a call per bucket; neither is
@@ -316,7 +361,7 @@ class FilOneOrchestrator implements ServiceOrchestrator {
     // for the one bucket the detail page actually needs them for.
     return buckets.map((b) => ({
       bucketName: b.name,
-      region: this.region,
+      region: this.bucketRegion(b),
       createdAt: b.createdAt,
       isPublic: false,
       // The contract mandates server-side encryption by default.
@@ -326,14 +371,18 @@ class FilOneOrchestrator implements ServiceOrchestrator {
 
   async getBucket(
     tenantId: string,
+    region: S3Region,
     bucketName: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketDetails | null> {
-    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    const ctx = await this.getS3ClientContext(tenantId, region, requestOptions);
     const s3 = createS3Client(ctx);
     const { buckets } = await s3ListBuckets(s3, requestOptions);
     const match = buckets.find((b) => b.name === bucketName);
-    if (!match) return null;
+    // A bucket the tenant holds in another region of the network is listed here
+    // too, but it is not served by this region's gateway: the per-bucket reads
+    // below would be refused, so it is not found as far as this region goes.
+    if (!match || this.bucketRegion(match) !== region) return null;
 
     const [versioning, lock] = await Promise.all([
       getBucketVersioning(s3, bucketName, requestOptions),
@@ -342,7 +391,7 @@ class FilOneOrchestrator implements ServiceOrchestrator {
 
     return {
       bucketName,
-      region: this.region,
+      region,
       createdAt: match.createdAt,
       isPublic: false,
       versioning,
@@ -471,6 +520,7 @@ class FilOneOrchestrator implements ServiceOrchestrator {
         from: metricsOpts.from,
         to: metricsOpts.to,
         window: mapIntervalToWindow(metricsOpts.interval ?? '1d'),
+        ...(metricsOpts.region && { region: metricsOpts.region }),
       },
       throwOnError: false,
       ...requestOptions,
@@ -555,41 +605,4 @@ function resolveClient(config: FilOneOrchestratorConfig): Client {
   });
   instrumentClient(client, { apiName: `${config.id}-management` });
   return client;
-}
-
-const MANAGEMENT_TENANT_STATUSES: readonly TenantStatus[] = ['active', 'write-locked', 'disabled'];
-
-// The contract's status enum is closed, but defend against noncompliant
-// orchestrators: unknown values surface as `undefined` rather than leaking a
-// string TenantStatus doesn't model.
-function normalizeStatus(status: string | undefined): TenantStatus | undefined {
-  return MANAGEMENT_TENANT_STATUSES.find((s) => s === status);
-}
-
-// The interface expresses sampling as an interval like '1d'/'1h'; the
-// contract only accepts `<integer>h` windows. Same permissive posture as
-// aurora: convert day intervals, pass hour intervals through, and let the API
-// reject anything else with a 400.
-function mapIntervalToWindow(interval: string): string {
-  const days = /^(\d+)d$/.exec(interval);
-  if (days) return `${Number(days[1]) * 24}h`;
-  return interval;
-}
-
-function mapStorageSamples(metrics: Metrics): StorageUsageSample[] {
-  return metrics.storage.samples.map((s) => ({
-    timestamp: new Date(s.timestamp).toISOString(),
-    bytesUsed: s.bytesUsed,
-    objectCount: s.objectCount,
-  }));
-}
-
-// Pulls the human-readable message out of the contract's error body
-// (`{ message, code? }`) returned in the SDK result's `error` field.
-function extractApiMessage(body: unknown): string | undefined {
-  if (body && typeof body === 'object' && 'message' in body) {
-    const message = (body as { message?: unknown }).message;
-    if (typeof message === 'string') return message;
-  }
-  return undefined;
 }

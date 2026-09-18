@@ -1,8 +1,8 @@
 import { SubscriptionStatus } from '@filone/shared';
 import { isOrgDeletedOrDeleting } from '../lib/org-profile.ts';
 import {
-  assertRegionSyncSucceeded,
-  syncTenantStatusInProvisionedRegions,
+  assertTenantSyncSucceeded,
+  syncTenantStatusInProvisionedTenants,
 } from '../lib/region-helpers.ts';
 import { scanSubscriptions, updateSubscriptionByUser } from '../lib/subscription-store.ts';
 
@@ -109,8 +109,8 @@ async function scanGracePeriodCandidates(nowMs: number): Promise<Candidate[]> {
 // with no provisioned regions still transitions out of grace (empty outcomes,
 // cancel proceeds).
 async function cancelSubscriptionAndDisableTenant(candidate: Candidate, now: Date): Promise<void> {
-  assertRegionSyncSucceeded(
-    await syncTenantStatusInProvisionedRegions(candidate.orgId, 'disabled'),
+  assertTenantSyncSucceeded(
+    await syncTenantStatusInProvisionedTenants(candidate.orgId, 'disabled'),
   );
   // Transition DynamoDB status to canceled, on both keys — a cancel that
   // reached only the row this scan happened to pick would leave the twin in
@@ -135,7 +135,7 @@ async function cancelSubscriptionAndDisableTenant(candidate: Candidate, now: Dat
 // lock calls are skipped and a tenant that is already `disabled` is never
 // downgraded back to `write-locked`.
 async function ensureTenantWriteLocked(candidate: Candidate): Promise<CandidateOutcome> {
-  const outcomes = await syncTenantStatusInProvisionedRegions(candidate.orgId, 'write-locked');
+  const outcomes = await syncTenantStatusInProvisionedTenants(candidate.orgId, 'write-locked');
 
   if (outcomes.length === 0) {
     console.warn('[grace-period-enforcer] No ready tenant on any orchestrator, skipping', {
@@ -157,7 +157,7 @@ async function ensureTenantWriteLocked(candidate: Candidate): Promise<CandidateO
 
   // The sync helper never throws; re-raise per-region failures so the
   // candidate is counted as failed and retried on the next run.
-  assertRegionSyncSucceeded(outcomes);
+  assertTenantSyncSucceeded(outcomes);
 
   return updated.length > 0 ? 'write_locked' : 'skipped';
 }

@@ -16,7 +16,7 @@ import { authMiddleware } from '../middleware/auth.ts';
 import { authorize } from '../middleware/authorize.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 import type { AccessKeyRecord } from '../lib/dynamo-records.ts';
-import { type ProvisionedRegion, getProvisionedRegions } from '../lib/region-helpers.ts';
+import { type ProvisionedTenant, getProvisionedTenants } from '../lib/region-helpers.ts';
 import { reportMetric } from '../lib/metrics.ts';
 
 const dynamo = getDynamoClient();
@@ -84,10 +84,10 @@ export async function baseHandler(
   // neither. The rows are not fetched at all in that last case: a read nobody
   // may see is a read worth not making.
   const scope = keyScope(event);
-  // The dashboard aggregates activity across every region the org is provisioned
-  // in, so resolve the ready tenant on each available orchestrator.
+  // The dashboard aggregates activity across every network the org is
+  // provisioned on, so resolve the ready tenant on each available orchestrator.
   const { result: regions, durationMs: resolveRegionsMs } = await timed('resolveRegions', () =>
-    getProvisionedRegions(orgId),
+    getProvisionedTenants(orgId),
   );
 
   const [
@@ -121,7 +121,7 @@ export async function baseHandler(
   console.log('[get-activity] completed', {
     orgId,
     regionCount: regions.length,
-    regions: regions.map((r) => r.orchestrator.region),
+    orchestrators: regions.map((r) => r.orchestrator.id),
     bucketActivityCount: bucketActivities.length,
     keyActivityCount: keyActivities.length,
     durationsMs: {
@@ -137,7 +137,7 @@ export async function baseHandler(
 
 async function fetchBucketActivities(
   orgId: string,
-  regions: ProvisionedRegion[],
+  regions: ProvisionedTenant[],
 ): Promise<RecentActivity[]> {
   const perRegion = await Promise.all(
     regions.map(({ orchestrator, tenantId }) =>
@@ -152,18 +152,18 @@ async function listBucketActivities(
   orchestrator: ServiceOrchestrator,
   tenantId: string,
 ): Promise<RecentActivity[]> {
-  // Swallow per-orchestrator errors so one region's outage still renders the rest.
+  // Swallow per-orchestrator errors so one network's outage still renders the rest.
   const start = performance.now();
   try {
     const buckets = await orchestrator.listBuckets(tenantId);
     const durationMs = performance.now() - start;
-    reportDuration('ListBucketsDuration', { region: orchestrator.region }, durationMs);
+    reportDuration('ListBucketsDuration', { orchestrator: orchestrator.id }, durationMs);
     // bucketCount vs durationMs exposes the per-bucket cost — a duration that
     // grows with bucketCount points at an N+1 in the orchestrator's listBuckets.
     console.log('[get-activity] listed buckets', {
       orgId,
       tenantId,
-      region: orchestrator.region,
+      orchestratorId: orchestrator.id,
       bucketCount: buckets.length,
       durationMs: Math.round(durationMs),
     });
@@ -181,13 +181,13 @@ async function listBucketActivities(
       console.warn('[get-activity] AccessDenied listing buckets — tenant may have no buckets yet', {
         orgId,
         tenantId,
-        region: orchestrator.region,
+        orchestratorId: orchestrator.id,
       });
     } else {
       console.error('[get-activity] Failed to list buckets', {
         orgId,
         tenantId,
-        region: orchestrator.region,
+        orchestratorId: orchestrator.id,
         err,
       });
     }

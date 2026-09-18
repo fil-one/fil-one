@@ -17,6 +17,7 @@ function makeKey(overrides: Partial<AccessKey>): AccessKey {
     status: 'active',
     permissions: ['read'],
     bucketScope: 'all',
+    regions: ['eu-west-1'],
     ...overrides,
   };
 }

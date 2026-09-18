@@ -94,7 +94,9 @@ export function createInstrumentedFthClient(): FthManagementClient {
 // Callers only ever see createFthOrchestrator(client).
 class FthOrchestrator implements ServiceOrchestrator {
   readonly id = 'fth';
-  readonly region = S3Region.UsEast1;
+  readonly regions = [S3Region.UsEast1];
+  // The one region this network serves; the region a caller names is always it.
+  private readonly region = S3Region.UsEast1;
   readonly accessModel = 'scoped-keys';
 
   private readonly client: FthManagementClient;
@@ -175,6 +177,7 @@ class FthOrchestrator implements ServiceOrchestrator {
 
   async getS3ClientContext(
     tenantId: string,
+    _region: S3Region,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<S3ClientContext> {
     const stage = process.env.FILONE_STAGE!;
@@ -198,10 +201,11 @@ class FthOrchestrator implements ServiceOrchestrator {
 
   async createBucket(
     tenantId: string,
+    _region: S3Region,
     args: CreateBucketArgs,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void> {
-    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    const ctx = await this.getS3ClientContext(tenantId, this.region, requestOptions);
     const s3 = createS3Client(ctx);
     await s3CreateBucket(
       s3,
@@ -243,10 +247,11 @@ class FthOrchestrator implements ServiceOrchestrator {
 
   async deleteBucket(
     tenantId: string,
+    _region: S3Region,
     bucketName: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void> {
-    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    const ctx = await this.getS3ClientContext(tenantId, this.region, requestOptions);
     const s3 = createS3Client(ctx);
     await s3DeleteBucket(s3, bucketName, requestOptions);
   }
@@ -259,7 +264,7 @@ class FthOrchestrator implements ServiceOrchestrator {
     // call per bucket, an N+1 nobody wants to pay just to render a list. Neither
     // is returned here; getBucket loads both for the one bucket the detail page
     // actually needs them for.
-    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    const ctx = await this.getS3ClientContext(tenantId, this.region, requestOptions);
     const s3 = createS3Client(ctx);
     const { buckets } = await s3ListBuckets(s3, requestOptions);
 
@@ -274,10 +279,11 @@ class FthOrchestrator implements ServiceOrchestrator {
 
   async getBucket(
     tenantId: string,
+    _region: S3Region,
     bucketName: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketDetails | null> {
-    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    const ctx = await this.getS3ClientContext(tenantId, this.region, requestOptions);
     const s3 = createS3Client(ctx);
     const { buckets } = await s3ListBuckets(s3, requestOptions);
     const match = buckets.find((b) => b.name === bucketName);
@@ -452,7 +458,7 @@ class FthOrchestrator implements ServiceOrchestrator {
     // the bucket. A snapshot miss alone can't distinguish "not owned" from
     // "owned but absent from the current breakdown" (e.g. an empty bucket), so
     // confirm existence before reading metrics.
-    const bucket = await this.getBucket(tenantId, bucketName, requestOptions);
+    const bucket = await this.getBucket(tenantId, this.region, bucketName, requestOptions);
     if (!bucket) throw new BucketNotFoundError(bucketName);
 
     // FTH has no per-bucket time series; the current-snapshot `by_bucket`

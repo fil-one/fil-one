@@ -35,10 +35,13 @@ const mockOrchestrator = {
   deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
 };
 
+// One mocked network per region: eu-west-1 is 'aurora', us-east-1 is 'fth'.
+// Both share the same mocked methods; only the id (what a key row records)
+// differs, which is what the recovery and routing cases below turn on.
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (region: string) => {
     mockGetOrchestratorForRegion(region);
-    return mockOrchestrator;
+    return region === 'us-east-1' ? { ...mockOrchestrator, id: 'fth' } : mockOrchestrator;
   },
 }));
 
@@ -258,7 +261,10 @@ describe('create-access-key baseHandler', () => {
     expect(item.createdAt.S).toBe('2026-03-10T13:36:07.752371Z');
     expect(item.status.S).toBe('active');
     expect(item.bucketScope.S).toBe('all');
-    expect(item.region.S).toBe('eu-west-1');
+    // The network holding the key, and no region: the key works at every
+    // region the network serves.
+    expect(item.orchestratorId.S).toBe('aurora');
+    expect(item.region).toBeUndefined();
     // Secret must NOT be stored
     expect(item.accessKeySecret).toBeUndefined();
     expect(item.secretAccessKey).toBeUndefined();
@@ -686,7 +692,7 @@ describe('create-access-key baseHandler', () => {
     expect(completion.correlationId).toBe(intent.correlationId);
   });
 
-  it('recovers DynamoDB record when same keyName exists only in a different region', async () => {
+  it('recovers DynamoDB record when same keyName exists only on a different network', async () => {
     mockIssueAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
     ddbMock.on(QueryCommand).resolves({
       Items: [
@@ -721,13 +727,14 @@ describe('create-access-key baseHandler', () => {
       pk: { S: 'ORG#org-1' },
       sk: { S: 'ACCESSKEY#aurora-key-1' },
       keyName: { S: 'My Key' },
-      region: { S: 'eu-west-1' },
+      orchestratorId: { S: 'aurora' },
     });
+    expect(item.region).toBeUndefined();
   });
 
-  it('treats DynamoDB rows without region as eu-west-1 (recovery proceeds when request region differs)', async () => {
+  it('treats DynamoDB rows naming neither network nor region as Aurora (recovery proceeds when the request names another network)', async () => {
     mockIssueAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
-    // Legacy row: matching keyName, no `region` attribute -> treated as eu-west-1
+    // Legacy row: matching keyName, neither `orchestratorId` nor `region` -> Aurora's
     ddbMock.on(QueryCommand).resolves({
       Items: [
         {
@@ -755,7 +762,8 @@ describe('create-access-key baseHandler', () => {
 
     expect(result.statusCode).toBe(409);
     const item = keyRow();
-    expect(item.region.S).toBe('us-east-1');
+    expect(item.orchestratorId.S).toBe('fth');
+    expect(item.region).toBeUndefined();
   });
 
   describe('region', () => {
@@ -798,7 +806,8 @@ describe('create-access-key baseHandler', () => {
       expect(result.statusCode).toBe(201);
       expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('us-east-1');
       const item = keyRow();
-      expect(item.region.S).toBe('us-east-1');
+      expect(item.orchestratorId.S).toBe('fth');
+      expect(item.region).toBeUndefined();
     });
 
     it('accepts us-east-1 in production for any user (soft-launched region)', async () => {

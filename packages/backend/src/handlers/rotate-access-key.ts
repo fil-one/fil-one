@@ -4,14 +4,7 @@ import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import {
-  ApiErrorCode,
-  NO_ROLE,
-  S3Region,
-  auditKeyIdSuffix,
-  canRetainAccessKey,
-  isSupportedRegion,
-} from '@filone/shared';
+import { ApiErrorCode, NO_ROLE, auditKeyIdSuffix, canRetainAccessKey } from '@filone/shared';
 import type {
   AccessKeyPermission,
   ErrorResponse,
@@ -22,7 +15,7 @@ import { Resource } from 'sst';
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
 import type { AuditCorrelation } from '../lib/audit.ts';
 import { getDynamoClient } from '../lib/ddb-client.ts';
-import { AccessKeyKeys, DEFAULT_ACCESS_KEY_REGION, keyAttribution } from '../lib/dynamo-records.ts';
+import { AccessKeyKeys, accessKeyOrchestratorId, keyAttribution } from '../lib/dynamo-records.ts';
 import type { AccessKeyRecord } from '../lib/dynamo-records.ts';
 import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
 import {
@@ -44,10 +37,10 @@ import {
   accountDeletedResponse,
   ResponseBuilder,
   tenantNotReadyResponse,
-  unsupportedRegionResponse,
+  orchestratorUnavailableResponse,
 } from '../lib/response-builder.ts';
 import { vendorNameForRotation } from '../lib/rotation-key-name.ts';
-import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import { findOrchestratorById } from '../lib/service-orchestrator-registry.ts';
 import type { IssuedAccessKey, ServiceOrchestrator } from '../lib/service-orchestrator.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
@@ -70,7 +63,7 @@ const dynamo = getDynamoClient();
  * whose mint then failed with no credential at all.
  *
  * What carries over is everything the row records: permissions, granulars,
- * bucket scope, buckets, expiry, region and owner. What changes is the
+ * bucket scope, buckets, expiry, network and owner. What changes is the
  * credential.
  *
  * The order of everything before the vendor call is `create-access-key.ts`'s,
@@ -159,16 +152,16 @@ async function prepareRotation(
       .build();
   }
 
-  if (!isSupportedRegion(stored.region, process.env.FILONE_STAGE!)) {
-    return unsupportedRegionResponse(stored.region);
-  }
+  // The network holding the key mints its replacement. One this stage does not
+  // offer has no orchestrator to ask.
+  const orchestrator = findOrchestratorById(stored.orchestratorId);
+  if (!orchestrator) return orchestratorUnavailableResponse(stored.orchestratorId);
 
   // Before ensureTenantReady, as the mint has it: the replacement is minted
   // upstream, so a fence checked only at the DynamoDB write would leave a live
   // credential behind.
   if (await isOrgDeleting(orgId, { consistent: true })) return accountDeletedResponse();
 
-  const orchestrator = getOrchestratorForRegion(stored.region);
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
 
@@ -217,7 +210,7 @@ async function issueReplacement({
     details: {
       keyKind: 's3',
       keyName: stored.keyName,
-      region: stored.region,
+      orchestratorId: orchestrator.id,
       replacedKeyIdSuffix: auditKeyIdSuffix('s3', stored.accessKeyId ?? keyId),
     },
   });
@@ -241,7 +234,6 @@ async function issueReplacement({
     keyId: replacement.id,
     accessKeyId: replacement.accessKeyId,
     keyName: stored.keyName,
-    region: stored.region,
     orchestrator,
     tenantId,
   };
@@ -303,7 +295,7 @@ async function issueReplacement({
     // The name the vendor holds it under, which is what an operator reading the
     // event would search for. The two differ once a key has been rotated before.
     keyName: stored.vendorKeyName ?? stored.keyName,
-    region: stored.region,
+    orchestratorId: stored.orchestratorId,
     orchestrator,
     tenantId,
     actor,
@@ -338,16 +330,28 @@ interface Rotation {
 /**
  * The stored row, with the two fallbacks a legacy row needs: a row written
  * before the id was stored has no `keyName` to show, and one written before
- * multi-region routing has no `region`, so it takes
- * {@link DEFAULT_ACCESS_KEY_REGION}, the same fallback the revoke applies.
- * Everything else is read as stored; `unmarshall` leaves an absent attribute
- * absent, which is what the row write needs.
+ * keys were recorded by network names a region or nothing, which
+ * {@link accessKeyOrchestratorId} resolves to the network, the same way the
+ * revoke does. Everything else is read as stored; `unmarshall` leaves an absent
+ * attribute absent, which is what the row write needs. The replacement row is
+ * written with the network alone, so a stored legacy `region` is dropped from
+ * it here rather than copied forward.
  */
-type StoredKey = Partial<AccessKeyRecord> & { keyName: string; region: S3Region };
+type StoredKey = Omit<Partial<AccessKeyRecord>, 'region'> & {
+  keyName: string;
+  orchestratorId: string;
+};
 
 function readStoredKey(item: Record<string, AttributeValue>, keyId: string): StoredKey {
-  const row = unmarshall(item) as Partial<AccessKeyRecord>;
-  return { ...row, keyName: row.keyName ?? keyId, region: row.region ?? DEFAULT_ACCESS_KEY_REGION };
+  const { region: _region, ...row } = unmarshall(item) as Partial<AccessKeyRecord>;
+  return {
+    ...row,
+    keyName: row.keyName ?? keyId,
+    orchestratorId: accessKeyOrchestratorId({
+      orchestratorId: row.orchestratorId,
+      region: _region,
+    }),
+  };
 }
 
 /** The replacement's row: the original's shape, a new credential, and who reissued it. */
@@ -371,7 +375,9 @@ function replacementRow({
     accessKeyId: replacement.accessKeyId,
     createdAt: replacement.createdAt,
     status: 'active',
-    region: stored.region,
+    // The replacement lives where the key it replaces did: on the network, at
+    // every region it serves.
+    orchestratorId: stored.orchestratorId,
     permissions: stored.permissions,
     vendorKeyName,
     // Who reissued it and when, beside the owner the row keeps.

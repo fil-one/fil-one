@@ -33,14 +33,19 @@ vi.mock('jose', () => ({
 // registry builds the FTH client at import time from a secret this suite has
 // no reason to stand up.
 const mockDeleteAccessKey = vi.fn();
+// Key rows name the network holding them; the revocation pass finds it by id.
+// The tenant id carries the network's region so assertions read as before.
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
-  getOrchestratorForRegion: (region: string) => ({
-    id: region === 'us-east-1' ? 'fth' : 'aurora',
-    region,
-    accessModel: 'scoped-keys',
-    isTenantReady: () => `tenant:${region}`,
-    deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
-  }),
+  findOrchestratorById: (id: string) => {
+    const region = id === 'fth' ? 'us-east-1' : 'eu-west-1';
+    return {
+      id,
+      regions: [region],
+      accessModel: 'scoped-keys',
+      isTenantReady: () => `tenant:${region}`,
+      deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
+    };
+  },
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
@@ -610,7 +615,7 @@ describe('a narrowing revokes the keys the new role could not mint', () => {
         id: 'key-0',
         keyName: 'key 0',
         accessKeyIdSuffix: '0000',
-        region: S3Region.UsEast1,
+        regions: [S3Region.UsEast1],
         createdAt: '2026-02-01T00:00:00.000Z',
         reason: 'exceeds_role',
         excess: ['DeleteBucket'],

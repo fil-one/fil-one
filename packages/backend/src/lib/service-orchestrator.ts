@@ -115,6 +115,12 @@ export interface GetTenantUsageMetricsOptions {
   to: string;
   /** Sampling window applied to BOTH series. Defaults to '1d'. */
   interval?: string;
+  /**
+   * Restricts the series to the tenant's buckets served by this region. Absent,
+   * the series cover the tenant's buckets in every region of the network. A
+   * single-region network ignores it.
+   */
+  region?: S3Region;
 }
 
 /**
@@ -148,9 +154,13 @@ export interface TenantInfo {
 }
 
 /**
- * Abstraction over a service orchestrator (e.g. Aurora, FTH, etc.).
+ * Abstraction over a service orchestrator (e.g. Aurora, FTH, a Forge network).
  * Each implementation handles tenant provisioning, bucket lifecycle,
- * access-key issuance, and presigning for a service orchestrator in a single region.
+ * access-key issuance, and presigning for one storage network. A network serves
+ * one or more regions ({@link ServiceOrchestrator.regions}); its tenant is
+ * region-free, so one tenant holds buckets in any of them and its access keys
+ * work at every region's S3 gateway. Bucket operations name the region the
+ * bucket lives in, since a bucket is served by exactly one.
  *
  * ## orgId vs tenantId
  *
@@ -176,7 +186,12 @@ export interface ServiceOrchestrator {
    * should have the format `^[a-z][a-zA-Z0-9_]*$`.
    */
   readonly id: string;
-  readonly region: S3Region;
+  /**
+   * The regions this network serves, in {@link S3Region} order. Aurora and FTH
+   * serve one each; a Forge network serves every region its Hilt has a
+   * provider for. Always non-empty.
+   */
+  readonly regions: S3Region[];
 
   /**
    * How this backend decides what a credential may do, and therefore which
@@ -222,22 +237,31 @@ export interface ServiceOrchestrator {
    */
   isTenantReady(orgProfile: OrgProfileItem | undefined): string | null;
 
+  /** Creates the bucket in `region`, which must be one of {@link regions}. */
   createBucket(
     tenantId: string,
+    region: S3Region,
     args: CreateBucketArgs,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void>;
   deleteBucket(
     tenantId: string,
+    region: S3Region,
     bucketName: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void>;
+  /**
+   * Every bucket the tenant holds on this network, each labelled with the
+   * region serving it. One call per network, not per region.
+   */
   listBuckets(
     tenantId: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketSummary[]>;
+  /** The bucket as served by `region`; `null` when no such bucket lives there. */
   getBucket(
     tenantId: string,
+    region: S3Region,
     bucketName: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketDetails | null>;
@@ -299,8 +323,15 @@ export interface ServiceOrchestrator {
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void>;
 
+  /**
+   * Credentials and endpoint for the S3 gateway of `region`, which must be one
+   * of {@link regions}. The credential is the tenant's console key, which is
+   * the same at every region of the network; the endpoint and signing region
+   * are the region's.
+   */
   getS3ClientContext(
     tenantId: string,
+    region: S3Region,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<S3ClientContext>;
 

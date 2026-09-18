@@ -23,6 +23,7 @@ import { useToast } from './Toast';
 import { FILONE_STAGE } from '../env.js';
 import { useHasPermission } from '../lib/use-permissions.js';
 import { useCopyToClipboard } from '../lib/use-copy-to-clipboard.js';
+import type { DeletableBucket } from '../lib/use-delete-bucket.js';
 import { formatDate } from '../lib/time.js';
 import {
   EMPTY_BUCKET_FILTERS,
@@ -43,7 +44,8 @@ const SECONDARY_COLUMN = 'hidden sm:table-cell';
 type BucketsTableProps = {
   /** Already filtered and sorted server-side; this component only renders. */
   buckets: Bucket[];
-  onDelete: (bucketName: string) => void;
+  /** Called with the bucket and the region serving it; only that region can delete it. */
+  onDelete: (bucket: DeletableBucket) => void;
   showControls: boolean;
   filters: BucketFilters;
   onFiltersChange: (filters: BucketFilters) => void;
@@ -140,7 +142,7 @@ function BucketRowActions({
 }: {
   bucket: Bucket;
   region: string;
-  onDelete: (name: string) => void;
+  onDelete: (bucket: DeletableBucket) => void;
 }) {
   const navigate = useNavigate();
   const { copy } = useCopyToClipboard();
@@ -183,7 +185,8 @@ function BucketRowActions({
               {
                 label: 'Delete bucket',
                 icon: TrashIcon,
-                onSelect: () => onDelete(bucket.bucketName),
+                onSelect: () =>
+                  onDelete({ bucketName: bucket.bucketName, region: region as S3Region }),
               },
             ]
           : []),
@@ -192,7 +195,13 @@ function BucketRowActions({
   );
 }
 
-function BucketRow({ bucket, onDelete }: { bucket: Bucket; onDelete: (name: string) => void }) {
+function BucketRow({
+  bucket,
+  onDelete,
+}: {
+  bucket: Bucket;
+  onDelete: (bucket: DeletableBucket) => void;
+}) {
   const region = bucket.region ?? S3_REGION;
 
   return (

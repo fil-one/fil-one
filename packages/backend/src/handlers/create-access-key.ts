@@ -1,12 +1,7 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import {
-  CreateAccessKeySchema,
-  S3Region,
-  excessKeyPermissions,
-  isSupportedRegion,
-} from '@filone/shared';
+import { CreateAccessKeySchema, excessKeyPermissions, isSupportedRegion } from '@filone/shared';
 import type {
   CreateAccessKeyRequest,
   CreateAccessKeyResponse,
@@ -85,7 +80,9 @@ export async function baseHandler(
   // Before the intent, because nothing happened: a name the org already shows
   // is a request that was never going to produce a key, and writing an intent
   // for it would leave an operator reading a mint that never started.
-  if (await orgAlreadyShowsKeyName({ orgId, keyName, region })) return duplicateKeyNameResponse();
+  if (await orgAlreadyShowsKeyName({ orgId, keyName, orchestratorId: orchestrator.id })) {
+    return duplicateKeyNameResponse();
+  }
 
   // Fail-closed, and before the vendor: the credential is created at the storage
   // vendor before anything local is written, so no SigV4 key may come into
@@ -99,7 +96,7 @@ export async function baseHandler(
     actor,
     orgId,
     subject: AuditSubjects.org(orgId),
-    details: { keyKind: 's3', keyName, region },
+    details: { keyKind: 's3', keyName, region, orchestratorId: orchestrator.id },
   });
 
   let accessKey: IssuedAccessKey;
@@ -116,7 +113,6 @@ export async function baseHandler(
       orgId,
       tenantId,
       keyName,
-      region,
       orchestrator,
       attribution,
       mint,
@@ -128,7 +124,6 @@ export async function baseHandler(
     keyId: accessKey.id,
     accessKeyId: accessKey.accessKeyId,
     keyName,
-    region,
     orchestrator,
     tenantId,
   };
@@ -141,7 +136,9 @@ export async function baseHandler(
       accessKeyId: accessKey.accessKeyId,
       createdAt: accessKey.createdAt,
       status: 'active',
-      region,
+      // The network holding the credential, and no region: the key works at
+      // every region the network serves.
+      orchestratorId: orchestrator.id,
       permissions,
       ...optionalKeyAttributes({ granularPermissions, bucketScope, buckets, expiresAt }),
       ...attribution,
@@ -172,7 +169,7 @@ export async function baseHandler(
 }
 
 /**
- * Whether the org already lists a key under this name in this region.
+ * Whether the org already lists a key under this name on this network.
  *
  * The vendor enforces name uniqueness per tenant, and until rotation shipped
  * that was enough: a duplicate came back as a 409 and nothing local had to ask.
@@ -194,14 +191,14 @@ export async function baseHandler(
 async function orgAlreadyShowsKeyName({
   orgId,
   keyName,
-  region,
+  orchestratorId,
 }: {
   orgId: string;
   keyName: string;
-  region: S3Region;
+  orchestratorId: string;
 }): Promise<boolean> {
   const keys = await listOrgAccessKeys(orgId);
-  return keys.some((key) => key.keyName === keyName && key.region === region);
+  return keys.some((key) => key.keyName === keyName && key.orchestratorId === orchestratorId);
 }
 
 /** The name is taken, whoever is holding it. */
@@ -269,7 +266,6 @@ interface MintAttempt {
   orgId: string;
   tenantId: string;
   keyName: string;
-  region: S3Region;
   orchestrator: ServiceOrchestrator;
   attribution: Pick<AccessKeyRecord, 'createdBy' | 'creatorEmail' | 'policyVersion'>;
   /** The intent this attempt already wrote — every exit here closes it. */
@@ -281,13 +277,12 @@ async function recoverDuplicateKey({
   orgId,
   tenantId,
   keyName,
-  region,
   orchestrator,
   attribution,
   mint,
   creator,
 }: MintAttempt): Promise<void> {
-  if (await orgAlreadyShowsKeyName({ orgId, keyName, region })) {
+  if (await orgAlreadyShowsKeyName({ orgId, keyName, orchestratorId: orchestrator.id })) {
     // A plain duplicate name: the vendor refused and there is nothing to
     // recover, so the correlation closes as the rejection it was.
     await mint.complete({ outcome: 'failed' });
@@ -312,7 +307,6 @@ async function recoverDuplicateKey({
     keyId: recovered.id,
     accessKeyId: recovered.accessKeyId,
     keyName,
-    region,
     orchestrator,
     tenantId,
   };
@@ -330,7 +324,7 @@ async function recoverDuplicateKey({
       // key — not this retry's clock, which would date the credential wrong.
       createdAt: recovered.createdAt,
       status: 'active',
-      region,
+      orchestratorId: orchestrator.id,
       // Attributed to the caller who retried, which in practice is the same
       // person whose first attempt minted the key at the provider. A key with
       // no owner at all is the worse outcome, and `recovered` keeps the

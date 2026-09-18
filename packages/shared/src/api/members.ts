@@ -58,7 +58,8 @@ export interface AccessKeySummary {
   keyName: string;
   /** The characters of the access key id the console already shows. */
   accessKeyIdSuffix?: string;
-  region: S3Region;
+  /** Every region the key works in; see `AccessKey.regions`. */
+  regions: S3Region[];
   createdAt: string;
   /** Why it goes, when it does. */
   reason: AccessKeyRevocationReason;

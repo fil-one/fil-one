@@ -11,9 +11,9 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockGetProvisionedRegions = vi.fn(async () => [] as unknown[]);
+const mockGetProvisionedTenants = vi.fn(async () => [] as unknown[]);
 vi.mock('./region-helpers.ts', () => ({
-  getProvisionedRegions: (...args: unknown[]) => mockGetProvisionedRegions(...(args as [])),
+  getProvisionedTenants: (...args: unknown[]) => mockGetProvisionedTenants(...(args as [])),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
@@ -64,7 +64,7 @@ describe('resolveDeletionTargets', () => {
   beforeEach(() => {
     ddbMock.reset();
     vi.clearAllMocks();
-    mockGetProvisionedRegions.mockResolvedValue([]);
+    mockGetProvisionedTenants.mockResolvedValue([]);
     stubMembers({});
     stubProfiles({ 'user-1': 'auth0|one', 'user-2': 'auth0|two' });
   });
@@ -149,7 +149,7 @@ describe('resolveDeletionTargets', () => {
   // lookup is consistent.
   it('maps every provisioned region to its tenant id', async () => {
     stubMembers({ orgTable: [memberRow('user-1')] });
-    mockGetProvisionedRegions.mockResolvedValue([
+    mockGetProvisionedTenants.mockResolvedValue([
       { orchestrator: { id: 'fth' }, tenantId: '42' },
       { orchestrator: { id: 'ord' }, tenantId: '43' },
     ]);
@@ -157,7 +157,7 @@ describe('resolveDeletionTargets', () => {
     const { tenantIds } = await resolveDeletionTargets(ORG);
 
     expect(tenantIds).toEqual({ fth: '42', ord: '43' });
-    expect(mockGetProvisionedRegions).toHaveBeenCalledWith(ORG, { consistent: true });
+    expect(mockGetProvisionedTenants).toHaveBeenCalledWith(ORG, { consistent: true });
   });
 
   describe('the sole-membership census', () => {

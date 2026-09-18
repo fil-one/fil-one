@@ -91,7 +91,7 @@ describe('get-role-change-preview baseHandler', () => {
           id: 'key-1',
           keyName: 'nightly backup',
           accessKeyIdSuffix: '9999',
-          region: S3Region.UsEast1,
+          regions: [S3Region.UsEast1],
           createdAt: '2026-02-01T00:00:00.000Z',
           reason: 'exceeds_role',
           excess: ['DeleteBucket'],

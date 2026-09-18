@@ -217,5 +217,5 @@ async function resolveClientContext(job: BulkDeleteJobRecord) {
     // Provisioning will not appear by itself between deliveries.
     throw new NonRetryableBulkDeleteError(`Tenant is not provisioned in region ${job.region}`);
   }
-  return orchestrator.getS3ClientContext(tenantId);
+  return orchestrator.getS3ClientContext(tenantId, job.region);
 }

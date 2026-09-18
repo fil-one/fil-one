@@ -36,7 +36,7 @@ export async function baseHandler(
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) return tenantNotReadyResponse();
 
-  const bucket = await orchestrator.getBucket(tenantId, bucketName);
+  const bucket = await orchestrator.getBucket(tenantId, region, bucketName);
   if (!bucket) {
     return new ResponseBuilder().status(404).body({ message: 'Bucket not found' }).build();
   }
