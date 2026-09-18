@@ -34,6 +34,7 @@ const mockDeleteAccessKey = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockDeleteTenant = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetTenantMetrics = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetBucketMetrics = vi.fn((_o: Record<string, unknown>) => ({}));
+const mockGetPrincipalAccess = vi.fn((_o: Record<string, unknown>) => ({}));
 
 vi.mock('@filone/orchestrator-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
@@ -47,6 +48,8 @@ vi.mock('@filone/orchestrator-client', () => ({
   getTenantsByTenantIdMetrics: (o: Record<string, unknown>) => mockGetTenantMetrics(o),
   getTenantsByTenantIdBucketsByBucketNameMetrics: (o: Record<string, unknown>) =>
     mockGetBucketMetrics(o),
+  getTenantsByTenantIdPrincipalsByPrincipalIdAccess: (o: Record<string, unknown>) =>
+    mockGetPrincipalAccess(o),
 }));
 
 vi.mock('./metrics.ts', () => ({
@@ -85,13 +88,17 @@ function fail(status: number, message = 'error') {
   return { data: undefined, error: { message }, response: { status } };
 }
 
-function buildOrchestrator(overrides?: { api?: FilOneOrchestratorConfig['api'] }) {
+function buildOrchestrator(overrides?: {
+  api?: FilOneOrchestratorConfig['api'];
+  accessModel?: FilOneOrchestratorConfig['accessModel'];
+}) {
   return createFilOneOrchestrator({
     id: 'forge',
     region: S3Region.UsEast1,
     stage: 'test',
     s3EndpointUrl: 'https://us-east-1.s3.test.example.com',
     api: overrides?.api ?? { baseUrl: 'https://api.example.com', accessToken: 'partner-key' },
+    ...(overrides?.accessModel && { accessModel: overrides.accessModel }),
   });
 }
 
@@ -527,6 +534,79 @@ describe('listBuckets', () => {
         encrypted: true,
       },
     ]);
+  });
+});
+
+describe('listBuckets on an iam region', () => {
+  const iamOrchestrator = buildOrchestrator({ accessModel: 'iam' });
+  const member = 'user-1';
+
+  // Two buckets exist in the tenant; the gateway returns both whatever key
+  // signs, because every principal holds `s3:ListAllMyBuckets`.
+  function stubTenantListing() {
+    stubS3Credentials();
+    s3Mock.on(ListBucketsCommand).resolves({
+      Buckets: [
+        { Name: 'photos', CreationDate: new Date('2026-01-01T00:00:00Z') },
+        { Name: 'backups', CreationDate: new Date('2026-01-02T00:00:00Z') },
+      ],
+    });
+  }
+
+  const reaches = (...names: string[]) => ({
+    data: { buckets: names.map((name) => ({ name, actions: ['s3:ListBucket'] })) },
+    error: undefined,
+    response: { status: 200 },
+  });
+
+  it('keeps only the buckets the member reaches', async () => {
+    stubTenantListing();
+    mockGetPrincipalAccess.mockReturnValue(reaches('photos'));
+
+    const result = await iamOrchestrator.listBuckets(tenantId, { actAs: member });
+
+    expect(result.map((b) => b.bucketName)).toStrictEqual(['photos']);
+    expect(mockGetPrincipalAccess).toHaveBeenCalledWith(
+      expect.objectContaining({ path: { tenantId, principalId: member } }),
+    );
+  });
+
+  it('returns the tenant listing untouched when no member is named', async () => {
+    stubTenantListing();
+
+    const result = await iamOrchestrator.listBuckets(tenantId);
+
+    // The fence for the roster fan-out, the usage handler and the activity
+    // feed: they omit `actAs` and must keep seeing every bucket.
+    expect(result.map((b) => b.bucketName)).toStrictEqual(['photos', 'backups']);
+    expect(mockGetPrincipalAccess).not.toHaveBeenCalled();
+  });
+
+  it('rejects rather than answering unfiltered when the access lookup fails', async () => {
+    stubTenantListing();
+    mockGetPrincipalAccess.mockReturnValue(fail(503));
+
+    // The caller's fan-out turns this into an unavailable region. Returning the
+    // tenant listing here would hand the member every bucket name it holds.
+    await expect(iamOrchestrator.listBuckets(tenantId, { actAs: member })).rejects.toThrow();
+  });
+
+  it('answers with an empty list for a member who reaches nothing', async () => {
+    stubTenantListing();
+    mockGetPrincipalAccess.mockReturnValue(reaches());
+
+    await expect(iamOrchestrator.listBuckets(tenantId, { actAs: member })).resolves.toStrictEqual(
+      [],
+    );
+  });
+
+  it('ignores the named member on a scoped-keys region', async () => {
+    stubTenantListing();
+
+    const result = await orchestrator.listBuckets(tenantId, { actAs: member });
+
+    expect(result.map((b) => b.bucketName)).toStrictEqual(['photos', 'backups']);
+    expect(mockGetPrincipalAccess).not.toHaveBeenCalled();
   });
 });
 
