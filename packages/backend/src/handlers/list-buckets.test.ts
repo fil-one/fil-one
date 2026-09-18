@@ -169,7 +169,7 @@ describe('list-buckets baseHandler (single-region)', () => {
     const event = buildEvent({ userInfo: USER_INFO });
     await baseHandler(event);
 
-    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1');
+    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1', { actAs: 'user-1' });
   });
 
   it('consults the orchestrator registry to fan out across available regions', async () => {
@@ -294,7 +294,7 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
     expect(body.buckets.map((b: { bucketName: string }) => b.bucketName)).toStrictEqual([
       'fth-bucket',
     ]);
-    expect(fth.listBuckets).toHaveBeenCalledWith('fth-t-9');
+    expect(fth.listBuckets).toHaveBeenCalledWith('fth-t-9', { actAs: 'user-1' });
     expect(aurora.isTenantReady).not.toHaveBeenCalled();
     expect(aurora.listBuckets).not.toHaveBeenCalled();
   });
@@ -346,8 +346,8 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
         },
       ],
     });
-    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1');
-    expect(fth.listBuckets).toHaveBeenCalledWith('fth-t-9');
+    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1', { actAs: 'user-1' });
+    expect(fth.listBuckets).toHaveBeenCalledWith('fth-t-9', { actAs: 'user-1' });
   });
 
   it('sorts buckets alphabetically by name across regions', async () => {
