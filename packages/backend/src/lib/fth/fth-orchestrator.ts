@@ -42,6 +42,7 @@ import type {
   StorageUsageSample,
   TenantInfo,
   TenantUsageMetrics,
+  ScopedKeysOrchestrator,
 } from '../service-orchestrator.ts';
 import { TENANT_DELETE_RETRY } from '../service-orchestrator.ts';
 import type { OrgProfileItem } from '../org-profile.ts';
@@ -92,7 +93,7 @@ export function createInstrumentedFthClient(): FthManagementClient {
 // The max-lines-per-function lint rule caps a function at 100 lines and the
 // orchestrator methods together run well past that, so they live on a class.
 // Callers only ever see createFthOrchestrator(client).
-class FthOrchestrator implements ServiceOrchestrator {
+class FthOrchestrator implements ScopedKeysOrchestrator {
   readonly id = 'fth';
   readonly region = S3Region.UsEast1;
   readonly accessModel = 'scoped-keys';
