@@ -250,6 +250,7 @@ export type {
 
 export type {
   Bucket,
+  BucketDetail,
   ListBucketsResponse,
   ListBucketsQuery,
   BucketSortKey,

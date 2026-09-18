@@ -273,7 +273,7 @@ export async function baseHandler(
   }
 
   const ops = parsed.data;
-  const { orgId } = getUserInfo(event);
+  const { orgId, userId } = getUserInfo(event);
 
   // Authorization first: what the caller's role permits does not depend on
   // their billing state, and a member denied an operation should hear that
@@ -288,7 +288,7 @@ export async function baseHandler(
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) return tenantNotReadyResponse();
 
-  const ctx = await orchestrator.getS3ClientContext(tenantId);
+  const ctx = await orchestrator.getS3ClientContext(tenantId, { actAs: userId });
 
   const items = await Promise.all(ops.map((op) => presignOp(op, ctx)));
 

@@ -26,7 +26,7 @@ export async function baseHandler(
     return new ResponseBuilder().status(400).body({ message: 'Bucket name is required' }).build();
   }
 
-  const { orgId } = getUserInfo(event);
+  const { orgId, userId } = getUserInfo(event);
 
   const region = event.queryStringParameters?.region ?? S3_REGION;
   if (!isSupportedRegion(region, process.env.FILONE_STAGE!)) {
@@ -36,7 +36,7 @@ export async function baseHandler(
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) return tenantNotReadyResponse();
 
-  const bucket = await orchestrator.getBucket(tenantId, bucketName);
+  const bucket = await orchestrator.getBucket(tenantId, bucketName, { actAs: userId });
   if (!bucket) {
     return new ResponseBuilder().status(404).body({ message: 'Bucket not found' }).build();
   }

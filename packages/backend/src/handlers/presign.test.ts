@@ -533,6 +533,18 @@ describe('presign baseHandler', () => {
 
   // ── Region routing ────────────────────────────────────────────────
 
+  describe('member-signed traffic', () => {
+    it('asks the orchestrator to act as the calling member', async () => {
+      const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }]);
+      await baseHandler(event);
+
+      // On an `iam` region this picks the member's principal-bound credential,
+      // so a URL they redeem is authorized against their own policies. Every
+      // other region ignores it.
+      expect(mockGetS3ClientContext).toHaveBeenCalledWith('aurora-t-1', { actAs: 'user-1' });
+    });
+  });
+
   describe('region routing', () => {
     it('returns 400 when region query parameter is missing', async () => {
       const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], { region: null });

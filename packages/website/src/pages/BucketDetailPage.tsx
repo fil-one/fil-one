@@ -21,7 +21,7 @@ import { getS3Endpoint, formatBytes } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
 
 import type {
-  Bucket,
+  BucketDetail,
   ListObjectVersionsResponse,
   GetBucketResponse,
   ListAccessKeysResponse,
@@ -29,7 +29,6 @@ import type {
 } from '@filone/shared';
 import { isIamRegion } from '../lib/access-model.js';
 import { apiRequest } from '../lib/api.js';
-import { formatDateTime } from '../lib/time.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
 import { useHasPermission } from '../lib/use-permissions.js';
 import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
@@ -77,7 +76,7 @@ function displayObjectCount(
 async function fetchObjectListing(
   region: S3Region,
   bucketName: string,
-  bucket: Bucket | null,
+  bucket: BucketDetail | null,
 ): Promise<ListObjectVersionsResponse> {
   if (bucket?.versioning) {
     const { items } = await batchPresign(region, [
@@ -133,7 +132,7 @@ function BucketOverview({
   region,
   bytesUsed,
 }: {
-  bucket: Bucket | null;
+  bucket: BucketDetail | null;
   region: S3Region;
   bytesUsed: number | undefined;
 }) {
@@ -145,8 +144,6 @@ function BucketOverview({
         <span className="text-zinc-700">{region}</span>
         <span className="mx-2 text-zinc-400">&bull;</span>
         <span className="text-xs text-zinc-500">{formatStorage(bytesUsed)} used</span>
-        <span className="mx-2 text-zinc-400">&bull;</span>
-        <span className="text-xs text-zinc-500">Created {formatDateTime(bucket.createdAt)}</span>
       </p>
       {/* Responsive rather than a fixed three columns: at 375px three columns
           crushed the cards, and with four of them the fourth was orphaned at a
