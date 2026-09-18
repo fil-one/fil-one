@@ -1,9 +1,12 @@
 import {
+  ConditionalCheckFailedException,
   GetItemCommand,
   TransactionCanceledException,
   TransactWriteItemsCommand,
+  UpdateItemCommand,
   type AttributeValue,
   type TransactWriteItem,
+  type Update,
 } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.ts';
@@ -108,6 +111,11 @@ export function orgNotDeletingCheck(orgId: string): TransactWriteItem {
   return orgNotDeletingCheckIn(Resource.UserInfoTable.name, orgId);
 }
 
+// A condition on a missing item reads every attribute as absent, so
+// attribute_not_exists(deleting) alone would pass for an org that has no profile
+// row. attribute_exists(pk) refuses that case instead.
+const ORG_NOT_DELETING = 'attribute_exists(pk) AND attribute_not_exists(deleting)';
+
 /**
  * The same guard against a named UserInfoTable, for operator scripts that run
  * outside `sst shell` and resolve the table name themselves.
@@ -117,10 +125,7 @@ export function orgNotDeletingCheckIn(userInfoTableName: string, orgId: string):
     ConditionCheck: {
       TableName: userInfoTableName,
       Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-      // A ConditionCheck on a missing item reads every attribute as absent, so
-      // attribute_not_exists(deleting) alone would pass for an org that has no
-      // profile row. attribute_exists(pk) refuses that case instead.
-      ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
+      ConditionExpression: ORG_NOT_DELETING,
     },
   };
 }
@@ -156,6 +161,36 @@ export async function resolveOrgName(orgId: string): Promise<string> {
 }
 
 /**
+ * Updates the org's own PROFILE row, refusing the write while the org is being
+ * deleted.
+ *
+ * The guard rides on the update rather than arriving as its own ConditionCheck:
+ * this row is both the guard's subject and the write's target, and DynamoDB
+ * refuses a transaction carrying two operations on one item.
+ */
+async function updateProfileIfNotDeleting(
+  orgId: string,
+  update: Pick<
+    Update,
+    'UpdateExpression' | 'ExpressionAttributeNames' | 'ExpressionAttributeValues'
+  >,
+): Promise<void> {
+  try {
+    await dynamo.send(
+      new UpdateItemCommand({
+        TableName: Resource.UserInfoTable.name,
+        Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+        ConditionExpression: ORG_NOT_DELETING,
+        ...update,
+      }),
+    );
+  } catch (err) {
+    if (err instanceof ConditionalCheckFailedException) throw new OrgDeletingError(orgId);
+    throw err;
+  }
+}
+
+/**
  * The attribute recording which members are registered as principals at one
  * orchestrator. Per-orchestrator, matching the `${id}TenantId` convention
  * tenant-setup writes to the same row.
@@ -186,17 +221,11 @@ export async function addRegisteredPrincipals(
   userIds: string[],
 ): Promise<void> {
   if (userIds.length === 0) return;
-  await sendDeletionGuardedWrite(orgId, [
-    {
-      Update: {
-        TableName: Resource.UserInfoTable.name,
-        Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-        UpdateExpression: 'ADD #principals :ids',
-        ExpressionAttributeNames: { '#principals': principalsAttribute(orchestratorId) },
-        ExpressionAttributeValues: { ':ids': { SS: [...new Set(userIds)] } },
-      },
-    },
-  ]);
+  await updateProfileIfNotDeleting(orgId, {
+    UpdateExpression: 'ADD #principals :ids',
+    ExpressionAttributeNames: { '#principals': principalsAttribute(orchestratorId) },
+    ExpressionAttributeValues: { ':ids': { SS: [...new Set(userIds)] } },
+  });
 }
 
 /**
@@ -209,15 +238,9 @@ export async function removeRegisteredPrincipal(
   orchestratorId: string,
   userId: string,
 ): Promise<void> {
-  await sendDeletionGuardedWrite(orgId, [
-    {
-      Update: {
-        TableName: Resource.UserInfoTable.name,
-        Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-        UpdateExpression: 'DELETE #principals :ids',
-        ExpressionAttributeNames: { '#principals': principalsAttribute(orchestratorId) },
-        ExpressionAttributeValues: { ':ids': { SS: [userId] } },
-      },
-    },
-  ]);
+  await updateProfileIfNotDeleting(orgId, {
+    UpdateExpression: 'DELETE #principals :ids',
+    ExpressionAttributeNames: { '#principals': principalsAttribute(orchestratorId) },
+    ExpressionAttributeValues: { ':ids': { SS: [userId] } },
+  });
 }

@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
+  ConditionalCheckFailedException,
   DynamoDBClient,
   GetItemCommand,
   TransactionCanceledException,
   TransactWriteItemsCommand,
+  UpdateItemCommand,
   type TransactWriteItem,
 } from '@aws-sdk/client-dynamodb';
 
@@ -17,11 +19,13 @@ vi.mock('sst', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 import {
+  addRegisteredPrincipals,
   getOrgProfile,
   isOrgDeletedOrDeleting,
   isOrgDeleting,
   orgNotDeletingCheck,
   OrgDeletingError,
+  removeRegisteredPrincipal,
   sendDeletionGuardedWrite,
 } from './org-profile.ts';
 
@@ -202,5 +206,83 @@ describe('sendDeletionGuardedWrite', () => {
     ddbMock.on(TransactWriteItemsCommand).rejects(new Error('throttled'));
 
     await expect(sendDeletionGuardedWrite('org-1', [callerItem])).rejects.toThrow('throttled');
+  });
+});
+
+describe('registered principals', () => {
+  const profileKey = { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } };
+  const notDeleting = 'attribute_exists(pk) AND attribute_not_exists(deleting)';
+
+  beforeEach(() => {
+    ddbMock.reset();
+    ddbMock.on(UpdateItemCommand).resolves({});
+  });
+
+  // The regression fence. These write the same row the deletion guard checks,
+  // and DynamoDB refuses a transaction carrying two operations on one item, so
+  // the guard has to ride on the update itself.
+  it('adds ids with one conditional update, not a transaction', async () => {
+    await addRegisteredPrincipals('org-1', 'forgeDev', ['user-1', 'user-2']);
+
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+    const calls = ddbMock.commandCalls(UpdateItemCommand);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.args[0].input).toStrictEqual({
+      TableName: 'UserInfoTable',
+      Key: profileKey,
+      ConditionExpression: notDeleting,
+      UpdateExpression: 'ADD #principals :ids',
+      ExpressionAttributeNames: { '#principals': 'forgeDevPrincipals' },
+      ExpressionAttributeValues: { ':ids': { SS: ['user-1', 'user-2'] } },
+    });
+  });
+
+  it('de-duplicates ids and writes nothing for an empty list', async () => {
+    await addRegisteredPrincipals('org-1', 'forgeDev', ['user-1', 'user-1']);
+    expect(
+      ddbMock.commandCalls(UpdateItemCommand)[0]!.args[0].input.ExpressionAttributeValues,
+    ).toStrictEqual({ ':ids': { SS: ['user-1'] } });
+
+    ddbMock.reset();
+    ddbMock.on(UpdateItemCommand).resolves({});
+    await addRegisteredPrincipals('org-1', 'forgeDev', []);
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+  });
+
+  it('removes one id with one conditional update', async () => {
+    await removeRegisteredPrincipal('org-1', 'forgeDev', 'user-1');
+
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+    const calls = ddbMock.commandCalls(UpdateItemCommand);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.args[0].input).toStrictEqual({
+      TableName: 'UserInfoTable',
+      Key: profileKey,
+      ConditionExpression: notDeleting,
+      UpdateExpression: 'DELETE #principals :ids',
+      ExpressionAttributeNames: { '#principals': 'forgeDevPrincipals' },
+      ExpressionAttributeValues: { ':ids': { SS: ['user-1'] } },
+    });
+  });
+
+  it('reports a refused condition as the org being deleted', async () => {
+    ddbMock
+      .on(UpdateItemCommand)
+      .rejects(new ConditionalCheckFailedException({ message: 'refused', $metadata: {} }));
+
+    await expect(addRegisteredPrincipals('org-1', 'forgeDev', ['user-1'])).rejects.toBeInstanceOf(
+      OrgDeletingError,
+    );
+    await expect(removeRegisteredPrincipal('org-1', 'forgeDev', 'user-1')).rejects.toBeInstanceOf(
+      OrgDeletingError,
+    );
+  });
+
+  it('rethrows unrelated failures', async () => {
+    ddbMock.on(UpdateItemCommand).rejects(new Error('throttled'));
+
+    await expect(addRegisteredPrincipals('org-1', 'forgeDev', ['user-1'])).rejects.toThrow(
+      'throttled',
+    );
   });
 });
