@@ -191,6 +191,7 @@ describe('canRetainAccessKey', () => {
       granularPermissions: ['GetObjectVersion', 'ListBucketVersions'],
     },
     recovered: {},
+    principalBound: { principalId: 'user-1' },
   };
 
   function survivors(role: string): string[] {
@@ -207,6 +208,7 @@ describe('canRetainAccessKey', () => {
       'holdsRetention',
       'holdsLegalHold',
       'readsVersions',
+      'principalBound',
     ]);
   });
 
@@ -216,6 +218,7 @@ describe('canRetainAccessKey', () => {
       'deletesBuckets',
       'createsBuckets',
       'readsVersions',
+      'principalBound',
     ]);
   });
 
@@ -224,6 +227,7 @@ describe('canRetainAccessKey', () => {
       'plainReadWrite',
       'createsBuckets',
       'readsVersions',
+      'principalBound',
     ]);
   });
 
