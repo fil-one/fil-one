@@ -28,10 +28,11 @@ import { useHasPermission } from '../lib/use-permissions.js';
  * sits inside both already, so it labels itself with the `h2` its neighbours use
  * and adds no padding of its own.
  *
- * Both exist because `/organization` does not. An org with no members surface
- * has no Organization page to hold a Billing tab, and billing is the one thing
- * on that page such an org still needs — so `/billing` stays a page of its own
- * there. See `routes/_app/billing.tsx`.
+ * Only the `page` chrome has a caller today: billing is its own `/billing` page
+ * for every org, reached from the org switcher. The `tab` variant is what the
+ * unified Organization page used before it split into `/members` and `/billing`;
+ * it is kept here so the tab-vs-page seam is a single prop away if billing is
+ * ever nested again.
  */
 export type BillingChrome = 'page' | 'tab';
 

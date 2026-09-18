@@ -34,6 +34,7 @@ import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
 import { useKeyActionScope } from '../lib/use-key-scope.js';
 import { LIST_GC_TIME, LIST_STALE_TIME, queryKeys } from '../lib/query-client.js';
 import { batchPresign } from '../lib/use-presign.js';
+import { useOrgSlug } from '../lib/use-org-path.js';
 import {
   parseListObjectVersionsResponse,
   parseListObjectsResponse,
@@ -336,6 +337,7 @@ export type BucketDetailPageProps = {
 export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPageProps) {
   const s3Endpoint = getS3Endpoint(region, FILONE_STAGE);
   const navigate = useNavigate();
+  const orgSlug = useOrgSlug();
   const queryClient = useQueryClient();
   const currentPrefix = prefix ?? '';
   const mayUpload = useHasPermission('objects.write');
@@ -346,13 +348,13 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   const setCurrentPrefix = useCallback(
     (newPrefix: string) => {
       void navigate({
-        to: '/buckets/$bucketName',
-        params: { bucketName },
+        to: '/$orgSlug/buckets/$bucketName',
+        params: { orgSlug, bucketName },
         search: { region, ...(newPrefix ? { prefix: newPrefix } : {}) },
         replace: true,
       });
     },
-    [navigate, bucketName, region],
+    [navigate, orgSlug, bucketName, region],
   );
 
   const {
@@ -459,8 +461,8 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
                 iconPosition="left"
                 onClick={() =>
                   void navigate({
-                    to: '/buckets/$bucketName/upload',
-                    params: { bucketName },
+                    to: '/$orgSlug/buckets/$bucketName/upload',
+                    params: { orgSlug, bucketName },
                     search: { region },
                   })
                 }

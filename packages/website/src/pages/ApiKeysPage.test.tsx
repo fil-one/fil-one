@@ -15,7 +15,7 @@ vi.mock('../lib/api.js', () => ({
   getUsage: () => mockGetUsage(),
 }));
 
-vi.mock('@tanstack/react-router', () => ({ useNavigate: () => vi.fn() }));
+vi.mock('@tanstack/react-router', () => ({ useNavigate: () => vi.fn(), useParams: () => ({}) }));
 
 import { ApiKeysPage } from './ApiKeysPage.js';
 import { ToastProvider } from '../components/Toast/ToastProvider.js';

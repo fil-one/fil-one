@@ -178,28 +178,9 @@ describe('MembersInvitations', () => {
     expect(await openInviteDialog()).toBeInTheDocument();
   });
 
-  it('drops the empty state call to action outside the beta', async () => {
-    renderSection(OrgRole.Owner, [], { orgsBeta: false });
-
-    const card = await screen.findByTestId('invitations-empty');
-    expect(within(card).queryByRole('button', { name: 'Invite member' })).toBeNull();
-  });
-
-  it('withdraws the form outside the beta and keeps the list that revokes', async () => {
-    renderSection(OrgRole.Owner, [invitation({ email: 'waiting@example.com' })], {
-      orgsBeta: false,
-    });
-
-    // `accept-invitation` carries no beta gate, so the tokens this org already
-    // issued stay redeemable after the flag goes. The form is the only half the
-    // flag decides; the revoke button is the only way to withdraw a live token.
-    expect(await screen.findAllByTestId('invitation-row')).toHaveLength(1);
-    expect(
-      screen.getByRole('button', { name: 'Revoke invitation for waiting@example.com' }),
-    ).toBeInTheDocument();
-    expect(screen.queryByLabelText('Email address')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Send invitation' })).not.toBeInTheDocument();
-  });
+  // Invitations are generally available now: the old `orgsBeta` gate that
+  // withdrew the empty-state CTA and the form for orgs outside the beta is gone,
+  // so `members.manage` alone decides. See `use-member-scope`'s `mayInvite`.
 
   it('tells an expired invitation from one nobody received', async () => {
     renderSection(OrgRole.Owner, [

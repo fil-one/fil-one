@@ -36,6 +36,15 @@ vi.mock('jose', () => ({
   createRemoteJWKSet: vi.fn((_url: unknown) => 'mock-jwks'),
 }));
 
+// Every other test in this file fixes an org profile with no `slug` — the
+// pre-backfill shape this module exists to repair — so it defaults to a
+// no-op that leaves the response exactly as it read before this backfill
+// existed. The one test that cares about the backfill itself overrides it.
+const mockEnsureOrgSlug = vi.fn();
+vi.mock('../lib/org-slug.ts', () => ({
+  ensureOrgSlug: (...args: unknown[]) => mockEnsureOrgSlug(...args),
+}));
+
 const ddbMock = mockClient(DynamoDBClient);
 
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
@@ -90,7 +99,7 @@ function ownerTail(orgName: string) {
     userId: MOCK_USER_ID,
     role: OrgRole.Owner,
     permissions: [...ROLE_PERMISSIONS[OrgRole.Owner]],
-    memberships: [{ orgId: MOCK_ORG_ID, orgName, role: OrgRole.Owner }],
+    memberships: [{ orgId: MOCK_ORG_ID, orgName, slug: '', role: OrgRole.Owner }],
     orgsBeta: false,
   };
 }
@@ -126,6 +135,7 @@ describe('GET /api/me handler', () => {
 
     mockGetMfaEnrollments.mockResolvedValue([]);
     mockGetPasskeyAuthenticators.mockResolvedValue([]);
+    mockEnsureOrgSlug.mockResolvedValue('');
 
     // Auth middleware: resolve existing user
     ddbMock
@@ -182,6 +192,8 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
+        slug: '',
+        nameConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         mfaEnrollments: [],
@@ -190,6 +202,43 @@ describe('GET /api/me handler', () => {
         ...ownerTail('Example Corp'),
       }),
     });
+  });
+
+  it('backfills a slug for an org profile that predates the field', async () => {
+    profileResolves();
+    mockEnsureOrgSlug.mockResolvedValue('example-corp');
+
+    const result = await handler(authenticatedEvent(), buildContext());
+
+    expect(mockEnsureOrgSlug).toHaveBeenCalledWith({ orgId: MOCK_ORG_ID, name: 'Example Corp' });
+    const body = JSON.parse((result as { body: string }).body);
+    expect(body.slug).toBe('example-corp');
+    expect(body.memberships).toContainEqual(
+      expect.objectContaining({ orgId: MOCK_ORG_ID, slug: 'example-corp' }),
+    );
+  });
+
+  it('does not backfill a slug an org profile already has', async () => {
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+      })
+      .resolves({
+        Item: {
+          pk: { S: `ORG#${MOCK_ORG_ID}` },
+          sk: { S: 'PROFILE' },
+          name: { S: 'Example Corp' },
+          slug: { S: 'example-corp' },
+          auroraSetupStatus: { S: FINAL_SETUP_STATUS },
+        },
+      });
+
+    const result = await handler(authenticatedEvent(), buildContext());
+
+    expect(mockEnsureOrgSlug).not.toHaveBeenCalled();
+    const body = JSON.parse((result as { body: string }).body);
+    expect(body.slug).toBe('example-corp');
   });
 
   it('returns 200 with emailVerified false for unverified users (verified-email gate opt-out)', async () => {
@@ -205,6 +254,8 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
+        slug: '',
+        nameConfirmed: true,
         emailVerified: false,
         email: MOCK_EMAIL,
         mfaEnrollments: [],
@@ -230,6 +281,8 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: '',
+        slug: '',
+        nameConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         mfaEnrollments: [],
@@ -273,6 +326,8 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
+        slug: '',
+        nameConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         mfaEnrollments: [
@@ -310,6 +365,8 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
+        slug: '',
+        nameConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         mfaEnrollments: [],
@@ -357,6 +414,8 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
+        slug: '',
+        nameConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         mfaEnrollments: [],
@@ -433,7 +492,7 @@ describe('GET /api/me handler', () => {
         userId: string;
         role: OrgRole;
         permissions: string[];
-        memberships: Array<{ orgId: string; orgName: string; role: OrgRole }>;
+        memberships: Array<{ orgId: string; orgName: string; slug: string; role: OrgRole }>;
       };
     }
 
@@ -455,7 +514,7 @@ describe('GET /api/me handler', () => {
       expect(body.role).toBe(OrgRole.ReadOnly);
       expect(body.permissions).toStrictEqual([...ROLE_PERMISSIONS[OrgRole.ReadOnly]]);
       expect(body.memberships).toStrictEqual([
-        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', role: OrgRole.ReadOnly },
+        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', slug: '', role: OrgRole.ReadOnly },
       ]);
     });
 
@@ -474,8 +533,8 @@ describe('GET /api/me handler', () => {
       const body = parseBody(await handler(authenticatedEvent(), buildContext()));
 
       expect(body.memberships).toStrictEqual([
-        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', role: OrgRole.Owner },
-        { orgId: secondOrgId, orgName: 'Second Corp', role: OrgRole.Member },
+        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', slug: '', role: OrgRole.Owner },
+        { orgId: secondOrgId, orgName: 'Second Corp', slug: '', role: OrgRole.Member },
       ]);
     });
 
@@ -516,8 +575,8 @@ describe('GET /api/me handler', () => {
 
       expect((result as { statusCode: number }).statusCode).toBe(200);
       expect(parseBody(result).memberships).toStrictEqual([
-        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', role: OrgRole.Owner },
-        { orgId: secondOrgId, orgName: '', role: OrgRole.Member },
+        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', slug: '', role: OrgRole.Owner },
+        { orgId: secondOrgId, orgName: '', slug: '', role: OrgRole.Member },
       ]);
       consoleError.mockRestore();
     });

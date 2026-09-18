@@ -1,23 +1,10 @@
 import { createRoute } from '@tanstack/react-router';
-
 import { Route as appRoute } from '../_app';
-import { CreateApiKeyPage } from '../../pages/CreateApiKeyPage';
-import { RequirePermissionPage } from '../../components/RequirePermissionPage';
+import { redirectToActiveOrgPath } from '../../lib/legacy-route-redirect.js';
 
-function CreateApiKeyRoute() {
-  return (
-    <RequirePermissionPage
-      permission="keys.create"
-      title="Create access key"
-      deniedMessage="Minting access keys is not part of your role. Ask a member who can create keys for one scoped to what you need."
-    >
-      <CreateApiKeyPage />
-    </RequirePermissionPage>
-  );
-}
-
+/** The pre-org-scoping URL. See `dashboard.tsx` for why this stays. */
 export const Route = createRoute({
   path: '/api-keys/create',
   getParentRoute: () => appRoute,
-  component: CreateApiKeyRoute,
+  beforeLoad: ({ location }) => redirectToActiveOrgPath(location.href),
 });

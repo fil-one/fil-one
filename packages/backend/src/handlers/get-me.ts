@@ -4,6 +4,7 @@ import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { MeResponse } from '@filone/shared';
 import { permissionsForRole } from '@filone/shared';
 import { getOrgProfile } from '../lib/org-profile.ts';
+import { ensureOrgSlug } from '../lib/org-slug.ts';
 import { summarizeMemberships } from '../lib/org-membership.ts';
 import { hasRagAccess } from '../middleware/rag-access.ts';
 import { hasOrgsBetaAccess } from '../lib/orgs-beta.ts';
@@ -30,7 +31,18 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
 
   // The switcher names the active org from this same read rather than a second
   // one, so the memberships join the round of reads already in flight.
-  const activeOrgProfile = getOrgProfile(orgId);
+  //
+  // Chained here rather than awaited on its own: an org profile that predates
+  // the `slug` field is backfilled on the spot, so `redirectToActiveOrgPath`
+  // (the Auth0 callback, and every pre-scoping bookmark) always has one to
+  // route to rather than depending on the standalone backfill script having
+  // been run for this stage first. Chaining keeps it off the critical path for
+  // every other org, which already has one and returns immediately.
+  const activeOrgProfile = getOrgProfile(orgId).then(async (profile) => {
+    if (!profile || profile.slug?.S) return profile;
+    const slug = await ensureOrgSlug({ orgId, name: profile.name?.S ?? '' });
+    return { ...profile, slug: { S: slug } };
+  });
 
   const [orgProfile, enrollments, passkeys, ragAccess, orgsBeta, memberships] = await Promise.all([
     activeOrgProfile,
@@ -45,15 +57,27 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       userId,
       activeOrgId: orgId,
       activeRole: membership?.role,
-      activeOrgName: activeOrgProfile.then((profile) => profile?.name?.S ?? ''),
+      activeOrgSummary: activeOrgProfile.then((profile) => ({
+        name: profile?.name?.S ?? '',
+        slug: profile?.slug?.S ?? '',
+        ...(profile?.logoUrl?.S ? { logoUrl: profile.logoUrl.S } : {}),
+      })),
     }),
   ]);
 
   const orgName = orgProfile?.name?.S ?? '';
+  const slug = orgProfile?.slug?.S ?? '';
+  const orgLogoUrl = orgProfile?.logoUrl?.S;
+  // Absent means an organization that predates the field, which is treated as
+  // named: only an explicit false sends the caller through the naming step.
+  const nameConfirmed = orgProfile?.nameConfirmed?.BOOL !== false;
 
   const body: MeResponse = {
     orgId,
     orgName,
+    slug,
+    ...(orgLogoUrl ? { logoUrl: orgLogoUrl } : {}),
+    nameConfirmed,
     emailVerified,
     email,
     name,
