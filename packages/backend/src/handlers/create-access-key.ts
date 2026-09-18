@@ -25,6 +25,7 @@ import {
 } from '../lib/key-mint.ts';
 import type { KeyMinter, MintedKey } from '../lib/key-mint.ts';
 import { listOrgAccessKeys } from '../lib/member-keys.ts';
+import { mintPrincipalKey, principalKeyOrchestrator } from '../lib/mint-principal-key.ts';
 import type { AuditCorrelation } from '../lib/audit.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
@@ -52,6 +53,11 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
+  // A region serving the `iam` access model mints a key bound to the caller's
+  // principal, which takes a different body and no creator-authority cap.
+  const iamOrchestrator = principalKeyOrchestrator(event.body);
+  if (iamOrchestrator) return mintPrincipalKey(event, iamOrchestrator);
+
   const parsed = parseJsonBody(event.body, CreateAccessKeySchema);
   if ('error' in parsed) return parsed.error;
 
