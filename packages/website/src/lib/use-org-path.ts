@@ -21,7 +21,7 @@ function orgSlugParam(): string | undefined {
  * Paths that live outside `$orgSlug`, reached before an org context exists at
  * all: signing in, verifying an email, accepting an invite, or naming the org
  * on `/welcome` (before that org's slug is worth putting in a URL for a caller
- * who hasn't seen it yet). `/new` is NOT here — the org already has a slug by
+ * who hasn't seen it yet). `/get-started` is NOT here — the org already has a slug by
  * then, same as every other real page. `prefixWithOrg` leaves these exactly as
  * written rather than stapling a slug onto them.
  */
