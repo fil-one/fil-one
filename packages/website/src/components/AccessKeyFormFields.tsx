@@ -4,6 +4,7 @@ import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 import { AccessKeyBucketScopeFields } from './AccessKeyBucketScopeFields.js';
 import { AccessKeyExpirationFields } from './AccessKeyExpirationFields.js';
 import { AccessKeyPermissionsFields } from './AccessKeyPermissionsFields.js';
+import { Alert } from './Alert.js';
 import { FormField } from './FormField.js';
 import { Input } from './Input.js';
 import { RegionSelect } from './RegionSelect.js';
@@ -83,34 +84,46 @@ export function AccessKeyFormFields({
         </FormField>
       )}
 
-      {/* Permissions */}
-      <FormField
-        label="What can this key do?"
-        error={permissions.length === 0 ? 'Select at least one permission.' : undefined}
-      >
-        <AccessKeyPermissionsFields
-          value={permissions}
-          onChange={setPermissions}
-          granularPermissions={granularPermissions}
-          onGranularPermissionsChange={setGranularPermissions}
-          region={region}
+      {/* On an `iam` region the key belongs to the caller and carries nothing
+          of its own, so there is no permission set or bucket scope to ask for. */}
+      {form.iam ? (
+        <Alert
+          variant="blue"
+          assertive={false}
+          description="This key acts as you. What it can reach is decided by each bucket's policy."
         />
-      </FormField>
+      ) : (
+        <>
+          {/* Permissions */}
+          <FormField
+            label="What can this key do?"
+            error={permissions.length === 0 ? 'Select at least one permission.' : undefined}
+          >
+            <AccessKeyPermissionsFields
+              value={permissions}
+              onChange={setPermissions}
+              granularPermissions={granularPermissions}
+              onGranularPermissionsChange={setGranularPermissions}
+              region={region}
+            />
+          </FormField>
 
-      {/* Bucket scope */}
-      <FormField
-        label="Which buckets can this key access?"
-        description="Restrict access to specific buckets or allow all buckets in this region"
-      >
-        <AccessKeyBucketScopeFields
-          bucketScope={bucketScope}
-          onBucketScopeChange={setBucketScope}
-          selectedBuckets={selectedBuckets}
-          onSelectedBucketsChange={setSelectedBuckets}
-          pinnedBucket={pinnedBucket}
-          region={region}
-        />
-      </FormField>
+          {/* Bucket scope */}
+          <FormField
+            label="Which buckets can this key access?"
+            description="Restrict access to specific buckets or allow all buckets in this region"
+          >
+            <AccessKeyBucketScopeFields
+              bucketScope={bucketScope}
+              onBucketScopeChange={setBucketScope}
+              selectedBuckets={selectedBuckets}
+              onSelectedBucketsChange={setSelectedBuckets}
+              pinnedBucket={pinnedBucket}
+              region={region}
+            />
+          </FormField>
+        </>
+      )}
 
       {/* Expiration */}
       <FormField
