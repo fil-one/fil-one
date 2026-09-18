@@ -35,6 +35,7 @@ const mockDeleteTenant = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetTenantMetrics = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetBucketMetrics = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetPrincipalAccess = vi.fn((_o: Record<string, unknown>) => ({}));
+const mockPutPrincipal = vi.fn((_o: Record<string, unknown>) => ({}));
 
 vi.mock('@filone/orchestrator-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
@@ -50,6 +51,7 @@ vi.mock('@filone/orchestrator-client', () => ({
     mockGetBucketMetrics(o),
   getTenantsByTenantIdPrincipalsByPrincipalIdAccess: (o: Record<string, unknown>) =>
     mockGetPrincipalAccess(o),
+  putTenantsByTenantIdPrincipalsByPrincipalId: (o: Record<string, unknown>) => mockPutPrincipal(o),
 }));
 
 vi.mock('./metrics.ts', () => ({
