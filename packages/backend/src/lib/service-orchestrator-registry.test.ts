@@ -75,7 +75,9 @@ describe('getAvailableOrchestrators', () => {
   it('includes both Forge orchestrators on non-production stages', () => {
     process.env.FILONE_STAGE = Stage.Staging;
     const orchestrators = getAvailableOrchestrators();
-    expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'fth', 'forge', 'forgeDev']);
+    // Order follows `getAvailableRegions`, which groups by continent
+    // (eu-west-1, eu-central-3, us-east-1, us-east-9) rather than by service.
+    expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'forge', 'fth', 'forgeDev']);
   });
 
   // Two answers to the same question: the console reads the region's model
