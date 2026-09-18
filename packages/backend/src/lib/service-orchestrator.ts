@@ -33,6 +33,21 @@ export interface OrchestratorRequestOptions {
 }
 
 /**
+ * A call the console makes on behalf of one member, rather than tenant-wide.
+ *
+ * Omitting `actAs` — what the roster fan-out, the usage handler and the
+ * activity feed all do — asks for the tenant's whole set, as before.
+ */
+export interface S3ActorOptions extends OrchestratorRequestOptions {
+  /**
+   * The console user the call acts for. Honoured by a region serving the `iam`
+   * access model and ignored elsewhere, so a region that flips models cannot
+   * break its callers in either direction.
+   */
+  actAs?: string;
+}
+
+/**
  * Object-lock and retention state. Neither orchestrator's bucket *list* carries
  * it, and a per-bucket read on every row would mean an N+1 on a page every user
  * hits, so it's loaded only for a single bucket (see {@link BucketDetails}).
@@ -261,10 +276,7 @@ export interface OrchestratorCore {
     bucketName: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void>;
-  listBuckets(
-    tenantId: string,
-    requestOptions?: OrchestratorRequestOptions,
-  ): Promise<BucketSummary[]>;
+  listBuckets(tenantId: string, requestOptions?: S3ActorOptions): Promise<BucketSummary[]>;
   getBucket(
     tenantId: string,
     bucketName: string,

@@ -39,6 +39,7 @@ import type {
   IssuedAccessKey,
   OrchestratorCore,
   OrchestratorRequestOptions,
+  S3ActorOptions,
   ScopedKeysOrchestrator,
   ServiceOrchestrator,
   StorageUsageSample,
@@ -585,6 +586,35 @@ class IamFilOneOrchestrator extends FilOneOrchestrator implements IamOrchestrato
     const tenantId = await super.ensureTenantReady(orgId, opts);
     if (tenantId) await registerMemberPrincipals(this.iam, this.id, orgId, tenantId);
     return tenantId;
+  }
+
+  /**
+   * The tenant's buckets, or one member's when the caller names a member.
+   *
+   * The console filters because the data plane does not: every principal holds
+   * `s3:ListAllMyBuckets`, so the gateway answers with the tenant's whole set
+   * by design (RFC#30) and a principal-bound key would return the same names.
+   * The reachable set comes from the storage system's own evaluation, so it
+   * agrees with its last policy write.
+   *
+   * A bucket carrying no policy is reachable by nobody, Owners included. That
+   * is the fail-closed reading, and the console writes a policy on every bucket
+   * it creates.
+   */
+  override async listBuckets(
+    tenantId: string,
+    requestOptions?: S3ActorOptions,
+  ): Promise<BucketSummary[]> {
+    if (!requestOptions?.actAs) return super.listBuckets(tenantId, requestOptions);
+    // One promise, so a failed access lookup rejects the whole leg and the
+    // caller's fan-out reports the region as unavailable. Answering unfiltered
+    // would hand the member every bucket name in the tenant.
+    const [buckets, access] = await Promise.all([
+      super.listBuckets(tenantId, requestOptions),
+      this.iam.resolveMemberAccess(tenantId, requestOptions.actAs),
+    ]);
+    const reachable = new Set(access.map((entry) => entry.bucketName));
+    return buckets.filter((bucket) => reachable.has(bucket.bucketName));
   }
 }
 
