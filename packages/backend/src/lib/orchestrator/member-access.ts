@@ -5,8 +5,13 @@
 
 import { AccessKeyAlreadyExistsError } from '../errors.ts';
 import type { IamMethods } from '../iam-orchestrator.ts';
-import { getMemberS3Credentials, memberConsoleKeyName } from '../s3-credentials.ts';
-import type { S3Credentials } from '../s3-credentials.ts';
+import {
+  evictMemberS3Credentials,
+  getMemberS3Credentials,
+  memberConsoleKeyName,
+} from '../s3-credentials.ts';
+import type { MemberCredentialRef, S3Credentials } from '../s3-credentials.ts';
+import { isRejectedCredentialError } from '../s3-errors.ts';
 import type { BucketSummary, S3ActorOptions } from '../service-orchestrator.ts';
 
 /** What minting needs from the orchestrator that owns the tenant. */
@@ -105,4 +110,30 @@ export async function reachableBuckets(
   const access = await iam.resolveMemberAccess(tenantId, userId);
   const reachable = new Set(access.map((entry) => entry.bucketName));
   return buckets.filter((bucket) => reachable.has(bucket.bucketName));
+}
+
+/**
+ * Runs an S3 operation signed as a member, retrying once on a refused
+ * credential.
+ *
+ * The storage system can retire a member's key without telling the console, and
+ * the cached copy would otherwise keep failing until it ages out. Eviction only
+ * drops the cache entry, so the retry re-reads SSM and mints only if the
+ * parameter is gone too.
+ *
+ * A presigned URL gets no retry here: its 403 is raised against the browser long
+ * after the console has stopped looking, which is why the cache carries a
+ * maximum age as well.
+ */
+export async function withFreshMemberCredential<T>(
+  ref: MemberCredentialRef,
+  run: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (!isRejectedCredentialError(err)) throw err;
+    evictMemberS3Credentials(ref);
+    return run();
+  }
 }

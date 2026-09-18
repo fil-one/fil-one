@@ -77,7 +77,7 @@ export async function baseHandler(
       );
   if (denied) return denied;
 
-  const { orgId } = getUserInfo(event);
+  const { orgId, userId } = getUserInfo(event);
 
   const region = event.queryStringParameters?.region ?? S3_REGION;
   if (!isSupportedRegion(region, process.env.FILONE_STAGE!)) {
@@ -91,7 +91,7 @@ export async function baseHandler(
   if (!tenantId) return tenantNotReadyResponse();
 
   // Enforce tenant/org scope: a bucket the caller's tenant does not own is 404.
-  const bucket = await orchestrator.getBucket(tenantId, bucketName);
+  const bucket = await orchestrator.getBucket(tenantId, bucketName, { actAs: userId });
   if (!bucket) {
     return new ResponseBuilder()
       .status(404)

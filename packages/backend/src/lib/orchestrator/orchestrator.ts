@@ -56,6 +56,7 @@ import {
   getBucketVersioning,
   getBucketObjectLock,
 } from '../s3-bucket-operations.ts';
+import { isNoSuchBucketError } from '../s3-errors.ts';
 import { getConsoleS3Credentials } from '../s3-credentials.ts';
 import type { S3Credentials } from '../s3-credentials.ts';
 import {
@@ -347,26 +348,37 @@ export abstract class FilOneOrchestrator implements OrchestratorCore {
     }));
   }
 
+  /**
+   * One bucket's details, or null when the caller cannot reach it.
+   *
+   * Existence comes from the bucket-addressed reads themselves rather than from
+   * a tenant-wide listing. The listing answered for the tenant, so it said yes
+   * for a bucket the caller could not open, and it cost a call per bucket in
+   * the tenant to answer a question about one.
+   */
   async getBucket(
     tenantId: string,
     bucketName: string,
-    requestOptions?: OrchestratorRequestOptions,
+    requestOptions?: S3ActorOptions,
   ): Promise<BucketDetails | null> {
     const ctx = await this.getS3ClientContext(tenantId, requestOptions);
     const s3 = createS3Client(ctx);
-    const { buckets } = await s3ListBuckets(s3, requestOptions);
-    const match = buckets.find((b) => b.name === bucketName);
-    if (!match) return null;
 
-    const [versioning, lock] = await Promise.all([
-      getBucketVersioning(s3, bucketName, requestOptions),
-      getBucketObjectLock(s3, bucketName, requestOptions),
-    ]);
+    let versioning: boolean;
+    let lock: Awaited<ReturnType<typeof getBucketObjectLock>>;
+    try {
+      [versioning, lock] = await Promise.all([
+        getBucketVersioning(s3, bucketName, requestOptions),
+        getBucketObjectLock(s3, bucketName, requestOptions),
+      ]);
+    } catch (err) {
+      if (isNoSuchBucketError(err)) return null;
+      throw err;
+    }
 
     return {
       bucketName,
       region: this.region,
-      createdAt: match.createdAt,
       isPublic: false,
       versioning,
       encrypted: true,

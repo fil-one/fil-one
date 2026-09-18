@@ -146,7 +146,9 @@ describe('get-bucket baseHandler', () => {
     event.pathParameters = { name: 'my-bucket' };
     await baseHandler(event);
 
-    expect(orch.getBucket).toHaveBeenCalledWith(tenantFor('aurora', 'org-1'), 'my-bucket');
+    expect(orch.getBucket).toHaveBeenCalledWith(tenantFor('aurora', 'org-1'), 'my-bucket', {
+      actAs: 'user-1',
+    });
   });
 
   it('returns 404 when orchestrator.getBucket returns null', async () => {

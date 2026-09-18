@@ -77,7 +77,12 @@ export interface BucketSummary {
 export interface BucketDetails extends BucketProtection {
   bucketName: string;
   region: S3Region;
-  createdAt: string;
+  /**
+   * Absent where existence is proved by a bucket-addressed read rather than a
+   * tenant listing: S3 carries no per-bucket creation date and the Management
+   * API has none either. The bucket list still carries it.
+   */
+  createdAt?: string;
   isPublic: boolean;
   versioning: boolean;
   encrypted: boolean;
@@ -280,7 +285,7 @@ export interface OrchestratorCore {
   getBucket(
     tenantId: string,
     bucketName: string,
-    requestOptions?: OrchestratorRequestOptions,
+    requestOptions?: S3ActorOptions,
   ): Promise<BucketDetails | null>;
 
   /**
