@@ -1,12 +1,12 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { ApiErrorCode, S3_REGION } from '@filone/shared';
+import { ApiErrorCode, isSupportedRegion, S3_REGION } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import { BucketNotEmptyError } from '../lib/errors.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
-import { ResponseBuilder } from '../lib/response-builder.ts';
+import { ResponseBuilder, unsupportedRegionResponse } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -28,7 +28,13 @@ export async function baseHandler(
 
   const { orgId } = getUserInfo(event);
 
-  const orchestrator = getOrchestratorForRegion(S3_REGION);
+  // The region the bucket lives in; a bucket is served by exactly one.
+  const region = event.queryStringParameters?.region ?? S3_REGION;
+  if (!isSupportedRegion(region, process.env.FILONE_STAGE!)) {
+    return unsupportedRegionResponse(region);
+  }
+
+  const orchestrator = getOrchestratorForRegion(region);
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) {
     return new ResponseBuilder()
@@ -38,7 +44,7 @@ export async function baseHandler(
   }
 
   try {
-    await orchestrator.deleteBucket(tenantId, bucketName);
+    await orchestrator.deleteBucket(tenantId, region, bucketName);
   } catch (err) {
     if (err instanceof BucketNotEmptyError) {
       return new ResponseBuilder()

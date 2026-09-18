@@ -17,26 +17,28 @@ const auroraIsTenantReady = vi.fn();
 const auroraDeleteAccessKey = vi.fn();
 const fthIsTenantReady = vi.fn();
 const fthDeleteAccessKey = vi.fn();
-const mockGetOrchestratorForRegion = vi.fn();
+const mockFindOrchestratorById = vi.fn();
 
 const auroraMock = {
   id: 'aurora',
-  region: 'eu-west-1',
+  regions: ['eu-west-1'],
   isTenantReady: (...args: unknown[]) => auroraIsTenantReady(...args),
   deleteAccessKey: (...args: unknown[]) => auroraDeleteAccessKey(...args),
 };
 
 const fthMock = {
   id: 'fth',
-  region: 'us-east-1',
+  regions: ['us-east-1'],
   isTenantReady: (...args: unknown[]) => fthIsTenantReady(...args),
   deleteAccessKey: (...args: unknown[]) => fthDeleteAccessKey(...args),
 };
 
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
-  getOrchestratorForRegion: (region: string) => {
-    mockGetOrchestratorForRegion(region);
-    return region === 'us-east-1' ? fthMock : auroraMock;
+  findOrchestratorById: (id: string) => {
+    mockFindOrchestratorById(id);
+    if (id === 'fth') return fthMock;
+    if (id === 'aurora') return auroraMock;
+    return undefined;
   },
 }));
 
@@ -69,7 +71,12 @@ function eventWithKey(keyId: string | undefined, role?: OrgRole): AuthenticatedE
   }) as unknown as AuthenticatedEvent;
 }
 
-function accessKeyItem(region?: string, createdBy?: string, recovered?: boolean) {
+function accessKeyItem(
+  region?: string,
+  createdBy?: string,
+  recovered?: boolean,
+  orchestratorId?: string,
+) {
   const item: Record<string, { S: string } | { BOOL: boolean }> = {
     pk: { S: 'ORG#org-1' },
     sk: { S: `ACCESSKEY#${KEY_ID}` },
@@ -79,6 +86,7 @@ function accessKeyItem(region?: string, createdBy?: string, recovered?: boolean)
     status: { S: 'active' },
   };
   if (region) item.region = { S: region };
+  if (orchestratorId) item.orchestratorId = { S: orchestratorId };
   if (createdBy) item.createdBy = { S: createdBy };
   if (recovered) item.recovered = { BOOL: true };
   return item;
@@ -128,7 +136,36 @@ describe('delete-access-key baseHandler', () => {
     expect(fthDeleteAccessKey).not.toHaveBeenCalled();
   });
 
-  it('routes Aurora rows (region=eu-west-1) to the Aurora orchestrator', async () => {
+  it('routes rows naming a network to that network', async () => {
+    ddbMock
+      .on(GetItemCommand)
+      .resolves({ Item: accessKeyItem(undefined, undefined, false, 'fth') });
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+    fthIsTenantReady.mockReturnValue('fth-t-1');
+    fthDeleteAccessKey.mockResolvedValue(undefined);
+
+    const result = (await baseHandler(eventWithKey(KEY_ID))) as { statusCode: number };
+
+    expect(result.statusCode).toBe(204);
+    expect(mockFindOrchestratorById).toHaveBeenCalledWith('fth');
+    expect(fthDeleteAccessKey).toHaveBeenCalledWith('fth-t-1', KEY_ID);
+    expect(auroraDeleteAccessKey).not.toHaveBeenCalled();
+  });
+
+  it('answers 400 and leaves the row when the network on the row is not available', async () => {
+    ddbMock
+      .on(GetItemCommand)
+      .resolves({ Item: accessKeyItem(undefined, undefined, false, 'forge') });
+
+    const result = (await baseHandler(eventWithKey(KEY_ID))) as { statusCode: number };
+
+    expect(result.statusCode).toBe(400);
+    expect(auroraDeleteAccessKey).not.toHaveBeenCalled();
+    expect(fthDeleteAccessKey).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+  });
+
+  it('routes legacy Aurora rows (region=eu-west-1) to the Aurora orchestrator', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: accessKeyItem('eu-west-1') });
     ddbMock.on(TransactWriteItemsCommand).resolves({});
     auroraIsTenantReady.mockReturnValue('aurora-t-1');
@@ -137,13 +174,13 @@ describe('delete-access-key baseHandler', () => {
     const result = (await baseHandler(eventWithKey(KEY_ID))) as { statusCode: number };
 
     expect(result.statusCode).toBe(204);
-    expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('eu-west-1');
+    expect(mockFindOrchestratorById).toHaveBeenCalledWith('aurora');
     expect(auroraDeleteAccessKey).toHaveBeenCalledWith('aurora-t-1', KEY_ID);
     expect(fthDeleteAccessKey).not.toHaveBeenCalled();
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
   });
 
-  it('routes FTH rows (region=us-east-1) to the FTH orchestrator', async () => {
+  it('routes legacy FTH rows (region=us-east-1) to the FTH orchestrator', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: accessKeyItem('us-east-1') });
     ddbMock.on(TransactWriteItemsCommand).resolves({});
     fthIsTenantReady.mockReturnValue('fth-t-1');
@@ -152,12 +189,12 @@ describe('delete-access-key baseHandler', () => {
     const result = (await baseHandler(eventWithKey(KEY_ID))) as { statusCode: number };
 
     expect(result.statusCode).toBe(204);
-    expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('us-east-1');
+    expect(mockFindOrchestratorById).toHaveBeenCalledWith('fth');
     expect(fthDeleteAccessKey).toHaveBeenCalledWith('fth-t-1', KEY_ID);
     expect(auroraDeleteAccessKey).not.toHaveBeenCalled();
   });
 
-  it('falls back to Aurora for legacy rows without a region attribute', async () => {
+  it('falls back to Aurora for legacy rows naming neither network nor region', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: accessKeyItem() });
     ddbMock.on(TransactWriteItemsCommand).resolves({});
     auroraIsTenantReady.mockReturnValue('aurora-t-1');
@@ -166,7 +203,7 @@ describe('delete-access-key baseHandler', () => {
     const result = (await baseHandler(eventWithKey(KEY_ID))) as { statusCode: number };
 
     expect(result.statusCode).toBe(204);
-    expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('eu-west-1');
+    expect(mockFindOrchestratorById).toHaveBeenCalledWith('aurora');
     expect(auroraDeleteAccessKey).toHaveBeenCalledWith('aurora-t-1', KEY_ID);
   });
 
@@ -212,7 +249,7 @@ describe('delete-access-key baseHandler', () => {
       subject: 'key:1111',
       actor: { kind: 'user', id: 'user-1' },
       // The key is known up front here, so both halves are filed under it.
-      details: { keyKind: 's3', keyName: 'My Key', region: 'eu-west-1', keyIdSuffix: '1111' },
+      details: { keyKind: 's3', keyName: 'My Key', orchestratorId: 'aurora', keyIdSuffix: '1111' },
     });
     expect(completion).toMatchObject({
       type: 'key.deleted',

@@ -7,6 +7,7 @@ vi.mock('sst', () => ({
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
+process.env.FILONE_STAGE = 'test';
 
 import { countAccessKeysInScope, getAccessKeysInScope } from './access-key-inventory.ts';
 
@@ -82,14 +83,39 @@ describe('getAccessKeysInScope', () => {
     expect(input.ExpressionAttributeValues?.[':bucket']).toEqual({ S: 'target-bucket' });
   });
 
-  it('narrows to a region filter via the DynamoDB FilterExpression', async () => {
-    ddbMock.on(QueryCommand).resolves({ Items: [] });
+  it('narrows to the keys whose network serves the region, in code', async () => {
+    // A key works at every region of its network, so the filter reads the
+    // network off each row (or the region a legacy row names) rather than
+    // asking DynamoDB for a stored region.
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        { ...row('fth-network'), orchestratorId: { S: 'fth' } },
+        { ...row('fth-legacy'), region: { S: 'us-east-1' } },
+        row('aurora-legacy'),
+        { ...row('forge-network'), orchestratorId: { S: 'forge' } },
+      ],
+    });
 
-    await getAccessKeysInScope('org-1', { sees: 'all' }, { regionFilter: 'us-east-1' });
+    const keys = await getAccessKeysInScope(
+      'org-1',
+      { sees: 'all' },
+      { regionFilter: 'us-east-1' },
+    );
 
     const input = ddbMock.commandCalls(QueryCommand)[0].args[0].input;
-    expect(input.FilterExpression).toBe('#region = :region');
-    expect(input.ExpressionAttributeValues?.[':region']).toEqual({ S: 'us-east-1' });
+    expect(input.FilterExpression).toBeUndefined();
+    expect(keys.map((k) => k.id)).toStrictEqual(['fth-network', 'fth-legacy']);
+    expect(keys.every((k) => k.regions.includes('us-east-1'))).toBe(true);
+  });
+
+  it('reports every region of the network holding a key', async () => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [row('aurora-legacy'), { ...row('fth-network'), orchestratorId: { S: 'fth' } }],
+    });
+
+    const keys = await getAccessKeysInScope('org-1', { sees: 'all' });
+
+    expect(keys.map((k) => k.regions)).toStrictEqual([['eu-west-1'], ['us-east-1']]);
   });
 });
 

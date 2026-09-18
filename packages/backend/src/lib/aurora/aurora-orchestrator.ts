@@ -79,7 +79,7 @@ function toBucketProtection(data: BucketBucketResponse): BucketProtection {
 
 export const auroraOrchestrator = {
   id: 'aurora',
-  region: S3Region.EuWest1 as S3RegionType,
+  regions: [S3Region.EuWest1 as S3RegionType],
   accessModel: 'scoped-keys',
 
   async ensureTenantReady(
@@ -143,6 +143,7 @@ export const auroraOrchestrator = {
 
   async createBucket(
     tenantId: string,
+    _region: S3RegionType,
     args: CreateBucketArgs,
     opts?: OrchestratorRequestOptions,
   ): Promise<void> {
@@ -165,6 +166,7 @@ export const auroraOrchestrator = {
 
   async deleteBucket(
     tenantId: string,
+    _region: S3RegionType,
     bucketName: string,
     opts?: OrchestratorRequestOptions,
   ): Promise<void> {
@@ -190,7 +192,7 @@ export const auroraOrchestrator = {
       .filter((b): b is typeof b & { name: string; createdAt: string } => !!b.name && !!b.createdAt)
       .map((b) => ({
         bucketName: b.name,
-        region: auroraOrchestrator.region,
+        region: auroraOrchestrator.regions[0]!,
         createdAt: b.createdAt,
         isPublic: false,
         encrypted: b.flags?.includes('encrypted') ?? true,
@@ -199,6 +201,7 @@ export const auroraOrchestrator = {
 
   async getBucket(
     tenantId: string,
+    _region: S3RegionType,
     bucketName: string,
     opts?: OrchestratorRequestOptions,
   ): Promise<BucketDetails | null> {
@@ -225,7 +228,7 @@ export const auroraOrchestrator = {
 
     return {
       bucketName: data.name ?? bucketName,
-      region: auroraOrchestrator.region,
+      region: auroraOrchestrator.regions[0]!,
       createdAt: data.createdAt,
       isPublic: false,
       versioning: data.versioning ?? false,
@@ -268,7 +271,7 @@ export const auroraOrchestrator = {
     await deleteAuroraAccessKey({ tenantId, auroraKeyId: keyId, signal: opts?.signal });
   },
 
-  async getS3ClientContext(tenantId: string): Promise<S3ClientContext> {
+  async getS3ClientContext(tenantId: string, _region: S3RegionType): Promise<S3ClientContext> {
     const stage = getStage();
     const credentials = await getConsoleS3Credentials({
       orchestratorId: auroraOrchestrator.id,
@@ -337,7 +340,12 @@ export const auroraOrchestrator = {
     // getBucketStorageSamples queries Aurora metrics globally by bucket name, so
     // gate it behind a tenant-scoped ownership check: only the owning tenant's
     // Portal client resolves the bucket (404 -> null otherwise).
-    const bucket = await auroraOrchestrator.getBucket(tenantId, bucketName, opts);
+    const bucket = await auroraOrchestrator.getBucket(
+      tenantId,
+      auroraOrchestrator.regions[0]!,
+      bucketName,
+      opts,
+    );
     if (!bucket) throw new BucketNotFoundError(bucketName);
     const auroraInterval = mapIntervalToAuroraWindow(metricsOpts.interval ?? '1d');
 

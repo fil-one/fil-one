@@ -29,11 +29,11 @@ vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getAvailableOrchestrators: () => [],
 }));
 
-const mockSyncTenantStatusInProvisionedRegions = vi.fn();
+const mockSyncTenantStatusInProvisionedTenants = vi.fn();
 vi.mock('../lib/region-helpers.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/region-helpers.ts')>()),
-  syncTenantStatusInProvisionedRegions: (...args: unknown[]) =>
-    mockSyncTenantStatusInProvisionedRegions(...args),
+  syncTenantStatusInProvisionedTenants: (...args: unknown[]) =>
+    mockSyncTenantStatusInProvisionedTenants(...args),
 }));
 
 const mockConstructEvent = vi.fn();
@@ -222,7 +222,7 @@ function updatedKeys() {
   return updateInputs().map((input) => input.Key);
 }
 
-// Per-region failure as reported by syncTenantStatusInProvisionedRegions,
+// Per-region failure as reported by syncTenantStatusInProvisionedTenants,
 // which never throws.
 function regionSyncFailure(cause: Error) {
   return [
@@ -255,8 +255,8 @@ describe('stripe-webhook handler', () => {
     mockConstructEvent.mockReset();
     mockCustomersRetrieve.mockReset();
     mockPaymentMethodsRetrieve.mockReset();
-    mockSyncTenantStatusInProvisionedRegions.mockReset();
-    mockSyncTenantStatusInProvisionedRegions.mockResolvedValue([]);
+    mockSyncTenantStatusInProvisionedTenants.mockReset();
+    mockSyncTenantStatusInProvisionedTenants.mockResolvedValue([]);
     mockStartDeletion.mockReset();
     reportMetricMock.mockReset();
   });
@@ -888,7 +888,7 @@ describe('stripe-webhook handler', () => {
       const result = await handler(buildWebhookEvent('{}'));
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+      expect(mockSyncTenantStatusInProvisionedTenants).not.toHaveBeenCalled();
       expect(supersededEmissions()).toHaveLength(1);
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -938,7 +938,7 @@ describe('stripe-webhook handler', () => {
       await handler(buildWebhookEvent('{}'));
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+      expect(mockSyncTenantStatusInProvisionedTenants).not.toHaveBeenCalled();
       expect(supersededEmissions()).toHaveLength(1);
     });
 
@@ -1061,7 +1061,7 @@ describe('stripe-webhook handler', () => {
       const result = await handler(buildWebhookEvent('{}'));
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+      expect(mockSyncTenantStatusInProvisionedTenants).not.toHaveBeenCalled();
       expect(result).toEqual({
         statusCode: 500,
         body: JSON.stringify({ message: 'Processing error' }),
@@ -1136,7 +1136,7 @@ describe('stripe-webhook handler', () => {
 
       const result = await handler(buildWebhookEvent('{}'));
 
-      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
+      expect(mockSyncTenantStatusInProvisionedTenants).toHaveBeenCalledWith(
         MOCK_ORG_ID,
         'write-locked',
         WEBHOOK_STATUS_SYNC_RETRY,
@@ -1148,7 +1148,7 @@ describe('stripe-webhook handler', () => {
     it('does not fail webhook when Aurora WRITE_LOCK fails', async () => {
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
       setupCustomerRetrieve();
-      mockSyncTenantStatusInProvisionedRegions.mockResolvedValue(
+      mockSyncTenantStatusInProvisionedTenants.mockResolvedValue(
         regionSyncFailure(new Error('Aurora API error')),
       );
 
@@ -1335,7 +1335,7 @@ describe('stripe-webhook handler', () => {
 
       const result = await handler(buildWebhookEvent('{}'));
 
-      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
+      expect(mockSyncTenantStatusInProvisionedTenants).toHaveBeenCalledWith(
         MOCK_ORG_ID,
         'active',
         WEBHOOK_STATUS_SYNC_RETRY,
@@ -1347,7 +1347,7 @@ describe('stripe-webhook handler', () => {
     it('does not fail webhook when Aurora re-activation fails', async () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice());
       setupCustomerRetrieve();
-      mockSyncTenantStatusInProvisionedRegions.mockResolvedValue(
+      mockSyncTenantStatusInProvisionedTenants.mockResolvedValue(
         regionSyncFailure(new Error('Aurora API error')),
       );
 
@@ -1666,7 +1666,7 @@ describe('stripe-webhook handler', () => {
         attemptBucket: '4+',
       });
       // Aurora re-activation must still run
-      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
+      expect(mockSyncTenantStatusInProvisionedTenants).toHaveBeenCalledWith(
         MOCK_ORG_ID,
         'active',
         WEBHOOK_STATUS_SYNC_RETRY,

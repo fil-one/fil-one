@@ -120,7 +120,9 @@ describe('BucketsPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Delete bucket' }));
 
     await waitFor(() =>
-      expect(mockApiRequest).toHaveBeenCalledWith('/buckets/my-bucket', { method: 'DELETE' }),
+      expect(mockApiRequest).toHaveBeenCalledWith('/buckets/my-bucket?region=eu-west-1', {
+        method: 'DELETE',
+      }),
     );
     expect(await screen.findByText('Bucket "my-bucket" deleted')).toBeInTheDocument();
   });

@@ -132,7 +132,7 @@ describe('get-bucket baseHandler', () => {
     });
   });
 
-  it('calls orchestrator.getBucket with tenantId and bucketName', async () => {
+  it('calls orchestrator.getBucket with tenantId, region and bucketName', async () => {
     orch.getBucket.mockResolvedValue({
       bucketName: 'my-bucket',
       region: S3_REGION,
@@ -146,7 +146,11 @@ describe('get-bucket baseHandler', () => {
     event.pathParameters = { name: 'my-bucket' };
     await baseHandler(event);
 
-    expect(orch.getBucket).toHaveBeenCalledWith(tenantFor('aurora', 'org-1'), 'my-bucket');
+    expect(orch.getBucket).toHaveBeenCalledWith(
+      tenantFor('aurora', 'org-1'),
+      S3_REGION,
+      'my-bucket',
+    );
   });
 
   it('returns 404 when orchestrator.getBucket returns null', async () => {

@@ -71,6 +71,9 @@ export async function listBuckets(
     buckets: (result.Buckets ?? []).map((b) => ({
       name: b.Name!,
       createdAt: b.CreationDate?.toISOString() ?? new Date().toISOString(),
+      // The region serving the bucket, when the gateway reports it. A gateway
+      // fronting several regions labels each bucket with its own.
+      ...(b.BucketRegion && { region: b.BucketRegion }),
     })),
   };
 }

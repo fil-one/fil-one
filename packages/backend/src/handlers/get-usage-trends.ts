@@ -9,7 +9,7 @@ import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { authorize } from '../middleware/authorize.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
-import { type ProvisionedRegion, getProvisionedRegions } from '../lib/region-helpers.ts';
+import { type ProvisionedTenant, getProvisionedTenants } from '../lib/region-helpers.ts';
 
 /**
  * How a period is bucketed.
@@ -78,16 +78,16 @@ export async function baseHandler(
   const { orgId } = getUserInfo(event);
   const period = parsePeriod(event.queryStringParameters?.period);
 
-  // The dashboard aggregates usage across every region the org is provisioned
-  // in, so resolve the ready tenant on each available orchestrator.
-  const regions = await getProvisionedRegions(orgId);
+  // The dashboard aggregates usage across every network the org is provisioned
+  // on, so resolve the ready tenant on each available orchestrator.
+  const regions = await getProvisionedTenants(orgId);
 
   const response: UsageTrendsResponse = await buildTimeSeries(regions, period);
   return new ResponseBuilder().status(200).body(response).build();
 }
 
 async function buildTimeSeries(
-  regions: ProvisionedRegion[],
+  regions: ProvisionedTenant[],
   period: UsageTrendsPeriod,
 ): Promise<UsageTrendsResponse> {
   const { points, granularity } = TREND_WINDOWS[period];
@@ -96,8 +96,8 @@ async function buildTimeSeries(
   granularity.rewind(from, points - 1);
   granularity.toStartOfBucket(from);
 
-  // Fetch each region's series and index them by bucket, then sum across
-  // regions per bucket for the org-wide trend.
+  // Fetch each tenant's series and index them by bucket, then sum across
+  // tenants per bucket for the org-wide trend.
   const perRegion = await Promise.all(
     regions.map(({ orchestrator, tenantId }) =>
       fetchSamplesByBucket({ orchestrator, tenantId, from, to: now, granularity }),
@@ -166,7 +166,7 @@ async function fetchSamplesByBucket({
   to,
   granularity,
 }: FetchSamplesArgs): Promise<SamplesByBucket> {
-  // Swallow errors so one region's outage still renders the rest.
+  // Swallow errors so one network's outage still renders the rest.
   try {
     const { storage, egress } = await orchestrator.getTenantUsageMetrics(tenantId, {
       from: from.toISOString(),
@@ -195,7 +195,7 @@ async function fetchSamplesByBucket({
   } catch (err) {
     console.error('[get-usage-trends] Failed to fetch usage metrics', {
       tenantId,
-      region: orchestrator.region,
+      orchestratorId: orchestrator.id,
       err,
     });
     return { storage: new Map(), egress: new Map(), ok: false };

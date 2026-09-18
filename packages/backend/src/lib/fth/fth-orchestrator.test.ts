@@ -1,3 +1,4 @@
+import { S3Region } from '@filone/shared';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
@@ -316,7 +317,7 @@ describe('fthOrchestrator.getS3ClientContext', () => {
       Parameter: { Value: JSON.stringify({ accessKeyId: 'AK1', secretAccessKey: 'SK1' }) },
     });
 
-    const ctx = await fthOrchestrator.getS3ClientContext(fthClientId);
+    const ctx = await fthOrchestrator.getS3ClientContext(fthClientId, S3Region.UsEast1);
 
     expect(ctx).toEqual({
       endpointUrl: 'https://s3.us-east-1.staging.filonecontent.com',
@@ -333,8 +334,8 @@ describe('fthOrchestrator.getS3ClientContext', () => {
       Parameter: { Value: JSON.stringify({ accessKeyId: 'AK1', secretAccessKey: 'SK1' }) },
     });
 
-    await fthOrchestrator.getS3ClientContext(fthClientId);
-    await fthOrchestrator.getS3ClientContext(fthClientId);
+    await fthOrchestrator.getS3ClientContext(fthClientId, S3Region.UsEast1);
+    await fthOrchestrator.getS3ClientContext(fthClientId, S3Region.UsEast1);
 
     expect(ssmMock.commandCalls(GetParameterCommand)).toHaveLength(1);
   });
@@ -350,7 +351,7 @@ describe('fthOrchestrator.createBucket', () => {
   it('issues a CreateBucketCommand for the given bucket name', async () => {
     s3Mock.on(CreateBucketCommand).resolves({});
 
-    await fthOrchestrator.createBucket(fthClientId, { bucketName: 'my-bucket' });
+    await fthOrchestrator.createBucket(fthClientId, S3Region.UsEast1, { bucketName: 'my-bucket' });
 
     const calls = s3Mock.commandCalls(CreateBucketCommand);
     expect(calls).toHaveLength(1);
@@ -363,7 +364,7 @@ describe('fthOrchestrator.createBucket', () => {
     s3Mock.on(CreateBucketCommand).rejects(err);
 
     await expect(
-      fthOrchestrator.createBucket(fthClientId, { bucketName: 'my-bucket' }),
+      fthOrchestrator.createBucket(fthClientId, S3Region.UsEast1, { bucketName: 'my-bucket' }),
     ).rejects.toBeInstanceOf(BucketAlreadyExistsError);
   });
 
@@ -371,7 +372,10 @@ describe('fthOrchestrator.createBucket', () => {
     s3Mock.on(CreateBucketCommand).resolves({});
     s3Mock.on(PutBucketVersioningCommand).resolves({});
 
-    await fthOrchestrator.createBucket(fthClientId, { bucketName: 'my-bucket', versioning: true });
+    await fthOrchestrator.createBucket(fthClientId, S3Region.UsEast1, {
+      bucketName: 'my-bucket',
+      versioning: true,
+    });
 
     const calls = s3Mock.commandCalls(PutBucketVersioningCommand);
     expect(calls).toHaveLength(1);
@@ -385,7 +389,7 @@ describe('fthOrchestrator.createBucket', () => {
     s3Mock.on(CreateBucketCommand).resolves({});
     s3Mock.on(PutBucketVersioningCommand).resolves({});
 
-    await fthOrchestrator.createBucket(fthClientId, {
+    await fthOrchestrator.createBucket(fthClientId, S3Region.UsEast1, {
       bucketName: 'my-bucket',
       versioning: true,
       lock: true,
@@ -405,7 +409,7 @@ describe('fthOrchestrator.createBucket', () => {
     s3Mock.on(PutBucketVersioningCommand).resolves({});
     s3Mock.on(PutObjectLockConfigurationCommand).resolves({});
 
-    await fthOrchestrator.createBucket(fthClientId, {
+    await fthOrchestrator.createBucket(fthClientId, S3Region.UsEast1, {
       bucketName: 'my-bucket',
       versioning: true,
       lock: true,
@@ -428,7 +432,7 @@ describe('fthOrchestrator.createBucket', () => {
     s3Mock.on(PutBucketVersioningCommand).rejects(new Error('AccessDenied'));
 
     const promise = fthOrchestrator
-      .createBucket(fthClientId, { bucketName: 'my-bucket', versioning: true })
+      .createBucket(fthClientId, S3Region.UsEast1, { bucketName: 'my-bucket', versioning: true })
       .catch((e) => e);
     await vi.runAllTimersAsync();
     const err = await promise;
@@ -445,7 +449,7 @@ describe('fthOrchestrator.createBucket', () => {
     s3Mock.on(PutObjectLockConfigurationCommand).rejects(cause);
 
     const promise = fthOrchestrator
-      .createBucket(fthClientId, {
+      .createBucket(fthClientId, S3Region.UsEast1, {
         bucketName: 'my-bucket',
         versioning: true,
         lock: true,
@@ -465,7 +469,7 @@ describe('fthOrchestrator.createBucket', () => {
     s3Mock.on(CreateBucketCommand).resolves({});
     s3Mock.on(PutBucketVersioningCommand).rejectsOnce(new Error('transient S3 error')).resolves({});
 
-    const promise = fthOrchestrator.createBucket(fthClientId, {
+    const promise = fthOrchestrator.createBucket(fthClientId, S3Region.UsEast1, {
       bucketName: 'my-bucket',
       versioning: true,
     });
@@ -482,7 +486,7 @@ describe('fthOrchestrator.createBucket', () => {
     s3Mock.on(PutBucketVersioningCommand).rejects(new Error('persistent S3 error'));
 
     const promise = fthOrchestrator
-      .createBucket(fthClientId, { bucketName: 'my-bucket', versioning: true })
+      .createBucket(fthClientId, S3Region.UsEast1, { bucketName: 'my-bucket', versioning: true })
       .catch((e) => e);
     await vi.runAllTimersAsync();
     const err = await promise;
@@ -501,7 +505,7 @@ describe('fthOrchestrator.createBucket', () => {
       .rejectsOnce(new Error('transient S3 error'))
       .resolves({});
 
-    const promise = fthOrchestrator.createBucket(fthClientId, {
+    const promise = fthOrchestrator.createBucket(fthClientId, S3Region.UsEast1, {
       bucketName: 'my-bucket',
       versioning: true,
       lock: true,
@@ -517,7 +521,7 @@ describe('fthOrchestrator.createBucket', () => {
   it('does not call PutBucketVersioning or PutObjectLockConfiguration for a plain bucket', async () => {
     s3Mock.on(CreateBucketCommand).resolves({});
 
-    await fthOrchestrator.createBucket(fthClientId, { bucketName: 'my-bucket' });
+    await fthOrchestrator.createBucket(fthClientId, S3Region.UsEast1, { bucketName: 'my-bucket' });
 
     expect(s3Mock.commandCalls(PutBucketVersioningCommand)).toHaveLength(0);
     expect(s3Mock.commandCalls(PutObjectLockConfigurationCommand)).toHaveLength(0);
@@ -534,7 +538,7 @@ describe('fthOrchestrator.deleteBucket', () => {
   it('issues a DeleteBucketCommand against the tenant S3 client', async () => {
     s3Mock.on(DeleteBucketCommand).resolves({});
 
-    await fthOrchestrator.deleteBucket(fthClientId, 'my-bucket');
+    await fthOrchestrator.deleteBucket(fthClientId, S3Region.UsEast1, 'my-bucket');
 
     const calls = s3Mock.commandCalls(DeleteBucketCommand);
     expect(calls).toHaveLength(1);
@@ -544,7 +548,9 @@ describe('fthOrchestrator.deleteBucket', () => {
   it('resolves when the delete succeeds', async () => {
     s3Mock.on(DeleteBucketCommand).resolves({});
 
-    await expect(fthOrchestrator.deleteBucket(fthClientId, 'my-bucket')).resolves.toBeUndefined();
+    await expect(
+      fthOrchestrator.deleteBucket(fthClientId, S3Region.UsEast1, 'my-bucket'),
+    ).resolves.toBeUndefined();
   });
 
   // s3DeleteBucket swallows NoSuchBucket, so an already-gone bucket is a success.
@@ -553,7 +559,9 @@ describe('fthOrchestrator.deleteBucket', () => {
     (err as Error & { name: string }).name = 'NoSuchBucket';
     s3Mock.on(DeleteBucketCommand).rejects(err);
 
-    await expect(fthOrchestrator.deleteBucket(fthClientId, 'my-bucket')).resolves.toBeUndefined();
+    await expect(
+      fthOrchestrator.deleteBucket(fthClientId, S3Region.UsEast1, 'my-bucket'),
+    ).resolves.toBeUndefined();
   });
 
   // Surfaced as a domain error so delete-bucket can answer with a machine-readable
@@ -563,9 +571,9 @@ describe('fthOrchestrator.deleteBucket', () => {
     (err as Error & { name: string }).name = 'BucketNotEmpty';
     s3Mock.on(DeleteBucketCommand).rejects(err);
 
-    await expect(fthOrchestrator.deleteBucket(fthClientId, 'my-bucket')).rejects.toBeInstanceOf(
-      BucketNotEmptyError,
-    );
+    await expect(
+      fthOrchestrator.deleteBucket(fthClientId, S3Region.UsEast1, 'my-bucket'),
+    ).rejects.toBeInstanceOf(BucketNotEmptyError);
   });
 });
 
@@ -1043,7 +1051,7 @@ describe('fthOrchestrator.getBucket', () => {
     (notFound as Error & { name: string }).name = 'ObjectLockConfigurationNotFoundError';
     s3Mock.on(GetObjectLockConfigurationCommand).rejects(notFound);
 
-    const result = await fthOrchestrator.getBucket(fthClientId, 'my-bucket');
+    const result = await fthOrchestrator.getBucket(fthClientId, S3Region.UsEast1, 'my-bucket');
 
     expect(result).toMatchObject({
       bucketName: 'my-bucket',
@@ -1068,7 +1076,7 @@ describe('fthOrchestrator.getBucket', () => {
       },
     });
 
-    const result = await fthOrchestrator.getBucket(fthClientId, 'my-bucket');
+    const result = await fthOrchestrator.getBucket(fthClientId, S3Region.UsEast1, 'my-bucket');
 
     expect(result).toMatchObject({
       bucketName: 'my-bucket',
@@ -1089,7 +1097,7 @@ describe('fthOrchestrator.getBucket', () => {
     (notFound as Error & { name: string }).name = 'ObjectLockConfigurationNotFoundError';
     s3Mock.on(GetObjectLockConfigurationCommand).rejects(notFound);
 
-    const result = await fthOrchestrator.getBucket(fthClientId, 'my-bucket');
+    const result = await fthOrchestrator.getBucket(fthClientId, S3Region.UsEast1, 'my-bucket');
 
     expect(result?.objectLockEnabled).toBe(false);
     expect(result).not.toHaveProperty('defaultRetention');
@@ -1102,7 +1110,7 @@ describe('fthOrchestrator.getBucket', () => {
       Buckets: [{ Name: 'other', CreationDate: new Date('2026-01-01T00:00:00Z') }],
     });
 
-    const result = await fthOrchestrator.getBucket(fthClientId, 'missing-bucket');
+    const result = await fthOrchestrator.getBucket(fthClientId, S3Region.UsEast1, 'missing-bucket');
 
     expect(result).toBeNull();
   });
@@ -1381,13 +1389,14 @@ describe('fthOrchestrator signal forwarding', () => {
 
   const credentialLookups = {
     getS3ClientContext: (signal: AbortSignal) =>
-      fthOrchestrator.getS3ClientContext(fthClientId, { signal }),
+      fthOrchestrator.getS3ClientContext(fthClientId, S3Region.UsEast1, { signal }),
     createBucket: (signal: AbortSignal) =>
-      fthOrchestrator.createBucket(fthClientId, { bucketName: 'b' }, { signal }),
+      fthOrchestrator.createBucket(fthClientId, S3Region.UsEast1, { bucketName: 'b' }, { signal }),
     deleteBucket: (signal: AbortSignal) =>
-      fthOrchestrator.deleteBucket(fthClientId, 'b', { signal }),
+      fthOrchestrator.deleteBucket(fthClientId, S3Region.UsEast1, 'b', { signal }),
     listBuckets: (signal: AbortSignal) => fthOrchestrator.listBuckets(fthClientId, { signal }),
-    getBucket: (signal: AbortSignal) => fthOrchestrator.getBucket(fthClientId, 'b', { signal }),
+    getBucket: (signal: AbortSignal) =>
+      fthOrchestrator.getBucket(fthClientId, S3Region.UsEast1, 'b', { signal }),
   };
 
   for (const [method, invoke] of Object.entries(credentialLookups)) {
@@ -1432,7 +1441,7 @@ describe('fthOrchestrator signal forwarding', () => {
   it('deleteBucket forwards the signal to S3 DeleteBucket', async () => {
     s3Mock.on(DeleteBucketCommand).resolves({});
 
-    await fthOrchestrator.deleteBucket(fthClientId, 'b', { signal });
+    await fthOrchestrator.deleteBucket(fthClientId, S3Region.UsEast1, 'b', { signal });
 
     expect(sendOptionsOf(s3Mock.commandCalls(DeleteBucketCommand))).toEqual({
       abortSignal: signal,
@@ -1446,7 +1455,7 @@ describe('fthOrchestrator signal forwarding', () => {
     s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
     s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
 
-    await fthOrchestrator.getBucket(fthClientId, 'b', { signal });
+    await fthOrchestrator.getBucket(fthClientId, S3Region.UsEast1, 'b', { signal });
 
     const sent = [
       sendOptionsOf(s3Mock.commandCalls(ListBucketsCommand)),
@@ -1467,6 +1476,7 @@ describe('fthOrchestrator signal forwarding', () => {
 
     await fthOrchestrator.createBucket(
       fthClientId,
+      S3Region.UsEast1,
       {
         bucketName: 'b',
         versioning: true,

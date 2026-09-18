@@ -11,7 +11,7 @@
 import type { Context } from 'aws-lambda';
 import { Resource } from 'sst';
 import { S3VectorsStore, type VectorStore } from '@filone/rag-shared';
-import { getProvisionedRegions } from '../lib/region-helpers.ts';
+import { getProvisionedTenants } from '../lib/region-helpers.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import { createS3Client } from '../lib/s3-client.ts';
 import { updateBucketTelemetry } from '../lib/bucket-rag-enablement.ts';
@@ -73,7 +73,7 @@ export async function handler(
       return;
     }
 
-    const regions = await getProvisionedRegions(orgId);
+    const regions = await getProvisionedTenants(orgId);
     if (regions.length === 0) {
       console.warn(`${LOG} Org not provisioned in any available region, skipping`, { orgId });
       emitWorkerInvocation('success', Date.now() - start, { regionsProcessed, regionFailures });
@@ -81,9 +81,12 @@ export async function handler(
     }
 
     // tenantId is required to build each region's S3 client; a region the org is
-    // not provisioned in has no tenant and its buckets cannot be indexed.
+    // not provisioned in has no tenant and its buckets cannot be indexed. A
+    // network's tenant is region-free, so it answers for every region it serves.
     const tenantByRegion = new Map<S3Region, string>(
-      regions.map(({ orchestrator, tenantId }) => [orchestrator.region, tenantId]),
+      regions.flatMap(({ orchestrator, tenantId }) =>
+        orchestrator.regions.map((region): [S3Region, string] => [region, tenantId]),
+      ),
     );
     const bucketsByRegion = groupBucketsByRegion(buckets);
 
@@ -203,7 +206,7 @@ async function indexRegion(args: IndexRegionArgs): Promise<RegionIndexStats> {
   const { orgId, region, tenantId, bucketNames, vectorStore, deadlineEpochMs } = args;
 
   const orchestrator = getOrchestratorForRegion(region);
-  const ctx = await orchestrator.getS3ClientContext(tenantId);
+  const ctx = await orchestrator.getS3ClientContext(tenantId, region);
   const s3 = createS3Client(ctx);
 
   const stats: RegionIndexStats = {

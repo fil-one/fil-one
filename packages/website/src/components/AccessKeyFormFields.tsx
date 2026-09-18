@@ -77,7 +77,7 @@ export function AccessKeyFormFields({
         <FormField
           htmlFor="key-region"
           label="Region"
-          description="This key only works with buckets in this region."
+          description="The key works in this region and in any other region on the same storage network."
         >
           <RegionSelect id="key-region" value={region} onChange={onRegionChange} />
         </FormField>
