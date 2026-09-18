@@ -1,6 +1,7 @@
 import type {
   AccessKeyPermission,
   AccessModel,
+  BucketPolicy,
   GranularPermission,
   RetentionDurationType,
   RetentionMode,
@@ -71,6 +72,13 @@ export interface CreateBucketArgs {
   bucketName: string;
   versioning?: boolean;
   lock?: boolean;
+  /**
+   * The bucket's first policy, on a region serving the `iam` access model.
+   * Travels on the create request so the bucket and its policy are written
+   * together (see `s3-bucket-operations.ts`). Ignored by a `scoped-keys`
+   * orchestrator.
+   */
+  policy?: BucketPolicy;
   retention?: {
     enabled: boolean;
     mode: RetentionMode;
