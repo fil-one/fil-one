@@ -36,6 +36,8 @@ interface Pass {
   /** Who asked. On a role change this is the admin, never the key's holder. */
   actor: AuditActor;
   reason: RevocationTrigger;
+  /** The caller's deadline, shared by every vendor call in the pass. */
+  signal?: AbortSignal;
 }
 
 export async function revokeMemberKeys({
@@ -44,8 +46,9 @@ export async function revokeMemberKeys({
   keys,
   actor,
   reason,
+  signal,
 }: Pass & { keys: readonly AccessKeyToRevoke[] }): Promise<RevocationOutcome> {
-  const pass = { orgId, orgProfile, actor, reason };
+  const pass = { orgId, orgProfile, actor, reason, signal };
   const outcomes = await Promise.allSettled(keys.map((key) => revokeOne(key, pass)));
 
   const revoked: AccessKeySummary[] = [];
@@ -85,7 +88,7 @@ export async function revokeMemberKeys({
 
 async function revokeOne(
   key: AccessKeyToRevoke,
-  { orgId, orgProfile, actor, reason }: Pass,
+  { orgId, orgProfile, actor, reason, signal }: Pass,
 ): Promise<void> {
   const orchestrator = getOrchestratorForRegion(key.region);
   const tenantId = orchestrator.isTenantReady(orgProfile);
@@ -101,5 +104,6 @@ async function revokeOne(
     tenantId,
     actor,
     reason,
+    signal,
   });
 }

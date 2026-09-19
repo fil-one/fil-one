@@ -118,7 +118,9 @@ describe('tearDownStripe', () => {
 
     await expect(tearDownStripe(ORG, MEMBERS)).resolves.toBeUndefined();
 
-    expect(mockDisableTenants).toHaveBeenCalledWith(ORG, 'disabled');
+    expect(mockDisableTenants).toHaveBeenCalledWith(ORG, 'disabled', {
+      signal: expect.any(AbortSignal),
+    });
     expect(mockCustomersDel).not.toHaveBeenCalled();
   });
 
@@ -185,7 +187,9 @@ describe('tearDownStripe', () => {
     await tearDownStripe(ORG, MEMBERS);
 
     expect(order).toEqual(['disable', 'report', 'cancel:sub_1', 'pay', `del:${CUSTOMER}`]);
-    expect(mockDisableTenants).toHaveBeenCalledWith(ORG, 'disabled');
+    expect(mockDisableTenants).toHaveBeenCalledWith(ORG, 'disabled', {
+      signal: expect.any(AbortSignal),
+    });
     expect(mockReportOrgUsage).toHaveBeenCalledWith(
       expect.objectContaining({
         orgId: ORG,

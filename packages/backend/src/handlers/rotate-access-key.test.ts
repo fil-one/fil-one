@@ -174,6 +174,20 @@ describe('rotate-access-key baseHandler', () => {
     mockDeleteAccessKey.mockResolvedValue(undefined);
   });
 
+  it('revokes the old key under a deadline of its own', async () => {
+    // The route is sized for two vendor calls. Sharing one budget means a mint
+    // that ran long answers `previousKeyRevoked: false`, leaving live exactly
+    // the credential the user asked to retire.
+    stubStoredKey();
+    stubWrites();
+
+    await baseHandler(eventFor());
+
+    const mintSignal = (mockIssueAccessKey.mock.calls[0]![2] as { signal: AbortSignal }).signal;
+    const revokeSignal = (mockDeleteAccessKey.mock.calls[0]![2] as { signal: AbortSignal }).signal;
+    expect(revokeSignal).not.toBe(mintSignal);
+  });
+
   it('mints a replacement carrying everything the key already had', async () => {
     stubStoredKey();
     stubWrites();
@@ -196,6 +210,7 @@ describe('rotate-access-key baseHandler', () => {
         buckets: ['alpha', 'beta'],
         expiresAt: null,
       }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 
@@ -238,6 +253,7 @@ describe('rotate-access-key baseHandler', () => {
     expect(mockIssueAccessKey).toHaveBeenCalledWith(
       TENANT_ID,
       expect.objectContaining({ expiresAt: '2099-01-01' }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 
@@ -247,7 +263,11 @@ describe('rotate-access-key baseHandler', () => {
 
     await baseHandler(eventFor());
 
-    expect(mockDeleteAccessKey).toHaveBeenCalledWith(TENANT_ID, KEY_ID);
+    expect(mockDeleteAccessKey).toHaveBeenCalledWith(
+      TENANT_ID,
+      KEY_ID,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
 
     const revocationIntent = standaloneEvents().find((event) => event.type === 'key.deleted');
     expect(revocationIntent?.details).toMatchObject({ reason: 'rotation' });
@@ -337,7 +357,11 @@ describe('rotate-access-key baseHandler', () => {
 
     expect(result.statusCode).toBe(409);
     expect(body(result).message).toContain('owner');
-    expect(mockDeleteAccessKey).toHaveBeenCalledWith(TENANT_ID, 'aurora-key-2');
+    expect(mockDeleteAccessKey).toHaveBeenCalledWith(
+      TENANT_ID,
+      'aurora-key-2',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(mockDeleteAccessKey).not.toHaveBeenCalledWith(TENANT_ID, KEY_ID);
   });
 
@@ -420,7 +444,11 @@ describe('rotate-access-key baseHandler', () => {
     expect(result.statusCode).toBe(409);
     expect(body(result).code).toBe(ApiErrorCode.FORBIDDEN_ROLE);
     expect(body(result).message).toContain('Your role');
-    expect(mockDeleteAccessKey).toHaveBeenCalledWith(TENANT_ID, 'aurora-key-2');
+    expect(mockDeleteAccessKey).toHaveBeenCalledWith(
+      TENANT_ID,
+      'aurora-key-2',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(mockDeleteAccessKey).not.toHaveBeenCalledWith(TENANT_ID, KEY_ID);
   });
 
@@ -457,7 +485,11 @@ describe('rotate-access-key baseHandler', () => {
     expect(result.statusCode).toBe(409);
     expect(body(result).message).toContain('another request');
     expect(mockDeleteAccessKey).toHaveBeenCalledTimes(1);
-    expect(mockDeleteAccessKey).toHaveBeenCalledWith(TENANT_ID, 'aurora-key-2');
+    expect(mockDeleteAccessKey).toHaveBeenCalledWith(
+      TENANT_ID,
+      'aurora-key-2',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('refuses a key that already names its replacement', async () => {
@@ -610,7 +642,11 @@ describe('rotate-access-key baseHandler', () => {
     expect(body(result).code).toBe(ApiErrorCode.FORBIDDEN_ROLE);
     // The replacement goes, and the key it was replacing is untouched.
     expect(mockDeleteAccessKey).toHaveBeenCalledTimes(1);
-    expect(mockDeleteAccessKey).toHaveBeenCalledWith(TENANT_ID, 'aurora-key-2');
+    expect(mockDeleteAccessKey).toHaveBeenCalledWith(
+      TENANT_ID,
+      'aurora-key-2',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('tells a caller to retry when the mint lost to contention', async () => {
@@ -632,7 +668,11 @@ describe('rotate-access-key baseHandler', () => {
     expect(result.statusCode).toBe(409);
     expect(body(result).code).toBeUndefined();
     expect(body(result).message).toContain('try again');
-    expect(mockDeleteAccessKey).toHaveBeenCalledWith(TENANT_ID, 'aurora-key-2');
+    expect(mockDeleteAccessKey).toHaveBeenCalledWith(
+      TENANT_ID,
+      'aurora-key-2',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('discards the replacement when the caller was demoted mid-rotation', async () => {
@@ -647,7 +687,11 @@ describe('rotate-access-key baseHandler', () => {
 
     expect(result.statusCode).toBe(409);
     expect(body(result).code).toBe(ApiErrorCode.FORBIDDEN_ROLE);
-    expect(mockDeleteAccessKey).toHaveBeenCalledWith(TENANT_ID, 'aurora-key-2');
+    expect(mockDeleteAccessKey).toHaveBeenCalledWith(
+      TENANT_ID,
+      'aurora-key-2',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('hands over the replacement even when the old key survives its revoke', async () => {

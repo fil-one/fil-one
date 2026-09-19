@@ -234,13 +234,17 @@ describe('create-access-key baseHandler', () => {
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
     await baseHandler(event);
 
-    expect(mockIssueAccessKey).toHaveBeenCalledWith('aurora-t-1', {
-      keyName: 'My Key',
-      permissions: ['read', 'write', 'list', 'delete'],
-      granularPermissions: undefined,
-      buckets: undefined,
-      expiresAt: null,
-    });
+    expect(mockIssueAccessKey).toHaveBeenCalledWith(
+      'aurora-t-1',
+      {
+        keyName: 'My Key',
+        permissions: ['read', 'write', 'list', 'delete'],
+        granularPermissions: undefined,
+        buckets: undefined,
+        expiresAt: null,
+      },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('stores access key in DynamoDB without the secret', async () => {
@@ -337,13 +341,17 @@ describe('create-access-key baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(201);
-    expect(mockIssueAccessKey).toHaveBeenCalledWith('aurora-t-1', {
-      keyName: 'My Key',
-      permissions: ['read', 'write', 'list', 'delete'],
-      granularPermissions: undefined,
-      buckets: undefined,
-      expiresAt: null,
-    });
+    expect(mockIssueAccessKey).toHaveBeenCalledWith(
+      'aurora-t-1',
+      {
+        keyName: 'My Key',
+        permissions: ['read', 'write', 'list', 'delete'],
+        granularPermissions: undefined,
+        buckets: undefined,
+        expiresAt: null,
+      },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     const body = JSON.parse(result.body!);
     expect(body.keyName).toBe('My Key');
   });
@@ -367,6 +375,7 @@ describe('create-access-key baseHandler', () => {
     expect(mockIssueAccessKey).toHaveBeenCalledWith(
       'aurora-t-1',
       expect.objectContaining({ expiresAt: '2026-06-01' }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 
@@ -459,7 +468,10 @@ describe('create-access-key baseHandler', () => {
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
     await baseHandler(event);
 
-    expect(mockEnsureTenantReady).toHaveBeenCalledWith('org-1');
+    expect(mockEnsureTenantReady).toHaveBeenCalledWith(
+      'org-1',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('throws when the orchestrator fails', async () => {
@@ -844,6 +856,7 @@ describe('create-access-key baseHandler', () => {
         expect.objectContaining({
           permissions: ['read', 'CreateBucket', 'DeleteBucket'],
         }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
     });
 
@@ -1072,7 +1085,11 @@ describe('create-access-key baseHandler', () => {
 
       expect(result.statusCode).toBe(409);
       expect(JSON.parse(result.body!).code).toBe(ApiErrorCode.FORBIDDEN_ROLE);
-      expect(mockDeleteAccessKey).toHaveBeenCalledWith('aurora-t-1', 'aurora-key-1');
+      expect(mockDeleteAccessKey).toHaveBeenCalledWith(
+        'aurora-t-1',
+        'aurora-key-1',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
 
       const deletes = keyRowWrites()
         .flatMap((call) => call.args[0].input.TransactItems ?? [])
@@ -1152,7 +1169,11 @@ describe('create-access-key baseHandler', () => {
 
       expect(result.statusCode).toBe(409);
       expect(JSON.parse(result.body!).message).toContain('try again');
-      expect(mockDeleteAccessKey).toHaveBeenCalledWith('aurora-t-1', 'aurora-key-1');
+      expect(mockDeleteAccessKey).toHaveBeenCalledWith(
+        'aurora-t-1',
+        'aurora-key-1',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
     });
 
     it('discards the key when the member was removed outright', async () => {
@@ -1189,6 +1210,45 @@ describe('create-access-key baseHandler', () => {
 
       expect(result.statusCode).toBe(409);
       expect(vi.mocked(console.error).mock.calls[0]?.[0]).toContain('minter was demoted');
+    });
+  });
+
+  describe('the compensating delete gets a deadline of its own', () => {
+    // The mint's budget is usually spent by the time a discard runs — a
+    // request that shared it would leave a live credential no row names.
+    const signalOf = (calls: unknown[][], index: number): AbortSignal =>
+      (calls[0]![index] as { signal: AbortSignal }).signal;
+
+    it('does not hand the unrecorded discard the mint deadline', async () => {
+      ddbMock
+        .on(TransactWriteItemsCommand)
+        .rejects(cancelledWith(['None', 'TransactionConflict', 'None', 'None']));
+
+      await baseHandler(
+        buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO }),
+      );
+
+      expect(signalOf(mockDeleteAccessKey.mock.calls, 2)).not.toBe(
+        signalOf(mockIssueAccessKey.mock.calls, 2),
+      );
+    });
+
+    it('does not hand the recorded discard the mint deadline', async () => {
+      stubCreatorRole(OrgRole.Admin);
+
+      await baseHandler(
+        buildEvent({
+          body: validBody({ keyName: 'My Key', ...PRIVILEGED }),
+          userInfo: {
+            ...USER_INFO,
+            membership: membershipFor(USER_INFO.orgId, USER_INFO.userId, OrgRole.Owner),
+          },
+        }),
+      );
+
+      expect(signalOf(mockDeleteAccessKey.mock.calls, 2)).not.toBe(
+        signalOf(mockIssueAccessKey.mock.calls, 2),
+      );
     });
   });
 

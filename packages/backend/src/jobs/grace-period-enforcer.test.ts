@@ -256,8 +256,16 @@ describe('grace-period-enforcer', () => {
 
     await handler();
 
-    expect(aurora.updateTenantStatus).toHaveBeenCalledWith(tenantFor('aurora'), 'disabled');
-    expect(fth.updateTenantStatus).toHaveBeenCalledWith(tenantFor('fth'), 'disabled');
+    expect(aurora.updateTenantStatus).toHaveBeenCalledWith(
+      tenantFor('aurora'),
+      'disabled',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(fth.updateTenantStatus).toHaveBeenCalledWith(
+      tenantFor('fth'),
+      'disabled',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('does not cancel the subscription when the disable fails in one region', async () => {
@@ -278,7 +286,11 @@ describe('grace-period-enforcer', () => {
     await vi.runAllTimersAsync();
     await run;
 
-    expect(aurora.updateTenantStatus).toHaveBeenCalledWith(tenantFor('aurora'), 'disabled');
+    expect(aurora.updateTenantStatus).toHaveBeenCalledWith(
+      tenantFor('aurora'),
+      'disabled',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(canceledUpdate()).toBeUndefined();
   });
 
@@ -374,7 +386,11 @@ describe('grace-period-enforcer', () => {
 
     await handler();
 
-    expect(aurora.updateTenantStatus).toHaveBeenCalledWith(tenantFor('aurora'), 'write-locked');
+    expect(aurora.updateTenantStatus).toHaveBeenCalledWith(
+      tenantFor('aurora'),
+      'write-locked',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('write-locks when the orchestrator reports an unmodeled (undefined) status', async () => {
@@ -390,7 +406,11 @@ describe('grace-period-enforcer', () => {
 
     await handler();
 
-    expect(aurora.updateTenantStatus).toHaveBeenCalledWith(tenantFor('aurora'), 'write-locked');
+    expect(aurora.updateTenantStatus).toHaveBeenCalledWith(
+      tenantFor('aurora'),
+      'write-locked',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('skips write-lock when the tenant is already write-locked', async () => {
@@ -479,7 +499,11 @@ describe('grace-period-enforcer', () => {
     await handler();
 
     expect(aurora.updateTenantStatus).not.toHaveBeenCalled();
-    expect(fth.updateTenantStatus).toHaveBeenCalledWith(tenantFor('fth'), 'write-locked');
+    expect(fth.updateTenantStatus).toHaveBeenCalledWith(
+      tenantFor('fth'),
+      'write-locked',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   // -----------------------------------------------------------------------
@@ -518,7 +542,11 @@ describe('grace-period-enforcer', () => {
     await handler();
 
     // Second record still disabled + canceled.
-    expect(aurora.updateTenantStatus).toHaveBeenCalledWith(tenantFor('aurora', orgId2), 'disabled');
+    expect(aurora.updateTenantStatus).toHaveBeenCalledWith(
+      tenantFor('aurora', orgId2),
+      'disabled',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(
       ddbMock
         .commandCalls(UpdateItemCommand)
@@ -565,7 +593,11 @@ describe('grace-period-enforcer', () => {
     await handler();
 
     expect(ddbMock.commandCalls(ScanCommand)).toHaveLength(2);
-    expect(aurora.updateTenantStatus).toHaveBeenCalledWith(tenantFor('aurora'), 'disabled');
+    expect(aurora.updateTenantStatus).toHaveBeenCalledWith(
+      tenantFor('aurora'),
+      'disabled',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   // -----------------------------------------------------------------------
@@ -590,7 +622,11 @@ describe('grace-period-enforcer', () => {
 
       // Disable called only on the first run.
       expect(aurora.updateTenantStatus).toHaveBeenCalledTimes(1);
-      expect(aurora.updateTenantStatus).toHaveBeenCalledWith(tenantFor('aurora'), 'disabled');
+      expect(aurora.updateTenantStatus).toHaveBeenCalledWith(
+        tenantFor('aurora'),
+        'disabled',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
       expect(canceledUpdates().map((input) => input.Key)).toEqual([ORG_KEY]);
     });
 

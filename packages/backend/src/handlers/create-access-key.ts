@@ -29,6 +29,7 @@ import type { AuditCorrelation } from '../lib/audit.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
 import type { IssuedAccessKey, ServiceOrchestrator } from '../lib/service-orchestrator.ts';
+import { cleanupDeadline, ORCHESTRATOR_SETUP_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
 import {
@@ -79,7 +80,13 @@ export async function baseHandler(
   if (await isOrgDeleting(orgId, { consistent: true })) return accountDeletedResponse();
 
   const orchestrator = getOrchestratorForRegion(region);
-  const tenantId = await orchestrator.ensureTenantReady(orgId);
+  // One deadline for the mint and everything it needs, tenant setup included.
+  // This route has 30 s; a hung vendor fails the call and answers the user
+  // instead of the Lambda timeout killing the handler. What runs after a mint
+  // has already succeeded — the compensating delete, the duplicate recovery —
+  // mints its own budget, because this one is usually spent by then.
+  const signal = AbortSignal.timeout(ORCHESTRATOR_SETUP_TIMEOUT_MS);
+  const tenantId = await orchestrator.ensureTenantReady(orgId, { signal });
   if (!tenantId) return tenantNotReadyResponse();
 
   // Before the intent, because nothing happened: a name the org already shows
@@ -104,13 +111,11 @@ export async function baseHandler(
 
   let accessKey: IssuedAccessKey;
   try {
-    accessKey = await orchestrator.issueAccessKey(tenantId, {
-      keyName,
-      permissions,
-      granularPermissions,
-      buckets,
-      expiresAt,
-    });
+    accessKey = await orchestrator.issueAccessKey(
+      tenantId,
+      { keyName, permissions, granularPermissions, buckets, expiresAt },
+      { signal },
+    );
   } catch (err) {
     return await handleMintRefusal(err, {
       orgId,
@@ -121,10 +126,13 @@ export async function baseHandler(
       attribution,
       mint,
       creator,
+      // Not the mint's signal: the refusal being handled is often the deadline
+      // above expiring, and recovery would then have no budget to run in.
+      cleanupSignal: cleanupDeadline(),
     });
   }
 
-  const mintedKey: MintedKey = {
+  const minted: MintedKey = {
     keyId: accessKey.id,
     accessKeyId: accessKey.accessKeyId,
     keyName,
@@ -149,13 +157,15 @@ export async function baseHandler(
     mint,
     minter: creator,
   });
+  // Both discards run after a successful mint, so the deadline above may be
+  // spent; each gets its own.
   if (!record.recorded) {
-    await discardUnrecordedKey({ minted: mintedKey, mint, minter: creator });
+    await discardUnrecordedKey({ minted, mint, minter: creator, signal: cleanupDeadline() });
     return record.reason === 'minter_role_changed' ? roleChangedResponse() : mintConflictResponse();
   }
 
   if (await keyExceedsCurrentRole(creator)) {
-    await discardRecordedKey({ minted: mintedKey, minter: creator, actor });
+    await discardRecordedKey({ minted, minter: creator, actor, signal: cleanupDeadline() });
     return roleChangedResponse();
   }
 
@@ -275,6 +285,8 @@ interface MintAttempt {
   /** The intent this attempt already wrote — every exit here closes it. */
   mint: AuditCorrelation<'key.created'>;
   creator: KeyMinter;
+  /** A deadline of its own, because the mint's is usually what expired. */
+  cleanupSignal: AbortSignal;
 }
 
 async function recoverDuplicateKey({
@@ -286,6 +298,7 @@ async function recoverDuplicateKey({
   attribution,
   mint,
   creator,
+  cleanupSignal,
 }: MintAttempt): Promise<void> {
   if (await orgAlreadyShowsKeyName({ orgId, keyName, region })) {
     // A plain duplicate name: the vendor refused and there is nothing to
@@ -296,7 +309,9 @@ async function recoverDuplicateKey({
 
   // Partial failure: key exists in Orchestrator's DB, but our DynamoDB record is missing.
   // Recover by fetching key details from the provider and writing the DB record.
-  const recovered = await orchestrator.findAccessKeyByName(tenantId, keyName);
+  const recovered = await orchestrator.findAccessKeyByName(tenantId, keyName, {
+    signal: cleanupSignal,
+  });
 
   if (!recovered) {
     // Shouldn't happen — orchestrator returned conflict but key not found in list.
@@ -345,7 +360,7 @@ async function recoverDuplicateKey({
   // This path answers 409 either way; a row that did not land just leaves no
   // credential behind it.
   if (!record.recorded) {
-    await discardUnrecordedKey({ minted, mint, minter: creator });
+    await discardUnrecordedKey({ minted, mint, minter: creator, signal: cleanupSignal });
     return;
   }
 

@@ -11,6 +11,7 @@ import {
   unsupportedRegionResponse,
 } from '../lib/response-builder.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import { ORCHESTRATOR_REQUEST_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -44,11 +45,12 @@ export async function baseHandler(
   // BucketNotFoundError when the bucket isn't owned by this tenant.
   let samples;
   try {
-    samples = await orchestrator.getBucketUsageMetrics(tenantId, bucketName, {
-      from: thirtyDaysAgo.toISOString(),
-      to: now.toISOString(),
-      interval: '1d',
-    });
+    samples = await orchestrator.getBucketUsageMetrics(
+      tenantId,
+      bucketName,
+      { from: thirtyDaysAgo.toISOString(), to: now.toISOString(), interval: '1d' },
+      { signal: AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS) },
+    );
   } catch (err) {
     if (err instanceof BucketNotFoundError) {
       return new ResponseBuilder().status(404).body({ message: 'Bucket not found' }).build();

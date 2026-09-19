@@ -5,6 +5,7 @@ import { NO_ROLE, OrgRole } from '@filone/shared';
 import type { AccessKeySummary, RemoveMemberResponse } from '@filone/shared';
 import { AuditSubjects, userActor } from '../lib/audit.ts';
 import { commitAfterRevokingKeys } from '../lib/commit-after-revoking-keys.ts';
+import { ORCHESTRATOR_REQUEST_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
 import { notifyRevokedKeys } from '../lib/key-revocation-email.ts';
 import { reviewKeysForRoleChange } from '../lib/member-keys.ts';
 import { requireManageableMember } from '../lib/manageable-member.ts';
@@ -143,6 +144,8 @@ export async function baseHandler(
       ...(invitationsToRevoke.length > 0 ? { revokedInvitations: invitationsToRevoke.length } : {}),
     },
     source: SOURCE,
+    // One deadline for the whole revocation pass; this route has 10 s.
+    signal: AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS),
     onCancelled: (err, revokedKeys) => removalFailureResponse(err, { ...failure, revokedKeys }),
     onRefused: (refused, revoked) => vendorRefusedResponse(revoked, refused),
     // The member is still here with their clients already broken. The caller
