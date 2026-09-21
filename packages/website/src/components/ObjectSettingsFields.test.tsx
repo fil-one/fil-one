@@ -124,4 +124,32 @@ describe('ObjectSettingsFields', () => {
     expect(screen.getByText('Days')).toBeInTheDocument();
     expect(screen.getByText('Years')).toBeInTheDocument();
   });
+
+  it('hints why Object Lock is disabled when versioning is off', () => {
+    renderWithDefaults({ versioning: false });
+    const row = screen.getByText('Object Lock').closest('[aria-disabled]')!.parentElement!;
+    fireEvent.mouseEnter(row);
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Turn on versioning first');
+  });
+
+  it('does not hint at Object Lock once versioning is on', () => {
+    renderWithDefaults({ versioning: true });
+    const row = screen.getByText('Object Lock').closest('[aria-disabled]')!.parentElement!;
+    fireEvent.mouseEnter(row);
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  });
+
+  it('hints why Retention is disabled when Object Lock is off', () => {
+    renderWithDefaults({ versioning: true, lock: false });
+    const row = screen.getByText('Retention').closest('[aria-disabled]')!.parentElement!;
+    fireEvent.mouseEnter(row);
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Turn on Object Lock first');
+  });
+
+  it('does not hint at Retention once Object Lock is on', () => {
+    renderWithDefaults({ versioning: true, lock: true });
+    const row = screen.getByText('Retention').closest('[aria-disabled]')!.parentElement!;
+    fireEvent.mouseEnter(row);
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  });
 });

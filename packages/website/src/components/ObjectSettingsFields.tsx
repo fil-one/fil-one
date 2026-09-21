@@ -5,6 +5,7 @@ import { Input } from './Input';
 import { Switch } from './Switch';
 import { RadioOption } from './RadioOption';
 import { Select } from './Select';
+import { Tooltip } from './Tooltip';
 
 type ObjectSettingsFieldsProps = {
   versioning: boolean;
@@ -93,53 +94,57 @@ export function ObjectSettingsFields({
 
         {/* Object Lock */}
         <div className="border-t border-zinc-200/60">
-          <div
-            aria-disabled={!versioning}
-            className={`flex items-center justify-between px-3.5 py-3 ${!versioning ? 'opacity-40' : ''}`}
-          >
-            <div className="flex flex-col gap-0.5">
-              <span id="lock-label" className="text-[13px] font-medium text-zinc-900">
-                Object Lock
-              </span>
-              <span id="lock-desc" className="text-[11px] leading-relaxed text-zinc-500">
-                Prevent objects from being deleted or overwritten. Required for regulatory
-                compliance.
-              </span>
+          <MaybeTooltip content={!versioning ? 'Turn on versioning first' : undefined}>
+            <div
+              aria-disabled={!versioning}
+              className={`flex items-center justify-between px-3.5 py-3 ${!versioning ? 'opacity-40' : ''}`}
+            >
+              <div className="flex flex-col gap-0.5">
+                <span id="lock-label" className="text-[13px] font-medium text-zinc-900">
+                  Object Lock
+                </span>
+                <span id="lock-desc" className="text-[11px] leading-relaxed text-zinc-500">
+                  Prevent objects from being deleted or overwritten. Required for regulatory
+                  compliance.
+                </span>
+              </div>
+              <Switch
+                checked={lock}
+                onChange={handleLockChange}
+                disabled={!versioning}
+                aria-label="Object Lock"
+                aria-describedby="lock-desc"
+              />
             </div>
-            <Switch
-              checked={lock}
-              onChange={handleLockChange}
-              disabled={!versioning}
-              aria-label="Object Lock"
-              aria-describedby="lock-desc"
-            />
-          </div>
+          </MaybeTooltip>
         </div>
 
         {/* Retention */}
         <div className="border-t border-zinc-200/60">
           <div className="flex flex-col px-3.5 py-3">
-            <div
-              aria-disabled={!lock}
-              className={`flex items-center justify-between ${!lock ? 'opacity-40' : ''}`}
-            >
-              <div className="flex flex-col gap-0.5">
-                <span id="retention-label" className="text-[13px] font-medium text-zinc-900">
-                  Retention
-                </span>
-                <span id="retention-desc" className="text-[11px] leading-relaxed text-zinc-500">
-                  Apply a default retention period. Objects cannot be deleted until this period
-                  expires.
-                </span>
+            <MaybeTooltip content={!lock ? 'Turn on Object Lock first' : undefined}>
+              <div
+                aria-disabled={!lock}
+                className={`flex items-center justify-between ${!lock ? 'opacity-40' : ''}`}
+              >
+                <div className="flex flex-col gap-0.5">
+                  <span id="retention-label" className="text-[13px] font-medium text-zinc-900">
+                    Retention
+                  </span>
+                  <span id="retention-desc" className="text-[11px] leading-relaxed text-zinc-500">
+                    Apply a default retention period. Objects cannot be deleted until this period
+                    expires.
+                  </span>
+                </div>
+                <Switch
+                  checked={retentionEnabled}
+                  onChange={onRetentionEnabledChange}
+                  disabled={!lock}
+                  aria-label="Retention"
+                  aria-describedby="retention-desc"
+                />
               </div>
-              <Switch
-                checked={retentionEnabled}
-                onChange={onRetentionEnabledChange}
-                disabled={!lock}
-                aria-label="Retention"
-                aria-describedby="retention-desc"
-              />
-            </div>
+            </MaybeTooltip>
 
             {/* Retention details (expanded when enabled) */}
             {retentionEnabled && (
@@ -220,5 +225,15 @@ export function ObjectSettingsFields({
         </div>
       </div>
     </fieldset>
+  );
+}
+
+/** Wraps `children` in a tooltip explaining a disabled dependency, or renders them plain when there's nothing to explain. */
+function MaybeTooltip({ content, children }: { content?: string; children: React.ReactNode }) {
+  if (!content) return children;
+  return (
+    <Tooltip content={content} side="top">
+      {children}
+    </Tooltip>
   );
 }
