@@ -110,17 +110,33 @@ describe('getBucketPolicy', () => {
     );
   });
 
-  it('answers null for a bucket with no policy and throws for a bucket that is not there', async () => {
-    mockGetPolicy.mockResolvedValueOnce(
-      fail(404, { message: 'no policy', code: 'PolicyNotFound' }),
-    );
-    await expect(iam.getBucketPolicy(tenantId, 'photos')).resolves.toBeNull();
+  it('tells a bucket with no policy from a bucket that is not there', async () => {
+    // The code decides it; the message is prose either way.
+    const bodies = [
+      { message: 'bucket has no policy', code: 'PolicyNotFound' },
+      { message: 'bucket not found', code: 'BucketNotFound' },
+      { message: 'bucket has no policy' },
+      { message: 'bucket not found' },
+    ];
 
-    // A message that merely mentions the policy route is a bucket that is not there.
-    mockGetPolicy.mockResolvedValueOnce(fail(404, { message: 'bucket policy: bucket not found' }));
-    await expect(iam.getBucketPolicy(tenantId, 'photos')).rejects.toBeInstanceOf(
-      BucketNotFoundError,
-    );
+    const outcomes: unknown[] = [];
+    for (const body of bodies) {
+      mockGetPolicy.mockResolvedValueOnce(fail(404, body));
+      outcomes.push(
+        await iam
+          .getBucketPolicy(tenantId, 'photos')
+          .catch((err: unknown) =>
+            err instanceof BucketNotFoundError ? 'bucket-not-found' : 'other',
+          ),
+      );
+    }
+
+    expect(outcomes).toStrictEqual([
+      null,
+      'bucket-not-found',
+      'bucket-not-found',
+      'bucket-not-found',
+    ]);
   });
 
   it('refuses a 200 that carries no ETag', async () => {
