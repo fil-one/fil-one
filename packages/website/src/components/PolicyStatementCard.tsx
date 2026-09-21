@@ -6,6 +6,7 @@ import {
   POLICY_ACTION_LABELS,
   POLICY_ACTION_WILDCARD,
   POLICY_WILDCARD_PRINCIPAL,
+  ROSTER_SID_LABELS,
   policyActionsInGroup,
 } from '@filone/shared';
 
@@ -15,6 +16,15 @@ import { IconButton } from './IconButton.js';
 
 /** How many members a statement names before the rest fold into one badge. */
 const NAMED_MEMBERS_SHOWN = 3;
+
+/**
+ * How a statement is titled: the label for one Fil One writes, otherwise the
+ * name it was given, otherwise its place in the policy.
+ */
+export function statementLabel(statement: Pick<PolicyStatement, 'sid'>, index: number): string {
+  if (statement.sid) return ROSTER_SID_LABELS[statement.sid] ?? statement.sid;
+  return `Statement ${index + 1}`;
+}
 
 export type PolicyStatementCardProps = {
   statement: PolicyStatement;
@@ -38,7 +48,7 @@ export function PolicyStatementCard({
   onEdit,
   onRemove,
 }: PolicyStatementCardProps) {
-  const label = statement.sid ?? `Statement ${index + 1}`;
+  const label = statementLabel(statement, index);
   return (
     <Card padding="md" shadow={false} data-testid="policy-statement">
       <div className="flex flex-col gap-3">

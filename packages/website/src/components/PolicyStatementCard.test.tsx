@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import type { PolicyStatement } from '@filone/shared';
+import { ROSTER_ADMINS_SID, ROSTER_CREATOR_SID, ROSTER_OWNERS_SID } from '@filone/shared';
 
 import { PolicyStatementCard } from './PolicyStatementCard.js';
 
@@ -41,6 +42,20 @@ describe('PolicyStatementCard', () => {
     expect(screen.getByText('Deny')).toBeInTheDocument();
     expect(screen.getByText('Statement 3')).toBeInTheDocument();
     expect(screen.getByText('Everyone in this organization')).toBeInTheDocument();
+  });
+
+  it('titles a roster statement by its label and any other by its sid', () => {
+    const titles = [ROSTER_OWNERS_SID, ROSTER_ADMINS_SID, ROSTER_CREATOR_SID, 'team'].map((sid) => {
+      const { unmount } = renderCard(
+        { sid, effect: 'allow', principal: ['a'], action: ['s3:GetObject'] },
+        { onEdit: () => {} },
+      );
+      const label = screen.getByRole('button', { name: /^Edit / }).getAttribute('aria-label');
+      unmount();
+      return label;
+    });
+
+    expect(titles).toEqual(['Edit Owners', 'Edit Admins', 'Edit Bucket creator', 'Edit team']);
   });
 
   it('folds members past the third into one badge and names an unknown member honestly', () => {

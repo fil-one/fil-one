@@ -279,6 +279,17 @@ export const ROSTER_ADMINS_SID = 'filone-admins';
 export const ROSTER_CREATOR_SID = 'filone-creator';
 
 /**
+ * How a roster statement is titled where a person reads it. A statement Fil
+ * One writes is matched by its sid, so the console shows the label and refuses
+ * to rename it.
+ */
+export const ROSTER_SID_LABELS: Record<string, string> = {
+  [ROSTER_OWNERS_SID]: 'Owners',
+  [ROSTER_ADMINS_SID]: 'Admins',
+  [ROSTER_CREATOR_SID]: 'Bucket creator',
+};
+
+/**
  * Every action but the two retention writes: what an Admin, and a Member who
  * created the bucket, receives. An Owner may still grant the pair to an Admin on
  * one bucket, which is why the roster statement lists actions rather than
