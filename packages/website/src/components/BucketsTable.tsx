@@ -43,7 +43,7 @@ const SECONDARY_COLUMN = 'hidden sm:table-cell';
 type BucketsTableProps = {
   /** Already filtered and sorted server-side; this component only renders. */
   buckets: Bucket[];
-  onDelete: (bucketName: string) => void;
+  onDelete: (bucketName: string, region: string) => void;
   showControls: boolean;
   filters: BucketFilters;
   onFiltersChange: (filters: BucketFilters) => void;
@@ -140,7 +140,7 @@ function BucketRowActions({
 }: {
   bucket: Bucket;
   region: string;
-  onDelete: (name: string) => void;
+  onDelete: (name: string, region: string) => void;
 }) {
   const navigate = useNavigate();
   const { copy } = useCopyToClipboard();
@@ -183,7 +183,7 @@ function BucketRowActions({
               {
                 label: 'Delete bucket',
                 icon: TrashIcon,
-                onSelect: () => onDelete(bucket.bucketName),
+                onSelect: () => onDelete(bucket.bucketName, region),
               },
             ]
           : []),
@@ -192,7 +192,13 @@ function BucketRowActions({
   );
 }
 
-function BucketRow({ bucket, onDelete }: { bucket: Bucket; onDelete: (name: string) => void }) {
+function BucketRow({
+  bucket,
+  onDelete,
+}: {
+  bucket: Bucket;
+  onDelete: (name: string, region: string) => void;
+}) {
   const region = bucket.region ?? S3_REGION;
 
   return (
