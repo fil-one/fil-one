@@ -112,7 +112,7 @@ describe('RagApiKeysTab', () => {
 
   it('shows an empty state when the org has no keys', async () => {
     renderTab();
-    expect(await screen.findByTestId('rag-api-keys-empty')).toBeInTheDocument();
+    expect(await screen.findByText('No API keys yet')).toBeInTheDocument();
   });
 
   it('creates a key and reveals the token exactly once', async () => {
@@ -234,7 +234,7 @@ describe('RagApiKeysTab — permissions', () => {
     // the invitation to create one goes with the button it has lost.
     renderTab([bucket()], OrgRole.ReadOnly);
 
-    await screen.findByTestId('rag-api-keys-empty');
+    await screen.findByText('No API keys yet');
     expect(mockList).not.toHaveBeenCalled();
     expect(screen.getByText('Keys for the Query API appear here.')).toBeInTheDocument();
   });
