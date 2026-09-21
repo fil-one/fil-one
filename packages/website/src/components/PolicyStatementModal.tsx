@@ -1,10 +1,17 @@
 import { useEffect, useState } from 'react';
 import type { PolicyStatement } from '@filone/shared';
-import { POLICY_WILDCARD_PRINCIPAL } from '@filone/shared';
+import {
+  POLICY_SID_MAX_LENGTH,
+  POLICY_WILDCARD_PRINCIPAL,
+  RESERVED_SID_PREFIX,
+  ROSTER_SID_LABELS,
+  isReservedSid,
+} from '@filone/shared';
 
 import { Alert } from './Alert.js';
 import { Button } from './Button.js';
 import { FormField } from './FormField.js';
+import { Input } from './Input.js';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './Modal/index.js';
 import { PolicyActionFields } from './PolicyActionFields.js';
 import { PolicyPrincipalFields } from './PolicyPrincipalFields.js';
@@ -19,6 +26,32 @@ export type PolicyStatementModalProps = {
 };
 
 const EMPTY: PolicyStatement = { effect: 'allow', principal: [], action: [] };
+
+/**
+ * A name of their own, or none. The schema is strict and takes `sid` only as a
+ * non-empty string, so a name that is empty or all spaces drops the key rather
+ * than sending one the backend refuses. Held untrimmed while it is being typed,
+ * since trimming each keystroke would swallow the space between two words.
+ */
+function withSid(statement: PolicyStatement, name: string): PolicyStatement {
+  const { sid: _dropped, ...rest } = statement;
+  return name.trim() ? { ...rest, sid: name } : rest;
+}
+
+/**
+ * What the name field shows and whether it holds. A roster statement's sid is
+ * how the fan-out finds the statement again, so its name is fixed; any other
+ * may not take the prefix those carry.
+ */
+function nameState(statement: PolicyStatement, initial: PolicyStatement | undefined) {
+  const rosterLabel = initial?.sid ? ROSTER_SID_LABELS[initial.sid] : undefined;
+  if (rosterLabel) return { rosterLabel, error: undefined };
+  const reserved = statement.sid !== undefined && isReservedSid(statement.sid.trim());
+  const error = reserved
+    ? `Names starting with "${RESERVED_SID_PREFIX}" are reserved for statements Fil One manages.`
+    : undefined;
+  return { rosterLabel, error };
+}
 
 /** Whether a deny names everyone, which locks the org out of the bucket until an Owner edits it. */
 export function deniesEveryone(statement: Pick<PolicyStatement, 'effect' | 'principal'>): boolean {
@@ -41,13 +74,14 @@ export function PolicyStatementModal({
     if (open) setStatement(initial ?? EMPTY);
   }, [open, initial]);
 
+  const { rosterLabel, error: nameError } = nameState(statement, initial);
   const noPrincipal =
     statement.principal !== POLICY_WILDCARD_PRINCIPAL && statement.principal.length === 0;
   const noAction = statement.action.length === 0;
-  const canSubmit = !noPrincipal && !noAction;
+  const canSubmit = !noPrincipal && !noAction && !nameError;
 
   function submit() {
-    onSubmit(statement);
+    onSubmit(withSid(statement, statement.sid?.trim() ?? ''));
     onClose();
   }
 
@@ -56,6 +90,18 @@ export function PolicyStatementModal({
       <ModalHeader onClose={onClose}>{initial ? 'Edit statement' : 'Add statement'}</ModalHeader>
       <ModalBody>
         <div className="flex flex-col gap-6">
+          <FormField label="Name (optional)" htmlFor="policy-statement-name" error={nameError}>
+            <Input
+              id="policy-statement-name"
+              value={rosterLabel ?? statement.sid ?? ''}
+              invalid={Boolean(nameError)}
+              disabled={Boolean(rosterLabel)}
+              maxLength={POLICY_SID_MAX_LENGTH}
+              placeholder="Analytics team read"
+              onChange={(value) => setStatement(withSid(statement, value))}
+            />
+          </FormField>
+
           <FormField label="Effect">
             <div className="flex gap-2">
               <RadioOption

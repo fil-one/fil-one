@@ -290,6 +290,17 @@ export const ROSTER_SID_LABELS: Record<string, string> = {
 };
 
 /**
+ * The prefix the roster sids share. A statement a person names may not take
+ * it: the fan-out matches on those sids, so a collision would have their
+ * statement rewritten the next time a role changes.
+ */
+export const RESERVED_SID_PREFIX = 'filone-';
+
+export function isReservedSid(sid: string): boolean {
+  return sid.startsWith(RESERVED_SID_PREFIX);
+}
+
+/**
  * Every action but the two retention writes: what an Admin, and a Member who
  * created the bucket, receives. An Owner may still grant the pair to an Admin on
  * one bucket, which is why the roster statement lists actions rather than
