@@ -120,7 +120,11 @@ describe('BucketsPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Delete bucket' }));
 
     await waitFor(() =>
-      expect(mockApiRequest).toHaveBeenCalledWith('/buckets/my-bucket', { method: 'DELETE' }),
+      // The bucket's own region, not the default: a delete routed to the wrong
+      // orchestrator reaches a region that has never heard of the bucket.
+      expect(mockApiRequest).toHaveBeenCalledWith('/buckets/my-bucket?region=eu-west-1', {
+        method: 'DELETE',
+      }),
     );
     expect(await screen.findByText('Bucket "my-bucket" deleted')).toBeInTheDocument();
   });

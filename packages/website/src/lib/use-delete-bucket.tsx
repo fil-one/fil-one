@@ -40,6 +40,11 @@ function reportDeleteError(err: unknown, bucketName: string, toast: Toast) {
   toast.error(err instanceof Error ? err.message : 'Failed to delete bucket');
 }
 
+interface PendingDelete {
+  bucketName: string;
+  region: string;
+}
+
 /**
  * Bucket deletion, gated behind a confirm step since it's irreversible.
  * Returns the confirm-dialog state and the action to run once confirmed;
@@ -51,15 +56,20 @@ export function useDeleteBucket() {
   // The confirmation goes with the Delete control it was opened from: a dialog
   // left on screen after a demotion still confirms the request the hidden
   // control exists to avoid.
-  const [pendingBucketName, setPendingBucketName] = usePermittedDialog<string | null>(
+  // The region travels with the name: a bucket is deleted in the region that
+  // holds it, and the list mixes regions row by row.
+  const [pending, setPending] = usePermittedDialog<PendingDelete | null>(
     null,
     useHasPermission('buckets.delete'),
   );
 
   const mutation = useMutation({
-    mutationFn: (bucketName: string) =>
-      apiRequest(`/buckets/${encodeURIComponent(bucketName)}`, { method: 'DELETE' }),
-    onSuccess: (_, bucketName) => {
+    mutationFn: ({ bucketName, region }: PendingDelete) =>
+      apiRequest(
+        `/buckets/${encodeURIComponent(bucketName)}?region=${encodeURIComponent(region)}`,
+        { method: 'DELETE' },
+      ),
+    onSuccess: (_, { bucketName }) => {
       // Optimistically remove from cache, then confirm with a background refetch. Spread `old`:
       // this updater owns `buckets` only, and rebuilding the object would drop
       // `unavailableRegions`, making the degraded-regions banner vanish on any delete.
@@ -70,22 +80,23 @@ export function useDeleteBucket() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
       toast.success(`Bucket "${bucketName}" deleted`);
     },
-    onError: (err, bucketName) => reportDeleteError(err, bucketName, toast),
+    onError: (err, { bucketName }) => reportDeleteError(err, bucketName, toast),
   });
 
   async function confirmDelete() {
-    if (!pendingBucketName) return;
+    if (!pending) return;
     try {
-      await mutation.mutateAsync(pendingBucketName);
+      await mutation.mutateAsync(pending);
     } catch {
       // error handled by mutation.onError
     }
   }
 
   return {
-    pendingBucketName,
-    requestDelete: setPendingBucketName,
-    cancelDelete: () => setPendingBucketName(null),
+    // Still just the name: it is what the confirm dialog shows.
+    pendingBucketName: pending?.bucketName ?? null,
+    requestDelete: (bucketName: string, region: string) => setPending({ bucketName, region }),
+    cancelDelete: () => setPending(null),
     confirmDelete,
   };
 }
