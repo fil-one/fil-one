@@ -127,29 +127,21 @@ describe('ObjectSettingsFields', () => {
 
   it('hints why Object Lock is disabled when versioning is off', () => {
     renderWithDefaults({ versioning: false });
-    const row = screen.getByText('Object Lock').closest('[aria-disabled]')!.parentElement!;
-    fireEvent.mouseEnter(row);
-    expect(screen.getByRole('tooltip')).toHaveTextContent('Turn on versioning first');
+    expect(screen.getByText(/Requires versioning\./)).toBeInTheDocument();
   });
 
   it('does not hint at Object Lock once versioning is on', () => {
     renderWithDefaults({ versioning: true });
-    const row = screen.getByText('Object Lock').closest('[aria-disabled]')!.parentElement!;
-    fireEvent.mouseEnter(row);
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Requires versioning\./)).not.toBeInTheDocument();
   });
 
   it('hints why Retention is disabled when Object Lock is off', () => {
     renderWithDefaults({ versioning: true, lock: false });
-    const row = screen.getByText('Retention').closest('[aria-disabled]')!.parentElement!;
-    fireEvent.mouseEnter(row);
-    expect(screen.getByRole('tooltip')).toHaveTextContent('Turn on Object Lock first');
+    expect(screen.getByText(/Requires Object Lock\./)).toBeInTheDocument();
   });
 
   it('does not hint at Retention once Object Lock is on', () => {
     renderWithDefaults({ versioning: true, lock: true });
-    const row = screen.getByText('Retention').closest('[aria-disabled]')!.parentElement!;
-    fireEvent.mouseEnter(row);
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Requires Object Lock\./)).not.toBeInTheDocument();
   });
 });
