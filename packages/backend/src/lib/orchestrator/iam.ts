@@ -64,14 +64,15 @@ interface SdkResult<T> {
 const POLICY_NOT_FOUND_CODE = 'PolicyNotFound';
 
 /**
- * Matched exactly, on the code or on a bare message: a 404 whose message
- * merely mentions the policy route is a bucket that is not there.
+ * A 404 saying the bucket is there and its policy is not, which the console
+ * answers by offering to write the first statement.
+ *
+ * The code alone decides it. Both cases are a 404 whose message is prose the
+ * contract does not fix, so reading the message would tie the console to
+ * wording the storage system is free to change.
  */
 function isPolicyNotFound(error: unknown): boolean {
-  return (
-    extractApiCode(error) === POLICY_NOT_FOUND_CODE ||
-    extractApiMessage(error) === POLICY_NOT_FOUND_CODE
-  );
+  return extractApiCode(error) === POLICY_NOT_FOUND_CODE;
 }
 
 /**
