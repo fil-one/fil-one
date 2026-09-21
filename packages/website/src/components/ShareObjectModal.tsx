@@ -136,7 +136,11 @@ function ExpirySelector({
   disabled: boolean;
 }) {
   return (
-    <div className="grid grid-cols-4 gap-2" role="radiogroup" aria-label="Link expiry">
+    <div
+      className="grid grid-cols-2 gap-2 sm:grid-cols-4"
+      role="radiogroup"
+      aria-label="Link expiry"
+    >
       {EXPIRY_OPTIONS.map((option) => {
         const isSelected = option.seconds === selected.seconds;
         return (
