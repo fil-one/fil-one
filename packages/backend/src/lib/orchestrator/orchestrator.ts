@@ -597,9 +597,10 @@ class IamFilOneOrchestrator extends FilOneOrchestrator implements IamOrchestrato
    * The reachable set comes from the storage system's own evaluation, so it
    * agrees with its last policy write.
    *
-   * A bucket carrying no policy is reachable by nobody, Owners included. That
-   * is the fail-closed reading, and the console writes a policy on every bucket
-   * it creates.
+   * A bucket carrying no policy is reachable by unscoped callers alone, who
+   * name no member and so are never filtered here. The console writes a policy
+   * on every bucket it creates; one that arrives without it, or loses it, is
+   * visible to an Owner or an Admin and to nobody else.
    */
   override async listBuckets(
     tenantId: string,

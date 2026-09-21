@@ -44,8 +44,8 @@ vi.mock('../lib/org-profile.ts', () => ({
 process.env.FILONE_STAGE = 'test';
 
 import { baseHandler } from './list-buckets.ts';
-import { buildEvent } from '../test/lambda-test-utilities.ts';
-import { S3_REGION, S3Region } from '@filone/shared';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
+import { OrgRole, S3_REGION, S3Region } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -163,13 +163,24 @@ describe('list-buckets baseHandler (single-region)', () => {
     expect(byName('unencrypted-bucket')).toMatchObject({ versioning: false, encrypted: false });
   });
 
-  it('calls orchestrator.listBuckets with the tenant id', async () => {
+  it('names the member for a scoped caller and nobody for an unscoped one', async () => {
     aurora.listBuckets.mockResolvedValue([]);
 
-    const event = buildEvent({ userInfo: USER_INFO });
-    await baseHandler(event);
+    // Owner and Admin are unscoped by role, so the listing is not filtered and
+    // a bucket with no policy is still theirs to see. Everyone else is scoped
+    // to the buckets a statement names them on.
+    const actors: (string | undefined)[] = [];
+    for (const role of [OrgRole.Owner, OrgRole.Admin, OrgRole.Member, OrgRole.ReadOnly]) {
+      aurora.listBuckets.mockClear();
+      await baseHandler(
+        buildEvent({
+          userInfo: { ...USER_INFO, membership: membershipFor('org-1', 'user-1', role) },
+        }),
+      );
+      actors.push(aurora.listBuckets.mock.calls[0][1].actAs);
+    }
 
-    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1', { actAs: 'user-1' });
+    expect(actors).toStrictEqual([undefined, undefined, 'user-1', 'user-1']);
   });
 
   it('consults the orchestrator registry to fan out across available regions', async () => {
@@ -294,7 +305,7 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
     expect(body.buckets.map((b: { bucketName: string }) => b.bucketName)).toStrictEqual([
       'fth-bucket',
     ]);
-    expect(fth.listBuckets).toHaveBeenCalledWith('fth-t-9', { actAs: 'user-1' });
+    expect(fth.listBuckets).toHaveBeenCalledWith('fth-t-9', { actAs: undefined });
     expect(aurora.isTenantReady).not.toHaveBeenCalled();
     expect(aurora.listBuckets).not.toHaveBeenCalled();
   });
@@ -346,8 +357,8 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
         },
       ],
     });
-    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1', { actAs: 'user-1' });
-    expect(fth.listBuckets).toHaveBeenCalledWith('fth-t-9', { actAs: 'user-1' });
+    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1', { actAs: undefined });
+    expect(fth.listBuckets).toHaveBeenCalledWith('fth-t-9', { actAs: undefined });
   });
 
   it('sorts buckets alphabetically by name across regions', async () => {
