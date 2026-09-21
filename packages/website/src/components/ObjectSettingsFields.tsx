@@ -75,10 +75,10 @@ export function ObjectSettingsFields({
         {/* Versioning */}
         <div className="flex items-center justify-between px-3.5 py-3">
           <div className="flex flex-col gap-0.5">
-            <span id="versioning-label" className="text-[13px] font-medium text-zinc-900">
+            <span id="versioning-label" className="text-ui font-medium text-zinc-900">
               Versioning
             </span>
-            <span id="versioning-desc" className="text-[11px] leading-relaxed text-zinc-500">
+            <span id="versioning-desc" className="text-meta leading-relaxed text-zinc-500">
               Keep multiple versions of objects for backup, recovery, and tracking changes over
               time.
             </span>
@@ -98,10 +98,10 @@ export function ObjectSettingsFields({
             className={`flex items-center justify-between px-3.5 py-3 ${!versioning ? 'opacity-40' : ''}`}
           >
             <div className="flex flex-col gap-0.5">
-              <span id="lock-label" className="text-[13px] font-medium text-zinc-900">
+              <span id="lock-label" className="text-ui font-medium text-zinc-900">
                 Object Lock
               </span>
-              <span id="lock-desc" className="text-[11px] leading-relaxed text-zinc-500">
+              <span id="lock-desc" className="text-meta leading-relaxed text-zinc-500">
                 Prevent objects from being deleted or overwritten. Required for regulatory
                 compliance.
               </span>
@@ -124,10 +124,10 @@ export function ObjectSettingsFields({
               className={`flex items-center justify-between ${!lock ? 'opacity-40' : ''}`}
             >
               <div className="flex flex-col gap-0.5">
-                <span id="retention-label" className="text-[13px] font-medium text-zinc-900">
+                <span id="retention-label" className="text-ui font-medium text-zinc-900">
                   Retention
                 </span>
-                <span id="retention-desc" className="text-[11px] leading-relaxed text-zinc-500">
+                <span id="retention-desc" className="text-meta leading-relaxed text-zinc-500">
                   Apply a default retention period. Objects cannot be deleted until this period
                   expires.
                 </span>
@@ -210,7 +210,7 @@ export function ObjectSettingsFields({
                       </Select>
                     </div>
                   </div>
-                  <span id="lock-period-hint" className="text-[11px] text-zinc-500">
+                  <span id="lock-period-hint" className="text-meta text-zinc-500">
                     Objects cannot be deleted until this period expires.
                   </span>
                 </div>

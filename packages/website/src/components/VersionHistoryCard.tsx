@@ -85,7 +85,7 @@ function VersionRow({
       <td className="px-3 py-2 font-mono text-zinc-700">
         {truncatedId}
         {isCurrent && (
-          <span className="ml-1.5 text-[10px] font-semibold text-brand-600">(viewing)</span>
+          <span className="ml-1.5 text-meta font-semibold text-brand-600">(viewing)</span>
         )}
       </td>
       <td className="px-3 py-2">

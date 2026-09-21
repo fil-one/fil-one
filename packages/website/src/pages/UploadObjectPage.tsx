@@ -466,7 +466,7 @@ export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) 
         <IconButton icon={ArrowLeftIcon} aria-label="Back to bucket" onClick={goToBucket} />
         <div>
           <Heading tag="h1">Upload</Heading>
-          <p className="text-[13px] text-zinc-500">
+          <p className="text-ui text-zinc-500">
             Upload files to <span className="font-medium text-zinc-700">{bucketName}</span>
           </p>
         </div>

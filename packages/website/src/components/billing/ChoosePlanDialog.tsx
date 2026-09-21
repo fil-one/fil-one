@@ -86,7 +86,7 @@ export function ChoosePlanDialog({
                 {savedCardLast4 ? 'Reactivate' : 'Upgrade now'}
               </Button>
               {savedCardLast4 && (
-                <p className="mt-2 text-center text-[11px] leading-[16px] text-zinc-500">
+                <p className="mt-2 text-center text-meta text-zinc-500">
                   Will use card ending in &bull;&bull;{savedCardLast4}
                   {onUseDifferentCard && (
                     <>

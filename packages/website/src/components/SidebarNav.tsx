@@ -122,7 +122,7 @@ function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps
       {navGroups.map((group, gi) => (
         <div key={gi} className={gi > 0 ? 'mt-2' : ''}>
           {!collapsed && group.label && (
-            <p className="mb-1 px-3 text-[10px] font-medium uppercase tracking-wide text-zinc-400">
+            <p className="mb-1 px-3 text-meta font-medium uppercase tracking-wide text-zinc-400">
               {group.label}
             </p>
           )}

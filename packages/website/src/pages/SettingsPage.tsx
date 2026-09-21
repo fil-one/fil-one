@@ -90,7 +90,7 @@ function ToggleRow({
   return (
     <div className="flex items-center justify-between py-1">
       <div>
-        <p id={labelId} className="text-[13px] font-medium text-zinc-900">
+        <p id={labelId} className="text-ui font-medium text-zinc-900">
           {label}
         </p>
         <p className="text-xs text-zinc-500">{description}</p>

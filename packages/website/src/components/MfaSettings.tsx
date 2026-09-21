@@ -315,8 +315,8 @@ function PasskeyRow({
   return (
     <div className="flex items-center justify-between rounded-md border border-[#e1e4ea] bg-zinc-50 px-3 py-2">
       <div>
-        <p className="text-[13px] font-medium text-zinc-900">{passkey.name ?? 'Passkey'}</p>
-        <p className="text-[11px] text-zinc-500">
+        <p className="text-ui font-medium text-zinc-900">{passkey.name ?? 'Passkey'}</p>
+        <p className="text-meta text-zinc-500">
           {passkey.createdAt ? `Added ${formatDate(passkey.createdAt)}` : 'Enrolled'}
         </p>
       </div>

@@ -10,7 +10,7 @@ import type { InputSize } from './Input';
 
 /** Matches Input's sizes so a filter row lines up with its search field. */
 const SIZES: Record<InputSize, { control: string; caret: { inset: string; size: number } }> = {
-  sm: { control: 'h-8 pr-7 pl-2.5 text-[13px]', caret: { inset: 'right-2', size: 12 } },
+  sm: { control: 'h-8 pr-7 pl-2.5 text-ui', caret: { inset: 'right-2', size: 12 } },
   md: { control: 'py-2.5 pr-9 pl-3 text-sm', caret: { inset: 'right-3', size: 14 } },
 };
 
