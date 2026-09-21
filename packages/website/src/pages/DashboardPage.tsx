@@ -6,6 +6,7 @@ import {
   ArrowUpIcon,
   XIcon,
   CheckIcon,
+  ClockCounterClockwiseIcon,
 } from '@phosphor-icons/react/dist/ssr';
 import { Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
@@ -18,6 +19,7 @@ import { Button } from '../components/Button';
 import { IconButton } from '../components/IconButton';
 import { Badge, type BadgeColor } from '../components/Badge';
 import { Card } from '../components/Card';
+import { EmptyStateCard } from '../components/EmptyStateCard';
 import { IconBox } from '../components/IconBox';
 import { ProgressBar } from '../components/ProgressBar';
 import { formatBytes } from '@filone/shared';
@@ -448,11 +450,13 @@ export function DashboardPage() {
         </div>
 
         {activities.length === 0 ? (
-          <div className="flex flex-col items-center px-6 py-16 text-center">
-            <p className="mb-1 text-sm font-medium text-zinc-900">No activity yet</p>
-            <p className="mb-4 max-w-xs text-sm text-zinc-500">
-              Create a bucket to start storing objects
-            </p>
+          <EmptyStateCard
+            icon={ClockCounterClockwiseIcon}
+            iconColor="grey"
+            title="No activity yet"
+            description="Create a bucket to start storing objects"
+            bordered={false}
+          >
             <RequirePermission permission="buckets.create">
               <Button
                 id="dashboard-create-bucket-button"
@@ -463,7 +467,7 @@ export function DashboardPage() {
                 Create bucket
               </Button>
             </RequirePermission>
-          </div>
+          </EmptyStateCard>
         ) : (
           <div className="divide-y divide-zinc-100/50">
             {activities.map((activity) => (
