@@ -12,17 +12,23 @@ vi.mock('sst', () => ({
 
 const mockIsTenantReady = vi.fn();
 const mockOrchestratorDeleteBucket = vi.fn();
+const mockGetOrchestratorForRegion = vi.fn();
 
 const mockOrchestrator = {
   id: 'aurora',
-  region: 'eu-west-1',
+  regions: ['eu-west-1'],
   isTenantReady: (...args: unknown[]) => mockIsTenantReady(...args),
   deleteBucket: (...args: unknown[]) => mockOrchestratorDeleteBucket(...args),
 };
 
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
-  getOrchestratorForRegion: () => mockOrchestrator,
+  getOrchestratorForRegion: (region: string) => {
+    mockGetOrchestratorForRegion(region);
+    return mockOrchestrator;
+  },
 }));
+
+process.env.FILONE_STAGE = 'test';
 
 vi.mock('../lib/org-profile.ts', () => ({
   getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
@@ -76,7 +82,53 @@ describe('delete-bucket baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result).toMatchObject({ statusCode: 204, body: '' });
-    expect(mockOrchestratorDeleteBucket).toHaveBeenCalledWith('aurora-t-1', 'my-bucket');
+    expect(mockOrchestratorDeleteBucket).toHaveBeenCalledWith(
+      'aurora-t-1',
+      'eu-west-1',
+      'my-bucket',
+    );
+  });
+
+  it('routes to the region named in the query and deletes the bucket there', async () => {
+    mockOrchestratorDeleteBucket.mockResolvedValue(undefined);
+
+    const event = buildEvent({
+      userInfo: USER_INFO,
+      queryStringParameters: { region: 'us-east-1' },
+    });
+    event.pathParameters = { name: 'my-bucket' };
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(204);
+    expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('us-east-1');
+    expect(mockOrchestratorDeleteBucket).toHaveBeenCalledWith(
+      'aurora-t-1',
+      'us-east-1',
+      'my-bucket',
+    );
+  });
+
+  it('defaults to S3_REGION when no region is named', async () => {
+    mockOrchestratorDeleteBucket.mockResolvedValue(undefined);
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    event.pathParameters = { name: 'my-bucket' };
+    await baseHandler(event);
+
+    expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('eu-west-1');
+  });
+
+  it('returns 400 for a region the product does not offer, before any orchestrator call', async () => {
+    const event = buildEvent({
+      userInfo: USER_INFO,
+      queryStringParameters: { region: 'us-west-2' },
+    });
+    event.pathParameters = { name: 'my-bucket' };
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(400);
+    expect(mockGetOrchestratorForRegion).not.toHaveBeenCalled();
+    expect(mockOrchestratorDeleteBucket).not.toHaveBeenCalled();
   });
 
   it('passes the tenantId from isTenantReady through to deleteBucket', async () => {
@@ -87,7 +139,11 @@ describe('delete-bucket baseHandler', () => {
     event.pathParameters = { name: 'some-bucket' };
     await baseHandler(event);
 
-    expect(mockOrchestratorDeleteBucket).toHaveBeenCalledWith('tenant-xyz', 'some-bucket');
+    expect(mockOrchestratorDeleteBucket).toHaveBeenCalledWith(
+      'tenant-xyz',
+      'eu-west-1',
+      'some-bucket',
+    );
   });
 
   // A non-empty bucket is the one failure translated to a response here, so the

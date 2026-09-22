@@ -49,7 +49,7 @@ export function BucketsPage() {
   // "No buckets yet" would be a lie while a region is down. The banner explains the gap.
   const showEmptyState = baseBuckets.length === 0 && unavailableRegions.length === 0;
 
-  const { pendingBucketName, requestDelete, cancelDelete, confirmDelete } = useDeleteBucket();
+  const { pendingBucket, requestDelete, cancelDelete, confirmDelete } = useDeleteBucket();
 
   // Shared across every state so navigating to Buckets never blanks the header
   // or takes the Create action away while the list loads.
@@ -144,7 +144,7 @@ export function BucketsPage() {
       )}
 
       <ConfirmDialog
-        open={pendingBucketName !== null}
+        open={pendingBucket !== null}
         onClose={cancelDelete}
         onConfirm={confirmDelete}
         title="Delete bucket"
