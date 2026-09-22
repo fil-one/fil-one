@@ -432,8 +432,7 @@ is the one existing path for pushing a change to a warm key.
 2. **Principals** per tenant, `(tenantId, userId)`, that a key can bind to and a
    statement can name. A principal carries no permissions, no role, and no
    all-buckets flag, so there is nothing on it to keep in step with the console.
-   It does need an identity of its own that a revocation can target. A batched
-   write for the provisioning sweep.
+   A batched write for the provisioning sweep.
 3. **Bucket policies** addressed by bucket: a statement list carrying effect,
    principals, and actions; an ETag the caller passes back to make an edit
    conditional; and a query by principal. The management API carries no actor,
@@ -444,7 +443,9 @@ is the one existing path for pushing a change to a warm key.
 5. **Per-request authority** computed from the bucket's policy alone, `Allow \
 Deny` for the calling principal, with an explicit Deny winning. A key's
 permission set is derived, never stored: the flat permissions and buckets fields
-on today's key do not describe an IAM key. A member-access read returns a
+on today's key do not describe an IAM key. What the policies give the key's
+principal is materialized as the key's delegations, one per bucket and Forge
+command, and rewritten when a policy changes. A member-access read returns a
 principal's per-bucket access, is consistent with Hilt's own last write, and
 carries a latency target, since the bucket list and the activity feed resolve it
 per request. Deny is what makes this more than a proof-chain check: several S3
@@ -457,9 +458,9 @@ probing for a chain.
    cannot, so a failed change leaves the old access rather than a stale one. The
    propagation time is the published staleness bound: a revocation that reaches
    every warm cache holding a principal's grants, independent of when those
-   caches would have expired on their own. A policy edit costs on the order of
-   the statements it changes and touches no key, since a key holds no authority
-   of its own.
+   caches would have expired on their own. A policy edit rewrites the
+   delegations of every key bound to a changed principal over the edited bucket,
+   revoking the old set before it acknowledges.
 7. **The `s3:*` vocabulary** crosses the API through the existing mapping, and
    every principal holds `s3:ListAllMyBuckets`, which no statement grants and no
    Deny removes. The contract enum gains `s3:AbortMultipartUpload` and
