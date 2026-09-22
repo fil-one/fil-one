@@ -3,7 +3,7 @@ import { Resource } from 'sst';
 import { auroraOrchestrator } from './aurora/aurora-orchestrator.ts';
 import { createForgeOrchestrator, type ForgeManagementApi } from './forge/forge-orchestrator.ts';
 import { createFthOrchestrator, createInstrumentedFthClient } from './fth/fth-orchestrator.ts';
-import { ORCHESTRATOR_ID_BY_REGION } from './service-orchestrator-ids.ts';
+import { ORCHESTRATOR_ID_BY_REGION, regionsForOrchestrator } from './service-orchestrator-ids.ts';
 import type { ServiceOrchestrator } from './service-orchestrator.ts';
 
 // Aurora is built at import; its module reads no secret while loading. FTH and
@@ -18,14 +18,27 @@ import type { ServiceOrchestrator } from './service-orchestrator.ts';
 let fthOrchestrator: ServiceOrchestrator | undefined;
 const forgeOrchestrators = new Map<string, ServiceOrchestrator>();
 
-function getForgeOrchestrator(
-  id: string,
-  regions: S3Region[],
-  api: () => ForgeManagementApi,
-): ServiceOrchestrator {
+// One Forge network per Hilt, keyed by the orchestrator id its regions map to
+// in ORCHESTRATOR_ID_BY_REGION. A network is built once and serves every region
+// of its id: its tenant is region-free, so the regions share tenant state and
+// the console key.
+const FORGE_NETWORKS: Record<string, () => ForgeManagementApi> = {
+  forge: () => ({
+    baseUrl: process.env.FORGE_MANAGEMENT_API_URL!,
+    accessToken: Resource.ForgeManagementApiToken.value,
+  }),
+  forgeDev: () => ({
+    baseUrl: process.env.FORGE_DEV_MANAGEMENT_API_URL!,
+    accessToken: Resource.ForgeDevManagementApiToken.value,
+  }),
+};
+
+function getForgeOrchestrator(id: string, stage: string): ServiceOrchestrator {
   let orchestrator = forgeOrchestrators.get(id);
   if (!orchestrator) {
-    orchestrator = createForgeOrchestrator(id, regions, api());
+    const api = FORGE_NETWORKS[id];
+    if (!api) throw new Error(`No Forge network is configured for orchestrator "${id}".`);
+    orchestrator = createForgeOrchestrator(id, regionsForOrchestrator(id, stage), api());
     forgeOrchestrators.set(id, orchestrator);
   }
   return orchestrator;
@@ -41,16 +54,8 @@ export function getOrchestratorForRegion(region: S3Region): ServiceOrchestrator 
       case S3Region.UsEast1:
         fthOrchestrator ??= createFthOrchestrator(createInstrumentedFthClient());
         return fthOrchestrator;
-      case S3Region.EuCentral3:
-        return getForgeOrchestrator(ORCHESTRATOR_ID_BY_REGION[region], [region], () => ({
-          baseUrl: process.env.FORGE_MANAGEMENT_API_URL!,
-          accessToken: Resource.ForgeManagementApiToken.value,
-        }));
-      case S3Region.UsEast9:
-        return getForgeOrchestrator(ORCHESTRATOR_ID_BY_REGION[region], [region], () => ({
-          baseUrl: process.env.FORGE_DEV_MANAGEMENT_API_URL!,
-          accessToken: Resource.ForgeDevManagementApiToken.value,
-        }));
+      default:
+        return getForgeOrchestrator(ORCHESTRATOR_ID_BY_REGION[region], stage);
     }
   }
   throw new Error(`Unsupported region "${String(region)}".`);
