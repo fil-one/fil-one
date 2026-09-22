@@ -366,13 +366,22 @@ export function AccessKeysTable({
               </div>
             </Table.Cell>
 
-            {/* Region — access keys are region-scoped */}
+            {/* Regions — a key works at every region of the storage network that holds it */}
             {showRegion && (
               <Table.Cell className="hidden md:table-cell">
-                {key.region ? (
-                  <Badge color="grey" size="sm" description={getRegionLabel(key.region)}>
-                    {key.region}
-                  </Badge>
+                {key.regions.length > 0 ? (
+                  <div className="flex flex-wrap gap-1">
+                    {key.regions.map((region) => (
+                      <Badge
+                        key={region}
+                        color="grey"
+                        size="sm"
+                        description={getRegionLabel(region)}
+                      >
+                        {region}
+                      </Badge>
+                    ))}
+                  </div>
                 ) : (
                   <span className="text-xs text-zinc-400">—</span>
                 )}

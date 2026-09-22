@@ -48,7 +48,7 @@ function key(overrides: Partial<MemberAccessKey> = {}): MemberAccessKey {
     id: 'key-1',
     keyName: 'ci',
     accessKeyId: 'AKIAEXAMPLE0001',
-    region: S3Region.UsEast1,
+    orchestratorId: 'fth',
     createdAt: '2026-01-01T00:00:00.000Z',
     createdBy: MEMBER,
     permissions: ['read', 'write'],
@@ -98,10 +98,24 @@ describe('listOrgAccessKeys', () => {
     });
   });
 
-  it('reads a row with no region as Aurora, which is what predates the attribute', async () => {
+  it('reads a row with no network and no region as Aurora, which is what predates both', async () => {
     ddbMock.on(QueryCommand).resolves({ Items: [row({ region: undefined })] });
 
-    expect((await listOrgAccessKeys(ORG_ID))[0]!.region).toBe(S3Region.EuWest1);
+    expect((await listOrgAccessKeys(ORG_ID))[0]!.orchestratorId).toBe('aurora');
+  });
+
+  it('resolves a row that names only a region to the network that served it', async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [row({ region: S3Region.UsEast1 })] });
+
+    expect((await listOrgAccessKeys(ORG_ID))[0]!.orchestratorId).toBe('fth');
+  });
+
+  it('reads the network off a row that names it, whatever region it also carries', async () => {
+    ddbMock
+      .on(QueryCommand)
+      .resolves({ Items: [row({ orchestratorId: 'forge', region: undefined })] });
+
+    expect((await listOrgAccessKeys(ORG_ID))[0]!.orchestratorId).toBe('forge');
   });
 
   it('leaves the optional attributes absent when the row carries none', async () => {

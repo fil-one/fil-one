@@ -149,7 +149,7 @@ function nextStepSentence(cause: RevocationCause): string {
 /** A key as both bodies name it: what it was called, which one it was, and where. */
 function describeKey(key: AccessKeySummary): string {
   const suffix = key.accessKeyIdSuffix ? ` (…${key.accessKeyIdSuffix})` : '';
-  return `${key.keyName}${suffix} — ${formatRegion(key.region)}, created ${key.createdAt.slice(0, 10)}`;
+  return `${key.keyName}${suffix} — ${key.regions.map(formatRegion).join(', ')}, created ${key.createdAt.slice(0, 10)}`;
 }
 
 interface BodyLines {

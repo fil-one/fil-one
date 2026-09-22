@@ -23,7 +23,7 @@ const mockKeys: AccessKey[] = [
     status: 'active',
     permissions: ['read', 'write', 'list'],
     bucketScope: 'all',
-    region: S3Region.EuWest1,
+    regions: [S3Region.EuWest1],
   },
   {
     id: '2',
@@ -34,7 +34,7 @@ const mockKeys: AccessKey[] = [
     permissions: ['read', 'list'],
     bucketScope: 'specific',
     buckets: ['backups', 'archives'],
-    region: S3Region.UsEast1,
+    regions: [S3Region.UsEast1],
   },
   {
     id: '3',
@@ -45,7 +45,7 @@ const mockKeys: AccessKey[] = [
     status: 'inactive',
     permissions: ['read'],
     bucketScope: 'all',
-    region: S3Region.EuWest1,
+    regions: [S3Region.EuWest1],
   },
 ];
 
@@ -69,7 +69,7 @@ const keysWithBucketPermissions: AccessKey[] = [
     ],
     granularPermissions: ['GetObjectVersion', 'PutObjectRetention'],
     bucketScope: 'all',
-    region: S3Region.UsEast1,
+    regions: [S3Region.UsEast1],
   },
   {
     id: '11',
@@ -80,7 +80,7 @@ const keysWithBucketPermissions: AccessKey[] = [
     permissions: ['read', 'list', 'GetBucketVersioning', 'GetBucketObjectLockConfiguration'],
     bucketScope: 'specific',
     buckets: ['backups'],
-    region: S3Region.EuWest1,
+    regions: [S3Region.EuWest1],
   },
 ];
 

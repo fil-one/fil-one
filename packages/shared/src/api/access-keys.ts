@@ -222,7 +222,13 @@ export interface AccessKey {
   granularPermissions?: GranularPermission[];
   bucketScope: AccessKeyBucketScope;
   buckets?: string[];
-  region?: S3Region;
+  /**
+   * Every region the key works in. A key is held by one storage network and
+   * its credential is accepted at each region that network serves, so this is
+   * the network's regions: one for Aurora or FTH, one or more for a Forge
+   * network. Never empty for a key whose network is available on this stage.
+   */
+  regions: S3Region[];
   expiresAt?: string | null;
   /**
    * The FilOne user who minted the key, so the console can tell the caller's

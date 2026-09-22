@@ -31,7 +31,7 @@ const mockOrchestrator = {
 };
 
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
-  getOrchestratorForRegion: () => mockOrchestrator,
+  findOrchestratorById: () => mockOrchestrator,
 }));
 
 process.env.FILONE_STAGE = 'test';
@@ -226,7 +226,9 @@ describe('rotate-access-key baseHandler', () => {
       accessKeyId: 'AKIANEW00000000',
       createdAt: '2026-09-11T10:00:00.000Z',
       status: 'active',
-      region: 'eu-west-1',
+      // The network the key lives on, and no region: the stored row's legacy
+      // region resolves to it and is not copied forward.
+      orchestratorId: 'aurora',
       permissions: ['read', 'write', 'list'],
       granularPermissions: ['GetObjectVersion'],
       bucketScope: 'specific',

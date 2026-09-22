@@ -1,4 +1,9 @@
-import { S3Region } from '@filone/shared';
+import { S3Region, type StageLike } from '@filone/shared';
+import {
+  ORCHESTRATOR_ID_BY_REGION,
+  orchestratorIdForRegion,
+  regionsForOrchestrator,
+} from './service-orchestrator-ids.ts';
 import type {
   AccessKeyBucketScope,
   AccessKeyPermission,
@@ -41,11 +46,38 @@ export const AccessKeyKeys = {
 } as const;
 
 /**
- * The region of an access-key row that carries no `region` attribute. Those
- * rows were written before multi-region routing, so they predate FTH and
- * belong to Aurora.
+ * The region of an access-key row that carries neither an `orchestratorId` nor
+ * a `region` attribute. Those rows were written before multi-region routing, so
+ * they predate FTH and belong to Aurora.
  */
 export const DEFAULT_ACCESS_KEY_REGION: S3Region = S3Region.EuWest1;
+
+/**
+ * The storage network holding an access key's credential. A row written since
+ * keys became network-wide names it directly; an older row names the region it
+ * was minted in, which is the one region its network served at the time; the
+ * oldest rows name neither and are Aurora's.
+ */
+export function accessKeyOrchestratorId(
+  record: Pick<AccessKeyRecord, 'orchestratorId' | 'region'>,
+): string {
+  if (record.orchestratorId) return record.orchestratorId;
+  return (
+    orchestratorIdForRegion(record.region ?? DEFAULT_ACCESS_KEY_REGION) ??
+    ORCHESTRATOR_ID_BY_REGION[DEFAULT_ACCESS_KEY_REGION]
+  );
+}
+
+/**
+ * Every region an access key works in on this stage: the regions of the
+ * network holding it. Empty only for a network the stage does not offer.
+ */
+export function accessKeyRegions(
+  record: Pick<AccessKeyRecord, 'orchestratorId' | 'region'>,
+  stage: StageLike,
+): S3Region[] {
+  return regionsForOrchestrator(accessKeyOrchestratorId(record), stage);
+}
 
 /** UserInfoTable — pk: ORG#{orgId}, sk: ACCESSKEY#{id} */
 export interface AccessKeyRecord {
@@ -56,8 +88,17 @@ export interface AccessKeyRecord {
   createdAt: string;
   status: string;
   /**
-   * The region whose orchestrator holds the credential. Absent on rows written
-   * before multi-region routing, which predate FTH and belong to Aurora.
+   * The storage network (orchestrator id) holding the credential. A key is
+   * network-wide: it works at every region the network serves, which is why a
+   * row carries this and no region. Absent on rows written before keys were
+   * recorded this way; see {@link accessKeyOrchestratorId} for how they resolve.
+   */
+  orchestratorId?: string;
+  /**
+   * On rows written before keys were recorded by network: the region the key
+   * was minted in, whose orchestrator holds the credential. Absent on rows
+   * written before multi-region routing, which belong to Aurora, and on every
+   * row written since, which carries `orchestratorId` instead.
    */
   region?: S3Region;
   /**
