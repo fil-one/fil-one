@@ -1115,6 +1115,20 @@ describe('a network serving several regions', () => {
     stage: 'test',
     api: { baseUrl: 'https://api.example.com', accessToken: 'partner-key' },
   });
+  const listing = {
+    Buckets: [
+      {
+        Name: 'us-bucket',
+        CreationDate: new Date('2026-01-01T00:00:00Z'),
+        BucketRegion: 'us-east-1',
+      },
+      {
+        Name: 'eu-bucket',
+        CreationDate: new Date('2026-01-02T00:00:00Z'),
+        BucketRegion: 'eu-central-3',
+      },
+    ],
+  };
 
   beforeEach(stubS3Credentials);
 
@@ -1136,5 +1150,54 @@ describe('a network serving several regions', () => {
       /does not serve region "eu-west-1"/,
     );
     expect(ssmMock.commandCalls(GetParameterCommand)).toHaveLength(0);
+  });
+
+  it("lists the tenant's buckets from every region once, each labelled with its region", async () => {
+    s3Mock.on(ListBucketsCommand).resolves(listing);
+
+    const buckets = await network.listBuckets(tenantId);
+
+    expect(s3Mock.commandCalls(ListBucketsCommand)).toHaveLength(1);
+    expect(buckets.map((b) => [b.bucketName, b.region])).toStrictEqual([
+      ['us-bucket', S3Region.UsEast1],
+      ['eu-bucket', S3Region.EuCentral3],
+    ]);
+  });
+
+  it('refuses a listing that omits the region of a bucket, rather than guessing', async () => {
+    s3Mock.on(ListBucketsCommand).resolves({
+      Buckets: [{ Name: 'unlabelled', CreationDate: new Date('2026-01-01T00:00:00Z') }],
+    });
+
+    await expect(network.listBuckets(tenantId)).rejects.toThrow(/without a region/);
+  });
+
+  it('refuses a listing naming a region the network does not serve', async () => {
+    s3Mock.on(ListBucketsCommand).resolves({
+      Buckets: [
+        {
+          Name: 'stray',
+          CreationDate: new Date('2026-01-01T00:00:00Z'),
+          BucketRegion: 'eu-west-1',
+        },
+      ],
+    });
+
+    await expect(network.listBuckets(tenantId)).rejects.toThrow(/does not serve/);
+  });
+
+  it('finds a bucket only through the region serving it', async () => {
+    s3Mock.on(ListBucketsCommand).resolves(listing);
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Suspended' });
+    s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
+
+    const viaEu = await network.getBucket(tenantId, S3Region.EuCentral3, 'eu-bucket');
+    const viaUs = await network.getBucket(tenantId, S3Region.UsEast1, 'eu-bucket');
+
+    expect(viaEu).toMatchObject({ bucketName: 'eu-bucket', region: S3Region.EuCentral3 });
+    // Listed at every gateway, served by one: through the wrong region it is
+    // not found, and no per-bucket read is attempted there.
+    expect(viaUs).toBeNull();
+    expect(s3Mock.commandCalls(GetBucketVersioningCommand)).toHaveLength(1);
   });
 });

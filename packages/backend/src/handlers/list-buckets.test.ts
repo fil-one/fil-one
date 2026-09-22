@@ -271,6 +271,79 @@ describe('list-buckets baseHandler (single-region)', () => {
   });
 });
 
+describe('list-buckets baseHandler (a network serving several regions)', () => {
+  const forge: MockOrchestrator = {
+    id: 'forge',
+    regions: [S3Region.EuCentral3, S3Region.UsEast9],
+    isTenantReady: vi.fn(),
+    listBuckets: vi.fn(),
+  };
+  const eu = {
+    bucketName: 'eu-bucket',
+    region: S3Region.EuCentral3,
+    createdAt: '2026-01-01T00:00:00.000Z',
+  };
+  const us = {
+    bucketName: 'us-bucket',
+    region: S3Region.UsEast9,
+    createdAt: '2026-01-02T00:00:00.000Z',
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    availableOrchestrators.mockReturnValue([aurora, forge]);
+    aurora.isTenantReady.mockReturnValue(null);
+    forge.isTenantReady.mockReturnValue('forge-t-1');
+    forge.listBuckets.mockResolvedValue([eu, us]);
+  });
+
+  it('lists the network once and returns its buckets from every region, each labelled', async () => {
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const body = JSON.parse(result.body as string);
+    expect(forge.listBuckets).toHaveBeenCalledTimes(1);
+    expect(body.buckets).toStrictEqual([eu, us]);
+  });
+
+  it('narrows a region filter to that region while still calling the network', async () => {
+    const event = buildEvent({
+      userInfo: USER_INFO,
+      queryStringParameters: { region: S3Region.UsEast9 },
+    });
+    const result = await baseHandler(event);
+
+    const body = JSON.parse(result.body as string);
+    expect(forge.listBuckets).toHaveBeenCalledWith('forge-t-1');
+    expect(body.buckets).toStrictEqual([us]);
+  });
+
+  it('names only the requested region as unavailable when the network fails under a filter', async () => {
+    forge.listBuckets.mockRejectedValue(new Error('forge down'));
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const event = buildEvent({
+      userInfo: USER_INFO,
+      queryStringParameters: { region: S3Region.UsEast9 },
+    });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(503);
+    expect(JSON.parse(result.body as string).message).toBe(unavailableMessage(S3Region.UsEast9));
+  });
+
+  it('names every region of the network as unavailable when it fails unfiltered', async () => {
+    forge.listBuckets.mockRejectedValue(new Error('forge down'));
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    expect(result.statusCode).toBe(503);
+    expect(JSON.parse(result.body as string).message).toBe(
+      unavailableMessage(S3Region.EuCentral3, S3Region.UsEast9),
+    );
+  });
+});
+
 describe('list-buckets baseHandler (multi-region fan-out)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
