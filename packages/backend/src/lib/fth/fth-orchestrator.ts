@@ -94,7 +94,9 @@ export function createInstrumentedFthClient(): FthManagementClient {
 // Callers only ever see createFthOrchestrator(client).
 class FthOrchestrator implements ServiceOrchestrator {
   readonly id = 'fth';
-  readonly region = S3Region.UsEast1;
+  readonly regions = [S3Region.UsEast1];
+  // The one region this network serves; the region a caller names is always it.
+  private readonly region = S3Region.UsEast1;
   readonly accessModel = 'scoped-keys';
 
   private readonly client: FthManagementClient;

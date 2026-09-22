@@ -37,10 +37,10 @@ export async function baseHandler(
   const sortKey = parseSortKey(event.queryStringParameters?.sortKey);
   const sortDirection = parseSortDirection(event.queryStringParameters?.sortDirection);
 
-  // Each orchestrator only ever serves its own fixed region, so a region filter
-  // lets every other leg be skipped outright instead of fetched and discarded.
+  // An orchestrator is one storage network and lists every region it serves in
+  // one call, so a region filter skips the networks that do not serve the region.
   const orchestrators = getAvailableOrchestrators().filter(
-    (orchestrator) => !region || orchestrator.region === region,
+    (orchestrator) => !region || orchestrator.regions.includes(region as S3Region),
   );
   const orgProfile = await getOrgProfile(orgId);
 
@@ -70,11 +70,11 @@ export async function baseHandler(
     console.error('[list-buckets] Orchestrator listBuckets failed', {
       orgId,
       orchestratorId: orchestrator.id,
-      region: orchestrator.region,
+      regions: orchestrator.regions,
       tenantId,
       error: result.reason,
     });
-    unavailableRegions.push(orchestrator.region);
+    unavailableRegions.push(...orchestrator.regions);
   });
 
   // Every provisioned region is down: an empty 200 renders as "No buckets yet" over a real

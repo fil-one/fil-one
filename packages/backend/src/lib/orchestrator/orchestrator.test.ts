@@ -12,7 +12,7 @@ import {
   GetBucketVersioningCommand,
   GetObjectLockConfigurationCommand,
 } from '@aws-sdk/client-s3';
-import { S3Region } from '@filone/shared';
+import { getS3Endpoint, S3Region } from '@filone/shared';
 import type { Client } from '@filone/orchestrator-client';
 
 vi.mock('sst', () => ({
@@ -88,9 +88,8 @@ function fail(status: number, message = 'error') {
 function buildOrchestrator(overrides?: { api?: FilOneOrchestratorConfig['api'] }) {
   return createFilOneOrchestrator({
     id: 'forge',
-    region: S3Region.UsEast1,
+    regions: [S3Region.UsEast1],
     stage: 'test',
-    s3EndpointUrl: 'https://us-east-1.s3.test.example.com',
     api: overrides?.api ?? { baseUrl: 'https://api.example.com', accessToken: 'partner-key' },
   });
 }
@@ -122,9 +121,9 @@ beforeEach(() => {
 });
 
 describe('createFilOneOrchestrator config', () => {
-  it('exposes the configured id and region', () => {
+  it('exposes the configured id and regions', () => {
     expect(orchestrator.id).toBe('forge');
-    expect(orchestrator.region).toBe(S3Region.UsEast1);
+    expect(orchestrator.regions).toStrictEqual([S3Region.UsEast1]);
   });
 
   it('does not instrument an injected client', () => {
@@ -358,7 +357,7 @@ describe('getS3ClientContext', () => {
     const ctx = await orchestrator.getS3ClientContext(tenantId);
 
     expect(ctx).toEqual({
-      endpointUrl: 'https://us-east-1.s3.test.example.com',
+      endpointUrl: getS3Endpoint(S3Region.UsEast1, 'test'),
       region: 'us-east-1',
       credentials: { accessKeyId: 'AK1', secretAccessKey: 'SK1' },
       forcePathStyle: true,
