@@ -27,7 +27,7 @@ function key(over: Partial<AccessKey> = {}): AccessKey {
     permissions: ['read', 'list'],
     bucketScope: 'specific',
     buckets: ['my-bucket'],
-    region: S3Region.UsEast1,
+    regions: [S3Region.UsEast1],
     // `seedPermissions` writes userId 'user-1'.
     createdBy: 'user-1',
     ...over,

@@ -6,8 +6,10 @@ import {
   type RAGConfigRecord,
   type RagIndexerCheckpointRecord,
   RAGKeys,
+  accessKeyOrchestratorId,
+  accessKeyRegions,
 } from './dynamo-records.ts';
-import { S3Region } from '@filone/shared';
+import { S3Region, Stage } from '@filone/shared';
 
 const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
 
@@ -221,5 +223,42 @@ describe('RagIndexerCheckpointRecord', () => {
       ttl: Math.floor(Date.now() / 1000) + 48 * 60 * 60,
     };
     expect(record.continuationToken).toBeUndefined();
+  });
+});
+
+describe('accessKeyOrchestratorId', () => {
+  it('reads the network off a row that names it, whatever else it carries', () => {
+    expect(accessKeyOrchestratorId({ orchestratorId: 'forge' })).toBe('forge');
+    expect(accessKeyOrchestratorId({ orchestratorId: 'forge', region: S3Region.UsEast1 })).toBe(
+      'forge',
+    );
+  });
+
+  it('resolves a legacy row that names only a region to the network that served it', () => {
+    expect(accessKeyOrchestratorId({ region: S3Region.UsEast1 })).toBe('fth');
+    expect(accessKeyOrchestratorId({ region: S3Region.EuCentral3 })).toBe('forge');
+  });
+
+  it('treats a row naming neither as Aurora, which predates both attributes', () => {
+    expect(accessKeyOrchestratorId({})).toBe('aurora');
+  });
+});
+
+describe('accessKeyRegions', () => {
+  it('is every region the key works in: the regions of its network on the stage', () => {
+    expect(accessKeyRegions({ orchestratorId: 'fth' }, Stage.Production)).toStrictEqual([
+      S3Region.UsEast1,
+    ]);
+    expect(accessKeyRegions({ region: S3Region.EuWest1 }, Stage.Production)).toStrictEqual([
+      S3Region.EuWest1,
+    ]);
+    expect(accessKeyRegions({}, Stage.Production)).toStrictEqual([S3Region.EuWest1]);
+  });
+
+  it('is empty for a network the stage does not offer', () => {
+    expect(accessKeyRegions({ orchestratorId: 'forge' }, Stage.Production)).toStrictEqual([]);
+    expect(accessKeyRegions({ orchestratorId: 'forge' }, Stage.Staging)).toStrictEqual([
+      S3Region.EuCentral3,
+    ]);
   });
 });

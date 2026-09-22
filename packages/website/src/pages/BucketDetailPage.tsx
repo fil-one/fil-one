@@ -220,9 +220,10 @@ function useBucketQueries(bucketName: string, region: S3Region, mayListKeys: boo
     },
   });
 
-  // Access keys are region-scoped, so the region is part of the filter: a key
-  // from another region, even one scoped to all buckets, cannot operate on this
-  // bucket. The server narrows the list to the caller's own keys unless they
+  // A key works at every region of the storage network holding it and nowhere
+  // else, so the region is part of the filter: the server keeps the keys whose
+  // network serves this bucket's region, even ones scoped to all buckets on
+  // another network. It narrows the list to the caller's own keys unless they
   // hold `keys.manage_all`; without `keys.manage_own` it refuses the request, so
   // it is not made.
   const accessKeysQuery = useQuery({

@@ -1,6 +1,6 @@
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { auditKeyIdSuffix } from '@filone/shared';
-import type { AuditActor, RevocationTrigger, S3Region } from '@filone/shared';
+import type { AuditActor, RevocationTrigger } from '@filone/shared';
 import { Resource } from 'sst';
 import { AuditSubjects, twoPhaseAudit } from './audit.ts';
 import { AccessKeyKeys } from './dynamo-records.ts';
@@ -13,7 +13,8 @@ export interface RevokeAccessKeyArgs {
   /** What the console lists. Absent only on rows written before it was stored. */
   accessKeyId?: string | undefined;
   keyName?: string | undefined;
-  region: S3Region;
+  /** The storage network the credential is revoked at. */
+  orchestratorId: string;
   orchestrator: Pick<ServiceOrchestrator, 'deleteAccessKey'>;
   tenantId: string;
   /** Who asked. On a role change this is the admin, never the key's holder. */
@@ -61,7 +62,7 @@ export async function revokeAccessKey({
   keyId,
   accessKeyId,
   keyName,
-  region,
+  orchestratorId,
   orchestrator,
   tenantId,
   actor,
@@ -79,7 +80,7 @@ export async function revokeAccessKey({
     subject: AuditSubjects.key('s3', accessKeyId ?? keyId),
     details: {
       keyKind: 's3',
-      region,
+      orchestratorId,
       ...(keyName ? { keyName } : {}),
       ...(accessKeyId ? { keyIdSuffix: auditKeyIdSuffix('s3', accessKeyId) } : {}),
       reason,

@@ -18,7 +18,7 @@ const mockKeys: AccessKey[] = [
     permissions: ['read', 'write', 'list'],
     bucketScope: 'specific',
     buckets: ['my-bucket'],
-    region: S3Region.UsEast1,
+    regions: [S3Region.UsEast1],
     createdBy: 'user-1',
   },
   {
@@ -30,7 +30,7 @@ const mockKeys: AccessKey[] = [
     permissions: ['read', 'list'],
     bucketScope: 'specific',
     buckets: ['my-bucket'],
-    region: S3Region.UsEast1,
+    regions: [S3Region.UsEast1],
     createdBy: 'someone-else',
   },
 ];

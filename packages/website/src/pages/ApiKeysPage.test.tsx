@@ -35,7 +35,7 @@ function key(over: Partial<AccessKey> = {}): AccessKey {
     status: 'active',
     permissions: ['read', 'list'],
     bucketScope: 'all',
-    region: S3Region.UsEast1,
+    regions: [S3Region.UsEast1],
     createdBy: 'user-1',
     ...over,
   };

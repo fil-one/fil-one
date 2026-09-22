@@ -3,15 +3,20 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import { type ErrorResponse, S3Region } from '@filone/shared';
+import type { ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { userActor } from '../lib/audit.ts';
 import { getDynamoClient } from '../lib/ddb-client.ts';
-import { AccessKeyKeys, DEFAULT_ACCESS_KEY_REGION } from '../lib/dynamo-records.ts';
+import { AccessKeyKeys, accessKeyOrchestratorId } from '../lib/dynamo-records.ts';
+import type { AccessKeyRecord } from '../lib/dynamo-records.ts';
 import { keyScope, notYourKeyResponse, withinScope } from '../lib/key-scope.ts';
 import { revokeAccessKey } from '../lib/key-revocation.ts';
-import { ResponseBuilder, tenantNotReadyResponse } from '../lib/response-builder.ts';
-import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import {
+  orchestratorUnavailableResponse,
+  ResponseBuilder,
+  tenantNotReadyResponse,
+} from '../lib/response-builder.ts';
+import { findOrchestratorById } from '../lib/service-orchestrator-registry.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
@@ -59,8 +64,15 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   )
     return notYourKeyResponse();
 
-  const region: S3Region = (Item.region?.S as S3Region | undefined) ?? DEFAULT_ACCESS_KEY_REGION;
-  const orchestrator = getOrchestratorForRegion(region);
+  // The network holding the credential is what revokes it. Rows written before
+  // keys were recorded by network name a region instead, which resolves to
+  // the network that served it.
+  const orchestratorId = accessKeyOrchestratorId({
+    orchestratorId: Item.orchestratorId?.S,
+    region: Item.region?.S as AccessKeyRecord['region'],
+  });
+  const orchestrator = findOrchestratorById(orchestratorId);
+  if (!orchestrator) return orchestratorUnavailableResponse(orchestratorId);
 
   const tenantId = orchestrator.isTenantReady(orgProfile);
   if (!tenantId) return tenantNotReadyResponse();
@@ -73,7 +85,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     keyId,
     accessKeyId: Item.accessKeyId?.S,
     keyName: Item.keyName?.S,
-    region,
+    orchestratorId,
     orchestrator,
     tenantId,
     actor: userActor({ userId, email: getVerifiedEmail(event) }),

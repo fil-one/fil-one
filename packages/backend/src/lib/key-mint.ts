@@ -8,7 +8,6 @@ import type {
   AuditActor,
   ErrorResponse,
   ExcessKeyPermission,
-  S3Region,
 } from '@filone/shared';
 import { Resource } from 'sst';
 import { accessKeyMintSeqItem } from './access-key-mint-seq.ts';
@@ -47,7 +46,7 @@ export interface MintedKey {
   keyId: string;
   accessKeyId: string;
   keyName: string;
-  region: S3Region;
+  /** The network that minted it, which is where it lives and what revokes it. */
   orchestrator: ServiceOrchestrator;
   tenantId: string;
 }
@@ -218,7 +217,13 @@ export async function discardRecordedKey({
   actor: AuditActor;
 }): Promise<boolean> {
   try {
-    await revokeAccessKey({ orgId: minter.orgId, ...minted, actor, reason: 'stale_role_at_mint' });
+    await revokeAccessKey({
+      orgId: minter.orgId,
+      ...minted,
+      orchestratorId: minted.orchestrator.id,
+      actor,
+      reason: 'stale_role_at_mint',
+    });
     return true;
   } catch (err) {
     // Left for the operator rather than retried: a second delete against a
