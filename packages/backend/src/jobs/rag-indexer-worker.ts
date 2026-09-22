@@ -205,7 +205,7 @@ async function indexRegion(args: IndexRegionArgs): Promise<RegionIndexStats> {
   const { orgId, region, tenantId, bucketNames, vectorStore, deadlineEpochMs } = args;
 
   const orchestrator = getOrchestratorForRegion(region);
-  const ctx = await orchestrator.getS3ClientContext(tenantId);
+  const ctx = await orchestrator.getS3ClientContext(tenantId, region);
   const s3 = createS3Client(ctx);
 
   const stats: RegionIndexStats = {

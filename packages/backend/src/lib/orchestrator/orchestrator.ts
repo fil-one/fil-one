@@ -10,8 +10,10 @@
 //   - control-plane (ensureTenantReady, issueAccessKey, tenant status/info,
 //     usage metrics, ...) calls the Management API.
 //   - data-plane (createBucket, listBuckets, getBucket, getS3ClientContext)
-//     speaks S3 directly against the orchestrator's S3 gateway using the
-//     `filone-console` system key stashed in SSM during setup.
+//     speaks S3 directly against the S3 gateway of the region named in the
+//     call, using the `filone-console` system key stashed in SSM during setup.
+//     The tenant is region-free, so that one key works at every region's
+//     gateway; only the endpoint and signing region change.
 
 import pRetry from 'p-retry';
 import { getS3Endpoint, type S3Region, type TenantStatus } from '@filone/shared';
@@ -156,10 +158,20 @@ class FilOneOrchestrator implements ServiceOrchestrator {
     throw new Error(`Failed to set tenant ${tenantId} status to "${status}"`, { cause: error });
   }
 
+  // A region this network does not serve has no gateway to send the request to;
+  // reaching one is a routing bug upstream, not something to sign for anyway.
+  private assertServes(region: S3Region): void {
+    if (!this.regions.includes(region)) {
+      throw new Error(`Orchestrator "${this.id}" does not serve region "${region}".`);
+    }
+  }
+
   async getS3ClientContext(
     tenantId: string,
+    region: S3Region,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<S3ClientContext> {
+    this.assertServes(region);
     const credentials = await getConsoleS3Credentials(
       {
         orchestratorId: this.id,
@@ -169,8 +181,8 @@ class FilOneOrchestrator implements ServiceOrchestrator {
       requestOptions,
     );
     return {
-      endpointUrl: getS3Endpoint(this.regions[0]!, this.config.stage),
-      region: this.regions[0]!,
+      endpointUrl: getS3Endpoint(region, this.config.stage),
+      region,
       credentials,
       forcePathStyle: true,
       orchestratorId: this.id,
@@ -257,10 +269,11 @@ class FilOneOrchestrator implements ServiceOrchestrator {
   // Data-plane bucket operations against the S3 gateway with the console key.
   async createBucket(
     tenantId: string,
+    region: S3Region,
     args: CreateBucketArgs,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void> {
-    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    const ctx = await this.getS3ClientContext(tenantId, region, requestOptions);
     const s3 = createS3Client(ctx);
     await s3CreateBucket(
       s3,
@@ -305,10 +318,11 @@ class FilOneOrchestrator implements ServiceOrchestrator {
 
   async deleteBucket(
     tenantId: string,
+    region: S3Region,
     bucketName: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void> {
-    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    const ctx = await this.getS3ClientContext(tenantId, region, requestOptions);
     const s3 = createS3Client(ctx);
     await s3DeleteBucket(s3, bucketName, requestOptions);
   }
@@ -317,7 +331,9 @@ class FilOneOrchestrator implements ServiceOrchestrator {
     tenantId: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketSummary[]> {
-    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    // ListBuckets is account-wide at every gateway of the network, so any
+    // region's endpoint returns the tenant's buckets in all of them.
+    const ctx = await this.getS3ClientContext(tenantId, this.regions[0]!, requestOptions);
     const s3 = createS3Client(ctx);
     const { buckets } = await s3ListBuckets(s3, requestOptions);
     // Versioning and object-lock both cost a call per bucket; neither is
@@ -335,10 +351,11 @@ class FilOneOrchestrator implements ServiceOrchestrator {
 
   async getBucket(
     tenantId: string,
+    region: S3Region,
     bucketName: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketDetails | null> {
-    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    const ctx = await this.getS3ClientContext(tenantId, region, requestOptions);
     const s3 = createS3Client(ctx);
     const { buckets } = await s3ListBuckets(s3, requestOptions);
     const match = buckets.find((b) => b.name === bucketName);
@@ -351,7 +368,7 @@ class FilOneOrchestrator implements ServiceOrchestrator {
 
     return {
       bucketName,
-      region: this.regions[0]!,
+      region,
       createdAt: match.createdAt,
       isPublic: false,
       versioning,

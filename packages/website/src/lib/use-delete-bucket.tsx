@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
-import type { ListBucketsResponse } from '@filone/shared';
+import type { ListBucketsResponse, S3Region } from '@filone/shared';
 import { ApiErrorCode, DOCS_URL } from '@filone/shared';
 
 import { Link as ExternalLink } from '../components/Link';
@@ -19,6 +19,16 @@ const EMPTY_BUCKET_DOCS_URL = `${DOCS_URL}/storage/objects#deleting-objects`;
 const NOT_EMPTY_TOAST_DURATION_MS = 12_000;
 
 type Toast = ReturnType<typeof useToast>['toast'];
+
+/**
+ * The bucket a delete is about. A bucket is served by exactly one region, and
+ * that region's gateway is the only one that can delete it, so the region
+ * travels with the name to the API.
+ */
+export interface DeletableBucket {
+  bucketName: string;
+  region: S3Region;
+}
 
 // S3 refuses to delete a bucket that still holds objects or object versions.
 // That is a user-fixable problem, so say what to do and link the docs rather
@@ -51,41 +61,51 @@ export function useDeleteBucket() {
   // The confirmation goes with the Delete control it was opened from: a dialog
   // left on screen after a demotion still confirms the request the hidden
   // control exists to avoid.
-  const [pendingBucketName, setPendingBucketName] = usePermittedDialog<string | null>(
+  const [pendingBucket, setPendingBucket] = usePermittedDialog<DeletableBucket | null>(
     null,
     useHasPermission('buckets.delete'),
   );
 
   const mutation = useMutation({
-    mutationFn: (bucketName: string) =>
-      apiRequest(`/buckets/${encodeURIComponent(bucketName)}`, { method: 'DELETE' }),
-    onSuccess: (_, bucketName) => {
+    mutationFn: ({ bucketName, region }: DeletableBucket) =>
+      apiRequest(
+        `/buckets/${encodeURIComponent(bucketName)}?${new URLSearchParams({ region }).toString()}`,
+        { method: 'DELETE' },
+      ),
+    onSuccess: (_, { bucketName, region }) => {
       // Optimistically remove from cache, then confirm with a background refetch. Spread `old`:
       // this updater owns `buckets` only, and rebuilding the object would drop
       // `unavailableRegions`, making the degraded-regions banner vanish on any delete.
       queryClient.setQueryData<ListBucketsResponse>(queryKeys.buckets, (old) =>
-        old ? { ...old, buckets: old.buckets.filter((b) => b.bucketName !== bucketName) } : old,
+        old
+          ? {
+              ...old,
+              buckets: old.buckets.filter(
+                (b) => !(b.bucketName === bucketName && b.region === region),
+              ),
+            }
+          : old,
       );
       void queryClient.invalidateQueries({ queryKey: queryKeys.buckets });
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
       toast.success(`Bucket "${bucketName}" deleted`);
     },
-    onError: (err, bucketName) => reportDeleteError(err, bucketName, toast),
+    onError: (err, { bucketName }) => reportDeleteError(err, bucketName, toast),
   });
 
   async function confirmDelete() {
-    if (!pendingBucketName) return;
+    if (!pendingBucket) return;
     try {
-      await mutation.mutateAsync(pendingBucketName);
+      await mutation.mutateAsync(pendingBucket);
     } catch {
       // error handled by mutation.onError
     }
   }
 
   return {
-    pendingBucketName,
-    requestDelete: setPendingBucketName,
-    cancelDelete: () => setPendingBucketName(null),
+    pendingBucket,
+    requestDelete: setPendingBucket,
+    cancelDelete: () => setPendingBucket(null),
     confirmDelete,
   };
 }
