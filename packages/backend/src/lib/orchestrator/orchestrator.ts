@@ -125,7 +125,6 @@ class FilOneOrchestrator implements ServiceOrchestrator {
       client: this.client,
       id: config.id,
       stage: config.stage,
-      region: config.region,
     };
     this.tenantIdAttribute = `${config.id}TenantId`;
   }
@@ -476,6 +475,7 @@ class FilOneOrchestrator implements ServiceOrchestrator {
         from: metricsOpts.from,
         to: metricsOpts.to,
         window: mapIntervalToWindow(metricsOpts.interval ?? '1d'),
+        ...(metricsOpts.region && { region: metricsOpts.region }),
       },
       throwOnError: false,
       ...requestOptions,

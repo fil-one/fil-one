@@ -115,6 +115,12 @@ export interface GetTenantUsageMetricsOptions {
   to: string;
   /** Sampling window applied to BOTH series. Defaults to '1d'. */
   interval?: string;
+  /**
+   * Restricts the series to the tenant's buckets served by this region. Absent,
+   * the series cover the tenant's buckets in every region of the network. A
+   * single-region network ignores it.
+   */
+  region?: S3Region;
 }
 
 /**
