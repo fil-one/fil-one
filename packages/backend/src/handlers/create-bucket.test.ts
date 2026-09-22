@@ -86,7 +86,7 @@ describe('create-bucket baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(201);
-    expect(mockCreateBucket).toHaveBeenCalledWith('aurora-t-1', {
+    expect(mockCreateBucket).toHaveBeenCalledWith('aurora-t-1', S3_REGION, {
       bucketName: 'my-bucket',
       versioning: false,
       lock: false,
@@ -162,7 +162,7 @@ describe('create-bucket baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(201);
-    expect(mockCreateBucket).toHaveBeenCalledWith('aurora-t-1', {
+    expect(mockCreateBucket).toHaveBeenCalledWith('aurora-t-1', S3_REGION, {
       bucketName: 'my-bucket',
       versioning: true,
       lock: true,
@@ -177,7 +177,7 @@ describe('create-bucket baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(201);
-    expect(mockCreateBucket).toHaveBeenCalledWith('aurora-t-1', {
+    expect(mockCreateBucket).toHaveBeenCalledWith('aurora-t-1', S3_REGION, {
       bucketName: 'my-bucket',
       versioning: false,
       lock: false,

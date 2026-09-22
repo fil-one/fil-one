@@ -159,7 +159,8 @@ export interface TenantInfo {
  * access-key issuance, and presigning for one storage network. A network serves
  * one or more regions ({@link ServiceOrchestrator.regions}); its tenant is
  * region-free, so one tenant holds buckets in any of them and its access keys
- * work at every region's S3 gateway.
+ * work at every region's S3 gateway. Bucket operations name the region the
+ * bucket lives in, since a bucket is served by exactly one.
  *
  * ## orgId vs tenantId
  *
@@ -236,22 +237,31 @@ export interface ServiceOrchestrator {
    */
   isTenantReady(orgProfile: OrgProfileItem | undefined): string | null;
 
+  /** Creates the bucket in `region`, which must be one of {@link regions}. */
   createBucket(
     tenantId: string,
+    region: S3Region,
     args: CreateBucketArgs,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void>;
   deleteBucket(
     tenantId: string,
+    region: S3Region,
     bucketName: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void>;
+  /**
+   * Every bucket the tenant holds on this network, each labelled with the
+   * region serving it. One call per network, not per region.
+   */
   listBuckets(
     tenantId: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketSummary[]>;
+  /** The bucket as served by `region`; `null` when no such bucket lives there. */
   getBucket(
     tenantId: string,
+    region: S3Region,
     bucketName: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketDetails | null>;
@@ -313,8 +323,15 @@ export interface ServiceOrchestrator {
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void>;
 
+  /**
+   * Credentials and endpoint for the S3 gateway of `region`, which must be one
+   * of {@link regions}. The credential is the tenant's console key, which is
+   * the same at every region of the network; the endpoint and signing region
+   * are the region's.
+   */
   getS3ClientContext(
     tenantId: string,
+    region: S3Region,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<S3ClientContext>;
 
