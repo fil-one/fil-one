@@ -16,7 +16,7 @@ import { authMiddleware } from '../middleware/auth.ts';
 import { authorize } from '../middleware/authorize.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 import type { AccessKeyRecord } from '../lib/dynamo-records.ts';
-import { type ProvisionedRegion, getProvisionedRegions } from '../lib/region-helpers.ts';
+import { type ProvisionedTenant, getProvisionedTenants } from '../lib/region-helpers.ts';
 import { reportMetric } from '../lib/metrics.ts';
 
 const dynamo = getDynamoClient();
@@ -84,10 +84,10 @@ export async function baseHandler(
   // neither. The rows are not fetched at all in that last case: a read nobody
   // may see is a read worth not making.
   const scope = keyScope(event);
-  // The dashboard aggregates activity across every region the org is provisioned
-  // in, so resolve the ready tenant on each available orchestrator.
+  // The dashboard aggregates activity across every network the org is
+  // provisioned on, so resolve the ready tenant on each available orchestrator.
   const { result: regions, durationMs: resolveRegionsMs } = await timed('resolveRegions', () =>
-    getProvisionedRegions(orgId),
+    getProvisionedTenants(orgId),
   );
 
   const [
@@ -137,7 +137,7 @@ export async function baseHandler(
 
 async function fetchBucketActivities(
   orgId: string,
-  regions: ProvisionedRegion[],
+  regions: ProvisionedTenant[],
 ): Promise<RecentActivity[]> {
   const perRegion = await Promise.all(
     regions.map(({ orchestrator, tenantId }) =>

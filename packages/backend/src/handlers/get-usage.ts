@@ -5,7 +5,7 @@ import type { UsageResponse, TenantStatus } from '@filone/shared';
 import { countAccessKeysInScope } from '../lib/access-key-inventory.ts';
 import { keyScope } from '../lib/key-scope.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
-import { getProvisionedRegions } from '../lib/region-helpers.ts';
+import { getProvisionedTenants } from '../lib/region-helpers.ts';
 import type { ServiceOrchestrator, TenantInfo } from '../lib/service-orchestrator.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
@@ -31,9 +31,10 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   // independent of how many regions answer below, including none.
   const accessKeyCount = await countAccessKeysInScope(orgId, keyScope(event));
 
-  // The dashboard aggregates usage across every region the org is provisioned
-  // in, so resolve the ready tenant on each available orchestrator.
-  const regions = await getProvisionedRegions(orgId);
+  // The dashboard aggregates usage across every network the org is provisioned
+  // on, so resolve the ready tenant on each available orchestrator. A tenant's
+  // metrics already cover its buckets in every region of its network.
+  const regions = await getProvisionedTenants(orgId);
 
   if (regions.length === 0) {
     const response: UsageResponse = {
