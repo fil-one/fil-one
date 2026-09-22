@@ -16,7 +16,7 @@
 // are linked only on non-production stages, so eager construction would crash
 // production at import time.
 
-import { getS3Endpoint, S3Region } from '@filone/shared';
+import type { S3Region } from '@filone/shared';
 import { createFilOneOrchestrator } from '../orchestrator/orchestrator.ts';
 import type { ServiceOrchestrator } from '../service-orchestrator.ts';
 
@@ -29,23 +29,16 @@ export interface ForgeManagementApi {
 /**
  * @param id The unique identifier for the Forge orchestrator. It should have
  *           the format `^[a-z][a-zA-Z0-9_]*$`.
- * @param region The S3 region the orchestrator will manage.
- * @param api The Hilt endpoint and bearer token of the Forge network hosting
- *            the region.
- * @returns A `ServiceOrchestrator` instance configured for the specified Forge
- *          region.
+ * @param regions The S3 regions the network serves. A tenant on the network is
+ *                region-free, so every region shares its tenant and console key.
+ * @param api The Hilt endpoint and bearer token of the Forge network.
+ * @returns A `ServiceOrchestrator` instance for the Forge network.
  */
 export function createForgeOrchestrator(
   id: string,
-  region: S3Region,
+  regions: S3Region[],
   api: ForgeManagementApi,
 ): ServiceOrchestrator {
   const stage = process.env.FILONE_STAGE!;
-  return createFilOneOrchestrator({
-    id,
-    region,
-    stage,
-    s3EndpointUrl: getS3Endpoint(region, stage),
-    api,
-  });
+  return createFilOneOrchestrator({ id, regions, stage, api });
 }

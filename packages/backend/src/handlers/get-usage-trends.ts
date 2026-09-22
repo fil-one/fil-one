@@ -166,7 +166,7 @@ async function fetchSamplesByBucket({
   to,
   granularity,
 }: FetchSamplesArgs): Promise<SamplesByBucket> {
-  // Swallow errors so one region's outage still renders the rest.
+  // Swallow errors so one network's outage still renders the rest.
   try {
     const { storage, egress } = await orchestrator.getTenantUsageMetrics(tenantId, {
       from: from.toISOString(),
@@ -195,7 +195,7 @@ async function fetchSamplesByBucket({
   } catch (err) {
     console.error('[get-usage-trends] Failed to fetch usage metrics', {
       tenantId,
-      region: orchestrator.region,
+      orchestratorId: orchestrator.id,
       err,
     });
     return { storage: new Map(), egress: new Map(), ok: false };

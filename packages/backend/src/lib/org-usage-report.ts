@@ -73,7 +73,11 @@ export async function reportOrgUsage(params: {
           // only surfaces an index, and the escaping error is what the runtime
           // logs (enumerable own properties included).
           if (error instanceof Error) {
-            Object.assign(error, { orgId, region: t.orchestrator.region, tenantId: t.tenantId });
+            Object.assign(error, {
+              orgId,
+              orchestratorId: t.orchestrator.id,
+              tenantId: t.tenantId,
+            });
           }
           throw error;
         }
@@ -83,7 +87,7 @@ export async function reportOrgUsage(params: {
     const e = error as Error & { cause?: unknown };
     console.error(`${LOG} Usage metrics fetch failed`, {
       orgId,
-      regions: orgRegions.map((r) => ({ region: r.orchestrator.region, tenantId: r.tenantId })),
+      tenants: orgRegions.map((r) => ({ orchestratorId: r.orchestrator.id, tenantId: r.tenantId })),
       subscriptionId,
       message: e.message,
       cause: e.cause,

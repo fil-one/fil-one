@@ -12,21 +12,21 @@ vi.mock('sst', () => ({
 
 interface MockOrchestrator {
   id: string;
-  region: string;
+  regions: S3Region[];
   isTenantReady: ReturnType<typeof vi.fn>;
   listBuckets: ReturnType<typeof vi.fn>;
 }
 
 const aurora: MockOrchestrator = {
   id: 'aurora',
-  region: 'eu-west-1',
+  regions: [S3Region.EuWest1],
   isTenantReady: vi.fn(),
   listBuckets: vi.fn(),
 };
 
 const fth: MockOrchestrator = {
   id: 'fth',
-  region: 'us-east-1',
+  regions: [S3Region.UsEast1],
   isTenantReady: vi.fn(),
   listBuckets: vi.fn(),
 };
@@ -476,7 +476,7 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
     consoleError.mockRestore();
   });
 
-  it('logs the orchestrator id and region of every failing leg', async () => {
+  it('logs the orchestrator id and regions of every failing leg', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const auroraError = new Error('Aurora listBuckets blew up');
     aurora.listBuckets.mockRejectedValue(auroraError);
@@ -488,13 +488,13 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
     expect(consoleError).toHaveBeenCalledWith('[list-buckets] Orchestrator listBuckets failed', {
       orgId: 'org-1',
       orchestratorId: 'aurora',
-      region: 'eu-west-1',
+      regions: ['eu-west-1'],
       tenantId: 'aurora-t-1',
       error: auroraError,
     });
     expect(consoleError).toHaveBeenCalledWith(
       '[list-buckets] Orchestrator listBuckets failed',
-      expect.objectContaining({ orchestratorId: 'fth', region: 'us-east-1' }),
+      expect.objectContaining({ orchestratorId: 'fth', regions: ['us-east-1'] }),
     );
     consoleError.mockRestore();
   });
