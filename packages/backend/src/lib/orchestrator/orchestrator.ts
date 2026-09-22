@@ -87,8 +87,8 @@ export interface FilOneOrchestratorConfig {
    */
   id: string;
   /**
-   * The regions the network serves. The S3 gateway endpoint is derived from a
-   * region with `getS3Endpoint`.
+   * The regions the network serves. Data-plane calls name one of them; the
+   * S3 gateway endpoint is derived from it with `getS3Endpoint`.
    */
   regions: S3Region[];
   /** Deployment stage — explicit (rather than read from process.env) so instances are testable. */
@@ -156,6 +156,25 @@ class FilOneOrchestrator implements ServiceOrchestrator {
     if (!error) return;
     if (allowMissing && response?.status === 404) return;
     throw new Error(`Failed to set tenant ${tenantId} status to "${status}"`, { cause: error });
+  }
+
+  // The gateway labels every listed bucket with the region serving it. A
+  // listing that omits the label can only be trusted on a single-region
+  // network, where there is one answer; on a multi-region one it is a gateway
+  // bug that would misfile the bucket, so it is refused rather than guessed.
+  private bucketRegion(bucket: { name: string; region?: string }): S3Region {
+    if (bucket.region) {
+      if (!this.regions.includes(bucket.region as S3Region)) {
+        throw new Error(
+          `Bucket "${bucket.name}" is served by region "${bucket.region}", which orchestrator "${this.id}" does not serve.`,
+        );
+      }
+      return bucket.region as S3Region;
+    }
+    if (this.regions.length === 1) return this.regions[0]!;
+    throw new Error(
+      `Bucket "${bucket.name}" was listed without a region by multi-region orchestrator "${this.id}".`,
+    );
   }
 
   // A region this network does not serve has no gateway to send the request to;
@@ -332,7 +351,8 @@ class FilOneOrchestrator implements ServiceOrchestrator {
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketSummary[]> {
     // ListBuckets is account-wide at every gateway of the network, so any
-    // region's endpoint returns the tenant's buckets in all of them.
+    // region's endpoint returns the tenant's buckets in all of them, each
+    // labelled with the region serving it.
     const ctx = await this.getS3ClientContext(tenantId, this.regions[0]!, requestOptions);
     const s3 = createS3Client(ctx);
     const { buckets } = await s3ListBuckets(s3, requestOptions);
@@ -341,7 +361,7 @@ class FilOneOrchestrator implements ServiceOrchestrator {
     // for the one bucket the detail page actually needs them for.
     return buckets.map((b) => ({
       bucketName: b.name,
-      region: this.regions[0]!,
+      region: this.bucketRegion(b),
       createdAt: b.createdAt,
       isPublic: false,
       // The contract mandates server-side encryption by default.
@@ -359,7 +379,10 @@ class FilOneOrchestrator implements ServiceOrchestrator {
     const s3 = createS3Client(ctx);
     const { buckets } = await s3ListBuckets(s3, requestOptions);
     const match = buckets.find((b) => b.name === bucketName);
-    if (!match) return null;
+    // A bucket the tenant holds in another region of the network is listed here
+    // too, but it is not served by this region's gateway: the per-bucket reads
+    // below would be refused, so it is not found as far as this region goes.
+    if (!match || this.bucketRegion(match) !== region) return null;
 
     const [versioning, lock] = await Promise.all([
       getBucketVersioning(s3, bucketName, requestOptions),
