@@ -35,7 +35,7 @@ vi.mock('../lib/members-api.js', () => ({
 const REVOKED_KEY = {
   id: 'key-1',
   keyName: 'nightly backup',
-  region: 'us-east-1',
+  regions: ['us-east-1'],
   createdAt: '2026-02-01T00:00:00.000Z',
   reason: 'exceeds_role' as const,
   excess: ['DeleteBucket'],
@@ -451,7 +451,7 @@ describe('the role-narrowing confirmation', () => {
           id: 'key-1',
           keyName: 'nightly backup',
           accessKeyIdSuffix: '9999',
-          region: 'us-east-1',
+          regions: ['us-east-1'],
           createdAt: '2026-02-01T00:00:00.000Z',
           reason: 'exceeds_role',
           excess: ['DeleteBucket'],
@@ -619,7 +619,7 @@ describe('the role-narrowing confirmation', () => {
         {
           id: 'key-1',
           keyName: 'nightly backup',
-          region: 'us-east-1',
+          regions: ['us-east-1'],
           createdAt: '2026-02-01T00:00:00.000Z',
           reason: 'exceeds_role',
           excess: ['DeleteBucket'],
@@ -651,7 +651,7 @@ describe('the role-narrowing confirmation', () => {
           {
             id: 'key-1',
             keyName: 'nightly backup',
-            region: 'us-east-1',
+            regions: ['us-east-1'],
             createdAt: '2026-02-01T00:00:00.000Z',
             reason: 'exceeds_role',
             excess: ['DeleteBucket'],
