@@ -40,11 +40,11 @@ vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getAvailableOrchestrators: () => [],
 }));
 
-const mockSyncTenantStatusInProvisionedRegions = vi.fn();
+const mockSyncTenantStatusInProvisionedTenants = vi.fn();
 vi.mock('../lib/region-helpers.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/region-helpers.ts')>()),
-  syncTenantStatusInProvisionedRegions: (...args: unknown[]) =>
-    mockSyncTenantStatusInProvisionedRegions(...args),
+  syncTenantStatusInProvisionedTenants: (...args: unknown[]) =>
+    mockSyncTenantStatusInProvisionedTenants(...args),
 }));
 
 vi.mock('../lib/stripe-client.ts', () => ({
@@ -129,12 +129,12 @@ describe('activate-subscription baseHandler', () => {
     mockSubscriptionsCreate.mockReset();
     mockSubscriptionsUpdate.mockReset();
     mockPromotionCodesList.mockReset();
-    mockSyncTenantStatusInProvisionedRegions.mockReset();
+    mockSyncTenantStatusInProvisionedTenants.mockReset();
 
     mockSetupIntentsList.mockResolvedValue({
       data: [{ status: 'succeeded', payment_method: 'pm_test_789' }],
     });
-    mockSyncTenantStatusInProvisionedRegions.mockResolvedValue([]);
+    mockSyncTenantStatusInProvisionedTenants.mockResolvedValue([]);
     mockIsOrgDeleting.mockResolvedValue(false);
     // The billing read asks both keys at once. Absent unless a test says
     // otherwise, so a row only exists where the test put one.
@@ -253,7 +253,7 @@ describe('activate-subscription baseHandler', () => {
     expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+    expect(mockSyncTenantStatusInProvisionedTenants).not.toHaveBeenCalled();
   });
 
   it('unlocks every provisioned region on activation', async () => {
@@ -273,7 +273,7 @@ describe('activate-subscription baseHandler', () => {
     });
     await baseHandler(event);
 
-    expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith('org-1', 'active');
+    expect(mockSyncTenantStatusInProvisionedTenants).toHaveBeenCalledWith('org-1', 'active');
   });
 
   it('attaches payment method before ending trial to prevent cancellation', async () => {
@@ -491,7 +491,7 @@ describe('activate-subscription baseHandler', () => {
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
 
     // Aurora tenant should NOT have been unlocked
-    expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+    expect(mockSyncTenantStatusInProvisionedTenants).not.toHaveBeenCalled();
   });
 
   it('returns 402 when subscription status is unpaid after activation', async () => {
@@ -511,7 +511,7 @@ describe('activate-subscription baseHandler', () => {
 
     expect((result as { statusCode: number }).statusCode).toBe(402);
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+    expect(mockSyncTenantStatusInProvisionedTenants).not.toHaveBeenCalled();
   });
 
   // Turning the throw into a 500 is errorHandlerMiddleware's job, and its own
@@ -523,7 +523,7 @@ describe('activate-subscription baseHandler', () => {
       .resolves({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) });
     ddbMock.on(UpdateItemCommand).resolves({});
     mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
-    mockSyncTenantStatusInProvisionedRegions.mockResolvedValue([
+    mockSyncTenantStatusInProvisionedTenants.mockResolvedValue([
       {
         orchestratorId: 'aurora',
         tenantId: 'aurora-t-1',
@@ -695,7 +695,7 @@ describe('activate-subscription baseHandler', () => {
 
     expect((result as { statusCode: number }).statusCode).toBe(402);
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+    expect(mockSyncTenantStatusInProvisionedTenants).not.toHaveBeenCalled();
   });
 
   // ── promotion code ────────────────────────────────────────────────────
