@@ -13,8 +13,8 @@ import { getDynamoClient } from '../lib/ddb-client.ts';
 import { resolveOrgId, resolveOrgIdFromSubscription } from '../lib/billing-org-lookup.ts';
 import { startDeletionFromStripe } from '../lib/deletion-from-stripe.ts';
 import {
-  assertRegionSyncSucceeded,
-  syncTenantStatusInProvisionedRegions,
+  assertTenantSyncSucceeded,
+  syncTenantStatusInProvisionedTenants,
   WEBHOOK_STATUS_SYNC_RETRY,
 } from '../lib/region-helpers.ts';
 import {
@@ -461,8 +461,8 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
   // downgrades a tenant that is already disabled.
   try {
     if (orgId) {
-      assertRegionSyncSucceeded(
-        await syncTenantStatusInProvisionedRegions(
+      assertTenantSyncSucceeded(
+        await syncTenantStatusInProvisionedTenants(
           orgId,
           'write-locked',
           WEBHOOK_STATUS_SYNC_RETRY,
@@ -541,8 +541,8 @@ async function handlePaymentSucceeded(invoice: Stripe.Invoice): Promise<void> {
   // the tenant it disabled stays disabled.
   try {
     if (orgId && !updateResult.refused) {
-      assertRegionSyncSucceeded(
-        await syncTenantStatusInProvisionedRegions(orgId, 'active', WEBHOOK_STATUS_SYNC_RETRY),
+      assertTenantSyncSucceeded(
+        await syncTenantStatusInProvisionedTenants(orgId, 'active', WEBHOOK_STATUS_SYNC_RETRY),
       );
       console.log('[stripe-webhook] Tenant re-activated', { userId, orgId });
     }

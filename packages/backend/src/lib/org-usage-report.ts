@@ -1,5 +1,5 @@
 import { GB_BYTES } from '@filone/shared';
-import { getProvisionedRegions } from './region-helpers.ts';
+import { getProvisionedTenants } from './region-helpers.ts';
 import type { TenantUsageMetrics } from './service-orchestrator.ts';
 import { getStripeClient, isStripeResourceMissing } from './stripe-client.ts';
 import {
@@ -49,12 +49,14 @@ export async function reportOrgUsage(params: {
   const { orgId, subscriptionId, stripeCustomerId, currentPeriodStart, to, meterEventName } =
     params;
 
-  // Each region resolves its own tenant id (side-effect-free), is fetched
-  // independently, then aggregated and reported at the org level.
-  const orgRegions = await getProvisionedRegions(orgId);
+  // Each network resolves its own tenant id (side-effect-free), is fetched
+  // independently, then aggregated and reported at the org level. A tenant's
+  // metrics cover its buckets in every region of its network, so one fetch per
+  // network is the whole picture and never double counts.
+  const orgRegions = await getProvisionedTenants(orgId);
 
   if (orgRegions.length === 0) {
-    console.warn(`${LOG} Org not provisioned in any available region, skipping`, { orgId });
+    console.warn(`${LOG} Org not provisioned on any available network, skipping`, { orgId });
     return undefined;
   }
 

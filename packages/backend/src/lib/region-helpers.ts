@@ -4,17 +4,23 @@ import { getOrgProfile } from './org-profile.ts';
 import type { ServiceOrchestrator } from './service-orchestrator.ts';
 import type { TenantStatus } from '@filone/shared/src/api/tenants.ts';
 
-export interface ProvisionedRegion {
+/**
+ * A tenant the org holds on one orchestrator. An orchestrator is a storage
+ * network serving one or more regions, and its tenant is region-free: this is
+ * one entry per network, never one per region, so a loop over it touches each
+ * tenant once.
+ */
+export interface ProvisionedTenant {
   orchestrator: ServiceOrchestrator;
   tenantId: string;
 }
 
-export async function getProvisionedRegions(
+export async function getProvisionedTenants(
   orgId: string,
   // Account teardown snapshots tenant ids from here; a stale read there would
   // orphan a live tenant permanently.
   options?: { consistent?: boolean },
-): Promise<ProvisionedRegion[]> {
+): Promise<ProvisionedTenant[]> {
   const orchestrators = getAvailableOrchestrators();
   if (orchestrators.length === 0) return [];
   const orgProfile = await getOrgProfile(
@@ -26,20 +32,20 @@ export async function getProvisionedRegions(
       const tenantId = orchestrator.isTenantReady(orgProfile);
       return tenantId ? { orchestrator, tenantId } : null;
     })
-    .filter((t): t is ProvisionedRegion => t !== null);
+    .filter((t): t is ProvisionedTenant => t !== null);
 }
 
-export interface RegionSyncOutcome {
+export interface TenantSyncOutcome {
   orchestratorId: string;
   tenantId: string;
   outcome: 'updated' | 'in-sync' | 'skipped' | 'not-found' | 'error';
   cause?: unknown;
 }
 
-// Re-raises per-region sync failures as a single error. Callers that need a
+// Re-raises per-tenant sync failures as a single error. Callers that need a
 // failed sync to abort the surrounding operation (so it is retried as a whole)
-// pass the outcomes of syncTenantStatusInProvisionedRegions through this.
-export function assertRegionSyncSucceeded(outcomes: RegionSyncOutcome[]): void {
+// pass the outcomes of syncTenantStatusInProvisionedTenants through this.
+export function assertTenantSyncSucceeded(outcomes: TenantSyncOutcome[]): void {
   const failed = outcomes.filter((o) => o.outcome === 'error');
   if (failed.length > 0) {
     throw new Error(
@@ -71,12 +77,12 @@ export const WEBHOOK_STATUS_SYNC_RETRY: RetryOptions = { retries: 1, minTimeout:
 // when it differs. A region that fails to update still differs on the next
 // run, so partial failures self-heal. Never throws — per-region failures are
 // reported as `error` outcomes so callers can record them.
-export async function syncTenantStatusInProvisionedRegions(
+export async function syncTenantStatusInProvisionedTenants(
   orgId: string,
   desired: TenantStatus,
   retry: RetryOptions = STATUS_SYNC_RETRY,
-): Promise<RegionSyncOutcome[]> {
-  const ready = await getProvisionedRegions(orgId);
+): Promise<TenantSyncOutcome[]> {
+  const ready = await getProvisionedTenants(orgId);
 
   return Promise.all(
     ready.map(({ orchestrator, tenantId }) =>
@@ -97,7 +103,7 @@ async function syncRegionTenantStatus({
   tenantId: string;
   desired: TenantStatus;
   retry: RetryOptions;
-}): Promise<RegionSyncOutcome> {
+}): Promise<TenantSyncOutcome> {
   const base = { orchestratorId: orchestrator.id, tenantId };
   try {
     // getTenantStatus never throws; surface `error` probes as exceptions so
