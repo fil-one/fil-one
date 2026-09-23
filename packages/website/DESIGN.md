@@ -283,20 +283,22 @@ confirm a clear ring does.
 
 ## 11. Keep motion within budget
 
-- Transition **colour, opacity, and transform only**. Never `transition-all`.
+- `transition-all` is allowed, including for layout. Some motion is a resize by design: the
+  sidebar collapsing, a label sliding open. When something grows, keep the growth inside its
+  own container so it does not shift unrelated content.
 - `duration-150` for local feedback (hover, focus, colour change).
 - `duration-200` for elements entering or leaving (toasts, menus, popovers).
 - Standard easing: `ease-out` for entering, `ease-in` for leaving.
 - Nothing animates on page load. Nothing loops except a genuine progress indicator.
 - Respect `prefers-reduced-motion`: movement is removed, opacity may remain.
 
-**Why:** `transition-all` animates properties you did not intend, including layout, which
-is where janky resizes come from. Unowned durations are why some interactions feel snappy
-and others sluggish in the same product; the console currently mixes 150, 200, and 300 with
-no rule, and uses `transition-all` in 5 places.
+**Why:** Unowned durations are why some interactions feel snappy and others sluggish in the
+same product; the console currently mixes 150, 200, and 300 with no rule. Limiting which
+properties transition would rule out the resizes the console uses on purpose, so the budget
+is set on duration and easing instead.
 
-**Check:** No `transition-all`. Every duration is 150 or 200. Any new keyframe animation is
-added to the Animations section of `DesignTokens.stories.tsx`.
+**Check:** Every duration is 150 or 200. Any new keyframe animation is added to the
+Animations section of `DesignTokens.stories.tsx`.
 
 ## 12. Build every state
 
@@ -363,8 +365,8 @@ here.
    `shadow-[0px_1px_2px_...]`, 1 ring-as-shadow to convert to `ring-*`.
 6. **Radius collapse** (rule 8): 29 bare `rounded`, 4 `rounded-[6px]`, 2 `rounded-sm`, 2
    `rounded-2xl`, 2 `rounded-3xl`.
-7. **Motion** (rule 11): 5 `transition-all`, 1 `duration-300`, 4 `transition-transform` and
-   2 `transition-opacity` to confirm as intentional.
+7. **Motion** (rule 11): 1 `duration-300`, 4 `transition-transform` and 2
+   `transition-opacity` to confirm as intentional.
 8. **Weights** (rule 5): 8 `font-bold` uses to remove, and `font-semibold` (47 uses) to
    audit down to page titles.
 9. **`font-heading` is undefined.** `DesignTokens.stories.tsx` uses it in two places and no
@@ -394,7 +396,7 @@ will be rather than as it is:
 - [ ] Radii are `md`, `lg`, `xl`, or `full`
 - [ ] Shadows only on overlays
 - [ ] Focus rings use `focus-visible` and are clearly visible
-- [ ] No `transition-all`; durations are 150 or 200
+- [ ] Durations are 150 or 200
 - [ ] Hover, focus-visible, active, disabled, loading, empty, and error all exist
 - [ ] Verified at 375px
 - [ ] Copy is sentence case, no em dashes, buttons name their action
