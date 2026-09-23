@@ -23,7 +23,7 @@ export function RadioOption({
       {description ? (
         <div className="flex flex-col gap-0.5">
           <span className="text-xs font-medium text-zinc-900">{children}</span>
-          <span className="text-[11px] leading-relaxed text-zinc-500">{description}</span>
+          <span className="text-meta leading-relaxed text-zinc-500">{description}</span>
         </div>
       ) : (
         <span className="text-xs font-normal text-zinc-900">{children}</span>

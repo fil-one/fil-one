@@ -100,7 +100,7 @@ export function ShareObjectModal({
         Share object
       </ModalHeader>
       <ModalBody>
-        <p className="mb-2 text-[13px] font-medium text-zinc-900">Link expires in</p>
+        <p className="mb-2 text-ui font-medium text-zinc-900">Link expires in</p>
         <ExpirySelector selected={selected} onSelect={setSelected} disabled={generatingUrl} />
       </ModalBody>
       <ModalFooter fullWidth>
@@ -148,7 +148,7 @@ function ExpirySelector({
             disabled={disabled}
             onClick={() => onSelect(option)}
             className={clsx(
-              'rounded-md border px-3 py-1.5 text-[13px] transition-colors',
+              'rounded-md border px-3 py-1.5 text-ui transition-colors',
               isSelected
                 ? 'border-blue-500 bg-blue-50 font-medium text-blue-600'
                 : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50',
@@ -184,13 +184,13 @@ function GeneratedLink({
         </div>
         <CopyButton value={url} size="md" />
       </div>
-      <p className="text-[12px] text-amber-600">
+      <p className="text-xs text-amber-600">
         Copy this link now — it won&rsquo;t be shown again after you close this dialog.
       </p>
-      <div className="flex items-center gap-2 text-[13px] text-zinc-500">
+      <div className="flex items-center gap-2 text-ui text-zinc-500">
         <span>Expires</span>
         <span className="text-zinc-900">{expiryDateFormat.format(new Date(expiresAt))}</span>
-        <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-600">
+        <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-meta font-medium text-zinc-600">
           {shortExpiry}
         </span>
       </div>
@@ -198,7 +198,7 @@ function GeneratedLink({
         type="button"
         onClick={onRegenerate}
         disabled={regenerating}
-        className="flex items-center gap-1.5 self-start text-[13px] text-zinc-600 hover:text-zinc-900 disabled:opacity-60"
+        className="flex items-center gap-1.5 self-start text-ui text-zinc-600 hover:text-zinc-900 disabled:opacity-60"
       >
         {regenerating ? (
           <Spinner ariaLabel="Regenerating link" size={12} />

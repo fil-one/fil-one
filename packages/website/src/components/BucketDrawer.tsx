@@ -227,7 +227,7 @@ function AskSection({
 
   return (
     <div data-testid="bucket-drawer-ask" className="px-5 py-5">
-      <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+      <p className="mb-3 text-meta font-semibold uppercase tracking-widest text-zinc-500">
         Ask a question
       </p>
       <div className="flex gap-2">
@@ -277,7 +277,7 @@ function AskSection({
 function QueryFromCodeSection({ bucket }: { bucket: RagBucket }) {
   return (
     <div data-testid="bucket-drawer-code" className="border-t border-zinc-100 px-5 py-5">
-      <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+      <p className="mb-3 text-meta font-semibold uppercase tracking-widest text-zinc-500">
         Query from code
       </p>
       <CodeBlock

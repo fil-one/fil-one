@@ -57,9 +57,7 @@ export function ApiReference() {
 
   return (
     <section data-testid="api-reference" className="pt-2">
-      <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
-        Reference
-      </h3>
+      <h3 className="text-meta font-semibold uppercase tracking-widest text-zinc-500">Reference</h3>
       <div className="mt-1 divide-y divide-zinc-100">
         <ReferenceRow label="Query endpoint">
           <CodeBlock code={endpointShape} language="bash" />

@@ -160,7 +160,7 @@ export function PaymentForm({
         {/* Security banner */}
         <div className="flex items-center gap-[10px] rounded-lg bg-[rgba(243,244,246,0.5)] p-[10px] mb-4">
           <ShieldCheckIcon size={16} className="text-[#0066ff] flex-shrink-0" weight="fill" />
-          <span className="text-[13px] text-[#677183]">
+          <span className="text-ui text-[#677183]">
             Your payment information is encrypted and secure
           </span>
         </div>
@@ -168,7 +168,7 @@ export function PaymentForm({
         <div className="flex flex-col gap-4">
           {/* Card Number */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-[13px] font-medium text-[#14181f]">Card number</label>
+            <label className="text-ui font-medium text-[#14181f]">Card number</label>
             <div className="rounded-[6px] border border-[#e1e4ea] bg-[#f9fafb] px-3 py-2.5">
               <CardNumberElement
                 options={{ ...ELEMENT_OPTIONS, showIcon: true }}
@@ -180,13 +180,13 @@ export function PaymentForm({
           {/* Expiry + CVC */}
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <label className="text-[13px] font-medium text-[#14181f]">Expiry</label>
+              <label className="text-ui font-medium text-[#14181f]">Expiry</label>
               <div className="rounded-[6px] border border-[#e1e4ea] bg-[#f9fafb] px-3 py-2.5">
                 <CardExpiryElement options={ELEMENT_OPTIONS} />
               </div>
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-[13px] font-medium text-[#14181f]">CVC</label>
+              <label className="text-ui font-medium text-[#14181f]">CVC</label>
               <div className="rounded-[6px] border border-[#e1e4ea] bg-[#f9fafb] px-3 py-2.5">
                 <CardCvcElement options={ELEMENT_OPTIONS} />
               </div>
@@ -195,7 +195,7 @@ export function PaymentForm({
 
           {/* Promo code (optional) */}
           <div className="flex flex-col gap-1.5">
-            <label htmlFor="promotion-code" className="text-[13px] font-medium text-[#14181f]">
+            <label htmlFor="promotion-code" className="text-ui font-medium text-[#14181f]">
               Promo code <span className="font-normal text-[#99a0ae]">(optional)</span>
             </label>
             <input
@@ -208,7 +208,7 @@ export function PaymentForm({
               autoCorrect="off"
               spellCheck={false}
               maxLength={40}
-              className="rounded-[6px] border border-[#e1e4ea] bg-[#f9fafb] px-3 py-2.5 text-[13px] text-[#14181f] placeholder:text-[#99a0ae] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#0080ff]"
+              className="rounded-[6px] border border-[#e1e4ea] bg-[#f9fafb] px-3 py-2.5 text-ui text-[#14181f] placeholder:text-[#99a0ae] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#0080ff]"
             />
           </div>
 
@@ -235,7 +235,7 @@ export function PaymentForm({
             </Button>
           </div>
 
-          <p className="text-center text-[11px] text-[#677183]">
+          <p className="text-center text-meta text-[#677183]">
             Pay for the storage you use, $4.99/month minimum. Cancel anytime.
           </p>
         </div>
