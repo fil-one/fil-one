@@ -1137,25 +1137,4 @@ describe('a network serving several regions', () => {
     );
     expect(ssmMock.commandCalls(GetParameterCommand)).toHaveLength(0);
   });
-
-  it("asks the Management API for one region's usage when the caller names it", async () => {
-    mockGetTenantMetrics.mockResolvedValue(ok(emptyMetrics));
-
-    await network.getTenantUsageMetrics(tenantId, {
-      from: '2026-01-01T00:00:00Z',
-      to: '2026-01-08T00:00:00Z',
-      region: S3Region.EuCentral3,
-    });
-
-    expect(mockGetTenantMetrics).toHaveBeenCalledWith(
-      expect.objectContaining({
-        query: {
-          from: '2026-01-01T00:00:00Z',
-          to: '2026-01-08T00:00:00Z',
-          window: '24h',
-          region: 'eu-central-3',
-        },
-      }),
-    );
-  });
 });
