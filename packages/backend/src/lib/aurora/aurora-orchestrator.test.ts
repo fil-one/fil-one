@@ -107,9 +107,9 @@ describe('auroraOrchestrator', () => {
     _resetSsmCacheForTesting();
   });
 
-  it('exposes the Aurora provider id and region', () => {
+  it('exposes the Aurora provider id and regions', () => {
     expect(auroraOrchestrator.id).toBe('aurora');
-    expect(auroraOrchestrator.region).toBe('eu-west-1');
+    expect(auroraOrchestrator.regions).toStrictEqual(['eu-west-1']);
   });
 
   describe('ensureTenantReady', () => {

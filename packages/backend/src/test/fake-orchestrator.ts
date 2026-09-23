@@ -10,7 +10,7 @@ import type { AccessModel } from '@filone/shared';
 
 export interface FakeOrchestrator {
   id: string;
-  region: string;
+  regions: S3Region[];
   accessModel: AccessModel;
   isTenantReady: ReturnType<typeof vi.fn>;
   getTenantStatus: ReturnType<typeof vi.fn>;
@@ -29,6 +29,8 @@ export interface FakeOrchestratorOpts {
   status?: TenantStatus;
   /** Region reported by the orchestrator. Defaults to `eu-west-1`. */
   region?: S3Region;
+  /** Every region the orchestrator serves; overrides `region`. Defaults to `[region]`. */
+  regions?: S3Region[];
   /** Access model reported by the orchestrator. Defaults to `scoped-keys`. */
   accessModel?: AccessModel;
   /** Storage series returned by `getTenantUsageMetrics`. Defaults to empty. */
@@ -56,11 +58,12 @@ export interface FakeOrchestratorOpts {
  */
 export function fakeOrchestrator(id: string, opts: FakeOrchestratorOpts = {}): FakeOrchestrator {
   const { ready = true, status = 'active', region = S3Region.EuWest1, failUsage = false } = opts;
+  const regions = opts.regions ?? [region];
   const regionDown = () => vi.fn().mockRejectedValue(new Error('region down'));
 
   return {
     id,
-    region,
+    regions,
     accessModel: opts.accessModel ?? 'scoped-keys',
     isTenantReady: vi.fn((orgProfile?: { pk?: { S?: string } }) => {
       const orgId = orgProfile?.pk?.S?.replace('ORG#', '');
@@ -76,7 +79,11 @@ export function fakeOrchestrator(id: string, opts: FakeOrchestratorOpts = {}): F
     getBucket: vi.fn().mockResolvedValue(opts.bucket ?? null),
     listBuckets: failUsage
       ? regionDown()
-      : vi.fn().mockResolvedValue((opts.buckets ?? []).map((bucketName) => ({ bucketName }))),
+      : vi
+          .fn()
+          .mockResolvedValue(
+            (opts.buckets ?? []).map((bucketName) => ({ bucketName, region: regions[0] })),
+          ),
   };
 }
 

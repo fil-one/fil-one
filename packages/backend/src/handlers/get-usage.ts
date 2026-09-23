@@ -68,7 +68,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     console.error('[get-usage] Failed to fetch usage', {
       orgId,
       tenantId,
-      region: orchestrator.region,
+      orchestratorId: orchestrator.id,
       err: result.reason,
     });
   });
