@@ -241,16 +241,6 @@ export type MetricsTo = string;
  */
 export type MetricsWindow = string;
 
-/**
- * Restricts tenant-level samples to the buckets served by this region,
- * named as in the S3 Gateway hostname (e.g. `us-east-1`). Absent, the
- * samples cover the tenant's buckets in every region. A region the
- * Service Orchestrator does not serve is a 400. Per-bucket metrics take
- * no region: a bucket is served by exactly one.
- *
- */
-export type MetricsRegion = string;
-
 export type DeleteTenantsByTenantIdData = {
   body?: never;
   path: {
@@ -573,15 +563,6 @@ export type GetTenantsByTenantIdMetricsData = {
      *
      */
     window: string;
-    /**
-     * Restricts tenant-level samples to the buckets served by this region,
-     * named as in the S3 Gateway hostname (e.g. `us-east-1`). Absent, the
-     * samples cover the tenant's buckets in every region. A region the
-     * Service Orchestrator does not serve is a 400. Per-bucket metrics take
-     * no region: a bucket is served by exactly one.
-     *
-     */
-    region?: string;
   };
   url: '/tenants/{tenantId}/metrics';
 };

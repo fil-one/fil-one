@@ -65,7 +65,6 @@ export type {
   IngressSample,
   Metrics,
   MetricsFrom,
-  MetricsRegion,
   MetricsTo,
   MetricsWindow,
   PostTenantsByTenantIdAccessKeysData,

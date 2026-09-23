@@ -266,12 +266,6 @@ export const getTenantsByTenantIdAccessKeysByAccessKeyId = <ThrowOnError extends
  * `to` / `window` parameters and are returned in a single
  * response.
  *
- * A tenant's buckets may span every region the Service Orchestrator
- * manages. Without `region` the samples cover the whole tenant;
- * with `region` they cover only the buckets served by that region,
- * which is how FilOne reports usage per region for a tenant that
- * spans several.
- *
  * Typical FilOne queries:
  *
  * * `window=1h` over the current billing period — used to

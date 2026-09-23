@@ -98,7 +98,7 @@ Deleting an access key should revoke the key immediately so that subsequent S3 r
 
 FilOne relies on the Service Orchestrator for all usage data. The Service Orchestrator must expose two time-series metrics endpoints, each returning storage, egress, and ingress data together for a specified time range:
 
-- `GET /tenants/{tenantId}/metrics` — tenant-level usage. A tenant's buckets may span every region the Service Orchestrator manages; the optional `region` query parameter restricts the samples to the buckets served by one region, which FilOne uses to report and bill usage per region.
+- `GET /tenants/{tenantId}/metrics` — tenant-level usage.
 - `GET /tenants/{tenantId}/buckets/{bucketName}/metrics` — per-bucket usage. The Service Orchestrator must verify that the bucket belongs to the path `tenantId` and return 404 otherwise.
 
 For storage, FilOne queries hourly samples of bytes used and object count. The dashboard also queries storage metrics with a wider window (30 days, single sample) for a quick current-usage snapshot.

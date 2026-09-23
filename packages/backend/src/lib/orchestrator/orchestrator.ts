@@ -475,7 +475,6 @@ class FilOneOrchestrator implements ServiceOrchestrator {
         from: metricsOpts.from,
         to: metricsOpts.to,
         window: mapIntervalToWindow(metricsOpts.interval ?? '1d'),
-        ...(metricsOpts.region && { region: metricsOpts.region }),
       },
       throwOnError: false,
       ...requestOptions,

@@ -284,7 +284,6 @@ paths:
       - $ref: '#/components/parameters/MetricsFrom'
       - $ref: '#/components/parameters/MetricsTo'
       - $ref: '#/components/parameters/MetricsWindow'
-      - $ref: '#/components/parameters/MetricsRegion'
     get:
       tags: [Metrics]
       summary: Tenant usage time series
@@ -293,12 +292,6 @@ paths:
         for the tenant. All three metric types share the same `from` /
         `to` / `window` parameters and are returned in a single
         response.
-
-        A tenant's buckets may span every region the Service Orchestrator
-        manages. Without `region` the samples cover the whole tenant;
-        with `region` they cover only the buckets served by that region,
-        which is how FilOne reports usage per region for a tenant that
-        spans several.
 
         Typical FilOne queries:
 
@@ -415,19 +408,6 @@ components:
       schema:
         type: string
         pattern: '^[0-9]+h$'
-    MetricsRegion:
-      in: query
-      name: region
-      required: false
-      description: |
-        Restricts tenant-level samples to the buckets served by this region,
-        named as in the S3 Gateway hostname (e.g. `us-east-1`). Absent, the
-        samples cover the tenant's buckets in every region. A region the
-        Service Orchestrator does not serve is a 400. Per-bucket metrics take
-        no region: a bucket is served by exactly one.
-      schema:
-        type: string
-        minLength: 1
 
   responses:
     BadRequest:
