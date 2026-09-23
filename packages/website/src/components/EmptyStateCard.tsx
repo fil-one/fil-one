@@ -1,3 +1,4 @@
+import { clsx } from 'clsx';
 import { type IconProps } from './Icon';
 import { IconBox, type IconBoxColor } from './IconBox';
 
@@ -7,6 +8,8 @@ export type EmptyStateCardProps = {
   title: React.ReactNode;
   description: string;
   children?: React.ReactNode;
+  /** False when a parent `Card` already supplies the border/background, so this doesn't nest a card inside a card. */
+  bordered?: boolean;
 };
 
 export function EmptyStateCard({
@@ -15,9 +18,15 @@ export function EmptyStateCard({
   title,
   description,
   children,
+  bordered = true,
 }: EmptyStateCardProps) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-zinc-200 bg-white px-6 py-16 text-center">
+    <div
+      className={clsx(
+        'flex flex-col items-center justify-center px-6 py-16 text-center',
+        bordered && 'rounded-xl border border-zinc-200 bg-white',
+      )}
+    >
       <IconBox icon={icon} size="md" color={iconColor} className="mb-4" />
       <p className="mb-1 text-sm font-medium text-zinc-900">{title}</p>
       <p className="mb-4 max-w-xs text-sm text-zinc-500">{description}</p>
