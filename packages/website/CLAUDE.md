@@ -19,7 +19,7 @@ The rules broken most often, so check these first:
 - **Four radii only:** `rounded-md` for controls, `rounded-lg` for toasts and table
   containers, `rounded-xl` for cards and modals, `rounded-full` for pills.
 - **Shadows only on overlays.** Resting surfaces get a border plus at most `shadow-xs`.
-- **No `transition-all`.** Durations are `150` or `200`.
+- **Durations are `150` or `200`.**
 - **Control heights come from `--control-height-*`**, never computed from padding.
 - **Build every state:** hover, focus-visible, active, disabled, loading, empty, error.
 - **375px is a supported width.** Verify it.
