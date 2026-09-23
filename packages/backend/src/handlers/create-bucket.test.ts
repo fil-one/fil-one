@@ -86,12 +86,16 @@ describe('create-bucket baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(201);
-    expect(mockCreateBucket).toHaveBeenCalledWith('aurora-t-1', {
-      bucketName: 'my-bucket',
-      versioning: false,
-      lock: false,
-      retention: undefined,
-    });
+    expect(mockCreateBucket).toHaveBeenCalledWith(
+      'aurora-t-1',
+      {
+        bucketName: 'my-bucket',
+        versioning: false,
+        lock: false,
+        retention: undefined,
+      },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('drives tenant setup via ensureTenantReady before creating the bucket', async () => {
@@ -100,7 +104,10 @@ describe('create-bucket baseHandler', () => {
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
     await baseHandler(event);
 
-    expect(mockEnsureTenantReady).toHaveBeenCalledWith('org-1');
+    expect(mockEnsureTenantReady).toHaveBeenCalledWith(
+      'org-1',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('returns 503 with a retry message when tenant setup fails', async () => {
@@ -162,12 +169,16 @@ describe('create-bucket baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(201);
-    expect(mockCreateBucket).toHaveBeenCalledWith('aurora-t-1', {
-      bucketName: 'my-bucket',
-      versioning: true,
-      lock: true,
-      retention: { enabled: true, mode: 'governance', duration: 30, durationType: 'd' },
-    });
+    expect(mockCreateBucket).toHaveBeenCalledWith(
+      'aurora-t-1',
+      {
+        bucketName: 'my-bucket',
+        versioning: true,
+        lock: true,
+        retention: { enabled: true, mode: 'governance', duration: 30, durationType: 'd' },
+      },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('defaults versioning and lock to false when not provided', async () => {
@@ -177,12 +188,16 @@ describe('create-bucket baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(201);
-    expect(mockCreateBucket).toHaveBeenCalledWith('aurora-t-1', {
-      bucketName: 'my-bucket',
-      versioning: false,
-      lock: false,
-      retention: undefined,
-    });
+    expect(mockCreateBucket).toHaveBeenCalledWith(
+      'aurora-t-1',
+      {
+        bucketName: 'my-bucket',
+        versioning: false,
+        lock: false,
+        retention: undefined,
+      },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('returns 400 when lock is true but versioning is false', async () => {

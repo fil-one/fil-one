@@ -4,6 +4,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { CreateBucketResponse, ErrorResponse } from '@filone/shared';
 import { CreateBucketSchema, isSupportedRegion } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import { ORCHESTRATOR_SETUP_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
 import { BucketAlreadyExistsError, BucketConfigurationError } from '../lib/errors.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
 import {
@@ -55,16 +56,19 @@ export async function baseHandler(
   if (await isOrgDeleting(orgId, { consistent: true })) return accountDeletedResponse();
 
   const orchestrator = getOrchestratorForRegion(region);
-  const tenantId = await orchestrator.ensureTenantReady(orgId);
+  // One deadline for tenant setup and the bucket calls together. This route has
+  // 30 s; a hung vendor fails the call and answers the user instead of the
+  // Lambda timeout killing the handler.
+  const signal = AbortSignal.timeout(ORCHESTRATOR_SETUP_TIMEOUT_MS);
+  const tenantId = await orchestrator.ensureTenantReady(orgId, { signal });
   if (!tenantId) return tenantNotReadyResponse();
 
   try {
-    await orchestrator.createBucket(tenantId, {
-      bucketName,
-      versioning,
-      lock,
-      retention,
-    });
+    await orchestrator.createBucket(
+      tenantId,
+      { bucketName, versioning, lock, retention },
+      { signal },
+    );
   } catch (err) {
     if (err instanceof BucketAlreadyExistsError) {
       return new ResponseBuilder()

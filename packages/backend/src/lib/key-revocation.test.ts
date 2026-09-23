@@ -62,9 +62,10 @@ function completionEvent() {
 
 describe('revokeAccessKey', () => {
   it('revokes at the orchestrator and deletes the row in the completion', async () => {
-    await revoke();
+    const signal = new AbortController().signal;
+    await revoke({ signal });
 
-    expect(deleteAccessKey).toHaveBeenCalledWith('fth:org-1', KEY_ID);
+    expect(deleteAccessKey).toHaveBeenCalledWith('fth:org-1', KEY_ID, { signal });
     expect(
       ddbMock.commandCalls(TransactWriteItemsCommand)[0]!.args[0].input.TransactItems?.[0],
     ).toStrictEqual({
@@ -137,8 +138,9 @@ describe('revokeAccessKey', () => {
     // An AuditTable outage must never be the reason a leaked key stays live.
     ddbMock.on(PutItemCommand).rejects(new Error('AuditTable unavailable'));
 
-    await revoke({ reason: 'role_narrowing' });
+    const signal = new AbortController().signal;
+    await revoke({ reason: 'role_narrowing', signal });
 
-    expect(deleteAccessKey).toHaveBeenCalledWith('fth:org-1', KEY_ID);
+    expect(deleteAccessKey).toHaveBeenCalledWith('fth:org-1', KEY_ID, { signal });
   });
 });

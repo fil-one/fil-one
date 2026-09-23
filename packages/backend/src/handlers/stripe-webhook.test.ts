@@ -1139,7 +1139,7 @@ describe('stripe-webhook handler', () => {
       expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
         MOCK_ORG_ID,
         'write-locked',
-        WEBHOOK_STATUS_SYNC_RETRY,
+        { retry: WEBHOOK_STATUS_SYNC_RETRY, signal: expect.any(AbortSignal) },
       );
 
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
@@ -1335,11 +1335,10 @@ describe('stripe-webhook handler', () => {
 
       const result = await handler(buildWebhookEvent('{}'));
 
-      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
-        MOCK_ORG_ID,
-        'active',
-        WEBHOOK_STATUS_SYNC_RETRY,
-      );
+      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(MOCK_ORG_ID, 'active', {
+        retry: WEBHOOK_STATUS_SYNC_RETRY,
+        signal: expect.any(AbortSignal),
+      });
 
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -1666,11 +1665,10 @@ describe('stripe-webhook handler', () => {
         attemptBucket: '4+',
       });
       // Aurora re-activation must still run
-      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
-        MOCK_ORG_ID,
-        'active',
-        WEBHOOK_STATUS_SYNC_RETRY,
-      );
+      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(MOCK_ORG_ID, 'active', {
+        retry: WEBHOOK_STATUS_SYNC_RETRY,
+        signal: expect.any(AbortSignal),
+      });
     });
 
     it('does NOT emit recovered on normal renewal (prior status was active)', async () => {

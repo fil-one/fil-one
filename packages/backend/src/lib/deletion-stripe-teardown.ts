@@ -6,6 +6,7 @@ import { getDynamoClient } from './ddb-client.ts';
 import type { DeletionMember } from './deletion-record.ts';
 import { reportOrgUsage } from './org-usage-report.ts';
 import { syncTenantStatusInProvisionedRegions } from './region-helpers.ts';
+import { ORCHESTRATOR_JOB_TIMEOUT_MS } from './service-orchestrator.ts';
 import { getStripeClient, isStripeResourceMissing } from './stripe-client.ts';
 import { readSubscription, SubscriptionKeys } from './subscription-store.ts';
 import type { SubscriptionRecord } from './dynamo-records.ts';
@@ -45,7 +46,9 @@ const TEARDOWN_PROJECTION = 'stripeCustomerId, subscriptionId, currentPeriodStar
  * and so does every re-drive after the first.
  */
 export async function tearDownStripe(orgId: string, members: DeletionMember[]): Promise<void> {
-  await syncTenantStatusInProvisionedRegions(orgId, 'disabled');
+  await syncTenantStatusInProvisionedRegions(orgId, 'disabled', {
+    signal: AbortSignal.timeout(ORCHESTRATOR_JOB_TIMEOUT_MS),
+  });
 
   // Consistent: the row may have been written moments earlier, and a stale read
   // that missed the customer would leave a live subscription behind.
