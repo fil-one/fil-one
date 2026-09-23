@@ -191,3 +191,12 @@ export const WithCreators: Story = {
         : { name: 'grace@example.com', email: 'grace@example.com' },
   },
 };
+
+export const Selectable: Story = {
+  args: {
+    keys: mockKeys,
+    showBuckets: true,
+    showPermissions: true,
+    onBulkDelete: () => Promise.resolve(),
+  },
+};
