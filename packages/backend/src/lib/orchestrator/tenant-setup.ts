@@ -63,8 +63,6 @@ export interface TenantSetupDeps {
   /** Orchestrator id — drives the SSM path (`${id}-s3`) and PROFILE attribute (`${id}TenantId`). */
   id: string;
   stage: string;
-  /** Region the tenant is provisioned in, sent on `PUT /tenants/{tenantId}`. */
-  region: string;
 }
 
 // Public entry point for synchronous tenant setup from request handlers.
@@ -101,7 +99,7 @@ async function processTenantSetup(
   orgId: string,
   requestOptions?: OrchestratorRequestOptions,
 ): Promise<string> {
-  const { client, id, region } = deps;
+  const { client, id } = deps;
   const tenantIdAttribute = `${id}TenantId`;
   const key = { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } };
 
@@ -128,7 +126,6 @@ async function processTenantSetup(
   const { error: putError } = await putTenantsByTenantId({
     client,
     path: { tenantId: orgId },
-    body: { region },
     throwOnError: false,
     ...requestOptions,
   });
