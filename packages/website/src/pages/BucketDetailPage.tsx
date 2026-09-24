@@ -263,7 +263,7 @@ function BucketErrorState({
   return (
     <div className="px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
       <Breadcrumb items={[{ label: 'Buckets', href: '/buckets' }, { label: bucketName }]} />
-      <div className="mt-4">
+      <div className="mt-4" data-testid="bucket-error">
         <Alert variant="red" description={error?.message ?? fallback} />
       </div>
     </div>
@@ -432,7 +432,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
       <Breadcrumb items={[{ label: 'Buckets', href: '/buckets' }, { label: bucketName }]} />
 
       <div className="mt-4 mb-2 flex items-center justify-between">
-        <Heading tag="h1" size="xl">
+        <Heading id="bucket-detail-heading" tag="h1" size="xl">
           {bucketName}
         </Heading>
         {/* Both hidden while the bucket is empty: the empty state carries the

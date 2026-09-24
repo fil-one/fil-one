@@ -7,6 +7,7 @@ type RadioOptionProps = {
   onChange: () => void;
   children: React.ReactNode;
   description?: string;
+  testId?: string;
 };
 
 export function RadioOption({
@@ -16,9 +17,13 @@ export function RadioOption({
   onChange,
   children,
   description,
+  testId,
 }: RadioOptionProps) {
   return (
-    <label className="flex flex-1 cursor-pointer items-center gap-2.5 rounded-lg border border-zinc-200 px-4 py-3 transition-all hover:border-zinc-400 hover:bg-zinc-50 has-[:checked]:border-brand-300 has-[:checked]:bg-brand-50">
+    <label
+      data-testid={testId}
+      className="flex flex-1 cursor-pointer items-center gap-2.5 rounded-lg border border-zinc-200 px-4 py-3 transition-all hover:border-zinc-400 hover:bg-zinc-50 has-[:checked]:border-brand-300 has-[:checked]:bg-brand-50"
+    >
       <Radio name={name} value={value} checked={checked} onChange={onChange} />
       {description ? (
         <div className="flex flex-col gap-0.5">
