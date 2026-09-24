@@ -3,9 +3,7 @@ import type { PolicyStatement } from '@filone/shared';
 import {
   POLICY_SID_MAX_LENGTH,
   POLICY_WILDCARD_PRINCIPAL,
-  RESERVED_SID_PREFIX,
   ROSTER_SID_LABELS,
-  isReservedSid,
 } from '@filone/shared';
 
 import { Alert } from './Alert.js';
@@ -39,18 +37,11 @@ function withSid(statement: PolicyStatement, name: string): PolicyStatement {
 }
 
 /**
- * What the name field shows and whether it holds. A roster statement's sid is
- * how the fan-out finds the statement again, so its name is fixed; any other
- * may not take the prefix those carry.
+ * The label a roster statement shows in place of its sid. That sid is how the
+ * fan-out finds the statement again, so its name is fixed.
  */
-function nameState(statement: PolicyStatement, initial: PolicyStatement | undefined) {
-  const rosterLabel = initial?.sid ? ROSTER_SID_LABELS[initial.sid] : undefined;
-  if (rosterLabel) return { rosterLabel, error: undefined };
-  const reserved = statement.sid !== undefined && isReservedSid(statement.sid.trim());
-  const error = reserved
-    ? `Names starting with "${RESERVED_SID_PREFIX}" are reserved for statements Fil One manages.`
-    : undefined;
-  return { rosterLabel, error };
+function rosterLabelOf(initial: PolicyStatement | undefined): string | undefined {
+  return initial?.sid ? ROSTER_SID_LABELS[initial.sid] : undefined;
 }
 
 /** Whether a deny names everyone, which locks the org out of the bucket until an Owner edits it. */
@@ -74,11 +65,11 @@ export function PolicyStatementModal({
     if (open) setStatement(initial ?? EMPTY);
   }, [open, initial]);
 
-  const { rosterLabel, error: nameError } = nameState(statement, initial);
+  const rosterLabel = rosterLabelOf(initial);
   const noPrincipal =
     statement.principal !== POLICY_WILDCARD_PRINCIPAL && statement.principal.length === 0;
   const noAction = statement.action.length === 0;
-  const canSubmit = !noPrincipal && !noAction && !nameError;
+  const canSubmit = !noPrincipal && !noAction;
 
   function submit() {
     onSubmit(withSid(statement, statement.sid?.trim() ?? ''));
@@ -90,11 +81,10 @@ export function PolicyStatementModal({
       <ModalHeader onClose={onClose}>{initial ? 'Edit statement' : 'Add statement'}</ModalHeader>
       <ModalBody>
         <div className="flex flex-col gap-6">
-          <FormField label="Name (optional)" htmlFor="policy-statement-name" error={nameError}>
+          <FormField label="Name (optional)" htmlFor="policy-statement-name">
             <Input
               id="policy-statement-name"
               value={rosterLabel ?? statement.sid ?? ''}
-              invalid={Boolean(nameError)}
               disabled={Boolean(rosterLabel)}
               maxLength={POLICY_SID_MAX_LENGTH}
               placeholder="Analytics team read"
