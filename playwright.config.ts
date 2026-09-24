@@ -72,6 +72,9 @@ export default defineConfig({
       name: 'policies-local',
       testDir: './tests/e2e/policies',
       use: { ...devices['Desktop Chrome'] },
+      // One org and one roster for every spec, and some specs change the roster.
+      fullyParallel: false,
+      workers: 1,
       dependencies: ['policies-setup'],
     },
     // smoke tests executed in production

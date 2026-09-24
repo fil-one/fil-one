@@ -11,6 +11,7 @@ import {
   listObjects,
   ownersStatement,
   removeBucket,
+  rosterPolicy,
   s3For,
   uniqueBucketName,
 } from './policy.util.ts';
@@ -19,6 +20,7 @@ import {
 // bucket forms there. Each case gets its own buckets.
 
 const ownerId = credentials('owner').userId;
+const adminId = credentials('admin').userId;
 const memberId = credentials('member').userId;
 
 let orgId: string;
@@ -165,7 +167,7 @@ test.describe('as the owner', () => {
     await expect(row.getByTestId('permission-badge-follows-policy')).toBeVisible();
   });
 
-  test('K2. a bucket created on an iam region carries the owners statement', async ({ page }) => {
+  test('K2. a bucket created on an iam region carries the roster statements', async ({ page }) => {
     const bucket = uniqueBucketName('form');
     buckets.push(bucket);
     await page.goto('/buckets');
@@ -179,10 +181,7 @@ test.describe('as the owner', () => {
     await expect(page).toHaveURL((url) => url.pathname === `/buckets/${bucket}`);
 
     await page.getByTestId('bucket-policy-tab').click();
-    await expect(page.getByTestId('policy-statement')).toHaveCount(1);
-    await expect(page.getByTestId('policy-statement')).toContainText('Owners');
-    expect((await owner.readPolicy(bucket)).policy).toEqual({
-      statement: [ownersStatement(ownerId)],
-    });
+    await expect(page.getByTestId('policy-statement')).toHaveCount(2);
+    expect((await owner.readPolicy(bucket)).policy).toEqual(rosterPolicy(ownerId, adminId));
   });
 });
