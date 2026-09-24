@@ -1,12 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import {
+  AbortMultipartUploadCommand,
   DeleteObjectCommand,
+  ListMultipartUploadsCommand,
+  ListObjectVersionsCommand,
   ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
   S3ServiceException,
 } from '@aws-sdk/client-s3';
 import { expect, request, type APIRequestContext, type APIResponse } from '@playwright/test';
+import { ROSTER_ADMIN_ACTIONS } from '@filone/shared';
 import type {
   BucketPolicy,
   CreateAccessKeyResponse,
@@ -25,6 +29,7 @@ export const SEEDED_KEY = 'seeded.txt';
 
 export const STORAGE_STATE = {
   owner: '.auth/policy-owner.json',
+  admin: '.auth/policy-admin.json',
   member: '.auth/policy-member.json',
 } as const;
 export type PolicyUser = keyof typeof STORAGE_STATE;
@@ -78,7 +83,11 @@ export class ConsoleApi {
     return this.ctx.get(`/api${path}`, { headers: this.headers(false) });
   }
 
-  send(method: 'POST' | 'PUT' | 'DELETE', path: string, data?: unknown): Promise<APIResponse> {
+  send(
+    method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+    path: string,
+    data?: unknown,
+  ): Promise<APIResponse> {
     return this.ctx.fetch(`/api${path}`, { method, data, headers: this.headers(true) });
   }
 
@@ -113,8 +122,12 @@ export class ConsoleApi {
 
   // ── Buckets and keys ─────────────────────────────────────────────
 
-  async createBucket(bucket: string): Promise<void> {
-    const res = await this.send('POST', '/buckets', { bucketName: bucket, region: REGION });
+  async createBucket(bucket: string, { versioning = false } = {}): Promise<void> {
+    const res = await this.send('POST', '/buckets', {
+      bucketName: bucket,
+      region: REGION,
+      versioning,
+    });
     expect(res.status(), await res.text()).toBe(201);
   }
 
@@ -141,6 +154,20 @@ export class ConsoleApi {
   async deleteKey(id: string): Promise<void> {
     const res = await this.send('DELETE', `/access-keys/${id}`);
     expect([200, 204, 404], await res.text()).toContain(res.status());
+  }
+
+  rotateKey(id: string): Promise<APIResponse> {
+    return this.send('POST', `/access-keys/${id}/rotate`);
+  }
+
+  // ── Members ──────────────────────────────────────────────────────
+
+  setRole(userId: string, role: 'admin' | 'member'): Promise<APIResponse> {
+    return this.send('PATCH', `/org/members/${userId}`, { role });
+  }
+
+  removeMember(userId: string): Promise<APIResponse> {
+    return this.send('DELETE', `/org/members/${userId}`);
   }
 
   dispose(): Promise<void> {
@@ -179,6 +206,20 @@ export const deleteObject = (s3: S3Client, bucket: string, key: string) =>
 
 export function ownersStatement(ownerId: string): PolicyStatement {
   return { sid: 'filone-owners', effect: 'allow', principal: [ownerId], action: ['s3:*'] };
+}
+
+export function adminsStatement(adminId: string): PolicyStatement {
+  return {
+    sid: 'filone-admins',
+    effect: 'allow',
+    principal: [adminId],
+    action: ROSTER_ADMIN_ACTIONS,
+  };
+}
+
+/** What a bucket the Owner or the Admin creates carries: the org's roster. */
+export function rosterPolicy(ownerId: string, adminId: string): BucketPolicy {
+  return { statement: [ownersStatement(ownerId), adminsStatement(adminId)] };
 }
 
 export function allow(
@@ -222,8 +263,18 @@ export async function removeBucket(
   const key = await owner.mintKey();
   try {
     const s3 = s3For(key);
-    const { Contents = [] } = await listObjects(s3, bucket);
-    for (const { Key } of Contents) await deleteObject(s3, bucket, Key!);
+    // Every version and delete marker, so a versioned bucket empties too, and
+    // any upload a test left open.
+    const { Versions = [], DeleteMarkers = [] } = await s3.send(
+      new ListObjectVersionsCommand({ Bucket: bucket }),
+    );
+    for (const { Key, VersionId } of [...Versions, ...DeleteMarkers]) {
+      await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key, VersionId }));
+    }
+    const { Uploads = [] } = await s3.send(new ListMultipartUploadsCommand({ Bucket: bucket }));
+    for (const { Key, UploadId } of Uploads) {
+      await s3.send(new AbortMultipartUploadCommand({ Bucket: bucket, Key, UploadId }));
+    }
   } finally {
     await owner.deleteKey(key.id);
   }

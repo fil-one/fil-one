@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 
 // One-time setup for the bucket policy e2e suite (tests/e2e/policies): signs up
-// the Owner and the Member it drives, on a local stage, and records their
+// the Owner, Admin and Member it drives, on a local stage, and records their
 // credentials in the gitignored .env.e2e.local that playwright.config.ts loads.
 //
 // Usage:
-//   node bin/e2e-register-policy-users.ts signup  <consoleOrigin>
+//   node bin/e2e-register-policy-users.ts signup  <consoleOrigin> [ROLE...]
 //   node bin/e2e-register-policy-users.ts verify  <verificationUrl>
-//   node bin/e2e-register-policy-users.ts finish  <consoleOrigin>
+//   node bin/e2e-register-policy-users.ts finish  <consoleOrigin> [ROLE...]
 //
-// `signup` creates both accounts through Auth0's signup with generated
+// ROLE is OWNER, ADMIN or MEMBER; without one, all three. `signup` creates the
+// accounts through Auth0's signup with generated
 // passwords and writes the addresses and passwords. Open the verification links
 // Auth0 mails with `verify` (or in any browser), then `finish` logs each account
 // in once, which creates its personal organization, and writes its user id.
@@ -21,7 +22,8 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { chromium, type Page } from '@playwright/test';
 
 const ENV_FILE = '.env.e2e.local';
-const ROLES = ['OWNER', 'MEMBER'] as const;
+const ROLES = ['OWNER', 'ADMIN', 'MEMBER'] as const;
+type Role = (typeof ROLES)[number];
 const PRIMARY = 'button[data-action-button-primary="true"]';
 
 function readEnv(): Record<string, string> {
@@ -56,9 +58,9 @@ async function withPage(run: (page: Page) => Promise<void>): Promise<void> {
   }
 }
 
-async function signup(origin: string): Promise<void> {
+async function signup(origin: string, roles: readonly Role[]): Promise<void> {
   const env = readEnv();
-  for (const role of ROLES) {
+  for (const role of roles) {
     const email = `srdjan+policy-${role.toLowerCase()}@fil.org`;
     const password = generatePassword();
     await withPage(async (page) => {
@@ -84,9 +86,9 @@ async function verify(url: string): Promise<void> {
   });
 }
 
-async function finish(origin: string): Promise<void> {
+async function finish(origin: string, roles: readonly Role[]): Promise<void> {
   const env = readEnv();
-  for (const role of ROLES) {
+  for (const role of roles) {
     await withPage(async (page) => {
       await page.goto(origin);
       await page.locator('#username').fill(env[`E2E_POLICY_${role}_EMAIL`]);
@@ -115,9 +117,14 @@ async function finish(origin: string): Promise<void> {
   }
 }
 
-const [command, arg] = process.argv.slice(2);
-if (!arg) throw new Error('Usage: e2e-register-policy-users.ts <signup|verify|finish> <url>');
-if (command === 'signup') await signup(arg);
+const [command, arg, ...named] = process.argv.slice(2);
+if (!arg) {
+  throw new Error('Usage: e2e-register-policy-users.ts <signup|verify|finish> <url> [ROLE...]');
+}
+const unknown = named.filter((r) => !(ROLES as readonly string[]).includes(r));
+if (unknown.length > 0) throw new Error(`Unknown role: ${unknown.join(', ')}`);
+const roles = named.length > 0 ? (named as Role[]) : ROLES;
+if (command === 'signup') await signup(arg, roles);
 else if (command === 'verify') await verify(arg);
-else if (command === 'finish') await finish(arg);
+else if (command === 'finish') await finish(arg, roles);
 else throw new Error(`Unknown command: ${command}`);

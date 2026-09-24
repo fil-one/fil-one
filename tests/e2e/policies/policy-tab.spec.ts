@@ -9,6 +9,7 @@ import {
   deny,
   listObjects,
   outcome,
+  adminsStatement,
   ownersStatement,
   putObject,
   removeBucket,
@@ -23,6 +24,7 @@ import {
 test.use({ storageState: STORAGE_STATE.owner });
 
 const ownerId = credentials('owner').userId;
+const adminId = credentials('admin').userId;
 const memberId = credentials('member').userId;
 
 let owner: ConsoleApi;
@@ -109,10 +111,11 @@ async function savePolicy(page: Page): Promise<void> {
   await expect(saveBar(page)).toBeHidden();
 }
 
-test('U1. the tab lists the owners statement of a new bucket', async ({ page }) => {
+test('U1. the tab lists the roster statements of a new bucket', async ({ page }) => {
   await openPolicyTab(page);
-  await expect(cards(page)).toHaveCount(1);
+  await expect(cards(page)).toHaveCount(2);
   await expect(card(page, 'Owners')).toBeVisible();
+  await expect(card(page, 'Admins')).toBeVisible();
 });
 
 test('U2. a roster statement keeps its name but can be removed', async ({ page }) => {
@@ -123,11 +126,11 @@ test('U2. a roster statement keeps its name but can be removed', async ({ page }
   await modal(page).locator('#policy-statement-cancel').click();
 
   await card(page, 'Owners').getByTestId('policy-statement-remove').click();
-  await expect(emptyState(page)).toHaveAttribute('data-empty-state', 'cleared');
-  await page.locator('#policy-save-button').click();
-  await expectToast(page, 'Policy removed');
-  const res = await owner.getPolicy(bucket);
-  expect([res.status(), (await res.json()).code]).toEqual([404, 'POLICY_NOT_FOUND']);
+  await expect(cards(page)).toHaveCount(1);
+  await savePolicy(page);
+  expect((await owner.readPolicy(bucket)).policy).toEqual({
+    statement: [adminsStatement(adminId)],
+  });
 });
 
 test('U3. an allow added in the tab grants the member', async ({ page }) => {
@@ -137,13 +140,14 @@ test('U3. an allow added in the tab grants the member', async ({ page }) => {
   await memberBox(page, memberId).click();
   await pickActions(page, ['s3:ListBucket', 's3:GetObject']);
   await submitStatement(page);
-  await expect(cards(page)).toHaveCount(2);
+  await expect(cards(page)).toHaveCount(3);
   await expect(saveBar(page)).toBeVisible();
   await savePolicy(page);
 
   expect((await owner.readPolicy(bucket)).policy).toEqual({
     statement: [
       ownersStatement(ownerId),
+      adminsStatement(adminId),
       allow([memberId], ['s3:ListBucket', 's3:GetObject'], 'member-read'),
     ],
   });
@@ -195,7 +199,7 @@ test('U6. a deny for everyone warns, locks the owner out, and can be undone', as
   await expect(page.getByTestId('policy-denies-everyone')).toBeVisible();
   await savePolicy(page);
 
-  expect((await owner.readPolicy(bucket)).policy.statement[1]).toEqual(
+  expect((await owner.readPolicy(bucket)).policy.statement.at(-1)).toEqual(
     deny('*', ['s3:*'], 'lockdown'),
   );
   expect(await outcome(listObjects(await freshS3(owner), bucket))).toBe('404 NoSuchBucket');
@@ -216,7 +220,7 @@ test('U7. a statement may take a name starting with filone-', async ({ page }) =
   await submitStatement(page);
   await savePolicy(page);
 
-  expect((await owner.readPolicy(bucket)).policy.statement[1]).toEqual(
+  expect((await owner.readPolicy(bucket)).policy.statement.at(-1)).toEqual(
     allow([memberId], ['s3:ListBucket'], 'filone-x'),
   );
 });
@@ -243,7 +247,9 @@ test('U9. all actions covers every action and saves as s3:*', async ({ page }) =
   await submitStatement(page);
   await savePolicy(page);
 
-  expect((await owner.readPolicy(bucket)).policy.statement[1]).toEqual(allow([memberId], ['s3:*']));
+  expect((await owner.readPolicy(bucket)).policy.statement.at(-1)).toEqual(
+    allow([memberId], ['s3:*']),
+  );
 });
 
 test('U10. a cancelled or discarded edit writes nothing', async ({ page }) => {
@@ -254,16 +260,16 @@ test('U10. a cancelled or discarded edit writes nothing', async ({ page }) => {
   await memberBox(page, memberId).click();
   await pickActions(page, ['s3:GetObject']);
   await modal(page).locator('#policy-statement-cancel').click();
-  await expect(cards(page)).toHaveCount(1);
+  await expect(cards(page)).toHaveCount(2);
   await expect(saveBar(page)).toBeHidden();
 
   await openAddStatement(page);
   await memberBox(page, memberId).click();
   await pickActions(page, ['s3:GetObject']);
   await submitStatement(page);
-  await expect(cards(page)).toHaveCount(2);
+  await expect(cards(page)).toHaveCount(3);
   await page.locator('#policy-discard-button').click();
-  await expect(cards(page)).toHaveCount(1);
+  await expect(cards(page)).toHaveCount(2);
   await expect(saveBar(page)).toBeHidden();
 
   expect((await owner.readPolicy(bucket)).etag).toBe(etag);
@@ -271,7 +277,7 @@ test('U10. a cancelled or discarded edit writes nothing', async ({ page }) => {
 
 test('U11. a save that lost to another writer shows the conflict and reloads', async ({ page }) => {
   await openPolicyTab(page);
-  await expect(cards(page)).toHaveCount(1);
+  await expect(cards(page)).toHaveCount(2);
   const theirs = [ownersStatement(ownerId), allow([memberId], ['s3:ListBucket'], 'theirs')];
   await owner.setStatements(bucket, theirs);
 

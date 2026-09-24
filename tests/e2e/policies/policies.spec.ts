@@ -21,6 +21,7 @@ import {
   outcome,
   ownersStatement,
   putObject,
+  rosterPolicy,
   removeBucket,
   s3For,
   uniqueBucketName,
@@ -37,6 +38,7 @@ import {
 test.describe.configure({ mode: 'serial' });
 
 const ownerId = credentials('owner').userId;
+const adminId = credentials('admin').userId;
 const memberId = credentials('member').userId;
 const B1 = uniqueBucketName('api1');
 const B2 = uniqueBucketName('api2');
@@ -75,9 +77,9 @@ test.afterAll(async () => {
   await member.dispose();
 });
 
-test('1. a new bucket carries the owners statement', async () => {
+test('1. a new bucket carries the roster statements', async () => {
   const { policy, etag } = await owner.readPolicy(B1);
-  expect(policy).toEqual({ statement: [ownersStatement(ownerId)] });
+  expect(policy).toEqual(rosterPolicy(ownerId, adminId));
   expect(etag).toEqual(expect.any(String));
 });
 
@@ -253,7 +255,7 @@ test('17. a bucket a member creates also names its creator', async () => {
   await member.createBucket(B3);
   expect((await owner.readPolicy(B3)).policy).toEqual({
     statement: [
-      ownersStatement(ownerId),
+      ...rosterPolicy(ownerId, adminId).statement,
       {
         sid: 'filone-creator',
         effect: 'allow',
