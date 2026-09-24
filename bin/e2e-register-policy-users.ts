@@ -9,7 +9,8 @@
 //   node bin/e2e-register-policy-users.ts verify  <verificationUrl>
 //   node bin/e2e-register-policy-users.ts finish  <consoleOrigin> [ROLE...]
 //
-// ROLE is OWNER, ADMIN, MEMBER or READONLY; without one, all four. `signup` creates the
+// ROLE is OWNER, ADMIN, MEMBER, READONLY or LEAVER (the member the removal case
+// takes out of the org); without one, all five. `signup` creates the
 // accounts through Auth0's signup with generated
 // passwords and writes the addresses and passwords. Open the verification links
 // Auth0 mails with `verify` (or in any browser), then `finish` logs each account
@@ -22,7 +23,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { chromium, type Page } from '@playwright/test';
 
 const ENV_FILE = '.env.e2e.local';
-const ROLES = ['OWNER', 'ADMIN', 'MEMBER', 'READONLY'] as const;
+const ROLES = ['OWNER', 'ADMIN', 'MEMBER', 'READONLY', 'LEAVER'] as const;
 type Role = (typeof ROLES)[number];
 const PRIMARY = 'button[data-action-button-primary="true"]';
 

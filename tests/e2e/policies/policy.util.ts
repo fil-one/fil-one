@@ -32,6 +32,7 @@ export const STORAGE_STATE = {
   admin: '.auth/policy-admin.json',
   member: '.auth/policy-member.json',
   readonly: '.auth/policy-readonly.json',
+  leaver: '.auth/policy-leaver.json',
 } as const;
 export type PolicyUser = keyof typeof STORAGE_STATE;
 

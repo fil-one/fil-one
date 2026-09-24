@@ -24,19 +24,22 @@ import {
 } from './policy.util.ts';
 
 // What membership changes and key and bucket deletion do to policies and keys.
-// These move the org's roster, so the project runs one test at a time, and
-// every case puts the Member back as it found them.
+// These move the org's roster, so the project runs one test at a time. The
+// removal case takes out the Leaver, whom no other spec uses, and seats them
+// again afterwards.
 
 test.describe.configure({ mode: 'serial' });
 
 const ownerId = credentials('owner').userId;
 const adminId = credentials('admin').userId;
 const memberId = credentials('member').userId;
+const leaverId = credentials('leaver').userId;
 const byName = (a: string, b: string) => a.localeCompare(b);
 
 let orgId: string;
 let owner: ConsoleApi;
 let member: ConsoleApi;
+let leaver: ConsoleApi;
 const buckets: string[] = [];
 const minted: { api: ConsoleApi; id: string }[] = [];
 
@@ -60,16 +63,17 @@ async function newBucket(statements: PolicyStatement[] = []): Promise<string> {
   return bucket;
 }
 
-/** The Member back in the Owner's org as a Member, whatever a case did. */
-const restoreMember = {
-  label: 'member seat',
-  run: () => seedMembership({ orgId, userId: memberId, role: 'member', invitedBy: ownerId }),
+/** The Leaver back in the Owner's org as a Member, whatever B2 did. */
+const restoreLeaver = {
+  label: 'leaver seat',
+  run: () => seedMembership({ orgId, userId: leaverId, role: 'member', invitedBy: ownerId }),
 };
 
 test.beforeAll(async () => {
   orgId = await resolvePersonalOrgId(ownerId);
   owner = await ConsoleApi.open('owner', orgId);
   member = await ConsoleApi.open('member', orgId);
+  leaver = await ConsoleApi.open('leaver', orgId);
 });
 
 test.afterAll(async () => {
@@ -80,7 +84,7 @@ test.afterAll(async () => {
     })),
     ...minted.map(({ api, id }) => ({ label: `key ${id}`, run: () => api.deleteKey(id) })),
   ]);
-  await Promise.all([owner.dispose(), member.dispose()]);
+  await Promise.all([owner.dispose(), member.dispose(), leaver.dispose()]);
 });
 
 test('B1. a promotion and a demotion rewrite the admins statement on every bucket', async () => {
@@ -129,14 +133,14 @@ test('B1. a promotion and a demotion rewrite the admins statement on every bucke
 });
 
 test('B2. removing a member takes their keys and every statement naming them', async () => {
-  const bucket = await newBucket([allow([memberId], ['s3:ListBucket'], 'member-only')]);
+  const bucket = await newBucket([allow([leaverId], ['s3:ListBucket'], 'leaver-only')]);
   // Minted and not yet used, so the gateway holds nothing cached for it.
-  const key = await mint(member);
+  const key = await mint(leaver);
   const byId = (a: string, b: string) => a.localeCompare(b);
-  const held = (await member.listKeyIds()).sort(byId);
+  const held = (await leaver.listKeyIds()).sort(byId);
   expect(held).toContain(key.id);
   try {
-    const removed = await owner.removeMember(memberId);
+    const removed = await owner.removeMember(leaverId);
     expect(removed.status(), await removed.text()).toBe(200);
     const { revokedKeys = [] } = await removed.json();
     expect(revokedKeys.map((k: { id: string }) => k.id).sort(byId)).toEqual(held);
@@ -147,12 +151,12 @@ test('B2. removing a member takes their keys and every statement naming them', a
     // A removed member is no longer a principal of the tenant.
     const { etag } = await owner.readPolicy(bucket);
     const named = await owner.putPolicy(bucket, {
-      policy: { statement: [ownersStatement(ownerId), allow([memberId], ['s3:ListBucket'])] },
+      policy: { statement: [ownersStatement(ownerId), allow([leaverId], ['s3:ListBucket'])] },
       etag,
     });
     expect(named.status()).toBe(400);
   } finally {
-    await runCleanup([restoreMember]);
+    await runCleanup([restoreLeaver]);
   }
 });
 
