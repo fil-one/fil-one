@@ -56,7 +56,8 @@ export default defineConfig(({ mode }) => {
       ...(trustedCert && { https: trustedCert }),
       ...(proxyTarget && {
         proxy: {
-          '/api': {
+          // Anchored, so console routes such as /api-keys stay local.
+          '^/api/': {
             target: proxyTarget,
             changeOrigin: true,
             headers: { 'X-Dev-Origin': 'https://localhost:5173' },
