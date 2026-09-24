@@ -174,7 +174,11 @@ export const PolicyStatementSchema = z
     effect: z.enum(POLICY_EFFECTS),
     principal: z.union([
       z.literal(POLICY_WILDCARD_PRINCIPAL),
-      z.array(PrincipalIdSchema).min(1, 'A statement names at least one member'),
+      z
+        .array(PrincipalIdSchema)
+        .min(1, 'A statement names at least one member')
+        // A member named twice is still one member; keep the first mention.
+        .transform((ids) => [...new Set(ids)]),
     ]),
     action: z
       .array(z.enum(POLICY_ACTIONS_WITH_WILDCARD))

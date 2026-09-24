@@ -56,6 +56,17 @@ describe('BucketPolicySchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('names each member once, in the order first given', () => {
+    const parsed = BucketPolicySchema.parse({
+      statement: [
+        { effect: 'allow', principal: ['bob', 'alice', 'bob'], action: ['s3:GetObject'] },
+      ],
+    });
+    expect(parsed).toEqual({
+      statement: [{ effect: 'allow', principal: ['bob', 'alice'], action: ['s3:GetObject'] }],
+    });
+  });
+
   it('refuses a field it does not define, as the storage system does', () => {
     expect(
       BucketPolicySchema.safeParse({
