@@ -132,11 +132,14 @@ test('B2. removing a member takes their keys and every statement naming them', a
   const bucket = await newBucket([allow([memberId], ['s3:ListBucket'], 'member-only')]);
   // Minted and not yet used, so the gateway holds nothing cached for it.
   const key = await mint(member);
+  const byId = (a: string, b: string) => a.localeCompare(b);
+  const held = (await member.listKeyIds()).sort(byId);
+  expect(held).toContain(key.id);
   try {
     const removed = await owner.removeMember(memberId);
     expect(removed.status(), await removed.text()).toBe(200);
     const { revokedKeys = [] } = await removed.json();
-    expect(revokedKeys.map((k: { id: string }) => k.id)).toEqual([key.id]);
+    expect(revokedKeys.map((k: { id: string }) => k.id).sort(byId)).toEqual(held);
 
     expect((await owner.readPolicy(bucket)).policy).toEqual(rosterPolicy(ownerId, adminId));
     expect(await outcome(listObjects(s3For(key), bucket))).toBe('403 InvalidAccessKeyId');
