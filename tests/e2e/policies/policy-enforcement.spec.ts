@@ -318,6 +318,19 @@ test.describe('C. policy writes', () => {
     expect((await owner.getPolicy(bucket)).status()).toBe(200);
   });
 
+  test('C4. a member named twice in a statement is stored once', async () => {
+    await owner.setStatements(bucket, [
+      ownersStatement(ownerId),
+      allow([memberId, ownerId, memberId], ['s3:ListBucket'], 'repeat'),
+    ]);
+    expect((await owner.readPolicy(bucket)).policy).toEqual({
+      statement: [
+        ownersStatement(ownerId),
+        allow([memberId, ownerId], ['s3:ListBucket'], 'repeat'),
+      ],
+    });
+  });
+
   test('C3. the schema is strict about fields and lengths', async () => {
     const { etag } = await owner.readPolicy(bucket);
     const statuses = [];
