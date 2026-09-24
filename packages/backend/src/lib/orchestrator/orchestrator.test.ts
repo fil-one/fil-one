@@ -769,6 +769,27 @@ describe('listBuckets on an iam region', () => {
     await expect(iamOrchestrator.listBuckets(tenantId, { actAs: member })).rejects.toThrow();
   });
 
+  it('evicts and retries once when the member credential is refused', async () => {
+    const memberPath = `/filone/test/forge-s3/member-key/${tenantId}/${member}`;
+    stubTenantListing();
+    ssmMock.on(GetParameterCommand, { Name: memberPath }).resolves({
+      Parameter: { Value: JSON.stringify({ accessKeyId: 'AKM', secretAccessKey: 'SKM' }) },
+    });
+    const refused = Object.assign(new Error('bad key'), { name: 'InvalidAccessKeyId' });
+    s3Mock
+      .on(ListBucketsCommand)
+      .rejectsOnce(refused)
+      .resolves({ Buckets: [{ Name: 'photos', CreationDate: new Date('2026-01-01T00:00:00Z') }] });
+    mockGetPrincipalAccess.mockReturnValue(reaches('photos'));
+
+    const result = await iamOrchestrator.listBuckets(tenantId, { actAs: member });
+
+    expect(result.map((b) => b.bucketName)).toStrictEqual(['photos']);
+    // A member removed and invited again comes back with a new key; the cached
+    // one is gone at the storage system, so the retry re-reads SSM.
+    expect(ssmMock.commandCalls(GetParameterCommand, { Name: memberPath })).toHaveLength(2);
+  });
+
   it('answers with an empty list for a member who reaches nothing', async () => {
     stubTenantListing();
     mockGetPrincipalAccess.mockReturnValue(reaches());

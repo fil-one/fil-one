@@ -59,12 +59,17 @@ class IamFilOneOrchestrator extends FilOneOrchestrator implements IamOrchestrato
     requestOptions?: S3ActorOptions,
   ): Promise<BucketSummary[]> {
     const userId = requestOptions?.actAs;
-    const buckets = await super.listBuckets(tenantId, requestOptions);
+    if (!userId) return super.listBuckets(tenantId, requestOptions);
+    const { id: orchestratorId, config } = this;
+    const buckets = await withFreshMemberCredential(
+      { orchestratorId, stage: config.stage, tenantId, userId },
+      () => super.listBuckets(tenantId, requestOptions),
+    );
     // Awaited after the listing rather than beside it, so a failed access lookup
     // rejects this method and the caller's fan-out reports the region as
     // unavailable. Answering unfiltered would hand the member every bucket name
     // in the tenant.
-    return userId ? reachableBuckets(this.iam, buckets, tenantId, userId) : buckets;
+    return reachableBuckets(this.iam, buckets, tenantId, userId);
   }
 
   /**
