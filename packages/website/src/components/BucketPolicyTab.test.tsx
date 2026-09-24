@@ -172,6 +172,7 @@ describe('BucketPolicyTab', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Reload policy' }));
     });
     await waitFor(() => expect(screen.getByText('team')).toBeInTheDocument());
+    expect(screen.queryByText('This policy changed elsewhere')).not.toBeInTheDocument();
   });
 
   it('sends the etag the draft was read at, and stops saving once a newer document arrived', async () => {

@@ -167,6 +167,8 @@ function usePolicyEditor(bucketName: string, region: S3Region) {
 
   async function reload() {
     await policy.refetch();
+    policy.save.reset();
+    policy.remove.reset();
     draft.reset();
   }
 
