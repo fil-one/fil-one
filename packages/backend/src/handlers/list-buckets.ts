@@ -8,13 +8,9 @@ import type {
   S3Region,
   SortDirection,
 } from '@filone/shared';
-import {
-  BUCKET_SORT_KEYS,
-  listBucketsUnavailableMessage,
-  OrgRole,
-  SORT_DIRECTIONS,
-} from '@filone/shared';
+import { BUCKET_SORT_KEYS, listBucketsUnavailableMessage, SORT_DIRECTIONS } from '@filone/shared';
 import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.ts';
+import { scopedTo } from '../lib/member-scope.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { BucketSummary } from '../lib/service-orchestrator.ts';
@@ -32,20 +28,6 @@ function parseSortKey(value: string | undefined): BucketSortKey {
 
 function parseSortDirection(value: string | undefined): SortDirection {
   return SORT_DIRECTIONS.find((direction) => direction === value) ?? 'asc';
-}
-
-/**
- * The member the listing is scoped to, or undefined for a caller who sees the
- * tenant's whole set. Owner and Admin are unscoped by role, so the policy store
- * is never read for them and a bucket with no policy is still theirs to see.
- *
- * Kept here rather than shared with the other `actAs` callers: this asks who is
- * unscoped, which `isRosterRole` only happens to answer today. The two part
- * company once a membership row can say `bucketScope: 'all'`, since a roster
- * statement never names such a member.
- */
-function scopedTo(role: string | undefined, userId: string): string | undefined {
-  return role === OrgRole.Owner || role === OrgRole.Admin ? undefined : userId;
 }
 
 export async function baseHandler(

@@ -11,6 +11,7 @@ import {
   unsupportedRegionResponse,
 } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { scopedTo } from '../lib/member-scope.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { authorize } from '../middleware/authorize.ts';
@@ -26,7 +27,7 @@ export async function baseHandler(
     return new ResponseBuilder().status(400).body({ message: 'Bucket name is required' }).build();
   }
 
-  const { orgId, userId } = getUserInfo(event);
+  const { orgId, userId, membership } = getUserInfo(event);
 
   const region = event.queryStringParameters?.region ?? S3_REGION;
   if (!isSupportedRegion(region, process.env.FILONE_STAGE!)) {
@@ -36,7 +37,9 @@ export async function baseHandler(
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) return tenantNotReadyResponse();
 
-  const bucket = await orchestrator.getBucket(tenantId, bucketName, { actAs: userId });
+  const bucket = await orchestrator.getBucket(tenantId, bucketName, {
+    actAs: scopedTo(membership?.role, userId),
+  });
   if (!bucket) {
     return new ResponseBuilder().status(404).body({ message: 'Bucket not found' }).build();
   }
