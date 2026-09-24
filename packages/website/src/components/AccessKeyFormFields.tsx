@@ -119,11 +119,13 @@ export function AccessKeyFormFields({
       )}
 
       {form.keyType === 'principal' ? (
-        <Alert
-          variant="blue"
-          assertive={false}
-          description="This key acts as you. What it can reach is decided by each bucket's policy."
-        />
+        <div data-testid="access-key-follows-policy">
+          <Alert
+            variant="blue"
+            assertive={false}
+            description="This key acts as you. What it can reach is decided by each bucket's policy."
+          />
+        </div>
       ) : (
         <>
           {/* Permissions */}
