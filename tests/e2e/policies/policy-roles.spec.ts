@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { ROSTER_ADMIN_ACTIONS } from '@filone/shared';
 import { resolvePersonalOrgId, runCleanup } from '../destructive/invite.util.ts';
 import {
   ConsoleApi,
@@ -185,6 +186,42 @@ test('R6. readonly reads what a policy grants and no more than the role allows',
   });
   expect(put.status()).toBe(403);
   expect((await api.readonly.listBucketNames()).includes(bucket)).toBe(true);
+});
+
+test("R8. the first policy is the server's own, whatever a creator sends", async () => {
+  // The create request carries no policy; the server builds the roster from the
+  // org's membership and sends it on the create itself, so a creator who asks
+  // for more gets the default and nothing else.
+  const asked = { statement: [allow('*', ['s3:*'], 'mine')] };
+  const results = [];
+  for (const role of ['admin', 'member'] as const) {
+    const bucket = uniqueBucketName(`r8-${role}`);
+    const created = await api[role].send('POST', '/buckets', {
+      bucketName: bucket,
+      region: REGION,
+      policy: asked,
+    });
+    if (created.status() === 201) buckets.push(bucket);
+    results.push([role, created.status(), (await api.owner.readPolicy(bucket)).policy]);
+  }
+  expect(results).toEqual([
+    ['admin', 201, rosterPolicy(ids.owner, ids.admin)],
+    [
+      'member',
+      201,
+      {
+        statement: [
+          ...rosterPolicy(ids.owner, ids.admin).statement,
+          {
+            sid: 'filone-creator',
+            effect: 'allow',
+            principal: [ids.member],
+            action: ROSTER_ADMIN_ACTIONS,
+          },
+        ],
+      },
+    ],
+  ]);
 });
 
 test.describe('the Policy tab', () => {
