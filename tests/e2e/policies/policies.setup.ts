@@ -6,12 +6,12 @@ import { activateSubscription } from '../destructive/billing-reset.util.ts';
 import { resolvePersonalOrgId, seedMembership } from '../destructive/invite.util.ts';
 import { REGION, STORAGE_STATE, credentials, type PolicyUser } from './policy.util.ts';
 
-// Logs in the Owner, the Admin and the Member, gives the Owner's org an active
-// subscription, and seats the other two in it. The seat is seeded rather than
+// Logs in the Owner, the Admin, the Member and the ReadOnly user, gives the
+// Owner's org an active subscription, and seats the other three in it. The seat is seeded rather than
 // invited, as members.spec.ts does; the Member's Hilt principal is created
 // lazily, the first time they mint a key.
 
-for (const user of ['owner', 'admin', 'member'] as PolicyUser[]) {
+for (const user of ['owner', 'admin', 'member', 'readonly'] as PolicyUser[]) {
   setup(`authenticate the policy ${user}`, async ({ page }) => {
     const { email, password } = credentials(user);
     await page.goto('/');
@@ -40,7 +40,7 @@ for (const user of ['owner', 'admin', 'member'] as PolicyUser[]) {
   });
 }
 
-setup('seat the admin and the member in the owner org', async () => {
+setup('seat the admin, the member and the readonly user in the owner org', async () => {
   const owner = credentials('owner');
   const orgId = await resolvePersonalOrgId(owner.userId);
   // `paid` only picks the subscription state activateSubscription writes.
@@ -48,6 +48,7 @@ setup('seat the admin and the member in the owner org', async () => {
   for (const [user, role] of [
     ['admin', 'admin'],
     ['member', 'member'],
+    ['readonly', 'readonly'],
   ] as const) {
     await seedMembership({
       orgId,
