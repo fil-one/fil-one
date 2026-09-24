@@ -31,6 +31,7 @@ export const STORAGE_STATE = {
   owner: '.auth/policy-owner.json',
   admin: '.auth/policy-admin.json',
   member: '.auth/policy-member.json',
+  readonly: '.auth/policy-readonly.json',
 } as const;
 export type PolicyUser = keyof typeof STORAGE_STATE;
 
@@ -122,11 +123,12 @@ export class ConsoleApi {
 
   // ── Buckets and keys ─────────────────────────────────────────────
 
-  async createBucket(bucket: string, { versioning = false } = {}): Promise<void> {
+  async createBucket(bucket: string, { versioning = false, lock = false } = {}): Promise<void> {
     const res = await this.send('POST', '/buckets', {
       bucketName: bucket,
       region: REGION,
-      versioning,
+      versioning: versioning || lock,
+      lock,
     });
     expect(res.status(), await res.text()).toBe(201);
   }
@@ -149,6 +151,13 @@ export class ConsoleApi {
     });
     expect(res.status(), await res.text()).toBe(201);
     return (await res.json()) as CreateAccessKeyResponse;
+  }
+
+  /** The ids of the keys this user sees, which for a Member or below is their own. */
+  async listKeyIds(): Promise<string[]> {
+    const res = await this.get('/access-keys');
+    expect(res.status(), await res.text()).toBe(200);
+    return ((await res.json()) as { keys: { id: string }[] }).keys.map((k) => k.id);
   }
 
   async deleteKey(id: string): Promise<void> {

@@ -5,8 +5,12 @@ import {
   DeleteObjectCommand,
   GetBucketVersioningCommand,
   GetObjectCommand,
+  GetObjectRetentionCommand,
+  ListObjectVersionsCommand,
   ListPartsCommand,
   PutObjectCommand,
+  PutObjectLegalHoldCommand,
+  PutObjectRetentionCommand,
   UploadPartCommand,
   type S3Client,
 } from '@aws-sdk/client-s3';
@@ -58,10 +62,10 @@ async function freshS3(api: ConsoleApi): Promise<S3Client> {
 /** A bucket holding SEEDED_KEY whose policy is the owners plus `statements`. */
 async function bucketWith(
   statements: PolicyStatement[],
-  { versioning = false } = {},
+  { versioning = false, lock = false } = {},
 ): Promise<string> {
   const bucket = uniqueBucketName('enf');
-  await owner.createBucket(bucket, { versioning });
+  await owner.createBucket(bucket, { versioning, lock });
   buckets.push(bucket);
   await putObject(ownerS3, bucket, SEEDED_KEY);
   await owner.setStatements(bucket, [ownersStatement(ownerId), ...statements]);
@@ -232,6 +236,44 @@ test('A10. reading bucket configuration counts as listing', async () => {
   expect(
     await outcome((await freshS3(member)).send(new GetBucketVersioningCommand({ Bucket: bucket }))),
   ).toBe('403 AccessDenied');
+});
+
+test('A11. a write or read grant does not carry retention or legal holds', async () => {
+  const bucket = await bucketWith([allow([memberId], ['s3:PutObject', 's3:GetObject'])], {
+    lock: true,
+  });
+  const s3 = await freshS3(member);
+  const object = { Bucket: bucket, Key: SEEDED_KEY };
+  try {
+    expect([
+      // A date in the past: were the action permitted, the gateway would refuse
+      // the date instead, so no retention is ever applied.
+      await outcome(
+        s3.send(
+          new PutObjectRetentionCommand({
+            ...object,
+            Retention: { Mode: 'GOVERNANCE', RetainUntilDate: new Date('2000-01-01') },
+          }),
+        ),
+      ),
+      await outcome(
+        s3.send(new PutObjectLegalHoldCommand({ ...object, LegalHold: { Status: 'ON' } })),
+      ),
+      await outcome(s3.send(new GetObjectRetentionCommand(object))),
+    ]).toEqual(['403 AccessDenied', '403 AccessDenied', '403 AccessDenied']);
+  } finally {
+    // Were the hold applied, it would keep teardown from deleting the object.
+    await ownerS3.send(new PutObjectLegalHoldCommand({ ...object, LegalHold: { Status: 'OFF' } }));
+  }
+});
+
+test('A12. listing versions is granted on its own', async () => {
+  const bucket = await bucketWith([allow([memberId], ['s3:ListBucket'])], { versioning: true });
+  const s3 = await freshS3(member);
+  expect([
+    await outcome(listObjects(s3, bucket)),
+    await outcome(s3.send(new ListObjectVersionsCommand({ Bucket: bucket }))),
+  ]).toEqual(['ok', '403 AccessDenied']);
 });
 
 test.describe('C. policy writes', () => {
