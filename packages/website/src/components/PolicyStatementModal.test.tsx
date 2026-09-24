@@ -88,20 +88,15 @@ describe('PolicyStatementModal', () => {
     ] satisfies PolicyStatement[]);
   });
 
-  it('refuses a name reserved for the statements Fil One writes', () => {
+  it('takes a name that starts like the ones Fil One writes', () => {
     renderModal();
     fireEvent.click(screen.getByRole('radio', { name: 'Everyone in this organization' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Read objects' }));
     fireEvent.change(screen.getByLabelText('Name (optional)'), {
-      target: { value: 'filone-owners' },
+      target: { value: 'filone-team' },
     });
 
-    expect(
-      screen.getByText(
-        'Names starting with "filone-" are reserved for statements Fil One manages.',
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Add statement' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add statement' })).toBeEnabled();
   });
 
   it('shows a roster statement its label and will not let it be renamed', async () => {
