@@ -50,7 +50,7 @@ export function PolicyStatementCard({
 }: PolicyStatementCardProps) {
   const label = statementLabel(statement, index);
   return (
-    <Card padding="md" shadow={false} data-testid="policy-statement">
+    <Card padding="md" shadow={false} data-testid="policy-statement" data-statement-label={label}>
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
           {statement.effect === 'allow' ? (
@@ -70,6 +70,7 @@ export function PolicyStatementCard({
                   icon={PencilSimpleIcon}
                   size="sm"
                   aria-label={`Edit ${label}`}
+                  data-testid="policy-statement-edit"
                   tooltip="Edit statement"
                   onClick={onEdit}
                 />
@@ -79,6 +80,7 @@ export function PolicyStatementCard({
                   icon={TrashIcon}
                   size="sm"
                   aria-label={`Remove ${label}`}
+                  data-testid="policy-statement-remove"
                   tooltip="Remove statement"
                   onClick={onRemove}
                 />
