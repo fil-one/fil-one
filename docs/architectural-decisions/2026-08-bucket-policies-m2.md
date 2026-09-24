@@ -172,6 +172,13 @@ for an Owner carries every action; the one it writes for an Admin leaves out the
 two mutating data-protection actions, which an Owner can still grant them
 deliberately on a given bucket.
 
+The console writes these as statements labelled `filone-owners` and
+`filone-admins`, plus `filone-creator` for a Member who creates a bucket, and the
+fan-out finds them again by those labels. The labels are defaults, not a
+reserved namespace: a person may give any statement any label. The console only
+keeps the three it writes from being renamed, so the fan-out can still find
+them.
+
 The fan-out is the price of keeping roles out of the storage system, and it
 cannot be atomic. A promotion that fails halfway leaves the member unscoped on
 some buckets and not others, so each write is idempotent, the role change
