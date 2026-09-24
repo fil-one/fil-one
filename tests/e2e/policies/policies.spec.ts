@@ -66,6 +66,8 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
+  // Every bucket and key the file made goes one at a time, each several calls.
+  test.setTimeout(180_000);
   await runCleanup([
     ...[B1, B2, B3].map((bucket) => ({
       label: `bucket ${bucket}`,
