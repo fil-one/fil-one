@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../lib/query-client.js';
@@ -31,6 +31,7 @@ import { useToast } from '../components/Toast/index.js';
 import { useFileUpload } from '../lib/use-file-upload.js';
 import type { FileEntry, FileUploadStatus } from '../lib/use-file-upload.js';
 import { resolveDropItems } from '../lib/drop-helpers.js';
+import { useIsMounted } from '../lib/use-is-mounted.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -375,40 +376,26 @@ export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) 
   const { toast } = useToast();
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
 
+  // An upload keeps going when the user leaves for another page in the same
+  // org. Finishing takes them to the bucket only if they are still here.
+  const isMounted = useIsMounted();
+
   const upload = useFileUpload({
     bucketName,
     region,
     onSuccess: () => {
-      // The bucket this just wrote to now has a listing and a size that are one
-      // upload out of date, so say so before navigating back onto them. This
-      // used to ride on the objects query being stale on arrival by default;
-      // that is not something the destination page should have to guarantee for
-      // a write that happened here.
-      void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.bucketAnalytics(bucketName, region),
-      });
+      // `useFileUpload` has already refreshed the bucket's listing and size;
+      // the org-wide usage totals are this page's to refresh.
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
+      if (!isMounted()) return;
       void navigate({ to: '/buckets/$bucketName', params: { bucketName }, search: { region } });
     },
   });
 
-  // An upload in flight dies with the page, and every way out of this page is a
-  // navigation: closing the tab, logging out, switching organizations. One
-  // guard here covers all of them, and it is the only place that knows an
-  // upload is running.
+  // Closing the tab, logging out and switching organizations while this runs
+  // are guarded by the upload itself (see `useFileUpload`), so the guard lasts
+  // as long as the upload does, even after the user leaves this page.
   const isUploading = upload.uploadStep === 'uploading';
-  useEffect(() => {
-    if (!isUploading) return;
-    const warn = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      // `preventDefault` is the current trigger; older Chromium and Safari
-      // builds key the confirmation dialog off this instead.
-      e.returnValue = '';
-    };
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [isUploading]);
 
   const goToBucket = () =>
     void navigate({ to: '/buckets/$bucketName', params: { bucketName }, search: { region } });
