@@ -18,7 +18,8 @@ import {
 // Granting a retention or legal-hold write is `privileged.grant`, which only an
 // Owner holds: `s3:PutObjectRetention`, `s3:PutObjectLegalHold`, and `s3:*`,
 // which stands for both. An Admin manages policies but may not newly grant the
-// pair; a grant the stored policy already makes is not new.
+// pair; a grant the stored policy already makes is not new, and neither is the
+// Owners roster statement sent back as the console writes it.
 
 const ownerId = credentials('owner').userId;
 const adminId = credentials('admin').userId;
@@ -110,16 +111,28 @@ test.describe('through the API', () => {
     ]);
   });
 
-  test('P5. an admin writing a first policy may not grant the pair either', async () => {
+  test('P5. an admin restores the owners statement, and nothing wider', async () => {
     const { etag } = await owner.readPolicy(bucket);
     expect((await owner.deletePolicy(bucket, etag)).status()).toBe(204);
 
-    expect(await putAs(admin, [ownersStatement(ownerId)])).toEqual([
-      403,
-      'RETENTION_GRANT_FORBIDDEN',
+    // The roster as the console writes it: filone-owners naming exactly the Owners.
+    expect(await putAs(admin, roster())).toEqual([201, undefined]);
+    expect((await owner.readPolicy(bucket)).policy).toEqual({ statement: roster() });
+
+    // Anyone added to the Owners statement, or s3:* for someone under another
+    // label, is a new grant, and stays an Owner's to make.
+    const outcomes = [];
+    for (const statements of [
+      [{ ...ownersStatement(ownerId), principal: [ownerId, adminId] }, adminsStatement(adminId)],
+      [...roster(), allow([memberId], ['s3:*'], 'everything')],
+    ]) {
+      const current = (await admin.readPolicy(bucket)).etag;
+      outcomes.push(await putAs(admin, statements, current));
+    }
+    expect(outcomes).toEqual([
+      [403, 'RETENTION_GRANT_FORBIDDEN'],
+      [403, 'RETENTION_GRANT_FORBIDDEN'],
     ]);
-    const statement = [adminsStatement(adminId), allow([memberId], ['s3:ListBucket'])];
-    expect(await putAs(admin, statement)).toEqual([201, undefined]);
   });
 });
 
