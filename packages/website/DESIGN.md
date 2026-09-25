@@ -195,6 +195,11 @@ repeated at call sites.
 **Check:** A story placing a button, an input, and a select in one `flex` row. Their tops
 and bottoms line up exactly.
 
+**Dropdown and overflow menus** follow `BucketActionMenu.tsx`'s sizing, not a size picked
+per call site: `p-1.5` trigger padding with an 18px icon, `min-w-36` panel, `text-xs` items
+with `gap-2 px-3 py-1.5` and a 13px icon. `RowActionsMenu.tsx` (used by the Organizations
+list and the Members table) matches this.
+
 ## 8. Use four radii (plus one sanctioned exception)
 
 | Radius              | Use for                                                                |
@@ -397,6 +402,7 @@ will be rather than as it is:
 - [ ] No `font-bold`; `font-semibold` only on a page title
 - [ ] No arbitrary spacing; half-steps only inside controls
 - [ ] Control heights come from `--control-height-*`, not from padding
+- [ ] Dropdown and overflow menus match `BucketActionMenu.tsx`'s sizing
 - [ ] Radii are `md`, `lg`, `xl`, or `full`
 - [ ] Shadows only on overlays
 - [ ] Focus rings use `focus-visible` and are clearly visible
