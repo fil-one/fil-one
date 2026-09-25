@@ -198,7 +198,13 @@ function useEmailChangeModal(me: MeResponse) {
       return;
     }
     setError(null);
-    mutation.mutate(validated.data.email!);
+    const next = validated.data.email!.trim();
+    // Saving the address on file would un-verify it and resend verification.
+    if (next.toLowerCase() === (me.email ?? '').toLowerCase()) {
+      setOpen(false);
+      return;
+    }
+    mutation.mutate(next);
   }
 
   return { open, setOpen, email, setEmail, error, submit, isSaving: mutation.isPending };
