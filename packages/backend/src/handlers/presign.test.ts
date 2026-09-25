@@ -533,6 +533,32 @@ describe('presign baseHandler', () => {
 
   // ── Region routing ────────────────────────────────────────────────
 
+  describe('member-signed traffic', () => {
+    it('asks the orchestrator to act as the calling member', async () => {
+      const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], {
+        role: OrgRole.Member,
+      });
+      await baseHandler(event);
+
+      // On an `iam` region this picks the member's principal-bound credential,
+      // so a URL they redeem is authorized against their own policies. Every
+      // other region ignores it.
+      expect(mockGetS3ClientContext).toHaveBeenCalledWith('aurora-t-1', { actAs: 'user-1' });
+    });
+
+    it('signs unscoped for an Owner or an Admin', async () => {
+      // They must reach a bucket whose policy leaves them out, or has none, to
+      // repair it, so the console signs for them with the tenant's key.
+      const actors: unknown[] = [];
+      for (const role of [OrgRole.Owner, OrgRole.Admin, OrgRole.Member, OrgRole.ReadOnly]) {
+        mockGetS3ClientContext.mockClear();
+        await baseHandler(buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], { role }));
+        actors.push(mockGetS3ClientContext.mock.calls[0]?.[1]?.actAs);
+      }
+      expect(actors).toStrictEqual([undefined, undefined, 'user-1', 'user-1']);
+    });
+  });
+
   describe('region routing', () => {
     it('returns 400 when region query parameter is missing', async () => {
       const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], { region: null });

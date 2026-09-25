@@ -6,10 +6,11 @@
 import { FilOneOrchestrator } from './orchestrator.ts';
 import type { FilOneOrchestratorConfig } from './orchestrator.ts';
 import { buildIamMethods } from './iam.ts';
-import { memberCredentials, reachableBuckets } from './member-access.ts';
+import { memberCredentials, reachableBuckets, withFreshMemberCredential } from './member-access.ts';
 import { registerMemberPrincipals } from './principals.ts';
 import type { S3Credentials } from '../s3-credentials.ts';
 import type {
+  BucketDetails,
   BucketSummary,
   IamMethods,
   IamOrchestrator,
@@ -58,12 +59,17 @@ class IamFilOneOrchestrator extends FilOneOrchestrator implements IamOrchestrato
     requestOptions?: S3ActorOptions,
   ): Promise<BucketSummary[]> {
     const userId = requestOptions?.actAs;
-    const buckets = await super.listBuckets(tenantId, requestOptions);
+    if (!userId) return super.listBuckets(tenantId, requestOptions);
+    const { id: orchestratorId, config } = this;
+    const buckets = await withFreshMemberCredential(
+      { orchestratorId, stage: config.stage, tenantId, userId },
+      () => super.listBuckets(tenantId, requestOptions),
+    );
     // Awaited after the listing rather than beside it, so a failed access lookup
     // rejects this method and the caller's fan-out reports the region as
     // unavailable. Answering unfiltered would hand the member every bucket name
     // in the tenant.
-    return userId ? reachableBuckets(this.iam, buckets, tenantId, userId) : buckets;
+    return reachableBuckets(this.iam, buckets, tenantId, userId);
   }
 
   /**
@@ -74,6 +80,26 @@ class IamFilOneOrchestrator extends FilOneOrchestrator implements IamOrchestrato
    * each request. So a role change or a policy edit needs no reissue here, and
    * a demotion deletes nothing — rewriting the policies is the narrowing.
    */
+  /**
+   * One bucket's details, signed as the member when the caller names one.
+   *
+   * A bucket outside their policies answers exactly like a bucket that does not
+   * exist: the gateway refuses the read and this returns null.
+   */
+  override async getBucket(
+    tenantId: string,
+    bucketName: string,
+    requestOptions?: S3ActorOptions,
+  ): Promise<BucketDetails | null> {
+    const userId = requestOptions?.actAs;
+    if (!userId) return super.getBucket(tenantId, bucketName, requestOptions);
+    const { id: orchestratorId, config } = this;
+    return withFreshMemberCredential(
+      { orchestratorId, stage: config.stage, tenantId, userId },
+      () => super.getBucket(tenantId, bucketName, requestOptions),
+    );
+  }
+
   protected override s3Credentials(
     tenantId: string,
     requestOptions?: S3ActorOptions,

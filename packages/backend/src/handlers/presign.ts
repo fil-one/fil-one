@@ -32,6 +32,7 @@ import {
   unsupportedRegionResponse,
 } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { scopedTo } from '../lib/member-scope.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { requireOrgMembershipMiddleware, requirePermission } from '../middleware/authorize.ts';
@@ -273,7 +274,7 @@ export async function baseHandler(
   }
 
   const ops = parsed.data;
-  const { orgId } = getUserInfo(event);
+  const { orgId, userId, membership } = getUserInfo(event);
 
   // Authorization first: what the caller's role permits does not depend on
   // their billing state, and a member denied an operation should hear that
@@ -288,7 +289,9 @@ export async function baseHandler(
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) return tenantNotReadyResponse();
 
-  const ctx = await orchestrator.getS3ClientContext(tenantId);
+  const ctx = await orchestrator.getS3ClientContext(tenantId, {
+    actAs: scopedTo(membership?.role, userId),
+  });
 
   const items = await Promise.all(ops.map((op) => presignOp(op, ctx)));
 
