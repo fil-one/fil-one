@@ -50,11 +50,10 @@ test.describe('paid user (organizations beta)', () => {
   });
 
   test('paid user invites a teammate and withdraws the invitation', async ({ page }) => {
-    await page.goto('/dashboard');
-    // The nav entry itself is the beta gate's other half: `useMembersSurface`
-    // renders it for a solo org only once the flag is on.
-    await page.getByTestId('nav-organization').click();
-    await expect(page.locator('#organization-heading')).toBeVisible();
+    // Members is its own page now, reached from the org switcher; navigating
+    // straight to it is what the switcher's link resolves to.
+    await page.goto('/members');
+    await expect(page.locator('#members-heading')).toBeVisible();
 
     const created = page.waitForResponse(
       (response) =>
@@ -126,7 +125,7 @@ test.describe('paid user (organizations beta)', () => {
     // withdrawal is the server's answer rather than the cache edit that follows
     // a successful revoke.
     await page.reload();
-    await expect(page.locator('#organization-heading')).toBeVisible();
+    await expect(page.locator('#members-heading')).toBeVisible();
     // A reload comes back on the default tab, and the row lives in the
     // Invitations panel: without selecting it, "no such row" is true of every
     // run and says nothing about the withdrawal.
