@@ -8,7 +8,15 @@
 
 @plugin '@tailwindcss/typography';
 
+/* Browsers default a bare <button> to the arrow cursor, not the hand — Tailwind
+   stopped papering over that in v3.3. `.button` (button.css) already opts in
+   itself; this covers every other raw <button> in the console (icon buttons,
+   dialog and menu triggers) in one place instead of per component. */
 @layer base {
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+
   /* The document's own background, not just AppShell's root: `h-screen` on
      that root is a best effort at covering the exact viewport, but any gap
      left by a rounding difference or a timing gap before it paints shows
