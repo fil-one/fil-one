@@ -67,6 +67,7 @@ describe('ensureTrialEntitlement', () => {
       pk: { S: 'EMAIL_NORM#user@gmail.com' },
       sk: { S: 'TRIAL_ENTITLEMENT' },
       userId: { S: 'user-1' },
+      orgId: { S: 'org-1' },
       createdAt: { S: expect.any(String) },
     });
     expect(putCalls[0].args[0].input.ConditionExpression).toBe('attribute_not_exists(pk)');
@@ -122,7 +123,49 @@ describe('ensureTrialEntitlement', () => {
     warnSpy.mockRestore();
   });
 
-  it('creates the trial when the existing claim is owned by the same user (retry)', async () => {
+  it('creates the trial when the same user retries for the org the claim was spent on', async () => {
+    ddbMock.on(PutItemCommand).rejects(
+      new ConditionalCheckFailedException({
+        message: 'exists',
+        $metadata: {},
+        Item: { userId: { S: 'user-1' }, orgId: { S: 'org-1' } },
+      }),
+    );
+    ddbMock.on(UpdateItemCommand).resolves({});
+
+    const result = await ensureTrialEntitlement(BASE);
+
+    expect(result).toBe(true);
+    expect(mockCreateBillingTrial).toHaveBeenCalledOnce();
+  });
+
+  // One trial per person: a second org of theirs (one they created, or the
+  // floor org made when they leave their last one) gets no trial of its own.
+  it('refuses the same user asking from a different org', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    ddbMock.on(PutItemCommand).rejects(
+      new ConditionalCheckFailedException({
+        message: 'exists',
+        $metadata: {},
+        Item: { userId: { S: 'user-1' }, orgId: { S: 'org-first' } },
+      }),
+    );
+    ddbMock.on(UpdateItemCommand).resolves({});
+
+    const result = await ensureTrialEntitlement(BASE);
+
+    expect(result).toBe(false);
+    expect(mockCreateBillingTrial).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[trial-entitlement] Trial already spent on another org; no trial granted',
+      { userId: 'user-1', orgId: 'org-1', claimedOrgId: 'org-first' },
+    );
+    warnSpy.mockRestore();
+  });
+
+  // Written before the claim recorded its org, when an account had exactly one.
+  it('treats a claim with no recorded org as spent', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
     ddbMock.on(PutItemCommand).rejects(
       new ConditionalCheckFailedException({
         message: 'exists',
@@ -134,8 +177,8 @@ describe('ensureTrialEntitlement', () => {
 
     const result = await ensureTrialEntitlement(BASE);
 
-    expect(result).toBe(true);
-    expect(mockCreateBillingTrial).toHaveBeenCalledOnce();
+    expect(result).toBe(false);
+    expect(mockCreateBillingTrial).not.toHaveBeenCalled();
   });
 
   it('throws and does not set the flag on a transient claim error', async () => {
