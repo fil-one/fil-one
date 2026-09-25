@@ -7,11 +7,14 @@ import type {
 } from '../lib/service-orchestrator.ts';
 import { S3Region, type TenantStatus } from '@filone/shared';
 import type { AccessModel } from '@filone/shared';
+import { FakeIamOrchestrator } from './fake-iam-orchestrator.ts';
 
 export interface FakeOrchestrator {
   id: string;
   region: string;
   accessModel: AccessModel;
+  /** Present when built with `iam`; see {@link FakeIamOrchestrator}. */
+  iam?: FakeIamOrchestrator;
   isTenantReady: ReturnType<typeof vi.fn>;
   getTenantStatus: ReturnType<typeof vi.fn>;
   updateTenantStatus: ReturnType<typeof vi.fn>;
@@ -29,8 +32,13 @@ export interface FakeOrchestratorOpts {
   status?: TenantStatus;
   /** Region reported by the orchestrator. Defaults to `eu-west-1`. */
   region?: S3Region;
-  /** Access model reported by the orchestrator. Defaults to `scoped-keys`. */
+  /** Access model reported by the orchestrator. Defaults to `scoped-keys`, or `iam` when `iam` is set. */
   accessModel?: AccessModel;
+  /**
+   * Attach the `iam` arm: `true` for a fresh {@link FakeIamOrchestrator}, or
+   * one the test seeded. Sets `accessModel` to `iam`.
+   */
+  iam?: true | FakeIamOrchestrator;
   /** Storage series returned by `getTenantUsageMetrics`. Defaults to empty. */
   storage?: StorageUsageSample[];
   /** Egress series returned by `getTenantUsageMetrics`. Defaults to empty. */
@@ -57,11 +65,13 @@ export interface FakeOrchestratorOpts {
 export function fakeOrchestrator(id: string, opts: FakeOrchestratorOpts = {}): FakeOrchestrator {
   const { ready = true, status = 'active', region = S3Region.EuWest1, failUsage = false } = opts;
   const regionDown = () => vi.fn().mockRejectedValue(new Error('region down'));
+  const iam = opts.iam === true ? new FakeIamOrchestrator() : opts.iam;
 
   return {
     id,
     region,
-    accessModel: opts.accessModel ?? 'scoped-keys',
+    accessModel: iam ? 'iam' : (opts.accessModel ?? 'scoped-keys'),
+    ...(iam ? { iam } : {}),
     isTenantReady: vi.fn((orgProfile?: { pk?: { S?: string } }) => {
       const orgId = orgProfile?.pk?.S?.replace('ORG#', '');
       return ready && orgId ? tenantFor(id, orgId) : null;

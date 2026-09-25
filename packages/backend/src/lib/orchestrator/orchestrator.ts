@@ -14,12 +14,14 @@
 //     `filone-console` system key stashed in SSM during setup.
 
 import pRetry from 'p-retry';
-import type { S3Region, TenantStatus } from '@filone/shared';
+import type { AccessModel, S3Region, TenantStatus } from '@filone/shared';
 import {
   ensureTenantReady as ensureManagementTenantReady,
   type TenantSetupDeps,
 } from './tenant-setup.ts';
 import { buildPermissions } from './permissions.ts';
+import { buildIamMethods } from './iam.ts';
+import { extractApiMessage } from './api-message.ts';
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
@@ -31,9 +33,13 @@ import type {
   BucketSummary,
   CreateBucketArgs,
   GetTenantUsageMetricsOptions,
+  IamMethods,
+  IamOrchestrator,
   IssueAccessKeyOpts,
   IssuedAccessKey,
+  OrchestratorCore,
   OrchestratorRequestOptions,
+  ScopedKeysOrchestrator,
   ServiceOrchestrator,
   StorageUsageSample,
   TenantInfo,
@@ -90,6 +96,13 @@ export interface FilOneOrchestratorConfig {
    * tests and advanced callers; NOT auto-instrumented).
    */
   api: { client: Client } | { baseUrl: string; accessToken: string; fetch?: typeof fetch };
+  /**
+   * Which arm of the interface this instance serves. `iam` attaches the
+   * principal and bucket-policy methods; the registry passes the shared
+   * `getRegionAccessModel(region)` so the two never disagree. Defaults to
+   * `scoped-keys`.
+   */
+  accessModel?: AccessModel;
 }
 
 // Versioning / object-lock are applied as separate, idempotent S3 calls after the
@@ -98,16 +111,22 @@ export interface FilOneOrchestratorConfig {
 const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
 
 export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): ServiceOrchestrator {
-  return new FilOneOrchestrator(config);
+  return config.accessModel === 'iam'
+    ? new IamFilOneOrchestrator(config)
+    : new ScopedKeysFilOneOrchestrator(config);
 }
 
-class FilOneOrchestrator implements ServiceOrchestrator {
+// The core every arm shares. `implements OrchestratorCore` rather than
+// ServiceOrchestrator: the latter is a union, and a class may only implement an
+// object type. Each subclass implements its own arm, so an arm that forgot its
+// members would not compile.
+abstract class FilOneOrchestrator implements OrchestratorCore {
+  abstract readonly accessModel: AccessModel;
   readonly id: string;
   readonly region: S3Region;
-  readonly accessModel = 'scoped-keys';
 
   private readonly config: FilOneOrchestratorConfig;
-  private readonly client: Client;
+  protected readonly client: Client;
   private readonly setupDeps: TenantSetupDeps;
   private readonly tenantIdAttribute: string;
 
@@ -543,6 +562,19 @@ class FilOneOrchestrator implements ServiceOrchestrator {
   }
 }
 
+// The two arms. `as const` on each discriminant is load-bearing: the abstract
+// declaration would otherwise widen the initializer back to AccessModel and the
+// union would stop narrowing.
+class ScopedKeysFilOneOrchestrator extends FilOneOrchestrator implements ScopedKeysOrchestrator {
+  readonly accessModel = 'scoped-keys' as const;
+}
+
+class IamFilOneOrchestrator extends FilOneOrchestrator implements IamOrchestrator {
+  readonly accessModel = 'iam' as const;
+  // Field initializers run after the base constructor, so `client` is set.
+  readonly iam: IamMethods = buildIamMethods(this.client, this.id);
+}
+
 function resolveClient(config: FilOneOrchestratorConfig): Client {
   if ('client' in config.api) return config.api.client;
   const { baseUrl, accessToken: token, fetch } = config.api;
@@ -582,14 +614,4 @@ function mapStorageSamples(metrics: Metrics): StorageUsageSample[] {
     bytesUsed: s.bytesUsed,
     objectCount: s.objectCount,
   }));
-}
-
-// Pulls the human-readable message out of the contract's error body
-// (`{ message, code? }`) returned in the SDK result's `error` field.
-function extractApiMessage(body: unknown): string | undefined {
-  if (body && typeof body === 'object' && 'message' in body) {
-    const message = (body as { message?: unknown }).message;
-    if (typeof message === 'string') return message;
-  }
-  return undefined;
 }
