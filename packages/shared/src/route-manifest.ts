@@ -45,11 +45,12 @@ export type RouteCategory =
  * would refuse every invitation there is. Deliberately not `'self'`, which is
  * for routes that touch no org state at all — accepting creates a membership.
  *
- * One `'in-handler'` route is membership-only: creating an additional org. The
- * caller holds no role in the org being made, so there is no permission to
- * check, and the handler checks nothing past the chain's membership gate (the
- * caller's own active org). It is `'in-handler'` rather than `'self'` because
- * `'self'` is for routes with no org gate at all.
+ * Two `'in-handler'` routes are membership-only: creating an additional org,
+ * and presigning a home for its logo before that org exists. The caller holds
+ * no role in the org being made, so there is no permission to check, and the
+ * handler checks nothing past the chain's membership gate (the caller's own
+ * active org). They are `'in-handler'` rather than `'self'` because `'self'` is
+ * for routes with no org gate at all.
  */
 export type RouteRequirement = Permission | 'self' | 'in-handler' | 'invite-token';
 
@@ -299,6 +300,15 @@ const MANIFEST = [
     method: 'POST',
     path: '/api/org',
     handler: 'create-org',
+    category: 'authenticated',
+    requires: 'in-handler',
+  },
+  // A place to put an org logo before the org it belongs to exists.
+  // Membership-only, like create-org.
+  {
+    method: 'POST',
+    path: '/api/org/logo-upload-url',
+    handler: 'presign-org-logo',
     category: 'authenticated',
     requires: 'in-handler',
   },

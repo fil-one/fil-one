@@ -16,6 +16,22 @@ import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
 // Mocks
 // ---------------------------------------------------------------------------
 
+const mockIsUploadedOrgLogoUrl = vi.fn();
+const mockClaimOrgLogoUrl = vi.fn();
+const mockDeleteReplacedOrgLogo = vi.fn();
+vi.mock('../lib/org-logo-storage.ts', () => ({
+  isUploadedOrgLogoUrl: (...args: unknown[]) => mockIsUploadedOrgLogoUrl(...args),
+  // Net effect: the upload ends up claimed only when the save succeeded. The
+  // claim-first order and the unclaim on failure are org-logo-storage's own
+  // tests to cover.
+  withClaimedOrgLogo: async (url: string, save: () => Promise<unknown>) => {
+    const result = await save();
+    mockClaimOrgLogoUrl(url);
+    return result;
+  },
+  deleteReplacedOrgLogo: (...args: unknown[]) => mockDeleteReplacedOrgLogo(...args),
+}));
+
 vi.mock('sst', () => sstResourceMock());
 
 vi.mock('../lib/auth-secrets.ts', () => ({
@@ -134,10 +150,10 @@ function onlyTheLeaderHasTheProfileRow() {
 
 /**
  * Answer the profile-row read the rename makes to capture the previous name,
- * and whether that name has been confirmed. `nameConfirmed` absent
+ * whether that name has been confirmed, and the logo. `nameConfirmed` absent
  * is the shape of a row written before the flag existed.
  */
-function orgProfileNamed(name?: string, nameConfirmed?: boolean) {
+function orgProfileNamed(name?: string, nameConfirmed?: boolean, logoUrl?: string) {
   ddbMock
     .on(GetItemCommand, {
       TableName: 'UserInfoTable',
@@ -150,6 +166,7 @@ function orgProfileNamed(name?: string, nameConfirmed?: boolean) {
             Item: {
               name: { S: name },
               ...(nameConfirmed === undefined ? {} : { nameConfirmed: { BOOL: nameConfirmed } }),
+              ...(logoUrl ? { logoUrl: { S: logoUrl } } : {}),
             },
           },
     );
@@ -163,6 +180,7 @@ describe('PATCH /api/org handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
+    mockIsUploadedOrgLogoUrl.mockResolvedValue(true);
     vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -377,6 +395,221 @@ describe('PATCH /api/org handler', () => {
     });
   });
 
+  describe('the logo', () => {
+    const LOGO_URL = 'https://cdn.example.com/logo.png';
+
+    it('updates only the logo when the name is unchanged', async () => {
+      const result = await handler(
+        renameEvent({ name: 'Old Corp', logoUrl: LOGO_URL }),
+        buildContext(),
+      );
+
+      expect(result).toMatchObject({
+        statusCode: 200,
+        body: JSON.stringify({ name: 'Old Corp', logoUrl: LOGO_URL }),
+      });
+      // Just the profile update and the audit event.
+      expect(transactItems()).toHaveLength(2);
+      expect(updateInput()).toMatchObject({
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+        UpdateExpression: 'SET logoUrl = :logoUrl',
+        // No logo stored yet, so none may have appeared meanwhile either.
+        ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(logoUrl)',
+        ExpressionAttributeValues: { ':logoUrl': { S: LOGO_URL } },
+      });
+      expect(auditedEvent()).toMatchObject({
+        type: 'org.logo_updated',
+        orgId: MOCK_ORG_ID,
+        subject: `org:${MOCK_ORG_ID}`,
+        details: { logoUrl: LOGO_URL },
+      });
+    });
+
+    // The console's logo save sends no name: one read when the file was picked
+    // can be stale by the time the upload lands, and would rename the org back.
+    it('saves a logo sent without a name, leaving the stored name alone', async () => {
+      const result = await handler(renameEvent({ logoUrl: LOGO_URL }), buildContext());
+
+      expect(result).toMatchObject({
+        statusCode: 200,
+        body: JSON.stringify({ name: 'Old Corp', logoUrl: LOGO_URL }),
+      });
+      expect(transactItems()).toHaveLength(2);
+      expect(updateInput()).toMatchObject({ UpdateExpression: 'SET logoUrl = :logoUrl' });
+      expect(auditedEvent()).toMatchObject({ type: 'org.logo_updated' });
+    });
+
+    it('does not confirm an unconfirmed name on a logo-only save', async () => {
+      orgProfileNamed('Old Corp', false);
+
+      await handler(renameEvent({ logoUrl: LOGO_URL }), buildContext());
+
+      const updates = ddbMock
+        .commandCalls(UpdateItemCommand)
+        .map((call) => call.args[0].input.UpdateExpression);
+      expect(updates).not.toContain('SET nameConfirmed = :confirmed');
+    });
+
+    it('records the previous logo when replacing one that already existed', async () => {
+      orgProfileNamed('Old Corp', true, 'https://cdn.example.com/old.png');
+
+      await handler(renameEvent({ name: 'Old Corp', logoUrl: LOGO_URL }), buildContext());
+
+      expect(auditedEvent().details).toStrictEqual({
+        logoUrl: LOGO_URL,
+        previousLogoUrl: 'https://cdn.example.com/old.png',
+      });
+    });
+
+    it('rejects a logo URL the presign step never minted', async () => {
+      mockIsUploadedOrgLogoUrl.mockResolvedValue(false);
+
+      const result = await handler(
+        renameEvent({ name: 'New Corp', logoUrl: 'https://attacker.example/tracker.png' }),
+        buildContext(),
+      );
+
+      expect(result).toMatchObject({ statusCode: 400 });
+      // The rename riding along is refused with it, not committed without the logo.
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(mockClaimOrgLogoUrl).not.toHaveBeenCalled();
+    });
+
+    it('claims the new logo and deletes the one it replaced, after saving', async () => {
+      orgProfileNamed('Old Corp', true, 'https://cdn.example.com/old.png');
+
+      await handler(renameEvent({ name: 'Old Corp', logoUrl: LOGO_URL }), buildContext());
+
+      expect(mockClaimOrgLogoUrl).toHaveBeenCalledWith(LOGO_URL);
+      expect(mockDeleteReplacedOrgLogo).toHaveBeenCalledWith('https://cdn.example.com/old.png');
+    });
+
+    // Two admins saving a logo at once both read the same one. Without this the
+    // second write lands too, and the first new logo is left claimed with
+    // nothing pointing at it and nothing ever deleting it.
+    it('saves the logo only if it is still the one this request read', async () => {
+      orgProfileNamed('Old Corp', true, 'https://cdn.example.com/old.png');
+
+      await handler(renameEvent({ name: 'Old Corp', logoUrl: LOGO_URL }), buildContext());
+
+      expect(updateInput()).toMatchObject({
+        ConditionExpression: 'attribute_exists(pk) AND logoUrl = :previousLogoUrl',
+        ExpressionAttributeValues: {
+          ':logoUrl': { S: LOGO_URL },
+          ':previousLogoUrl': { S: 'https://cdn.example.com/old.png' },
+        },
+      });
+    });
+
+    it('conditions a rename that carries a logo on both', async () => {
+      orgProfileNamed('Old Corp', true, 'https://cdn.example.com/old.png');
+
+      await handler(renameEvent({ name: 'New Corp', logoUrl: LOGO_URL }), buildContext());
+
+      expect(updateInput()?.ConditionExpression).toBe(
+        'attribute_exists(pk) AND #name = :previousName AND logoUrl = :previousLogoUrl',
+      );
+    });
+
+    it('returns 409, deleting nothing, when another logo landed first', async () => {
+      orgProfileNamed('Old Corp', true, 'https://cdn.example.com/old.png');
+      ddbMock.on(TransactWriteItemsCommand).rejects(cancelledOnTheUpdate());
+
+      const result = await handler(
+        renameEvent({ name: 'Old Corp', logoUrl: LOGO_URL }),
+        buildContext(),
+      );
+
+      expect(result).toMatchObject({ statusCode: 409 });
+      expect(JSON.parse((result as { body: string }).body).message).toBe(
+        'The logo was changed by someone else. Try again.',
+      );
+      expect(mockClaimOrgLogoUrl).not.toHaveBeenCalled();
+      expect(mockDeleteReplacedOrgLogo).not.toHaveBeenCalled();
+    });
+
+    it('settles the logo on a rename that carries one too', async () => {
+      await handler(renameEvent({ name: 'New Corp', logoUrl: LOGO_URL }), buildContext());
+
+      expect(mockClaimOrgLogoUrl).toHaveBeenCalledWith(LOGO_URL);
+    });
+
+    it('writes nothing when the submitted logo is the one already stored', async () => {
+      orgProfileNamed('Old Corp', true, LOGO_URL);
+
+      const result = await handler(
+        renameEvent({ name: 'Old Corp', logoUrl: LOGO_URL }),
+        buildContext(),
+      );
+
+      expect(result).toMatchObject({
+        statusCode: 200,
+        body: JSON.stringify({ name: 'Old Corp', logoUrl: LOGO_URL }),
+      });
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+      expect(mockIsUploadedOrgLogoUrl).not.toHaveBeenCalled();
+      expect(mockClaimOrgLogoUrl).not.toHaveBeenCalled();
+      expect(mockDeleteReplacedOrgLogo).not.toHaveBeenCalled();
+    });
+
+    it('carries the logo into the rename write when both change together', async () => {
+      const result = await handler(
+        renameEvent({ name: 'New Corp', logoUrl: LOGO_URL }),
+        buildContext(),
+      );
+
+      expect(result).toMatchObject({
+        statusCode: 200,
+        body: JSON.stringify({ name: 'New Corp', logoUrl: LOGO_URL }),
+      });
+      expect(updateInput()).toMatchObject({
+        UpdateExpression: 'SET #name = :name, nameConfirmed = :confirmed, logoUrl = :logoUrl',
+        ExpressionAttributeValues: { ':logoUrl': { S: LOGO_URL } },
+      });
+      expect(auditedEvent()).toMatchObject({
+        type: 'org.renamed',
+        details: { name: 'New Corp', previousName: 'Old Corp', logoUrl: LOGO_URL },
+      });
+    });
+
+    it('carries the existing logo over when only the name changes', async () => {
+      orgProfileNamed('Old Corp', true, LOGO_URL);
+
+      const result = await handler(renameEvent({ name: 'New Corp' }), buildContext());
+
+      expect(result).toMatchObject({
+        statusCode: 200,
+        body: JSON.stringify({ name: 'New Corp', logoUrl: LOGO_URL }),
+      });
+      // Untouched by this save, so the rename's own write never sets it again.
+      expect(updateInput().UpdateExpression).not.toContain('logoUrl');
+      expect(auditedEvent().details).toStrictEqual({ name: 'New Corp', previousName: 'Old Corp' });
+    });
+
+    it('returns 404 for a logo-only save when the org was deleted underneath it', async () => {
+      // The logo-only write conditions on nothing but `attribute_exists(pk)`,
+      // so the only way it cancels is the row being gone — there is no
+      // previous-name race to tell apart here, unlike the rename path.
+      ddbMock.on(TransactWriteItemsCommand).rejects(cancelledOnTheUpdate());
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'UserInfoTable',
+          Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+        })
+        .resolves({});
+
+      const result = await handler(
+        renameEvent({ name: 'Old Corp', logoUrl: LOGO_URL }),
+        buildContext(),
+      );
+
+      expect(result).toMatchObject({ statusCode: 404 });
+      expect(mockClaimOrgLogoUrl).not.toHaveBeenCalled();
+    });
+  });
+
   it('lets an Admin rename the org', async () => {
     callerHolds(OrgRole.Admin);
 
@@ -406,7 +639,7 @@ describe('PATCH /api/org handler', () => {
     );
   });
 
-  it('returns 400 for a body with no name', async () => {
+  it('returns 400 for a body with neither a name nor a logo', async () => {
     const result = await handler(renameEvent({}), buildContext());
 
     expect(result).toMatchObject({ statusCode: 400 });

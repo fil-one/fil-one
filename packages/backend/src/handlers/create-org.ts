@@ -5,6 +5,7 @@ import { CreateOrgSchema, MAX_OWNED_ORGS, OrgRole } from '@filone/shared';
 import type { CreateOrgResponse, ErrorResponse } from '@filone/shared';
 import { createAdditionalOrg } from '../lib/account-creation.ts';
 import { SanitizedOrgNameSchema } from '../lib/org-name-validation.ts';
+import { isUploadedOrgLogoUrl, withClaimedOrgLogo } from '../lib/org-logo-storage.ts';
 import { listMemberships } from '../lib/org-membership.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
@@ -27,6 +28,10 @@ const CreateOrgBodySchema = CreateOrgSchema.extend({ name: SanitizedOrgNameSchem
  *
  * Membership-only, with no `authorize(permission)`: see the `'in-handler'` doc
  * in `route-manifest.ts`.
+ *
+ * `logoUrl`, when present, must already be a URL `POST /api/org/logo-upload-url`
+ * returned: this handler only ever persists the string, it never touches
+ * storage.
  */
 export async function baseHandler(
   event: AuthenticatedEvent,
@@ -36,7 +41,7 @@ export async function baseHandler(
 
   const parsed = parseJsonBody(event.body, CreateOrgBodySchema);
   if ('error' in parsed) return parsed.error;
-  const { name } = parsed.data;
+  const { name, logoUrl } = parsed.data;
 
   // A ceiling on how many orgs one account can stand up, so a loop against this
   // route can't mint orgs without bound. Read before the write rather than
@@ -53,7 +58,23 @@ export async function baseHandler(
       .build();
   }
 
-  const created = await createAdditionalOrg({ userId, orgName: name, email });
+  // `logoUrl` is client-supplied, so its only trust is being a URL the
+  // presign step actually minted — never a caller-chosen host that every
+  // member's browser would then be made to contact.
+  if (logoUrl !== undefined && !(await isUploadedOrgLogoUrl(logoUrl))) {
+    return new ResponseBuilder()
+      .status(400)
+      .body<ErrorResponse>({
+        message: 'logoUrl must be a URL returned by the logo upload endpoint',
+      })
+      .build();
+  }
+
+  // The logo is claimed before the org points at it, and a create that fails
+  // puts the claim back, so retrying with the same logo still passes the check.
+  const create = () => createAdditionalOrg({ userId, orgName: name, logoUrl, email });
+  const created =
+    logoUrl === undefined ? await create() : await withClaimedOrgLogo(logoUrl, create);
 
   return new ResponseBuilder()
     .status(201)
@@ -61,6 +82,7 @@ export async function baseHandler(
       orgId: created.orgId,
       orgName: created.orgName,
       role: OrgRole.Owner,
+      ...(created.logoUrl ? { logoUrl: created.logoUrl } : {}),
     })
     .build();
 }

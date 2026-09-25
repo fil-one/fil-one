@@ -52,22 +52,36 @@ export const OrgNameSchema = z
 /**
  * `PATCH /api/org` — renaming the organization, which is `org.rename` and
  * therefore its own endpoint rather than a field on the profile a member
- * updates about themselves.
+ * updates about themselves. `logoUrl`, when present, is a second, independent
+ * change this same call may carry — `org.rename` still gates it, same as the
+ * name — and must already point at a file `POST /api/org/logo-upload-url`
+ * put there, same as `CreateOrgSchema` below.
+ *
+ * Either field may be sent alone, and the API refuses a body with neither. A
+ * logo save sends no name: a name read when the file was picked can be stale
+ * by the time the upload lands, and sending it would rename the org back.
  */
-export const UpdateOrgSchema = z.object({ name: OrgNameSchema });
+export const UpdateOrgSchema = z.object({
+  name: OrgNameSchema.optional(),
+  logoUrl: z.string().url().optional(),
+});
 
 export type UpdateOrgRequest = z.infer<typeof UpdateOrgSchema>;
 
 export interface UpdateOrgResponse {
   name: string;
+  logoUrl?: string;
 }
 
 /**
  * `POST /api/org` — an existing account creating an additional organization
- * (distinct from the one org.ts owns via signup).
+ * (distinct from the one org.ts owns via signup). `logoUrl`, when present,
+ * must already point at a file the presign step below put there — this
+ * schema only ever persists the string, never touches storage.
  */
 export const CreateOrgSchema = z.object({
   name: OrgNameSchema,
+  logoUrl: z.string().url().optional(),
 });
 
 export type CreateOrgRequest = z.infer<typeof CreateOrgSchema>;
@@ -75,6 +89,7 @@ export type CreateOrgRequest = z.infer<typeof CreateOrgSchema>;
 export interface CreateOrgResponse {
   orgId: string;
   orgName: string;
+  logoUrl?: string;
   role: OrgRole;
 }
 
@@ -84,3 +99,27 @@ export interface CreateOrgResponse {
  * orgs never uses up the allowance.
  */
 export const MAX_OWNED_ORGS = 10;
+
+/** Accepted image types for an org logo upload, and the size ceiling for one. */
+export const ORG_LOGO_CONTENT_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
+export const ORG_LOGO_MAX_BYTES = 2 * 1024 * 1024;
+
+export const PresignOrgLogoSchema = z.object({
+  contentType: z.enum(ORG_LOGO_CONTENT_TYPES),
+});
+
+export type PresignOrgLogoRequest = z.infer<typeof PresignOrgLogoSchema>;
+
+export interface PresignOrgLogoResponse {
+  /** Where the client POSTs the file, as a multipart form. */
+  uploadUrl: string;
+  /**
+   * The form fields the POST must carry alongside the file, including the
+   * policy and signature that bind the upload to this content type and to
+   * `ORG_LOGO_MAX_BYTES`. The client sends these unchanged; only `file` (last)
+   * is theirs to append.
+   */
+  fields: Record<string, string>;
+  /** The public URL to read it back from afterward, and what gets sent to `CreateOrgRequest.logoUrl`. */
+  logoUrl: string;
+}

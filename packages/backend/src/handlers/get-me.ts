@@ -3,7 +3,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { MeResponse } from '@filone/shared';
 import { permissionsForRole } from '@filone/shared';
-import { getOrgProfile } from '../lib/org-profile.ts';
+import { getOrgProfile, orgSummary } from '../lib/org-profile.ts';
 import { summarizeMemberships } from '../lib/org-membership.ts';
 import { hasRagAccess } from '../middleware/rag-access.ts';
 import { hasOrgsBetaAccess } from '../lib/orgs-beta.ts';
@@ -51,11 +51,11 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       userId,
       activeOrgId: orgId,
       activeRole: membership?.role,
-      activeOrgName: activeOrgProfile.then((profile) => profile?.name?.S ?? ''),
+      activeOrgSummary: activeOrgProfile.then(orgSummary),
     }),
   ]);
 
-  const orgName = orgProfile?.name?.S ?? '';
+  const { name: orgName, ...orgLogo } = orgSummary(orgProfile);
   // Absent means an organization that predates the field, which is treated as
   // named: only an explicit false sends the caller through the naming step.
   const nameConfirmed = orgProfile?.nameConfirmed?.BOOL !== false;
@@ -63,6 +63,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   const body: MeResponse = {
     orgId,
     orgName,
+    ...orgLogo,
     nameConfirmed,
     emailVerified,
     email,

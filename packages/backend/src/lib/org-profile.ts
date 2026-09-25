@@ -144,13 +144,34 @@ export function isGuardRejection(err: unknown): boolean {
  * so the read failure is logged and swallowed here rather than raised.
  */
 export async function resolveOrgName(orgId: string): Promise<string> {
+  return (await resolveOrgSummary(orgId)).name;
+}
+
+/**
+ * An org's name and logo, for the org switcher and `/me`. `logoUrl` is absent
+ * when there is none, and the console falls back to a generated monogram.
+ */
+export interface OrgProfileSummary {
+  name: string;
+  logoUrl?: string;
+}
+
+export function orgSummary(profile: OrgProfileItem | undefined): OrgProfileSummary {
+  return {
+    name: profile?.name?.S ?? '',
+    ...(profile?.logoUrl?.S ? { logoUrl: profile.logoUrl.S } : {}),
+  };
+}
+
+/** {@link resolveOrgName} with the logo too, under the same failure contract. */
+export async function resolveOrgSummary(orgId: string): Promise<OrgProfileSummary> {
   try {
-    return (await getOrgProfile(orgId))?.name?.S ?? '';
+    return orgSummary(await getOrgProfile(orgId));
   } catch (err) {
     console.error('[org-profile] Org profile read failed — naming the org empty', {
       orgId,
       error: err,
     });
-    return '';
+    return { name: '' };
   }
 }

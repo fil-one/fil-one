@@ -246,6 +246,10 @@ declare module "sst" {
       "type": "sst.sst.Secret"
       "value": string
     }
+    "ImageUploadRateLimitTable": {
+      "name": string
+      "type": "sst.aws.Dynamo"
+    }
     "ListAccessKeys": {
       "name": string
       "type": "sst.aws.Function"
@@ -273,6 +277,10 @@ declare module "sst" {
     "ListRagApiKeys": {
       "name": string
       "type": "sst.aws.Function"
+    }
+    "OrgLogoBucket": {
+      "name": string
+      "type": "sst.aws.Bucket"
     }
     "OrgTable": {
       "name": string
