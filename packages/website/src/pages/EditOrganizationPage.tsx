@@ -4,6 +4,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import { OrgNameSchema } from '@filone/shared';
 import type { MeResponse } from '@filone/shared';
 
+import { Alert } from '../components/Alert';
 import { Button } from '../components/Button';
 import { FormField } from '../components/FormField';
 import { Input } from '../components/Input';
@@ -166,11 +167,20 @@ function DangerSection({ me }: { me: MeResponse }) {
 // ---------------------------------------------------------------------------
 
 function OrganizationDetails() {
-  const { data: me, isPending } = useQuery({
+  const {
+    data: me,
+    isPending,
+    isError,
+    error,
+  } = useQuery({
     queryKey: queryKeys.meWithMfa,
     queryFn: () => getMe({ include: 'mfa' }),
     staleTime: ME_STALE_TIME,
   });
+
+  if (isError) {
+    return <Alert variant="red" description={error?.message ?? 'Failed to load organization'} />;
+  }
 
   if (isPending || !me) {
     return (

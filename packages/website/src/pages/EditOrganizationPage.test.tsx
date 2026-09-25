@@ -108,6 +108,22 @@ describe('EditOrganizationPage', () => {
     expect(mockUpdateOrg).not.toHaveBeenCalled();
   });
 
+  it('shows an error instead of a spinner when /me fails to load', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seedPermissions(client, OrgRole.Owner, me(OrgRole.Owner));
+    mockGetMe.mockRejectedValue(new Error('Could not load your account'));
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <EditOrganizationPage />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText('Could not load your account')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Loading organization')).not.toBeInTheDocument();
+  });
+
   it('shows a fallback instead of the form for a role without org.rename', async () => {
     renderPage(OrgRole.Member);
 
