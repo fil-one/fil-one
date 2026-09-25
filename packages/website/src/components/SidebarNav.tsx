@@ -2,8 +2,6 @@ import {
   SquaresFourIcon,
   DatabaseIcon,
   KeyIcon,
-  CaretLeftIcon,
-  CaretRightIcon,
   ChatTeardropDotsIcon,
   RobotIcon,
 } from '@phosphor-icons/react/dist/ssr';
@@ -14,6 +12,7 @@ import { usePermissions } from '../lib/use-permissions.js';
 import { useSidebarData } from './use-sidebar-data.js';
 
 import { OrgSwitcherMenu } from './OrgSwitcherMenu.js';
+import { ReportBugButton } from './ReportBugButton.js';
 import { StatusBanners } from './SidebarStatusBanners.js';
 import { StatusIndicator } from './StatusIndicator.js';
 import { Tooltip } from './Tooltip.js';
@@ -21,7 +20,6 @@ import { UserMenu } from './UserMenu.js';
 
 type SidebarNavProps = {
   collapsed: boolean;
-  onToggle: () => void;
   onClose?: () => void;
   showUserProfile?: boolean;
   // When false, omit page-unique e2e identifiers (ids/data-testids) so the
@@ -149,7 +147,6 @@ function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps
 
 export function SidebarNav({
   collapsed,
-  onToggle,
   onClose,
   showUserProfile = true,
   showTestIds,
@@ -177,46 +174,19 @@ export function SidebarNav({
   return (
     <div className="h-full">
       <nav
-        className={`relative flex h-full flex-col border-zinc-200 bg-white ${showUserProfile ? 'border-r' : 'border-l'}`}
+        // No background or border of its own: on desktop it sits on the app's
+        // white canvas beside the inset content panel (the panel carries the
+        // chrome now). The mobile drawer supplies its own white background.
+        className="relative flex h-full flex-col"
       >
-        {/* Expand toggle (collapsed) — desktop only */}
-        {showUserProfile && collapsed && (
-          <div className="absolute -right-3 top-7 z-10 hidden -translate-y-1/2 lg:block">
-            <Tooltip content="Expand sidebar" side="right">
-              <button
-                type="button"
-                onClick={onToggle}
-                aria-label="Expand sidebar"
-                className="flex h-6 w-6 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-400 shadow-sm hover:text-zinc-600"
-              >
-                <CaretRightIcon size={14} />
-              </button>
-            </Tooltip>
-          </div>
-        )}
-
-        {/* Header (desktop only): the full-width org switcher, with the
-            collapse toggle beside it while expanded. */}
+        {/* Header (desktop only): the full-width org switcher. The collapse
+            toggle now lives in the utility bar under the content window. */}
         {showUserProfile && (
-          <div className="flex flex-shrink-0 items-center gap-1 px-2 pt-2 pb-1">
-            <div className="min-w-0 flex-1">
-              <OrgSwitcherMenu
-                collapsed={collapsed}
-                testId={showTestIds ? 'org-switcher-button' : undefined}
-              />
-            </div>
-            {!collapsed && (
-              <Tooltip content="Collapse sidebar" side="right">
-                <button
-                  type="button"
-                  onClick={onToggle}
-                  aria-label="Collapse sidebar"
-                  className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
-                >
-                  <CaretLeftIcon size={16} />
-                </button>
-              </Tooltip>
-            )}
+          <div className="flex flex-shrink-0 flex-col gap-1 px-2 pt-2 pb-1">
+            <OrgSwitcherMenu
+              collapsed={collapsed}
+              testId={showTestIds ? 'org-switcher-button' : undefined}
+            />
           </div>
         )}
 
@@ -249,7 +219,10 @@ export function SidebarNav({
           isInactive={isInactive}
         />
 
-        {/* Footer: user identity (also carries Documentation/Support now) + System status */}
+        {/* Footer: user identity (also carries Documentation/Support now). Bug
+            report and system status have moved to the content window's bottom
+            bar on desktop; they stay here only in the mobile drawer, which has
+            no such bar. */}
         <div className="p-2 flex flex-col gap-0.5">
           {showUserProfile && (
             <UserMenu
@@ -260,7 +233,12 @@ export function SidebarNav({
               testId={showTestIds ? 'user-menu-button' : undefined}
             />
           )}
-          <StatusIndicator collapsed={collapsed} />
+          {!showUserProfile && (
+            <>
+              <ReportBugButton variant="row" />
+              <StatusIndicator variant="row" />
+            </>
+          )}
         </div>
       </nav>
     </div>
