@@ -100,6 +100,19 @@ describe('OrgSwitcherMenu', () => {
     }
   });
 
+  // Behind the billing gate those three would land right back on it; Edit
+  // organization is past the gate, and holds the danger zone.
+  it('leaves out the pages the billing gate stands in for', () => {
+    renderMenu({ billingActive: false });
+
+    fireEvent.click(screen.getByTestId('org-switcher-button'));
+
+    expect(screen.getByRole('menuitem', { name: 'Edit organization' })).toBeInTheDocument();
+    for (const name of ['Members', 'Billing', 'Audit log']) {
+      expect(screen.queryByRole('menuitem', { name })).not.toBeInTheDocument();
+    }
+  });
+
   it('opens the create-organization dialog from its own action', () => {
     renderMenu();
 

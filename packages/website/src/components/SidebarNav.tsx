@@ -152,6 +152,10 @@ export function SidebarNav({
   showTestIds,
 }: SidebarNavProps) {
   const matchRoute = useMatchRoute();
+  // Without an active plan, `_app.tsx` swaps every page for the billing gate,
+  // so the page links and the status banners (the same "no active plan" fact
+  // the gate states) are dead ends and are left out.
+  const hideNavLinks = !usePermissions().billingActive;
 
   const {
     me,
@@ -190,34 +194,36 @@ export function SidebarNav({
           </div>
         )}
 
-        {/* Primary nav items */}
-        <NavLinks
-          collapsed={collapsed}
-          matchRoute={matchRoute}
-          onClose={onClose}
-          showTestIds={showTestIds}
-        />
+        {!hideNavLinks && (
+          <NavLinks
+            collapsed={collapsed}
+            matchRoute={matchRoute}
+            onClose={onClose}
+            showTestIds={showTestIds}
+          />
+        )}
 
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Status banners */}
-        <StatusBanners
-          collapsed={collapsed}
-          showTestIds={showTestIds}
-          isTrialing={isTrialing}
-          trialDays={trialDays}
-          trialEndsLabel={trialEndsLabel}
-          storageUsed={storageUsed}
-          storagePct={storagePct}
-          egressUsed={egressUsed}
-          egressPct={egressPct}
-          limitsKnown={limitsKnown}
-          graceDays={graceDays}
-          graceEndsLabel={graceEndsLabel}
-          isPastDue={isPastDue}
-          isInactive={isInactive}
-        />
+        {!hideNavLinks && (
+          <StatusBanners
+            collapsed={collapsed}
+            showTestIds={showTestIds}
+            isTrialing={isTrialing}
+            trialDays={trialDays}
+            trialEndsLabel={trialEndsLabel}
+            storageUsed={storageUsed}
+            storagePct={storagePct}
+            egressUsed={egressUsed}
+            egressPct={egressPct}
+            limitsKnown={limitsKnown}
+            graceDays={graceDays}
+            graceEndsLabel={graceEndsLabel}
+            isPastDue={isPastDue}
+            isInactive={isInactive}
+          />
+        )}
 
         {/* Footer: user identity (also carries Documentation/Support now). Bug
             report and system status have moved to the content window's bottom

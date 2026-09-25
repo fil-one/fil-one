@@ -44,14 +44,18 @@ type BillingInvoices = Awaited<ReturnType<typeof getInvoices>>;
 /**
  * What the tab reads. Invoices wait for billing, since whether to ask for them
  * at all depends on the plan's state.
+ *
+ * `enabled: false` skips the billing read, for a caller whose role may not make
+ * it: the server answers anyone without `billing.view` with a 403, which would
+ * otherwise come back here as a billing error.
  */
-export function useBillingData(): BillingData {
+export function useBillingData({ enabled = true }: { enabled?: boolean } = {}): BillingData {
   const {
     data: billing,
     isPending: billingPending,
     isError: isBillingError,
     error: billingError,
-  } = useQuery({ queryKey: queryKeys.billing, queryFn: getBilling });
+  } = useQuery({ queryKey: queryKeys.billing, queryFn: getBilling, enabled });
 
   const { data: usage, isPending: usagePending } = useQuery({
     queryKey: queryKeys.usage,
