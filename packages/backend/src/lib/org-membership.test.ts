@@ -354,8 +354,18 @@ describe('summarizeMemberships', () => {
     });
 
     expect(summaries).toStrictEqual([
-      { orgId: ORG_ID, orgName: 'Example Corp', role: OrgRole.Owner },
-      { orgId: OTHER_ORG_ID, orgName: 'Second Corp', role: OrgRole.Member },
+      {
+        orgId: ORG_ID,
+        orgName: 'Example Corp',
+        role: OrgRole.Owner,
+        joinedAt: JOINED_AT,
+      },
+      {
+        orgId: OTHER_ORG_ID,
+        orgName: 'Second Corp',
+        role: OrgRole.Member,
+        joinedAt: JOINED_AT,
+      },
     ]);
     // The active org's name came from the caller's read, not a second one.
     expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(1);
@@ -396,8 +406,18 @@ describe('summarizeMemberships', () => {
     });
 
     expect(summaries).toStrictEqual([
-      { orgId: ORG_ID, orgName: 'Example Corp', role: OrgRole.Member },
-      { orgId: OTHER_ORG_ID, orgName: 'Second Corp', role: OrgRole.Member },
+      {
+        orgId: ORG_ID,
+        orgName: 'Example Corp',
+        role: OrgRole.Member,
+        joinedAt: JOINED_AT,
+      },
+      {
+        orgId: OTHER_ORG_ID,
+        orgName: 'Second Corp',
+        role: OrgRole.Member,
+        joinedAt: JOINED_AT,
+      },
     ]);
   });
 
@@ -443,8 +463,13 @@ describe('summarizeMemberships', () => {
     });
 
     expect(summaries).toStrictEqual([
-      { orgId: ORG_ID, orgName: 'Example Corp', role: OrgRole.Owner },
-      { orgId: OTHER_ORG_ID, orgName: '', role: OrgRole.Member },
+      {
+        orgId: ORG_ID,
+        orgName: 'Example Corp',
+        role: OrgRole.Owner,
+        joinedAt: JOINED_AT,
+      },
+      { orgId: OTHER_ORG_ID, orgName: '', role: OrgRole.Member, joinedAt: JOINED_AT },
     ]);
     expect(consoleError).toHaveBeenCalled();
     consoleError.mockRestore();
