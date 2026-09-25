@@ -16,10 +16,28 @@ vi.mock('disposable-domains', () => ({
 
 const mockUpdateAuth0User = vi.fn();
 const mockSendVerificationEmail = vi.fn();
+const mockGetAuth0UserPicture = vi.fn();
 vi.mock('../lib/auth0-management.ts', () => ({
   updateAuth0User: (...args: unknown[]) => mockUpdateAuth0User(...args),
   sendVerificationEmail: (...args: unknown[]) => mockSendVerificationEmail(...args),
+  getAuth0UserPicture: (...args: unknown[]) => mockGetAuth0UserPicture(...args),
   getConnectionType: (sub: string) => sub.split('|')[0] ?? 'unknown',
+}));
+
+const mockIsUploadedAvatarUrl = vi.fn();
+const mockClaimAvatarUrl = vi.fn();
+const mockDeleteReplacedAvatar = vi.fn();
+vi.mock('../lib/avatar-storage.ts', () => ({
+  isUploadedAvatarUrl: (...args: unknown[]) => mockIsUploadedAvatarUrl(...args),
+  // Net effect: the upload ends up claimed only when the save succeeded. The
+  // claim-first order and the unclaim on failure are org-logo-storage's own
+  // tests to cover.
+  withClaimedAvatar: async (url: string, save: () => Promise<unknown>) => {
+    const result = await save();
+    mockClaimAvatarUrl(url);
+    return result;
+  },
+  deleteReplacedAvatar: (...args: unknown[]) => mockDeleteReplacedAvatar(...args),
 }));
 
 vi.mock('sst', () => sstResourceMock());
@@ -82,6 +100,8 @@ describe('PATCH /api/me/profile handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
+    mockIsUploadedAvatarUrl.mockResolvedValue(true);
+    mockGetAuth0UserPicture.mockResolvedValue(undefined);
     stubMembershipRead(ddbMock, {
       orgId: MOCK_ORG_ID,
       userId: MOCK_USER_ID,
@@ -152,6 +172,62 @@ describe('PATCH /api/me/profile handler', () => {
       body: JSON.stringify({ name: 'New Name' }),
     });
     expect(mockUpdateAuth0User).toHaveBeenCalledWith(MOCK_SUB, { name: 'New Name' });
+  });
+
+  it('updates the avatar via Auth0 with only pictureUrl in the body', async () => {
+    // The schema's refine accepts pictureUrl alone: `POST
+    // /api/me/avatar-upload-url` already put the file, so this call carries
+    // nothing but the URL to persist.
+    const pictureUrl = 'https://cdn.example.com/avatar.png';
+
+    const result = await handler(profileEvent({ pictureUrl }), buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 200,
+      body: JSON.stringify({ picture: pictureUrl }),
+    });
+    expect(mockUpdateAuth0User).toHaveBeenCalledWith(MOCK_SUB, { picture: pictureUrl });
+    // Neither name nor email path ran: no verification email, no claim-flag clear.
+    expect(mockSendVerificationEmail).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+  });
+
+  it('rejects an avatar URL the upload step never minted', async () => {
+    mockIsUploadedAvatarUrl.mockResolvedValue(false);
+    const pictureUrl = 'https://attacker.example/tracker.png';
+
+    const result = await handler(profileEvent({ pictureUrl, name: 'Jane' }), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 400 });
+    expect(mockIsUploadedAvatarUrl).toHaveBeenCalledWith(pictureUrl);
+    // Nothing else in the body lands either: the check runs before any write.
+    expect(mockUpdateAuth0User).not.toHaveBeenCalled();
+    expect(mockClaimAvatarUrl).not.toHaveBeenCalled();
+  });
+
+  it('claims the new avatar and deletes the one it replaced, after saving', async () => {
+    const previous = 'https://OrgLogoBucket.s3.us-east-1.amazonaws.com/avatars/old';
+    const pictureUrl = 'https://OrgLogoBucket.s3.us-east-1.amazonaws.com/avatars/new';
+    mockGetAuth0UserPicture.mockResolvedValue(previous);
+
+    await handler(profileEvent({ pictureUrl }), buildContext());
+
+    expect(mockClaimAvatarUrl).toHaveBeenCalledWith(pictureUrl);
+    expect(mockDeleteReplacedAvatar).toHaveBeenCalledWith(previous);
+    expect(mockUpdateAuth0User.mock.invocationCallOrder[0]).toBeLessThan(
+      mockClaimAvatarUrl.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('touches the bucket for nothing when the Auth0 save fails', async () => {
+    mockUpdateAuth0User.mockRejectedValue(new Error('Auth0 down'));
+    const pictureUrl = 'https://OrgLogoBucket.s3.us-east-1.amazonaws.com/avatars/new';
+
+    const result = await handler(profileEvent({ pictureUrl }), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 500 });
+    expect(mockClaimAvatarUrl).not.toHaveBeenCalled();
+    expect(mockDeleteReplacedAvatar).not.toHaveBeenCalled();
   });
 
   it('updates email via Auth0 and sends verification email', async () => {
@@ -265,6 +341,44 @@ describe('PATCH /api/me/profile handler', () => {
 
     expect(result).toMatchObject({ statusCode: 400 });
     expect(mockUpdateAuth0User).not.toHaveBeenCalled();
+  });
+
+  // Auth0 re-syncs a social account's picture from the provider on login, so
+  // an uploaded avatar would be replaced and its file left in the bucket.
+  it('rejects an avatar change for social login users, before writing anything', async () => {
+    const socialSub = 'google-oauth2|123';
+    mockJwtVerify.mockResolvedValue({
+      payload: { sub: socialSub, email: MOCK_EMAIL, email_verified: true },
+    });
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `SUB#${socialSub}` }, sk: { S: 'IDENTITY' } },
+      })
+      .resolves({
+        Item: {
+          userId: { S: MOCK_USER_ID },
+          orgId: { S: MOCK_ORG_ID },
+        },
+      });
+
+    const event = buildEvent({
+      cookies: [`hs_access_token=valid-token`, `hs_csrf_token=${MOCK_CSRF_TOKEN}`],
+      userInfo: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID, email: MOCK_EMAIL, sub: socialSub },
+      body: JSON.stringify({
+        pictureUrl: 'https://OrgLogoBucket.s3.us-east-1.amazonaws.com/avatars/new',
+      }),
+      method: 'PATCH',
+      rawPath: '/api/me/profile',
+    });
+    event.headers['x-csrf-token'] = MOCK_CSRF_TOKEN;
+
+    const result = await handler(event, buildContext());
+
+    expect(result).toMatchObject({ statusCode: 400 });
+    expect(JSON.parse((result as { body: string }).body).message).toContain('at your provider');
+    expect(mockUpdateAuth0User).not.toHaveBeenCalled();
+    expect(mockClaimAvatarUrl).not.toHaveBeenCalled();
   });
 
   it('returns 400 when no fields are provided', async () => {
