@@ -5,14 +5,16 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { WelcomePage } from './WelcomePage';
 
 const mockUpdateOrg = vi.fn();
+const mockGetBilling = vi.fn();
 
-// `updateOrg` is faked; `errorMessageOf` is the real one, so
+// `updateOrg` and `getBilling` are faked; `errorMessageOf` is the real one, so
 // the test exercises the same message the user would read.
 vi.mock('../lib/api.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/api.js')>();
   return {
     ...actual,
     updateOrg: (...args: unknown[]) => mockUpdateOrg(...args),
+    getBilling: (...args: unknown[]) => mockGetBilling(...args),
   };
 });
 
@@ -34,6 +36,9 @@ describe('WelcomePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUpdateOrg.mockResolvedValue({ name: 'Acme' });
+    mockGetBilling.mockResolvedValue({
+      subscription: { planId: 'free_trial', status: 'trialing' },
+    });
   });
 
   it('starts with the derived name, so the common answer is submit', () => {
@@ -49,6 +54,38 @@ describe('WelcomePage', () => {
     fireEvent.click(submit());
 
     await waitFor(() => expect(mockUpdateOrg).toHaveBeenCalledWith({ name: 'Acme Storage' }));
+    await waitFor(() => expect(onNamed).toHaveBeenCalled());
+  });
+
+  it('claims the trial before reporting back, so the destination never has to catch up', async () => {
+    // `/me`'s own billingActive is a plain read of whatever this claim already
+    // wrote — without it running first, the caller would land on
+    // `/get-started` to a "no active plan" gate for however long the claim
+    // takes to catch up on its own.
+    let settleClaim!: (value: unknown) => void;
+    mockGetBilling.mockReturnValue(new Promise((resolve) => (settleClaim = resolve)));
+    const { onNamed } = renderPage();
+
+    fireEvent.click(submit());
+
+    // The claim is in flight, so nothing has reported back yet: the order is
+    // the point, and calling onNamed first would still call both.
+    await waitFor(() => expect(mockGetBilling).toHaveBeenCalled());
+    expect(onNamed).not.toHaveBeenCalled();
+
+    settleClaim({ subscription: { planId: 'free_trial', status: 'trialing' } });
+    await waitFor(() => expect(onNamed).toHaveBeenCalled());
+  });
+
+  it('reports back even when the trial claim itself fails', async () => {
+    // A claim that could not be made (or was already spent) is what the
+    // destination page's own gate is for — not a reason to strand the caller
+    // on the naming step.
+    mockGetBilling.mockRejectedValue(new Error('network error'));
+    const { onNamed } = renderPage();
+
+    fireEvent.click(submit());
+
     await waitFor(() => expect(onNamed).toHaveBeenCalled());
   });
 
