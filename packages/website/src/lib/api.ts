@@ -211,6 +211,13 @@ export interface ApiRequestBehavior {
    */
   omitOrgHeader?: boolean;
   /**
+   * Name this org rather than the tab's active one. For a write that belongs to
+   * the org it started in: a logo upload that finishes after the user has
+   * switched away still saves to the org it was picked for, rather than
+   * landing on whichever org the tab shows by then.
+   */
+  orgId?: string;
+  /**
    * Do not navigate to `/verify-email` on `EMAIL_NOT_VERIFIED`. The caller
    * renders that state itself, with the invitation still named and the same CTA
    * the redirect would have landed on.
@@ -352,7 +359,7 @@ async function sendApiRequest(
   // who has switched — so the header goes on here, in the one funnel, rather
   // than at each call site. The exception is a call about an org the caller is
   // not in yet, which asks not to be asked.
-  const activeOrgId = behavior.omitOrgHeader ? null : getActiveOrgId();
+  const activeOrgId = behavior.omitOrgHeader ? null : (behavior.orgId ?? getActiveOrgId());
   if (activeOrgId) headers.set(ORG_ID_HEADER, activeOrgId);
   if (sentOrg) sentOrg.orgId = activeOrgId;
 
@@ -478,6 +485,8 @@ import type {
   CreateOrgResponse,
   DeleteAccountRequest,
   MeResponse,
+  PresignAvatarRequest,
+  PresignAvatarResponse,
   RegenerateRecoveryCodeResponse,
   RequestAccountDeletionResponse,
   UpdateOrgRequest,
@@ -542,6 +551,18 @@ export async function getMe(options?: {
 export function updateProfile(data: UpdateProfileRequest): Promise<UpdateProfileResponse> {
   return apiRequest<UpdateProfileResponse>('/me/profile', {
     method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+/**
+ * Ask for a place to put a personal avatar. The upload happens against the
+ * URL this returns, and `pictureUrl` from the result is what gets passed to
+ * {@link updateProfile}.
+ */
+export function presignAvatarUpload(data: PresignAvatarRequest): Promise<PresignAvatarResponse> {
+  return apiRequest<PresignAvatarResponse>('/me/avatar-upload-url', {
+    method: 'POST',
     body: JSON.stringify(data),
   });
 }
