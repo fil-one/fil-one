@@ -10,6 +10,11 @@ type PageLayoutProps = {
   className?: string;
   /** Optional id applied to the page heading (used as an e2e selector). */
   headingId?: string;
+  /**
+   * Makes the heading a focus target, for a page that has to put focus
+   * somewhere when the control holding it disappears.
+   */
+  headingRef?: React.Ref<HTMLHeadingElement>;
 };
 
 export function PageLayout({
@@ -20,6 +25,7 @@ export function PageLayout({
   maxWidth,
   className,
   headingId,
+  headingRef,
 }: PageLayoutProps) {
   return (
     <div
@@ -31,7 +37,14 @@ export function PageLayout({
       )}
     >
       <div className="mb-6 flex items-start justify-between gap-4">
-        <Heading id={headingId} tag="h1" size="xl" description={description}>
+        <Heading
+          ref={headingRef}
+          id={headingId}
+          tag="h1"
+          size="xl"
+          description={description}
+          {...(headingRef ? { tabIndex: -1, className: 'outline-none' } : {})}
+        >
           {title}
         </Heading>
         {/* `action` is usually a <RequirePermission> element, which is truthy
