@@ -92,7 +92,9 @@ export function BillingRequiredGate() {
           <Button
             variant="primary"
             size="md"
-            disabled={startingPayment}
+            // Until `GET /api/billing` answers: it may be claiming a trial, and
+            // a setup intent racing it could mint a second Stripe customer.
+            disabled={startingPayment || !billing}
             onClick={() => void handleAddPaymentMethod()}
           >
             {/* Button's own inner wraps `children` in a single `<span>`, so
