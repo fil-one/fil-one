@@ -18,7 +18,10 @@ const meta: Meta<typeof CreateOrganizationDialog> = {
 export default meta;
 type Story = StoryObj<typeof CreateOrganizationDialog>;
 
-/** Create stays inert until there is a name to send. */
+/**
+ * The avatar starts as a generated monogram from whatever name is typed, and
+ * Create stays inert until there is a name to send.
+ */
 export const Default: Story = {
   render: () => {
     const [open, setOpen] = useState(true);

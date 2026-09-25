@@ -88,6 +88,7 @@ export function OrgSwitcher({ memberships, activeOrgId, onClose }: OrgSwitcherPr
                       // rows stay live and the panel stays open.
                       const started = switchToOrg(membership.orgId, 'dashboard', {
                         orgName: membership.orgName,
+                        logoUrl: membership.logoUrl,
                       });
                       if (!started) return;
                       setChosen(membership.orgId);
@@ -96,7 +97,11 @@ export function OrgSwitcher({ memberships, activeOrgId, onClose }: OrgSwitcherPr
               }
               className={rowClassName({ isActive, isInert })}
             >
-              <OrgAvatar name={membership.orgName || 'Untitled organization'} size="xs" />
+              <OrgAvatar
+                name={membership.orgName || 'Untitled organization'}
+                logoUrl={membership.logoUrl}
+                size="xs"
+              />
               <span className="min-w-0 flex-1 truncate">
                 {membership.orgName || 'Untitled organization'}
               </span>

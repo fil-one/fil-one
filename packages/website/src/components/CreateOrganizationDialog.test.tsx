@@ -39,10 +39,11 @@ describe('CreateOrganizationDialog', () => {
     });
   });
 
-  it('opens empty, with a name field, and Create disabled with nothing typed', async () => {
+  it('opens empty, with a name field and logo picker, and Create disabled with nothing typed', async () => {
     renderDialog();
 
     expect(await screen.findByLabelText('Organization name')).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Choose avatar' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Create organization' })).toBeDisabled();
 
     fireEvent.change(screen.getByLabelText('Organization name'), {

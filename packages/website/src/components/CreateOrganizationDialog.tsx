@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { OrgNameSchema } from '@filone/shared';
 
+import { AvatarPicker, useOrgLogoUpload } from './OrgLogoPicker.js';
 import { Button } from './Button';
 import { FormField } from './FormField';
 import { Input } from './Input';
@@ -15,25 +16,33 @@ export type CreateOrganizationDialogProps = {
   onClose: () => void;
 };
 
-/** Create an additional organization for the signed-in account. */
+/**
+ * Create an additional organization for the signed-in account.
+ *
+ * The avatar is a monogram of the typed name until a logo is uploaded, via
+ * {@link AvatarPicker}/{@link useOrgLogoUpload}.
+ */
 export function CreateOrganizationDialog({ open, onClose }: CreateOrganizationDialogProps) {
   const [name, setName] = useState('');
   const [nameError, setNameError] = useState<string | null>(null);
+  const logo = useOrgLogoUpload();
   const client = useQueryClient();
 
   function handleClose(): void {
     setName('');
     setNameError(null);
+    logo.reset();
     onClose();
   }
 
   const create = useMutation({
-    mutationFn: (orgName: string) => createOrg({ name: orgName }),
+    mutationFn: (orgName: string) => createOrg({ name: orgName, logoUrl: logo.logoUrl }),
     onSuccess: (result) => {
       // A full org switch: the new org is not the one any loaded page's data
       // describes. It lands on get-started, since a brand-new org is empty.
       const started = switchToOrg(result.orgId, 'get-started', {
         orgName: result.orgName,
+        logoUrl: result.logoUrl,
       });
       if (!started) {
         // Declined (an upload is running): the tab stays put, but the org
@@ -57,7 +66,7 @@ export function CreateOrganizationDialog({ open, onClose }: CreateOrganizationDi
     create.mutate(parsed.data);
   }
 
-  const busy = create.isPending;
+  const busy = create.isPending || logo.uploading;
 
   return (
     <Modal
@@ -68,6 +77,7 @@ export function CreateOrganizationDialog({ open, onClose }: CreateOrganizationDi
     >
       <ModalHeader onClose={busy ? undefined : handleClose}>Create organization</ModalHeader>
       <ModalBody>
+        <AvatarPicker name={name} logo={logo} disabled={busy} />
         <FormField
           label="Organization name"
           htmlFor="create-org-name"
