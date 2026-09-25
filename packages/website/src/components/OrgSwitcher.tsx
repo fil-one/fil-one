@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
+import { MenuItem } from '@headlessui/react';
 import { CheckIcon } from '@phosphor-icons/react/dist/ssr';
 import type { OrgMembershipSummary } from '@filone/shared';
 
+import { OrgAvatar } from './OrgAvatar';
 import { Overline } from './Overline';
 import { onSwitchingOrgChange, switchToOrg } from '../lib/active-org.js';
 
@@ -11,20 +13,16 @@ type OrgSwitcherProps = {
   /** The org the server resolved this session in — the one to mark as current. */
   activeOrgId: string | undefined;
   /**
-   * Mounted inside a `role="menu"` panel, whose children have to be menu items.
-   * The desktop dropdown is a plain panel and takes the default.
+   * Closes the host menu once a switch starts. `switchToOrg` clears the query
+   * cache the panel's permission-gated rows read from, so a panel left open
+   * would have them blink out mid-click.
    */
-  inMenu?: boolean;
-  /**
-   * e2e identifier for this copy of the switcher. The desktop sidebar and the
-   * mobile user menu both mount one, so the selector has to be theirs rather
-   * than the component's, exactly as `SidebarNav`'s `showTestIds` arranges.
-   */
-  testId?: string;
+  onClose?: () => void;
 };
 
 /**
- * Which organization this tab is operating in, and how to change it.
+ * Which organization this tab is operating in, and how to change it. Mounted
+ * inside a Headless UI `Menu`: each row is one of its items.
  *
  * Absent for a caller with one membership, which is every account today: an org
  * surface that shows a solo user a list of one is noise. It appears the moment a
@@ -36,7 +34,7 @@ type OrgSwitcherProps = {
  * options and the role the server enforces come from the same response and
  * cannot disagree.
  */
-export function OrgSwitcher({ memberships, activeOrgId, inMenu, testId }: OrgSwitcherProps) {
+export function OrgSwitcher({ memberships, activeOrgId, onClose }: OrgSwitcherProps) {
   // The click starts a page load, and the browser takes its time about it. Until
   // it lands the list is inert: a second click would stash a third org while the
   // load for the second is already in flight.
@@ -55,7 +53,7 @@ export function OrgSwitcher({ memberships, activeOrgId, inMenu, testId }: OrgSwi
 
   return (
     <div
-      {...(testId ? { 'data-testid': testId } : {})}
+      data-testid="org-switcher"
       role="group"
       aria-label="Organization"
       // The backend answers up to 100 memberships and neither dropdown scrolls,
@@ -64,54 +62,61 @@ export function OrgSwitcher({ memberships, activeOrgId, inMenu, testId }: OrgSwi
       // on both sides of it belongs here rather than to whatever follows.
       className="max-h-64 overflow-y-auto border-b border-zinc-100 pb-1 mb-1"
     >
-      {/* The shared overline rather than another hand-rolled uppercase label:
-          `SidebarNav`'s own section headings still inline theirs, which is the
-          kind of duplication FIL-1032 is about. */}
       <Overline className="mt-1 mb-1 px-3">Organization</Overline>
       {ordered.map((membership) => {
         const isActive = membership.orgId === activeOrgId;
         const isInert = isActive || chosen !== null;
         return (
-          <button
-            key={membership.orgId}
-            type="button"
-            // Inside a menu the current org is the checked radio; outside one
-            // there is no menu semantic to satisfy and `aria-current` says it.
-            {...(inMenu
-              ? { role: 'menuitemradio', 'aria-checked': isActive }
-              : { 'aria-current': isActive || undefined })}
-            // Not `disabled`: a disabled button leaves the keyboard, and the
-            // current org is a state worth reaching and reading.
-            aria-disabled={isInert || undefined}
-            aria-busy={chosen === membership.orgId || undefined}
-            // Switching to the org already in use would load the console to
-            // arrive exactly where it is.
-            onClick={
-              isInert
-                ? undefined
-                : () => {
-                    setChosen(membership.orgId);
-                    switchToOrg(membership.orgId);
-                  }
-            }
-            className={[
-              // `py-2` and `rounded-lg` to match `Log out`, the row directly
-              // below it in the same menu.
-              'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors',
-              'focus-visible:brand-outline',
-              isActive ? 'font-medium text-zinc-900' : 'text-zinc-600',
-              isInert ? '' : 'hover:bg-zinc-100 hover:text-zinc-900',
-            ]
-              .filter(Boolean)
-              .join(' ')}
-          >
-            <span className="min-w-0 flex-1 truncate">
-              {membership.orgName || 'Untitled organization'}
-            </span>
-            {isActive && <CheckIcon size={14} weight="bold" className="shrink-0 text-brand-600" />}
-          </button>
+          <MenuItem key={membership.orgId}>
+            <button
+              type="button"
+              // `MenuItem` makes this a `menuitem` (it sets the role itself, so a
+              // `menuitemradio` would not survive); `aria-current` marks the org
+              // in use.
+              aria-current={isActive || undefined}
+              // Not `disabled`: a disabled button leaves the keyboard, and the
+              // current org is a state worth reaching and reading.
+              aria-disabled={isInert || undefined}
+              aria-busy={chosen === membership.orgId || undefined}
+              // Switching to the org already in use would arrive exactly where
+              // it is.
+              onClick={
+                isInert
+                  ? undefined
+                  : () => {
+                      setChosen(membership.orgId);
+                      switchToOrg(membership.orgId);
+                      onClose?.();
+                    }
+              }
+              className={rowClassName({ isActive, isInert })}
+            >
+              <OrgAvatar name={membership.orgName || 'Untitled organization'} size="xs" />
+              <span className="min-w-0 flex-1 truncate">
+                {membership.orgName || 'Untitled organization'}
+              </span>
+              {isActive && (
+                <CheckIcon size={13} weight="bold" className="shrink-0 text-brand-600" />
+              )}
+            </button>
+          </MenuItem>
         );
       })}
     </div>
   );
+}
+
+function rowClassName({ isActive, isInert }: { isActive: boolean; isInert: boolean }): string {
+  return [
+    // The bucket dropdown's row metrics, the console's default for a dropdown.
+    'flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-xs transition-colors',
+    'focus-visible:brand-outline',
+    isActive ? 'font-medium text-zinc-900' : 'text-zinc-600',
+    isInert ? '' : 'hover:bg-zinc-100 hover:text-zinc-900',
+    // The arrow keys move focus, and a hover-only highlight would leave a
+    // keyboard caller not knowing where it is.
+    isInert ? '' : 'data-focus:bg-zinc-100 data-focus:text-zinc-900',
+  ]
+    .filter(Boolean)
+    .join(' ');
 }

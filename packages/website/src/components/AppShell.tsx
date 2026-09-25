@@ -5,8 +5,9 @@ import { SubscriptionStatus } from '@filone/shared';
 import { SidebarNav } from './SidebarNav';
 import { Banner } from './Banner';
 import { UserAvatar } from './UserAvatar';
-import { OrgSwitcher } from './OrgSwitcher';
+import { OrgSwitcherMenu } from './OrgSwitcherMenu';
 import { getUsage, getBilling, getMe, logout } from '../lib/api';
+import { monogramFromName } from '../lib/monogram.js';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { useHasPermission } from '../lib/use-permissions.js';
 import { daysUntil, pluralizeDays } from '../lib/time.js';
@@ -18,7 +19,7 @@ function MobileUserMenu() {
   const { data: me } = useQuery({ queryKey: queryKeys.me, queryFn: () => getMe() });
 
   const displayName = me?.name || me?.email || 'User';
-  const initial = displayName.charAt(0).toUpperCase();
+  const initial = monogramFromName(displayName);
 
   useEffect(() => {
     if (!open) return;
@@ -61,12 +62,6 @@ function MobileUserMenu() {
             {me?.orgName && <p className="truncate text-xs text-zinc-500">{me.orgName}</p>}
           </div>
           <div className="my-1 border-t border-zinc-100" />
-          <OrgSwitcher
-            memberships={me?.memberships}
-            activeOrgId={me?.orgId}
-            inMenu
-            testId="mobile-org-switcher"
-          />
           <button
             type="button"
             role="menuitem"
@@ -209,6 +204,9 @@ export function AppShell({ children }: AppShellProps) {
     if (!mobileOpen) return;
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') {
+        // A menu or dialog opened from inside the drawer handles its own Escape;
+        // the drawer only closes when nothing above it claimed the key.
+        if (e.defaultPrevented) return;
         closeDrawer();
         return;
       }
@@ -277,8 +275,17 @@ export function AppShell({ children }: AppShellProps) {
           // Hide from assistive technology when closed
           inert={!mobileOpen || undefined}
         >
-          {/* Drawer header: close */}
-          <div className="flex h-14 flex-shrink-0 items-center justify-end border-b border-zinc-200 px-3">
+          {/* Drawer header: the org menu, the same control the desktop sidebar
+              pins at its top, then close. Without it the drawer offered no way
+              to switch, create, or manage an organization. */}
+          <div className="flex h-14 flex-shrink-0 items-center gap-2 border-b border-zinc-200 px-3">
+            <div className="min-w-0 flex-1">
+              <OrgSwitcherMenu
+                collapsed={false}
+                testId="mobile-org-switcher-button"
+                onNavigate={() => setMobileOpen(false)}
+              />
+            </div>
             <button
               ref={closeButtonRef}
               id="mobile-nav-close-button"

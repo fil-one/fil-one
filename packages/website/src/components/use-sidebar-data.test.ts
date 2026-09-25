@@ -80,11 +80,11 @@ describe('useSidebarData', () => {
       expect(result.current.initial).toBe('U');
     });
 
-    it('prefers name over email', () => {
+    it('prefers name over email, taking both initials of a full name', () => {
       setQueries({ me: { name: 'Ada Lovelace', email: 'ada@example.com' } });
       const { result } = renderHook(() => useSidebarData());
       expect(result.current.displayName).toBe('Ada Lovelace');
-      expect(result.current.initial).toBe('A');
+      expect(result.current.initial).toBe('AL');
     });
 
     it('uses email when name is absent', () => {
