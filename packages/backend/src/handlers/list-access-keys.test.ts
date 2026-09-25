@@ -43,6 +43,7 @@ function ddbItem(overrides: {
   recovered?: boolean;
   rotatedBy?: string;
   rotatedAt?: string;
+  principalId?: string;
 }) {
   const item: Record<string, AttributeValue> = {
     pk: { S: `ORG#${USER_INFO.orgId}` },
@@ -56,6 +57,7 @@ function ddbItem(overrides: {
   if (overrides.recovered) item.recovered = { BOOL: true };
   if (overrides.rotatedBy) item.rotatedBy = { S: overrides.rotatedBy };
   if (overrides.rotatedAt) item.rotatedAt = { S: overrides.rotatedAt };
+  if (overrides.principalId) item.principalId = { S: overrides.principalId };
   if (overrides.permissions) item.permissions = { L: overrides.permissions.map((p) => ({ S: p })) };
   if (overrides.granularPermissions)
     item.granularPermissions = { L: overrides.granularPermissions.map((g) => ({ S: g })) };
@@ -110,6 +112,29 @@ describe('list-access-keys baseHandler', () => {
         },
       ],
     });
+  });
+
+  it('lists a principal-bound key with its principal and no permission set', async () => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        ddbItem({
+          id: 'key-9',
+          keyName: 'laptop',
+          accessKeyId: 'did:key:z9',
+          createdAt: '2026-09-16T00:00:00Z',
+          region: 'us-east-9',
+          createdBy: 'user-1',
+          principalId: 'user-1',
+        }),
+      ],
+    });
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const [listed] = JSON.parse(result.body!).keys;
+    expect(listed).toMatchObject({ id: 'key-9', principalId: 'user-1', region: 'us-east-9' });
+    expect(listed).not.toHaveProperty('permissions');
+    expect(listed).not.toHaveProperty('bucketScope');
   });
 
   it('returns bucket-scoped key with buckets list', async () => {

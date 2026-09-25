@@ -12,6 +12,7 @@ import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.ts';
 import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
+import { FakeIamOrchestrator } from '../test/fake-iam-orchestrator.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -35,10 +36,23 @@ const mockOrchestrator = {
   deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
 };
 
+// One region serves the `iam` access model in these tests, minting keys bound
+// to the caller's principal through the in-memory fake.
+const IAM_REGION = 'us-east-9';
+const iamFake = new FakeIamOrchestrator();
+const iamOrchestrator = {
+  id: 'forgeDev',
+  region: IAM_REGION,
+  accessModel: 'iam',
+  iam: iamFake,
+  ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
+  deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
+};
+
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (region: string) => {
     mockGetOrchestratorForRegion(region);
-    return mockOrchestrator;
+    return region === IAM_REGION ? iamOrchestrator : mockOrchestrator;
   },
 }));
 
@@ -1228,6 +1242,99 @@ describe('create-access-key baseHandler', () => {
       const result = await baseHandler(event);
 
       expect(result.statusCode).toBe(201);
+    });
+  });
+
+  describe('on a region serving the iam access model', () => {
+    const principalBody = (overrides: Record<string, unknown> = {}) =>
+      JSON.stringify({ keyName: 'laptop', region: IAM_REGION, ...overrides });
+
+    /** The key row the transaction put, as the table would store it. */
+    function keyRowWritten() {
+      const items =
+        ddbMock.commandCalls(TransactWriteItemsCommand)[0]!.args[0].input.TransactItems!;
+      const put = items.find((item) => item.Put?.TableName === 'UserInfoTable');
+      return unmarshall(put!.Put!.Item!);
+    }
+
+    beforeEach(() => {
+      iamFake.principals.clear();
+      iamFake.keys.length = 0;
+      iamFake.calls.length = 0;
+      mockEnsureTenantReady.mockResolvedValue('tenant-9');
+      // The org shows no key under this name yet.
+      ddbMock.on(QueryCommand).resolves({ Items: [] });
+      stubWrites();
+    });
+
+    it('mints a key bound to the caller, syncing their principal first', async () => {
+      const result = await baseHandler(buildEvent({ body: principalBody(), userInfo: USER_INFO }));
+
+      expect(result.statusCode).toBe(201);
+      const body = JSON.parse(result.body!);
+      expect(body).toMatchObject({ keyName: 'laptop', principalId: 'user-1' });
+      expect(body.secretAccessKey).toBeDefined();
+      expect(iamFake.calls.map((call) => call.method)).toStrictEqual([
+        'syncMember',
+        'issueMemberKey',
+      ]);
+      expect(iamFake.keys[0]).toMatchObject({
+        tenantId: 'tenant-9',
+        userId: 'user-1',
+        keyName: 'laptop',
+      });
+      expect(mockIssueAccessKey).not.toHaveBeenCalled();
+    });
+
+    it('records the principal on the row and no permission set or bucket scope', async () => {
+      await baseHandler(buildEvent({ body: principalBody(), userInfo: USER_INFO }));
+
+      const row = keyRowWritten();
+      expect(row).toMatchObject({ principalId: 'user-1', createdBy: 'user-1', region: IAM_REGION });
+      expect(row).not.toHaveProperty('permissions');
+      expect(row).not.toHaveProperty('bucketScope');
+      expect(row).not.toHaveProperty('secretAccessKey');
+    });
+
+    it('runs no creator-authority cap: a Member mints with no permissions named', async () => {
+      stubWrites(OrgRole.Member);
+
+      const result = await baseHandler(
+        buildEvent({
+          body: principalBody(),
+          userInfo: { ...USER_INFO, membership: membershipFor('org-1', 'user-1', OrgRole.Member) },
+        }),
+      );
+
+      expect(result.statusCode).toBe(201);
+    });
+
+    it('refuses the scoped-key body shape on an iam region', async () => {
+      const result = await baseHandler(
+        buildEvent({ body: principalBody({ permissions: ['read'] }), userInfo: USER_INFO }),
+      );
+
+      expect(result.statusCode).toBe(400);
+      expect(iamFake.calls).toHaveLength(0);
+    });
+
+    it('refuses a name the org already shows in the region, before the vendor', async () => {
+      ddbMock.on(QueryCommand).resolves({
+        Items: [
+          {
+            pk: { S: 'ORG#org-1' },
+            sk: { S: 'ACCESSKEY#existing' },
+            keyName: { S: 'laptop' },
+            region: { S: IAM_REGION },
+            createdAt: { S: '2026-01-01T00:00:00Z' },
+          },
+        ],
+      });
+
+      const result = await baseHandler(buildEvent({ body: principalBody(), userInfo: USER_INFO }));
+
+      expect(result.statusCode).toBe(409);
+      expect(iamFake.calls).toHaveLength(0);
     });
   });
 });
