@@ -38,6 +38,8 @@ export interface MeResponse {
   permissions?: readonly Permission[];
   /** Every org the caller belongs to, for the org switcher. */
   memberships?: OrgMembershipSummary[];
+  /** Whether the org's name was chosen; only an explicit `false` sends the caller to the naming step. */
+  nameConfirmed?: boolean;
   /**
    * Whether the organizations beta is switched on for this caller — their own
    * allowlist row, or {@link MeResponse.orgId}'s. Computed server-side like

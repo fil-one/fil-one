@@ -1,4 +1,8 @@
-import { GetItemCommand, TransactionCanceledException } from '@aws-sdk/client-dynamodb';
+import {
+  GetItemCommand,
+  TransactionCanceledException,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
@@ -48,24 +52,25 @@ export async function baseHandler(
 
   const parsed = parseJsonBody(event.body, UpdateOrgBodySchema);
   if ('error' in parsed) return parsed.error;
-  const { name } = parsed.data;
 
   const profileKey = orgProfileKey(orgId);
-  const previousName = await readOrgName(profileKey);
+  const previous = await readOrgProfile(profileKey);
 
-  // Submitting the form unchanged is what the Settings page does on every save,
-  // and there is nothing to record: an event saying an org was renamed from
-  // "Acme" to "Acme" is noise in the log a customer reads.
-  if (previousName === name) {
-    return new ResponseBuilder().status(200).body<UpdateOrgResponse>({ name }).build();
-  }
+  const { name, nameChanged, confirmUnchanged } = resolveNameChange(parsed.data.name, previous);
+
+  if (confirmUnchanged) await confirmName(profileKey);
+
+  // Submitting the form unchanged is what the Settings page does on every
+  // save, and there is nothing to record: an event saying an org was renamed
+  // from "Acme" to "Acme" is noise in the log a customer reads.
+  if (!nameChanged) return orgResponse(name);
 
   try {
     await renameOrg({
       key: profileKey,
       orgId,
       name,
-      previousName,
+      previousName: previous.name,
       actor: userActor({ userId, email }),
     });
   } catch (err) {
@@ -73,7 +78,28 @@ export async function baseHandler(
     throw err;
   }
 
+  return orgResponse(name);
+}
+
+function orgResponse(name: string): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder().status(200).body<UpdateOrgResponse>({ name }).build();
+}
+
+/**
+ * What the org is called once this request is done, whether that is a rename,
+ * and whether an unchanged name still needs confirming.
+ *
+ * A new account that accepts its prefilled suggested name unchanged
+ * still has to confirm it: the name already matches, so no rename will ever
+ * flip `nameConfirmed`, and skipping it strands that account re-redirected to
+ * `/create-organization` on every load.
+ */
+function resolveNameChange(
+  sent: string,
+  previous: { name?: string; nameConfirmed: boolean },
+): { name: string; nameChanged: boolean; confirmUnchanged: boolean } {
+  const nameChanged = previous.name !== sent;
+  return { name: sent, nameChanged, confirmUnchanged: !nameChanged && !previous.nameConfirmed };
 }
 
 type OrgProfileKey = Record<'pk' | 'sk', { S: string }>;
@@ -83,7 +109,8 @@ function orgProfileKey(orgId: string): OrgProfileKey {
 }
 
 /**
- * The org's current name, or undefined when the row carries none.
+ * The org's current name, possibly undefined when the row carries none, and
+ * whether that name has been confirmed.
  *
  * A read rather than `UPDATED_OLD`, because the event needs the previous name
  * and an update returns nothing for an attribute that was absent: every org
@@ -91,17 +118,38 @@ function orgProfileKey(orgId: string): OrgProfileKey {
  * would record a rename with no predecessor. Consistent, because the value is
  * what the write then conditions on.
  */
-async function readOrgName(key: OrgProfileKey): Promise<string | undefined> {
+async function readOrgProfile(
+  key: OrgProfileKey,
+): Promise<{ name?: string; nameConfirmed: boolean }> {
   const { Item } = await getDynamoClient().send(
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: key,
-      ProjectionExpression: '#name',
+      ProjectionExpression: '#name, nameConfirmed',
       ExpressionAttributeNames: { '#name': 'name' },
       ConsistentRead: true,
     }),
   );
-  return Item?.name?.S;
+  return {
+    name: Item?.name?.S,
+    nameConfirmed: Item?.nameConfirmed?.BOOL ?? false,
+  };
+}
+
+/**
+ * Flip `nameConfirmed` on its own, for the submit-unchanged path: the name is
+ * already correct, so nothing else about the profile row needs to move, and
+ * there is no rename to audit — the org's name never changed.
+ */
+async function confirmName(key: OrgProfileKey): Promise<void> {
+  await getDynamoClient().send(
+    new UpdateItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: key,
+      UpdateExpression: 'SET nameConfirmed = :confirmed',
+      ExpressionAttributeValues: { ':confirmed': { BOOL: true } },
+    }),
+  );
 }
 
 /**
@@ -188,7 +236,8 @@ async function renameOrg({
         Update: {
           TableName: Resource.UserInfoTable.name,
           Key: key,
-          UpdateExpression: 'SET #name = :name',
+          // Naming it is what confirms it, so the flag rides the same write.
+          UpdateExpression: 'SET #name = :name, nameConfirmed = :confirmed',
           // An org created before naming shipped has no name to match, so the
           // two cases condition on absence and on the value respectively.
           ConditionExpression:
@@ -198,6 +247,7 @@ async function renameOrg({
           ExpressionAttributeNames: { '#name': 'name' },
           ExpressionAttributeValues: {
             ':name': { S: name },
+            ':confirmed': { BOOL: true },
             ...(previousName === undefined ? {} : { ':previousName': { S: previousName } }),
           },
         },

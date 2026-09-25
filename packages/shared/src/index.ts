@@ -61,12 +61,20 @@ export {
   isOrgRole,
   OrgNameSchema,
   UpdateOrgSchema,
+  CreateOrgSchema,
   ORG_NAME_MIN_LENGTH,
   ORG_NAME_MAX_LENGTH,
   ORG_NAME_PATTERN,
   ORG_NAME_DISALLOWED_CHARS,
+  MAX_OWNED_ORGS,
 } from './api/org.ts';
-export type { OrgMembershipSource, UpdateOrgRequest, UpdateOrgResponse } from './api/org.ts';
+export type {
+  OrgMembershipSource,
+  UpdateOrgRequest,
+  UpdateOrgResponse,
+  CreateOrgRequest,
+  CreateOrgResponse,
+} from './api/org.ts';
 
 export {
   INVITATION_STATUSES,

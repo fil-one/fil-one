@@ -5,6 +5,7 @@ import {
   GetItemCommand,
   TransactionCanceledException,
   TransactWriteItemsCommand,
+  UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { AUDIT_RETENTION_DAYS, OrgRole } from '@filone/shared';
@@ -131,14 +132,27 @@ function onlyTheLeaderHasTheProfileRow() {
     .callsFake((input) => (input.ConsistentRead ? { Item: { name: { S: 'Old Corp' } } } : {}));
 }
 
-/** Answer the profile-row read the rename makes to capture the previous name. */
-function orgProfileNamed(name?: string) {
+/**
+ * Answer the profile-row read the rename makes to capture the previous name,
+ * and whether that name has been confirmed. `nameConfirmed` absent
+ * is the shape of a row written before the flag existed.
+ */
+function orgProfileNamed(name?: string, nameConfirmed?: boolean) {
   ddbMock
     .on(GetItemCommand, {
       TableName: 'UserInfoTable',
       Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
     })
-    .resolves(name === undefined ? {} : { Item: { name: { S: name } } });
+    .resolves(
+      name === undefined
+        ? {}
+        : {
+            Item: {
+              name: { S: name },
+              ...(nameConfirmed === undefined ? {} : { nameConfirmed: { BOOL: nameConfirmed } }),
+            },
+          },
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -192,7 +206,12 @@ describe('PATCH /api/org handler', () => {
     expect(updateInput()).toMatchObject({
       TableName: 'UserInfoTable',
       Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-      ExpressionAttributeValues: { ':name': { S: 'New Corp' }, ':previousName': { S: 'Old Corp' } },
+      ExpressionAttributeValues: {
+        ':name': { S: 'New Corp' },
+        ':previousName': { S: 'Old Corp' },
+        // Naming it is what confirms it.
+        ':confirmed': { BOOL: true },
+      },
       // Never conjure an org, and never record a transition that did not
       // happen: the write is conditional on the name the event names.
       ConditionExpression: 'attribute_exists(pk) AND #name = :previousName',
@@ -203,10 +222,32 @@ describe('PATCH /api/org handler', () => {
     // The Settings page submits the form whether or not the field changed, and
     // an event saying an org was renamed from "Old Corp" to "Old Corp" is noise
     // in a log a customer reads.
+    orgProfileNamed('Old Corp', true);
+
     const result = await handler(renameEvent({ name: 'Old Corp' }), buildContext());
 
     expect(result).toMatchObject({ statusCode: 200, body: JSON.stringify({ name: 'Old Corp' }) });
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+  });
+
+  it('confirms an unconfirmed name submitted unchanged, without recording a rename', async () => {
+    // A new account accepting its suggested name as-is: the name already
+    // matches, so this is the only write that will ever flip the flag.
+    orgProfileNamed('Old Corp', false);
+
+    const result = await handler(renameEvent({ name: 'Old Corp' }), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 200, body: JSON.stringify({ name: 'Old Corp' }) });
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+    const updates = ddbMock.commandCalls(UpdateItemCommand);
+    expect(updates).toHaveLength(1);
+    expect(updates[0].args[0].input).toMatchObject({
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+      UpdateExpression: 'SET nameConfirmed = :confirmed',
+      ExpressionAttributeValues: { ':confirmed': { BOOL: true } },
+    });
   });
 
   it('carries no credential into the log', async () => {
