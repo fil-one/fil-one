@@ -170,7 +170,7 @@ async function tearDownAuth0(members: DeletionMember[]): Promise<void> {
     // expiry rule never removes it, and it would stay publicly readable. A
     // picture that is not one of our uploads (a social provider's) is left
     // alone: the delete touches only our own avatar prefix.
-    await deleteReplacedAvatar(await getAuth0UserPicture(sub));
+    await deleteReplacedAvatar(await getAuth0UserPicture(sub), { rethrow: true });
     await deleteAuth0User(sub);
   }
 }
@@ -181,7 +181,7 @@ async function tearDownAuth0(members: DeletionMember[]): Promise<void> {
  */
 async function deleteOrgLogo(orgId: string): Promise<void> {
   const profile = await getOrgProfile(orgId, { consistentRead: true });
-  await deleteReplacedOrgLogo(profile?.logoUrl?.S);
+  await deleteReplacedOrgLogo(profile?.logoUrl?.S, { rethrow: true });
 }
 
 /** Presence of the row is the grant, so deleting it revokes the grant. */

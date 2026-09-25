@@ -160,12 +160,12 @@ describe('scrubOrgRecords', () => {
     expect(scrubbedKeys()).not.toContain(`AuditTable:ORG#${ORG}/2026-08-27T10:00:00.000Z#event-1`);
   });
 
-  it('strips the name off the org profile and leaves the fence up', async () => {
+  it('strips the name and logo off the org profile and leaves the fence up', async () => {
     await scrubOrgRecords(ORG, MEMBERS);
 
     const update = scrubOf(`UserInfoTable:ORG#${ORG}/PROFILE`);
     expect(update.UpdateExpression).toBe(
-      'SET deletedAt = if_not_exists(deletedAt, :now) REMOVE #name',
+      'SET deletedAt = if_not_exists(deletedAt, :now) REMOVE #name, logoUrl',
     );
     expect(update.ExpressionAttributeNames).toEqual({ '#name': 'name' });
     expect(update.ConditionExpression).toBe('attribute_exists(pk)');
