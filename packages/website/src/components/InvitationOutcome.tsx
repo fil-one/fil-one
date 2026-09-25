@@ -76,7 +76,7 @@ function Panel({
       >
         {title}
       </h1>
-      <div className="mt-3 flex flex-col items-stretch gap-5 text-center text-sm text-zinc-600">
+      <div className="mt-3 flex flex-col items-stretch gap-4 text-center text-sm text-zinc-600">
         {children}
       </div>
     </div>
