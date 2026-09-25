@@ -270,6 +270,24 @@ async function extractIdTokenClaims({
 }
 
 /**
+ * Hosts that serve Auth0's generated initials placeholder rather than a chosen
+ * photo. The `auth0` connection's `picture` is always a Gravatar URL whose
+ * default is Auth0's own avatar on `cdn.auth0.com`, and a real Gravatar photo
+ * is unlikely enough for these accounts that both hosts count as no picture.
+ */
+const GENERATED_AVATAR_HOSTS = new Set(['s.gravatar.com', 'cdn.auth0.com']);
+
+/** Whether `picture` is one of Auth0/Gravatar's own generated placeholders. */
+function isGeneratedAvatar(picture: string): boolean {
+  try {
+    return GENERATED_AVATAR_HOSTS.has(new URL(picture).hostname);
+  } catch {
+    // Not a URL at all — pass it through rather than guess.
+    return false;
+  }
+}
+
+/**
  * Resolve user identity from sub+email and attach userInfo to the request context.
  */
 async function attachIdentity({
@@ -297,7 +315,7 @@ async function attachIdentity({
     email: resolved.email ?? undefined,
     emailVerified,
     name: name ?? undefined,
-    picture: picture ?? undefined,
+    picture: picture && !isGeneratedAvatar(picture) ? picture : undefined,
     // Set only when this request created the account: the signup transaction
     // wrote the row, so re-reading it would be a race against its own write.
     ...(resolved.membership ? { membership: resolved.membership } : {}),
