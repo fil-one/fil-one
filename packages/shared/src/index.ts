@@ -46,10 +46,18 @@ export type {
   PasskeyEnrollment,
   UpdateProfileRequest,
   UpdateProfileResponse,
+  PresignAvatarRequest,
+  PresignAvatarResponse,
   RegenerateRecoveryCodeResponse,
   StepUpRequiredResponse,
 } from './api/me.ts';
-export { PASSKEY_PER_USER_LIMIT, UpdateProfileSchema } from './api/me.ts';
+export {
+  PASSKEY_PER_USER_LIMIT,
+  UpdateProfileSchema,
+  AVATAR_CONTENT_TYPES,
+  AVATAR_MAX_BYTES,
+  PresignAvatarSchema,
+} from './api/me.ts';
 
 export type { PreferencesResponse, UpdatePreferencesRequest } from './api/preferences.ts';
 export { UpdatePreferencesSchema } from './api/preferences.ts';

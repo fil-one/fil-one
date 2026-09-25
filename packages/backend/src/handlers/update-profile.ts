@@ -13,7 +13,13 @@ import {
   updateAuth0User,
   sendVerificationEmail,
   getConnectionType,
+  getAuth0UserPicture,
 } from '../lib/auth0-management.ts';
+import {
+  withClaimedAvatar,
+  deleteReplacedAvatar,
+  isUploadedAvatarUrl,
+} from '../lib/avatar-storage.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo, requestTokenRefresh } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -32,7 +38,8 @@ function isDisposableDomain(domain: string): boolean {
 }
 
 /**
- * PATCH /api/me/profile — the caller's own name and email, and nothing else.
+ * PATCH /api/me/profile — the caller's own name, email, and avatar, and
+ * nothing else.
  *
  * A `self` route in the manifest: an authenticated session is the whole
  * requirement. No role gates it, and neither does membership — a user whose
@@ -62,6 +69,14 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
 
   const connectionType = getConnectionType(sub);
   const social = isSocialConnection(connectionType);
+
+  // Checked before anything is written, so a rejected avatar never lands a
+  // name or email change alongside the 400.
+  const pictureError =
+    rejectSocialPicture(social, parsed.data.pictureUrl) ??
+    (await rejectUnmintedPicture(parsed.data.pictureUrl));
+  if (pictureError) return pictureError;
+
   const response: UpdateProfileResponse = {};
 
   if (parsed.data.name !== undefined) {
@@ -76,11 +91,68 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     response.email = parsed.data.email;
   }
 
-  if (response.name !== undefined || response.email !== undefined) {
+  if (parsed.data.pictureUrl !== undefined) {
+    await applyPictureUpdate(sub, parsed.data.pictureUrl);
+    response.picture = parsed.data.pictureUrl;
+  }
+
+  if (
+    response.name !== undefined ||
+    response.email !== undefined ||
+    response.picture !== undefined
+  ) {
     requestTokenRefresh(event);
   }
 
   return new ResponseBuilder().status(200).body(response).build();
+}
+
+/**
+ * The 400 for a `pictureUrl` no avatar upload minted, or undefined when there
+ * is none to check or it passes. `PATCH /api/me/profile` writes the URL to the
+ * caller's Auth0 profile, so an arbitrary one would have every console that
+ * renders their avatar request a host of the caller's choosing.
+ */
+async function rejectUnmintedPicture(
+  pictureUrl: string | undefined,
+): Promise<APIGatewayProxyResultV2 | undefined> {
+  if (pictureUrl === undefined || (await isUploadedAvatarUrl(pictureUrl))) return undefined;
+  return new ResponseBuilder()
+    .status(400)
+    .body<ErrorResponse>({
+      message: 'pictureUrl must be a URL returned by the avatar upload endpoint',
+    })
+    .build();
+}
+
+/**
+ * Point the profile at the new avatar, claimed first so the lifecycle rule
+ * cannot delete a picture the profile already names (a failed save puts the
+ * claim back). Then the one it replaced, if it was ours, is deleted.
+ */
+async function applyPictureUpdate(sub: string, pictureUrl: string): Promise<void> {
+  const previous = await getAuth0UserPicture(sub);
+  await withClaimedAvatar(pictureUrl, () => updateAuth0User(sub, { picture: pictureUrl }));
+  if (previous !== pictureUrl) await deleteReplacedAvatar(previous);
+}
+
+/**
+ * The 400 for a picture change on a social login account, like its name and
+ * email. The provider owns the picture too: Auth0 re-syncs it from the
+ * provider on login, so an uploaded avatar would be replaced and its file left
+ * in the bucket.
+ */
+function rejectSocialPicture(
+  social: boolean,
+  pictureUrl: string | undefined,
+): APIGatewayProxyResultV2 | undefined {
+  if (!social || pictureUrl === undefined) return undefined;
+  return new ResponseBuilder()
+    .status(400)
+    .body<ErrorResponse>({
+      message: 'Avatar cannot be changed for social login accounts. Update it at your provider.',
+    })
+    .build();
 }
 
 async function applyNameUpdate(
