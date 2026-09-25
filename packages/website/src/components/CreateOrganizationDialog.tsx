@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { OrgNameSchema } from '@filone/shared';
 
 import { Button } from './Button';
@@ -8,6 +8,7 @@ import { Input } from './Input';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './Modal';
 import { createOrg, errorMessageOf } from '../lib/api.js';
 import { switchToOrg } from '../lib/active-org.js';
+import { queryKeys } from '../lib/query-client.js';
 
 export type CreateOrganizationDialogProps = {
   open: boolean;
@@ -18,6 +19,7 @@ export type CreateOrganizationDialogProps = {
 export function CreateOrganizationDialog({ open, onClose }: CreateOrganizationDialogProps) {
   const [name, setName] = useState('');
   const [nameError, setNameError] = useState<string | null>(null);
+  const client = useQueryClient();
 
   function handleClose(): void {
     setName('');
@@ -29,8 +31,15 @@ export function CreateOrganizationDialog({ open, onClose }: CreateOrganizationDi
     mutationFn: (orgName: string) => createOrg({ name: orgName }),
     onSuccess: (result) => {
       // A full org switch: the new org is not the one any loaded page's data
-      // describes.
-      switchToOrg(result.orgId);
+      // describes. It lands on get-started, since a brand-new org is empty.
+      const started = switchToOrg(result.orgId, 'get-started', {
+        orgName: result.orgName,
+      });
+      if (!started) {
+        // Declined (an upload is running): the tab stays put, but the org
+        // exists now, and the switcher only learns of it from a fresh `/me`.
+        void client.invalidateQueries({ queryKey: queryKeys.me });
+      }
       handleClose();
     },
     onError: (err) => {

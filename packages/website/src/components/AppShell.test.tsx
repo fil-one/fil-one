@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import { AppShell, gracePeriodMessage } from './AppShell';
 
 /** What `/me` answers, per test. Undefined is the shell before it has replied. */
@@ -17,6 +17,8 @@ vi.mock('./SidebarNav', () => ({
 
 // The org menu's dialogs and links need a query client and a router; what is
 // under test here is only where the menu mounts and what it lists.
+// A switch navigates through the router; only that it starts matters here.
+vi.mock('../router.js', () => ({ router: { navigate: vi.fn(async () => {}) } }));
 vi.mock('./CreateOrganizationDialog.js', () => ({ CreateOrganizationDialog: () => null }));
 vi.mock('./BaseLink.js', () => ({
   BaseLink: ({ href, ...props }: { href: string } & React.ComponentProps<'a'>) => (
@@ -36,11 +38,19 @@ vi.mock('../lib/api', () => ({
 }));
 
 vi.mock('../lib/query-client.js', () => ({
-  queryKeys: { usage: ['usage'], billing: ['billing'], me: ['me'] },
+  queryKeys: {
+    usage: ['usage'],
+    billing: ['billing'],
+    me: ['me'],
+    pendingOrgSwitch: ['pendingOrgSwitch'],
+  },
   USAGE_STALE_TIME: 5 * 60_000,
   // The shell now reads `billing.view` before fetching billing, and the
   // permission hook is a third `/me` reader with its own staleTime.
   ME_STALE_TIME: 10 * 60_000,
+  // A switch clears the cache, and seeds the destination's name, before it
+  // navigates.
+  queryClient: { clear: vi.fn(), setQueryData: vi.fn() },
 }));
 
 vi.mock(import('../lib/time.js'), async (importOriginal) => ({
@@ -344,6 +354,19 @@ describe('AppShell mobile user menu', () => {
     );
     expect(screen.getByRole('menuitem', { name: 'Globex' })).not.toHaveAttribute('aria-current');
     expect(screen.getByRole('menuitem', { name: 'Create organization' })).toBeInTheDocument();
+  });
+
+  // Route params changing does not remount the shell, so a drawer left open
+  // would cover the org the user just switched into.
+  it('closes the mobile drawer when an org switch starts', async () => {
+    render(<AppShell>page content</AppShell>);
+    const hamburger = screen.getByRole('button', { name: 'Open navigation menu' });
+    fireEvent.click(hamburger);
+    fireEvent.click(await screen.findByTestId('mobile-org-switcher-button'));
+
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Globex' }));
+
+    await waitFor(() => expect(hamburger).toHaveAttribute('aria-expanded', 'false'));
   });
 
   it('keeps the panel’s items menu items', () => {

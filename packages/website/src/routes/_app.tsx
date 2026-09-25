@@ -30,7 +30,7 @@ export const Route = createRoute({
     try {
       me = await queryClient.fetchQuery({
         queryKey: queryKeys.me,
-        queryFn: () => getMe(),
+        queryFn: () => getMe({ skipSwitchWait: true }),
         staleTime: ME_STALE_TIME,
       });
     } catch {
@@ -128,6 +128,7 @@ function NotAMember() {
 function AppWithOrgGuard() {
   const navigate = useNavigate();
   const { isNotAMember } = usePermissions();
+  const { data: me } = useQuery({ queryKey: queryKeys.me, queryFn: () => getMe() });
 
   // Resume an MFA action after a step-up redirect round-trip. The api wrapper
   // stashes the pending action + return path in sessionStorage before bouncing
@@ -145,7 +146,13 @@ function AppWithOrgGuard() {
 
   return (
     <AppShell>
-      <Outlet />
+      {/* Keyed on the org the server answered for. A switch clears the cache
+          and lands on `/dashboard`, which can be the URL the tab is already on,
+          and the router keeps a route mounted when its location does not
+          change. Something downstream was seen to keep the previous org's data
+          after a switch, painting it over the new org's page until a full
+          reload; the key forces a real remount at the org boundary. */}
+      <Outlet key={me?.orgId} />
     </AppShell>
   );
 }
