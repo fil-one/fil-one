@@ -64,6 +64,12 @@ const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
   timeZoneName: 'short',
 });
 
+const timeFormatter = new Intl.DateTimeFormat(undefined, {
+  hour: 'numeric',
+  minute: '2-digit',
+  timeZoneName: 'short',
+});
+
 const monthDayFormatter = new Intl.DateTimeFormat(undefined, {
   month: 'short',
   day: 'numeric',
@@ -106,6 +112,11 @@ export function formatTimeShort(isoString: string): string {
 /** Locale-aware date + time string, e.g. "Mar 27, 2026, 7:00 PM EDT". */
 export function formatDateTime(isoString: string): string {
   return dateTimeFormatter.format(new Date(isoString));
+}
+
+/** Locale-aware time alone, e.g. "7:00 PM EDT" — pairs with {@link formatDate} on its own line. */
+export function formatTime(isoString: string): string {
+  return timeFormatter.format(new Date(isoString));
 }
 
 // ---------------------------------------------------------------------------
