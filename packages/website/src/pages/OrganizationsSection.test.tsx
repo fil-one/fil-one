@@ -52,6 +52,7 @@ function me(overrides: Partial<MeResponse> = {}): MeResponse {
     mfaEnrollments: [],
     ragAccess: true,
     orgsBeta: true,
+    billingActive: true,
     userId: USER_ID,
     role: OrgRole.Owner,
     permissions: [],

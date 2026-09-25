@@ -12,6 +12,7 @@ const me: MeResponse = {
   mfaEnrollments: [],
   ragAccess: false,
   orgsBeta: false,
+  billingActive: true,
 };
 
 const meta: Meta<typeof VerifyEmailPage> = {
