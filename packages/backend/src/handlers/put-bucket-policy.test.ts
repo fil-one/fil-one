@@ -12,7 +12,7 @@ vi.mock('../lib/org-profile.ts', async () => {
 });
 
 import { ApiErrorCode, OrgRole } from '@filone/shared';
-import type { BucketPolicy } from '@filone/shared';
+import type { BucketPolicy, PolicyStatement } from '@filone/shared';
 import { PolicyPublishError } from '../lib/errors.ts';
 import { baseHandler } from './put-bucket-policy.ts';
 import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
@@ -127,6 +127,71 @@ describe('put-bucket-policy baseHandler', () => {
     const result = await baseHandler(request({ policy: edited, etag }, { role: OrgRole.Admin }));
 
     expect(result.statusCode).toBe(200);
+  });
+
+  it('refuses an Admin restoring the Owners roster statement, since s3:* is an Owner\u2019s to grant', async () => {
+    const result = await baseHandler(
+      request(
+        {
+          policy: {
+            statement: [
+              { sid: 'filone-owners', effect: 'allow', principal: [USER_ID], action: ['s3:*'] },
+            ],
+          },
+        },
+        { role: OrgRole.Admin },
+      ),
+    );
+
+    expect([result.statusCode, body(result).code]).toStrictEqual([
+      403,
+      ApiErrorCode.RETENTION_GRANT_FORBIDDEN,
+    ]);
+  });
+
+  it('refuses an Admin naming a retention write even for an Owner who holds s3:*', async () => {
+    const owners: PolicyStatement = {
+      sid: 'filone-owners',
+      effect: 'allow',
+      principal: [USER_ID],
+      action: ['s3:*'],
+    };
+    const etag = iam.seedPolicy(TENANT_ID, BUCKET, { statement: [owners] });
+    const named: BucketPolicy = {
+      statement: [
+        owners,
+        { effect: 'allow', principal: [USER_ID], action: ['s3:PutObjectLegalHold'] },
+      ],
+    };
+
+    const result = await baseHandler(request({ policy: named, etag }, { role: OrgRole.Admin }));
+
+    expect([result.statusCode, body(result).code]).toStrictEqual([
+      403,
+      ApiErrorCode.RETENTION_GRANT_FORBIDDEN,
+    ]);
+    expect(iam.policies.get(TENANT_ID)?.get(BUCKET)?.etag).toBe(etag);
+  });
+
+  it('lets an Admin keep or narrow a retention write an Owner named', async () => {
+    const hold: PolicyStatement = {
+      sid: 'hold',
+      effect: 'allow',
+      principal: ['friend'],
+      action: ['s3:PutObjectRetention', 's3:PutObjectLegalHold'],
+    };
+    const statuses = [];
+    for (const next of [hold, { ...hold, action: ['s3:PutObjectRetention'] } as PolicyStatement]) {
+      resetFixture();
+      iam.seedPrincipal(TENANT_ID, 'friend');
+      const etag = iam.seedPolicy(TENANT_ID, BUCKET, { statement: [hold] });
+      const result = await baseHandler(
+        request({ policy: { statement: [next] }, etag }, { role: OrgRole.Admin }),
+      );
+      statuses.push(result.statusCode);
+    }
+
+    expect(statuses).toStrictEqual([200, 200]);
   });
 
   it('refuses an Admin widening a retention write to a new principal', async () => {
