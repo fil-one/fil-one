@@ -18,23 +18,24 @@ function createSeededQueryClient(status: string) {
   return client;
 }
 
-type Args = { collapsed: boolean; status: string };
+type Args = { variant: 'row' | 'pill'; status: string };
 
 const meta: Meta<Args> = {
   title: 'Components/StatusIndicator',
   argTypes: {
-    collapsed: { control: 'boolean' },
+    variant: { control: 'inline-radio', options: ['row', 'pill'] },
     status: {
       control: 'select',
       options: ['UP', 'HASISSUES', 'UNDERMAINTENANCE', 'UNKNOWN'],
     },
   },
-  render: ({ collapsed, status }) => {
+  render: ({ variant, status }) => {
     const [queryClient] = useState(() => createSeededQueryClient(status));
     return (
       <QueryClientProvider client={queryClient}>
-        <div style={{ width: collapsed ? 56 : 240 }}>
-          <StatusIndicator collapsed={collapsed} />
+        {/* The pill sits in the utility bar's flex row, which sizes it to its content. */}
+        <div style={variant === 'row' ? { width: 240 } : { display: 'flex' }}>
+          <StatusIndicator variant={variant} />
         </div>
       </QueryClientProvider>
     );
@@ -45,21 +46,21 @@ export default meta;
 type Story = StoryObj<Args>;
 
 export const AllSystemsOperational: Story = {
-  args: { collapsed: false, status: 'UP' },
+  args: { variant: 'row', status: 'UP' },
 };
 
 export const ServiceDisruption: Story = {
-  args: { collapsed: false, status: 'HASISSUES' },
+  args: { variant: 'row', status: 'HASISSUES' },
 };
 
 export const UnderMaintenance: Story = {
-  args: { collapsed: false, status: 'UNDERMAINTENANCE' },
+  args: { variant: 'row', status: 'UNDERMAINTENANCE' },
 };
 
 export const StatusUnavailable: Story = {
-  args: { collapsed: false, status: 'UNKNOWN' },
+  args: { variant: 'row', status: 'UNKNOWN' },
 };
 
-export const Collapsed: Story = {
-  args: { collapsed: true, status: 'UP' },
+export const Pill: Story = {
+  args: { variant: 'pill', status: 'UP' },
 };
