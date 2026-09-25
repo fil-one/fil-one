@@ -1,4 +1,4 @@
-import { createRoute, Outlet, redirect, useNavigate } from '@tanstack/react-router';
+import { createRoute, Navigate, Outlet, redirect, useNavigate } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { MeResponse } from '@filone/shared';
 import { Route as rootRoute } from './__root';
@@ -49,12 +49,21 @@ export const Route = createRoute({
     // unnamed too, and the only one they have, but its owner is not new:
     // `/left-organization` says why they have no organization before sending
     // them on to name one.
-    if (me.nameConfirmed === false && isOnlyMembership(me)) {
-      throw redirect({ to: me.floorOrg ? '/left-organization' : '/create-organization' });
-    }
+    const naming = namingRedirect(me);
+    if (naming) throw redirect({ to: naming });
   },
   component: AppWithOrgGuard,
 });
+
+/**
+ * Where an unnamed org the account has nowhere else to be sends it, if
+ * anywhere. `AppWithOrgGuard` applies it too: a `/me` refetch that lands on the
+ * floor org remounts the outlet without rerunning `beforeLoad`.
+ */
+function namingRedirect(me: MeResponse): '/left-organization' | '/create-organization' | undefined {
+  if (me.nameConfirmed !== false || !isOnlyMembership(me)) return undefined;
+  return me.floorOrg ? '/left-organization' : '/create-organization';
+}
 
 /**
  * Whether the org `/me` answered for is the only one the account belongs to.
@@ -163,6 +172,8 @@ function AppWithOrgGuard() {
     void navigate({ to: url.pathname + url.search, replace: true });
   }, [navigate]);
 
+  const naming = me && namingRedirect(me);
+  if (naming) return <Navigate to={naming} />;
   if (isNotAMember) return <NotAMember />;
 
   return (
