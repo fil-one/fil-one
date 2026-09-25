@@ -18,8 +18,8 @@ import {
 // Granting a retention or legal-hold write is `privileged.grant`, which only an
 // Owner holds: `s3:PutObjectRetention`, `s3:PutObjectLegalHold`, and `s3:*`,
 // which stands for both. An Admin manages policies but may not newly grant the
-// pair; a grant the stored policy already makes is not new, and neither is the
-// Owners roster statement sent back as the console writes it.
+// pair; a grant the stored policy already makes is not new, and neither is
+// `s3:*` naming only the Owners, however it is labelled.
 
 const ownerId = credentials('owner').userId;
 const adminId = credentials('admin').userId;
@@ -115,24 +115,22 @@ test.describe('through the API', () => {
     const { etag } = await owner.readPolicy(bucket);
     expect((await owner.deletePolicy(bucket, etag)).status()).toBe(204);
 
-    // The roster as the console writes it: filone-owners naming exactly the Owners.
+    // s3:* for the Owners alone, as the console writes it; the label is not what counts.
     expect(await putAs(admin, roster())).toEqual([201, undefined]);
     expect((await owner.readPolicy(bucket)).policy).toEqual({ statement: roster() });
 
-    // Anyone added to the Owners statement, or s3:* for someone under another
-    // label, is a new grant, and stays an Owner's to make.
+    // s3:* reaching anyone who is not an Owner, or a retention write by name,
+    // even to an Owner, is a new grant, and stays an Owner's to make.
     const outcomes = [];
     for (const statements of [
       [{ ...ownersStatement(ownerId), principal: [ownerId, adminId] }, adminsStatement(adminId)],
       [...roster(), allow([memberId], ['s3:*'], 'everything')],
+      [...roster(), allow([ownerId], ['s3:PutObjectRetention'], 'owner-hold')],
     ]) {
       const current = (await admin.readPolicy(bucket)).etag;
       outcomes.push(await putAs(admin, statements, current));
     }
-    expect(outcomes).toEqual([
-      [403, 'RETENTION_GRANT_FORBIDDEN'],
-      [403, 'RETENTION_GRANT_FORBIDDEN'],
-    ]);
+    expect(outcomes).toEqual(Array(3).fill([403, 'RETENTION_GRANT_FORBIDDEN']));
   });
 });
 
