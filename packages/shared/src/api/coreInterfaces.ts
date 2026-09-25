@@ -72,6 +72,24 @@ export const ApiErrorCode = {
    * export.
    */
   AUDIT_EXPORT_TOO_LARGE: 'AUDIT_EXPORT_TOO_LARGE',
+  /**
+   * The bucket has no policy, or the region serves no policies at all. Distinct
+   * from a plain 404 so the console can tell "nothing written yet" from "no
+   * such bucket" and offer to create the first statement.
+   */
+  POLICY_NOT_FOUND: 'POLICY_NOT_FOUND',
+  /**
+   * The policy changed since the caller read it, or the write named a
+   * precondition the stored state contradicts. Nothing was written; the console
+   * re-reads and applies the edit again.
+   */
+  POLICY_CONFLICT: 'POLICY_CONFLICT',
+  /**
+   * The statement grants a retention or legal-hold write and the caller is not
+   * an Owner. The two actions are the console's privileged pair, and only
+   * `privileged.grant` may put them in a statement.
+   */
+  RETENTION_GRANT_FORBIDDEN: 'RETENTION_GRANT_FORBIDDEN',
 } as const;
 export type ApiErrorCode = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];
 

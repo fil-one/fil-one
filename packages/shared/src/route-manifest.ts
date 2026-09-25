@@ -48,7 +48,7 @@ export type RouteCategory =
 export type RouteRequirement = Permission | 'self' | 'in-handler' | 'invite-token';
 
 export interface RouteManifestEntry {
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   /** API Gateway route path, as passed to `addRoute` in sst.config.ts. */
   path: string;
   /** Handler module under `packages/backend/src/handlers/`, without extension. */
