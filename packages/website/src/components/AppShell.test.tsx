@@ -424,8 +424,13 @@ describe('AppShell mobile user menu', () => {
   it('keeps the panel’s items menu items', () => {
     openUserMenu();
 
-    // The panel is a `role="menu"`, and its logout sibling is a menuitem.
+    // The panel is a `role="menu"`, and its items are menuitems. Settings is
+    // how a gated Member on mobile reaches Leave organization.
     expect(screen.getByRole('menu')).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: 'Log out' })).toBeInTheDocument();
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+      'Settings',
+      'Log out',
+    ]);
+    expect(screen.getByRole('menuitem', { name: 'Settings' })).toHaveAttribute('href', '/settings');
   });
 });
