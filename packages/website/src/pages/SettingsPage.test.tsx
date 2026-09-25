@@ -122,6 +122,19 @@ describe('SettingsPage — changing the email address', () => {
     await waitFor(() => expect(screen.queryByLabelText('New email')).not.toBeInTheDocument());
   });
 
+  it('closes without saving when the address is the one on file', async () => {
+    renderSettings(OrgRole.Admin);
+
+    fireEvent.click(await screen.findByLabelText('Email'));
+    fireEvent.change(await screen.findByLabelText('New email'), {
+      target: { value: ' User@Example.com ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Update' }));
+
+    await waitFor(() => expect(screen.queryByLabelText('New email')).not.toBeInTheDocument());
+    expect(mockUpdateProfile).not.toHaveBeenCalled();
+  });
+
   it('opens from the keyboard, not just a click', async () => {
     renderSettings(OrgRole.Admin);
 
