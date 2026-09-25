@@ -54,18 +54,18 @@ describe('OrganizationPage', () => {
     vi.clearAllMocks();
   });
 
-  it('gives an Owner every tab their role reaches', async () => {
+  it('is titled Members, with no org identity or rename on it', async () => {
     renderPage(OrgRole.Owner);
 
-    await waitFor(() => expect(tabNames()).toContain('Members'));
-    expect(tabNames()).toContain('Invitations');
-    expect(tabNames()).toContain('Billing');
+    expect(await screen.findByRole('heading', { name: 'Members' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /Billing/ })).not.toBeInTheDocument();
   });
 
-  it('offers the rename only to a role that holds org.rename', async () => {
+  it('gives a role that can manage both people tabs', async () => {
     renderPage(OrgRole.Owner);
 
-    expect(await screen.findByRole('button', { name: 'Edit' })).toBeInTheDocument();
+    await waitFor(() => expect(tabNames()).toEqual(['Members', 'Invitations']));
   });
 
   it('adds a member from the page header, whichever tab is showing', async () => {
@@ -83,45 +83,22 @@ describe('OrganizationPage', () => {
     expect(screen.getByTestId('org-tab-invitations')).toHaveAttribute('data-selected');
   });
 
-  it('hides the add from a role that cannot invite, and outside the beta', async () => {
-    renderPage(OrgRole.Member);
-    await waitFor(() => expect(tabNames()).toContain('Members'));
-    expect(screen.queryByTestId('org-invite-button')).not.toBeInTheDocument();
-
+  it('withholds Add member outside the beta but keeps Invitations for revoking', async () => {
+    // `POST /api/org/invitations` still refuses an org outside the beta, so the
+    // button would only ever earn a 403. The tab stays: tokens already issued
+    // remain redeemable, and revoking is the only way to withdraw one.
     renderPage(OrgRole.Owner, 0, 0, { orgsBeta: false });
-    await waitFor(() => expect(tabNames()).toContain('Members'));
+
+    await waitFor(() => expect(tabNames()).toContain('Invitations'));
     expect(screen.queryByTestId('org-invite-button')).not.toBeInTheDocument();
   });
 
-  it.each([OrgRole.Member, OrgRole.ReadOnly])('hides the rename from %s', async (role) => {
-    renderPage(role);
-
-    await waitFor(() => expect(tabNames()).toContain('Members'));
-    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
-  });
-
-  it('leaves out a tab the caller cannot reach', async () => {
-    // The invitations endpoint is `members.manage`; a Member holds
-    // `members.read` and nothing more here, so the tab is not offered.
+  it('hides Invitations and Add member from a role without members.manage', async () => {
     renderPage(OrgRole.Member);
 
     await waitFor(() => expect(tabNames()).toContain('Members'));
     expect(tabNames()).not.toContain('Invitations');
-  });
-
-  it('keeps Billing out for a role that cannot read it', async () => {
-    // `billing.view` is Owner and Admin; a Member is not offered the tab at all
-    // rather than shown one that refuses.
-    renderPage(OrgRole.Member);
-
-    await waitFor(() => expect(tabNames()).toContain('Members'));
-    expect(tabNames()).not.toContain('Billing');
-  });
-
-  it('offers Billing to an Admin, who holds billing.view', async () => {
-    renderPage(OrgRole.Admin);
-
-    await waitFor(() => expect(tabNames()).toContain('Billing'));
+    expect(screen.queryByTestId('org-invite-button')).not.toBeInTheDocument();
   });
 
   it('offers a Read only member the roster and nothing that changes it', async () => {
@@ -129,34 +106,18 @@ describe('OrganizationPage', () => {
 
     await waitFor(() => expect(tabNames()).toContain('Members'));
     expect(tabNames()).not.toContain('Invitations');
+    expect(screen.queryByTestId('org-invite-button')).not.toBeInTheDocument();
   });
 
   it('counts each list on its own tab', async () => {
     renderPage(OrgRole.Owner, 4, 2);
 
-    // The number belongs with the label somebody reads before choosing a tab.
     await waitFor(() => expect(screen.getByTestId('org-tab-members')).toHaveTextContent('4'));
     expect(screen.getByTestId('org-tab-invitations')).toHaveTextContent('2');
-    // Neither the audit log nor billing counts anything, so neither carries a
-    // number.
-    expect(screen.getByTestId('org-tab-audit')).toHaveTextContent(/^Audit log$/);
-    expect(screen.getByTestId('org-tab-billing')).toHaveTextContent(/^Billing$/);
 
-    // People first, money last, and the audit log after the two tabs whose
-    // changes it records.
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
       'Members4',
       'Invitations2',
-      'Audit log',
-      'Billing',
     ]);
-  });
-
-  it('names the organization it is about', async () => {
-    renderPage(OrgRole.Owner);
-
-    // Two browser tabs can sit in different orgs, and this is the page that
-    // removes people, so it says which one.
-    await waitFor(() => expect(screen.getByText(/Manage/)).toBeInTheDocument());
   });
 });

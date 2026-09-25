@@ -15,7 +15,14 @@ vi.mock('./SidebarNav', () => ({
   ),
 }));
 
+// The org menu's dialogs and links need a query client and a router; what is
+// under test here is only where the menu mounts and what it lists.
 vi.mock('./CreateOrganizationDialog.js', () => ({ CreateOrganizationDialog: () => null }));
+vi.mock('./BaseLink.js', () => ({
+  BaseLink: ({ href, ...props }: { href: string } & React.ComponentProps<'a'>) => (
+    <a href={href} {...props} />
+  ),
+}));
 
 vi.mock('./Banner', () => ({
   Banner: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
