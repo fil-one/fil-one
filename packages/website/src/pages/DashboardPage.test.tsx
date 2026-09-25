@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole, PlanId, SubscriptionStatus } from '@filone/shared';
 import type { BillingInfo, UsageResponse } from '@filone/shared';
@@ -189,5 +189,57 @@ describe('DashboardPage — quick setup', () => {
     renderPage(OrgRole.Owner);
 
     expect(await screen.findByText('QUICK SETUP')).toBeInTheDocument();
+  });
+
+  it('lists the steps in the order they are done: bucket, key, then upload', async () => {
+    mockGetUsage.mockResolvedValue(ONBOARDING);
+    renderPage(OrgRole.Owner);
+
+    await screen.findByText('QUICK SETUP');
+    const titles = ['Create a bucket', 'Generate API key', 'Upload an object'].map((title) =>
+      screen.getByText(title),
+    );
+    for (let i = 1; i < titles.length; i++) {
+      expect(titles[i - 1].compareDocumentPosition(titles[i])).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+    }
+  });
+
+  it('hides the card on dismiss and moves focus to the page heading', async () => {
+    mockGetUsage.mockResolvedValue(ONBOARDING);
+    renderPage(OrgRole.Owner);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss quick setup' }));
+
+    expect(screen.queryByText('QUICK SETUP')).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Dashboard' }));
+  });
+
+  // Dismissal is page state, like the trial banner's: it lasts until the next
+  // visit, not across visits.
+  it('offers the card again on the next visit', async () => {
+    mockGetUsage.mockResolvedValue(ONBOARDING);
+    const { unmount } = renderPage(OrgRole.Owner);
+    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss quick setup' }));
+    unmount();
+
+    renderPage(OrgRole.Owner);
+    expect(await screen.findByText('QUICK SETUP')).toBeInTheDocument();
+  });
+});
+
+describe('DashboardPage — trial banner', () => {
+  it('hides the banner on dismiss and moves focus to the page heading', async () => {
+    const billing = payAsYouGoBilling();
+    mockGetBilling.mockResolvedValue({
+      subscription: { ...billing.subscription, status: SubscriptionStatus.Trialing },
+    });
+    renderPage(OrgRole.Owner);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss trial banner' }));
+
+    expect(screen.queryByRole('button', { name: 'Dismiss trial banner' })).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Dashboard' }));
   });
 });
