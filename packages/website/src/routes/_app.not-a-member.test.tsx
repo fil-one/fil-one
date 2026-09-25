@@ -25,7 +25,7 @@ vi.mock('../lib/use-permissions.js', () => ({
 }));
 vi.mock('../lib/step-up.js', () => ({ consumePendingMfaAction: () => null }));
 vi.mock('../lib/api.js', () => ({ getMe: vi.fn(), logout: vi.fn() }));
-vi.mock('../lib/active-org.js', () => ({ switchToOrg }));
+vi.mock('../lib/active-org.js', () => ({ switchToOrg, onSwitchingOrgChange: () => () => {} }));
 
 import { Route } from './_app';
 import { queryKeys } from '../lib/query-client.js';

@@ -9,8 +9,8 @@ import { queryClient, queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
 import { usePermissions } from '../lib/use-permissions.js';
 import { consumePendingMfaAction } from '../lib/step-up.js';
 import { hasPendingInviteToken } from '../lib/invite-token.js';
-import { switchToOrg } from '../lib/active-org.js';
-import { useEffect } from 'react';
+import { onSwitchingOrgChange, switchToOrg } from '../lib/active-org.js';
+import { useEffect, useReducer } from 'react';
 
 export const Route = createRoute({
   id: 'app',
@@ -130,6 +130,22 @@ function AppWithOrgGuard() {
   const { isNotAMember } = usePermissions();
   const { data: me } = useQuery({ queryKey: queryKeys.me, queryFn: () => getMe() });
 
+  // A switch clears the cache, and a mounted `useQuery` stays on its removed
+  // query until its component renders again. A switch onto the page the tab is
+  // already on changes no location, so nothing else re-renders this layout.
+  // Re-rendering once the switch commits moves every observer here and in the
+  // shell onto the new org's queries, and `me.orgId` re-keys the page. Not
+  // when the latch goes up: the cache is empty then, and a `/me` started from
+  // here is held by the latch, which `beforeLoad`'s own `/me` could join.
+  const [, rerender] = useReducer((n: number) => n + 1, 0);
+  useEffect(
+    () =>
+      onSwitchingOrgChange((next, outcome) => {
+        if (outcome === 'committed') rerender();
+      }),
+    [],
+  );
+
   // Resume an MFA action after a step-up redirect round-trip. The api wrapper
   // stashes the pending action + return path in sessionStorage before bouncing
   // through Auth0 with prompt=login; the callback lands on /dashboard, then we
@@ -146,12 +162,9 @@ function AppWithOrgGuard() {
 
   return (
     <AppShell>
-      {/* Keyed on the org the server answered for. A switch clears the cache
-          and lands on `/dashboard`, which can be the URL the tab is already on,
-          and the router keeps a route mounted when its location does not
-          change. Something downstream was seen to keep the previous org's data
-          after a switch, painting it over the new org's page until a full
-          reload; the key forces a real remount at the org boundary. */}
+      {/* Keyed on the org the server answered for, so the page remounts at the
+          org boundary even when the switch lands on the URL the tab is already
+          on. */}
       <Outlet key={me?.orgId} />
     </AppShell>
   );
