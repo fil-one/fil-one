@@ -47,6 +47,15 @@ export interface MeResponse {
   /** Whether the org's name was chosen; only an explicit `false` sends the caller to the naming step. */
   nameConfirmed?: boolean;
   /**
+   * Whether this organization was made for the caller because they lost their
+   * last membership (they left it, were removed, or it was deleted), rather
+   * than at signup. Paired with an unconfirmed name, it sends the caller to
+   * `/left-organization` instead of the new-account naming step, so they are
+   * told why they have no organization before they create one. Present only
+   * when true.
+   */
+  floorOrg?: boolean;
+  /**
    * Whether the organizations beta is switched on for this caller — their own
    * allowlist row, or {@link MeResponse.orgId}'s. Computed server-side like
    * {@link MeResponse.ragAccess}, from the same predicate the invitation

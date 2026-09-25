@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 import { OrgRole, ROLE_PERMISSIONS } from '@filone/shared';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.ts';
 import { sstResourceMock } from '../test/sst-resource-mock.ts';
@@ -69,7 +70,11 @@ function authenticatedEvent(queryStringParameters?: Record<string, string>) {
 }
 
 /** The `ORG#{orgId}/PROFILE` row `/me` names the org from. */
-function profileResolves(orgId: string = MOCK_ORG_ID, name = 'Example Corp') {
+function profileResolves(
+  orgId: string = MOCK_ORG_ID,
+  name = 'Example Corp',
+  extra: Record<string, AttributeValue> = {},
+) {
   ddbMock
     .on(GetItemCommand, {
       TableName: 'UserInfoTable',
@@ -81,6 +86,7 @@ function profileResolves(orgId: string = MOCK_ORG_ID, name = 'Example Corp') {
         sk: { S: 'PROFILE' },
         name: { S: name },
         auroraSetupStatus: { S: FINAL_SETUP_STATUS },
+        ...extra,
       },
     });
 }
@@ -212,6 +218,28 @@ describe('GET /api/me handler', () => {
           call.args[0].input.Key?.sk?.S === 'PROFILE',
       );
     expect(profileReads.some((call) => call.args[0].input.ConsistentRead === true)).toBe(true);
+  });
+
+  it('says when the active org is a floor org', async () => {
+    profileResolves(MOCK_ORG_ID, 'Example Corp', {
+      nameConfirmed: { BOOL: false },
+      floorOrg: { BOOL: true },
+    });
+
+    const result = await handler(authenticatedEvent(), buildContext());
+
+    expect(JSON.parse((result as { body: string }).body)).toMatchObject({
+      nameConfirmed: false,
+      floorOrg: true,
+    });
+  });
+
+  it('leaves floorOrg off for any other org', async () => {
+    profileResolves();
+
+    const result = await handler(authenticatedEvent(), buildContext());
+
+    expect(JSON.parse((result as { body: string }).body)).not.toHaveProperty('floorOrg');
   });
 
   it('returns 200 with emailVerified false for unverified users (verified-email gate opt-out)', async () => {
