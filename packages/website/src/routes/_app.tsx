@@ -44,8 +44,13 @@ export const Route = createRoute({
     // naming step runs after verification so the two gates cannot both claim
     // the page. Only an explicit `false` is unconfirmed: an absent value is a
     // pre-flag organization and reads as confirmed.
+    //
+    // A floor org (made when the caller lost their last membership) is
+    // unnamed too, and the only one they have, but its owner is not new:
+    // `/left-organization` says why they have no organization before sending
+    // them on to name one.
     if (me.nameConfirmed === false && isOnlyMembership(me)) {
-      throw redirect({ to: '/create-organization' });
+      throw redirect({ to: me.floorOrg ? '/left-organization' : '/create-organization' });
     }
   },
   component: AppWithOrgGuard,
