@@ -95,6 +95,17 @@ export const RowExpanded: Story = {
   args: { expanded: 'evt-1' },
 };
 
+/**
+ * A row opened on an event that carries nothing beyond its subject: the note
+ * spans both columns, so the subject stays beside its label.
+ */
+export const RowExpandedWithNoDetail: Story = {
+  args: {
+    events: [{ ...event({ eventId: 'evt-bare' }), details: {} } as AuditEvent],
+    expanded: 'evt-bare',
+  },
+};
+
 export const Loading: Story = {
   args: { events: undefined, isPending: true },
 };
