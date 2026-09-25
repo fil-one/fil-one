@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { ListIcon, XIcon, SignOutIcon, SidebarSimpleIcon } from '@phosphor-icons/react/dist/ssr';
+import {
+  GearIcon,
+  ListIcon,
+  XIcon,
+  SignOutIcon,
+  SidebarSimpleIcon,
+} from '@phosphor-icons/react/dist/ssr';
 import { useQuery } from '@tanstack/react-query';
 import { SubscriptionStatus } from '@filone/shared';
+import { BaseLink } from './BaseLink.js';
 import { SidebarNav } from './SidebarNav';
 import { Banner } from './Banner';
 import { UserAvatar } from './UserAvatar';
@@ -66,6 +73,15 @@ function MobileUserMenu() {
             {me?.orgName && <p className="truncate text-xs text-zinc-500">{me.orgName}</p>}
           </div>
           <div className="my-1 border-t border-zinc-100" />
+          <BaseLink
+            href="/settings"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
+          >
+            <GearIcon size={18} className="flex-shrink-0 text-zinc-400" />
+            Settings
+          </BaseLink>
           <button
             type="button"
             role="menuitem"

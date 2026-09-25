@@ -51,6 +51,15 @@ export function usePermissions(): {
    * options for `/me` — and false until `/me` answers, which fails closed.
    */
   orgsBeta: boolean;
+  /**
+   * Whether the active org has usable billing. Unlike everything else here,
+   * defaults *open* (true) rather than closed: this gates the whole console
+   * behind an "add a card" page, and blocking every account for the brief
+   * window before `/me` answers would be a far worse guess than the reverse.
+   * In practice the window is close to nothing — `_app.tsx`'s own `beforeLoad`
+   * already resolves this exact query before any page mounts.
+   */
+  billingActive: boolean;
   /** True while the answer is not yet known — render nothing rather than guess. */
   isPending: boolean;
   /** True when `/me` could not be read, which also grants nothing. */
@@ -75,6 +84,7 @@ export function usePermissions(): {
     userId: me?.userId,
     role: me?.role,
     orgsBeta: me?.orgsBeta ?? false,
+    billingActive: me?.billingActive ?? true,
     isPending,
     isError,
     // `role` is absent exactly when the caller has no membership row, which the

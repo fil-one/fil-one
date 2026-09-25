@@ -41,6 +41,7 @@ function me(
     mfaEnrollments: [],
     ragAccess: true,
     orgsBeta: true,
+    billingActive: true,
     userId: 'user-1',
     role,
     permissions: ROLE_PERMISSIONS[role],

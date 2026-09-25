@@ -1,12 +1,14 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
+import { SubscriptionStatus } from '@filone/shared';
 import type { MeResponse } from '@filone/shared';
 import { permissionsForRole } from '@filone/shared';
 import { getOrgProfile, orgSummary } from '../lib/org-profile.ts';
 import { summarizeMemberships } from '../lib/org-membership.ts';
 import { hasRagAccess } from '../middleware/rag-access.ts';
 import { hasOrgsBetaAccess } from '../lib/orgs-beta.ts';
+import { readSubscription } from '../lib/subscription-store.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import {
   getConnectionType,
@@ -17,6 +19,19 @@ import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
+
+/**
+ * Whether the active org has a trial or paid plan (see `MeResponse.billingActive`).
+ * A plain read, not a trial claim, which `GET /api/billing` makes; consistent,
+ * because the gate re-reads `/me` right after an activation.
+ */
+async function resolveBillingActive(orgId: string): Promise<boolean> {
+  const record = await readSubscription(orgId, { consistentRead: true });
+  return (
+    record?.subscriptionStatus !== undefined &&
+    record.subscriptionStatus !== SubscriptionStatus.Inactive
+  );
+}
 
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { orgId, userId, email, emailVerified, sub, name, picture, membership } =
@@ -38,22 +53,26 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   // is supposed to introduce it.
   const activeOrgProfile = getOrgProfile(orgId, { consistentRead: true });
 
-  const [orgProfile, enrollments, passkeys, ragAccess, orgsBeta, memberships] = await Promise.all([
-    activeOrgProfile,
-    includeMfa ? getMfaEnrollments(sub) : Promise.resolve([]),
-    includeMfa && connectionType === 'auth0' ? getPasskeyAuthenticators(sub) : Promise.resolve([]),
-    hasRagAccess(verifiedEmail),
-    // The same predicate `POST /api/org/invitations` refuses on, asked here so
-    // the console can leave the surface out rather than render it and collect a
-    // 403 from the first thing the caller reaches for.
-    hasOrgsBetaAccess({ verifiedEmail, orgId }),
-    summarizeMemberships({
-      userId,
-      activeOrgId: orgId,
-      activeRole: membership?.role,
-      activeOrgSummary: activeOrgProfile.then(orgSummary),
-    }),
-  ]);
+  const [orgProfile, enrollments, passkeys, ragAccess, orgsBeta, memberships, billingActive] =
+    await Promise.all([
+      activeOrgProfile,
+      includeMfa ? getMfaEnrollments(sub) : Promise.resolve([]),
+      includeMfa && connectionType === 'auth0'
+        ? getPasskeyAuthenticators(sub)
+        : Promise.resolve([]),
+      hasRagAccess(verifiedEmail),
+      // The same predicate `POST /api/org/invitations` refuses on, asked here so
+      // the console can leave the surface out rather than render it and collect a
+      // 403 from the first thing the caller reaches for.
+      hasOrgsBetaAccess({ verifiedEmail, orgId }),
+      summarizeMemberships({
+        userId,
+        activeOrgId: orgId,
+        activeRole: membership?.role,
+        activeOrgSummary: activeOrgProfile.then(orgSummary),
+      }),
+      resolveBillingActive(orgId),
+    ]);
 
   const { name: orgName, ...orgLogo } = orgSummary(orgProfile);
   // Absent means an organization that predates the field, which is treated as
@@ -94,6 +113,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     permissions: permissionsForRole(membership?.role ?? ''),
     memberships,
     orgsBeta,
+    billingActive,
   };
 
   return new ResponseBuilder().status(200).body(body).build();
