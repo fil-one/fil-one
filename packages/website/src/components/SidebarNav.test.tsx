@@ -5,6 +5,7 @@ import { OrgRole } from '@filone/shared';
 import type { MeResponse } from '@filone/shared';
 
 import { SidebarNav } from './SidebarNav';
+import { ToastProvider } from './Toast/ToastProvider.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 import { queryKeys } from '../lib/query-client.js';
 
@@ -80,14 +81,15 @@ function renderBothSidebars(role: OrgRole = OrgRole.Owner, overrides: Partial<Me
   seedPermissions(client, role, { ...ORG_ME, ...overrides });
   return render(
     <QueryClientProvider client={client}>
-      <SidebarNav collapsed={false} onToggle={() => {}} showTestIds={true} />
-      <SidebarNav
-        collapsed={false}
-        onToggle={() => {}}
-        onClose={() => {}}
-        showUserProfile={false}
-        showTestIds={false}
-      />
+      <ToastProvider>
+        <SidebarNav collapsed={false} showTestIds={true} />
+        <SidebarNav
+          collapsed={false}
+          onClose={() => {}}
+          showUserProfile={false}
+          showTestIds={false}
+        />
+      </ToastProvider>
     </QueryClientProvider>,
   );
 }
@@ -113,7 +115,9 @@ function renderOneSidebar({
   }
   return render(
     <QueryClientProvider client={client}>
-      <SidebarNav collapsed={collapsed} onToggle={() => {}} showTestIds={true} />
+      <ToastProvider>
+        <SidebarNav collapsed={collapsed} showTestIds={true} />
+      </ToastProvider>
     </QueryClientProvider>,
   );
 }
@@ -151,6 +155,28 @@ describe('SidebarNav e2e selector uniqueness (desktop + drawer mounted)', () => 
     // `container` — `screen`, which queries the whole document, is what finds
     // it; `container.querySelectorAll` never will, open or not.
     expect(screen.getAllByText('Log out')).toHaveLength(1);
+  });
+});
+
+describe('SidebarNav footer', () => {
+  // On desktop, bug report and system status live in the utility bar under the
+  // content window; only the drawer, which has no such bar, carries them.
+  it('carries bug report and system status in the drawer copy only', () => {
+    const { container } = renderBothSidebars();
+    const [desktop, drawer] = container.querySelectorAll('nav');
+
+    expect(within(desktop).queryByTestId('status-indicator')).not.toBeInTheDocument();
+    expect(within(desktop).queryByRole('button', { name: 'Report a bug' })).not.toBeInTheDocument();
+    expect(within(drawer).getByTestId('status-indicator')).toBeInTheDocument();
+    expect(within(drawer).getByRole('button', { name: 'Report a bug' })).toBeInTheDocument();
+  });
+
+  it('opens the bug-report dialog from the drawer', async () => {
+    const { container } = renderBothSidebars();
+    const drawer = container.querySelectorAll('nav')[1];
+
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Report a bug' }));
+    expect(await screen.findByTestId('report-bug-dialog')).toBeInTheDocument();
   });
 });
 

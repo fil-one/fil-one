@@ -8,6 +8,19 @@
 
 @plugin '@tailwindcss/typography';
 
+@layer base {
+  /* The document's own background, not just AppShell's root: `h-screen` on
+     that root is a best effort at covering the exact viewport, but any gap
+     left by a rounding difference or a timing gap before it paints shows
+     whatever `<body>` has, which Preflight leaves unset (browser-default
+     white). Matching it here means nothing shows through that as white by
+     accident — the console's sidebar and content-window frame stay `bg-white`
+     on top of this regardless. */
+  body {
+    background-color: var(--color-zinc-50);
+  }
+}
+
 @theme {
   /* Console type scale — the two steps Tailwind's 12/14/16 jump leaves out.
      Both are already the console's most-used sizes, spelled as arbitrary
