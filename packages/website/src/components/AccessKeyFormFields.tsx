@@ -87,11 +87,13 @@ export function AccessKeyFormFields({
       {/* On an `iam` region the key belongs to the caller and carries nothing
           of its own, so there is no permission set or bucket scope to ask for. */}
       {form.iam ? (
-        <Alert
-          variant="blue"
-          assertive={false}
-          description="This key acts as you. What it can reach is decided by each bucket's policy."
-        />
+        <div data-testid="access-key-follows-policy">
+          <Alert
+            variant="blue"
+            assertive={false}
+            description="This key acts as you. What it can reach is decided by each bucket's policy."
+          />
+        </div>
       ) : (
         <>
           {/* Permissions */}

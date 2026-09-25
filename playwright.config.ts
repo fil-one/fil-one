@@ -1,6 +1,10 @@
 /// <reference types="node" />
 
+import { existsSync } from 'node:fs';
 import { defineConfig, devices } from '@playwright/test';
+
+// Credentials for the bucket policy suite, written by bin/e2e-register-policy-users.ts.
+if (existsSync('.env.e2e.local')) process.loadEnvFile('.env.e2e.local');
 
 const isCI = !!process.env.CI;
 const baseURL = process.env.BASE_URL;
@@ -40,20 +44,38 @@ export default defineConfig({
     {
       name: 'full-chromium',
       testDir: './tests/e2e',
+      testIgnore: /policies\//,
       use: { ...devices['Desktop Chrome'] },
       dependencies: ['seed-buckets'],
     },
     {
       name: 'full-firefox',
       testDir: './tests/e2e',
+      testIgnore: /policies\//,
       use: { ...devices['Desktop Firefox'] },
       dependencies: ['seed-buckets'],
     },
     {
       name: 'full-webkit',
       testDir: './tests/e2e',
+      testIgnore: /policies\//,
       use: { ...devices['Desktop Safari'] },
       dependencies: ['seed-buckets'],
+    },
+    // Bucket policies, against a local stage whose us-east-9 region serves the
+    // `iam` access model from smelt (tests/e2e/policies/README.md).
+    {
+      name: 'policies-setup',
+      testMatch: /policies\/policies\.setup\.ts/,
+    },
+    {
+      name: 'policies-local',
+      testDir: './tests/e2e/policies',
+      use: { ...devices['Desktop Chrome'] },
+      // One org and one roster for every spec, and some specs change the roster.
+      fullyParallel: false,
+      workers: 1,
+      dependencies: ['policies-setup'],
     },
     // smoke tests executed in production
     {

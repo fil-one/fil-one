@@ -67,11 +67,22 @@ export function BucketPolicyTab({ bucketName, region }: BucketPolicyTabProps) {
         {ready && (
           <div className="flex items-center gap-2">
             {policy.snapshot && (
-              <Button variant="ghost" size="sm" onClick={() => setConfirmRemove(true)}>
+              <Button
+                id="policy-remove-button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setConfirmRemove(true)}
+              >
                 Remove policy
               </Button>
             )}
-            <Button variant="ghost" size="sm" icon={PlusIcon} onClick={() => setEditing({})}>
+            <Button
+              id="policy-add-statement"
+              variant="ghost"
+              size="sm"
+              icon={PlusIcon}
+              onClick={() => setEditing({})}
+            >
               Add statement
             </Button>
           </div>
@@ -189,32 +200,46 @@ function PolicyBody({
   return (
     <>
       {(policy.conflict || draft.stale) && (
-        <Alert
-          variant="amber"
-          title="This policy changed elsewhere"
-          description="Someone else saved a new version. Reload the policy, then apply your changes again."
-          action={
-            <Button variant="ghost" size="sm" onClick={() => void reload()}>
-              Reload policy
-            </Button>
-          }
-        />
+        <div data-testid="policy-conflict">
+          <Alert
+            variant="amber"
+            title="This policy changed elsewhere"
+            description="Someone else saved a new version. Reload the policy, then apply your changes again."
+            action={
+              <Button
+                id="policy-reload-button"
+                variant="ghost"
+                size="sm"
+                onClick={() => void reload()}
+              >
+                Reload policy
+              </Button>
+            }
+          />
+        </div>
       )}
 
       {draft.statements.length === 0 ? (
-        <EmptyStateCard
-          icon={ShieldCheckIcon}
-          title={draft.dirty ? 'This policy has no statements' : 'No policy yet'}
-          description={
-            draft.dirty
-              ? 'Saving removes the policy, and only service keys will reach this bucket.'
-              : 'Without a policy, only service keys can reach this bucket. Add a statement to grant members access.'
-          }
-        >
-          <Button variant="primary" icon={PlusIcon} onClick={onAdd}>
-            Add statement
-          </Button>
-        </EmptyStateCard>
+        <div data-testid="policy-empty" data-empty-state={draft.dirty ? 'cleared' : 'none'}>
+          <EmptyStateCard
+            icon={ShieldCheckIcon}
+            title={draft.dirty ? 'This policy has no statements' : 'No policy yet'}
+            description={
+              draft.dirty
+                ? 'Saving removes the policy, and only service keys will reach this bucket.'
+                : 'Without a policy, only service keys can reach this bucket. Add a statement to grant members access.'
+            }
+          >
+            <Button
+              id="policy-empty-add-statement"
+              variant="primary"
+              icon={PlusIcon}
+              onClick={onAdd}
+            >
+              Add statement
+            </Button>
+          </EmptyStateCard>
+        </div>
       ) : (
         <div className="flex flex-col gap-3">
           {draft.statements.map((statement, index) => (
@@ -231,12 +256,14 @@ function PolicyBody({
       )}
 
       {draft.statements.some(deniesEveryone) && (
-        <Alert
-          variant="amber"
-          assertive={false}
-          title="This policy denies everyone"
-          description="Nobody in the organization can use this bucket while this statement is saved. Only an Owner can edit the policy to undo it."
-        />
+        <div data-testid="policy-denies-everyone">
+          <Alert
+            variant="amber"
+            assertive={false}
+            title="This policy denies everyone"
+            description="Nobody in the organization can use this bucket while this statement is saved. Only an Owner can edit the policy to undo it."
+          />
+        </div>
       )}
 
       {draft.dirty && (
@@ -244,10 +271,17 @@ function PolicyBody({
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3">
             <span className="text-ui text-zinc-700">Unsaved changes</span>
             <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" onClick={draft.reset} disabled={policy.saving}>
+              <Button
+                id="policy-discard-button"
+                variant="ghost"
+                size="sm"
+                onClick={draft.reset}
+                disabled={policy.saving}
+              >
                 Discard changes
               </Button>
               <Button
+                id="policy-save-button"
                 variant="primary"
                 size="sm"
                 onClick={() => void save()}
