@@ -163,22 +163,54 @@ describe('ensureTrialEntitlement', () => {
     warnSpy.mockRestore();
   });
 
-  // Written before the claim recorded its org, when an account had exactly one.
-  it('treats a claim with no recorded org as spent', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-    ddbMock.on(PutItemCommand).rejects(
-      new ConditionalCheckFailedException({
-        message: 'exists',
-        $metadata: {},
-        Item: { userId: { S: 'user-1' } },
-      }),
+  // Written before the claim recorded its org. The owner's first request
+  // stamps its org, so an interrupted claim can still be retried.
+  describe('a claim with no recorded org', () => {
+    const STAMP = { UpdateExpression: 'SET orgId = :orgId' };
+
+    beforeEach(() => {
+      ddbMock.on(PutItemCommand).rejects(
+        new ConditionalCheckFailedException({
+          message: 'exists',
+          $metadata: {},
+          Item: { userId: { S: 'user-1' } },
+        }),
+      );
+      ddbMock.on(UpdateItemCommand).resolves({});
+    });
+
+    it('stamps the org it is asked from and creates the trial', async () => {
+      const result = await ensureTrialEntitlement(BASE);
+
+      expect(result).toBe(true);
+      expect(mockCreateBillingTrial).toHaveBeenCalledOnce();
+      expect(ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input).toMatchObject({
+        Key: { pk: { S: 'EMAIL_NORM#user@gmail.com' }, sk: { S: 'TRIAL_ENTITLEMENT' } },
+        UpdateExpression: 'SET orgId = :orgId',
+        ConditionExpression: 'attribute_not_exists(orgId) AND userId = :userId',
+        ExpressionAttributeValues: { ':orgId': { S: 'org-1' }, ':userId': { S: 'user-1' } },
+      });
+    });
+
+    it.each([
+      ['refuses', 'org-other', false],
+      ['still grants', 'org-1', true],
+    ])(
+      '%s the trial when a racing request stamped %s first',
+      async (_label, stampedOrgId, entitled) => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        ddbMock.on(UpdateItemCommand, STAMP).rejects(
+          new ConditionalCheckFailedException({
+            message: 'stamped',
+            $metadata: {},
+            Item: { userId: { S: 'user-1' }, orgId: { S: stampedOrgId } },
+          }),
+        );
+
+        expect(await ensureTrialEntitlement(BASE)).toBe(entitled);
+        expect(mockCreateBillingTrial).toHaveBeenCalledTimes(entitled ? 1 : 0);
+      },
     );
-    ddbMock.on(UpdateItemCommand).resolves({});
-
-    const result = await ensureTrialEntitlement(BASE);
-
-    expect(result).toBe(false);
-    expect(mockCreateBillingTrial).not.toHaveBeenCalled();
   });
 
   it('throws and does not set the flag on a transient claim error', async () => {

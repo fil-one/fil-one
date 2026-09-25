@@ -1,4 +1,5 @@
 import {
+  type AttributeValue,
   ConditionalCheckFailedException,
   PutItemCommand,
   UpdateItemCommand,
@@ -25,9 +26,8 @@ export interface EnsureTrialEntitlementParams {
  * only that org can come back for it (a retry after a failed
  * `createBillingTrial`). The same person asking from any other org, one they
  * created or the floor org leaving their last one makes, is refused. A claim
- * written before the org was recorded has no `orgId` and counts as spent: it
- * was made when an account had one org, and a failed trial on it was retried
- * on that account's next request, since the flag below stays unset until then.
+ * written before the org was recorded has no `orgId`: its owner's first request
+ * stamps the org it comes from, so an interrupted claim can still be retried.
  */
 export async function ensureTrialEntitlement({
   sub,
@@ -74,7 +74,7 @@ export async function ensureTrialEntitlement({
   } catch (err) {
     if (err instanceof ConditionalCheckFailedException) {
       ownerUserId = err.Item?.userId?.S;
-      claimedOrgId = err.Item?.orgId?.S;
+      claimedOrgId = await claimedOrgOf(err.Item, { normalizedEmail, userId, orgId });
     } else {
       console.error('[trial-entitlement] Failed to claim entitlement key', {
         error: err,
@@ -141,4 +141,34 @@ export async function ensureTrialEntitlement({
   }
 
   return entitled;
+}
+
+/**
+ * The org an existing claim is spent on. The caller's own claim with no org
+ * recorded is stamped with this one first, unless a racing request stamped it.
+ */
+async function claimedOrgOf(
+  claim: Record<string, AttributeValue> | undefined,
+  { normalizedEmail, userId, orgId }: { normalizedEmail: string; userId: string; orgId: string },
+): Promise<string | undefined> {
+  const claimedOrgId = claim?.orgId?.S;
+  if (claimedOrgId !== undefined || claim?.userId?.S !== userId) return claimedOrgId;
+  try {
+    await getDynamoClient().send(
+      new UpdateItemCommand({
+        TableName: Resource.UserInfoTable.name,
+        Key: { pk: { S: `EMAIL_NORM#${normalizedEmail}` }, sk: { S: 'TRIAL_ENTITLEMENT' } },
+        UpdateExpression: 'SET orgId = :orgId',
+        ConditionExpression: 'attribute_not_exists(orgId) AND userId = :userId',
+        ExpressionAttributeValues: { ':orgId': { S: orgId }, ':userId': { S: userId } },
+        ReturnValuesOnConditionCheckFailure: 'ALL_OLD',
+      }),
+    );
+    return orgId;
+  } catch (err) {
+    if (err instanceof ConditionalCheckFailedException) return err.Item?.orgId?.S;
+    throw new TrialEntitlementError('Failed to record the org on a trial entitlement', {
+      cause: err,
+    });
+  }
 }
