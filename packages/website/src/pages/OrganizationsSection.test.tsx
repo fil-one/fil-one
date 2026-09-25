@@ -214,6 +214,18 @@ describe('OrganizationsSection', () => {
     expect(mockRemoveMember).not.toHaveBeenCalled();
   });
 
+  it('does not block an Owner whose roster failed to load', async () => {
+    mockListMembers.mockRejectedValue(new Error('network'));
+    renderSection();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Acme' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Leave organization' }));
+
+    await waitFor(() => expect(mockListMembers).toHaveBeenCalled());
+    expect(await screen.findByRole('button', { name: 'Leave' })).toBeEnabled();
+    expect(screen.queryByText(/no other owner/)).not.toBeInTheDocument();
+  });
+
   it('never checks ownership for a non-Owner, who cannot hit LAST_OWNER', async () => {
     renderSection(me({ role: OrgRole.Member }));
 

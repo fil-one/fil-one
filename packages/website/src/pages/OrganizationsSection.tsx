@@ -102,9 +102,10 @@ export function OrganizationsSection({ me }: { me: MeResponse }) {
     queryFn: listMembers,
     enabled: me.role === OrgRole.Owner,
   });
-  const isLastOwner =
-    me.role === OrgRole.Owner &&
-    (membersData?.members.filter((m) => m.role === OrgRole.Owner).length ?? 1) <= 1;
+  // Unknown while loading or after a failed read: the server's LAST_OWNER
+  // refusal still stops a last owner, and its toast says why.
+  const ownerCount = membersData?.members.filter((m) => m.role === OrgRole.Owner).length;
+  const isLastOwner = me.role === OrgRole.Owner && ownerCount !== undefined && ownerCount <= 1;
 
   const leave = useMutation({
     // `userId` is only absent for a caller with no membership row at all, and
