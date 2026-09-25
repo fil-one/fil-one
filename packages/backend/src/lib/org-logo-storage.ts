@@ -121,8 +121,11 @@ export async function withClaimedOrgLogo<T>(logoUrl: string, save: () => Promise
 }
 
 /** Delete the logo a new one replaced, once the org no longer points at it. */
-export async function deleteReplacedOrgLogo(logoUrl: string | undefined): Promise<void> {
-  if (logoUrl) await deleteUpload(logoUrl, LOGO_KEY_PREFIX);
+export async function deleteReplacedOrgLogo(
+  logoUrl: string | undefined,
+  options?: DeleteUploadOptions,
+): Promise<void> {
+  if (logoUrl) await deleteUpload(logoUrl, LOGO_KEY_PREFIX, options);
 }
 
 /**
@@ -205,12 +208,22 @@ async function unclaimUpload(url: string, prefix: string): Promise<void> {
 }
 
 /**
- * Delete the upload `url` names, once whatever saved it has moved on to another.
- * A URL that isn't one of this bucket's is left alone. Never throws: the save
- * it follows already landed, and a file left behind costs storage, not
- * correctness.
+ * `rethrow` is for a caller that must not proceed with the file still public,
+ * such as account erasure. Deleting a missing key succeeds, so a retry is safe.
  */
-export async function deleteUpload(url: string, prefix: string): Promise<void> {
+export type DeleteUploadOptions = { rethrow?: boolean };
+
+/**
+ * Delete the upload `url` names, once whatever saved it has moved on to another.
+ * A URL that isn't one of this bucket's is left alone. Never throws unless
+ * `rethrow` is set: the save it follows already landed, and a file left behind
+ * costs storage, not correctness.
+ */
+export async function deleteUpload(
+  url: string,
+  prefix: string,
+  { rethrow = false }: DeleteUploadOptions = {},
+): Promise<void> {
   const bucket = Resource.OrgLogoBucket.name;
   const key = keyFromBucketUrl(url, bucket, prefix);
   if (!key) return;
@@ -218,6 +231,7 @@ export async function deleteUpload(url: string, prefix: string): Promise<void> {
   try {
     await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
   } catch (err) {
+    if (rethrow) throw err;
     console.error('[org-logo-storage] Failed to delete a replaced upload', {
       key,
       error: err instanceof Error ? err.message : String(err),
