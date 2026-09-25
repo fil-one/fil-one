@@ -415,7 +415,8 @@ describe('PATCH /api/org handler', () => {
         Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
         UpdateExpression: 'SET logoUrl = :logoUrl',
         // No logo stored yet, so none may have appeared meanwhile either.
-        ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(logoUrl)',
+        ConditionExpression:
+          'attribute_exists(pk) AND (attribute_not_exists(logoUrl) OR logoUrl = :logoUrl)',
         ExpressionAttributeValues: { ':logoUrl': { S: LOGO_URL } },
       });
       expect(auditedEvent()).toMatchObject({
@@ -488,14 +489,16 @@ describe('PATCH /api/org handler', () => {
 
     // Two admins saving a logo at once both read the same one. Without this the
     // second write lands too, and the first new logo is left claimed with
-    // nothing pointing at it and nothing ever deleting it.
-    it('saves the logo only if it is still the one this request read', async () => {
+    // nothing pointing at it and nothing ever deleting it. A duplicate save of
+    // the same logo still lands: failing it would unclaim the live logo.
+    it('saves the logo only if it is still the one this request read, or already this one', async () => {
       orgProfileNamed('Old Corp', true, 'https://cdn.example.com/old.png');
 
       await handler(renameEvent({ name: 'Old Corp', logoUrl: LOGO_URL }), buildContext());
 
       expect(updateInput()).toMatchObject({
-        ConditionExpression: 'attribute_exists(pk) AND logoUrl = :previousLogoUrl',
+        ConditionExpression:
+          'attribute_exists(pk) AND (logoUrl = :previousLogoUrl OR logoUrl = :logoUrl)',
         ExpressionAttributeValues: {
           ':logoUrl': { S: LOGO_URL },
           ':previousLogoUrl': { S: 'https://cdn.example.com/old.png' },
@@ -509,7 +512,7 @@ describe('PATCH /api/org handler', () => {
       await handler(renameEvent({ name: 'New Corp', logoUrl: LOGO_URL }), buildContext());
 
       expect(updateInput()?.ConditionExpression).toBe(
-        'attribute_exists(pk) AND #name = :previousName AND logoUrl = :previousLogoUrl',
+        'attribute_exists(pk) AND #name = :previousName AND (logoUrl = :previousLogoUrl OR logoUrl = :logoUrl)',
       );
     });
 

@@ -165,7 +165,9 @@ async function resolveLogoChange(
 /**
  * The row exists, and each field this save writes is still the value this
  * request read. An org created before naming shipped has no name to match, so
- * each field conditions on absence or on the value.
+ * each field conditions on absence or on the value. The logo may also already
+ * be the one this save writes: a duplicate save then lands instead of failing
+ * and unclaiming the logo the first save made live.
  */
 function saveCondition({
   renamed,
@@ -186,8 +188,8 @@ function saveCondition({
     ...(logoChanged
       ? [
           previousLogoUrl === undefined
-            ? 'attribute_not_exists(logoUrl)'
-            : 'logoUrl = :previousLogoUrl',
+            ? '(attribute_not_exists(logoUrl) OR logoUrl = :logoUrl)'
+            : '(logoUrl = :previousLogoUrl OR logoUrl = :logoUrl)',
         ]
       : []),
   ].join(' AND ');
