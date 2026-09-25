@@ -14,7 +14,7 @@ type OrgAvatarProps = {
 };
 
 const SIZE_CLASSES: Record<OrgAvatarSize, string> = {
-  xs: 'h-4 w-4 text-[8px]',
+  xs: 'h-4 w-4 text-meta',
   sm: 'h-7 w-7 text-xs',
   md: 'h-14 w-14 text-lg',
   lg: 'h-16 w-16 text-lg',
