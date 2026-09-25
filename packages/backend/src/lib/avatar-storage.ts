@@ -1,4 +1,5 @@
 import { AVATAR_MAX_BYTES } from '@filone/shared';
+import type { DeleteUploadOptions } from './org-logo-storage.ts';
 import {
   withClaimedUpload,
   deleteUpload,
@@ -53,6 +54,9 @@ export async function withClaimedAvatar<T>(pictureUrl: string, save: () => Promi
  * provider's, most often) is left alone: only our own uploads are ours to
  * remove.
  */
-export async function deleteReplacedAvatar(pictureUrl: string | undefined): Promise<void> {
-  if (pictureUrl) await deleteUpload(pictureUrl, AVATAR_KEY_PREFIX);
+export async function deleteReplacedAvatar(
+  pictureUrl: string | undefined,
+  options?: DeleteUploadOptions,
+): Promise<void> {
+  if (pictureUrl) await deleteUpload(pictureUrl, AVATAR_KEY_PREFIX, options);
 }

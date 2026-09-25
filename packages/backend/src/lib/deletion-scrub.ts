@@ -422,11 +422,11 @@ async function deleteInviteTokenLookups(orgRows: Item[]): Promise<void> {
   }
 }
 
-/** `name` is the org's only personal data. `deleting` stays, permanently. */
+/** `name` and `logoUrl` are the org's only personal data. `deleting` stays, permanently. */
 async function scrubOrgProfile(orgId: string): Promise<void> {
   await scrubRow({
     key: { pk: `ORG#${orgId}`, sk: 'PROFILE' },
-    remove: '#name',
+    remove: '#name, logoUrl',
     names: { '#name': 'name' },
   });
 }

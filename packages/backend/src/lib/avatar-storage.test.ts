@@ -41,6 +41,16 @@ describe('deleteReplacedAvatar', () => {
     });
   });
 
+  it('swallows a failed delete unless asked to rethrow it', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    s3Mock.on(DeleteObjectCommand).rejects(new Error('S3 down'));
+
+    await expect(deleteReplacedAvatar(`${BUCKET_HOST}/avatars/old`)).resolves.toBeUndefined();
+    await expect(
+      deleteReplacedAvatar(`${BUCKET_HOST}/avatars/old`, { rethrow: true }),
+    ).rejects.toThrow('S3 down');
+  });
+
   it.each([
     ['a social provider’s picture', 'https://lh3.googleusercontent.com/a/photo'],
     ['an org logo', `${BUCKET_HOST}/logos/abc`],
