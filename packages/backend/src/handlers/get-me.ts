@@ -30,7 +30,13 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
 
   // The switcher names the active org from this same read rather than a second
   // one, so the memberships join the round of reads already in flight.
-  const activeOrgProfile = getOrgProfile(orgId);
+  //
+  // Consistent, because the org this request names may be one the caller just
+  // created — signup, or "create organization" followed immediately by a
+  // switch into it — and an eventually-consistent read racing that write can
+  // still answer with nothing, naming the org empty on the very response that
+  // is supposed to introduce it.
+  const activeOrgProfile = getOrgProfile(orgId, { consistentRead: true });
 
   const [orgProfile, enrollments, passkeys, ragAccess, orgsBeta, memberships] = await Promise.all([
     activeOrgProfile,
@@ -50,10 +56,14 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   ]);
 
   const orgName = orgProfile?.name?.S ?? '';
+  // Absent means an organization that predates the field, which is treated as
+  // named: only an explicit false sends the caller through the naming step.
+  const nameConfirmed = orgProfile?.nameConfirmed?.BOOL !== false;
 
   const body: MeResponse = {
     orgId,
     orgName,
+    nameConfirmed,
     emailVerified,
     email,
     name,

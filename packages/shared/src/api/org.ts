@@ -27,8 +27,12 @@ export function isOrgRole(value: unknown): value is OrgRole {
  * Declared here rather than beside the membership row because the audit
  * envelope records it too, and two unions listing the same three values drift:
  * the day SCIM adds a fourth, one of them would still be missing it.
+ *
+ * `'manual'` is the account's own creation of an additional org — distinct from
+ * `'signup'`, which is the org that came with the account, so the two are
+ * distinguishable in the audit log and the member roster.
  */
-export type OrgMembershipSource = 'signup' | 'conversion' | 'invitation';
+export type OrgMembershipSource = 'signup' | 'conversion' | 'invitation' | 'manual';
 
 export const ORG_NAME_MIN_LENGTH = 2;
 export const ORG_NAME_MAX_LENGTH = 100;
@@ -57,3 +61,26 @@ export type UpdateOrgRequest = z.infer<typeof UpdateOrgSchema>;
 export interface UpdateOrgResponse {
   name: string;
 }
+
+/**
+ * `POST /api/org` — an existing account creating an additional organization
+ * (distinct from the one org.ts owns via signup).
+ */
+export const CreateOrgSchema = z.object({
+  name: OrgNameSchema,
+});
+
+export type CreateOrgRequest = z.infer<typeof CreateOrgSchema>;
+
+export interface CreateOrgResponse {
+  orgId: string;
+  orgName: string;
+  role: OrgRole;
+}
+
+/**
+ * How many organizations one user may own before `POST /api/org` refuses to
+ * create another. Counts Owner memberships only, so being invited into other
+ * orgs never uses up the allowance.
+ */
+export const MAX_OWNED_ORGS = 10;

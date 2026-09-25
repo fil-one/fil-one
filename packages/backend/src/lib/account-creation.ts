@@ -7,15 +7,6 @@ import { OrgKeys } from './org-membership.ts';
 import type { OrgMembership } from './org-membership.ts';
 import { OrgSetupStatus } from './org-setup-status.ts';
 
-export interface NewAccountParams {
-  sub: string;
-  userId: string;
-  orgId: string;
-  orgName: string;
-  email?: string;
-  name?: string;
-}
-
 /**
  * Create the account on first login: identity, profiles, membership, the org's
  * owner count, and the `org.created` audit event, in one transaction. Returns
@@ -41,7 +32,14 @@ export async function createNewUserAndOrg({
   orgName,
   email,
   name,
-}: NewAccountParams): Promise<OrgMembership> {
+}: {
+  sub: string;
+  userId: string;
+  orgId: string;
+  orgName: string;
+  email?: string;
+  name?: string;
+}): Promise<OrgMembership> {
   const now = new Date().toISOString();
 
   // Spans three tables: identity and profiles in UserInfoTable, membership and
@@ -67,6 +65,42 @@ export async function createNewUserAndOrg({
   });
 
   return { orgId, userId, role: OrgRole.Owner, joinedAt: now, source: 'signup' };
+}
+
+/**
+ * Create an additional organization for an account that already exists — the
+ * console's "Create organization" action, once an account may own more than
+ * one. Sibling to {@link createNewUserAndOrg}, reusing its row shapes minus the
+ * `SUB#`/`USER#PROFILE` identity rows, which already exist for this caller.
+ *
+ * `source: 'manual'` on both the membership row and the audit event, distinct
+ * from `'signup'`: this org did not come with the account, the account asked
+ * for it.
+ */
+export async function createAdditionalOrg({
+  userId,
+  orgName,
+  email,
+}: {
+  userId: string;
+  orgName: string;
+  email?: string;
+}): Promise<{ orgId: string; orgName: string }> {
+  const orgId = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  await commitAudited({
+    items: orgRows({ orgId, orgName, userId, now, source: 'manual', nameConfirmed: true }),
+    event: auditEvent({
+      type: 'org.created',
+      actor: userActor({ userId, email }),
+      orgId,
+      subject: AuditSubjects.org(orgId),
+      details: { orgName, source: 'manual' },
+    }),
+  });
+
+  return { orgId, orgName };
 }
 
 /**
@@ -190,7 +224,6 @@ function accountRows({
   now: string;
 }): TransactWriteItem[] {
   const tableName = Resource.UserInfoTable.name;
-  const orgTableName = Resource.OrgTable.name;
 
   return [
     {
@@ -225,24 +258,57 @@ function accountRows({
         },
       },
     },
+    // The name here is derived, not chosen. False sends the account through
+    // the naming step; `PATCH /api/org` flips it.
+    ...orgRows({ orgId, orgName, userId, now, source: 'signup', nameConfirmed: false }),
+  ];
+}
+
+/**
+ * An org's own rows: its profile, the owner count, the creator's Owner
+ * membership, and its inverse item, which is written in the same transaction
+ * so a membership and the list it appears in never disagree about a role.
+ *
+ * `source` is `'signup'` for the org that came with the account and `'manual'`
+ * for one the account asked for. A manual org's profile Put is create-only:
+ * its `orgId` is a fresh UUID, so a collision means the id was reused.
+ * The owner count sits in OrgTable beside the rows it counts, so every
+ * owner-set transaction is single-table.
+ */
+function orgRows({
+  orgId,
+  orgName,
+  userId,
+  now,
+  source,
+  nameConfirmed,
+}: {
+  orgId: string;
+  orgName: string;
+  userId: string;
+  now: string;
+  source: 'signup' | 'manual';
+  nameConfirmed: boolean;
+}): TransactWriteItem[] {
+  const orgTableName = Resource.OrgTable.name;
+
+  return [
     {
       Put: {
-        TableName: tableName,
+        TableName: Resource.UserInfoTable.name,
         Item: {
           pk: { S: `ORG#${orgId}` },
           sk: { S: 'PROFILE' },
           name: { S: orgName },
+          nameConfirmed: { BOOL: nameConfirmed },
           auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
           createdBy: { S: userId },
           createdAt: { S: now },
         },
+        ...(source === 'manual' ? { ConditionExpression: 'attribute_not_exists(pk)' } : {}),
       },
     },
     {
-      // The last-Owner invariant's counter, in OrgTable beside the rows it
-      // counts, so every owner-set transaction is single-table. Stamped
-      // from day one so no org is ever created without it and the
-      // conversion has nothing to repair for accounts created while it runs.
       Put: {
         TableName: orgTableName,
         Item: {
@@ -253,9 +319,6 @@ function accountRows({
       },
     },
     {
-      // Authoritative membership. The account's creator owns it: an org of
-      // one whose single member can do everything, which is what every
-      // account is until invitations ship.
       Put: {
         TableName: orgTableName,
         Item: {
@@ -263,13 +326,11 @@ function accountRows({
           sk: { S: OrgKeys.memberSk(userId) },
           role: { S: OrgRole.Owner },
           joinedAt: { S: now },
-          source: { S: 'signup' },
+          source: { S: source },
         },
       },
     },
     {
-      // Inverse item, written in the same transaction so a membership and
-      // the list it appears in can never disagree about a role.
       Put: {
         TableName: orgTableName,
         Item: {
