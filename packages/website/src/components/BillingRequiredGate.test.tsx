@@ -69,10 +69,23 @@ describe('BillingRequiredGate', () => {
 
     expect(await screen.findByText('Add a payment method to continue')).toBeInTheDocument();
     const cta = screen.getByRole('button', { name: 'Add payment method' });
-    expect(cta).toBeInTheDocument();
+    await waitFor(() => expect(cta).toBeEnabled());
 
     cta.click();
     expect(await screen.findByTestId('add-payment-dialog')).toBeInTheDocument();
+  });
+
+  // The billing read may be claiming a trial; a setup intent racing it could
+  // mint a second Stripe customer.
+  it('keeps the card button disabled until billing has loaded', async () => {
+    mockGetBilling.mockReturnValue(new Promise(() => {}));
+
+    renderGate(OrgRole.Owner);
+
+    const cta = await screen.findByRole('button', { name: 'Add payment method' });
+    expect(cta).toBeDisabled();
+    cta.click();
+    expect(mockApiRequest).not.toHaveBeenCalled();
   });
 
   // A pre-re-key billing row answers 503, and the card form refuses it too.
