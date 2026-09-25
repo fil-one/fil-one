@@ -5,6 +5,7 @@ import { SubscriptionStatus } from '@filone/shared';
 import { SidebarNav } from './SidebarNav';
 import { Banner } from './Banner';
 import { UserAvatar } from './UserAvatar';
+import { onSwitchingOrgChange } from '../lib/active-org.js';
 import { OrgSwitcherMenu } from './OrgSwitcherMenu';
 import { getUsage, getBilling, getMe, logout } from '../lib/api';
 import { monogramFromName } from '../lib/monogram.js';
@@ -182,6 +183,11 @@ export function AppShell({ children }: AppShellProps) {
     setMobileOpen(false);
     hamburgerButtonRef.current?.focus();
   }, []);
+
+  // A switch (or a new org, which switches into itself) moves the page into
+  // another org, and the drawer belongs to the one left behind. Route params
+  // changing does not remount the shell, so it closes here.
+  useEffect(() => onSwitchingOrgChange((switching) => switching && setMobileOpen(false)), []);
 
   // Move focus to close button when drawer opens
   useEffect(() => {

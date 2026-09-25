@@ -216,6 +216,14 @@ export interface ApiRequestBehavior {
    * the redirect would have landed on.
    */
   rendersUnverifiedEmail?: boolean;
+  /**
+   * Read straight past the org-switch latch instead of waiting it out.
+   *
+   * Only for `_app.tsx`'s `beforeLoad`: `switchToOrg`'s navigation does not
+   * settle until that `beforeLoad` does, so holding its `getMe()` on the latch
+   * would deadlock. Every other caller waits.
+   */
+  skipSwitchWait?: boolean;
 }
 
 /**
@@ -313,19 +321,29 @@ async function sendApiRequest(
   behavior: ApiRequestBehavior = {},
   sentOrg?: SentOrg,
 ): Promise<Response> {
+  const method = options.method?.toUpperCase() ?? 'GET';
+  const isWrite = method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS';
+
   // The tab is on its way to another org. Held rather than rejected, for the
   // reason `getMe` returns instead of throwing on a mismatch: the page is
   // disappearing, and an error rendered over it would be the last thing the user
   // sees of the org they just left. A switch that never navigates rolls back
   // instead, and the request goes ahead below against the restored stash.
-  await waitWhileSwitching();
+  const outcome = behavior.skipSwitchWait ? null : await waitWhileSwitching();
+  // A write held through a switch that landed was issued from the page the user
+  // left, about that page's org, and the stash now names the other one: sent,
+  // a rename or a delete clicked in org A would run in org B. It never settles
+  // instead, so nothing downstream of it runs either — no error toast over the
+  // new org's page, and no next step of a flow that awaited it. A read goes
+  // ahead: it names nothing from the old page, and the new page's own queries
+  // can start inside the same window.
+  if (outcome === 'committed' && isWrite) return new Promise<Response>(() => {});
 
-  const method = options.method?.toUpperCase() ?? 'GET';
   const headers = new Headers(options.headers);
   if (!headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
-  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+  if (isWrite) {
     const token = getCsrfToken();
     if (token) headers.set('X-CSRF-Token', token);
   }
@@ -493,6 +511,8 @@ export async function getMe(options?: {
   forceRefresh?: boolean;
   include?: 'mfa';
   skipOrgReconcile?: boolean;
+  /** See `ApiRequestBehavior.skipSwitchWait`. */
+  skipSwitchWait?: boolean;
 }): Promise<MeResponse> {
   const params = new URLSearchParams();
   if (options?.forceRefresh) params.set('forceRefresh', '1');
@@ -503,7 +523,12 @@ export async function getMe(options?: {
   const sentOrg: SentOrg = { orgId: null };
   let me: MeResponse;
   try {
-    me = await apiRequest<MeResponse>(`/me${qs ? `?${qs}` : ''}`, undefined, {}, sentOrg);
+    me = await apiRequest<MeResponse>(
+      `/me${qs ? `?${qs}` : ''}`,
+      undefined,
+      { skipSwitchWait: options?.skipSwitchWait },
+      sentOrg,
+    );
   } catch (err) {
     // The status decides: only a refusal the header can be blamed for drops the
     // stash. A network error carries none at all.
