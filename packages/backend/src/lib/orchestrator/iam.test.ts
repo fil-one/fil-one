@@ -42,7 +42,7 @@ import {
   PolicyValidationError,
   PrincipalNotFoundError,
 } from '../errors.ts';
-import { createFilOneOrchestrator } from './orchestrator.ts';
+import { createFilOneOrchestrator } from './arms.ts';
 
 const tenantId = '00000000-0000-0000-0000-000000000001';
 const policy: BucketPolicy = {
