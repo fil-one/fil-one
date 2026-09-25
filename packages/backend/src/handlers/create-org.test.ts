@@ -29,7 +29,20 @@ vi.mock('jose', () => ({
   createRemoteJWKSet: vi.fn((_url: unknown) => 'mock-jwks'),
 }));
 
+const mockIsUploadedOrgLogoUrl = vi.fn();
+const mockClaimOrgLogoUrl = vi.fn();
 const mockListMemberships = vi.fn();
+vi.mock('../lib/org-logo-storage.ts', () => ({
+  isUploadedOrgLogoUrl: (...args: unknown[]) => mockIsUploadedOrgLogoUrl(...args),
+  // Net effect: the upload ends up claimed only when the save succeeded. The
+  // claim-first order and the unclaim on failure are org-logo-storage's own
+  // tests to cover.
+  withClaimedOrgLogo: async (url: string, save: () => Promise<unknown>) => {
+    const result = await save();
+    mockClaimOrgLogoUrl(url);
+    return result;
+  },
+}));
 
 // Only the ownership count is stubbed; the membership read the middleware makes
 // still goes through the real module.
@@ -96,6 +109,10 @@ function transactItems() {
   return calls[0].args[0].input.TransactItems ?? [];
 }
 
+function profilePut() {
+  return transactItems().find((item) => item.Put?.TableName === 'UserInfoTable')!.Put!;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -111,6 +128,8 @@ describe('POST /api/org handler', () => {
     mockJwtVerify.mockResolvedValue({
       payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: true },
     });
+    mockIsUploadedOrgLogoUrl.mockResolvedValue(true);
+    mockClaimOrgLogoUrl.mockResolvedValue(undefined);
     mockListMemberships.mockResolvedValue([
       { orgId: MOCK_ORG_ID, role: OrgRole.Owner, joinedAt: '' },
     ]);
@@ -215,6 +234,51 @@ describe('POST /api/org handler', () => {
         },
       },
     ]);
+    expect(mockIsUploadedOrgLogoUrl).not.toHaveBeenCalled();
+  });
+
+  it('carries the logo URL through when one is provided', async () => {
+    const result = await handler(
+      createOrgEvent({ name: 'New Co', logoUrl: 'https://logos.example/abc.png' }),
+      buildContext(),
+    );
+
+    const body = JSON.parse((result as { body: string }).body);
+    expect(body.logoUrl).toBe('https://logos.example/abc.png');
+    expect(profilePut().Item).toMatchObject({
+      logoUrl: { S: 'https://logos.example/abc.png' },
+    });
+  });
+
+  it('claims the logo once the org holds it', async () => {
+    const logoUrl = 'https://OrgLogoBucket.s3.us-east-1.amazonaws.com/logos/abc';
+
+    const result = await handler(createOrgEvent({ name: 'New Co', logoUrl }), buildContext());
+
+    expect(result.statusCode).toBe(201);
+    expect(mockClaimOrgLogoUrl).toHaveBeenCalledWith(logoUrl);
+  });
+
+  it('leaves the logo unclaimed when the create fails, so a retry can reuse it', async () => {
+    ddbMock.on(TransactWriteItemsCommand).rejects(new Error('boom'));
+    const logoUrl = 'https://OrgLogoBucket.s3.us-east-1.amazonaws.com/logos/abc';
+
+    const result = await handler(createOrgEvent({ name: 'New Co', logoUrl }), buildContext());
+
+    expect(result.statusCode).toBe(500);
+    expect(mockClaimOrgLogoUrl).not.toHaveBeenCalled();
+  });
+
+  it('rejects a logo URL the presign step never minted', async () => {
+    mockIsUploadedOrgLogoUrl.mockResolvedValue(false);
+
+    const result = await handler(
+      createOrgEvent({ name: 'New Co', logoUrl: 'https://attacker.example/tracker.png' }),
+      buildContext(),
+    );
+
+    expect(result.statusCode).toBe(400);
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
   });
 
   it(`refuses a caller who already owns ${MAX_OWNED_ORGS} orgs`, async () => {
