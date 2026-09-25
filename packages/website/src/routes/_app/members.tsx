@@ -1,19 +1,34 @@
-import { createRoute, redirect } from '@tanstack/react-router';
+import z from 'zod';
+import { createRoute } from '@tanstack/react-router';
 
 import { Route as appRoute } from '../_app';
+import { OrganizationPage } from '../../pages/OrganizationPage';
+import { RequirePermissionPage } from '../../components/RequirePermissionPage';
 
 /**
- * The roster is a tab of `/organization` now (FIL-1094).
- *
- * Kept as a redirect rather than deleted: the path is in the sidebar's history,
- * in bookmarks, and in whatever anybody has linked to it. `replace` so the back
- * button returns where the caller came from rather than bouncing through here
- * again.
+ * `tab` names which of the page's tabs opens, for links that mean a particular
+ * one, e.g. `/organization?tab=invitations` now redirects here.
  */
+const membersSearchSchema = z.object({
+  tab: z.enum(['members', 'invitations']).optional(),
+});
+
+function MembersRoute() {
+  const { tab } = Route.useSearch();
+  return (
+    <RequirePermissionPage
+      permission="members.read"
+      title="Members"
+      deniedMessage="Reading this organization's members is not part of your role."
+    >
+      <OrganizationPage tab={tab} />
+    </RequirePermissionPage>
+  );
+}
+
 export const Route = createRoute({
   path: '/members',
   getParentRoute: () => appRoute,
-  beforeLoad: () => {
-    throw redirect({ to: '/organization', replace: true });
-  },
+  component: MembersRoute,
+  validateSearch: membersSearchSchema,
 });
