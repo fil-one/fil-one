@@ -4,7 +4,9 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import {
   ApiErrorCode,
   NO_ROLE,
+  POLICY_WILDCARD_PRINCIPAL,
   PutBucketPolicyRequestSchema,
+  RETENTION_WRITE_ACTIONS,
   addsRetentionGrants,
   roleHasPermission,
 } from '@filone/shared';
@@ -36,9 +38,11 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
  * or `s3:PutObjectLegalHold`, or `s3:*` which stands for both, needs
  * `privileged.grant`, which only an Owner holds. Newly, against the stored
  * document: the roster statement the console writes for Owners carries `s3:*`,
- * so an Admin editing an unrelated statement is not granting it again. The
- * storage system enforces the statement without knowing either action was
- * privileged, so the rule has to hold here.
+ * so an Admin editing an unrelated statement is not granting it again. A
+ * retention write named outright is held to the stored document by name, so an
+ * Admin may keep or narrow one an Owner wrote but not add one, even for an
+ * Owner who holds it through `s3:*`. The storage system enforces the statement
+ * without knowing either action was privileged, so the rule has to hold here.
  *
  * The body carries the ETag the last read returned; without one the write
  * creates the bucket's first policy and is refused if one exists. Either way a
@@ -128,8 +132,8 @@ function refuseFirstPolicyRetentionGrants({
 /**
  * For a caller without `privileged.grant`, the cap on a replacement: the
  * stored document is read, and the write is refused if the new one grants a
- * retention write the stored one did not. A read that fails answers as the
- * write would have.
+ * retention write the stored one did not, or names one outright that the stored
+ * one did not name. A read that fails answers as the write would have.
  */
 async function refuseNewRetentionGrants(
   iam: IamMethods,
@@ -145,7 +149,40 @@ async function refuseNewRetentionGrants(
     if (!response) throw err;
     return response;
   }
-  return addsRetentionGrants(current, next) ? retentionGrantForbiddenResponse() : undefined;
+  return addsRetentionGrants(current, next) || addsNamedRetentionGrants(current, next)
+    ? retentionGrantForbiddenResponse()
+    : undefined;
+}
+
+/**
+ * Whether `next` names a retention or legal-hold write for a principal that
+ * `current` does not name it for. Only actions spelled out count, not `s3:*`,
+ * so this holds even when the principal already has the write through `s3:*`.
+ * A name for everyone covers every principal.
+ */
+function addsNamedRetentionGrants(current: BucketPolicy | null, next: BucketPolicy): boolean {
+  const before = namedRetentionGrants(current);
+  return [...namedRetentionGrants(next)].some((grant) => {
+    const action = grant.slice(grant.indexOf('|') + 1);
+    return !before.has(grant) && !before.has(`${POLICY_WILDCARD_PRINCIPAL}|${action}`);
+  });
+}
+
+/** Each principal an allow names a retention write for outright, keyed with the action. */
+function namedRetentionGrants(policy: BucketPolicy | null): Set<string> {
+  const grants = new Set<string>();
+  for (const statement of policy?.statement ?? []) {
+    if (statement.effect !== 'allow') continue;
+    const principals =
+      statement.principal === POLICY_WILDCARD_PRINCIPAL
+        ? [POLICY_WILDCARD_PRINCIPAL]
+        : statement.principal;
+    for (const action of statement.action) {
+      if (!(RETENTION_WRITE_ACTIONS as readonly string[]).includes(action)) continue;
+      for (const principal of principals) grants.add(`${principal}|${action}`);
+    }
+  }
+  return grants;
 }
 
 function retentionGrantForbiddenResponse(): APIGatewayProxyStructuredResultV2 {
