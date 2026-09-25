@@ -4,6 +4,7 @@ import { CheckIcon } from '@phosphor-icons/react/dist/ssr';
 import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button';
 import { AuthCard } from '../components/AuthCard';
+import { textButtonClassName } from '../components/text-button.js';
 import { logout, getMe, resendVerificationEmail } from '../lib/api.js';
 import type { MeResponse } from '@filone/shared';
 import { queryKeys } from '../lib/query-client.js';
@@ -12,10 +13,6 @@ const RESEND_COOLDOWN_SECONDS = 60;
 
 /** Long enough to register as an answer before the dashboard replaces the page. */
 const VERIFIED_ACK_MS = 700;
-
-/** Text buttons carry no chrome, so they need their own keyboard-only ring. */
-const textButton =
-  'rounded-xs font-medium text-brand-600 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600';
 
 type VerifyEmailPageProps = {
   me: MeResponse;
@@ -101,7 +98,7 @@ export function VerifyEmailPage({ me, onVerified }: VerifyEmailPageProps) {
         // Account-level escape hatch belongs to the page, not the task.
         <p className="text-xs text-(--color-paragraph-text-subtle)">
           Not your account?{' '}
-          <button type="button" onClick={logout} className={textButton}>
+          <button type="button" onClick={logout} className={textButtonClassName}>
             Sign out
           </button>
         </p>
@@ -170,7 +167,7 @@ export function VerifyEmailPage({ me, onVerified }: VerifyEmailPageProps) {
               type="button"
               disabled={resending}
               onClick={handleResend}
-              className={textButton}
+              className={textButtonClassName}
             >
               {resending ? 'sending…' : 'resend'}
             </button>

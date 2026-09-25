@@ -71,11 +71,13 @@ describe('ROUTE_MANIFEST', () => {
   it('checks the routes whose requirement depends on the request in their handlers', () => {
     // presign serves seven operations through one route, and
     // set-bucket-rag-enablement creates or discards an index depending on the
-    // flag. Neither has a permission the chain could name.
+    // flag. create-org creates an org the caller holds no role in yet, so there
+    // is no membership for a permission to check. None of the three has a
+    // permission the chain could name.
     const inHandler = entries
       .filter((route) => route.requires === 'in-handler')
       .map((route) => route.handler);
-    expect(inHandler.sort()).toStrictEqual(['presign', 'set-bucket-rag-enablement']);
+    expect(inHandler.sort()).toStrictEqual(['create-org', 'presign', 'set-bucket-rag-enablement']);
   });
 
   it('names a declared permission alongside every in-handler cap', () => {

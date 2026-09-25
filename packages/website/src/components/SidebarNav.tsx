@@ -1,15 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
 import {
   SquaresFourIcon,
   DatabaseIcon,
   KeyIcon,
-  GearIcon,
   CaretLeftIcon,
   CaretRightIcon,
-  BookOpenIcon,
-  ChatCircleIcon,
-  SignOutIcon,
-  QuestionIcon,
   ChatTeardropDotsIcon,
   RobotIcon,
   UsersIcon,
@@ -17,18 +11,16 @@ import {
 } from '@phosphor-icons/react/dist/ssr';
 import { Link, useMatchRoute } from '@tanstack/react-router';
 
-import { DOCS_URL } from '@filone/shared';
 import type { Permission } from '@filone/shared';
-import { logout } from '../lib/api.js';
 import { usePermissions } from '../lib/use-permissions.js';
 import { useMembersSurface } from '../lib/use-members-surface.js';
 import { useSidebarData } from './use-sidebar-data.js';
 
-import { OrgSwitcher } from './OrgSwitcher.js';
+import { OrgSwitcherMenu } from './OrgSwitcherMenu.js';
 import { StatusBanners } from './SidebarStatusBanners.js';
 import { StatusIndicator } from './StatusIndicator.js';
 import { Tooltip } from './Tooltip.js';
-import { UserAvatar } from './UserAvatar.js';
+import { UserMenu } from './UserMenu.js';
 
 type SidebarNavProps = {
   collapsed: boolean;
@@ -172,7 +164,7 @@ function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps
 // Organization and Billing are the same entry seen from two orgs: where there
 // is a members surface, billing is a tab of Organization and gets no entry of
 // its own; where there is not, Organization is not a page and billing is all
-// that would have been on it. Settings is every member's own account.
+// that would have been on it.
 //
 // Both are declared with the permission the destination needs — even
 // `members.read`, which all four roles hold — so an entry stays hidden while
@@ -196,7 +188,6 @@ const utilityNavItems: NavItem[] = [
     permission: 'billing.view',
     membersSurface: 'without',
   },
-  { path: '/settings', icon: GearIcon, label: 'Settings', testId: 'nav-settings' },
 ];
 
 function UtilityNavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps) {
@@ -249,80 +240,6 @@ function UtilityNavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLin
   );
 }
 
-export type HelpMenuProps = {
-  collapsed: boolean;
-  helpMenuOpen: boolean;
-  helpMenuRef: React.RefObject<HTMLDivElement | null>;
-  helpButtonRef: React.RefObject<HTMLButtonElement | null>;
-  onToggle: () => void;
-  onClose?: () => void;
-};
-
-export function HelpMenu({
-  collapsed,
-  helpMenuOpen,
-  helpMenuRef,
-  helpButtonRef,
-  onToggle,
-  onClose,
-}: HelpMenuProps) {
-  return (
-    <div className="relative">
-      {collapsed ? (
-        // `w-full` on the tooltip wrapper: it is an inline-block, so without it
-        // the button shrinks to the icon and sits against the left edge instead
-        // of centring under the collapsed rail like every other icon.
-        <Tooltip content="Help" side="right" className="w-full">
-          <button
-            ref={helpButtonRef}
-            type="button"
-            onClick={onToggle}
-            aria-label="Help"
-            className="flex w-full items-center justify-center rounded-lg py-2 text-zinc-600 transition-colors hover:bg-zinc-100"
-          >
-            <QuestionIcon size={18} className="text-zinc-400" />
-          </button>
-        </Tooltip>
-      ) : (
-        <button
-          ref={helpButtonRef}
-          type="button"
-          onClick={onToggle}
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-xs text-zinc-500 transition-colors hover:bg-zinc-100"
-        >
-          <QuestionIcon size={16} className="flex-shrink-0 text-zinc-400" />
-          Help
-        </button>
-      )}
-      {helpMenuOpen && (
-        <div
-          ref={helpMenuRef}
-          className="absolute bottom-full left-2 z-50 mb-1 w-52 rounded-lg border border-zinc-200 bg-white p-1 shadow-lg"
-        >
-          <a
-            href={DOCS_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={onClose}
-            className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
-          >
-            <BookOpenIcon size={18} className="flex-shrink-0 text-zinc-400" />
-            Documentation
-          </a>
-          <Link
-            to="/support"
-            onClick={onClose}
-            className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
-          >
-            <ChatCircleIcon size={18} className="flex-shrink-0 text-zinc-400" />
-            Talk to an expert
-          </Link>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export function SidebarNav({
   collapsed,
   onToggle,
@@ -331,12 +248,6 @@ export function SidebarNav({
   showTestIds,
 }: SidebarNavProps) {
   const matchRoute = useMatchRoute();
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const userMenuRef = useRef<HTMLDivElement>(null);
-  const userButtonRef = useRef<HTMLButtonElement>(null);
-  const [helpMenuOpen, setHelpMenuOpen] = useState(false);
-  const helpMenuRef = useRef<HTMLDivElement>(null);
-  const helpButtonRef = useRef<HTMLButtonElement>(null);
 
   const {
     me,
@@ -355,32 +266,6 @@ export function SidebarNav({
     egressPct,
     limitsKnown,
   } = useSidebarData();
-
-  useEffect(() => {
-    if (!userMenuOpen && !helpMenuOpen) return;
-    function handleMouseDown(e: MouseEvent) {
-      if (
-        userMenuOpen &&
-        userMenuRef.current &&
-        !userMenuRef.current.contains(e.target as Node) &&
-        userButtonRef.current &&
-        !userButtonRef.current.contains(e.target as Node)
-      ) {
-        setUserMenuOpen(false);
-      }
-      if (
-        helpMenuOpen &&
-        helpMenuRef.current &&
-        !helpMenuRef.current.contains(e.target as Node) &&
-        helpButtonRef.current &&
-        !helpButtonRef.current.contains(e.target as Node)
-      ) {
-        setHelpMenuOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleMouseDown);
-    return () => document.removeEventListener('mousedown', handleMouseDown);
-  }, [userMenuOpen, helpMenuOpen]);
 
   return (
     <div className="h-full">
@@ -403,71 +288,27 @@ export function SidebarNav({
           </div>
         )}
 
-        {/* User profile + collapse toggle (desktop only) */}
+        {/* Header (desktop only): the full-width org switcher, with the
+            collapse toggle beside it while expanded. */}
         {showUserProfile && (
-          <div className="relative flex h-14 flex-shrink-0 items-center px-2">
-            <button
-              ref={userButtonRef}
-              type="button"
-              data-testid="user-profile"
-              aria-label={`User menu for ${displayName}`}
-              onClick={() => setUserMenuOpen((o) => !o)}
-              className={[
-                'flex items-center rounded-lg hover:bg-zinc-100',
-                collapsed ? 'w-full justify-center py-1.5' : 'gap-2.5 px-2 py-1.5',
-              ].join(' ')}
-            >
-              <UserAvatar src={me?.picture} initial={initial} />
-              {!collapsed && (
-                <div className="min-w-0 overflow-hidden text-left">
-                  <p className="truncate text-sm font-medium leading-tight text-zinc-900">
-                    {displayName}
-                  </p>
-                  {me?.orgName && (
-                    <p className="truncate text-xs leading-tight text-zinc-500">{me.orgName}</p>
-                  )}
-                </div>
-              )}
-            </button>
-
-            {/* Spacer + collapse toggle (expanded) */}
+          <div className="flex flex-shrink-0 items-center gap-1 px-2 pt-2 pb-1">
+            <div className="min-w-0 flex-1">
+              <OrgSwitcherMenu
+                collapsed={collapsed}
+                testId={showTestIds ? 'org-switcher-button' : undefined}
+              />
+            </div>
             {!collapsed && (
-              <>
-                <div className="flex-1" />
-                <Tooltip content="Collapse sidebar" side="right">
-                  <button
-                    type="button"
-                    onClick={onToggle}
-                    aria-label="Collapse sidebar"
-                    className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
-                  >
-                    <CaretLeftIcon size={16} />
-                  </button>
-                </Tooltip>
-              </>
-            )}
-
-            {/* User dropdown */}
-            {userMenuOpen && (
-              <div
-                ref={userMenuRef}
-                className="absolute left-2 top-14 z-50 w-52 rounded-lg border border-zinc-200 bg-white p-1 shadow-lg"
-              >
-                <OrgSwitcher
-                  memberships={me?.memberships}
-                  activeOrgId={me?.orgId}
-                  testId={showTestIds ? 'org-switcher' : undefined}
-                />
+              <Tooltip content="Collapse sidebar" side="right">
                 <button
                   type="button"
-                  id="user-menu-logout-button"
-                  onClick={logout}
-                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
+                  onClick={onToggle}
+                  aria-label="Collapse sidebar"
+                  className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
                 >
-                  <SignOutIcon size={18} className="flex-shrink-0 text-zinc-400" />
-                  Log out
+                  <CaretLeftIcon size={16} />
                 </button>
-              </div>
+              </Tooltip>
             )}
           </div>
         )}
@@ -509,16 +350,17 @@ export function SidebarNav({
           isInactive={isInactive}
         />
 
-        {/* Footer: Help + System status */}
-        <div className="border-t border-zinc-200 p-2 flex flex-col gap-0.5">
-          <HelpMenu
-            collapsed={collapsed}
-            helpMenuOpen={helpMenuOpen}
-            helpMenuRef={helpMenuRef}
-            helpButtonRef={helpButtonRef}
-            onToggle={() => setHelpMenuOpen((o) => !o)}
-            onClose={onClose}
-          />
+        {/* Footer: user identity (also carries Documentation/Support now) + System status */}
+        <div className="p-2 flex flex-col gap-0.5">
+          {showUserProfile && (
+            <UserMenu
+              src={me?.picture}
+              initial={initial}
+              displayName={displayName}
+              collapsed={collapsed}
+              testId={showTestIds ? 'user-menu-button' : undefined}
+            />
+          )}
           <StatusIndicator collapsed={collapsed} />
         </div>
       </nav>

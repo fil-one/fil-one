@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, fireEvent } from '@testing-library/react';
+import { render, fireEvent, screen, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole } from '@filone/shared';
 import type { MeResponse } from '@filone/shared';
@@ -17,21 +17,29 @@ vi.mock('@tanstack/react-router', () => ({
   useMatchRoute: () => () => false,
 }));
 
-// Force both status banners to render so their button ids are present, and give
-// the fixture the two memberships the org switcher needs to appear at all — with
-// one, it renders nothing and a props regression stays invisible.
+// The org the menu reads from `/me`, with the two memberships the org switcher
+// needs to appear at all.
+const ORG_ME: Partial<MeResponse> = {
+  orgName: 'Acme',
+  orgId: '11111111-1111-1111-1111-111111111111',
+  memberships: [
+    {
+      orgId: '11111111-1111-1111-1111-111111111111',
+      orgName: 'Acme',
+      role: OrgRole.Owner,
+    },
+    {
+      orgId: '22222222-2222-2222-2222-222222222222',
+      orgName: 'Globex',
+      role: OrgRole.Member,
+    },
+  ],
+};
+
+// Force both status banners to render so their button ids are present.
 vi.mock('./use-sidebar-data.js', () => ({
   useSidebarData: () => ({
-    me: {
-      name: 'Ada',
-      email: 'ada@example.com',
-      orgName: 'Acme',
-      orgId: '11111111-1111-1111-1111-111111111111',
-      memberships: [
-        { orgId: '11111111-1111-1111-1111-111111111111', orgName: 'Acme', role: 'owner' },
-        { orgId: '22222222-2222-2222-2222-222222222222', orgName: 'Globex', role: 'member' },
-      ],
-    },
+    me: { name: 'Ada', email: 'ada@example.com' },
     displayName: 'Ada',
     initial: 'A',
     isTrialing: true,
@@ -83,6 +91,25 @@ function renderBothSidebars(role: OrgRole = OrgRole.Owner, overrides: Partial<Me
   );
 }
 
+// A single mount, for cases that open a menu and inspect its contents. The
+// second (mobile drawer) copy `renderBothSidebars` also mounts is irrelevant
+// to these — its own `showUserProfile={false}` means it has no org switcher
+// or user menu of its own — and Headless UI's anchored `MenuItems` (used by
+// both) is measurably slower to commit when a second unrelated subtree is
+// mounted alongside it, which these tests otherwise have no reason to wait on.
+function renderOneSidebar({
+  overrides = {},
+  collapsed = false,
+}: { overrides?: Partial<MeResponse>; collapsed?: boolean } = {}) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  seedPermissions(client, OrgRole.Owner, { ...ORG_ME, ...overrides });
+  return render(
+    <QueryClientProvider client={client}>
+      <SidebarNav collapsed={collapsed} onToggle={() => {}} showTestIds={true} />
+    </QueryClientProvider>,
+  );
+}
+
 const UNIQUE_IDS = [
   'sidebar-upgrade-button',
   'sidebar-update-payment-button',
@@ -93,8 +120,8 @@ const UNIQUE_TESTIDS = [
   'nav-buckets',
   'nav-api-keys',
   'nav-organization',
-  'nav-settings',
-  'user-profile',
+  'org-switcher-button',
+  'user-menu-button',
 ];
 
 /** One membership, which is what a solo org has. */
@@ -117,40 +144,29 @@ describe('SidebarNav e2e selector uniqueness (desktop + drawer mounted)', () => 
     expect(container.querySelectorAll(`[data-testid="${testId}"]`)).toHaveLength(1);
   });
 
-  it('renders #user-menu-logout-button exactly once after opening the menu', () => {
-    const { container } = renderBothSidebars();
-    // Only the desktop sidebar has a user-profile trigger; the drawer omits it.
-    const triggers = container.querySelectorAll('[data-testid="user-profile"]');
-    expect(triggers).toHaveLength(1);
-    fireEvent.click(triggers[0]);
-    expect(container.querySelectorAll('#user-menu-logout-button')).toHaveLength(1);
+  it('renders #user-menu-logout-button once the menu is opened', () => {
+    // Single mount: see `renderOneSidebar`'s comment.
+    const { getByTestId } = renderOneSidebar();
+    fireEvent.click(getByTestId('user-menu-button'));
+    // Headless UI's anchored `MenuItems` (floating-ui positioning) portals its
+    // panel to `document.body` rather than rendering it inside RTL's own
+    // `container` — `screen`, which queries the whole document, is what finds
+    // it; `container.querySelectorAll` never will, open or not.
+    expect(screen.getAllByText('Log out')).toHaveLength(1);
   });
 });
 
 describe('SidebarNav — the org switcher', () => {
-  function openUserMenu() {
-    const rendered = renderBothSidebars();
-    fireEvent.click(rendered.container.querySelectorAll('[data-testid="user-profile"]')[0]);
-    return rendered;
-  }
+  it('lists every org in the menu with the active one marked', () => {
+    renderOneSidebar();
+    fireEvent.click(screen.getByTestId('org-switcher-button'));
 
-  it('mounts in the user menu with the active org marked', () => {
-    const { container } = openUserMenu();
-
-    // The props are the mount point's to get right — `activeOrgId={me.userId}`
-    // compiles and would leave every org unmarked.
-    expect(container.querySelectorAll('[data-testid="org-switcher"]')).toHaveLength(1);
-    const active = container.querySelector(`button[aria-current="true"]`);
-    expect(active?.textContent).toBe('Acme');
-  });
-
-  it('offers the caller’s other org', () => {
-    const { container } = openUserMenu();
-
-    const names = [...container.querySelectorAll('[data-testid="org-switcher"] button')].map(
-      (b) => b.textContent,
-    );
-    expect(names).toEqual(['Acme', 'Globex']);
+    // The panel is portalled, so `screen` rather than `container` finds it.
+    const switcher = within(screen.getByTestId('org-switcher'));
+    expect(switcher.getAllByRole('menuitem')).toEqual([
+      switcher.getByRole('menuitem', { name: 'Acme', current: true }),
+      switcher.getByRole('menuitem', { name: 'Globex', current: false }),
+    ]);
   });
 });
 
@@ -217,7 +233,6 @@ describe('SidebarNav — the Members entry', () => {
     });
 
     expect(container.querySelectorAll('[data-testid="nav-organization"]')).toHaveLength(0);
-    expect(container.querySelectorAll('[data-testid="nav-settings"]')).toHaveLength(1);
   });
 });
 
@@ -301,17 +316,15 @@ describe('SidebarNav — the API Keys entry', () => {
   });
 });
 
-// Collapsed mode hides the display name and the avatar is decorative, so the
-// button's own label is the only accessible name left.
-describe('SidebarNav user profile accessible name', () => {
-  it.each([true, false])('names the user-profile button when collapsed=%s', (collapsed) => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    seedPermissions(client, OrgRole.Owner);
-    const { getByTestId } = render(
-      <QueryClientProvider client={client}>
-        <SidebarNav collapsed={collapsed} onToggle={() => {}} showTestIds={true} />
-      </QueryClientProvider>,
+// Collapsed mode hides the display names and the avatars are decorative, so
+// each button's own label is the only accessible name left.
+describe('SidebarNav identity accessible names', () => {
+  it.each([true, false])('names the user and org menu buttons when collapsed=%s', (collapsed) => {
+    renderOneSidebar({ collapsed });
+
+    expect(screen.getByTestId('user-menu-button')).toHaveAccessibleName('User menu for Ada');
+    expect(screen.getByTestId('org-switcher-button')).toHaveAccessibleName(
+      'Organization menu for Acme',
     );
-    expect(getByTestId('user-profile')).toHaveAccessibleName('User menu for Ada');
   });
 });

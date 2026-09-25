@@ -477,15 +477,21 @@ const IN_HANDLER_PROBES: {
  * claim those cannot: the same caller, the same route, a different body, a
  * different answer.
  */
+/** Membership-only in-handler routes: see the `'in-handler'` doc in route-manifest.ts. */
+const MEMBERSHIP_ONLY_IN_HANDLER = ['create-org'];
+
 describe('what the in-handler routes enforce', () => {
   quietDenialOutput();
   withActiveSubscription();
 
   it('probes every route the manifest marks in-handler', () => {
-    // A route added to the manifest as in-handler with no probe here would
-    // otherwise be checked for membership alone, which is the gap this suite
-    // exists to close.
-    const probed = new Set(IN_HANDLER_PROBES.map((probe) => probe.handler));
+    // A route added to the manifest as in-handler with no probe here, and not
+    // named in MEMBERSHIP_ONLY_IN_HANDLER, would otherwise be checked for
+    // membership alone, which is the gap this suite exists to close.
+    const probed = new Set([
+      ...IN_HANDLER_PROBES.map((probe) => probe.handler),
+      ...MEMBERSHIP_ONLY_IN_HANDLER,
+    ]);
     expect(inHandler.filter((handler) => !probed.has(handler))).toStrictEqual([]);
   });
 

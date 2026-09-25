@@ -456,6 +456,8 @@ export async function apiDownload(path: string): Promise<Blob> {
 
 import type {
   ConfirmAccountDeletionResponse,
+  CreateOrgRequest,
+  CreateOrgResponse,
   DeleteAccountRequest,
   MeResponse,
   RegenerateRecoveryCodeResponse,
@@ -527,6 +529,18 @@ export function updateProfile(data: UpdateProfileRequest): Promise<UpdateProfile
 export function updateOrg(data: UpdateOrgRequest): Promise<UpdateOrgResponse> {
   return apiRequest<UpdateOrgResponse>('/org', {
     method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+/**
+ * Create an additional organization for the signed-in account. Distinct from
+ * signup's org, and from `updateOrg` above: this account has no role in the
+ * org being created yet, so there is nothing for `authorize()` to check.
+ */
+export function createOrg(data: CreateOrgRequest): Promise<CreateOrgResponse> {
+  return apiRequest<CreateOrgResponse>('/org', {
+    method: 'POST',
     body: JSON.stringify(data),
   });
 }
