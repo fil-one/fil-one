@@ -51,7 +51,7 @@ describe('CreateOrganizationDialog', () => {
     expect(screen.getByRole('button', { name: 'Create organization' })).toBeEnabled();
   });
 
-  it('creates the org, switches into it, and closes', async () => {
+  it('creates the org, switches into it landing on get-started, and closes', async () => {
     const { onClose } = renderDialog();
 
     fireEvent.change(await screen.findByLabelText('Organization name'), {
@@ -62,8 +62,29 @@ describe('CreateOrganizationDialog', () => {
     await waitFor(() =>
       expect(mockCreateOrg).toHaveBeenCalledWith({ name: 'Acme Two', logoUrl: undefined }),
     );
-    await waitFor(() => expect(mockSwitchToOrg).toHaveBeenCalledWith('org-2'));
+    // get-started is the landing since the new org is empty.
+    await waitFor(() =>
+      expect(mockSwitchToOrg).toHaveBeenCalledWith('org-2', 'get-started', {
+        orgName: 'Acme Two',
+        logoUrl: undefined,
+      }),
+    );
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('re-reads /me when the switch into the new org is declined', async () => {
+    mockSwitchToOrg.mockReturnValue(false);
+    const { client } = renderDialog();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+
+    fireEvent.change(await screen.findByLabelText('Organization name'), {
+      target: { value: 'Acme Two' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Create organization' }));
+
+    // The org exists either way; without this the switcher would not list it
+    // until `/me` went stale.
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['me'] }));
   });
 
   it('refuses a name the schema will not take, without asking the server', async () => {

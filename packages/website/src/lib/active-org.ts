@@ -1,3 +1,8 @@
+import { useQuery } from '@tanstack/react-query';
+
+import { queryClient, queryKeys } from './query-client.js';
+import { cancelGuardedWork, leaveGuardedWork } from './use-warn-before-unload.js';
+
 const ACTIVE_ORG_KEY = 'filone:activeOrgId';
 const RECONCILED_KEY = 'filone:activeOrgReconciled';
 
@@ -54,8 +59,10 @@ let switching = false;
  */
 export const NAVIGATION_GIVE_UP_MS = 4000;
 
+type SwitchingListener = (switching: boolean, outcome?: SwitchOutcome) => void;
+
 /** Told the latch went up or came down, so React can re-render the switcher. */
-const switchingListeners = new Set<(switching: boolean) => void>();
+const switchingListeners = new Set<SwitchingListener>();
 
 /**
  * Whether this tab is between orgs.
@@ -65,61 +72,112 @@ const switchingListeners = new Set<(switching: boolean) => void>();
  * the page still shows the old org, and their answers are discarded by the
  * navigation anyway. `apiRequest` holds them instead, and the switcher disables
  * its buttons, so nothing is issued against an org the user has already left.
+ * `_app.tsx`'s `beforeLoad` reads past it with `skipSwitchWait`.
  */
 export function isSwitchingOrg(): boolean {
   return switching;
 }
 
 /** Subscribe to the latch. Returns the unsubscribe. */
-export function onSwitchingOrgChange(listener: (switching: boolean) => void): () => void {
+export function onSwitchingOrgChange(listener: SwitchingListener): () => void {
   switchingListeners.add(listener);
   return () => switchingListeners.delete(listener);
 }
 
 /**
- * Wait out a switch that is in progress.
+ * How a switch ended: its navigation landed in the new org, or it never did and
+ * the previous stash is back.
+ */
+export type SwitchOutcome = 'committed' | 'rolledBack';
+
+/**
+ * Wait out a switch that is in progress, and say how it ended.
  *
- * Resolves when the latch comes down, which is the rollback: the navigation
- * never happened, the previous stash is back, and a request held in that window
- * can go ahead against the org still on screen. It never resolves when the
- * navigation commits, which is the whole point of holding — the page is going,
- * and the answer would be discarded by the load anyway.
+ * Resolves `null` straight away when no switch is running. Otherwise it resolves
+ * when the latch comes down, with the outcome, and the caller decides what a
+ * held request may still do. A rollback means the navigation never happened and
+ * the previous stash is back, so the request can go ahead against the org still
+ * on screen. A commit means the stash now names the org the user moved to, and
+ * a request held from the page they left would go out under that org's header.
  *
- * Without this a held request has no resolution path at all. React Query starts
- * no second fetch for a key whose fetch is still in flight, so a cancelled
+ * Without the rollback path a held request has no resolution at all. React Query
+ * starts no second fetch for a key whose fetch is still in flight, so a cancelled
  * switch left every panel opened in that window spinning until a manual reload.
  */
-export function waitWhileSwitching(): Promise<void> {
-  if (!switching) return Promise.resolve();
-  return new Promise<void>((resolve) => {
-    const unsubscribe = onSwitchingOrgChange((next) => {
-      if (next) return;
+export function waitWhileSwitching(): Promise<SwitchOutcome | null> {
+  if (!switching) return Promise.resolve(null);
+  return new Promise<SwitchOutcome>((resolve) => {
+    const unsubscribe = onSwitchingOrgChange((next, outcome) => {
+      if (next || !outcome) return;
       unsubscribe();
-      resolve();
+      resolve(outcome);
     });
   });
 }
 
-function setSwitching(next: boolean): void {
+function setSwitching(next: true): void;
+function setSwitching(next: false, outcome: SwitchOutcome): void;
+function setSwitching(next: boolean, outcome?: SwitchOutcome): void {
   switching = next;
-  for (const listener of switchingListeners) listener(next);
+  // The pending display below is only ever meaningful while a switch is in
+  // flight — once the latch comes back down, either the real `/me` has landed
+  // (the sidebar has the true name now) or the switch was rolled back (the
+  // stub named an org the tab never actually reached). Both cases want it
+  // gone, so it rides this same transition rather than a copy of the logic at
+  // every place `switchToOrg` itself brings the latch down.
+  if (!next) queryClient.setQueryData(queryKeys.pendingOrgSwitch, null);
+  for (const listener of switchingListeners) listener(next, outcome);
+}
+
+export type PendingOrgSwitchTarget = {
+  orgId: string;
+  orgName: string;
+  logoUrl?: string;
+};
+
+/**
+ * The org a switch in flight is headed for, painted from the switcher row the
+ * caller just clicked rather than waited on the network for.
+ *
+ * `switchToOrg`'s `queryClient.clear()` is what makes a client-side navigation
+ * safe instead of a full reload (see its own doc comment), but it also throws
+ * away the `memberships` list the sidebar reads its header from — so for
+ * however long the destination route's `beforeLoad` takes to bring back a
+ * fresh `/me`, the sidebar has nothing to name the org with. The row just
+ * clicked already carried that org's name and logo; this is where `switchToOrg`
+ * hands them forward instead of letting them be discarded a moment later.
+ *
+ * Deliberately not folded into `['me']`: this is never fetched, only ever
+ * `setQueryData`'d, and carries nothing beyond display — no permissions, no
+ * role, nothing a stale value could make a gated surface trust.
+ */
+export function usePendingOrgSwitchTarget(): PendingOrgSwitchTarget | null {
+  const { data } = useQuery({
+    queryKey: queryKeys.pendingOrgSwitch,
+    // Never actually runs: nothing here calls `fetchQuery`/`refetch` on this
+    // key, only `setQueryData`. `enabled: false` says so, and a `queryFn` is
+    // still required to satisfy the type.
+    queryFn: () => null as PendingOrgSwitchTarget | null,
+    enabled: false,
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+  return data ?? null;
 }
 
 /**
- * Raise the latch, and take it down again if the navigation never happens.
+ * Raise the latch before a reload, and take it down again if the reload never
+ * happens.
  *
  * A `beforeunload` handler can cancel it — the upload page installs one while a
  * transfer is running, and a user who answers "stay on this page" leaves a tab
- * that asked to switch and did not. Without a way back, `apiRequest` holds every
- * request forever and the switcher's rows stay inert: the console looks alive
- * and does nothing.
+ * that asked to reload and did not. Without a way back, `apiRequest` holds every
+ * request forever and the switcher's rows stay inert.
  *
- * `pagehide` fires when the page really is going, and cancels the rollback. What
- * is left is the cancelled case, where `rollbackTo` becomes the stash again so
- * the tab keeps working. A switch names the org it came from, which is the one
- * still on screen. A refusal names nothing: the server has just declined that
+ * `pagehide` fires when the page really is going, and cancels the rollback. In
+ * the cancelled case the stash stays cleared: the server has just declined that
  * org, and putting it back would re-attach the same header to every later
- * request and have each one refused in turn — the state the clear was for.
+ * request and have each one refused in turn.
  *
  * `pagehide` also fires on the way into the back/forward cache, and what comes
  * back out of it is this same document: the latch is still up and the rollback
@@ -127,15 +185,14 @@ function setSwitching(next: boolean): void {
  * switcher would stay disabled — a console that looks alive and does nothing.
  * The restored page is showing an org the user has left, so it reloads.
  */
-function latchUntilNavigation(rollbackTo: string | null): void {
+function latchUntilNavigation(): void {
   setSwitching(true);
 
   const rollback = setTimeout(() => {
     stopListening();
-    if (rollbackTo === null) clearActiveOrgId();
-    else setActiveOrgId(rollbackTo);
+    clearActiveOrgId();
     console.warn('[active-org] The navigation never happened — releasing the latch');
-    setSwitching(false);
+    setSwitching(false, 'rolledBack');
   }, NAVIGATION_GIVE_UP_MS);
 
   function stopListening(): void {
@@ -188,22 +245,83 @@ export function clearActiveOrgOnNavigation(): void {
 }
 
 /**
- * Switch this tab to another org: stash the choice and load the console's root.
+ * Switch this tab to another org: stash the choice and navigate into it.
  *
- * A full page load rather than query invalidation. No query key carries an org
- * dimension, and `/me` is cached under two keys with a ten-minute stale time, so
- * a load is the one mechanism that cannot leak org A's cache into org B's view.
- * A soft switch — org id in every key — is later polish.
+ * `queryClient.clear()` rather than a full page load. No query key carries an
+ * org dimension, and `/me` is cached under two keys with a ten-minute stale
+ * time, so clearing every cached query is what used to make a full reload the
+ * only safe option — with the cache empty, a router navigation cannot leak
+ * org A's data into org B's view either, and it does not cost a full document
+ * load to get there. A soft switch — org id in every key instead of a clear —
+ * is later polish.
  *
- * The root rather than the current URL: bucket names, key ids and every other
- * path segment are org-scoped, so reloading in place would greet the user with a
- * not-found page in the org they just chose.
+ * `/dashboard` rather than the current page: bucket names, key ids and every
+ * other path segment belong to the org being left, so staying in place would
+ * greet the user with a not-found page in the org they just chose. The page is
+ * keyed on the active org (see `_app.tsx`), so it remounts even when the tab was
+ * already on `/dashboard`.
+ *
+ * `landOn` picks that landing page. A switch between existing orgs wants the
+ * dashboard, but creating one lands on `get-started`: the new org is empty, so
+ * its dashboard is all zeroes, while get-started is the two things that empty
+ * org actually needs next.
+ *
+ * The router import is dynamic to avoid a cycle: `router.ts` pulls in every
+ * route, several of which import this module (via `api.ts`) at the top level,
+ * so a static import back here would be resolved before either side's module
+ * body has finished running.
+ *
+ * `knownDisplay` is the org's name and logo, when the caller already has them
+ * on hand — every call site does, since a switcher row and a just-created
+ * org's response both carry them. Seeded as `usePendingOrgSwitchTarget` right
+ * after the clear below, so the sidebar has the right name to paint the
+ * instant the switch starts rather than the `'Organization'` fallback for
+ * however long the fresh `/me` takes.
+ *
+ * @returns whether the switch started. False when the user declined to leave
+ * guarded work (a running upload) behind, in which case nothing changed.
  */
-export function switchToOrg(orgId: string): void {
+export function switchToOrg(
+  orgId: string,
+  landOn: 'dashboard' | 'get-started' = 'dashboard',
+  knownDisplay?: { orgName: string; logoUrl?: string },
+): boolean {
+  // A client-side navigation fires no `beforeunload`, so the upload page's
+  // guard is asked here instead, before anything about the tab has changed:
+  // declining leaves the stash, the cache, and the page exactly as they were.
+  // Agreeing cancels the upload here too, before the stash moves: its later
+  // batches read the stash when they go out, so an upload left running would
+  // carry on into the org the user is switching to.
+  if (!leaveGuardedWork()) return false;
+
   const previousOrgId = getActiveOrgId();
   setActiveOrgId(orgId);
-  latchUntilNavigation(previousOrgId);
-  window.location.assign('/');
+  setSwitching(true);
+  queryClient.clear();
+  if (knownDisplay) {
+    queryClient.setQueryData(queryKeys.pendingOrgSwitch, {
+      orgId,
+      orgName: knownDisplay.orgName,
+      logoUrl: knownDisplay.logoUrl,
+    } satisfies PendingOrgSwitchTarget);
+  }
+
+  void (async () => {
+    try {
+      const { router } = await import('../router.js');
+      await router.navigate({ to: landOn === 'get-started' ? '/get-started' : '/dashboard' });
+      setSwitching(false, 'committed');
+    } catch (error) {
+      // The navigation was blocked or failed — a `beforeLoad` redirect threw
+      // somewhere unexpected, say. Roll the stash back to where this tab was.
+      console.warn('[active-org] The switch navigation did not complete — rolling back', error);
+      if (previousOrgId === null) clearActiveOrgId();
+      else setActiveOrgId(previousOrgId);
+      setSwitching(false, 'rolledBack');
+    }
+  })();
+
+  return true;
 }
 
 /**
@@ -249,11 +367,13 @@ export function reconcileActiveOrg(
     requested: stashed,
     resolved: resolvedOrgId,
   });
+  // Running work was headed into the org this tab can no longer reach. Were it
+  // left running and the reload declined, its later requests would go out with
+  // no header, into whatever org the server resolves instead.
+  cancelGuardedWork();
   clearActiveOrgId();
   noteReconcile();
-  // Cleared is where a cancelled reload has to leave the tab: the org it asked
-  // for is not the org it got, and asking again would go the same way.
-  latchUntilNavigation(null);
+  latchUntilNavigation();
   window.location.reload();
   return true;
 }
@@ -315,12 +435,11 @@ export function clearActiveOrgAfterRefusal(status: number | undefined): boolean 
   if (stashClearedAfterRefusal || !stashed) return false;
   stashClearedAfterRefusal = true;
   console.warn('[active-org] /me refused the org this tab asked for — dropping it', { status });
+  // As in `reconcileActiveOrg`: running work was headed into the refused org.
+  cancelGuardedWork();
   clearActiveOrgId();
   noteReconcile();
-  // The refused org does not come back if the reload is cancelled. Restoring it
-  // would send the same header to every later request, and `/me` among them is
-  // the one call whose answer could have fixed the tab.
-  latchUntilNavigation(null);
+  latchUntilNavigation();
   window.location.reload();
   return true;
 }

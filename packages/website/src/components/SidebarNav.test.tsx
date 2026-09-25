@@ -6,6 +6,7 @@ import type { MeResponse } from '@filone/shared';
 
 import { SidebarNav } from './SidebarNav';
 import { seedPermissions } from '../lib/test-permissions.js';
+import { queryKeys } from '../lib/query-client.js';
 
 // Render <a>/no-op router primitives so SidebarNav can mount without a router.
 vi.mock('@tanstack/react-router', () => ({
@@ -100,9 +101,16 @@ function renderBothSidebars(role: OrgRole = OrgRole.Owner, overrides: Partial<Me
 function renderOneSidebar({
   overrides = {},
   collapsed = false,
-}: { overrides?: Partial<MeResponse>; collapsed?: boolean } = {}) {
+  pendingOrgName,
+}: { overrides?: Partial<MeResponse>; collapsed?: boolean; pendingOrgName?: string } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   seedPermissions(client, OrgRole.Owner, { ...ORG_ME, ...overrides });
+  if (pendingOrgName) {
+    client.setQueryData(queryKeys.pendingOrgSwitch, {
+      orgId: '22222222-2222-2222-2222-222222222222',
+      orgName: pendingOrgName,
+    });
+  }
   return render(
     <QueryClientProvider client={client}>
       <SidebarNav collapsed={collapsed} onToggle={() => {}} showTestIds={true} />
@@ -178,6 +186,25 @@ describe('SidebarNav — the API Keys entry', () => {
     expect(container.querySelectorAll('[data-testid="nav-api-keys"]')).toHaveLength(0);
     // Buckets carries no permission — every role browses.
     expect(container.querySelectorAll('[data-testid="nav-buckets"]')).toHaveLength(1);
+  });
+});
+
+// `switchToOrg` clears the cache, so `/me` has no org name until it answers.
+describe('SidebarNav — the pending org switch target', () => {
+  it('names the org being switched to instead of the "Organization" placeholder', () => {
+    renderOneSidebar({ overrides: { orgName: undefined }, pendingOrgName: 'Globex' });
+
+    expect(screen.getByTestId('org-switcher-button')).toHaveAccessibleName(
+      'Organization menu for Globex',
+    );
+  });
+
+  it('falls back to the placeholder when no switch is pending either', () => {
+    renderOneSidebar({ overrides: { orgName: undefined } });
+
+    expect(screen.getByTestId('org-switcher-button')).toHaveAccessibleName(
+      'Organization menu for Organization',
+    );
   });
 });
 

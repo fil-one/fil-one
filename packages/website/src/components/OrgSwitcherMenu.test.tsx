@@ -27,6 +27,7 @@ const switchToOrg = vi.fn();
 vi.mock('../lib/active-org.js', () => ({
   switchToOrg: (...args: unknown[]) => switchToOrg(...args),
   onSwitchingOrgChange: () => () => {},
+  usePendingOrgSwitchTarget: () => null,
 }));
 
 const ORG_A = '11111111-1111-1111-1111-111111111111';
@@ -75,6 +76,18 @@ describe('OrgSwitcherMenu', () => {
     const switcher = screen.getByTestId('org-switcher');
     expect(within(switcher).getByText('Acme')).toBeInTheDocument();
     expect(within(switcher).getByText('Globex')).toBeInTheDocument();
+  });
+
+  it('switches organization when another org is chosen', () => {
+    renderMenu();
+
+    fireEvent.click(screen.getByTestId('org-switcher-button'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Globex' }));
+
+    expect(switchToOrg).toHaveBeenCalledWith(ORG_B, 'dashboard', {
+      orgName: 'Globex',
+      logoUrl: undefined,
+    });
   });
 
   it("offers an Owner the org's pages", () => {
