@@ -9,7 +9,6 @@ import {
   allow,
   credentials,
   deny,
-  ownersStatement,
   removeBucket,
   rosterPolicy,
   uniqueBucketName,
@@ -18,8 +17,9 @@ import {
 // Granting a retention or legal-hold write is `privileged.grant`, which only an
 // Owner holds: `s3:PutObjectRetention`, `s3:PutObjectLegalHold`, and `s3:*`,
 // which stands for both. An Admin manages policies but may not newly grant the
-// pair; a grant the stored policy already makes is not new, and neither is
-// `s3:*` naming only the Owners, however it is labelled.
+// pair; a grant the stored policy already makes is not new. A retention write
+// named outright is held to the stored policy by name, so an Admin may keep or
+// drop one an Owner wrote but not add one, even for an Owner.
 
 const ownerId = credentials('owner').userId;
 const adminId = credentials('admin').userId;
@@ -111,26 +111,19 @@ test.describe('through the API', () => {
     ]);
   });
 
-  test('P5. an admin restores the owners statement, and nothing wider', async () => {
+  test('P5. an admin writing a first policy may not grant s3:*, even to the owners', async () => {
     const { etag } = await owner.readPolicy(bucket);
     expect((await owner.deletePolicy(bucket, etag)).status()).toBe(204);
 
-    // s3:* for the Owners alone, as the console writes it; the label is not what counts.
-    expect(await putAs(admin, roster())).toEqual([201, undefined]);
-    expect((await owner.readPolicy(bucket)).policy).toEqual({ statement: roster() });
+    expect(await putAs(admin, roster())).toEqual([403, 'RETENTION_GRANT_FORBIDDEN']);
+    const statement = [adminsStatement(adminId), allow([memberId], ['s3:ListBucket'])];
+    expect(await putAs(admin, statement)).toEqual([201, undefined]);
+  });
 
-    // s3:* reaching anyone who is not an Owner, or a retention write by name,
-    // even to an Owner, is a new grant, and stays an Owner's to make.
-    const outcomes = [];
-    for (const statements of [
-      [{ ...ownersStatement(ownerId), principal: [ownerId, adminId] }, adminsStatement(adminId)],
-      [...roster(), allow([memberId], ['s3:*'], 'everything')],
-      [...roster(), allow([ownerId], ['s3:PutObjectRetention'], 'owner-hold')],
-    ]) {
-      const current = (await admin.readPolicy(bucket)).etag;
-      outcomes.push(await putAs(admin, statements, current));
-    }
-    expect(outcomes).toEqual(Array(3).fill([403, 'RETENTION_GRANT_FORBIDDEN']));
+  test('P6. an admin may not name a retention write, even for an owner who holds s3:*', async () => {
+    const { etag } = await admin.readPolicy(bucket);
+    const named = [...roster(), allow([ownerId], ['s3:PutObjectRetention'], 'owner-hold')];
+    expect(await putAs(admin, named, etag)).toEqual([403, 'RETENTION_GRANT_FORBIDDEN']);
   });
 });
 
