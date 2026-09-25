@@ -1,8 +1,16 @@
-import { createRoute, Navigate, Outlet, redirect, useNavigate } from '@tanstack/react-router';
+import {
+  createRoute,
+  Navigate,
+  Outlet,
+  redirect,
+  useNavigate,
+  useRouterState,
+} from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { MeResponse } from '@filone/shared';
 import { Route as rootRoute } from './__root';
 import { AppShell } from '../components/AppShell';
+import { BillingRequiredGate } from '../components/BillingRequiredGate.js';
 import { Button } from '../components/Button';
 import { getMe, logout } from '../lib/api.js';
 import { queryClient, queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
@@ -139,9 +147,26 @@ function NotAMember() {
   );
 }
 
+/**
+ * The pages an org without an active plan still opens: Settings (the caller's
+ * own profile, and Leave organization), Edit organization (the danger zone),
+ * and Support. None of them reads or stores anything billing pays for, and
+ * without them a blocked org could not be left or deleted from the console:
+ * an owner who created one and decided not to pay, or a member of one, would
+ * have Log out as the only way out.
+ */
+const PAGES_PAST_THE_BILLING_GATE = new Set(['/settings', '/edit-organization', '/support']);
+
+/** Whether `pathname` is a page the billing gate replaces. */
+export function billingGateCovers(pathname: string): boolean {
+  return !PAGES_PAST_THE_BILLING_GATE.has(pathname.replace(/\/$/, ''));
+}
+
 function AppWithOrgGuard() {
   const navigate = useNavigate();
-  const { isNotAMember } = usePermissions();
+  const { isNotAMember, billingActive } = usePermissions();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const gated = !billingActive && billingGateCovers(pathname);
   const { data: me } = useQuery({ queryKey: queryKeys.me, queryFn: () => getMe() });
 
   // A switch clears the cache, and a mounted `useQuery` stays on its removed
@@ -178,10 +203,15 @@ function AppWithOrgGuard() {
 
   return (
     <AppShell>
-      {/* Keyed on the org the server answered for, so the page remounts at the
-          org boundary even when the switch lands on the URL the tab is already
-          on. */}
-      <Outlet key={me?.orgId} />
+      {/* In place of the routed page, not a redirect: the sidebar (org
+          switcher, log out) stays reachable either way, and so do the pages
+          in `PAGES_PAST_THE_BILLING_GATE`, where a blocked org can still be
+          left or deleted.
+
+          Keyed on the org the server answered for, on both branches, so the
+          page remounts at the org boundary even when the switch lands on the
+          URL the tab is already on. */}
+      {gated ? <BillingRequiredGate key={me?.orgId} /> : <Outlet key={me?.orgId} />}
     </AppShell>
   );
 }

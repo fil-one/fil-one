@@ -215,6 +215,19 @@ describe('SidebarNav — the API Keys entry', () => {
   });
 });
 
+describe('SidebarNav — the billing-blocked gate', () => {
+  it('omits every page link and the inactive-plan banner, but keeps the org switcher and user menu', () => {
+    renderOneSidebar({ overrides: { billingActive: false } });
+
+    for (const testId of ['nav-dashboard', 'nav-buckets', 'nav-api-keys']) {
+      expect(screen.queryByTestId(testId)).not.toBeInTheDocument();
+    }
+    expect(screen.queryByTestId('sidebar-choose-plan-button')).not.toBeInTheDocument();
+    expect(screen.getByTestId('org-switcher-button')).toBeInTheDocument();
+    expect(screen.getByTestId('user-menu-button')).toBeInTheDocument();
+  });
+});
+
 // `switchToOrg` clears the cache, so `/me` has no org name until it answers.
 describe('SidebarNav — the pending org switch target', () => {
   it('names the org being switched to instead of the "Organization" placeholder', () => {
