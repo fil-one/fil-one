@@ -19,6 +19,9 @@ vi.mock('../plausible.js', () => ({ track: vi.fn() }));
 vi.mock('../components/AppShell', () => ({
   AppShell: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
+vi.mock('../components/BillingRequiredGate.js', () => ({
+  BillingRequiredGate: () => <div data-testid="billing-gate" />,
+}));
 
 import { Route as rootRoute } from './__root';
 import { Route as appRoute } from './_app';
@@ -28,6 +31,7 @@ import { isSwitchingOrg, setActiveOrgId, switchToOrg } from '../lib/active-org.j
 
 const ORG_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const ORG_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const unpaid = new Set<string>();
 
 function meFor(orgId: string) {
   return {
@@ -35,7 +39,7 @@ function meFor(orgId: string) {
     orgName: orgId === ORG_A ? 'Acme' : 'Globex',
     nameConfirmed: true,
     emailVerified: true,
-    billingActive: true,
+    billingActive: !unpaid.has(orgId),
     role: 'owner',
     permissions: [],
     memberships: [
@@ -86,6 +90,7 @@ describe('switching orgs from the dashboard', () => {
   afterEach(() => {
     queryClient.clear();
     sessionStorage.clear();
+    unpaid.clear();
     vi.unstubAllGlobals();
     document.cookie = 'hs_logged_in=; expires=Thu, 01 Jan 1970 00:00:00 GMT';
   });
@@ -101,5 +106,19 @@ describe('switching orgs from the dashboard', () => {
     expect(queryClient.getQueryData(queryKeys.me)).toMatchObject({ orgId: ORG_A });
 
     expect(await screen.findByText('Acme')).toBeInTheDocument();
+  });
+
+  it('drops the billing gate once the org it lands in has a plan', async () => {
+    unpaid.add(ORG_B);
+    setActiveOrgId(ORG_B);
+    renderApp();
+    expect(await screen.findByTestId('billing-gate')).toBeInTheDocument();
+
+    switchToOrg(ORG_A);
+    await vi.waitFor(() => expect(isSwitchingOrg()).toBe(false));
+    expect(queryClient.getQueryData(queryKeys.me)).toMatchObject({ orgId: ORG_A });
+
+    expect(await screen.findByTestId('dashboard')).toHaveTextContent('Acme');
+    expect(screen.queryByTestId('billing-gate')).not.toBeInTheDocument();
   });
 });
