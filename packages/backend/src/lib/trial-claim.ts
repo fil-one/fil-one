@@ -117,10 +117,35 @@ export async function claimTrialIfEligible(userInfo: UserInfo): Promise<TrialCla
   return entitled ? 'claimed' : 'not-entitled';
 }
 
+/**
+ * Every refusal logs, so a `not-own-org` outcome can be told apart from an
+ * upstream bug that resolved `userInfo.membership` wrongly for this request.
+ */
 async function isSoloPersonalOrg({ userId, orgId, membership }: UserInfo): Promise<boolean> {
-  if (!membership || membership.orgId !== orgId) return false;
-  if (membership.source === 'invitation') return false;
+  if (!membership || membership.orgId !== orgId) {
+    console.warn('[trial-claim] No membership row for the active org — refusing the claim', {
+      userId,
+      orgId,
+      membershipOrgId: membership?.orgId,
+    });
+    return false;
+  }
+  if (membership.source === 'invitation') {
+    console.warn('[trial-claim] Membership arrived by invitation — refusing the claim', {
+      userId,
+      orgId,
+    });
+    return false;
+  }
 
   const memberships = await listMemberships(userId);
-  return memberships.length === 1 && memberships[0]?.orgId === orgId;
+  if (memberships.length !== 1 || memberships[0]?.orgId !== orgId) {
+    console.warn('[trial-claim] Caller belongs to more than this one org — refusing the claim', {
+      userId,
+      orgId,
+      membershipCount: memberships.length,
+    });
+    return false;
+  }
+  return true;
 }
