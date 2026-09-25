@@ -1,7 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import type { PlausibleRequestPayload } from '@plausible-analytics/tracker';
 
-import { scrubBreadcrumb, scrubEvent, scrubInviteToken, scrubTrackedPayload } from './url-scrub.js';
+import {
+  scrubBreadcrumb,
+  scrubEvent,
+  scrubFeedbackEvent,
+  scrubInviteToken,
+  scrubTrackedPayload,
+} from './url-scrub.js';
 
 const TOKEN = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
@@ -80,6 +86,32 @@ describe('scrubEvent', () => {
       type: undefined,
       message: 'boom',
     });
+  });
+});
+
+describe('scrubFeedbackEvent', () => {
+  // Sentry runs `beforeSend` for error events only, and records the page on a
+  // bug report's `request.url` the same as on an error.
+  it('redacts the page a bug report was sent from, wherever it is recorded', () => {
+    const scrubbed = scrubFeedbackEvent({
+      type: 'feedback',
+      request: { url: 'https://console.fil.one/invite/accept#token=secret' },
+      contexts: {
+        feedback: { message: 'broken', url: 'https://console.fil.one/invite/accept#token=secret' },
+      },
+    });
+
+    expect(scrubbed.request?.url).toBe('https://console.fil.one/invite/accept#token=REDACTED');
+    expect(scrubbed.contexts?.feedback?.url).toBe(
+      'https://console.fil.one/invite/accept#token=REDACTED',
+    );
+    expect(scrubbed.contexts?.feedback?.message).toBe('broken');
+  });
+
+  it('leaves every other event to the hooks that already cover it', () => {
+    const event = { request: { url: 'https://console.fil.one/invite/accept#token=secret' } };
+
+    expect(scrubFeedbackEvent(event)).toBe(event);
   });
 });
 
