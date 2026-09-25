@@ -21,6 +21,7 @@ function meWith(role: OrgRole | undefined): MeResponse {
   return {
     orgId: 'org-1',
     orgName: 'Acme',
+    nameConfirmed: true,
     emailVerified: true,
     mfaEnrollments: [],
     ragAccess: false,
