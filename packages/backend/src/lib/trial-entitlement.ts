@@ -10,6 +10,13 @@ import { createBillingTrial } from './create-billing-trial.ts';
 import { normalizeEmailForEntitlement } from './email-normalization.ts';
 import { TrialEntitlementError } from './errors.ts';
 
+/** UserInfoTable keys of the one-trial-per-person claim. */
+export const TrialEntitlementKeys = {
+  pk: (normalizedEmail: string): string => `EMAIL_NORM#${normalizedEmail}`,
+  pkPrefix: (): string => 'EMAIL_NORM#',
+  sk: (): string => 'TRIAL_ENTITLEMENT',
+} as const;
+
 export interface EnsureTrialEntitlementParams {
   sub: string;
   userId: string;
@@ -59,8 +66,8 @@ export async function ensureTrialEntitlement({
       new PutItemCommand({
         TableName: tableName,
         Item: {
-          pk: { S: `EMAIL_NORM#${normalizedEmail}` },
-          sk: { S: 'TRIAL_ENTITLEMENT' },
+          pk: { S: TrialEntitlementKeys.pk(normalizedEmail) },
+          sk: { S: TrialEntitlementKeys.sk() },
           userId: { S: userId },
           orgId: { S: orgId },
           createdAt: { S: now },
@@ -157,7 +164,10 @@ async function claimedOrgOf(
     await getDynamoClient().send(
       new UpdateItemCommand({
         TableName: Resource.UserInfoTable.name,
-        Key: { pk: { S: `EMAIL_NORM#${normalizedEmail}` }, sk: { S: 'TRIAL_ENTITLEMENT' } },
+        Key: {
+          pk: { S: TrialEntitlementKeys.pk(normalizedEmail) },
+          sk: { S: TrialEntitlementKeys.sk() },
+        },
         UpdateExpression: 'SET orgId = :orgId',
         ConditionExpression: 'attribute_not_exists(orgId) AND userId = :userId',
         ExpressionAttributeValues: { ':orgId': { S: orgId }, ':userId': { S: userId } },
