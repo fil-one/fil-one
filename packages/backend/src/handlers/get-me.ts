@@ -59,12 +59,14 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   // Absent means an organization that predates the field, which is treated as
   // named: only an explicit false sends the caller through the naming step.
   const nameConfirmed = orgProfile?.nameConfirmed?.BOOL !== false;
+  const floorOrg = orgProfile?.floorOrg?.BOOL === true;
 
   const body: MeResponse = {
     orgId,
     orgName,
     ...orgLogo,
     nameConfirmed,
+    ...(floorOrg ? { floorOrg } : {}),
     emailVerified,
     email,
     name,

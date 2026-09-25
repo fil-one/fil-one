@@ -10,6 +10,7 @@ import { queryKeys } from '../lib/query-client.js';
 
 const mockRemoveMember = vi.fn();
 const mockSwitchToOrg = vi.fn();
+const mockMoveToLeftOrganization = vi.fn();
 const mockListMembers = vi.fn();
 
 vi.mock('../lib/members-api.js', () => ({
@@ -19,6 +20,7 @@ vi.mock('../lib/members-api.js', () => ({
 
 vi.mock('../lib/active-org.js', () => ({
   switchToOrg: (...args: unknown[]) => mockSwitchToOrg(...args),
+  moveToLeftOrganization: () => mockMoveToLeftOrganization(),
 }));
 
 const mockCancelGuardedWork = vi.fn();
@@ -172,6 +174,16 @@ describe('OrganizationsSection', () => {
 
     expect(mockSwitchToOrg).toHaveBeenCalledWith(OTHER_ORG);
     expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  it('sends the tab to /left-organization when there is no other org to move to', async () => {
+    mockRemoveMember.mockResolvedValue(undefined);
+    renderSection(me({ memberships: [memberships[0]] }));
+
+    await confirmLeave();
+
+    await waitFor(() => expect(mockMoveToLeftOrganization).toHaveBeenCalledOnce());
+    expect(mockSwitchToOrg).not.toHaveBeenCalled();
   });
 
   // An upload into the org just left can only fail, and asking whether to

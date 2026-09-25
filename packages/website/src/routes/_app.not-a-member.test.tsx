@@ -13,6 +13,7 @@ vi.mock('@tanstack/react-router', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-router')>()),
   useNavigate: () => vi.fn(),
   Outlet: () => <div data-testid="page" />,
+  Navigate: ({ to }: { to: string }) => <div data-testid="navigate">{to}</div>,
 }));
 vi.mock('./__root', () => ({ Route: {} }));
 vi.mock('../components/AppShell', () => ({
@@ -73,5 +74,27 @@ describe('the not-a-member screen', () => {
     expect(screen.queryByRole('button', { name: /^Go to/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Log out' })).toBeInTheDocument();
+  });
+});
+
+// A `/me` refetch (the last membership removed, or a self-leave) lands on the
+// floor org without rerunning `beforeLoad`, so the layout redirects too.
+describe('the layout after /me lands on an unnamed only org', () => {
+  beforeEach(() => {
+    permissions.isNotAMember = false;
+  });
+
+  it.each([
+    [true, '/left-organization'],
+    [false, '/create-organization'],
+  ])('with floorOrg %s, sends the caller to %s', (floorOrg, target) => {
+    renderNotAMember({
+      ...account([{ orgId: 'org-1', orgName: 'Acme', role: OrgRole.Owner }]),
+      nameConfirmed: false,
+      floorOrg,
+    });
+
+    expect(screen.getByTestId('navigate')).toHaveTextContent(target);
+    expect(screen.queryByTestId('shell')).not.toBeInTheDocument();
   });
 });

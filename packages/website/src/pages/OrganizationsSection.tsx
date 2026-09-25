@@ -12,7 +12,7 @@ import { OrgAvatar } from '../components/OrgAvatar';
 import type { RowAction } from '../components/RowActionsMenu';
 import { RowActionsMenu } from '../components/RowActionsMenu';
 import { useToast } from '../components/Toast';
-import { switchToOrg } from '../lib/active-org.js';
+import { moveToLeftOrganization, switchToOrg } from '../lib/active-org.js';
 import { errorCodeOf, errorMessageOf } from '../lib/api.js';
 import { listMembers, removeMember } from '../lib/members-api.js';
 import { queryKeys } from '../lib/query-client.js';
@@ -125,7 +125,13 @@ export function OrganizationsSection({ me }: { me: MeResponse }) {
       // on "not a member". Another org the caller still belongs to is a real
       // place to go, so the tab switches there.
       const next = me.memberships?.find((m) => m.orgId !== membership.orgId);
-      if (next && switchToOrg(next.orgId)) return;
+      // No other org: the removal made the account a floor org to land in, and
+      // `/left-organization` says why before asking them to name it.
+      if (!next) {
+        moveToLeftOrganization();
+        return;
+      }
+      if (switchToOrg(next.orgId)) return;
       // The switch was declined: every surface that reads `/me` (the switcher,
       // permissions, this section) re-resolves from a fresh read rather than a
       // hand-patched cache, the same way the Members page's own self-removal
