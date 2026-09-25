@@ -27,6 +27,7 @@ import { Route as bucketIntelligenceRoute } from './routes/_app/bucket-intellige
 import { Route as aiAgentToolkitRoute } from './routes/_app/ai-agent-toolkit.js';
 import { Route as verifyEmailRoute } from './routes/verify-email.js';
 import { Route as createOrganizationRoute } from './routes/create-organization.js';
+import { Route as leftLastOrgRoute } from './routes/left-organization.js';
 import { RouteErrorPage, RouteNotFoundPage } from './components/RouteRecoveryPage.js';
 import { Route as accountDeletedRoute } from './routes/account-deleted.js';
 import { Route as acceptInvitationRoute } from './routes/invite.accept.js';
@@ -35,6 +36,7 @@ const routeTree = rootRoute.addChildren([
   indexRoute,
   verifyEmailRoute,
   createOrganizationRoute,
+  leftLastOrgRoute,
   accountDeletedRoute,
   acceptInvitationRoute,
   authRoute.addChildren([signInRoute, signUpRoute, loginErrorRoute]),
