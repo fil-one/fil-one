@@ -7,11 +7,15 @@ export interface OrgMembershipSummary {
   orgId: string;
   orgName: string;
   role: OrgRole;
+  /** Uploaded logo, if any. Absent falls back to a generated monogram, same as `MeResponse.picture` does for the user. */
+  logoUrl?: string;
 }
 
 export interface MeResponse {
   orgId: string;
   orgName: string;
+  /** The active org's uploaded logo, if any. Falls back to a generated monogram. */
+  logoUrl?: string;
   emailVerified: boolean;
   email?: string;
   name?: string;

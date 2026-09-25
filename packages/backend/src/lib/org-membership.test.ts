@@ -334,6 +334,8 @@ describe('summarizeMemberships', () => {
     ddbMock.reset();
   });
 
+  const activeOrgSummary = (name: string) => Promise.resolve({ name });
+
   it('names every org the user belongs to', async () => {
     stubMembershipList(ddbMock, {
       userId: USER_ID,
@@ -348,7 +350,7 @@ describe('summarizeMemberships', () => {
       userId: USER_ID,
       activeOrgId: ORG_ID,
       activeRole: OrgRole.Owner,
-      activeOrgName: Promise.resolve('Example Corp'),
+      activeOrgSummary: activeOrgSummary('Example Corp'),
     });
 
     expect(summaries).toStrictEqual([
@@ -366,7 +368,7 @@ describe('summarizeMemberships', () => {
       userId: USER_ID,
       activeOrgId: ORG_ID,
       activeRole: OrgRole.Owner,
-      activeOrgName: Promise.resolve('Example Corp'),
+      activeOrgSummary: activeOrgSummary('Example Corp'),
     });
 
     expect(summaries).toStrictEqual([
@@ -390,12 +392,35 @@ describe('summarizeMemberships', () => {
       userId: USER_ID,
       activeOrgId: ORG_ID,
       activeRole: OrgRole.Member,
-      activeOrgName: Promise.resolve('Example Corp'),
+      activeOrgSummary: activeOrgSummary('Example Corp'),
     });
 
     expect(summaries).toStrictEqual([
       { orgId: ORG_ID, orgName: 'Example Corp', role: OrgRole.Member },
       { orgId: OTHER_ORG_ID, orgName: 'Second Corp', role: OrgRole.Member },
+    ]);
+  });
+
+  it('carries the active org’s logo when it has one', async () => {
+    stubMembershipList(ddbMock, { userId: USER_ID, orgs: [] });
+
+    const summaries = await summarizeMemberships({
+      userId: USER_ID,
+      activeOrgId: ORG_ID,
+      activeRole: OrgRole.Owner,
+      activeOrgSummary: Promise.resolve({
+        name: 'Example Corp',
+        logoUrl: 'https://logos.example/example-corp.png',
+      }),
+    });
+
+    expect(summaries).toStrictEqual([
+      {
+        orgId: ORG_ID,
+        orgName: 'Example Corp',
+        role: OrgRole.Owner,
+        logoUrl: 'https://logos.example/example-corp.png',
+      },
     ]);
   });
 
@@ -414,7 +439,7 @@ describe('summarizeMemberships', () => {
       userId: USER_ID,
       activeOrgId: ORG_ID,
       activeRole: OrgRole.Owner,
-      activeOrgName: Promise.resolve('Example Corp'),
+      activeOrgSummary: activeOrgSummary('Example Corp'),
     });
 
     expect(summaries).toStrictEqual([
