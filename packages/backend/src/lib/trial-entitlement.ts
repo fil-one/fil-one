@@ -16,6 +16,8 @@ export const TrialEntitlementKeys = {
   pk: (normalizedEmail: string): string => `EMAIL_NORM#${normalizedEmail}`,
   pkPrefix: (): string => 'EMAIL_NORM#',
   sk: (): string => 'TRIAL_ENTITLEMENT',
+  /** The per-account twin: the org this userId spent its trial on, whatever its email. */
+  userPk: (userId: string): string => `USER#${userId}`,
 } as const;
 
 export interface EnsureTrialEntitlementParams {
@@ -38,6 +40,10 @@ export interface EnsureTrialEntitlementParams {
  * created or the floor org leaving their last one makes, is refused. A claim
  * written before the org was recorded has no `orgId`: its owner's first request
  * stamps the org it comes from, so an interrupted claim can still be retried.
+ *
+ * The email is not the whole person: an account that changes its address gets
+ * a fresh email key. The account's own claim (`USER#{userId}`) records the org
+ * too, so a new address buys no second trial for the same account.
  */
 export async function ensureTrialEntitlement({
   sub,
@@ -106,6 +112,10 @@ export async function ensureTrialEntitlement({
     }
   }
 
+  if (ownerUserId === userId && claimedOrgId === orgId) {
+    claimedOrgId = await claimForAccount({ userId, orgId });
+  }
+
   let entitled = false;
   if (ownerUserId === userId && claimedOrgId === orgId) {
     try {
@@ -158,6 +168,41 @@ async function markEntitlementChecked(sub: string, userId: string): Promise<void
     console.error('[trial-entitlement] Failed to set emailEntitlementClaimed flag', {
       error,
       userId,
+    });
+  }
+}
+
+/**
+ * The org this account spent its trial on: `orgId` when the account's claim is
+ * new or already names it, else the org it names.
+ */
+async function claimForAccount({
+  userId,
+  orgId,
+}: {
+  userId: string;
+  orgId: string;
+}): Promise<string | undefined> {
+  try {
+    await getDynamoClient().send(
+      new PutItemCommand({
+        TableName: Resource.UserInfoTable.name,
+        Item: {
+          pk: { S: TrialEntitlementKeys.userPk(userId) },
+          sk: { S: TrialEntitlementKeys.sk() },
+          orgId: { S: orgId },
+          createdAt: { S: new Date().toISOString() },
+        },
+        ConditionExpression: 'attribute_not_exists(pk) OR orgId = :orgId',
+        ExpressionAttributeValues: { ':orgId': { S: orgId } },
+        ReturnValuesOnConditionCheckFailure: 'ALL_OLD',
+      }),
+    );
+    return orgId;
+  } catch (err) {
+    if (err instanceof ConditionalCheckFailedException) return err.Item?.orgId?.S;
+    throw new TrialEntitlementError('Failed to claim the account trial entitlement', {
+      cause: err,
     });
   }
 }

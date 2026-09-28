@@ -14,6 +14,10 @@
 // `invitation` nor `manual`, the only kind the claim could be spent on. Several
 // candidates, or none, leave the row alone and name it in the summary.
 //
+// Each resolved claim, and each claim that already names its org, also gets
+// its account twin (`USER#{userId}/TRIAL_ENTITLEMENT`), so an account that
+// changes its email cannot claim again under the new address.
+//
 // DRY RUN BY DEFAULT; --execute writes. Each write is `SET orgId` conditioned on
 // `attribute_not_exists(orgId) AND userId = :userId`, so re-running is safe and
 // a claim a live request stamped first is left as it is.
@@ -36,6 +40,7 @@ import {
   ConditionalCheckFailedException,
   DynamoDBClient,
   GetItemCommand,
+  PutItemCommand,
   QueryCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
@@ -133,8 +138,51 @@ async function stamp(pk: string, userId: string, orgId: string): Promise<boolean
   }
 }
 
+/** False when the account already names a different org. */
+async function claimForAccount(userId: string, orgId: string): Promise<boolean> {
+  try {
+    await dynamo.send(
+      new PutItemCommand({
+        TableName: tables.UserInfoTable,
+        Item: {
+          pk: { S: TrialEntitlementKeys.userPk(userId) },
+          sk: { S: TrialEntitlementKeys.sk() },
+          orgId: { S: orgId },
+          createdAt: { S: new Date().toISOString() },
+        },
+        ConditionExpression: 'attribute_not_exists(pk) OR orgId = :orgId',
+        ExpressionAttributeValues: { ':orgId': { S: orgId } },
+      }),
+    );
+    return true;
+  } catch (err) {
+    if (err instanceof ConditionalCheckFailedException) return false;
+    throw err;
+  }
+}
+
+async function recordAccountClaim(
+  userId: string,
+  orgId: string,
+  { counts, unresolved }: Tally,
+): Promise<void> {
+  if (!cli.execute) {
+    counts.accountClaims++;
+  } else if (await claimForAccount(userId, orgId)) {
+    counts.accountClaims++;
+  } else {
+    unresolved.push(`USER#${userId} — account claim names an org other than ${orgId}`);
+  }
+}
+
 interface Tally {
-  counts: { scanned: number; stamped: number; alreadySet: number; raced: number };
+  counts: {
+    scanned: number;
+    stamped: number;
+    alreadySet: number;
+    raced: number;
+    accountClaims: number;
+  };
   unresolved: string[];
 }
 
@@ -146,11 +194,13 @@ async function processClaim(
   counts.scanned++;
   const claim = decodeRow<{ pk: string; userId: string; orgId: string }>(item);
   const pk = text(claim.pk) ?? '';
-  if (text(claim.orgId)) {
+  const userId = text(claim.userId);
+  const orgId = text(claim.orgId);
+  if (orgId) {
     counts.alreadySet++;
+    if (userId) await recordAccountClaim(userId, orgId, { counts, unresolved });
     return;
   }
-  const userId = text(claim.userId);
   if (!userId) {
     unresolved.push(`${pk} — no userId`);
     return;
@@ -175,7 +225,9 @@ async function processClaim(
   } else {
     counts.raced++;
     console.log(`  RACED ${label} — the claim changed since the scan; left as it is`);
+    return;
   }
+  await recordAccountClaim(userId, resolution.orgId, { counts, unresolved });
 }
 
 function printSummary({ counts, unresolved }: Tally): void {
@@ -186,6 +238,9 @@ function printSummary({ counts, unresolved }: Tally): void {
   console.log(`${cli.execute ? 'Stamped:    ' : 'Would stamp:'} ${counts.stamped}`);
   console.log(`Already set: ${counts.alreadySet}`);
   if (cli.execute) console.log(`Raced:       ${counts.raced}`);
+  console.log(
+    `${cli.execute ? 'Account claims:      ' : 'Would claim accounts:'} ${counts.accountClaims}`,
+  );
   console.log(`Unresolved:  ${unresolved.length}`);
   console.log('');
   if (!cli.execute) console.log('Dry run only — nothing was written.');
@@ -202,7 +257,7 @@ async function main(): Promise<void> {
 
   const billingOrgs = await readBillingOrgs();
   const tally: Tally = {
-    counts: { scanned: 0, stamped: 0, alreadySet: 0, raced: 0 },
+    counts: { scanned: 0, stamped: 0, alreadySet: 0, raced: 0, accountClaims: 0 },
     unresolved: [],
   };
   const claims = scanAll(dynamo, {

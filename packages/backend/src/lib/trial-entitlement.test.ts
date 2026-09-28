@@ -23,6 +23,13 @@ const ddbMock = mockClient(DynamoDBClient);
 import { ensureTrialEntitlement } from './trial-entitlement.ts';
 import { TrialEntitlementError } from './errors.ts';
 
+const EMAIL_PUT = { Item: { pk: { S: 'EMAIL_NORM#user@gmail.com' } } };
+const ACCOUNT_PUT = { Item: { pk: { S: 'USER#user-1' } } };
+
+function claimedAlready(Item: Record<string, { S: string }>) {
+  return new ConditionalCheckFailedException({ message: 'exists', $metadata: {}, Item });
+}
+
 const BASE = {
   sub: 'auth0|sub-1',
   userId: 'user-1',
@@ -63,16 +70,32 @@ describe('ensureTrialEntitlement', () => {
 
     expect(result).toBe(true);
 
-    const putCalls = ddbMock.commandCalls(PutItemCommand);
-    expect(putCalls).toHaveLength(1);
-    expect(putCalls[0].args[0].input.Item).toStrictEqual({
-      pk: { S: 'EMAIL_NORM#user@gmail.com' },
-      sk: { S: 'TRIAL_ENTITLEMENT' },
-      userId: { S: 'user-1' },
-      orgId: { S: 'org-1' },
-      createdAt: { S: expect.any(String) },
-    });
-    expect(putCalls[0].args[0].input.ConditionExpression).toBe('attribute_not_exists(pk)');
+    expect(ddbMock.commandCalls(PutItemCommand).map((c) => c.args[0].input)).toStrictEqual([
+      {
+        TableName: 'UserInfoTable',
+        Item: {
+          pk: { S: 'EMAIL_NORM#user@gmail.com' },
+          sk: { S: 'TRIAL_ENTITLEMENT' },
+          userId: { S: 'user-1' },
+          orgId: { S: 'org-1' },
+          createdAt: { S: expect.any(String) },
+        },
+        ConditionExpression: 'attribute_not_exists(pk)',
+        ReturnValuesOnConditionCheckFailure: 'ALL_OLD',
+      },
+      {
+        TableName: 'UserInfoTable',
+        Item: {
+          pk: { S: 'USER#user-1' },
+          sk: { S: 'TRIAL_ENTITLEMENT' },
+          orgId: { S: 'org-1' },
+          createdAt: { S: expect.any(String) },
+        },
+        ConditionExpression: 'attribute_not_exists(pk) OR orgId = :orgId',
+        ExpressionAttributeValues: { ':orgId': { S: 'org-1' } },
+        ReturnValuesOnConditionCheckFailure: 'ALL_OLD',
+      },
+    ]);
 
     expect(mockCreateBillingTrial).toHaveBeenCalledWith({
       userId: 'user-1',
@@ -86,7 +109,7 @@ describe('ensureTrialEntitlement', () => {
   });
 
   it('does not create a trial when the key is already claimed by another account', async () => {
-    ddbMock.on(PutItemCommand).rejects(
+    ddbMock.on(PutItemCommand, EMAIL_PUT).rejects(
       new ConditionalCheckFailedException({
         message: 'exists',
         $metadata: {},
@@ -107,7 +130,7 @@ describe('ensureTrialEntitlement', () => {
     // Production Lambdas run with applicationLogLevel WARN; console.info would
     // make this denial invisible.
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    ddbMock.on(PutItemCommand).rejects(
+    ddbMock.on(PutItemCommand, EMAIL_PUT).rejects(
       new ConditionalCheckFailedException({
         message: 'exists',
         $metadata: {},
@@ -126,7 +149,7 @@ describe('ensureTrialEntitlement', () => {
   });
 
   it('creates the trial when the same user retries for the org the claim was spent on', async () => {
-    ddbMock.on(PutItemCommand).rejects(
+    ddbMock.on(PutItemCommand, EMAIL_PUT).rejects(
       new ConditionalCheckFailedException({
         message: 'exists',
         $metadata: {},
@@ -145,7 +168,7 @@ describe('ensureTrialEntitlement', () => {
   // floor org made when they leave their last one) gets no trial of its own.
   it('refuses the same user asking from a different org', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    ddbMock.on(PutItemCommand).rejects(
+    ddbMock.on(PutItemCommand, EMAIL_PUT).rejects(
       new ConditionalCheckFailedException({
         message: 'exists',
         $metadata: {},
@@ -171,7 +194,7 @@ describe('ensureTrialEntitlement', () => {
     const STAMP = { UpdateExpression: 'SET orgId = :orgId' };
 
     beforeEach(() => {
-      ddbMock.on(PutItemCommand).rejects(
+      ddbMock.on(PutItemCommand, EMAIL_PUT).rejects(
         new ConditionalCheckFailedException({
           message: 'exists',
           $metadata: {},
@@ -234,8 +257,41 @@ describe('ensureTrialEntitlement', () => {
     });
   });
 
+  // update-profile lets a database account change its address, and the new
+  // address has no claim. The account's own claim still names the first org.
+  it('refuses an account that spent its trial on another org under a previous email', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    ddbMock.on(PutItemCommand, ACCOUNT_PUT).rejects(claimedAlready({ orgId: { S: 'org-first' } }));
+
+    expect(await ensureTrialEntitlement({ ...BASE, email: 'new-address@example.com' })).toBe(false);
+    expect(mockCreateBillingTrial).not.toHaveBeenCalled();
+  });
+
+  it('grants one trial when the same person claims for two orgs at once', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const rows = new Map<string, Record<string, { S: string }>>();
+    ddbMock.on(PutItemCommand).callsFake(({ Item, ExpressionAttributeValues }) => {
+      const existing = rows.get(Item.pk.S);
+      if (existing && existing.orgId?.S !== ExpressionAttributeValues?.[':orgId']?.S) {
+        throw claimedAlready(existing);
+      }
+      rows.set(Item.pk.S, existing ?? Item);
+      return {};
+    });
+
+    const results = await Promise.all([
+      ensureTrialEntitlement({ ...BASE, orgId: 'org-a' }),
+      ensureTrialEntitlement({ ...BASE, orgId: 'org-b' }),
+    ]);
+
+    expect(results).toEqual([true, false]);
+    expect(mockCreateBillingTrial.mock.calls).toEqual([
+      [{ userId: 'user-1', orgId: 'org-a', email: BASE.email }],
+    ]);
+  });
+
   it('throws and does not set the flag on a transient claim error', async () => {
-    ddbMock.on(PutItemCommand).rejects(new Error('Service unavailable'));
+    ddbMock.on(PutItemCommand, EMAIL_PUT).rejects(new Error('Service unavailable'));
 
     await expect(ensureTrialEntitlement(BASE)).rejects.toThrow(TrialEntitlementError);
     expect(mockCreateBillingTrial).not.toHaveBeenCalled();
