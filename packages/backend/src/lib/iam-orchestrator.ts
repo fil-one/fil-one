@@ -1,7 +1,9 @@
 // The `iam` half of the orchestrator interface: what a Forge region's Hilt
-// offers once it serves principals and bucket policies (fil-one/RFC#30). Every
-// method here is a management-API call under the partner key; none touches
-// DynamoDB, and every one takes a `tenantId` the caller has already resolved.
+// offers once it serves principals and bucket policies (fil-one/RFC#30). The
+// principal methods are management-API calls under the partner key; the
+// policy methods are the S3 bucket policy operations signed with the tenant's
+// console key. None touches DynamoDB, and every one takes a `tenantId` the
+// caller has already resolved.
 //
 // Principals are console user ids. The console holds no copy of any policy: it
 // reads one under an ETag, edits it, and writes it back under that ETag, so a
@@ -57,11 +59,13 @@ export interface IamMethods {
   getBucketPolicy(tenantId: string, bucketName: string): Promise<StoredBucketPolicy | null>;
 
   /**
-   * Creates or replaces the policy under the precondition. Throws
-   * {@link PolicyPreconditionFailedError} on a stale ETag with nothing written,
-   * and {@link PolicyValidationError} when the storage system refuses the
-   * document. Retries the two answers the RFC documents as retryable, a lock
-   * timeout and a failed revocation publish, and nothing else.
+   * Creates or replaces the policy with `PutBucketPolicy` under the
+   * precondition, sent as a signed `If-Match` or `If-None-Match: *` header.
+   * Throws {@link PolicyPreconditionFailedError} on a stale ETag with nothing
+   * written, and {@link PolicyValidationError} when the storage system refuses
+   * the document (`MalformedPolicy`). Retries the two answers the RFC documents
+   * as retryable, a lock timeout and a failed revocation publish, and nothing
+   * else.
    */
   putBucketPolicy(
     tenantId: string,
@@ -70,7 +74,7 @@ export interface IamMethods {
     precondition: PolicyPrecondition,
   ): Promise<{ etag: string; created: boolean }>;
 
-  /** Deletes the policy the caller read. Same precondition and retry rules as the write. */
+  /** Deletes the policy the caller read with `DeleteBucketPolicy`. Same precondition and retry rules as the write. */
   deleteBucketPolicy(
     tenantId: string,
     bucketName: string,

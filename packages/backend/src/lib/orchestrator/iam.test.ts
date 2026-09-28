@@ -5,13 +5,14 @@ import type { BucketPolicy } from '@filone/shared';
 vi.mock('sst', () => ({ Resource: { UserInfoTable: { name: 'UserInfoTable' } } }));
 
 // The generated SDK is mocked at the module boundary; each operation answers
-// the hey-api `{ data, error, response }` shape, and the response carries the
-// headers the ETag protocol reads.
+// the hey-api `{ data, error, response }` shape. The policy operations go over
+// S3 and are mocked at the S3 operations module instead; the console
+// credential lookup behind them is stubbed so no client reaches SSM.
 const mockPutPrincipal = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockDeletePrincipal = vi.fn((_o: Record<string, unknown>) => ({}));
-const mockGetPolicy = vi.fn((_o: Record<string, unknown>) => ({}));
-const mockPutPolicy = vi.fn((_o: Record<string, unknown>) => ({}));
-const mockDeletePolicy = vi.fn((_o: Record<string, unknown>) => ({}));
+const mockGetPolicy = vi.fn((..._a: unknown[]): unknown => null);
+const mockPutPolicy = vi.fn((..._a: unknown[]): unknown => ({}));
+const mockDeletePolicy = vi.fn((..._a: unknown[]): unknown => undefined);
 const mockPrincipalPolicies = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockPrincipalAccess = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockCreateAccessKey = vi.fn((_o: Record<string, unknown>) => ({}));
@@ -21,10 +22,6 @@ vi.mock('@filone/orchestrator-client', () => ({
   putTenantsByTenantIdPrincipalsByPrincipalId: (o: Record<string, unknown>) => mockPutPrincipal(o),
   deleteTenantsByTenantIdPrincipalsByPrincipalId: (o: Record<string, unknown>) =>
     mockDeletePrincipal(o),
-  getTenantsByTenantIdBucketsByBucketNamePolicy: (o: Record<string, unknown>) => mockGetPolicy(o),
-  putTenantsByTenantIdBucketsByBucketNamePolicy: (o: Record<string, unknown>) => mockPutPolicy(o),
-  deleteTenantsByTenantIdBucketsByBucketNamePolicy: (o: Record<string, unknown>) =>
-    mockDeletePolicy(o),
   getTenantsByTenantIdPrincipalsByPrincipalIdPolicies: (o: Record<string, unknown>) =>
     mockPrincipalPolicies(o),
   getTenantsByTenantIdPrincipalsByPrincipalIdAccess: (o: Record<string, unknown>) =>
@@ -32,10 +29,21 @@ vi.mock('@filone/orchestrator-client', () => ({
   postTenantsByTenantIdAccessKeys: (o: Record<string, unknown>) => mockCreateAccessKey(o),
 }));
 vi.mock('./metrics.ts', () => ({ instrumentClient: vi.fn() }));
+vi.mock('../s3-bucket-operations.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../s3-bucket-operations.ts')>()),
+  getBucketPolicy: (...a: unknown[]) => mockGetPolicy(...a),
+  putBucketPolicy: (...a: unknown[]) => mockPutPolicy(...a),
+  deleteBucketPolicy: (...a: unknown[]) => mockDeletePolicy(...a),
+}));
+vi.mock('../s3-credentials.ts', () => ({
+  getConsoleS3Credentials: async () => ({
+    accessKeyId: 'AKIA0000TESTKEY0',
+    secretAccessKey: 'secret',
+  }),
+}));
 
 import {
   AccessKeyAlreadyExistsError,
-  BucketNotFoundError,
   PolicyConflictError,
   PolicyPreconditionFailedError,
   PolicyPublishError,
@@ -98,78 +106,47 @@ describe('the access model', () => {
 });
 
 describe('getBucketPolicy', () => {
-  it('returns the document with the ETag the storage system sent', async () => {
-    mockGetPolicy.mockResolvedValue(ok(policy, 200, { etag: '"abc"' }));
+  it('reads over S3 as the tenant and returns what the operation answered', async () => {
+    mockGetPolicy.mockResolvedValue({ policy, etag: '"abc"' });
 
     await expect(iam.getBucketPolicy(tenantId, 'photos')).resolves.toStrictEqual({
       policy,
       etag: '"abc"',
     });
-    expect(mockGetPolicy).toHaveBeenCalledWith(
-      expect.objectContaining({ path: { tenantId, bucketName: 'photos' } }),
-    );
+    expect(mockGetPolicy).toHaveBeenCalledWith(expect.any(Object), 'photos');
   });
 
-  it('tells a bucket with no policy from a bucket that is not there', async () => {
-    // The code decides it; the message is prose either way.
-    const bodies = [
-      { message: 'bucket has no policy', code: 'PolicyNotFound' },
-      { message: 'bucket not found', code: 'BucketNotFound' },
-      { message: 'bucket has no policy' },
-      { message: 'bucket not found' },
-    ];
-
-    const outcomes: unknown[] = [];
-    for (const body of bodies) {
-      mockGetPolicy.mockResolvedValueOnce(fail(404, body));
-      outcomes.push(
-        await iam
-          .getBucketPolicy(tenantId, 'photos')
-          .catch((err: unknown) =>
-            err instanceof BucketNotFoundError ? 'bucket-not-found' : 'other',
-          ),
-      );
-    }
-
-    expect(outcomes).toStrictEqual([
-      null,
-      'bucket-not-found',
-      'bucket-not-found',
-      'bucket-not-found',
-    ]);
-  });
-
-  it('refuses a 200 that carries no ETag', async () => {
-    mockGetPolicy.mockResolvedValue(ok(policy));
-    await expect(iam.getBucketPolicy(tenantId, 'photos')).rejects.toThrow(/without an ETag/);
+  it('passes a bucket without a policy through as null', async () => {
+    mockGetPolicy.mockResolvedValue(null);
+    await expect(iam.getBucketPolicy(tenantId, 'photos')).resolves.toBeNull();
   });
 });
 
 describe('putBucketPolicy', () => {
-  it('sends If-Match to replace and reports the new ETag', async () => {
-    mockPutPolicy.mockResolvedValue(ok(undefined, 200, { etag: '"v2"' }));
+  it('replaces under If-Match and reports the new ETag', async () => {
+    mockPutPolicy.mockResolvedValue({ etag: '"v2"' });
 
     await expect(
       iam.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
     ).resolves.toStrictEqual({ etag: '"v2"', created: false });
-    expect(mockPutPolicy).toHaveBeenCalledWith(
-      expect.objectContaining({ headers: { 'If-Match': '"v1"' }, body: policy }),
-    );
+    expect(mockPutPolicy).toHaveBeenCalledWith(expect.any(Object), 'photos', policy, {
+      ifMatch: '"v1"',
+    });
   });
 
-  it('sends If-None-Match: * to create and reports created on a 201', async () => {
-    mockPutPolicy.mockResolvedValue(ok(undefined, 201, { etag: '"v1"' }));
+  it('creates under If-None-Match: * and reports created', async () => {
+    mockPutPolicy.mockResolvedValue({ etag: '"v1"' });
 
     await expect(
       iam.putBucketPolicy(tenantId, 'photos', policy, { ifNoneMatch: '*' }),
     ).resolves.toStrictEqual({ etag: '"v1"', created: true });
-    expect(mockPutPolicy).toHaveBeenCalledWith(
-      expect.objectContaining({ headers: { 'If-None-Match': '*' } }),
-    );
+    expect(mockPutPolicy).toHaveBeenCalledWith(expect.any(Object), 'photos', policy, {
+      ifNoneMatch: '*',
+    });
   });
 
   it('does not retry a stale ETag: the caller has to read again', async () => {
-    mockPutPolicy.mockResolvedValue(fail(412));
+    mockPutPolicy.mockRejectedValue(new PolicyPreconditionFailedError('photos'));
 
     await expect(
       iam.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"old"' }),
@@ -179,8 +156,8 @@ describe('putBucketPolicy', () => {
 
   it('retries a lock timeout and succeeds on the next attempt', async () => {
     mockPutPolicy
-      .mockResolvedValueOnce(fail(409, { message: 'ConcurrentChange' }))
-      .mockResolvedValueOnce(ok(undefined, 200, { etag: '"v2"' }));
+      .mockRejectedValueOnce(new PolicyConflictError())
+      .mockResolvedValueOnce({ etag: '"v2"' });
 
     await expect(
       iam.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
@@ -189,7 +166,7 @@ describe('putBucketPolicy', () => {
   });
 
   it('retries a failed publish and gives up with the retryable error', async () => {
-    mockPutPolicy.mockResolvedValue(fail(500));
+    mockPutPolicy.mockRejectedValue(new PolicyPublishError());
 
     await expect(
       iam.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
@@ -198,7 +175,7 @@ describe('putBucketPolicy', () => {
   });
 
   it('surfaces the storage system’s validation message once, without retrying', async () => {
-    mockPutPolicy.mockResolvedValue(fail(422, { message: 'unknown principal "bob"' }));
+    mockPutPolicy.mockRejectedValue(new PolicyValidationError('unknown principal "bob"'));
 
     const err: unknown = await iam
       .putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' })
@@ -208,8 +185,8 @@ describe('putBucketPolicy', () => {
     expect(mockPutPolicy).toHaveBeenCalledTimes(1);
   });
 
-  it('maps a 409 that never clears to PolicyConflictError', async () => {
-    mockPutPolicy.mockResolvedValue(fail(409));
+  it('maps a conflict that never clears to PolicyConflictError', async () => {
+    mockPutPolicy.mockRejectedValue(new PolicyConflictError());
     await expect(
       iam.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
     ).rejects.toBeInstanceOf(PolicyConflictError);
@@ -217,14 +194,14 @@ describe('putBucketPolicy', () => {
 });
 
 describe('deleteBucketPolicy', () => {
-  it('sends If-Match and treats 204 as done', async () => {
-    mockDeletePolicy.mockResolvedValue(respond(204));
+  it('deletes under If-Match as the tenant', async () => {
+    mockDeletePolicy.mockResolvedValue(undefined);
     await expect(
       iam.deleteBucketPolicy(tenantId, 'photos', { ifMatch: '"v1"' }),
     ).resolves.toBeUndefined();
-    expect(mockDeletePolicy).toHaveBeenCalledWith(
-      expect.objectContaining({ headers: { 'If-Match': '"v1"' } }),
-    );
+    expect(mockDeletePolicy).toHaveBeenCalledWith(expect.any(Object), 'photos', {
+      ifMatch: '"v1"',
+    });
   });
 });
 
