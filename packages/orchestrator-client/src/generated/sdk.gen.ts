@@ -124,6 +124,11 @@ export const getTenantsByTenantId = <ThrowOnError extends boolean = false>(
  * is supplied by FilOne (a UUID) in the URL path and reused as the
  * `{tenantId}` path parameter in all subsequent calls.
  *
+ * The request has no body. A tenant is not bound to a region: each
+ * of its buckets is served by the region whose S3 Gateway created
+ * it, so one tenant may hold buckets in every region the Service
+ * Orchestrator manages.
+ *
  */
 export const putTenantsByTenantId = <ThrowOnError extends boolean = false>(
   options: Options<PutTenantsByTenantIdData, ThrowOnError>,
@@ -136,10 +141,6 @@ export const putTenantsByTenantId = <ThrowOnError extends boolean = false>(
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/tenants/{tenantId}',
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
   });
 
 /**

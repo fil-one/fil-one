@@ -125,7 +125,6 @@ class FilOneOrchestrator implements ServiceOrchestrator {
       client: this.client,
       id: config.id,
       stage: config.stage,
-      region: config.region,
     };
     this.tenantIdAttribute = `${config.id}TenantId`;
   }
