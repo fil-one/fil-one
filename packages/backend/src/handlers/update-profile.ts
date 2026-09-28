@@ -1,7 +1,7 @@
 import { UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
-import type { APIGatewayProxyResultV2 } from 'aws-lambda';
+import type { APIGatewayProxyResultV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { UpdateProfileResponse, ErrorResponse } from '@filone/shared';
 import { UpdateProfileSchema, isSocialConnection, ApiErrorCode } from '@filone/shared';
 import disposableDomainsList from 'disposable-domains';
@@ -9,6 +9,8 @@ import * as psl from 'psl';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
+import { proceed, refuse } from '../lib/result.ts';
+import type { Result } from '../lib/result.ts';
 import {
   updateAuth0User,
   sendVerificationEmail,
@@ -72,10 +74,8 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
 
   // Checked before anything is written, so a rejected avatar never lands a
   // name or email change alongside the 400.
-  const pictureError =
-    rejectSocialPicture(social, parsed.data.pictureUrl) ??
-    (await rejectUnmintedPicture(parsed.data.pictureUrl));
-  if (pictureError) return pictureError;
+  const picture = await resolvePictureChange(sub, social, parsed.data.pictureUrl);
+  if (!picture.ok) return picture.refusal;
 
   const response: UpdateProfileResponse = {};
 
@@ -91,9 +91,9 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     response.email = parsed.data.email;
   }
 
-  if (parsed.data.pictureUrl !== undefined) {
-    await applyPictureUpdate(sub, parsed.data.pictureUrl);
-    response.picture = parsed.data.pictureUrl;
+  if (picture.value) {
+    await applyPictureUpdate(sub, picture.value.pictureUrl, picture.value.previous);
+    response.picture = picture.value.pictureUrl;
   }
 
   if (
@@ -108,15 +108,35 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
 }
 
 /**
+ * The picture change this request makes, undefined for none, or the 400 that
+ * refuses it. Resubmitting the current avatar is no change, as `update-org`
+ * treats the current logo: it is already claimed, so the unminted check would
+ * refuse it.
+ */
+async function resolvePictureChange(
+  sub: string,
+  social: boolean,
+  pictureUrl: string | undefined,
+): Promise<Result<{ pictureUrl: string; previous: string | undefined } | undefined>> {
+  const socialError = rejectSocialPicture(social, pictureUrl);
+  if (socialError) return refuse(socialError);
+  if (pictureUrl === undefined) return proceed(undefined);
+  const previous = await getAuth0UserPicture(sub);
+  if (pictureUrl === previous) return proceed(undefined);
+  const unmintedError = await rejectUnmintedPicture(pictureUrl);
+  return unmintedError ? refuse(unmintedError) : proceed({ pictureUrl, previous });
+}
+
+/**
  * The 400 for a `pictureUrl` no avatar upload minted, or undefined when there
  * is none to check or it passes. `PATCH /api/me/profile` writes the URL to the
  * caller's Auth0 profile, so an arbitrary one would have every console that
  * renders their avatar request a host of the caller's choosing.
  */
 async function rejectUnmintedPicture(
-  pictureUrl: string | undefined,
-): Promise<APIGatewayProxyResultV2 | undefined> {
-  if (pictureUrl === undefined || (await isUploadedAvatarUrl(pictureUrl))) return undefined;
+  pictureUrl: string,
+): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
+  if (await isUploadedAvatarUrl(pictureUrl)) return undefined;
   return new ResponseBuilder()
     .status(400)
     .body<ErrorResponse>({
@@ -130,10 +150,13 @@ async function rejectUnmintedPicture(
  * cannot delete a picture the profile already names (a failed save puts the
  * claim back). Then the one it replaced, if it was ours, is deleted.
  */
-async function applyPictureUpdate(sub: string, pictureUrl: string): Promise<void> {
-  const previous = await getAuth0UserPicture(sub);
+async function applyPictureUpdate(
+  sub: string,
+  pictureUrl: string,
+  previous: string | undefined,
+): Promise<void> {
   await withClaimedAvatar(pictureUrl, () => updateAuth0User(sub, { picture: pictureUrl }));
-  if (previous !== pictureUrl) await deleteReplacedAvatar(previous);
+  await deleteReplacedAvatar(previous);
 }
 
 /**
@@ -145,7 +168,7 @@ async function applyPictureUpdate(sub: string, pictureUrl: string): Promise<void
 function rejectSocialPicture(
   social: boolean,
   pictureUrl: string | undefined,
-): APIGatewayProxyResultV2 | undefined {
+): APIGatewayProxyStructuredResultV2 | undefined {
   if (!social || pictureUrl === undefined) return undefined;
   return new ResponseBuilder()
     .status(400)

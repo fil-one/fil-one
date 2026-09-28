@@ -219,6 +219,24 @@ describe('PATCH /api/me/profile handler', () => {
     );
   });
 
+  // It is already claimed, so the unminted check would refuse it.
+  it('treats resubmitting the current avatar as no change, still saving the name', async () => {
+    const current = 'https://OrgLogoBucket.s3.us-east-1.amazonaws.com/avatars/current';
+    mockGetAuth0UserPicture.mockResolvedValue(current);
+    mockIsUploadedAvatarUrl.mockResolvedValue(false);
+
+    const result = await handler(
+      profileEvent({ pictureUrl: current, name: 'Jane' }),
+      buildContext(),
+    );
+
+    expect(result).toMatchObject({ statusCode: 200, body: JSON.stringify({ name: 'Jane' }) });
+    expect(mockIsUploadedAvatarUrl).not.toHaveBeenCalled();
+    expect(mockUpdateAuth0User.mock.calls).toEqual([[MOCK_SUB, { name: 'Jane' }]]);
+    expect(mockClaimAvatarUrl).not.toHaveBeenCalled();
+    expect(mockDeleteReplacedAvatar).not.toHaveBeenCalled();
+  });
+
   it('touches the bucket for nothing when the Auth0 save fails', async () => {
     mockUpdateAuth0User.mockRejectedValue(new Error('Auth0 down'));
     const pictureUrl = 'https://OrgLogoBucket.s3.us-east-1.amazonaws.com/avatars/new';
