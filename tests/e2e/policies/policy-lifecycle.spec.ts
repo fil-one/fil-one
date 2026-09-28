@@ -35,7 +35,6 @@ const ownerId = credentials('owner').userId;
 const adminId = credentials('admin').userId;
 const memberId = credentials('member').userId;
 const leaverId = credentials('leaver').userId;
-const byName = (a: string, b: string) => a.localeCompare(b);
 
 let orgId: string;
 let owner: ConsoleApi;
@@ -102,28 +101,28 @@ test('B1. a promotion and a demotion rewrite the admins statement on every bucke
     ]);
 
     const { policy } = await owner.readPolicy(bucket);
-    expect(policy).toEqual({
-      statement: [
-        ownersStatement(ownerId),
-        {
-          sid: 'filone-admins',
-          effect: 'allow',
-          principal: expect.any(Array),
-          action: ROSTER_ADMIN_ACTIONS,
-        },
-        team,
-      ],
-    });
-    expect([...(policy.statement[1].principal as string[])].sort(byName)).toEqual(
-      [adminId, memberId].sort(byName),
+    expect(canonical(policy)).toEqual(
+      canonical({
+        statement: [
+          ownersStatement(ownerId),
+          {
+            sid: 'filone-admins',
+            effect: 'allow',
+            principal: [adminId, memberId],
+            action: ROSTER_ADMIN_ACTIONS,
+          },
+          team,
+        ],
+      }),
     );
     expect(await outcome(listObjects(await freshS3(member), bucket))).toBe('ok');
 
     const demoted = await owner.setRole(memberId, 'member');
     expect(demoted.status(), await demoted.text()).toBe(200);
-    expect((await owner.readPolicy(bucket)).policy).toEqual({
-      statement: [ownersStatement(ownerId), adminsStatement(adminId), team],
-    });
+    expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
+      canonical({ statement: [ownersStatement(ownerId), adminsStatement(adminId), team] }),
+    );
+
     expect(await outcome(listObjects(await freshS3(member), bucket))).toBe('404 NoSuchBucket');
   } finally {
     await runCleanup([
