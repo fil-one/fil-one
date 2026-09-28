@@ -25,6 +25,7 @@ import {
   removeBucket,
   s3For,
   uniqueBucketName,
+  canonical,
 } from './policy.util.ts';
 
 // What a bucket policy grants and withholds, read where it is enforced: S3
@@ -81,7 +82,7 @@ test.afterAll(async () => {
 
 test('1. a new bucket carries the roster statements', async () => {
   const { policy, etag } = await owner.readPolicy(B1);
-  expect(policy).toEqual(rosterPolicy(ownerId, adminId));
+  expect(canonical(policy)).toEqual(canonical(rosterPolicy(ownerId, adminId)));
   expect(etag).toEqual(expect.any(String));
 });
 
@@ -189,7 +190,7 @@ test('11. a policy may drop the roster statements and use any name', async () =>
     allow([memberId], ['s3:ListBucket'], 'team'),
   ];
   await owner.setStatements(B2, statement);
-  expect((await owner.readPolicy(B2)).policy).toEqual({ statement });
+  expect(canonical((await owner.readPolicy(B2)).policy)).toEqual(canonical({ statement }));
   await owner.setStatements(B2, [ownersStatement(ownerId)]);
 });
 

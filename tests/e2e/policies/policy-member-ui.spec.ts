@@ -14,6 +14,7 @@ import {
   rosterPolicy,
   s3For,
   uniqueBucketName,
+  canonical,
 } from './policy.util.ts';
 
 // The console as the Member sees it on an `iam` region, and the key and
@@ -182,6 +183,8 @@ test.describe('as the owner', () => {
 
     await page.getByTestId('bucket-policy-tab').click();
     await expect(page.getByTestId('policy-statement')).toHaveCount(2);
-    expect((await owner.readPolicy(bucket)).policy).toEqual(rosterPolicy(ownerId, adminId));
+    expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
+      canonical(rosterPolicy(ownerId, adminId)),
+    );
   });
 });
