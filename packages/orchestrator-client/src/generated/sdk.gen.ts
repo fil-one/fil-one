@@ -6,9 +6,6 @@ import type {
   DeleteTenantsByTenantIdAccessKeysByAccessKeyIdData,
   DeleteTenantsByTenantIdAccessKeysByAccessKeyIdErrors,
   DeleteTenantsByTenantIdAccessKeysByAccessKeyIdResponses,
-  DeleteTenantsByTenantIdBucketsByBucketNamePolicyData,
-  DeleteTenantsByTenantIdBucketsByBucketNamePolicyErrors,
-  DeleteTenantsByTenantIdBucketsByBucketNamePolicyResponses,
   DeleteTenantsByTenantIdData,
   DeleteTenantsByTenantIdErrors,
   DeleteTenantsByTenantIdPrincipalsByPrincipalIdData,
@@ -24,9 +21,6 @@ import type {
   GetTenantsByTenantIdBucketsByBucketNameMetricsData,
   GetTenantsByTenantIdBucketsByBucketNameMetricsErrors,
   GetTenantsByTenantIdBucketsByBucketNameMetricsResponses,
-  GetTenantsByTenantIdBucketsByBucketNamePolicyData,
-  GetTenantsByTenantIdBucketsByBucketNamePolicyErrors,
-  GetTenantsByTenantIdBucketsByBucketNamePolicyResponses,
   GetTenantsByTenantIdData,
   GetTenantsByTenantIdErrors,
   GetTenantsByTenantIdMetricsData,
@@ -34,9 +28,6 @@ import type {
   GetTenantsByTenantIdMetricsResponses,
   GetTenantsByTenantIdPrincipalsByPrincipalIdAccessData,
   GetTenantsByTenantIdPrincipalsByPrincipalIdAccessErrors,
-  GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysData,
-  GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysErrors,
-  GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysResponses,
   GetTenantsByTenantIdPrincipalsByPrincipalIdAccessResponses,
   GetTenantsByTenantIdPrincipalsByPrincipalIdData,
   GetTenantsByTenantIdPrincipalsByPrincipalIdErrors,
@@ -54,9 +45,6 @@ import type {
   PostTenantsByTenantIdStatusData,
   PostTenantsByTenantIdStatusErrors,
   PostTenantsByTenantIdStatusResponses,
-  PutTenantsByTenantIdBucketsByBucketNamePolicyData,
-  PutTenantsByTenantIdBucketsByBucketNamePolicyErrors,
-  PutTenantsByTenantIdBucketsByBucketNamePolicyResponses,
   PutTenantsByTenantIdData,
   PutTenantsByTenantIdErrors,
   PutTenantsByTenantIdPrincipalsByPrincipalIdData,
@@ -206,6 +194,10 @@ export const postTenantsByTenantIdStatus = <ThrowOnError extends boolean = false
 
 /**
  * List S3 access keys
+ *
+ * Every key of the tenant, or only the keys bound to one principal
+ * when `principalId` is given.
+ *
  */
 export const getTenantsByTenantIdAccessKeys = <ThrowOnError extends boolean = false>(
   options: Options<GetTenantsByTenantIdAccessKeysData, ThrowOnError>,
@@ -383,24 +375,6 @@ export const putTenantsByTenantIdPrincipalsByPrincipalId = <ThrowOnError extends
   });
 
 /**
- * List a principal's access keys
- */
-export const getTenantsByTenantIdPrincipalsByPrincipalIdAccessKeys = <
-  ThrowOnError extends boolean = false,
->(
-  options: Options<GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysData, ThrowOnError>,
-) =>
-  (options.client ?? client).get<
-    GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysResponses,
-    GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysErrors,
-    ThrowOnError
-  >({
-    security: [{ scheme: 'bearer', type: 'http' }],
-    url: '/tenants/{tenantId}/principals/{principalId}/access-keys',
-    ...options,
-  });
-
-/**
  * Bucket policies naming a principal
  *
  * Every bucket policy with a statement naming the principal or `*`.
@@ -444,88 +418,6 @@ export const getTenantsByTenantIdPrincipalsByPrincipalIdAccess = <
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/tenants/{tenantId}/principals/{principalId}/access',
     ...options,
-  });
-
-/**
- * Delete a bucket's policy
- *
- * Carries `If-Match` with the ETag the last read returned; a
- * mismatch is 412 and nothing is written. A bucket with no policy
- * is 404 with a `PolicyNotFound` code.
- *
- */
-export const deleteTenantsByTenantIdBucketsByBucketNamePolicy = <
-  ThrowOnError extends boolean = false,
->(
-  options: Options<DeleteTenantsByTenantIdBucketsByBucketNamePolicyData, ThrowOnError>,
-) =>
-  (options.client ?? client).delete<
-    DeleteTenantsByTenantIdBucketsByBucketNamePolicyResponses,
-    DeleteTenantsByTenantIdBucketsByBucketNamePolicyErrors,
-    ThrowOnError
-  >({
-    security: [{ scheme: 'bearer', type: 'http' }],
-    url: '/tenants/{tenantId}/buckets/{bucketName}/policy',
-    ...options,
-  });
-
-/**
- * Read a bucket's policy
- *
- * Returns the stored document and, in the `ETag` header, a strong
- * validator over its canonical encoding. Callers treat the ETag as
- * opaque and send it back on the next write.
- *
- */
-export const getTenantsByTenantIdBucketsByBucketNamePolicy = <ThrowOnError extends boolean = false>(
-  options: Options<GetTenantsByTenantIdBucketsByBucketNamePolicyData, ThrowOnError>,
-) =>
-  (options.client ?? client).get<
-    GetTenantsByTenantIdBucketsByBucketNamePolicyResponses,
-    GetTenantsByTenantIdBucketsByBucketNamePolicyErrors,
-    ThrowOnError
-  >({
-    security: [{ scheme: 'bearer', type: 'http' }],
-    url: '/tenants/{tenantId}/buckets/{bucketName}/policy',
-    ...options,
-  });
-
-/**
- * Create or replace a bucket's policy
- *
- * Compare-and-set. The request carries exactly one precondition:
- * `If-Match` with the ETag the last read returned, or
- * `If-None-Match: *` to create the bucket's first policy. A request
- * with neither, with both, or with another `If-None-Match` value is
- * 400. A mismatch, or `If-None-Match: *` when a policy exists, is
- * 412 and nothing is written.
- *
- * The orchestrator validates the document: every action in the
- * policy vocabulary or `s3:*`; every principal `*` or a live
- * principal of the tenant; no empty statement or action list; no
- * field outside the schema. A failing document is 422.
- *
- * Before acknowledging, the orchestrator invalidates the cached
- * authority of every key bound to a principal whose effective
- * actions changed, so the write is visible at the S3 gateway
- * within its propagation bound.
- *
- */
-export const putTenantsByTenantIdBucketsByBucketNamePolicy = <ThrowOnError extends boolean = false>(
-  options: Options<PutTenantsByTenantIdBucketsByBucketNamePolicyData, ThrowOnError>,
-) =>
-  (options.client ?? client).put<
-    PutTenantsByTenantIdBucketsByBucketNamePolicyResponses,
-    PutTenantsByTenantIdBucketsByBucketNamePolicyErrors,
-    ThrowOnError
-  >({
-    security: [{ scheme: 'bearer', type: 'http' }],
-    url: '/tenants/{tenantId}/buckets/{bucketName}/policy',
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
   });
 
 /**
