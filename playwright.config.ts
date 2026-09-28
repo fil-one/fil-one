@@ -1,6 +1,9 @@
 /// <reference types="node" />
 
+import fs from 'node:fs';
 import { defineConfig, devices } from '@playwright/test';
+
+if (fs.existsSync('.env.e2e.local')) process.loadEnvFile('.env.e2e.local');
 
 const isCI = !!process.env.CI;
 const baseURL = process.env.BASE_URL;
@@ -40,20 +43,43 @@ export default defineConfig({
     {
       name: 'full-chromium',
       testDir: './tests/e2e',
+      testIgnore: /multi-org\//,
       use: { ...devices['Desktop Chrome'] },
       dependencies: ['seed-buckets'],
     },
     {
       name: 'full-firefox',
       testDir: './tests/e2e',
+      testIgnore: /multi-org\//,
       use: { ...devices['Desktop Firefox'] },
       dependencies: ['seed-buckets'],
     },
     {
       name: 'full-webkit',
       testDir: './tests/e2e',
+      testIgnore: /multi-org\//,
       use: { ...devices['Desktop Safari'] },
       dependencies: ['seed-buckets'],
+    },
+    // The multi-org suite, on its own accounts. Serial: the specs share them.
+    {
+      name: 'multi-org-setup',
+      testDir: './tests/e2e/multi-org',
+      testMatch: /login\.setup\.ts/,
+    },
+    {
+      name: 'multi-org',
+      testDir: './tests/e2e/multi-org',
+      fullyParallel: false,
+      // Local lambdas start cold.
+      timeout: 90_000,
+      expect: { timeout: 20_000 },
+      use: {
+        ...devices['Desktop Chrome'],
+        trace: 'retain-on-failure',
+        screenshot: 'only-on-failure',
+      },
+      dependencies: ['multi-org-setup'],
     },
     // smoke tests executed in production
     {

@@ -327,6 +327,16 @@ floci's Lambda containers reach smelt through `host.docker.internal`. Presigned 
 
 Ingot only accepts browser requests from origins in `cors_allowed_origins` (`systems/ingot/config/config.yaml` in smelt). Add `https://localhost:5173` there and restart Ingot. To test Hilt changes, rebuild smelt's workspace binaries as its README describes; smelt runs whatever binary it last built.
 
+#### Multi-org E2E suite
+
+`tests/e2e/multi-org` runs on its own accounts (`E2E_ORG_{OWNER,MEMBER,FRESH}_{EMAIL,PASSWORD,AUTH0_ID}` in `.env.e2e.local`, which `playwright.config.ts` loads). Auth0 only accepts `https://localhost:5173`, so for a stage whose console runs on another port, keep `BASE_URL` at 5173 and set `E2E_ORIGIN_REWRITE` to the real origin: the fixture reroutes the browser's requests there. Run it serially, inside the stage's shell so the seeding helpers reach its tables:
+
+```bash
+eval "$(floci env)"; export LOCAL=true AWS_REGION=us-east-1
+BASE_URL=https://localhost:5173 E2E_ORIGIN_REWRITE=https://localhost:5185 \
+  pnpm exec sst shell --stage local-org -- pnpm exec playwright test --project=multi-org --workers=1
+```
+
 #### Removing
 
 ```bash
