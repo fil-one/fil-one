@@ -205,14 +205,14 @@ test("R8. the first policy is the server's own, whatever a creator sends", async
       policy: asked,
     });
     if (created.status() === 201) buckets.push(bucket);
-    results.push([role, created.status(), (await api.owner.readPolicy(bucket)).policy]);
+    results.push([role, created.status(), canonical((await api.owner.readPolicy(bucket)).policy)]);
   }
   expect(results).toEqual([
-    ['admin', 201, rosterPolicy(ids.owner, ids.admin)],
+    ['admin', 201, canonical(rosterPolicy(ids.owner, ids.admin))],
     [
       'member',
       201,
-      {
+      canonical({
         statement: [
           ...rosterPolicy(ids.owner, ids.admin).statement,
           {
@@ -222,7 +222,7 @@ test("R8. the first policy is the server's own, whatever a creator sends", async
             action: ROSTER_ADMIN_ACTIONS,
           },
         ],
-      },
+      }),
     ],
   ]);
 });

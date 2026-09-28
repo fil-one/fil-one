@@ -98,7 +98,9 @@ test.describe('through the API', () => {
       200,
       undefined,
     ]);
-    expect((await owner.readPolicy(bucket)).policy).toEqual({ statement: roster() });
+    expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
+      canonical({ statement: roster() }),
+    );
   });
 
   test('P4. an admin may deny the pair, since withholding is not granting', async () => {
@@ -180,9 +182,9 @@ test.describe('in the editor', () => {
       await page.locator('#policy-save-button').click();
       await expect(page.getByTestId('policy-save-bar')).toBeHidden();
 
-      expect((await owner.readPolicy(bucket)).policy).toEqual({
-        statement: [...roster(), allow([memberId], ['s3:PutObjectRetention'])],
-      });
+      expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
+        canonical({ statement: [...roster(), allow([memberId], ['s3:PutObjectRetention'])] }),
+      );
     });
   });
 });
