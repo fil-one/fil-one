@@ -14,7 +14,7 @@ import { BaseLink } from './BaseLink.js';
 import { UserAvatar } from './UserAvatar.js';
 
 const itemClassName =
-  'flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-xs text-zinc-600 transition-colors data-focus:bg-zinc-100 data-focus:text-zinc-900';
+  'flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-xs text-zinc-600 transition-colors data-focus:bg-zinc-100 data-focus:text-zinc-900';
 
 type UserMenuProps = {
   src: string | undefined;
