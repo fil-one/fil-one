@@ -577,7 +577,7 @@ class ScopedKeysFilOneOrchestrator extends FilOneOrchestrator implements ScopedK
 class IamFilOneOrchestrator extends FilOneOrchestrator implements IamOrchestrator {
   readonly accessModel = 'iam' as const;
   // Field initializers run after the base constructor, so `client` is set.
-  readonly iam: IamMethods = buildIamMethods(this.client, this.id);
+  readonly iam: IamMethods = buildIamMethods(this.client, this.id, this);
 }
 
 function resolveClient(config: FilOneOrchestratorConfig): Client {
