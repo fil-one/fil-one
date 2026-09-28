@@ -1,27 +1,22 @@
-// The `iam` arm of createFilOneOrchestrator: principals, bucket policies, and
-// principal-bound keys over the Management API (fil-one/RFC#30). Split from
-// orchestrator.ts so each file stays about one half of the contract.
+// The `iam` arm of createFilOneOrchestrator (fil-one/RFC#30): principals and
+// principal-bound keys over the Management API, bucket policies over S3 with
+// the tenant's console key. Split from orchestrator.ts so each file stays
+// about one half of the contract.
 
 import pRetry from 'p-retry';
 import type { BucketPolicy, MemberBucketAccess } from '@filone/shared';
 import {
-  deleteTenantsByTenantIdBucketsByBucketNamePolicy,
   deleteTenantsByTenantIdPrincipalsByPrincipalId,
-  getTenantsByTenantIdBucketsByBucketNamePolicy,
   getTenantsByTenantIdPrincipalsByPrincipalIdAccess,
   getTenantsByTenantIdPrincipalsByPrincipalIdPolicies,
   postTenantsByTenantIdAccessKeys,
-  putTenantsByTenantIdBucketsByBucketNamePolicy,
   putTenantsByTenantIdPrincipalsByPrincipalId,
   type Client,
 } from '@filone/orchestrator-client';
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
-  BucketNotFoundError,
   PolicyConflictError,
-  PolicyNotFoundError,
-  PolicyPreconditionFailedError,
   PolicyPublishError,
   PolicyValidationError,
   PrincipalNotFoundError,
@@ -31,16 +26,19 @@ import type {
   IssueMemberKeyOpts,
   IssuedMemberKey,
   MemberPolicy,
-  PolicyPrecondition,
   StoredBucketPolicy,
 } from '../iam-orchestrator.ts';
-import { extractApiCode, extractApiMessage } from './api-message.ts';
+import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
+import { deleteBucketPolicy, getBucketPolicy, putBucketPolicy } from '../s3-bucket-operations.ts';
+import { createS3Client, type S3ClientContext } from '../s3-client.ts';
+import { extractApiMessage } from './api-message.ts';
 
 /**
- * The two answers the RFC documents as "retry the same request": a 409 lock
- * timeout, and a 500 after the storage system published revocations but
- * committed nothing. A 412 is never retried, because the caller must read the
- * current document first, and a 422 never succeeds on a repeat.
+ * The two answers the RFC documents as "retry the same request": a lock
+ * timeout (409 on the management API, OperationAborted over S3), and a 500
+ * after the storage system published revocations but committed nothing. A
+ * stale precondition is never retried, because the caller must read the
+ * current document first, and a refused document never succeeds on a repeat.
  */
 const IAM_WRITE_RETRY = { retries: 2, minTimeout: 200, maxTimeout: 1000 } as const;
 
@@ -58,54 +56,6 @@ interface SdkResult<T> {
   error?: unknown;
   /** Absent when the request never reached the network. */
   response?: { status: number; headers?: { get(name: string): string | null } };
-}
-
-/** The storage system's code for "bucket exists, policy does not". */
-const POLICY_NOT_FOUND_CODE = 'PolicyNotFound';
-
-/**
- * A 404 saying the bucket is there and its policy is not, which the console
- * answers by offering to write the first statement.
- *
- * The code alone decides it. Both cases are a 404 whose message is prose the
- * contract does not fix, so reading the message would tie the console to
- * wording the storage system is free to change.
- */
-function isPolicyNotFound(error: unknown): boolean {
-  return extractApiCode(error) === POLICY_NOT_FOUND_CODE;
-}
-
-/**
- * A failed policy route, by status. `write` decides what a 500 means: on a
- * write it is a publish that failed before commit, which the caller retries; on
- * a read it is an ordinary upstream failure.
- */
-function policyFailure(
-  result: SdkResult<unknown>,
-  bucketName: string,
-  write: boolean,
-  fallback: string,
-): Error {
-  const cause = result.error;
-  switch (result.response?.status) {
-    case 404:
-      return isPolicyNotFound(cause)
-        ? new PolicyNotFoundError(bucketName, { cause })
-        : new BucketNotFoundError(bucketName, { cause });
-    case 409:
-      return new PolicyConflictError({ cause });
-    case 412:
-      return new PolicyPreconditionFailedError(bucketName, { cause });
-    case 422:
-      return new PolicyValidationError(
-        extractApiMessage(cause) ?? 'The storage system refused the policy document.',
-        { cause },
-      );
-    case 500:
-      return write ? new PolicyPublishError({ cause }) : new Error(fallback, { cause });
-    default:
-      return new Error(fallback, { cause });
-  }
 }
 
 /** A failed principal route, by status. */
@@ -132,24 +82,16 @@ function principalFailure(
   }
 }
 
-/** The ETag a successful read or write must carry; its absence is a contract violation. */
-function readEtag(result: SdkResult<unknown>, bucketName: string): string {
-  const etag = result.response?.headers?.get('etag');
-  if (!etag) {
-    throw new Error(`The storage system answered for bucket "${bucketName}" without an ETag`);
-  }
-  return etag;
-}
-
-function preconditionHeaders(precondition: PolicyPrecondition): Record<string, string> {
-  return 'ifMatch' in precondition
-    ? { 'If-Match': precondition.ifMatch }
-    : { 'If-None-Match': precondition.ifNoneMatch };
+/** Where the S3 client context for a tenant comes from: the orchestrator itself. */
+export interface S3ContextSource {
+  getS3ClientContext(tenantId: string, opts?: OrchestratorRequestOptions): Promise<S3ClientContext>;
 }
 
 interface IamContext {
   client: Client;
   orchestratorId: string;
+  /** An S3 client signing as the tenant's console key on this region. */
+  s3: (tenantId: string) => Promise<ReturnType<typeof createS3Client>>;
 }
 
 /** The message for an answer no mapping names; the upstream body rides as the cause. */
@@ -157,8 +99,16 @@ function failed(ctx: IamContext, what: string, tenantId: string): string {
   return `Failed to ${what} for ${ctx.orchestratorId} tenant ${tenantId}`;
 }
 
-export function buildIamMethods(client: Client, orchestratorId: string): IamMethods {
-  const ctx = { client, orchestratorId };
+export function buildIamMethods(
+  client: Client,
+  orchestratorId: string,
+  source: S3ContextSource,
+): IamMethods {
+  const ctx: IamContext = {
+    client,
+    orchestratorId,
+    s3: async (tenantId) => createS3Client(await source.getS3ClientContext(tenantId)),
+  };
   return {
     ...buildPrincipalMethods(ctx),
     ...buildPolicyMethods(ctx),
@@ -253,66 +203,25 @@ function buildPrincipalMethods(
 function buildPolicyMethods(
   ctx: IamContext,
 ): Pick<IamMethods, 'getBucketPolicy' | 'putBucketPolicy' | 'deleteBucketPolicy'> {
-  const { client } = ctx;
   return {
     async getBucketPolicy(tenantId, bucketName): Promise<StoredBucketPolicy | null> {
-      const result = await getTenantsByTenantIdBucketsByBucketNamePolicy({
-        client,
-        path: { tenantId, bucketName },
-        throwOnError: false,
-      });
-      if (result.error || !result.data) {
-        const failure = policyFailure(
-          result,
-          bucketName,
-          false,
-          failed(ctx, `read the policy of bucket "${bucketName}"`, tenantId),
-        );
-        if (failure instanceof PolicyNotFoundError) return null;
-        throw failure;
-      }
-      // The contract's document shape is the shared one, field for field.
-      return { policy: result.data as BucketPolicy, etag: readEtag(result, bucketName) };
+      // The gateway's document shape is the shared one, field for field.
+      return getBucketPolicy(await ctx.s3(tenantId), bucketName);
     },
 
     async putBucketPolicy(tenantId, bucketName, policy, precondition) {
+      const s3 = await ctx.s3(tenantId);
       return withWriteRetry(async () => {
-        const result = await putTenantsByTenantIdBucketsByBucketNamePolicy({
-          client,
-          path: { tenantId, bucketName },
-          headers: preconditionHeaders(precondition),
-          body: policy,
-          throwOnError: false,
-        });
-        if (result.error) {
-          throw policyFailure(
-            result,
-            bucketName,
-            true,
-            failed(ctx, `write the policy of bucket "${bucketName}"`, tenantId),
-          );
-        }
-        return { etag: readEtag(result, bucketName), created: result.response?.status === 201 };
+        const { etag } = await putBucketPolicy(s3, bucketName, policy, precondition);
+        // The operation answers 204 either way; a write that conditioned on
+        // there being no policy and landed created it.
+        return { etag, created: 'ifNoneMatch' in precondition };
       });
     },
 
     async deleteBucketPolicy(tenantId, bucketName, precondition) {
-      await withWriteRetry(async () => {
-        const result = await deleteTenantsByTenantIdBucketsByBucketNamePolicy({
-          client,
-          path: { tenantId, bucketName },
-          headers: preconditionHeaders(precondition),
-          throwOnError: false,
-        });
-        if (result.error) {
-          throw policyFailure(
-            result,
-            bucketName,
-            true,
-            failed(ctx, `delete the policy of bucket "${bucketName}"`, tenantId),
-          );
-        }
-      });
+      const s3 = await ctx.s3(tenantId);
+      await withWriteRetry(() => deleteBucketPolicy(s3, bucketName, precondition));
     },
   };
 }
