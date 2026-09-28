@@ -75,6 +75,10 @@ export type UpdateTenantStatusRequest = {
  * * `s3:CreateBucket` — create a bucket.
  * * `s3:ListAllMyBuckets` — list the tenant's buckets.
  * * `s3:DeleteBucket` — delete a bucket.
+ * * `s3:GetBucketPolicy`, `s3:PutBucketPolicy`,
+ * `s3:DeleteBucketPolicy` — read, write and delete a bucket's
+ * policy (`iam` access model). A bucket policy never grants
+ * them; only a service key holds them.
  *
  * **Object-level** — operating on objects within buckets. The
  * basic actions (`s3:GetObject`, `s3:PutObject`, `s3:ListBucket`,
@@ -124,7 +128,10 @@ export type AccessKeyPermission =
   | 's3:ListMultipartUploadParts'
   | 's3:AbortMultipartUpload'
   | 's3:DeleteObject'
-  | 's3:DeleteObjectVersion';
+  | 's3:DeleteObjectVersion'
+  | 's3:GetBucketPolicy'
+  | 's3:PutBucketPolicy'
+  | 's3:DeleteBucketPolicy';
 
 /**
  * Caller-supplied, opaque, unique within the tenant. FilOne uses
@@ -337,18 +344,6 @@ export type BucketName2 = BucketName;
 export type PrincipalId2 = PrincipalId;
 
 /**
- * The ETag the last read of the policy returned. Required unless
- * `If-None-Match: *` is sent.
- *
- */
-export type IfMatch = string;
-
-/**
- * The literal `*`, to create the bucket's first policy. Any other value is 400.
- */
-export type IfNoneMatch = '*';
-
-/**
  * Start of the query range (inclusive), RFC 3339. Service Orchestrators
  * must support ranges (`to` − `from`) of at least 32 days.
  *
@@ -528,7 +523,9 @@ export type GetTenantsByTenantIdAccessKeysData = {
   path: {
     tenantId: TenantId;
   };
-  query?: never;
+  query?: {
+    principalId?: PrincipalId;
+  };
   url: '/tenants/{tenantId}/access-keys';
 };
 
@@ -834,40 +831,6 @@ export type PutTenantsByTenantIdPrincipalsByPrincipalIdResponses = {
 export type PutTenantsByTenantIdPrincipalsByPrincipalIdResponse =
   PutTenantsByTenantIdPrincipalsByPrincipalIdResponses[keyof PutTenantsByTenantIdPrincipalsByPrincipalIdResponses];
 
-export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysData = {
-  body?: never;
-  path: {
-    tenantId: TenantId;
-    principalId: PrincipalId;
-  };
-  query?: never;
-  url: '/tenants/{tenantId}/principals/{principalId}/access-keys';
-};
-
-export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysErrors = {
-  /**
-   * Missing or invalid bearer token, or token not authorised for this tenant.
-   */
-  401: Error;
-  /**
-   * Resource not found.
-   */
-  404: Error;
-};
-
-export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysError =
-  GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysErrors[keyof GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysErrors];
-
-export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysResponses = {
-  /**
-   * The keys bound to this principal (without secrets).
-   */
-  200: AccessKeyList;
-};
-
-export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysResponse =
-  GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysResponses[keyof GetTenantsByTenantIdPrincipalsByPrincipalIdAccessKeysResponses];
-
 export type GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesData = {
   body?: never;
   path: {
@@ -935,190 +898,6 @@ export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessResponses = {
 
 export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessResponse =
   GetTenantsByTenantIdPrincipalsByPrincipalIdAccessResponses[keyof GetTenantsByTenantIdPrincipalsByPrincipalIdAccessResponses];
-
-export type DeleteTenantsByTenantIdBucketsByBucketNamePolicyData = {
-  body?: never;
-  headers?: {
-    /**
-     * The ETag the last read of the policy returned. Required unless
-     * `If-None-Match: *` is sent.
-     *
-     */
-    'If-Match'?: string;
-  };
-  path: {
-    tenantId: TenantId;
-    bucketName: BucketName;
-  };
-  query?: never;
-  url: '/tenants/{tenantId}/buckets/{bucketName}/policy';
-};
-
-export type DeleteTenantsByTenantIdBucketsByBucketNamePolicyErrors = {
-  /**
-   * Malformed request — invalid query parameter, path parameter, or
-   * unparseable JSON body. Body validation errors return 422 instead.
-   *
-   */
-  400: Error;
-  /**
-   * Missing or invalid bearer token, or token not authorised for this tenant.
-   */
-  401: Error;
-  /**
-   * The bucket does not exist or belongs to another tenant, or the
-   * bucket exists and has no policy. The body's `code` is
-   * `PolicyNotFound` in the second case, so callers can tell the two
-   * apart.
-   *
-   */
-  404: Error;
-  /**
-   * The write could not take its lock within the orchestrator's
-   * timeout, because another change to the same principal or policy
-   * is in flight. Nothing was written; the caller retries.
-   *
-   */
-  409: Error;
-  /**
-   * The ETag did not match the stored policy, or `If-None-Match: *`
-   * was sent and a policy exists. Nothing was written.
-   *
-   */
-  412: Error;
-  /**
-   * Unexpected server error.
-   */
-  500: Error;
-};
-
-export type DeleteTenantsByTenantIdBucketsByBucketNamePolicyError =
-  DeleteTenantsByTenantIdBucketsByBucketNamePolicyErrors[keyof DeleteTenantsByTenantIdBucketsByBucketNamePolicyErrors];
-
-export type DeleteTenantsByTenantIdBucketsByBucketNamePolicyResponses = {
-  /**
-   * Policy deleted.
-   */
-  204: void;
-};
-
-export type DeleteTenantsByTenantIdBucketsByBucketNamePolicyResponse =
-  DeleteTenantsByTenantIdBucketsByBucketNamePolicyResponses[keyof DeleteTenantsByTenantIdBucketsByBucketNamePolicyResponses];
-
-export type GetTenantsByTenantIdBucketsByBucketNamePolicyData = {
-  body?: never;
-  path: {
-    tenantId: TenantId;
-    bucketName: BucketName;
-  };
-  query?: never;
-  url: '/tenants/{tenantId}/buckets/{bucketName}/policy';
-};
-
-export type GetTenantsByTenantIdBucketsByBucketNamePolicyErrors = {
-  /**
-   * Missing or invalid bearer token, or token not authorised for this tenant.
-   */
-  401: Error;
-  /**
-   * The bucket does not exist or belongs to another tenant, or the
-   * bucket exists and has no policy. The body's `code` is
-   * `PolicyNotFound` in the second case, so callers can tell the two
-   * apart.
-   *
-   */
-  404: Error;
-};
-
-export type GetTenantsByTenantIdBucketsByBucketNamePolicyError =
-  GetTenantsByTenantIdBucketsByBucketNamePolicyErrors[keyof GetTenantsByTenantIdBucketsByBucketNamePolicyErrors];
-
-export type GetTenantsByTenantIdBucketsByBucketNamePolicyResponses = {
-  /**
-   * The policy.
-   */
-  200: BucketPolicy;
-};
-
-export type GetTenantsByTenantIdBucketsByBucketNamePolicyResponse =
-  GetTenantsByTenantIdBucketsByBucketNamePolicyResponses[keyof GetTenantsByTenantIdBucketsByBucketNamePolicyResponses];
-
-export type PutTenantsByTenantIdBucketsByBucketNamePolicyData = {
-  body: BucketPolicy;
-  headers?: {
-    /**
-     * The ETag the last read of the policy returned. Required unless
-     * `If-None-Match: *` is sent.
-     *
-     */
-    'If-Match'?: string;
-    /**
-     * The literal `*`, to create the bucket's first policy. Any other value is 400.
-     */
-    'If-None-Match'?: '*';
-  };
-  path: {
-    tenantId: TenantId;
-    bucketName: BucketName;
-  };
-  query?: never;
-  url: '/tenants/{tenantId}/buckets/{bucketName}/policy';
-};
-
-export type PutTenantsByTenantIdBucketsByBucketNamePolicyErrors = {
-  /**
-   * Malformed request — invalid query parameter, path parameter, or
-   * unparseable JSON body. Body validation errors return 422 instead.
-   *
-   */
-  400: Error;
-  /**
-   * Missing or invalid bearer token, or token not authorised for this tenant.
-   */
-  401: Error;
-  /**
-   * Resource not found.
-   */
-  404: Error;
-  /**
-   * The write could not take its lock within the orchestrator's
-   * timeout, because another change to the same principal or policy
-   * is in flight. Nothing was written; the caller retries.
-   *
-   */
-  409: Error;
-  /**
-   * The ETag did not match the stored policy, or `If-None-Match: *`
-   * was sent and a policy exists. Nothing was written.
-   *
-   */
-  412: Error;
-  /**
-   * Request body is well-formed but fails semantic validation
-   * (missing required field, value out of range, enum mismatch,
-   * cross-field constraint, etc.).
-   *
-   */
-  422: Error;
-  /**
-   * Unexpected server error.
-   */
-  500: Error;
-};
-
-export type PutTenantsByTenantIdBucketsByBucketNamePolicyError =
-  PutTenantsByTenantIdBucketsByBucketNamePolicyErrors[keyof PutTenantsByTenantIdBucketsByBucketNamePolicyErrors];
-
-export type PutTenantsByTenantIdBucketsByBucketNamePolicyResponses = {
-  /**
-   * Policy replaced.
-   */
-  200: unknown;
-  /**
-   * Policy created.
-   */
-  201: unknown;
-};
 
 export type GetTenantsByTenantIdMetricsData = {
   body?: never;
