@@ -256,8 +256,10 @@ describe('ensureTenantReady', () => {
     await ensureTenantReady(deps, orgId);
 
     const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
-    expect(permissions).toHaveLength(17);
+    expect(permissions).toHaveLength(20);
     expect(permissions).toContain('s3:ListBucketMultipartUploads');
+    // The console writes bucket policies over S3 with this key.
+    expect(permissions).toContain('s3:PutBucketPolicy');
     // The contract enum carries no bucket-config actions at all: the reads
     // classify as ListBucket (fil-one/RFC#30) and there are no writes.
     expect(permissions).not.toContain('s3:GetBucketVersioning');
