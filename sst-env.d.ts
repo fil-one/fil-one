@@ -278,6 +278,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Bucket"
     }
+    "OrgLogoBucketName": {
+      "name": string
+      "type": "sst.sst.Linkable"
+    }
     "OrgTable": {
       "name": string
       "type": "sst.aws.Dynamo"

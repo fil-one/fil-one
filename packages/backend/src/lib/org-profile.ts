@@ -145,7 +145,7 @@ export function isGuardRejection(err: unknown): boolean {
  * so the read failure is logged and swallowed here rather than raised.
  */
 export async function resolveOrgName(orgId: string): Promise<string> {
-  // Not through orgSummary: its logo check reads OrgLogoBucket, which only
+  // Not through orgSummary: its logo check reads OrgLogoBucketName, which only
   // some functions link.
   try {
     return (await getOrgProfile(orgId))?.name?.S ?? '';

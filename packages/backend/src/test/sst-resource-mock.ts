@@ -26,6 +26,7 @@ export function sstResourceMock(resources: Record<string, unknown> = {}): {
       // matches on.
       AuditLog: { name: 'AuditTable' },
       OrgLogoBucket: { name: 'OrgLogoBucket' },
+      OrgLogoBucketName: { name: 'OrgLogoBucket' },
       Auth0ClientId: { value: 'test-client-id' },
       Auth0ClientSecret: { value: 'test-client-secret' },
       Auth0MgmtClientId: { value: 'test-mgmt-client-id' },

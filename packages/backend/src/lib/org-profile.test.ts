@@ -11,7 +11,7 @@ import {
 vi.mock('sst', () => ({
   Resource: {
     UserInfoTable: { name: 'UserInfoTable' },
-    OrgLogoBucket: { name: 'OrgLogoBucket' },
+    OrgLogoBucketName: { name: 'OrgLogoBucket' },
   },
 }));
 

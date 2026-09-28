@@ -312,6 +312,12 @@ export default $config({
       lifecycle: [{ id: 'expire-unclaimed-uploads', expiresIn: '1 day' }],
     });
 
+    // The bucket's name alone, with no permissions, for the routes that only
+    // check a stored URL points into it. Linking the bucket itself grants s3:*.
+    const orgLogoBucketName = new sst.Linkable('OrgLogoBucketName', {
+      properties: { name: orgLogoBucket.name },
+    });
+
     // ── S3 Vectors bucket for RAG embeddings (FIL-548) ───────────────
     // One vector bucket hosts one index per RAG-enabled bucket. The
     // @filone/rag-shared S3VectorsStore reads the bucket name at runtime via
@@ -1253,9 +1259,9 @@ export default $config({
       },
 
       // ── Account and MFA ────────────────────────────────────────────
-      // OrgLogoBucket's name, to check a stored logo is one of its uploads.
+      // OrgLogoBucketName, to check a stored logo is one of its uploads.
       'get-me': {
-        extraLink: [...mgmtRuntimeResources, orgLogoBucket],
+        extraLink: [...mgmtRuntimeResources, orgLogoBucketName],
         extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
         provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       },
@@ -1314,7 +1320,7 @@ export default $config({
       // Checks a submitted logo URL against OrgLogoBucket, claims it, and
       // deletes the logo it replaced.
       'update-org': {
-        extraLink: [orgLogoBucket],
+        extraLink: [orgLogoBucket, orgLogoBucketName],
       },
 
       // ── Invitations ────────────────────────────────────────────────

@@ -160,7 +160,7 @@ export async function isUnclaimedUpload(url: string, prefix: string): Promise<bo
  * only, for URLs read back from storage before they reach a response.
  */
 export function isOurImageUrl(url: string, prefix: string): boolean {
-  return keyFromBucketUrl(url, Resource.OrgLogoBucket.name, prefix) !== undefined;
+  return keyFromBucketUrl(url, Resource.OrgLogoBucketName.name, prefix) !== undefined;
 }
 
 /**
