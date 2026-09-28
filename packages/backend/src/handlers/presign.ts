@@ -288,7 +288,10 @@ export async function baseHandler(
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) return tenantNotReadyResponse();
 
-  const ctx = await orchestrator.getS3ClientContext(tenantId);
+  const s3Ctx = await orchestrator.getS3ClientContext(tenantId);
+  const ctx = s3Ctx.presignEndpointUrl
+    ? { ...s3Ctx, endpointUrl: s3Ctx.presignEndpointUrl }
+    : s3Ctx;
 
   const items = await Promise.all(ops.map((op) => presignOp(op, ctx)));
 
