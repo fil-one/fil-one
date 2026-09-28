@@ -18,10 +18,13 @@ info:
     most one **bucket policy** naming principals and the S3 actions they
     may or may not perform, and an access key may be **bound to a
     principal**, in which case it carries no permissions of its own and
-    is authorized on every request from the bucket policies. The
-    principal and bucket-policy endpoints below are the `iam` capability
-    set; an orchestrator that serves only scoped keys may answer them
-    with 404.
+    is authorized on every request from the bucket policies. Bucket
+    policies themselves are read and written over S3 (`GetBucketPolicy`,
+    `PutBucketPolicy`, `DeleteBucketPolicy`) with a service key holding
+    the matching permission, as fil-one/RFC#30 specifies; this contract
+    carries the principals and the two reads computed from the policies.
+    The principal endpoints below are the `iam` capability set; an
+    orchestrator that serves only scoped keys may answer them with 404.
 
     The Service Orchestrator must also operate an S3 Gateway for
     bucket and object operations; that surface is outside this
@@ -52,9 +55,6 @@ info:
       * `PUT /tenants/{tenantId}/principals/{principalId}` returns 200 when
         the principal exists, and `DELETE` returns 204 when it is already
         gone.
-      * Bucket policy writes carry a precondition (`If-Match` or
-        `If-None-Match: *`), so a retry of a write that already landed
-        answers 412 and writes nothing.
 
 servers:
   - url: https://api.example.com/
@@ -72,8 +72,6 @@ tags:
     description: Usage metering for storage, egress, and ingress.
   - name: Principals
     description: FilOne members as the orchestrator knows them (`iam` access model).
-  - name: Bucket Policies
-    description: One policy per bucket naming principals and actions (`iam` access model).
 
 paths:
   /tenants/{tenantId}:
@@ -268,8 +266,17 @@ paths:
     get:
       tags: [Access Keys]
       summary: List S3 access keys
+      description: |
+        Every key of the tenant, or only the keys bound to one principal
+        when `principalId` is given.
       security:
         - PartnerKey: []
+      parameters:
+        - in: query
+          name: principalId
+          required: false
+          schema:
+            $ref: '#/components/schemas/PrincipalId'
       responses:
         '200':
           description: List of access keys (without secrets).
@@ -414,27 +421,6 @@ paths:
         '409':
           $ref: '#/components/responses/ConcurrentChange'
 
-  /tenants/{tenantId}/principals/{principalId}/access-keys:
-    parameters:
-      - $ref: '#/components/parameters/TenantId'
-      - $ref: '#/components/parameters/PrincipalId'
-    get:
-      tags: [Principals]
-      summary: List a principal's access keys
-      security:
-        - PartnerKey: []
-      responses:
-        '200':
-          description: The keys bound to this principal (without secrets).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AccessKeyList'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
   /tenants/{tenantId}/principals/{principalId}/policies:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -484,116 +470,6 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
-
-  /tenants/{tenantId}/buckets/{bucketName}/policy:
-    parameters:
-      - $ref: '#/components/parameters/TenantId'
-      - $ref: '#/components/parameters/BucketName'
-    get:
-      tags: [Bucket Policies]
-      summary: Read a bucket's policy
-      description: |
-        Returns the stored document and, in the `ETag` header, a strong
-        validator over its canonical encoding. Callers treat the ETag as
-        opaque and send it back on the next write.
-      security:
-        - PartnerKey: []
-      responses:
-        '200':
-          description: The policy.
-          headers:
-            ETag:
-              $ref: '#/components/headers/ETag'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BucketPolicy'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/PolicyOrBucketNotFound'
-    put:
-      tags: [Bucket Policies]
-      summary: Create or replace a bucket's policy
-      description: |
-        Compare-and-set. The request carries exactly one precondition:
-        `If-Match` with the ETag the last read returned, or
-        `If-None-Match: *` to create the bucket's first policy. A request
-        with neither, with both, or with another `If-None-Match` value is
-        400. A mismatch, or `If-None-Match: *` when a policy exists, is
-        412 and nothing is written.
-
-        The orchestrator validates the document: every action in the
-        policy vocabulary or `s3:*`; every principal `*` or a live
-        principal of the tenant; no empty statement or action list; no
-        field outside the schema. A failing document is 422.
-
-        Before acknowledging, the orchestrator invalidates the cached
-        authority of every key bound to a principal whose effective
-        actions changed, so the write is visible at the S3 gateway
-        within its propagation bound.
-      security:
-        - PartnerKey: []
-      parameters:
-        - $ref: '#/components/parameters/IfMatch'
-        - $ref: '#/components/parameters/IfNoneMatch'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/BucketPolicy'
-      responses:
-        '200':
-          description: Policy replaced.
-          headers:
-            ETag:
-              $ref: '#/components/headers/ETag'
-        '201':
-          description: Policy created.
-          headers:
-            ETag:
-              $ref: '#/components/headers/ETag'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/ConcurrentChange'
-        '412':
-          $ref: '#/components/responses/PreconditionFailed'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/Internal'
-    delete:
-      tags: [Bucket Policies]
-      summary: Delete a bucket's policy
-      description: |
-        Carries `If-Match` with the ETag the last read returned; a
-        mismatch is 412 and nothing is written. A bucket with no policy
-        is 404 with a `PolicyNotFound` code.
-      security:
-        - PartnerKey: []
-      parameters:
-        - $ref: '#/components/parameters/IfMatch'
-      responses:
-        '204':
-          description: Policy deleted.
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/PolicyOrBucketNotFound'
-        '409':
-          $ref: '#/components/responses/ConcurrentChange'
-        '412':
-          $ref: '#/components/responses/PreconditionFailed'
-        '500':
-          $ref: '#/components/responses/Internal'
 
   /tenants/{tenantId}/metrics:
     parameters:
@@ -701,23 +577,6 @@ components:
       required: true
       schema:
         $ref: '#/components/schemas/PrincipalId'
-    IfMatch:
-      in: header
-      name: If-Match
-      required: false
-      description: |
-        The ETag the last read of the policy returned. Required unless
-        `If-None-Match: *` is sent.
-      schema:
-        type: string
-    IfNoneMatch:
-      in: header
-      name: If-None-Match
-      required: false
-      description: The literal `*`, to create the bucket's first policy. Any other value is 400.
-      schema:
-        type: string
-        enum: ['*']
     MetricsFrom:
       in: query
       name: from
@@ -748,13 +607,6 @@ components:
       schema:
         type: string
         pattern: '^[0-9]+h$'
-
-  headers:
-    ETag:
-      required: true
-      description: Strong validator over the stored policy's canonical encoding. Opaque to callers.
-      schema:
-        type: string
 
   responses:
     BadRequest:
@@ -801,25 +653,6 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
-    PreconditionFailed:
-      description: |
-        The ETag did not match the stored policy, or `If-None-Match: *`
-        was sent and a policy exists. Nothing was written.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
-    PolicyOrBucketNotFound:
-      description: |
-        The bucket does not exist or belongs to another tenant, or the
-        bucket exists and has no policy. The body's `code` is
-        `PolicyNotFound` in the second case, so callers can tell the two
-        apart.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
-
   schemas:
     TenantId:
       type: string
@@ -920,6 +753,9 @@ components:
         - s3:AbortMultipartUpload
         - s3:DeleteObject
         - s3:DeleteObjectVersion
+        - s3:GetBucketPolicy
+        - s3:PutBucketPolicy
+        - s3:DeleteBucketPolicy
       description: |
         Permission scope expressed as an AWS S3 IAM action.
 
@@ -928,6 +764,10 @@ components:
           * `s3:CreateBucket` — create a bucket.
           * `s3:ListAllMyBuckets` — list the tenant's buckets.
           * `s3:DeleteBucket` — delete a bucket.
+          * `s3:GetBucketPolicy`, `s3:PutBucketPolicy`,
+            `s3:DeleteBucketPolicy` — read, write and delete a bucket's
+            policy (`iam` access model). A bucket policy never grants
+            them; only a service key holds them.
 
         **Object-level** — operating on objects within buckets. The
         basic actions (`s3:GetObject`, `s3:PutObject`, `s3:ListBucket`,
