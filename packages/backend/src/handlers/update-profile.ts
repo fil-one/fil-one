@@ -148,7 +148,10 @@ async function rejectUnmintedPicture(
 /**
  * Point the profile at the new avatar, claimed first so the lifecycle rule
  * cannot delete a picture the profile already names (a failed save puts the
- * claim back). Then the one it replaced, if it was ours, is deleted.
+ * claim back). Then the one it replaced, if it was ours, is deleted. Two
+ * concurrent fresh uploads can leave the losing one claimed and unreferenced,
+ * a stray image under a random key; Auth0 has no conditional write, so that is
+ * accepted.
  */
 async function applyPictureUpdate(
   sub: string,
