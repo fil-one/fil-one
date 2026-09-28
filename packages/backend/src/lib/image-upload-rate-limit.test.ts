@@ -12,42 +12,108 @@ vi.mock('sst', () => sstResourceMock());
 const ddbMock = mockClient(DynamoDBClient);
 
 import {
-  takeImageUploadPresign,
+  takeHourlyAllowance,
+  takeOrgLogoPresign,
   IMAGE_UPLOAD_PRESIGNS_PER_HOUR,
 } from './image-upload-rate-limit.ts';
 
-describe('takeImageUploadPresign', () => {
+const NOW = new Date('2026-09-23T10:30:00Z');
+const CUTOFF = { N: String(NOW.getTime() - 3_600_000) };
+const TABLE = 'SomeTable';
+const KEY = { pk: { S: 'THING#1' }, sk: { S: 'SOME_RATE' } };
+const NAMES = { '#count': 'count', '#windowStart': 'windowStart' };
+
+function spendInput(tableName = TABLE, key: object = KEY) {
+  return {
+    TableName: tableName,
+    Key: key,
+    UpdateExpression: 'SET #count = #count + :one',
+    ConditionExpression: '#windowStart > :cutoff AND #count < :max',
+    ExpressionAttributeNames: NAMES,
+    ExpressionAttributeValues: {
+      ':one': { N: '1' },
+      ':cutoff': CUTOFF,
+      ':max': { N: String(IMAGE_UPLOAD_PRESIGNS_PER_HOUR) },
+    },
+  };
+}
+
+const OPEN_WINDOW_INPUT = {
+  TableName: TABLE,
+  Key: KEY,
+  UpdateExpression: 'SET #windowStart = :now, #count = :one',
+  ConditionExpression: 'attribute_not_exists(#windowStart) OR #windowStart <= :cutoff',
+  ExpressionAttributeNames: NAMES,
+  ExpressionAttributeValues: {
+    ':now': { N: String(NOW.getTime()) },
+    ':one': { N: '1' },
+    ':cutoff': CUTOFF,
+  },
+};
+
+const conditionFailed = () => new ConditionalCheckFailedException({ message: 'no', $metadata: {} });
+
+function sentInputs() {
+  return ddbMock.commandCalls(UpdateItemCommand).map((call) => call.args[0].input);
+}
+
+function take() {
+  return takeHourlyAllowance({ tableName: TABLE, key: KEY, now: NOW });
+}
+
+describe('takeHourlyAllowance', () => {
   beforeEach(() => ddbMock.reset());
 
-  it('counts the call against the caller for the current hour', async () => {
+  it('spends one from an open window under the cap', async () => {
     ddbMock.on(UpdateItemCommand).resolves({});
-    const now = new Date('2026-09-23T10:30:00Z');
 
-    expect(await takeImageUploadPresign('user-1', now)).toBe(true);
-
-    const input = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
-    expect(input.TableName).toBe('ImageUploadRateLimitTable');
-    expect(input.Key).toEqual({
-      pk: { S: `USER#user-1#HOUR#${Math.floor(now.getTime() / 3_600_000)}` },
-    });
-    // Incremented only while under the limit, so a refusal spends nothing.
-    expect(input.ConditionExpression).toBe('attribute_not_exists(#count) OR #count < :max');
-    expect(input.ExpressionAttributeValues?.[':max']).toEqual({
-      N: String(IMAGE_UPLOAD_PRESIGNS_PER_HOUR),
-    });
+    expect(await take()).toBe(true);
+    expect(sentInputs()).toEqual([spendInput()]);
   });
 
-  it('refuses once the hour is spent', async () => {
+  it('refuses, and spends nothing, at the cap in an open window', async () => {
+    ddbMock.on(UpdateItemCommand).rejects(conditionFailed());
+
+    expect(await take()).toBe(false);
+    expect(sentInputs()).toEqual([spendInput(), OPEN_WINDOW_INPUT, spendInput()]);
+  });
+
+  // A passed window and a missing row both fail the spend and pass the reset.
+  it('opens a new window at now with a count of 1 once the old one has passed, or on first use', async () => {
+    ddbMock.on(UpdateItemCommand).rejectsOnce(conditionFailed()).resolves({});
+
+    expect(await take()).toBe(true);
+    expect(sentInputs()).toEqual([spendInput(), OPEN_WINDOW_INPUT]);
+  });
+
+  it('spends from a window a concurrent call opened first', async () => {
     ddbMock
       .on(UpdateItemCommand)
-      .rejects(new ConditionalCheckFailedException({ message: 'limit', $metadata: {} }));
+      .rejectsOnce(conditionFailed())
+      .rejectsOnce(conditionFailed())
+      .resolves({});
 
-    expect(await takeImageUploadPresign('user-1')).toBe(false);
+    expect(await take()).toBe(true);
+    expect(sentInputs()).toEqual([spendInput(), OPEN_WINDOW_INPUT, spendInput()]);
   });
 
   it('lets any other failure through to the caller', async () => {
     ddbMock.on(UpdateItemCommand).rejects(new Error('Service unavailable'));
 
-    await expect(takeImageUploadPresign('user-1')).rejects.toThrow('Service unavailable');
+    await expect(take()).rejects.toThrow('Service unavailable');
+    expect(sentInputs()).toEqual([spendInput()]);
+  });
+});
+
+describe('takeOrgLogoPresign', () => {
+  beforeEach(() => ddbMock.reset());
+
+  it("counts on the org's row in OrgTable", async () => {
+    ddbMock.on(UpdateItemCommand).resolves({});
+
+    expect(await takeOrgLogoPresign('org-1', NOW)).toBe(true);
+    expect(sentInputs()).toEqual([
+      spendInput('OrgTable', { pk: { S: 'ORG#org-1' }, sk: { S: 'LOGO_UPLOAD_RATE' } }),
+    ]);
   });
 });

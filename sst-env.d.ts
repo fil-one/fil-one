@@ -246,10 +246,6 @@ declare module "sst" {
       "type": "sst.sst.Secret"
       "value": string
     }
-    "ImageUploadRateLimitTable": {
-      "name": string
-      "type": "sst.aws.Dynamo"
-    }
     "ListAccessKeys": {
       "name": string
       "type": "sst.aws.Function"

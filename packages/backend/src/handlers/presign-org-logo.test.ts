@@ -183,7 +183,7 @@ describe('POST /api/org/logo-upload-url handler', () => {
 
   // Any member may ask, and the bucket is public: past the hourly limit the
   // endpoint stops handing out places to put files.
-  it('returns 429, and presigns nothing, once the caller has used the hour up', async () => {
+  it('returns 429, and presigns nothing, once the org has used the hour up', async () => {
     ddbMock
       .on(UpdateItemCommand)
       .rejects(new ConditionalCheckFailedException({ message: 'limit', $metadata: {} }));

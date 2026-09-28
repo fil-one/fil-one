@@ -6,7 +6,7 @@ import type { PresignOrgLogoResponse } from '@filone/shared';
 import { presignOrgLogoUpload } from '../lib/org-logo-storage.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
 import { ResponseBuilder, imageUploadRateLimitedResponse } from '../lib/response-builder.ts';
-import { takeImageUploadPresign } from '../lib/image-upload-rate-limit.ts';
+import { takeOrgLogoPresign } from '../lib/image-upload-rate-limit.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -24,8 +24,8 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
  * `route-manifest.ts`.
  *
  * Any member may ask, read-only included, and the bucket is public, so the
- * URLs one person can have are rate limited: past the limit this answers 429
- * rather than let the bucket serve as free hosting.
+ * URLs the caller's active org can have are rate limited: past the limit this
+ * answers 429 rather than let the bucket serve as free hosting.
  *
  * The body says only the content type; the client POSTs the file straight to
  * the returned `uploadUrl`, and hands the returned `logoUrl` to `POST
@@ -37,7 +37,7 @@ export async function baseHandler(
   const parsed = parseJsonBody(event.body, PresignOrgLogoSchema);
   if ('error' in parsed) return parsed.error;
 
-  if (!(await takeImageUploadPresign(getUserInfo(event).userId))) {
+  if (!(await takeOrgLogoPresign(getUserInfo(event).orgId))) {
     return imageUploadRateLimitedResponse();
   }
 

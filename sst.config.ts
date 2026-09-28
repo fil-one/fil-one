@@ -279,15 +279,6 @@ export default $config({
       ttl: 'ttl',
     });
 
-    // Per-user hourly counters for image upload URLs into the public image
-    // buckets (image-upload-rate-limit.ts). Its own table so TTL is not enabled
-    // on UserInfoTable, the same reason DeletionChallengeTable is separate.
-    const imageUploadRateLimitTable = new sst.aws.Dynamo('ImageUploadRateLimitTable', {
-      fields: { pk: 'string' },
-      primaryIndex: { hashKey: 'pk' },
-      ttl: 'ttl',
-    });
-
     // ── S3 Bucket for user file storage ──────────────────────────────
     const userFilesBucket = new sst.aws.Bucket('UserFilesBucket');
 
@@ -1312,7 +1303,7 @@ export default $config({
       },
       // Presigns a POST into OrgLogoBucket.
       'presign-org-logo': {
-        extraLink: [orgLogoBucket, imageUploadRateLimitTable],
+        extraLink: [orgLogoBucket],
       },
       // Confirms a submitted logoUrl names an unclaimed upload in OrgLogoBucket,
       // then claims it, so it needs the bucket as much as the presign route does.

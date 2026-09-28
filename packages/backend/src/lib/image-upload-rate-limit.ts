@@ -1,47 +1,80 @@
 import { ConditionalCheckFailedException, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.ts';
 
 /**
- * How many image upload URLs one person may ask for in an hour. Far above anyone
+ * How many image upload URLs one limit allows in an hour. Far above anyone
  * choosing a picture (a few tries, a change of mind), and low enough that the
- * public logo bucket is not free hosting for whoever loops the endpoint.
+ * public image buckets are not free hosting for whoever loops the endpoint.
  */
 export const IMAGE_UPLOAD_PRESIGNS_PER_HOUR = 30;
 
 const HOUR_MS = 60 * 60 * 1000;
 
 /**
- * Spend one of the caller's image upload URLs for the current hour, or refuse.
- * Images for the console only (the public image buckets): object uploads into
- * a customer's buckets are not counted here.
+ * Spend one URL from the hourly allowance on the row at `key`, or refuse.
  *
- * A counter per user per clock hour, incremented only while under the limit,
- * so a refused call spends nothing. The row expires on its own a day later
- * (TTL is cleanup only; the hour in the key is what resets the count).
+ * The row holds one window: `windowStart` (epoch ms) and `count`. A window
+ * lasts an hour; the first call after it has passed opens a new one. A refused
+ * call spends nothing.
  *
  * @returns whether the caller may have another image upload URL.
  */
-export async function takeImageUploadPresign(userId: string, now = new Date()): Promise<boolean> {
-  const hour = Math.floor(now.getTime() / HOUR_MS);
-  try {
-    await getDynamoClient().send(
-      new UpdateItemCommand({
-        TableName: Resource.ImageUploadRateLimitTable.name,
-        Key: { pk: { S: `USER#${userId}#HOUR#${hour}` } },
-        UpdateExpression: 'ADD #count :one SET #ttl = if_not_exists(#ttl, :ttl)',
-        ConditionExpression: 'attribute_not_exists(#count) OR #count < :max',
-        ExpressionAttributeNames: { '#count': 'count', '#ttl': 'ttl' },
-        ExpressionAttributeValues: {
-          ':one': { N: '1' },
-          ':max': { N: String(IMAGE_UPLOAD_PRESIGNS_PER_HOUR) },
-          ':ttl': { N: String(Math.floor(now.getTime() / 1000) + 24 * 60 * 60) },
-        },
-      }),
-    );
-    return true;
-  } catch (err) {
-    if (err instanceof ConditionalCheckFailedException) return false;
-    throw err;
+export async function takeHourlyAllowance({
+  tableName,
+  key,
+  now = new Date(),
+}: {
+  tableName: string;
+  key: Record<string, AttributeValue>;
+  now?: Date;
+}): Promise<boolean> {
+  const cutoff = { N: String(now.getTime() - HOUR_MS) };
+  const names = { '#count': 'count', '#windowStart': 'windowStart' };
+  const spend = () =>
+    new UpdateItemCommand({
+      TableName: tableName,
+      Key: key,
+      UpdateExpression: 'SET #count = #count + :one',
+      ConditionExpression: '#windowStart > :cutoff AND #count < :max',
+      ExpressionAttributeNames: names,
+      ExpressionAttributeValues: {
+        ':one': { N: '1' },
+        ':cutoff': cutoff,
+        ':max': { N: String(IMAGE_UPLOAD_PRESIGNS_PER_HOUR) },
+      },
+    });
+  const openWindow = new UpdateItemCommand({
+    TableName: tableName,
+    Key: key,
+    UpdateExpression: 'SET #windowStart = :now, #count = :one',
+    ConditionExpression: 'attribute_not_exists(#windowStart) OR #windowStart <= :cutoff',
+    ExpressionAttributeNames: names,
+    ExpressionAttributeValues: {
+      ':now': { N: String(now.getTime()) },
+      ':one': { N: '1' },
+      ':cutoff': cutoff,
+    },
+  });
+
+  // The last spend covers a concurrent call that opened the window first.
+  for (const command of [spend(), openWindow, spend()]) {
+    try {
+      await getDynamoClient().send(command);
+      return true;
+    } catch (err) {
+      if (!(err instanceof ConditionalCheckFailedException)) throw err;
+    }
   }
+  return false;
+}
+
+/** Spend one of the org's logo upload URLs for the hour, or refuse. */
+export function takeOrgLogoPresign(orgId: string, now?: Date): Promise<boolean> {
+  return takeHourlyAllowance({
+    tableName: Resource.OrgTable.name,
+    key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'LOGO_UPLOAD_RATE' } },
+    now,
+  });
 }
