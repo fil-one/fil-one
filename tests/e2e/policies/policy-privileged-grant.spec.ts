@@ -12,6 +12,7 @@ import {
   removeBucket,
   rosterPolicy,
   uniqueBucketName,
+  canonical,
 } from './policy.util.ts';
 
 // Granting a retention or legal-hold write is `privileged.grant`, which only an
@@ -80,7 +81,7 @@ test.describe('through the API', () => {
     const { etag } = await admin.readPolicy(bucket);
     const statement = [...roster(), allow([memberId], ['s3:ListBucket'], 'team')];
     expect(await putAs(admin, statement, etag)).toEqual([200, undefined]);
-    expect((await owner.readPolicy(bucket)).policy).toEqual({ statement });
+    expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(canonical({ statement }));
   });
 
   test('P3. an owner grants the pair, and an admin may keep or drop it', async () => {

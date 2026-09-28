@@ -291,3 +291,20 @@ export async function removeBucket(
   const res = await owner.deleteBucket(bucket);
   expect([200, 204], await res.text()).toContain(res.status());
 }
+
+/**
+ * A policy in the form the storage system stores it: the statement, principal
+ * and action lists are sets, so each is sorted and deduplicated and the
+ * statements are ordered by their encoding. Compare policies through this,
+ * since a read comes back canonical whatever order a write sent.
+ */
+export function canonical(policy: BucketPolicy): BucketPolicy {
+  const set = (values: readonly string[]) => [...new Set(values)].sort();
+  const statement = policy.statement.map((st) => ({
+    ...st,
+    principal: Array.isArray(st.principal) ? set(st.principal) : st.principal,
+    action: set(st.action),
+  }));
+  statement.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  return { statement } as BucketPolicy;
+}

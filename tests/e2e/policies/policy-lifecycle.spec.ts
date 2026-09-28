@@ -21,6 +21,7 @@ import {
   rosterPolicy,
   s3For,
   uniqueBucketName,
+  canonical,
 } from './policy.util.ts';
 
 // What membership changes and key and bucket deletion do to policies and keys.
@@ -147,7 +148,9 @@ test('B2. removing a member takes their keys and every statement naming them', a
     const { revokedKeys = [] } = await removed.json();
     expect(revokedKeys.map((k: { id: string }) => k.id).sort(byId)).toEqual(held);
 
-    expect((await owner.readPolicy(bucket)).policy).toEqual(rosterPolicy(ownerId, adminId));
+    expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
+      canonical(rosterPolicy(ownerId, adminId)),
+    );
     expect(await outcome(listObjects(s3For(key), bucket))).toBe('403 InvalidAccessKeyId');
 
     // A removed member is no longer a principal of the tenant.
@@ -166,7 +169,9 @@ test('B3. a bucket deleted and created again under its name starts from the rost
   const bucket = await newBucket([allow([memberId], ['s3:ListBucket'], 'member-read')]);
   expect([200, 204]).toContain((await owner.deleteBucket(bucket)).status());
   await owner.createBucket(bucket);
-  expect((await owner.readPolicy(bucket)).policy).toEqual(rosterPolicy(ownerId, adminId));
+  expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
+    canonical(rosterPolicy(ownerId, adminId)),
+  );
 });
 
 test('B4. a deleted principal key stops working and one cannot be rotated', async () => {
