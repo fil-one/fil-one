@@ -256,15 +256,17 @@ test('16. a principal-bound key cannot create or delete buckets', async () => {
 
 test('17. a bucket a member creates also names its creator', async () => {
   await member.createBucket(B3);
-  expect((await owner.readPolicy(B3)).policy).toEqual({
-    statement: [
-      ...rosterPolicy(ownerId, adminId).statement,
-      {
-        sid: 'filone-creator',
-        effect: 'allow',
-        principal: [memberId],
-        action: ROSTER_ADMIN_ACTIONS,
-      },
-    ],
-  });
+  expect(canonical((await owner.readPolicy(B3)).policy)).toEqual(
+    canonical({
+      statement: [
+        ...rosterPolicy(ownerId, adminId).statement,
+        {
+          sid: 'filone-creator',
+          effect: 'allow',
+          principal: [memberId],
+          action: ROSTER_ADMIN_ACTIONS,
+        },
+      ],
+    }),
+  );
 });

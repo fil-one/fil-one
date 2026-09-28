@@ -15,6 +15,7 @@ import {
   removeBucket,
   s3For,
   uniqueBucketName,
+  canonical,
 } from './policy.util.ts';
 
 // The Policy tab, driven by the Owner. Every case gets its own bucket, and
@@ -128,9 +129,9 @@ test('U2. a roster statement keeps its name but can be removed', async ({ page }
   await card(page, 'Owners').getByTestId('policy-statement-remove').click();
   await expect(cards(page)).toHaveCount(1);
   await savePolicy(page);
-  expect((await owner.readPolicy(bucket)).policy).toEqual({
-    statement: [adminsStatement(adminId)],
-  });
+  expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
+    canonical({ statement: [adminsStatement(adminId)] }),
+  );
 });
 
 test('U3. an allow added in the tab grants the member', async ({ page }) => {
@@ -144,13 +145,15 @@ test('U3. an allow added in the tab grants the member', async ({ page }) => {
   await expect(saveBar(page)).toBeVisible();
   await savePolicy(page);
 
-  expect((await owner.readPolicy(bucket)).policy).toEqual({
-    statement: [
-      ownersStatement(ownerId),
-      adminsStatement(adminId),
-      allow([memberId], ['s3:ListBucket', 's3:GetObject'], 'member-read'),
-    ],
-  });
+  expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
+    canonical({
+      statement: [
+        ownersStatement(ownerId),
+        adminsStatement(adminId),
+        allow([memberId], ['s3:ListBucket', 's3:GetObject'], 'member-read'),
+      ],
+    }),
+  );
   expect(await outcome(listObjects(await freshS3(member), bucket))).toBe('ok');
 });
 
@@ -247,7 +250,9 @@ test('U9. all actions covers every action and saves as s3:*', async ({ page }) =
   await submitStatement(page);
   await savePolicy(page);
 
-  expect((await owner.readPolicy(bucket)).policy.statement.at(-1)).toEqual(
+  // The stored order is the storage system's own; the new statement is the
+  // unnamed one.
+  expect((await owner.readPolicy(bucket)).policy.statement.find((st) => !st.sid)).toEqual(
     allow([memberId], ['s3:*']),
   );
 });

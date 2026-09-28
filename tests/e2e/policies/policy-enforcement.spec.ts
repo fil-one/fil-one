@@ -32,6 +32,7 @@ import {
   removeBucket,
   s3For,
   uniqueBucketName,
+  canonical,
 } from './policy.util.ts';
 
 // Which S3 operations each action admits, read at the gateway. Several actions
@@ -325,12 +326,14 @@ test.describe('C. policy writes', () => {
       ownersStatement(ownerId),
       allow([memberId, ownerId, memberId], ['s3:ListBucket'], 'repeat'),
     ]);
-    expect((await owner.readPolicy(bucket)).policy).toEqual({
-      statement: [
-        ownersStatement(ownerId),
-        allow([memberId, ownerId], ['s3:ListBucket'], 'repeat'),
-      ],
-    });
+    expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
+      canonical({
+        statement: [
+          ownersStatement(ownerId),
+          allow([memberId, ownerId], ['s3:ListBucket'], 'repeat'),
+        ],
+      }),
+    );
   });
 
   test('C3. the schema is strict about fields and lengths', async () => {
