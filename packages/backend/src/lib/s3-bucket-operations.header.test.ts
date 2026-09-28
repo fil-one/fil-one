@@ -76,15 +76,17 @@ describe('the x-bucket-policy header on CreateBucket', () => {
     expect(captured[0]!.headers).not.toHaveProperty(BUCKET_POLICY_HEADER);
   });
 
-  it('maps a refused policy to PolicyValidationError', async () => {
-    const captured: CapturedRequest[] = [];
-    const s3 = clientCapturing(captured, () => ({
-      statusCode: 400,
-      body: '<Error><Code>InvalidArgument</Code><Message>invalid bucket policy</Message></Error>',
-    }));
+  it('maps a refused policy to PolicyValidationError under either code', async () => {
+    for (const code of ['MalformedPolicy', 'InvalidArgument']) {
+      const captured: CapturedRequest[] = [];
+      const s3 = clientCapturing(captured, () => ({
+        statusCode: 400,
+        body: `<Error><Code>${code}</Code><Message>invalid bucket policy</Message></Error>`,
+      }));
 
-    await expect(createBucket(s3, { bucketName: 'photos', policy })).rejects.toBeInstanceOf(
-      PolicyValidationError,
-    );
+      await expect(createBucket(s3, { bucketName: 'photos', policy }), code).rejects.toBeInstanceOf(
+        PolicyValidationError,
+      );
+    }
   });
 });
