@@ -140,13 +140,14 @@ Charge $5/TB metered, but enforce a monthly minimum (e.g., $10/month).
 
 **Stripe implementation:** Metered price + conditional invoice item adjustment if usage is below minimum.
 
-**As shipped (July 2026):** no invoice-item adjustment is needed — the minimum is the
+**Current pricing:** no invoice-item adjustment is needed — the minimum is the
 flat amount of the first tier of a graduated metered price. Storage bills at
-$4.99/TB metered in GB: a $4.99 flat fee covers the first 1000 GB, and usage above
-that bills at $0.00499/GB, so Stripe enforces the minimum when it bills. New
-signups get that price via the `StripePriceId` secret; customers created before the
-switch stay on the old per-unit price ($0.00499/GB with no flat fee) and are
-grandfathered without a minimum.
+$5.99/TB metered in GB: a $5.99 flat fee covers the first 1000 GB, and usage above
+that bills at $0.00599/GB, so Stripe enforces the minimum when it bills. New
+signups get that price via the `StripePriceId` secret. Earlier customers keep the
+price they subscribed on: the $4.99 graduated price ($4.99 flat fee, then
+$0.00499/GB), or the original per-unit price ($0.00499/GB with no flat fee, so no
+minimum).
 `GET /api/billing` derives `subscription.monthlyMinimumCents` from the first tier's
 flat amount of whichever price the org's subscription carries. The field is absent
 only when the price genuinely has no minimum (per-unit or volume-tiered); a
