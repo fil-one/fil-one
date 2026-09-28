@@ -106,8 +106,10 @@ export async function createBucket(
       throw new BucketAlreadyExistsError(options.bucketName, { cause: err as Error });
     }
     // The storage system refused the policy the create carried, and created
-    // nothing. Only a create that sent one can mean this.
-    if (options.policy && name === 'InvalidArgument') {
+    // nothing. Only a create that sent one can mean this. The gateway renders
+    // it as MalformedPolicy, the code a refused PutBucketPolicy body gets, from
+    // fil-forge/ingot#194 on; InvalidArgument is what it answered before.
+    if (options.policy && (name === 'MalformedPolicy' || name === 'InvalidArgument')) {
       throw new PolicyValidationError(
         (err as Error).message || 'The storage system refused the bucket policy.',
         { cause: err as Error },
