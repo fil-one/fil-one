@@ -18,6 +18,7 @@ import {
   s3For,
   uniqueBucketName,
   type PolicyUser,
+  canonical,
 } from './policy.util.ts';
 
 // The same bucket as each role sees it: the Owner and the Admin are unscoped
@@ -118,7 +119,9 @@ test('R3. a bucket the admin creates carries the roster and no creator statement
   const bucket = uniqueBucketName('r3');
   await api.admin.createBucket(bucket);
   buckets.push(bucket);
-  expect((await api.owner.readPolicy(bucket)).policy).toEqual(rosterPolicy(ids.owner, ids.admin));
+  expect(canonical((await api.owner.readPolicy(bucket)).policy)).toEqual(
+    canonical(rosterPolicy(ids.owner, ids.admin)),
+  );
 });
 
 test('R4. on a new bucket the roster reaches the owner and the admin, nobody else', async () => {
