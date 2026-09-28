@@ -12,6 +12,7 @@ vi.mock('sst', () => sstResourceMock());
 const ddbMock = mockClient(DynamoDBClient);
 
 import {
+  takeAvatarPresign,
   takeHourlyAllowance,
   takeOrgLogoPresign,
   IMAGE_UPLOAD_PRESIGNS_PER_HOUR,
@@ -114,6 +115,19 @@ describe('takeOrgLogoPresign', () => {
     expect(await takeOrgLogoPresign('org-1', NOW)).toBe(true);
     expect(sentInputs()).toEqual([
       spendInput('OrgTable', { pk: { S: 'ORG#org-1' }, sk: { S: 'LOGO_UPLOAD_RATE' } }),
+    ]);
+  });
+});
+
+describe('takeAvatarPresign', () => {
+  beforeEach(() => ddbMock.reset());
+
+  it("counts on the user's row in UserInfoTable", async () => {
+    ddbMock.on(UpdateItemCommand).resolves({});
+
+    expect(await takeAvatarPresign('user-1', NOW)).toBe(true);
+    expect(sentInputs()).toEqual([
+      spendInput('UserInfoTable', { pk: { S: 'USER#user-1' }, sk: { S: 'AVATAR_UPLOAD_RATE' } }),
     ]);
   });
 });

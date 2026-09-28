@@ -129,6 +129,7 @@ describe('scrubOrgRecords', () => {
       'UserInfoTable:RAGKEYHASH#hash-1/LOOKUP',
       `UserInfoTable:ORG#${ORG}/ACCESSKEY#ak-1`,
       `UserInfoTable:ORG#${ORG}/RAGKEY#key-1`,
+      'UserInfoTable:USER#user-1/AVATAR_UPLOAD_RATE',
       // The member's inverse item, from the member list rather than the OrgTable
       // partition: it is the row that would otherwise leave them holding a
       // membership in an org that is gone.
@@ -153,6 +154,7 @@ describe('scrubOrgRecords', () => {
     await scrubOrgRecords(ORG, MEMBERS);
 
     expect(deletedKeys()).toEqual([
+      'UserInfoTable:USER#user-1/AVATAR_UPLOAD_RATE',
       `AuditTable:ORG#${ORG}/2026-08-27T10:00:00.000Z#event-1`,
       `AuditTable:ORG#${ORG}/2026-08-28T10:00:00.000Z#event-2`,
       `OrgTable:USER#user-1/MEMBERSHIP#${ORG}`,
@@ -197,7 +199,7 @@ describe('scrubOrgRecords', () => {
     );
   });
 
-  it('stamps every row that survives, and deletes none of them', async () => {
+  it('stamps every row that survives, and deletes only the avatar rate limit rows', async () => {
     await scrubOrgRecords(ORG, [
       { userId: 'user-1', sub: 'auth0|one', deleteIdentity: true },
       { userId: 'user-2', sub: 'auth0|two', deleteIdentity: true },
@@ -215,7 +217,10 @@ describe('scrubOrgRecords', () => {
       `UserInfoTable:ORG#${ORG}/MEMBER#user-2`,
       `UserInfoTable:ORG#${ORG}/PROFILE`,
     ]);
-    expect(deletedKeys().filter((key) => key.startsWith('UserInfoTable:'))).toEqual([]);
+    expect(deletedKeys().filter((key) => key.startsWith('UserInfoTable:'))).toEqual([
+      'UserInfoTable:USER#user-1/AVATAR_UPLOAD_RATE',
+      'UserInfoTable:USER#user-2/AVATAR_UPLOAD_RATE',
+    ]);
   });
 
   // The worker writes `canceled` itself, after the Stripe cancel has succeeded, so
@@ -586,8 +591,11 @@ describe('scrubOrgRecords', () => {
 
     await expect(scrubOrgRecords(ORG, MEMBERS)).resolves.toBeUndefined();
 
-    // Only the inverse item, and deleting a row that is already gone is a no-op.
-    expect(deletedKeys()).toEqual([`OrgTable:USER#user-1/MEMBERSHIP#${ORG}`]);
+    // Deleting a row that is already gone is a no-op.
+    expect(deletedKeys()).toEqual([
+      'UserInfoTable:USER#user-1/AVATAR_UPLOAD_RATE',
+      `OrgTable:USER#user-1/MEMBERSHIP#${ORG}`,
+    ]);
     for (const call of ddbMock.commandCalls(UpdateItemCommand)) {
       expect(call.args[0].input.UpdateExpression).toContain('if_not_exists(deletedAt, :now)');
     }

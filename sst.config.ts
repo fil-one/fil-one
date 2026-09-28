@@ -1326,7 +1326,7 @@ export default $config({
       // see avatar-storage.ts for why this reuses the org logo bucket rather
       // than standing up one of its own.
       'presign-avatar': {
-        extraLink: [orgLogoBucket, imageUploadRateLimitTable],
+        extraLink: [orgLogoBucket],
       },
       // Checks a submitted logo URL against OrgLogoBucket, claims it, and
       // deletes the logo it replaced.

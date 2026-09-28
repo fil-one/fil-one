@@ -240,6 +240,10 @@ async function scrubMembers(orgId: string, members: DeletionMember[]): Promise<v
     if (member.deleteIdentity) {
       await scrubRow({ key: { pk: `SUB#${member.sub}`, sk: 'IDENTITY' } });
       await scrubRow({ key: { pk: `USER#${member.userId}`, sk: 'PROFILE' } });
+      await deleteRow(Resource.UserInfoTable.name, {
+        pk: `USER#${member.userId}`,
+        sk: 'AVATAR_UPLOAD_RATE',
+      });
     } else {
       await repointHomeOrg(orgId, member);
     }

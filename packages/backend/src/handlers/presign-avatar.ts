@@ -6,7 +6,7 @@ import type { PresignAvatarResponse } from '@filone/shared';
 import { presignAvatarUpload } from '../lib/avatar-storage.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
 import { ResponseBuilder, imageUploadRateLimitedResponse } from '../lib/response-builder.ts';
-import { takeImageUploadPresign } from '../lib/image-upload-rate-limit.ts';
+import { takeAvatarPresign } from '../lib/image-upload-rate-limit.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -30,7 +30,7 @@ export async function baseHandler(
 
   // The bucket is public, so the upload URLs one person can have are limited,
   // the same way the logo endpoint's are.
-  if (!(await takeImageUploadPresign(getUserInfo(event).userId))) {
+  if (!(await takeAvatarPresign(getUserInfo(event).userId))) {
     return imageUploadRateLimitedResponse();
   }
 

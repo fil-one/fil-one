@@ -78,3 +78,12 @@ export function takeOrgLogoPresign(orgId: string, now?: Date): Promise<boolean> 
     now,
   });
 }
+
+/** Spend one of the user's avatar upload URLs for the hour, or refuse. */
+export function takeAvatarPresign(userId: string, now?: Date): Promise<boolean> {
+  return takeHourlyAllowance({
+    tableName: Resource.UserInfoTable.name,
+    key: { pk: { S: `USER#${userId}` }, sk: { S: 'AVATAR_UPLOAD_RATE' } },
+    now,
+  });
+}
