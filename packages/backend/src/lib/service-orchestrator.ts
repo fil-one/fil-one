@@ -148,9 +148,12 @@ export interface TenantInfo {
 }
 
 /**
- * Abstraction over a service orchestrator (e.g. Aurora, FTH, etc.).
+ * Abstraction over a service orchestrator (e.g. Aurora, FTH, a Forge network).
  * Each implementation handles tenant provisioning, bucket lifecycle,
- * access-key issuance, and presigning for a service orchestrator in a single region.
+ * access-key issuance, and presigning for one storage network. A network serves
+ * one or more regions ({@link ServiceOrchestrator.regions}); its tenant is
+ * region-free, so one tenant holds buckets in any of them and its access keys
+ * work at every region's S3 gateway.
  *
  * ## orgId vs tenantId
  *
@@ -176,7 +179,12 @@ export interface ServiceOrchestrator {
    * should have the format `^[a-z][a-zA-Z0-9_]*$`.
    */
   readonly id: string;
-  readonly region: S3Region;
+  /**
+   * The regions this network serves, in {@link S3Region} order. Aurora and FTH
+   * serve one each; a Forge network serves every region its Hilt has a
+   * provider for. Always non-empty.
+   */
+  readonly regions: S3Region[];
 
   /**
    * How this backend decides what a credential may do, and therefore which

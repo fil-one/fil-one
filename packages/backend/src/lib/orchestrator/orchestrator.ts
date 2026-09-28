@@ -14,7 +14,7 @@
 //     `filone-console` system key stashed in SSM during setup.
 
 import pRetry from 'p-retry';
-import type { S3Region, TenantStatus } from '@filone/shared';
+import { getS3Endpoint, type S3Region, type TenantStatus } from '@filone/shared';
 import {
   ensureTenantReady as ensureManagementTenantReady,
   type TenantSetupDeps,
@@ -84,11 +84,13 @@ export interface FilOneOrchestratorConfig {
    * (registry entry, sst.config IAM blocks) must honor the same derivations.
    */
   id: string;
-  region: S3Region;
+  /**
+   * The regions the network serves. The S3 gateway endpoint is derived from a
+   * region with `getS3Endpoint`.
+   */
+  regions: S3Region[];
   /** Deployment stage — explicit (rather than read from process.env) so instances are testable. */
   stage: string;
-  /** S3 gateway endpoint for the data plane, e.g. `https://s3.{region}.filonecontent.com`. */
-  s3EndpointUrl: string;
   /**
    * Control-plane Management API access: either connection settings (the
    * factory builds and instruments a client) or a pre-built client (used by
@@ -108,7 +110,7 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
 
 class FilOneOrchestrator implements ServiceOrchestrator {
   readonly id: string;
-  readonly region: S3Region;
+  readonly regions: S3Region[];
   readonly accessModel = 'scoped-keys';
 
   private readonly config: FilOneOrchestratorConfig;
@@ -118,8 +120,11 @@ class FilOneOrchestrator implements ServiceOrchestrator {
 
   constructor(config: FilOneOrchestratorConfig) {
     this.config = config;
+    if (config.regions.length === 0) {
+      throw new Error(`Orchestrator "${config.id}" must serve at least one region.`);
+    }
     this.id = config.id;
-    this.region = config.region;
+    this.regions = config.regions;
     this.client = resolveClient(config);
     this.setupDeps = {
       client: this.client,
@@ -164,8 +169,8 @@ class FilOneOrchestrator implements ServiceOrchestrator {
       requestOptions,
     );
     return {
-      endpointUrl: this.config.s3EndpointUrl,
-      region: this.region,
+      endpointUrl: getS3Endpoint(this.regions[0]!, this.config.stage),
+      region: this.regions[0]!,
       credentials,
       forcePathStyle: true,
       orchestratorId: this.id,
@@ -320,7 +325,7 @@ class FilOneOrchestrator implements ServiceOrchestrator {
     // for the one bucket the detail page actually needs them for.
     return buckets.map((b) => ({
       bucketName: b.name,
-      region: this.region,
+      region: this.regions[0]!,
       createdAt: b.createdAt,
       isPublic: false,
       // The contract mandates server-side encryption by default.
@@ -346,7 +351,7 @@ class FilOneOrchestrator implements ServiceOrchestrator {
 
     return {
       bucketName,
-      region: this.region,
+      region: this.regions[0]!,
       createdAt: match.createdAt,
       isPublic: false,
       versioning,
