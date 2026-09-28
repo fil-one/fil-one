@@ -1253,8 +1253,9 @@ export default $config({
       },
 
       // ── Account and MFA ────────────────────────────────────────────
+      // OrgLogoBucket's name, to check a stored logo is one of its uploads.
       'get-me': {
-        extraLink: mgmtRuntimeResources,
+        extraLink: [...mgmtRuntimeResources, orgLogoBucket],
         extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
         provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       },

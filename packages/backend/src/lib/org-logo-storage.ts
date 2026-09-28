@@ -124,6 +124,11 @@ export async function withClaimedOrgLogo<T>(
   return await withClaimedUpload(logoUrl, LOGO_KEY_PREFIX, save, isReferenced);
 }
 
+/** Whether a stored logo URL is one of this bucket's logo uploads. */
+export function isOrgLogoUrl(logoUrl: string): boolean {
+  return isOurImageUrl(logoUrl, LOGO_KEY_PREFIX);
+}
+
 /** Delete the logo a new one replaced, once the org no longer points at it. */
 export async function deleteReplacedOrgLogo(logoUrl: string | undefined): Promise<void> {
   if (logoUrl) await deleteUpload(logoUrl, LOGO_KEY_PREFIX);
@@ -148,6 +153,14 @@ export async function isUnclaimedUpload(url: string, prefix: string): Promise<bo
     // No such object, most often: nothing was ever uploaded at that key.
     return false;
   }
+}
+
+/**
+ * Whether `url` is an https URL into this bucket under `prefix`. A shape check
+ * only, for URLs read back from storage before they reach a response.
+ */
+export function isOurImageUrl(url: string, prefix: string): boolean {
+  return keyFromBucketUrl(url, Resource.OrgLogoBucket.name, prefix) !== undefined;
 }
 
 /**

@@ -7,6 +7,7 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.ts';
+import { isOrgLogoUrl } from './org-logo-storage.ts';
 
 const dynamo = getDynamoClient();
 
@@ -144,12 +145,23 @@ export function isGuardRejection(err: unknown): boolean {
  * so the read failure is logged and swallowed here rather than raised.
  */
 export async function resolveOrgName(orgId: string): Promise<string> {
-  return (await resolveOrgSummary(orgId)).name;
+  // Not through orgSummary: its logo check reads OrgLogoBucket, which only
+  // some functions link.
+  try {
+    return (await getOrgProfile(orgId))?.name?.S ?? '';
+  } catch (err) {
+    console.error('[org-profile] Org profile read failed — naming the org empty', {
+      orgId,
+      error: err,
+    });
+    return '';
+  }
 }
 
 /**
  * An org's name and logo, for the org switcher and `/me`. `logoUrl` is absent
- * when there is none, and the console falls back to a generated monogram.
+ * when there is none, or when the stored one is not one of our logo uploads,
+ * and the console falls back to a generated monogram.
  */
 export interface OrgProfileSummary {
   name: string;
@@ -159,7 +171,9 @@ export interface OrgProfileSummary {
 export function orgSummary(profile: OrgProfileItem | undefined): OrgProfileSummary {
   return {
     name: profile?.name?.S ?? '',
-    ...(profile?.logoUrl?.S ? { logoUrl: profile.logoUrl.S } : {}),
+    ...(profile?.logoUrl?.S && isOrgLogoUrl(profile.logoUrl.S)
+      ? { logoUrl: profile.logoUrl.S }
+      : {}),
   };
 }
 

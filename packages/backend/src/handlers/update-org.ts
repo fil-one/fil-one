@@ -13,6 +13,7 @@ import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audi
 import { getDynamoClient } from '../lib/ddb-client.ts';
 import {
   deleteReplacedOrgLogo,
+  isOrgLogoUrl,
   isUploadedOrgLogoUrl,
   withClaimedOrgLogo,
 } from '../lib/org-logo-storage.ts';
@@ -111,7 +112,7 @@ export async function baseHandler(
 function orgResponse(name: string, logoUrl: string | undefined): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(200)
-    .body<UpdateOrgResponse>({ name, ...(logoUrl ? { logoUrl } : {}) })
+    .body<UpdateOrgResponse>({ name, ...(logoUrl && isOrgLogoUrl(logoUrl) ? { logoUrl } : {}) })
     .build();
 }
 

@@ -20,7 +20,8 @@ const mockIsUploadedOrgLogoUrl = vi.fn();
 const mockClaimOrgLogoUrl = vi.fn();
 const mockDeleteReplacedOrgLogo = vi.fn();
 let isReferencedPassed: (() => Promise<boolean>) | undefined;
-vi.mock('../lib/org-logo-storage.ts', () => ({
+vi.mock('../lib/org-logo-storage.ts', async (importActual) => ({
+  isOrgLogoUrl: (await importActual<typeof import('../lib/org-logo-storage.ts')>()).isOrgLogoUrl,
   isUploadedOrgLogoUrl: (...args: unknown[]) => mockIsUploadedOrgLogoUrl(...args),
   // Net effect: the upload ends up claimed only when the save succeeded. The
   // claim-first order and the unclaim on failure are org-logo-storage's own
@@ -402,7 +403,7 @@ describe('PATCH /api/org handler', () => {
   });
 
   describe('the logo', () => {
-    const LOGO_URL = 'https://cdn.example.com/logo.png';
+    const LOGO_URL = 'https://OrgLogoBucket.s3.us-east-1.amazonaws.com/logos/logo.png';
 
     it('updates only the logo when the name is unchanged', async () => {
       const result = await handler(
@@ -507,7 +508,9 @@ describe('PATCH /api/org handler', () => {
           'attribute_exists(pk) AND (logoUrl = :previousLogoUrl OR logoUrl = :logoUrl)',
         ExpressionAttributeValues: {
           ':logoUrl': { S: LOGO_URL },
-          ':previousLogoUrl': { S: 'https://cdn.example.com/old.png' },
+          ':previousLogoUrl': {
+            S: 'https://cdn.example.com/old.png',
+          },
         },
       });
     });
@@ -595,6 +598,14 @@ describe('PATCH /api/org handler', () => {
         type: 'org.renamed',
         details: { name: 'New Corp', previousName: 'Old Corp', logoUrl: LOGO_URL },
       });
+    });
+
+    it('leaves out a stored logo that is not one of our uploads', async () => {
+      orgProfileNamed('Old Corp', true, 'https://attacker.example/logo.png');
+
+      const result = await handler(renameEvent({ name: 'New Corp' }), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 200, body: JSON.stringify({ name: 'New Corp' }) });
     });
 
     it('carries the existing logo over when only the name changes', async () => {
