@@ -3,6 +3,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { MeResponse } from '@filone/shared';
 import { permissionsForRole } from '@filone/shared';
+import { shownPicture } from '../lib/avatar-storage.ts';
 import { getOrgProfile, orgSummary } from '../lib/org-profile.ts';
 import { summarizeMemberships } from '../lib/org-membership.ts';
 import { hasRagAccess } from '../middleware/rag-access.ts';
@@ -81,7 +82,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
         ...(p.created_at && { createdAt: p.created_at }),
       })),
     }),
-    picture,
+    picture: shownPicture(picture, connectionType),
     connectionType,
     ragAccess,
     userId,

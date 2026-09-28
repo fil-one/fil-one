@@ -194,6 +194,23 @@ describe('GET /api/me handler', () => {
     });
   });
 
+  // A database account's picture is Gravatar with Auth0's placeholder behind it.
+  it('shows no picture that is neither our upload nor its provider’s photo', async () => {
+    profileResolves();
+    mockJwtVerify.mockResolvedValue({
+      payload: {
+        sub: MOCK_SUB,
+        email: MOCK_EMAIL,
+        email_verified: true,
+        picture: 'https://s.gravatar.com/avatar/abc',
+      },
+    });
+
+    const result = await handler(authenticatedEvent(), buildContext());
+
+    expect(JSON.parse((result as { body: string }).body)).not.toHaveProperty('picture');
+  });
+
   it('reads the active org profile consistently, so a just-created org is never named empty', async () => {
     profileResolves();
 

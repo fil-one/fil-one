@@ -7,7 +7,7 @@ vi.mock('sst', () => sstResourceMock());
 
 const s3Mock = mockClient(S3Client);
 
-import { deleteReplacedAvatar, isUploadedAvatarUrl } from './avatar-storage.ts';
+import { deleteReplacedAvatar, isUploadedAvatarUrl, shownPicture } from './avatar-storage.ts';
 import { isUploadedOrgLogoUrl } from './org-logo-storage.ts';
 
 const BUCKET_HOST = 'https://OrgLogoBucket.s3.us-east-1.amazonaws.com';
@@ -59,5 +59,45 @@ describe('deleteReplacedAvatar', () => {
     await deleteReplacedAvatar(url);
 
     expect(s3Mock.commandCalls(DeleteObjectCommand)).toHaveLength(0);
+  });
+});
+
+describe('shownPicture', () => {
+  it('shows our upload, or a social account’s photo from its own provider, and nothing else', () => {
+    const google = 'https://lh3.googleusercontent.com/a/photo';
+    const cases: [string | undefined, string][] = [
+      [`${BUCKET_HOST}/avatars/abc`, 'auth0'],
+      [`${BUCKET_HOST}/avatars/abc`, 'google-oauth2'],
+      [google, 'google-oauth2'],
+      ['https://avatars.githubusercontent.com/u/1', 'github'],
+      [google, 'auth0'],
+      [google, 'github'],
+      ['http://lh3.googleusercontent.com/a/photo', 'google-oauth2'],
+      [
+        'https://s.gravatar.com/avatar/abc?d=https%3A%2F%2Fcdn.auth0.com%2Favatars%2Ffi.png',
+        'auth0',
+      ],
+      ['https://cdn.auth0.com/avatars/fi.png', 'auth0'],
+      ['https://i0.wp.com/cdn.auth0.com/avatars/fi.png', 'auth0'],
+      ['https://attacker.example/tracker.png', 'google-oauth2'],
+      [`${BUCKET_HOST}/logos/abc`, 'auth0'],
+      [undefined, 'google-oauth2'],
+    ];
+
+    expect(cases.map(([picture, connection]) => shownPicture(picture, connection))).toEqual([
+      `${BUCKET_HOST}/avatars/abc`,
+      `${BUCKET_HOST}/avatars/abc`,
+      google,
+      'https://avatars.githubusercontent.com/u/1',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
   });
 });
