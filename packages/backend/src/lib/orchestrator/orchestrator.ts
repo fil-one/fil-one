@@ -66,9 +66,14 @@ import {
   postTenantsByTenantIdStatus,
   type Client,
   type CreateAccessKeyRequest,
-  type Metrics,
 } from '@filone/orchestrator-client';
 import { instrumentClient } from './metrics.ts';
+import {
+  extractApiMessage,
+  mapIntervalToWindow,
+  mapStorageSamples,
+  normalizeStatus,
+} from './mapping.ts';
 
 export interface FilOneOrchestratorConfig {
   /**
@@ -555,41 +560,4 @@ function resolveClient(config: FilOneOrchestratorConfig): Client {
   });
   instrumentClient(client, { apiName: `${config.id}-management` });
   return client;
-}
-
-const MANAGEMENT_TENANT_STATUSES: readonly TenantStatus[] = ['active', 'write-locked', 'disabled'];
-
-// The contract's status enum is closed, but defend against noncompliant
-// orchestrators: unknown values surface as `undefined` rather than leaking a
-// string TenantStatus doesn't model.
-function normalizeStatus(status: string | undefined): TenantStatus | undefined {
-  return MANAGEMENT_TENANT_STATUSES.find((s) => s === status);
-}
-
-// The interface expresses sampling as an interval like '1d'/'1h'; the
-// contract only accepts `<integer>h` windows. Same permissive posture as
-// aurora: convert day intervals, pass hour intervals through, and let the API
-// reject anything else with a 400.
-function mapIntervalToWindow(interval: string): string {
-  const days = /^(\d+)d$/.exec(interval);
-  if (days) return `${Number(days[1]) * 24}h`;
-  return interval;
-}
-
-function mapStorageSamples(metrics: Metrics): StorageUsageSample[] {
-  return metrics.storage.samples.map((s) => ({
-    timestamp: new Date(s.timestamp).toISOString(),
-    bytesUsed: s.bytesUsed,
-    objectCount: s.objectCount,
-  }));
-}
-
-// Pulls the human-readable message out of the contract's error body
-// (`{ message, code? }`) returned in the SDK result's `error` field.
-function extractApiMessage(body: unknown): string | undefined {
-  if (body && typeof body === 'object' && 'message' in body) {
-    const message = (body as { message?: unknown }).message;
-    if (typeof message === 'string') return message;
-  }
-  return undefined;
 }
