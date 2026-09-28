@@ -36,6 +36,8 @@ describe('ensureTrialEntitlement', () => {
     ddbMock.reset();
     vi.clearAllMocks();
     mockCreateBillingTrial.mockResolvedValue(undefined);
+    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(UpdateItemCommand).resolves({});
   });
 
   it('returns false and writes nothing when email is unverified', async () => {
@@ -211,6 +213,25 @@ describe('ensureTrialEntitlement', () => {
         expect(mockCreateBillingTrial).toHaveBeenCalledTimes(entitled ? 1 : 0);
       },
     );
+
+    // The prefill may not have run: a claim spent on the signup org must not be
+    // stamped from an org the account created, or from its floor org.
+    it.each(['manual', 'invitation'] as const)(
+      'neither stamps nor grants from a %s membership',
+      async (membershipSource) => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+        expect(await ensureTrialEntitlement({ ...BASE, membershipSource })).toBe(false);
+        expect(mockCreateBillingTrial).not.toHaveBeenCalled();
+        expect(
+          ddbMock.commandCalls(UpdateItemCommand).map((c) => c.args[0].input.UpdateExpression),
+        ).toEqual(['SET emailEntitlementClaimed = :t']);
+      },
+    );
+
+    it('stamps from the signup org', async () => {
+      expect(await ensureTrialEntitlement({ ...BASE, membershipSource: 'signup' })).toBe(true);
+    });
   });
 
   it('throws and does not set the flag on a transient claim error', async () => {

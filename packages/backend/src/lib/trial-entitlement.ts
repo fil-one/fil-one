@@ -5,6 +5,7 @@ import {
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
+import type { OrgMembershipSource } from '@filone/shared';
 import { getDynamoClient } from './ddb-client.ts';
 import { createBillingTrial } from './create-billing-trial.ts';
 import { normalizeEmailForEntitlement } from './email-normalization.ts';
@@ -23,6 +24,8 @@ export interface EnsureTrialEntitlementParams {
   orgId: string;
   email: string | null;
   emailVerified: boolean;
+  /** How the caller came to be in `orgId`; a legacy claim is stamped only from a home org. */
+  membershipSource?: OrgMembershipSource;
 }
 
 /**
@@ -42,6 +45,7 @@ export async function ensureTrialEntitlement({
   orgId,
   email,
   emailVerified,
+  membershipSource,
 }: EnsureTrialEntitlementParams): Promise<boolean> {
   if (!emailVerified || !email) {
     console.warn('[trial-entitlement] No verified email on the request — refusing the claim', {
@@ -81,7 +85,12 @@ export async function ensureTrialEntitlement({
   } catch (err) {
     if (err instanceof ConditionalCheckFailedException) {
       ownerUserId = err.Item?.userId?.S;
-      claimedOrgId = await claimedOrgOf(err.Item, { normalizedEmail, userId, orgId });
+      claimedOrgId = await claimedOrgOf(err.Item, {
+        normalizedEmail,
+        userId,
+        orgId,
+        membershipSource,
+      });
     } else {
       console.error('[trial-entitlement] Failed to claim entitlement key', {
         error: err,
@@ -130,11 +139,16 @@ export async function ensureTrialEntitlement({
     });
   }
 
-  // Optimization only: skip the re-check on future requests.
+  await markEntitlementChecked(sub, userId);
+  return entitled;
+}
+
+/** Optimization only: skip the re-check on future requests. */
+async function markEntitlementChecked(sub: string, userId: string): Promise<void> {
   try {
     await getDynamoClient().send(
       new UpdateItemCommand({
-        TableName: tableName,
+        TableName: Resource.UserInfoTable.name,
         Key: { pk: { S: `SUB#${sub}` }, sk: { S: 'IDENTITY' } },
         UpdateExpression: 'SET emailEntitlementClaimed = :t',
         ExpressionAttributeValues: { ':t': { BOOL: true } },
@@ -146,20 +160,33 @@ export async function ensureTrialEntitlement({
       userId,
     });
   }
-
-  return entitled;
 }
 
 /**
  * The org an existing claim is spent on. The caller's own claim with no org
  * recorded is stamped with this one first, unless a racing request stamped it.
+ *
+ * Only from a home org: a pre-717 claim could only have been spent on the org
+ * that came with the account, so an org the account created, or the floor org
+ * a removal made, is never the one it is owed.
  */
 async function claimedOrgOf(
   claim: Record<string, AttributeValue> | undefined,
-  { normalizedEmail, userId, orgId }: { normalizedEmail: string; userId: string; orgId: string },
+  {
+    normalizedEmail,
+    userId,
+    orgId,
+    membershipSource,
+  }: {
+    normalizedEmail: string;
+    userId: string;
+    orgId: string;
+    membershipSource?: OrgMembershipSource;
+  },
 ): Promise<string | undefined> {
   const claimedOrgId = claim?.orgId?.S;
   if (claimedOrgId !== undefined || claim?.userId?.S !== userId) return claimedOrgId;
+  if (membershipSource === 'manual' || membershipSource === 'invitation') return undefined;
   try {
     await getDynamoClient().send(
       new UpdateItemCommand({

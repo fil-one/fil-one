@@ -113,6 +113,7 @@ export async function claimTrialIfEligible(userInfo: UserInfo): Promise<TrialCla
     orgId,
     email: email ?? null,
     emailVerified,
+    membershipSource: userInfo.membership?.source,
   });
   return entitled ? 'claimed' : 'not-entitled';
 }
