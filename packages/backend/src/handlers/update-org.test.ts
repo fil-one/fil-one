@@ -19,12 +19,18 @@ import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
 const mockIsUploadedOrgLogoUrl = vi.fn();
 const mockClaimOrgLogoUrl = vi.fn();
 const mockDeleteReplacedOrgLogo = vi.fn();
+let isReferencedPassed: (() => Promise<boolean>) | undefined;
 vi.mock('../lib/org-logo-storage.ts', () => ({
   isUploadedOrgLogoUrl: (...args: unknown[]) => mockIsUploadedOrgLogoUrl(...args),
   // Net effect: the upload ends up claimed only when the save succeeded. The
   // claim-first order and the unclaim on failure are org-logo-storage's own
   // tests to cover.
-  withClaimedOrgLogo: async (url: string, save: () => Promise<unknown>) => {
+  withClaimedOrgLogo: async (
+    url: string,
+    save: () => Promise<unknown>,
+    isReferenced?: () => Promise<boolean>,
+  ) => {
+    isReferencedPassed = isReferenced;
     const result = await save();
     mockClaimOrgLogoUrl(url);
     return result;
@@ -531,6 +537,20 @@ describe('PATCH /api/org handler', () => {
       );
       expect(mockClaimOrgLogoUrl).not.toHaveBeenCalled();
       expect(mockDeleteReplacedOrgLogo).not.toHaveBeenCalled();
+    });
+
+    // An overlapping save of the same upload may have landed, and unclaiming
+    // it then would let the lifecycle rule delete the live logo.
+    it('checks a consistent re-read for the logo before a failed save unclaims it', async () => {
+      orgProfileNamed('Old Corp', true);
+      ddbMock.on(TransactWriteItemsCommand).rejects(cancelledOnTheUpdate());
+      await handler(renameEvent({ logoUrl: LOGO_URL }), buildContext());
+      const before = await isReferencedPassed!();
+      orgProfileNamed('Old Corp', true, LOGO_URL);
+      const after = await isReferencedPassed!();
+
+      expect([before, after]).toEqual([false, true]);
+      expect(ddbMock.commandCalls(GetItemCommand).at(-1)?.args[0].input.ConsistentRead).toBe(true);
     });
 
     it('settles the logo on a rename that carries one too', async () => {

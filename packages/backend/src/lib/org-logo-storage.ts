@@ -116,8 +116,12 @@ export async function isUploadedOrgLogoUrl(logoUrl: string): Promise<boolean> {
  * Save an accepted logo with `save`, claimed out of the lifecycle rule's reach
  * first. See {@link withClaimedUpload}.
  */
-export async function withClaimedOrgLogo<T>(logoUrl: string, save: () => Promise<T>): Promise<T> {
-  return await withClaimedUpload(logoUrl, LOGO_KEY_PREFIX, save);
+export async function withClaimedOrgLogo<T>(
+  logoUrl: string,
+  save: () => Promise<T>,
+  isReferenced?: () => Promise<boolean>,
+): Promise<T> {
+  return await withClaimedUpload(logoUrl, LOGO_KEY_PREFIX, save, isReferenced);
 }
 
 /** Delete the logo a new one replaced, once the org no longer points at it. */
@@ -154,18 +158,22 @@ export async function isUnclaimedUpload(url: string, prefix: string): Promise<bo
  * while the object still carried the tag would be deleted by the lifecycle
  * rule a day later, out from under everything that shows it. A save that then
  * fails puts the tag back, so a retry with the same upload still passes the
- * unclaimed check and an abandoned one still expires.
+ * unclaimed check and an abandoned one still expires. An upload
+ * `isReferenced` reports as saved anyway, by an overlapping request with the
+ * same upload, stays claimed; a failed check counts as referenced.
  */
 export async function withClaimedUpload<T>(
   url: string,
   prefix: string,
   save: () => Promise<T>,
+  isReferenced?: () => Promise<boolean>,
 ): Promise<T> {
   await claimUpload(url, prefix);
   try {
     return await save();
   } catch (err) {
-    await unclaimUpload(url, prefix);
+    const referenced = (await isReferenced?.().catch(() => true)) ?? false;
+    if (!referenced) await unclaimUpload(url, prefix);
     throw err;
   }
 }

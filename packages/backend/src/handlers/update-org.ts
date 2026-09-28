@@ -13,8 +13,8 @@ import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audi
 import { getDynamoClient } from '../lib/ddb-client.ts';
 import {
   deleteReplacedOrgLogo,
-  withClaimedOrgLogo,
   isUploadedOrgLogoUrl,
+  withClaimedOrgLogo,
 } from '../lib/org-logo-storage.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
@@ -387,7 +387,11 @@ async function saveOrg({
     await commit();
     return;
   }
-  await withClaimedOrgLogo(logoUrl, commit);
+  await withClaimedOrgLogo(
+    logoUrl,
+    commit,
+    async () => (await readOrgProfile(key)).logoUrl === logoUrl,
+  );
   await deleteReplacedOrgLogo(previousLogoUrl);
 }
 

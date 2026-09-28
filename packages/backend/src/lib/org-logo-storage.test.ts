@@ -111,6 +111,25 @@ describe('withClaimedOrgLogo', () => {
     });
   });
 
+  // An overlapping save carrying the same upload landed, so putting the tag
+  // back would let the lifecycle rule delete the live logo.
+  it.each([
+    [true, 0],
+    [false, 1],
+  ])('when the save fails and isReferenced is %s, unclaims %i times', async (referenced, puts) => {
+    await expect(
+      withClaimedOrgLogo(
+        url,
+        async () => {
+          throw new Error('TransactionConflict');
+        },
+        async () => referenced,
+      ),
+    ).rejects.toThrow('TransactionConflict');
+
+    expect(s3Mock.commandCalls(PutObjectTaggingCommand)).toHaveLength(puts);
+  });
+
   it('still reports the save error when putting the tag back fails too', async () => {
     s3Mock.on(PutObjectTaggingCommand).rejects(new Error('AccessDenied'));
 
