@@ -15,6 +15,8 @@ for (const user of USERS) {
     setup.setTimeout(120_000);
     await grantEmailBeta(credential(user, 'EMAIL'));
     await logIn(page, user);
+    // A first login can land before the console's own /me has created the account.
+    expect((await api(page, 'GET', '/api/me')).status()).toBe(200);
     if (user !== 'fresh') {
       const userId = await userIdOf(user);
       await resetToHomeOrg(userId);
