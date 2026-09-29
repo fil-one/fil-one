@@ -1008,6 +1008,9 @@ export default $config({
         stripeSecretKey,
         stripePriceId,
         orgTable,
+        // Deletes the org's saved logo and each departing account's uploaded
+        // avatar, which are claimed and so outlive the lifecycle expiry.
+        orgLogoBucket,
         ...managementApiTokens,
         ...mgmtRuntimeResources,
       ],
@@ -1265,8 +1268,10 @@ export default $config({
         extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
         provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       },
+      // Also checks a submitted avatar URL against OrgLogoBucket, claims it,
+      // and deletes the avatar it replaced.
       'update-profile': {
-        extraLink: mgmtRuntimeResources,
+        extraLink: [...mgmtRuntimeResources, orgLogoBucket],
         extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
       },
       'get-preferences': {
@@ -1315,6 +1320,12 @@ export default $config({
       // Confirms a submitted logoUrl names an unclaimed upload in OrgLogoBucket,
       // then claims it, so it needs the bucket as much as the presign route does.
       'create-org': {
+        extraLink: [orgLogoBucket],
+      },
+      // Presigns a POST into OrgLogoBucket too, under an `avatars/` prefix -
+      // see avatar-storage.ts for why this reuses the org logo bucket rather
+      // than standing up one of its own.
+      'presign-avatar': {
         extraLink: [orgLogoBucket],
       },
       // Checks a submitted logo URL against OrgLogoBucket, claims it, and
