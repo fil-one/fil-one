@@ -240,8 +240,8 @@ describe('getAvailableRegions', () => {
   it('returns all non-production regions when stage is empty', () => {
     expect(getAvailableRegions('')).toEqual([
       S3Region.EuWest1,
-      S3Region.UsEast1,
       S3Region.EuCentral3,
+      S3Region.UsEast1,
       S3Region.UsEast9,
     ]);
   });
@@ -253,8 +253,8 @@ describe('getAvailableRegions', () => {
   it('includes the Forge regions on non-production stages', () => {
     expect(getAvailableRegions(Stage.Staging)).toEqual([
       S3Region.EuWest1,
-      S3Region.UsEast1,
       S3Region.EuCentral3,
+      S3Region.UsEast1,
       S3Region.UsEast9,
     ]);
     expect(getAvailableRegions('dev-pr-123')).toContain(S3Region.EuCentral3);
