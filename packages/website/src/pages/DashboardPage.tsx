@@ -1,9 +1,9 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useRef, useState } from 'react';
 import {
   PlusIcon,
   DatabaseIcon,
   KeyIcon,
-  ArrowUpIcon,
+  CloudArrowUpIcon,
   XIcon,
   CheckIcon,
 } from '@phosphor-icons/react/dist/ssr';
@@ -85,6 +85,17 @@ function DashboardSkeleton() {
 // eslint-disable-next-line max-lines-per-function, complexity/complexity
 export function DashboardPage() {
   const [trialBannerVisible, setTrialBannerVisible] = useState(true);
+  // A prompt toward pages the caller can always reach on their own (Buckets,
+  // API Keys), so dismissing it costs nothing. Like the trial banner above it,
+  // dismissal lasts until the next visit to the dashboard.
+  const [quickSetupVisible, setQuickSetupVisible] = useState(true);
+  // Dismissing either removes the button that held focus, so focus moves to
+  // the page heading rather than dropping to the document body.
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  function dismiss(hide: (visible: boolean) => void) {
+    hide(false);
+    headingRef.current?.focus();
+  }
 
   // Money is `billing.view`. A Member's dashboard used to sit on a skeleton
   // forever waiting for a request that returns 403, so the plan panels are now
@@ -173,20 +184,20 @@ export function DashboardPage() {
       done: usage.buckets.count > 0,
     },
     {
-      id: 'upload-object',
-      icon: ArrowUpIcon,
-      title: 'Upload an object',
-      subtitle: 'Store files on Fil One',
-      href: '/buckets',
-      done: usage.objects.count > 0,
-    },
-    {
       id: 'generate-key',
       icon: KeyIcon,
       title: 'Generate API key',
       subtitle: 'Connect via S3 API',
       href: '/api-keys',
       done: usage.accessKeys.count > 0,
+    },
+    {
+      id: 'upload-object',
+      icon: CloudArrowUpIcon,
+      title: 'Upload an object',
+      subtitle: 'Store files on Fil One',
+      href: '/buckets',
+      done: usage.objects.count > 0,
     },
   ];
 
@@ -197,6 +208,7 @@ export function DashboardPage() {
     <PageLayout
       title="Dashboard"
       headingId="dashboard-heading"
+      headingRef={headingRef}
       action={
         <RequirePermission permission="buckets.create">
           <Button
@@ -233,23 +245,33 @@ export function DashboardPage() {
             <IconButton
               icon={XIcon}
               aria-label="Dismiss trial banner"
-              onClick={() => setTrialBannerVisible(false)}
-              size="sm"
+              onClick={() => dismiss(setTrialBannerVisible)}
+              size="md"
+              className="rounded-md focus-visible:brand-outline"
             />
           </div>
         </div>
       )}
 
       {/* 3. Quick Setup */}
-      {showQuickSetup && (
+      {showQuickSetup && quickSetupVisible && (
         <Card className="mb-5">
           <div className="mb-4 flex items-center justify-between">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+            <span className="text-meta font-medium uppercase tracking-wider text-zinc-500">
               QUICK SETUP
             </span>
-            <span className="text-[11px] text-zinc-500">
-              {quickSetupDone} of {quickSetupTotal}
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-meta text-zinc-500">
+                {quickSetupDone} of {quickSetupTotal}
+              </span>
+              <IconButton
+                icon={XIcon}
+                aria-label="Dismiss quick setup"
+                onClick={() => dismiss(setQuickSetupVisible)}
+                size="md"
+                className="rounded-md focus-visible:brand-outline"
+              />
+            </div>
           </div>
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
             {quickSetupTasks.map(({ id, icon: Icon, title, subtitle, href, done }) => (
@@ -262,12 +284,10 @@ export function DashboardPage() {
               >
                 <IconBox icon={done ? CheckIcon : Icon} color={done ? 'green' : 'blue'} size="md" />
                 <div className="min-w-0">
-                  <p
-                    className={`text-[13px] font-medium ${done ? 'text-green-900' : 'text-zinc-900'}`}
-                  >
+                  <p className={`text-ui font-medium ${done ? 'text-green-900' : 'text-zinc-900'}`}>
                     {title}
                   </p>
-                  <p className={`text-[11px] ${done ? 'text-green-700' : 'text-zinc-500'}`}>
+                  <p className={`text-meta ${done ? 'text-green-700' : 'text-zinc-500'}`}>
                     {subtitle}
                   </p>
                 </div>
