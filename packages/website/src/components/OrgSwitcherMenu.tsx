@@ -33,7 +33,8 @@ type OrgSwitcherMenuProps = {
 /**
  * The org's pages. Without an active plan the billing gate stands in for every
  * page but a few, so the `gated` ones would only land back on it; Edit
- * organization is one of the pages past the gate.
+ * organization is one of the pages past the gate. The `beta` ones belong to the
+ * organizations beta.
  */
 const ORG_LINKS: {
   href: string;
@@ -41,6 +42,7 @@ const ORG_LINKS: {
   icon: React.ElementType;
   permission: Permission;
   gated: boolean;
+  beta?: boolean;
   testId?: string;
 }[] = [
   {
@@ -51,7 +53,14 @@ const ORG_LINKS: {
     gated: false,
     testId: 'org-menu-edit',
   },
-  { href: '/members', label: 'Members', icon: UsersIcon, permission: 'members.read', gated: true },
+  {
+    href: '/members',
+    label: 'Members',
+    icon: UsersIcon,
+    permission: 'members.read',
+    gated: true,
+    beta: true,
+  },
   {
     href: '/billing',
     label: 'Billing',
@@ -65,6 +74,7 @@ const ORG_LINKS: {
     icon: ClockCounterClockwiseIcon,
     permission: 'audit.view',
     gated: true,
+    beta: true,
   },
 ];
 
@@ -91,12 +101,12 @@ const itemClassName =
  * return wrong (FIL-990).
  *
  * Always renders, even for a single-org account where `OrgSwitcher` itself
- * renders nothing: "Create organization" is reachable regardless of how many
- * orgs the caller already has.
+ * renders nothing: "Create organization" is reachable in the organizations beta
+ * regardless of how many orgs the caller already has.
  */
 export function OrgSwitcherMenu({ collapsed, testId, onNavigate }: OrgSwitcherMenuProps) {
   const [createOpen, setCreateOpen] = useState(false);
-  const { has, billingActive } = usePermissions();
+  const { has, billingActive, orgsBeta } = usePermissions();
   const { data: me } = useQuery({
     queryKey: queryKeys.me,
     queryFn: () => getMe(),
@@ -136,7 +146,10 @@ export function OrgSwitcherMenu({ collapsed, testId, onNavigate }: OrgSwitcherMe
               className="z-50 mt-1 w-60 rounded-lg border border-zinc-200 bg-white p-1 shadow-md outline-none"
             >
               {ORG_LINKS.filter(
-                (link) => has(link.permission) && (billingActive || !link.gated),
+                (link) =>
+                  has(link.permission) &&
+                  (billingActive || !link.gated) &&
+                  (orgsBeta || !link.beta),
               ).map(({ href, label, icon: Icon, testId: linkTestId }) => (
                 <MenuItem
                   key={href}
@@ -160,12 +173,18 @@ export function OrgSwitcherMenu({ collapsed, testId, onNavigate }: OrgSwitcherMe
                   onNavigate?.();
                 }}
               />
-              <MenuItem>
-                <button type="button" onClick={() => setCreateOpen(true)} className={itemClassName}>
-                  <PlusIcon size={13} className="flex-shrink-0 text-zinc-400" />
-                  Create organization
-                </button>
-              </MenuItem>
+              {orgsBeta && (
+                <MenuItem>
+                  <button
+                    type="button"
+                    onClick={() => setCreateOpen(true)}
+                    className={itemClassName}
+                  >
+                    <PlusIcon size={13} className="flex-shrink-0 text-zinc-400" />
+                    Create organization
+                  </button>
+                </MenuItem>
+              )}
             </MenuItems>
           </>
         )}

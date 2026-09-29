@@ -1,12 +1,10 @@
 import { test, expect, type Page } from '@playwright/test';
-import { STORAGE_STATE, requireEmail, requireUserId } from './roles.util.ts';
+import { STORAGE_STATE, requireUserId } from './roles.util.ts';
 import {
   deleteMembership,
-  grantEmailBeta,
   readOrgName,
   repairOwnerCount,
   resolvePersonalOrgId,
-  revokeEmailBeta,
   runCleanup,
   seedMembership,
   setMembershipRole,
@@ -19,10 +17,6 @@ import {
 // invitee's own session, which invite-accept.spec.ts drives. Here the member is
 // the material for three changes — a role change, the refusal that keeps an
 // organization owned, and a removal the removed account then walks into.
-//
-// The beta is granted as the caller's ALLOWLIST#{email} row, so this spec and
-// invitations.spec.ts — same account, same organization — hold their grants
-// under different keys and neither teardown can revoke the other's.
 //
 // Cross-run note: these specs mutate shared staging state, and the suite runs
 // with one worker in CI (`workers: isCI ? 1 : undefined`). A local run with
@@ -47,7 +41,6 @@ test.describe('paid owner manages members', () => {
     orgName = await readOrgName(orgId);
     memberOwnOrgName = await readOrgName(await resolvePersonalOrgId(memberUserId));
 
-    await grantEmailBeta(requireEmail(OWNER));
     await seedMembership({
       orgId,
       userId: memberUserId,
@@ -74,7 +67,6 @@ test.describe('paid owner manages members', () => {
       // The counter is the last-Owner invariant and a teardown is the wrong
       // place to assume nothing touched it.
       { label: 'ownerCount', run: () => repairOwnerCount(orgId) },
-      { label: 'beta grant', run: () => revokeEmailBeta(requireEmail(OWNER)) },
     ]);
   });
 

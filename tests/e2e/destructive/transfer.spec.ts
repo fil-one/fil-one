@@ -2,11 +2,9 @@ import { test, expect, type Page, type Response } from '@playwright/test';
 import { STORAGE_STATE, requireEmail, requirePassword, requireUserId } from './roles.util.ts';
 import {
   deleteMembership,
-  grantEmailBeta,
   readOrgName,
   repairOwnerCount,
   resolvePersonalOrgId,
-  revokeEmailBeta,
   runCleanup,
   seedMembership,
   setMembershipRole,
@@ -56,7 +54,6 @@ test.describe('trial owner transfers the organization', () => {
     orgId = await resolvePersonalOrgId(ownerUserId);
     orgName = await readOrgName(orgId);
 
-    await grantEmailBeta(requireEmail(OWNER));
     // Admin, because the seat is what this spec moves: a second Owner cannot be
     // seeded without the counter that guards the last one.
     await seedMembership({
@@ -83,7 +80,6 @@ test.describe('trial owner transfers the organization', () => {
         run: () => deleteMembership({ orgId, userId: successorUserId }),
       },
       { label: 'ownerCount', run: () => repairOwnerCount(orgId) },
-      { label: 'beta grant', run: () => revokeEmailBeta(requireEmail(OWNER)) },
     ]);
   });
 

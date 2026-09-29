@@ -378,6 +378,7 @@ describe('AppShell mobile user menu', () => {
       name: 'Ada',
       orgId: ORG_A,
       orgName: 'Acme',
+      orgsBeta: true,
       memberships: [
         { orgId: ORG_A, orgName: 'Acme', role: 'owner' },
         { orgId: ORG_B, orgName: 'Globex', role: 'member' },
