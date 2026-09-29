@@ -192,7 +192,7 @@ function NameCell({
       )}
       {name}
       {hasMultipleVersions && (
-        <span className="ml-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-500">
+        <span className="ml-1 rounded-full bg-zinc-100 px-2 py-0.5 text-meta font-medium text-zinc-500">
           {group.versionCount} versions
         </span>
       )}

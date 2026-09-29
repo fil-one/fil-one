@@ -16,7 +16,7 @@ export function CodeBlock({ code, language, className }: CodeBlockProps) {
   return (
     <div
       className={clsx(
-        'relative rounded-lg border border-zinc-200 bg-zinc-100/60 p-4 font-mono text-[11px] leading-5 text-zinc-800',
+        'relative rounded-lg border border-zinc-200 bg-zinc-100/60 p-4 font-mono text-meta leading-5 text-zinc-800',
         className,
       )}
     >
