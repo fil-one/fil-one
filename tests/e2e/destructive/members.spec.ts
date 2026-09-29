@@ -150,9 +150,9 @@ test.describe('paid owner manages members', () => {
 
     try {
       await memberPage.goto('/dashboard');
-      await memberPage.getByTestId('user-profile').click();
+      await memberPage.getByTestId('org-switcher-button').click();
       await memberPage.getByTestId('org-switcher').locator('button:not([aria-current])').click();
-      await expect(memberPage.getByTestId('user-profile')).toContainText(orgName);
+      await expect(memberPage.getByTestId('org-switcher-button')).toContainText(orgName);
       await expect.poll(() => activeOrgStash(memberPage)).toBe(orgId);
 
       await page.goto('/organization');
@@ -184,7 +184,7 @@ test.describe('paid owner manages members', () => {
       // match what it asked for, drops the stash and reloads. What it must not be
       // is a dead end — no interstitial, no 403 page, just the account's own org.
       await memberPage.goto('/buckets');
-      await expect(memberPage.getByTestId('user-profile')).toContainText(memberOwnOrgName);
+      await expect(memberPage.getByTestId('org-switcher-button')).toContainText(memberOwnOrgName);
       await expect(memberPage.getByTestId('not-a-member')).toHaveCount(0);
       await expect(memberPage.getByTestId('nav-buckets')).toBeVisible();
       // The stash is what the recovery drops on its way to the reload, and the

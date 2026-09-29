@@ -1,8 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { isRedirect } from '@tanstack/react-router';
 
+import type { MeResponse } from '@filone/shared';
+
 import { Route } from './_app.js';
 import { stashInviteToken } from '../lib/invite-token.js';
+import { queryClient } from '../lib/query-client.js';
 
 /** `beforeLoad` is called by the router with a context bag this route ignores. */
 function runBeforeLoad(): Promise<void> {
@@ -45,5 +48,40 @@ describe('the app layout’s beforeLoad', () => {
     // The cookie check comes first, so the two redirects cannot take turns.
     expect(isRedirect(thrown)).toBe(true);
     expect((thrown as { options: { href?: string } }).options.href).toBe('/login');
+  });
+
+  // Every account has an unnamed personal org from signup, including one that
+  // joined by invitation and only works in the team org.
+  describe('an unnamed org', () => {
+    function meWith(memberships: string[]) {
+      vi.spyOn(queryClient, 'fetchQuery').mockResolvedValue({
+        orgId: 'personal',
+        orgName: 'Personal',
+        nameConfirmed: false,
+        emailVerified: true,
+        email: 'user@example.com',
+        mfaEnrollments: [],
+        memberships: memberships.map((orgId) => ({ orgId, orgName: orgId, role: 'owner' })),
+      } as unknown as MeResponse);
+    }
+
+    async function redirectTarget() {
+      const thrown = await runBeforeLoad().catch((err: unknown) => err);
+      return isRedirect(thrown) ? (thrown as { options: { to?: string } }).options.to : undefined;
+    }
+
+    it('sends a brand-new account, with nowhere else to be, to name it', async () => {
+      meWith(['personal']);
+
+      expect(await redirectTarget()).toBe('/create-organization');
+    });
+
+    // A fresh tab resolves to the personal org; asking there would stop an
+    // invitee on every new tab to name an org they never asked for.
+    it('lets an account that belongs to another org through', async () => {
+      meWith(['personal', 'team']);
+
+      expect(await redirectTarget()).toBeUndefined();
+    });
   });
 });

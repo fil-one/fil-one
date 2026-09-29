@@ -15,6 +15,8 @@ vi.mock('./SidebarNav', () => ({
   ),
 }));
 
+vi.mock('./CreateOrganizationDialog.js', () => ({ CreateOrganizationDialog: () => null }));
+
 vi.mock('./Banner', () => ({
   Banner: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
@@ -40,7 +42,8 @@ vi.mock(import('../lib/time.js'), async (importOriginal) => ({
   formatDateTime: vi.fn(() => '2026-06-30'),
 }));
 
-vi.mock('@filone/shared', () => ({
+vi.mock('@filone/shared', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@filone/shared')>()),
   SubscriptionStatus: { GracePeriod: 'grace_period', Active: 'active', Trialing: 'trialing' },
   getUsageLimits: vi.fn(() => ({ storageLimitBytes: 1e12, egressLimitBytes: 2e12 })),
 }));
@@ -223,7 +226,8 @@ describe('AppShell focus management', () => {
     const drawerLink = getDrawer().querySelector('a[href="/dashboard"]') as HTMLElement;
     drawerLink.focus();
     fireEvent.keyDown(document, { key: 'Tab' });
-    expect(document.activeElement).toBe(getCloseButton());
+    // The org menu leads the drawer header, ahead of close, in reading order.
+    expect(document.activeElement).toBe(screen.getByTestId('mobile-org-switcher-button'));
   });
 
   it('wraps focus from first to last element on Shift+Tab', async () => {
@@ -231,7 +235,7 @@ describe('AppShell focus management', () => {
     await act(async () => {
       fireEvent.click(getHamburger());
     });
-    getCloseButton().focus();
+    screen.getByTestId('mobile-org-switcher-button').focus();
     fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
     const drawerLink = getDrawer().querySelector('a[href="/dashboard"]') as HTMLElement;
     expect(document.activeElement).toBe(drawerLink);
@@ -322,21 +326,17 @@ describe('AppShell mobile user menu', () => {
     return rendered;
   }
 
-  it('mounts the org switcher with the active org checked', () => {
-    openUserMenu();
+  it('offers the org menu in the mobile drawer with the active org checked', async () => {
+    render(<AppShell>page content</AppShell>);
+    fireEvent.click(screen.getByRole('button', { name: 'Open navigation menu' }));
+    fireEvent.click(await screen.findByTestId('mobile-org-switcher-button'));
 
-    // Neither mount was exercised before, so a props regression here —
-    // `activeOrgId={me?.userId}` compiles — would leave every org unmarked and
-    // the suite green.
-    expect(screen.getByTestId('mobile-org-switcher')).toBeInTheDocument();
-    expect(screen.getByRole('menuitemradio', { name: 'Acme' })).toHaveAttribute(
-      'aria-checked',
+    expect(await screen.findByRole('menuitem', { name: 'Acme' })).toHaveAttribute(
+      'aria-current',
       'true',
     );
-    expect(screen.getByRole('menuitemradio', { name: 'Globex' })).toHaveAttribute(
-      'aria-checked',
-      'false',
-    );
+    expect(screen.getByRole('menuitem', { name: 'Globex' })).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('menuitem', { name: 'Create organization' })).toBeInTheDocument();
   });
 
   it('keeps the panel’s items menu items', () => {

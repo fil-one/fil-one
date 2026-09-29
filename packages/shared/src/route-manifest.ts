@@ -44,6 +44,12 @@ export type RouteCategory =
  * invited address, both checked in the handler; a membership gate in the chain
  * would refuse every invitation there is. Deliberately not `'self'`, which is
  * for routes that touch no org state at all — accepting creates a membership.
+ *
+ * One `'in-handler'` route is membership-only: creating an additional org. The
+ * caller holds no role in the org being made, so there is no permission to
+ * check, and the handler checks nothing past the chain's membership gate (the
+ * caller's own active org). It is `'in-handler'` rather than `'self'` because
+ * `'self'` is for routes with no org gate at all.
  */
 export type RouteRequirement = Permission | 'self' | 'in-handler' | 'invite-token';
 
@@ -287,6 +293,14 @@ const MANIFEST = [
     handler: 'transfer-ownership',
     category: 'authenticated',
     requires: 'org.transfer',
+  },
+  // Membership-only: see the `'in-handler'` doc comment above.
+  {
+    method: 'POST',
+    path: '/api/org',
+    handler: 'create-org',
+    category: 'authenticated',
+    requires: 'in-handler',
   },
 
   // ── Members ──────────────────────────────────────────────────────

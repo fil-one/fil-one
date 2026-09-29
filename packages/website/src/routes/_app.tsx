@@ -1,5 +1,6 @@
 import { createRoute, Outlet, redirect, useNavigate } from '@tanstack/react-router';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import type { MeResponse } from '@filone/shared';
 import { Route as rootRoute } from './__root';
 import { AppShell } from '../components/AppShell';
 import { Button } from '../components/Button';
@@ -8,6 +9,7 @@ import { queryClient, queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
 import { usePermissions } from '../lib/use-permissions.js';
 import { consumePendingMfaAction } from '../lib/step-up.js';
 import { hasPendingInviteToken } from '../lib/invite-token.js';
+import { switchToOrg } from '../lib/active-org.js';
 import { useEffect } from 'react';
 
 export const Route = createRoute({
@@ -38,9 +40,30 @@ export const Route = createRoute({
     if (!me.emailVerified) {
       throw redirect({ to: '/verify-email' });
     }
+    // A new account has a derived organization name nobody has looked at. The
+    // naming step runs after verification so the two gates cannot both claim
+    // the page. Only an explicit `false` is unconfirmed: an absent value is a
+    // pre-flag organization and reads as confirmed.
+    if (me.nameConfirmed === false && isOnlyMembership(me)) {
+      throw redirect({ to: '/create-organization' });
+    }
   },
   component: AppWithOrgGuard,
 });
+
+/**
+ * Whether the org `/me` answered for is the only one the account belongs to.
+ *
+ * Every account has an unnamed personal org from signup, including one that
+ * signed up through an invitation and only ever works in the team org. A new
+ * tab resolves to that personal org (the tab has not chosen one yet), so
+ * asking for a name whenever it is unnamed would stop that person on every
+ * fresh tab to name an org they never asked for. The naming step is for an
+ * account with nowhere else to be: a brand-new signup.
+ */
+function isOnlyMembership(me: MeResponse): boolean {
+  return (me.memberships?.length ?? 1) <= 1;
+}
 
 /**
  * What a caller with no membership row sees.
@@ -48,12 +71,20 @@ export const Route = createRoute({
  * `usePermissions` has reported this state since permissions arrived, and
  * nothing consumed it: the console rendered the full shell, every request 403'd
  * with `not_a_member`, and the caller was left reading a dashboard of empty
- * counters. The two ways out are a re-read of `/me` — the usual cause is an
- * invite accepted in another tab, or a conversion that had not finished writing
- * the row — and signing out.
+ * counters. The ways out are a re-read of `/me` (the usual cause is an invite
+ * accepted in another tab, or a conversion that had not finished writing the
+ * row) and signing out. An account that still belongs to another org, after
+ * leaving or being removed from this one, is also offered that org, since the
+ * shell and its switcher are not rendered here.
  */
 function NotAMember() {
   const client = useQueryClient();
+  const { data: me } = useQuery({
+    queryKey: queryKeys.me,
+    queryFn: () => getMe(),
+    staleTime: ME_STALE_TIME,
+  });
+  const other = me?.memberships?.find((membership) => membership.orgId !== me.orgId);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 px-6">
@@ -68,10 +99,18 @@ function NotAMember() {
           Ask an organization owner to invite you. If you have just been added, refresh to pick up
           the change.
         </p>
-        <div className="mt-5 flex items-center justify-center gap-2">
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+          {other && (
+            <Button variant="primary" size="sm" onClick={() => switchToOrg(other.orgId)}>
+              {/* Capped so a long org name truncates inside the button on a
+                  375px screen rather than running past its edges. */}
+              Go to{' '}
+              <span className="inline-block max-w-40 truncate align-bottom">{other.orgName}</span>
+            </Button>
+          )}
           <Button
             id="not-a-member-refresh-button"
-            variant="primary"
+            variant={other ? 'ghost' : 'primary'}
             size="sm"
             onClick={() => void client.invalidateQueries({ queryKey: queryKeys.me })}
           >
