@@ -52,7 +52,8 @@ vi.mock('../lib/org-membership.ts', async (importOriginal) => ({
 }));
 
 const mockHasOrgsBetaAccess = vi.fn();
-vi.mock('../lib/orgs-beta.ts', () => ({
+vi.mock('../lib/orgs-beta.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/orgs-beta.ts')>()),
   hasOrgsBetaAccess: (...args: unknown[]) => mockHasOrgsBetaAccess(...args),
 }));
 
@@ -236,6 +237,13 @@ describe('POST /api/org handler', () => {
             role: { S: OrgRole.Owner },
             joinedAt: { S: now },
           },
+        },
+      },
+      // Into the beta with it, since only the beta can create one.
+      {
+        Put: {
+          TableName: 'UserInfoTable',
+          Item: { pk: { S: `ORG#${orgId}` }, sk: { S: 'ORGS_BETA' } },
         },
       },
       {
