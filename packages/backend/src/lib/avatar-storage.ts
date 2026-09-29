@@ -1,8 +1,9 @@
-import { AVATAR_MAX_BYTES } from '@filone/shared';
+import { AVATAR_MAX_BYTES, getProvider, isSocialConnection } from '@filone/shared';
 import type { DeleteUploadOptions } from './org-logo-storage.ts';
 import {
   withClaimedUpload,
   deleteUpload,
+  isOurImageUrl,
   isUnclaimedUpload,
   presignUpload,
 } from './org-logo-storage.ts';
@@ -59,4 +60,30 @@ export async function deleteReplacedAvatar(
   options?: DeleteUploadOptions,
 ): Promise<void> {
   if (pictureUrl) await deleteUpload(pictureUrl, AVATAR_KEY_PREFIX, options);
+}
+
+/**
+ * The picture to show for an account: our own avatar upload, or a social
+ * account's photo from its provider's picture host. Anything else (Gravatar,
+ * Auth0's generated placeholder, an arbitrary host) is no picture, and the
+ * console shows the monogram.
+ */
+export function shownPicture(
+  picture: string | undefined,
+  connectionType: string,
+): string | undefined {
+  if (!picture) return undefined;
+  if (isOurImageUrl(picture, AVATAR_KEY_PREFIX)) return picture;
+  if (!isSocialConnection(connectionType)) return undefined;
+  const host = getProvider(connectionType)?.pictureHost;
+  return host !== undefined && isHttpsOn(picture, host) ? picture : undefined;
+}
+
+function isHttpsOn(url: string, host: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' && parsed.hostname === host;
+  } catch {
+    return false;
+  }
 }

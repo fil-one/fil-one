@@ -48,6 +48,7 @@ import {
   stubAbsentMembershipRead,
   stubMembershipList,
   stubMembershipRead,
+  STUB_JOINED_AT,
 } from '../test/lambda-test-utilities.ts';
 
 // ---------------------------------------------------------------------------
@@ -90,7 +91,7 @@ function ownerTail(orgName: string) {
     userId: MOCK_USER_ID,
     role: OrgRole.Owner,
     permissions: [...ROLE_PERMISSIONS[OrgRole.Owner]],
-    memberships: [{ orgId: MOCK_ORG_ID, orgName, role: OrgRole.Owner }],
+    memberships: [{ orgId: MOCK_ORG_ID, orgName, role: OrgRole.Owner, joinedAt: STUB_JOINED_AT }],
     orgsBeta: false,
   };
 }
@@ -191,6 +192,23 @@ describe('GET /api/me handler', () => {
         ...ownerTail('Example Corp'),
       }),
     });
+  });
+
+  // A database account's picture is Gravatar with Auth0's placeholder behind it.
+  it('shows no picture that is neither our upload nor its provider’s photo', async () => {
+    profileResolves();
+    mockJwtVerify.mockResolvedValue({
+      payload: {
+        sub: MOCK_SUB,
+        email: MOCK_EMAIL,
+        email_verified: true,
+        picture: 'https://s.gravatar.com/avatar/abc',
+      },
+    });
+
+    const result = await handler(authenticatedEvent(), buildContext());
+
+    expect(JSON.parse((result as { body: string }).body)).not.toHaveProperty('picture');
   });
 
   it('reads the active org profile consistently, so a just-created org is never named empty', async () => {
@@ -459,7 +477,12 @@ describe('GET /api/me handler', () => {
         userId: string;
         role: OrgRole;
         permissions: string[];
-        memberships: Array<{ orgId: string; orgName: string; role: OrgRole }>;
+        memberships: Array<{
+          orgId: string;
+          orgName: string;
+          role: OrgRole;
+          joinedAt?: string;
+        }>;
       };
     }
 
@@ -481,7 +504,12 @@ describe('GET /api/me handler', () => {
       expect(body.role).toBe(OrgRole.ReadOnly);
       expect(body.permissions).toStrictEqual([...ROLE_PERMISSIONS[OrgRole.ReadOnly]]);
       expect(body.memberships).toStrictEqual([
-        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', role: OrgRole.ReadOnly },
+        {
+          orgId: MOCK_ORG_ID,
+          orgName: 'Example Corp',
+          role: OrgRole.ReadOnly,
+          joinedAt: STUB_JOINED_AT,
+        },
       ]);
     });
 
@@ -500,8 +528,18 @@ describe('GET /api/me handler', () => {
       const body = parseBody(await handler(authenticatedEvent(), buildContext()));
 
       expect(body.memberships).toStrictEqual([
-        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', role: OrgRole.Owner },
-        { orgId: secondOrgId, orgName: 'Second Corp', role: OrgRole.Member },
+        {
+          orgId: MOCK_ORG_ID,
+          orgName: 'Example Corp',
+          role: OrgRole.Owner,
+          joinedAt: STUB_JOINED_AT,
+        },
+        {
+          orgId: secondOrgId,
+          orgName: 'Second Corp',
+          role: OrgRole.Member,
+          joinedAt: STUB_JOINED_AT,
+        },
       ]);
     });
 
@@ -542,8 +580,18 @@ describe('GET /api/me handler', () => {
 
       expect((result as { statusCode: number }).statusCode).toBe(200);
       expect(parseBody(result).memberships).toStrictEqual([
-        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', role: OrgRole.Owner },
-        { orgId: secondOrgId, orgName: '', role: OrgRole.Member },
+        {
+          orgId: MOCK_ORG_ID,
+          orgName: 'Example Corp',
+          role: OrgRole.Owner,
+          joinedAt: STUB_JOINED_AT,
+        },
+        {
+          orgId: secondOrgId,
+          orgName: '',
+          role: OrgRole.Member,
+          joinedAt: STUB_JOINED_AT,
+        },
       ]);
       consoleError.mockRestore();
     });

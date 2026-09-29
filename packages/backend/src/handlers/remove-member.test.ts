@@ -365,6 +365,19 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     });
   });
 
+  it('refuses a Member removing someone else, who holds no members.manage', async () => {
+    // The self-leave carve-out only waives the permission for the caller's
+    // own row — removing anyone else still costs `members.manage`, now
+    // checked in the handler rather than the chain.
+    callerHolds(OrgRole.Member);
+    targetHolds(OrgRole.Member);
+
+    const result = await handler(removeEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 403 });
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+  });
+
   it('refuses an Admin removing an Owner', async () => {
     // Removal counts against the same ceiling as demotion, otherwise deleting
     // an Owner would reach what demoting one forbids.
@@ -399,17 +412,26 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     expect(result).toMatchObject({ statusCode: 200 });
   });
 
-  it('refuses a Member trying to leave, because the matrix grants them no removal', async () => {
-    // Not an oversight in this handler: `members.manage` is what the route
-    // costs, a Member does not hold it, and "leave this organization" for a
-    // Member or ReadOnly is a product decision the M1 matrix does not make.
+  it('lets a Member leave, though the matrix grants them no removal', async () => {
+    // Leaving is the self-service carve-out: `members.manage` is what
+    // removing someone ELSE costs, and a Member holds neither that nor any
+    // other permission over this row — but leaving needs no permission at
+    // all, only membership, which the chain's gate already confirmed.
     callerHolds(OrgRole.Member);
     targetHolds(OrgRole.Member, USER_ID);
 
     const result = await handler(removeEvent(USER_ID), buildContext());
 
-    expect(result).toMatchObject({ statusCode: 403 });
-    expect(body(result).code).toBe(ApiErrorCode.FORBIDDEN_ROLE);
+    expect(result).toMatchObject({ statusCode: 200 });
+  });
+
+  it('lets a ReadOnly leave the same way', async () => {
+    callerHolds(OrgRole.ReadOnly);
+    targetHolds(OrgRole.ReadOnly, USER_ID);
+
+    const result = await handler(removeEvent(USER_ID), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 200 });
   });
 
   it('stops the last Owner leaving by the same guard', async () => {
