@@ -28,6 +28,15 @@ jobs:
       E2E_TRIAL_EMAIL: ${{ secrets.E2E_TRIAL_EMAIL }}
       E2E_TRIAL_PASSWORD: ${{ secrets.E2E_TRIAL_PASSWORD }}
       E2E_TRIAL_USER_ID: ${{ secrets.E2E_TRIAL_USER_ID }}
+      E2E_ORG_OWNER_EMAIL: ${{ secrets.E2E_ORG_OWNER_EMAIL }}
+      E2E_ORG_OWNER_PASSWORD: ${{ secrets.E2E_ORG_OWNER_PASSWORD }}
+      E2E_ORG_OWNER_AUTH0_ID: ${{ secrets.E2E_ORG_OWNER_AUTH0_ID }}
+      E2E_ORG_MEMBER_EMAIL: ${{ secrets.E2E_ORG_MEMBER_EMAIL }}
+      E2E_ORG_MEMBER_PASSWORD: ${{ secrets.E2E_ORG_MEMBER_PASSWORD }}
+      E2E_ORG_MEMBER_AUTH0_ID: ${{ secrets.E2E_ORG_MEMBER_AUTH0_ID }}
+      E2E_ORG_FRESH_EMAIL: ${{ secrets.E2E_ORG_FRESH_EMAIL }}
+      E2E_ORG_FRESH_PASSWORD: ${{ secrets.E2E_ORG_FRESH_PASSWORD }}
+      E2E_ORG_FRESH_AUTH0_ID: ${{ secrets.E2E_ORG_FRESH_AUTH0_ID }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

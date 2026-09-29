@@ -210,6 +210,18 @@ The `.auth/` directory is gitignored — the JSON files are regenerated on every
 5. Add the same three vars to the `env:` block in both [.github/workflows/e2e-staging.yaml](.github/workflows/e2e-staging.yaml) and [.github/workflows/test-staging.yaml](.github/workflows/test-staging.yaml), and provision the corresponding GitHub secrets.
 6. If the role needs a seeded bucket per region, add it to `SEED_PLAN` in [tests/e2e/destructive/buckets.setup.ts](tests/e2e/destructive/buckets.setup.ts), with `needsActiveSubscription: true` when its desired subscription state blocks writes.
 
+#### Multi-org suite
+
+`tests/e2e/multi-org` runs in its own `multi-org` Playwright project on three accounts of its own: owner, member and fresh. Its credentials are `E2E_ORG_{OWNER,MEMBER,FRESH}_{EMAIL,PASSWORD,AUTH0_ID}`, where `_AUTH0_ID` is the account's Auth0 `sub`. In CI they come from GitHub secrets like the credentials above. Locally, put them in `.env.e2e.local`, which `playwright.config.ts` loads. The accounts need verified emails, because the setup ([tests/e2e/multi-org/login.setup.ts](tests/e2e/multi-org/login.setup.ts)) names the owner's and member's home orgs and claims their trials, and a trial is only granted to a verified email. Each spec resets the rows it seeds, so runs repeat cleanly.
+
+Against staging it runs as part of `pnpm test:e2e`. Against a [local stack](#local-stack) whose console runs on a port other than 5173, keep `BASE_URL` at `https://localhost:5173`, the only origin Auth0 accepts, and set `E2E_ORIGIN_REWRITE` to the real origin. The fixture then reroutes the browser's requests there:
+
+```bash
+eval "$(floci env)"; export LOCAL=true AWS_REGION=us-east-1
+BASE_URL=https://localhost:5173 E2E_ORIGIN_REWRITE=https://localhost:5185 \
+  pnpm exec sst shell --stage local-org -- pnpm exec playwright test --project=multi-org --workers=1
+```
+
 ### Integration Tests
 
 Integration tests, located in tests/integration/, confirm that individual modules or services interact correctly with one another — for instance, ensuring Stripe webhook handlers produce the expected state transitions in DynamoDB — by running against real AWS and Stripe resources.
@@ -326,16 +338,6 @@ The partner key replaces any hosted Forge dev token on the stage. To go back to 
 floci's Lambda containers reach smelt through `host.docker.internal`. Presigned URLs, which the browser fetches directly, use `http://localhost:15130` instead: an `https://` page may fetch `http://localhost` but not other plain-HTTP hosts.
 
 Ingot only accepts browser requests from origins in `cors_allowed_origins` (`systems/ingot/config/config.yaml` in smelt). Add `https://localhost:5173` there and restart Ingot. To test Hilt changes, rebuild smelt's workspace binaries as its README describes; smelt runs whatever binary it last built.
-
-#### Multi-org E2E suite
-
-`tests/e2e/multi-org` runs on its own accounts (`E2E_ORG_{OWNER,MEMBER,FRESH}_{EMAIL,PASSWORD,AUTH0_ID}` in `.env.e2e.local`, which `playwright.config.ts` loads). Auth0 only accepts `https://localhost:5173`, so for a stage whose console runs on another port, keep `BASE_URL` at 5173 and set `E2E_ORIGIN_REWRITE` to the real origin: the fixture reroutes the browser's requests there. Run it serially, inside the stage's shell so the seeding helpers reach its tables:
-
-```bash
-eval "$(floci env)"; export LOCAL=true AWS_REGION=us-east-1
-BASE_URL=https://localhost:5173 E2E_ORIGIN_REWRITE=https://localhost:5185 \
-  pnpm exec sst shell --stage local-org -- pnpm exec playwright test --project=multi-org --workers=1
-```
 
 #### Removing
 

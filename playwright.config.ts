@@ -71,7 +71,7 @@ export default defineConfig({
       name: 'multi-org',
       testDir: './tests/e2e/multi-org',
       fullyParallel: false,
-      // Local lambdas start cold.
+      // Lambdas start cold.
       timeout: 90_000,
       expect: { timeout: 20_000 },
       use: {
