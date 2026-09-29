@@ -93,7 +93,7 @@ export function BucketActionMenu({ actions, onDisable }: BucketActionMenuProps) 
           data-testid="bucket-action-menu-list"
           role="menu"
           style={{ top: pos.top, right: pos.right }}
-          className="fixed z-50 w-auto min-w-36 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg"
+          className="fixed z-50 w-auto min-w-36 rounded-lg border border-zinc-200 bg-white py-1 shadow-md"
         >
           {items.map((item) => {
             const Icon = item.icon;
@@ -110,7 +110,7 @@ export function BucketActionMenu({ actions, onDisable }: BucketActionMenuProps) 
                 }}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-xs whitespace-nowrap text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-zinc-400"
               >
-                <Icon size={13} aria-hidden="true" />
+                <Icon size={13} className="flex-shrink-0 text-zinc-400" aria-hidden="true" />
                 {item.label}
                 {item.hint && <span className="ml-auto pl-3 text-zinc-400">{item.hint}</span>}
               </button>

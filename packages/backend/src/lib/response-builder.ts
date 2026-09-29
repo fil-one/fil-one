@@ -114,6 +114,16 @@ export function accountDeletedResponse(): APIGatewayProxyStructuredResultV2 {
     .build();
 }
 
+export function imageUploadRateLimitedResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(429)
+    .body<ErrorResponse>({
+      message: 'Too many image uploads in the last hour. Please try again later.',
+      code: ApiErrorCode.IMAGE_UPLOAD_RATE_LIMITED,
+    })
+    .build();
+}
+
 export function tenantNotReadyResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(503)

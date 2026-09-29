@@ -158,6 +158,39 @@ describe('claimTrialIfEligible', () => {
     expect(mockEnsureTrialEntitlement).not.toHaveBeenCalled();
   });
 
+  it('refuses an owner who also holds an org they created', async () => {
+    mockListMemberships.mockResolvedValue([
+      { orgId: ORG_ID, role: OrgRole.Owner, joinedAt: '' },
+      { orgId: 'org-created', role: OrgRole.Owner, joinedAt: '' },
+    ]);
+
+    await expect(claimTrialIfEligible(soloOwner())).resolves.toBe('not-own-org');
+    expect(mockEnsureTrialEntitlement).not.toHaveBeenCalled();
+  });
+
+  // Solo in an org they created, or the floor org a removal made: the
+  // entitlement decides, and is told the org did not come with the account.
+  it('hands the membership source to the entitlement for a solo manual org', async () => {
+    const floor = soloOwner({
+      membership: { orgId: ORG_ID, userId: USER_ID, role: OrgRole.Owner, source: 'manual' },
+    } as Partial<UserInfo>);
+
+    await claimTrialIfEligible(floor);
+
+    expect(mockEnsureTrialEntitlement.mock.calls).toEqual([
+      [
+        {
+          sub: 'auth0|sub-1',
+          userId: USER_ID,
+          orgId: ORG_ID,
+          email: 'user@example.com',
+          emailVerified: true,
+          membershipSource: 'manual',
+        },
+      ],
+    ]);
+  });
+
   it('reports not-entitled when the claim is already spent', async () => {
     mockEnsureTrialEntitlement.mockResolvedValue(false);
 
