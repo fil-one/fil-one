@@ -1,87 +1,81 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { OrgRole } from '@filone/shared';
-import type { MeResponse } from '@filone/shared';
+import { isRedirect } from '@tanstack/react-router';
 
-// The route's parent is the whole app layout; the gate under test does not need
-// it, and importing it would drag the router in.
 vi.mock('../_app', () => ({ Route: {} }));
 
-// The page itself is covered by OrganizationPage.test.tsx. Here it only has to
-// be distinguishable from the two refusals.
-vi.mock('../../pages/OrganizationPage', () => ({
-  OrganizationPage: () => <div data-testid="organization-page" />,
-}));
+import { Route } from './organization';
 
-vi.mock('../../lib/api.js', () => ({ getMe: vi.fn() }));
+import { parseSearch } from '../../lib/search-params.js';
 
-import { OrganizationGate } from './organization';
-import { seedPermissions } from '../../lib/test-permissions.js';
+type Search = { tab?: string; portal_return?: string };
+type BeforeLoad = (ctx: { search: Search }) => unknown;
 
-const SOLO = [{ orgId: 'org-1', orgName: 'Acme', role: OrgRole.Owner }];
-const TWO_ORGS = [
-  { orgId: 'org-1', orgName: 'Acme', role: OrgRole.Owner },
-  { orgId: 'org-2', orgName: 'Globex', role: OrgRole.Member },
-];
-
-function renderRoute(role: OrgRole, overrides: Partial<MeResponse>) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  seedPermissions(client, role, overrides);
-  return render(
-    <QueryClientProvider client={client}>
-      <OrganizationGate />
-    </QueryClientProvider>,
-  );
+function redirectFor(search: Search) {
+  let thrown: unknown;
+  try {
+    (Route.options.beforeLoad as unknown as BeforeLoad)({ search });
+  } catch (err) {
+    thrown = err;
+  }
+  expect(isRedirect(thrown)).toBe(true);
+  const {
+    to,
+    search: nextSearch,
+    replace,
+  } = (thrown as { options: { to?: string; search?: unknown; replace?: boolean } }).options;
+  return { to, search: nextSearch, replace };
 }
 
-describe('the /organization route, reached by URL', () => {
-  it('opens for a solo org in the beta', () => {
-    renderRoute(OrgRole.Owner, { memberships: SOLO, orgsBeta: true });
-
-    expect(screen.getByTestId('organization-page')).toBeTruthy();
-  });
-
-  it('opens for a caller in more than one org', () => {
-    renderRoute(OrgRole.Member, { memberships: TWO_ORGS, orgsBeta: false });
-
-    expect(screen.getByTestId('organization-page')).toBeTruthy();
-  });
-
-  it('says the feature is off for a solo org outside the beta', () => {
-    // The gentler of the two refusals available: this caller holds
-    // `members.read`, so the role denial would be a lie. The heading still
-    // renders, so the URL does not land on a blank page.
-    renderRoute(OrgRole.Owner, { memberships: SOLO, orgsBeta: false });
-
-    expect(screen.getByTestId('members-not-enabled')).toBeTruthy();
-    expect(screen.queryByTestId('organization-page')).toBeNull();
-    expect(screen.queryByTestId('page-permission-denied')).toBeNull();
-    expect(screen.getByRole('heading', { name: 'Organization' })).toBeTruthy();
-  });
-
-  it('still refuses the role when the surface exists but the role cannot read it', () => {
-    // The surface gate does not replace the permission — it precedes it.
-    renderRoute(OrgRole.Owner, {
-      memberships: TWO_ORGS,
-      orgsBeta: true,
-      permissions: [],
+// `/organization` opened on Members before it split apart. `?tab=billing` is
+// Stripe's billing return, and `?tab=invitations` and `?tab=audit` are in
+// bookmarks and emailed links, so each still lands where it used to.
+describe('the old /organization URL', () => {
+  it('opens on Members, as the old page did', () => {
+    expect(redirectFor({})).toEqual({ to: '/members', search: {}, replace: true });
+    expect(redirectFor({ tab: 'members' })).toEqual({
+      to: '/members',
+      search: {},
+      replace: true,
     });
-
-    expect(screen.getByTestId('page-permission-denied')).toBeTruthy();
-    expect(screen.queryByTestId('organization-page')).toBeNull();
   });
 
-  it('renders the heading and nothing else while /me is in flight', () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={client}>
-        <OrganizationGate />
-      </QueryClientProvider>,
+  it('sends tab=invitations to the Invitations tab of Members', () => {
+    expect(redirectFor({ tab: 'invitations' })).toEqual({
+      to: '/members',
+      search: { tab: 'invitations' },
+      replace: true,
+    });
+  });
+
+  it('sends tab=billing to Billing, carrying portal_return', () => {
+    expect(redirectFor({ tab: 'billing', portal_return: '1' })).toEqual({
+      to: '/billing',
+      search: { portal_return: '1' },
+      replace: true,
+    });
+    expect(redirectFor({ tab: 'billing' })).toEqual({
+      to: '/billing',
+      search: {},
+      replace: true,
+    });
+  });
+
+  // Through the router's own search parsing, as a real navigation goes:
+  // Stripe returns with `portal_return=true`, which a JSON-parsing default
+  // would hand the schema as a boolean.
+  it("takes Stripe's return string as the URL writes it", () => {
+    const search = (Route.options.validateSearch as { parse: (input: unknown) => Search }).parse(
+      parseSearch('?tab=billing&portal_return=true'),
     );
 
-    expect(screen.getByRole('heading', { name: 'Organization' })).toBeTruthy();
-    expect(screen.queryByTestId('members-not-enabled')).toBeNull();
-    expect(screen.queryByTestId('organization-page')).toBeNull();
+    expect(redirectFor(search)).toEqual({
+      to: '/billing',
+      search: { portal_return: 'true' },
+      replace: true,
+    });
+  });
+
+  it('sends tab=audit to the audit log', () => {
+    expect(redirectFor({ tab: 'audit' })).toMatchObject({ to: '/audit', replace: true });
   });
 });

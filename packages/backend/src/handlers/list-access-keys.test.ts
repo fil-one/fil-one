@@ -41,6 +41,8 @@ function ddbItem(overrides: {
   region?: string;
   createdBy?: string;
   recovered?: boolean;
+  rotatedBy?: string;
+  rotatedAt?: string;
 }) {
   const item: Record<string, AttributeValue> = {
     pk: { S: `ORG#${USER_INFO.orgId}` },
@@ -52,6 +54,8 @@ function ddbItem(overrides: {
   };
   if (overrides.createdBy) item.createdBy = { S: overrides.createdBy };
   if (overrides.recovered) item.recovered = { BOOL: true };
+  if (overrides.rotatedBy) item.rotatedBy = { S: overrides.rotatedBy };
+  if (overrides.rotatedAt) item.rotatedAt = { S: overrides.rotatedAt };
   if (overrides.permissions) item.permissions = { L: overrides.permissions.map((p) => ({ S: p })) };
   if (overrides.granularPermissions)
     item.granularPermissions = { L: overrides.granularPermissions.map((g) => ({ S: g })) };
@@ -473,7 +477,7 @@ describe('list-access-keys baseHandler', () => {
     });
 
     await expect(baseHandler(event)).rejects.toThrow('DDB unavailable');
-    expect(consoleError).toHaveBeenCalledWith('[list-access-keys] Access key query failed', {
+    expect(consoleError).toHaveBeenCalledWith('[access-key-inventory] Access key query failed', {
       orgId: 'org-1',
       bucketFilter: 'target-bucket',
       regionFilter: 'us-east-1',
@@ -490,7 +494,7 @@ describe('list-access-keys baseHandler', () => {
 
     await expect(baseHandler(event)).rejects.toThrow('DDB unavailable');
     expect(consoleError).toHaveBeenCalledWith(
-      '[list-access-keys] Access key query failed',
+      '[access-key-inventory] Access key query failed',
       expect.objectContaining({ bucketFilter: null, regionFilter: null }),
     );
     consoleError.mockRestore();
@@ -569,6 +573,31 @@ describe('who sees which keys', () => {
 
   it('shows a Member only the keys they created, and not a recovered row naming them', async () => {
     expect(await keyNamesFor(OrgRole.Member)).toStrictEqual(['Mine']);
+  });
+
+  it('ships who rotated a key and when, beside its owner', async () => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        ddbItem({
+          id: 'key-rotated',
+          keyName: 'Rotated',
+          accessKeyId: 'AKIAROTATED',
+          createdAt: '2026-09-11T10:00:00.000Z',
+          createdBy: USER_INFO.userId,
+          rotatedBy: 'user-2',
+          rotatedAt: '2026-09-11T10:00:00.000Z',
+        }),
+      ],
+    });
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const [key] = JSON.parse((await baseHandler(event)).body!).keys as Record<string, unknown>[];
+
+    expect(key).toMatchObject({
+      createdBy: USER_INFO.userId,
+      rotatedBy: 'user-2',
+      rotatedAt: '2026-09-11T10:00:00.000Z',
+    });
   });
 
   it('ships the creator so the console can gate the per-row revoke button', async () => {

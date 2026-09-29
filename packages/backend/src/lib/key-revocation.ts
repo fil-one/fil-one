@@ -109,3 +109,37 @@ export async function revokeAccessKey({
     throw new RevocationNotRecordedError(keyId, { cause: err });
   }
 }
+
+/**
+ * Revoke a key and say whether it went, instead of raising when it did not.
+ *
+ * For the caller who is holding something the failure must not cost. A rotation
+ * has already minted the replacement and its secret exists only in that
+ * request's response, so throwing here would take a credential nobody can
+ * recover to save the caller from a key they can delete from the list
+ * themselves. The answer is reported and the request completes.
+ *
+ * {@link RevocationNotRecordedError} is the other way round: the credential is
+ * dead and its row survives. It is revoked, so the answer is yes, and the stale
+ * row is the operator's to clear.
+ */
+export async function revokeAndReport(args: RevokeAccessKeyArgs): Promise<boolean> {
+  try {
+    await revokeAccessKey(args);
+    return true;
+  } catch (err) {
+    const notRecorded = err instanceof RevocationNotRecordedError;
+    console.error(
+      notRecorded
+        ? '[key-revocation] Revoked a key, but its row survives'
+        : '[key-revocation] Could not revoke a key',
+      {
+        orgId: args.orgId,
+        reason: args.reason,
+        ...(args.accessKeyId ? { keyIdSuffix: auditKeyIdSuffix('s3', args.accessKeyId) } : {}),
+        error: err,
+      },
+    );
+    return notRecorded;
+  }
+}

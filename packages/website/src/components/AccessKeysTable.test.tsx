@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import type { AccessKey } from '@filone/shared';
 import { AccessKeysTable } from './AccessKeysTable.js';
 import { ToastProvider } from './Toast/ToastProvider';
@@ -63,5 +63,83 @@ describe('AccessKeysTable — the controls a caller may not use', () => {
     renderWithProviders(<AccessKeysTable keys={[]} onCreateOpen={() => {}} />);
 
     expect(screen.getByRole('button', { name: 'Create your first key' })).toBeInTheDocument();
+  });
+});
+
+describe('AccessKeysTable — the row menu', () => {
+  /** The menu is a popover, so its items exist only once it is open. */
+  function openMenu() {
+    fireEvent.click(screen.getByRole('button', { name: 'Key actions' }));
+  }
+
+  it('offers rotation only when the page passes it', () => {
+    renderWithProviders(<AccessKeysTable keys={[makeKey({})]} onDelete={async () => {}} />);
+    openMenu();
+
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Rotate' })).not.toBeInTheDocument();
+  });
+
+  it('carries both actions when both are on offer', () => {
+    renderWithProviders(
+      <AccessKeysTable keys={[makeKey({})]} onDelete={async () => {}} onRotate={async () => {}} />,
+    );
+    openMenu();
+
+    expect(screen.getByRole('button', { name: 'Rotate' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+  });
+
+  it('answers per row, not per table', () => {
+    // A Member may rotate the key they could still mint and not the one they
+    // could not, and both rows keep their Delete.
+    renderWithProviders(
+      <AccessKeysTable
+        keys={[makeKey({ id: '1' }), makeKey({ id: '2', keyName: 'Other' })]}
+        onDelete={async () => {}}
+        onRotate={async () => {}}
+        canRotate={(key) => key.id === '1'}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Key actions' })[1]);
+    expect(screen.queryByRole('button', { name: 'Rotate' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+  });
+
+  it('keeps the actions column for a row that may only be rotated', () => {
+    renderWithProviders(<AccessKeysTable keys={[makeKey({})]} onRotate={async () => {}} />);
+    openMenu();
+
+    expect(screen.getByRole('button', { name: 'Rotate' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+  });
+});
+
+describe('AccessKeysTable — who rotated a key', () => {
+  const names = (userId: string) =>
+    userId === 'user-1' ? { name: 'Ada Lovelace' } : { name: 'Grace Hopper' };
+
+  it('names the rotator beneath the owner', () => {
+    renderWithProviders(
+      <AccessKeysTable
+        keys={[
+          makeKey({ createdBy: 'user-1', rotatedBy: 'user-2', rotatedAt: '2026-09-11T10:00:00Z' }),
+        ]}
+        creatorFor={names}
+      />,
+    );
+
+    expect(screen.getByText('Ada Lovelace')).toBeInTheDocument();
+    expect(screen.getByText(/^Rotated by Grace Hopper on /)).toBeInTheDocument();
+  });
+
+  it('shows the column for a rotated key that names no owner', () => {
+    renderWithProviders(
+      <AccessKeysTable keys={[makeKey({ rotatedBy: 'user-2' })]} creatorFor={names} />,
+    );
+
+    expect(screen.getByText('Created by')).toBeInTheDocument();
+    expect(screen.getByText('Rotated by Grace Hopper')).toBeInTheDocument();
   });
 });

@@ -551,3 +551,67 @@ describe('FthClient getClientMetricsCurrent', () => {
     expect(result).toEqual(responseBody);
   });
 });
+
+describe('FthClient request signal', () => {
+  const args = {
+    createClientArgs: { externalId: 'org-1', displayName: 'Org 1', idempotencyKey: 'k' },
+    storageUserArgs: {
+      email: 'u@example.com',
+      displayName: 'U',
+      userCode: 'code',
+      role: 'storage_user' as const,
+      issueS3Credentials: false,
+      idempotencyKey: 'k',
+    },
+    accessKeyArgs: {
+      name: 'key',
+      permissions: [],
+      buckets: [],
+      expiresAt: null,
+      idempotencyKey: 'k',
+    },
+  };
+
+  // Every method, invoked with the request options as its last argument.
+  const methods: Record<
+    string,
+    (client: FthManagementClient, requestOptions: { signal: AbortSignal }) => Promise<unknown>
+  > = {
+    createClient: (c, o) => c.createClient(args.createClientArgs, o),
+    getClient: (c, o) => c.getClient('ref', o),
+    updateClientStatus: (c, o) => c.updateClientStatus('ref', { status: 'active' }, o),
+    deleteClient: (c, o) => c.deleteClient('ref', o),
+    createStorageUser: (c, o) => c.createStorageUser('ref', args.storageUserArgs, o),
+    listStorageUsers: (c, o) => c.listStorageUsers('ref', o),
+    getStorageUser: (c, o) => c.getStorageUser('ref', 'user', o),
+    createAccessKey: (c, o) => c.createAccessKey('ref', 'user', args.accessKeyArgs, o),
+    listAccessKeys: (c, o) => c.listAccessKeys('ref', o),
+    getAccessKey: (c, o) => c.getAccessKey('ref', 'AKIA', o),
+    deleteAccessKey: (c, o) => c.deleteAccessKey('ref', 'AKIA', o),
+    getClientMetricsTimeseries: (c, o) =>
+      c.getClientMetricsTimeseries('ref', { from: '2026-01-01', to: '2026-01-02' }, o),
+    getClientMetricsCurrent: (c, o) => c.getClientMetricsCurrent('ref', o),
+  };
+
+  // A Request built from an already-aborted signal is itself aborted, which is
+  // observable without a fetch implementation that honours signals.
+  for (const [name, invoke] of Object.entries(methods)) {
+    it(`${name} sets the caller's signal on the request`, async () => {
+      const fetchMock = mockFetch(200, { items: [] });
+      const client = buildClient({ fetch: fetchMock });
+
+      await invoke(client, { signal: AbortSignal.abort() });
+
+      expect(lastRequest(fetchMock).signal.aborted).toBe(true);
+    });
+  }
+
+  it('sends a request whose signal is not aborted when the caller passes none', async () => {
+    const fetchMock = mockFetch(200, { id: '1' });
+    const client = buildClient({ fetch: fetchMock });
+
+    await client.getClient('ref');
+
+    expect(lastRequest(fetchMock).signal.aborted).toBe(false);
+  });
+});

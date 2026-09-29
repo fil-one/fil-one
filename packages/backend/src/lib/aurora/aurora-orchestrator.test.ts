@@ -69,6 +69,10 @@ vi.mock('@filone/aurora-portal-client', () => ({
 process.env.FILONE_STAGE = 'test';
 process.env.AURORA_PORTAL_URL = 'https://portal.dev.aur.lu/api';
 
+// The caller's deadline. Never aborted here: these tests check it is forwarded,
+// not what happens when it fires.
+const signal = new AbortController().signal;
+
 import { S3Region } from '@filone/shared';
 import { auroraOrchestrator, _resetSsmCacheForTesting } from './aurora-orchestrator.ts';
 import type { OrgProfileItem } from '../org-profile.ts';
@@ -112,10 +116,10 @@ describe('auroraOrchestrator', () => {
     it('translates the legacy {ok, auroraTenantId} shape to {ok, tenantId}', async () => {
       mockEnsureAuroraTenantReady.mockResolvedValue({ ok: true, auroraTenantId: 'aurora-t-1' });
 
-      const result = await auroraOrchestrator.ensureTenantReady('org-1');
+      const result = await auroraOrchestrator.ensureTenantReady('org-1', { signal });
 
       expect(result).toEqual('aurora-t-1');
-      expect(mockEnsureAuroraTenantReady).toHaveBeenCalledWith('org-1');
+      expect(mockEnsureAuroraTenantReady).toHaveBeenCalledWith('org-1', { signal });
     });
 
     it('returns null when the Aurora tenant setup fails', async () => {
@@ -907,4 +911,166 @@ describe('auroraOrchestrator', () => {
       expect(result).toEqual([]);
     });
   });
+});
+
+describe('auroraOrchestrator signal forwarding', () => {
+  const FROM = '2026-01-01T00:00:00Z';
+  const TO = '2026-01-02T00:00:00Z';
+  const bucketInfo = { data: { name: 'b', createdAt: '2026-01-01T00:00:00Z' }, error: undefined };
+  const issuedKey = {
+    id: 'k',
+    accessKeyId: 'AK',
+    accessKeySecret: 'secret',
+    createdAt: '2026-01-01T00:00:00Z',
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // Each case names the Aurora-facing mocks the method must reach; the test
+  // checks every one of them received the caller's signal in its options.
+  const cases: Array<{
+    name: string;
+    run: () => Promise<unknown>;
+    mocks: Array<{ mock: { calls: unknown[][] } }>;
+  }> = [
+    {
+      name: 'createBucket',
+      run: () => {
+        mockCreateAuroraBucket.mockResolvedValue(undefined);
+        return auroraOrchestrator.createBucket('t', { bucketName: 'b' }, { signal });
+      },
+      mocks: [mockCreateAuroraBucket],
+    },
+    {
+      name: 'deleteBucket',
+      run: () => {
+        mockDeleteAuroraBucket.mockResolvedValue(undefined);
+        return auroraOrchestrator.deleteBucket('t', 'b', { signal });
+      },
+      mocks: [mockDeleteAuroraBucket],
+    },
+    {
+      name: 'listBuckets',
+      run: () => {
+        mockPortalListBuckets.mockResolvedValue({ data: { items: [] }, error: undefined });
+        return auroraOrchestrator.listBuckets('t', { signal });
+      },
+      mocks: [mockPortalListBuckets],
+    },
+    {
+      name: 'getBucket',
+      run: () => {
+        mockPortalGetBucketInfo.mockResolvedValue(bucketInfo);
+        return auroraOrchestrator.getBucket('t', 'b', { signal });
+      },
+      mocks: [mockPortalGetBucketInfo],
+    },
+    {
+      name: 'issueAccessKey',
+      run: () => {
+        mockCreateAuroraAccessKey.mockResolvedValue(issuedKey);
+        return auroraOrchestrator.issueAccessKey(
+          't',
+          { keyName: 'k', permissions: ['read'] },
+          { signal },
+        );
+      },
+      mocks: [mockCreateAuroraAccessKey],
+    },
+    {
+      name: 'findAccessKeyByName',
+      run: () => {
+        mockFindAuroraAccessKeyByName.mockResolvedValue(undefined);
+        return auroraOrchestrator.findAccessKeyByName('t', 'k', { signal });
+      },
+      mocks: [mockFindAuroraAccessKeyByName],
+    },
+    {
+      name: 'updateTenantStatus',
+      run: () => {
+        mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+        return auroraOrchestrator.updateTenantStatus('t', 'active', { signal });
+      },
+      mocks: [mockUpdateAuroraTenantStatusApi],
+    },
+    {
+      name: 'deleteTenant',
+      run: () => {
+        mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+        return auroraOrchestrator.deleteTenant('t', { signal });
+      },
+      mocks: [mockUpdateAuroraTenantStatusApi],
+    },
+    {
+      name: 'getTenantStatus',
+      run: () => {
+        mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: 'ACTIVE' });
+        return auroraOrchestrator.getTenantStatus('t', { signal });
+      },
+      mocks: [mockGetAuroraTenantStatusApi],
+    },
+    {
+      name: 'getTenantUsageMetrics',
+      run: () => {
+        mockGetStorageSamples.mockResolvedValue([]);
+        mockGetOperationsSamples.mockResolvedValue([]);
+        return auroraOrchestrator.getTenantUsageMetrics('t', { from: FROM, to: TO }, { signal });
+      },
+      mocks: [mockGetStorageSamples, mockGetOperationsSamples],
+    },
+    {
+      name: 'getTenantInfo',
+      run: () => {
+        mockGetTenantInfo.mockResolvedValue({});
+        return auroraOrchestrator.getTenantInfo('t', { signal });
+      },
+      mocks: [mockGetTenantInfo],
+    },
+    {
+      name: 'getBucketUsageMetrics',
+      run: () => {
+        mockPortalGetBucketInfo.mockResolvedValue(bucketInfo);
+        mockGetBucketStorageSamples.mockResolvedValue([]);
+        return auroraOrchestrator.getBucketUsageMetrics(
+          't',
+          'b',
+          { from: FROM, to: TO },
+          { signal },
+        );
+      },
+      mocks: [mockPortalGetBucketInfo, mockGetBucketStorageSamples],
+    },
+  ];
+
+  for (const { name, run, mocks } of cases) {
+    it(`${name} forwards the caller's signal to every Aurora call`, async () => {
+      await run();
+
+      const firstArgs = mocks.map((m) => m.mock.calls[0]?.[0]);
+      expect(firstArgs).toEqual(mocks.map(() => expect.objectContaining({ signal })));
+    });
+  }
+
+  // Both methods build their own portal client, so the signal has to reach the
+  // API-key lookup that happens before the portal request.
+  const portalClientCases: Record<string, () => Promise<unknown>> = {
+    listBuckets: () => {
+      mockPortalListBuckets.mockResolvedValue({ data: { items: [] }, error: undefined });
+      return auroraOrchestrator.listBuckets('t', { signal });
+    },
+    getBucket: () => {
+      mockPortalGetBucketInfo.mockResolvedValue(bucketInfo);
+      return auroraOrchestrator.getBucket('t', 'b', { signal });
+    },
+  };
+
+  for (const [name, run] of Object.entries(portalClientCases)) {
+    it(`${name} forwards the caller's signal to the portal client lookup`, async () => {
+      await run();
+
+      expect(mockCreatePortalClient).toHaveBeenCalledWith('t', { signal });
+    });
+  }
 });
