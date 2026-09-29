@@ -102,6 +102,7 @@ export function ObjectSettingsFields({
                 Object Lock
               </span>
               <span id="lock-desc" className="text-[11px] leading-relaxed text-zinc-500">
+                {!versioning && 'Requires versioning. '}
                 Prevent objects from being deleted or overwritten. Required for regulatory
                 compliance.
               </span>
@@ -128,6 +129,7 @@ export function ObjectSettingsFields({
                   Retention
                 </span>
                 <span id="retention-desc" className="text-[11px] leading-relaxed text-zinc-500">
+                  {!lock && 'Requires Object Lock. '}
                   Apply a default retention period. Objects cannot be deleted until this period
                   expires.
                 </span>
