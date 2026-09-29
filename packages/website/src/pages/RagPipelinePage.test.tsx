@@ -59,6 +59,7 @@ const ME: MeResponse = {
   mfaEnrollments: [],
   ragAccess: true,
   orgsBeta: true,
+  billingActive: true,
 };
 
 const BUCKETS: ListBucketsResponse = {

@@ -30,12 +30,17 @@ type OrgSwitcherMenuProps = {
   onNavigate?: () => void;
 };
 
-/** The org's pages. */
+/**
+ * The org's pages. Without an active plan the billing gate stands in for every
+ * page but a few, so the `gated` ones would only land back on it; Edit
+ * organization is one of the pages past the gate.
+ */
 const ORG_LINKS: {
   href: string;
   label: string;
   icon: React.ElementType;
   permission: Permission;
+  gated: boolean;
   testId?: string;
 }[] = [
   {
@@ -43,20 +48,23 @@ const ORG_LINKS: {
     label: 'Edit organization',
     icon: PencilSimpleIcon,
     permission: 'org.rename',
+    gated: false,
     testId: 'org-menu-edit',
   },
-  { href: '/members', label: 'Members', icon: UsersIcon, permission: 'members.read' },
+  { href: '/members', label: 'Members', icon: UsersIcon, permission: 'members.read', gated: true },
   {
     href: '/billing',
     label: 'Billing',
     icon: CreditCardIcon,
     permission: 'billing.view',
+    gated: true,
   },
   {
     href: '/audit',
     label: 'Audit log',
     icon: ClockCounterClockwiseIcon,
     permission: 'audit.view',
+    gated: true,
   },
 ];
 
@@ -88,7 +96,7 @@ const itemClassName =
  */
 export function OrgSwitcherMenu({ collapsed, testId, onNavigate }: OrgSwitcherMenuProps) {
   const [createOpen, setCreateOpen] = useState(false);
-  const { has } = usePermissions();
+  const { has, billingActive } = usePermissions();
   const { data: me } = useQuery({
     queryKey: queryKeys.me,
     queryFn: () => getMe(),
@@ -127,21 +135,21 @@ export function OrgSwitcherMenu({ collapsed, testId, onNavigate }: OrgSwitcherMe
               anchor="bottom start"
               className="z-50 mt-1 w-60 rounded-lg border border-zinc-200 bg-white p-1 shadow-md outline-none"
             >
-              {ORG_LINKS.filter((link) => has(link.permission)).map(
-                ({ href, label, icon: Icon, testId: linkTestId }) => (
-                  <MenuItem
-                    key={href}
-                    as={BaseLink}
-                    href={href}
-                    data-testid={linkTestId}
-                    onClick={onNavigate}
-                    className={itemClassName}
-                  >
-                    <Icon size={13} className="flex-shrink-0 text-zinc-400" />
-                    {label}
-                  </MenuItem>
-                ),
-              )}
+              {ORG_LINKS.filter(
+                (link) => has(link.permission) && (billingActive || !link.gated),
+              ).map(({ href, label, icon: Icon, testId: linkTestId }) => (
+                <MenuItem
+                  key={href}
+                  as={BaseLink}
+                  href={href}
+                  data-testid={linkTestId}
+                  onClick={onNavigate}
+                  className={itemClassName}
+                >
+                  <Icon size={13} className="flex-shrink-0 text-zinc-400" />
+                  {label}
+                </MenuItem>
+              ))}
 
               <div className="my-1 border-t border-zinc-100" />
               <OrgSwitcher
