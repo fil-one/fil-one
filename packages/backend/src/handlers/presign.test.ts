@@ -323,6 +323,23 @@ describe('presign baseHandler', () => {
     });
   });
 
+  it('presigns against presignEndpointUrl when the context carries one', async () => {
+    mockGetS3ClientContext.mockResolvedValue({
+      ...s3ClientContext,
+      presignEndpointUrl: 'http://localhost:15130',
+    });
+    mockGetPresignedListObjectsUrl.mockResolvedValue('http://localhost:15130/b?signed');
+
+    const result = await baseHandler(buildPresignEvent([{ op: 'listObjects', bucket: 'b' }]));
+
+    expect(mockGetPresignedListObjectsUrl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ctx: expect.objectContaining({ endpointUrl: 'http://localhost:15130' }),
+      }),
+    );
+    expect(JSON.parse(result.body as string).endpoint).toBe('http://localhost:15130');
+  });
+
   it('preserves item order matching request order', async () => {
     mockGetPresignedGetObjectUrl.mockResolvedValue('https://s3.example.com/get?signed');
     mockGetPresignedDeleteObjectUrl.mockResolvedValue('https://s3.example.com/delete?signed');

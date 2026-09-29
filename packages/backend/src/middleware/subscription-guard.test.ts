@@ -140,6 +140,7 @@ describe('subscriptionGuardMiddleware', () => {
       orgId: ORG_ID,
       email: 'test@example.com',
       emailVerified: true,
+      membershipSource: 'signup',
     });
   });
 

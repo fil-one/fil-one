@@ -21,7 +21,7 @@ test('paid user logs out and session cookies are cleared', async ({ browser }) =
   await page.goto('/dashboard');
   await expect(page.locator('#dashboard-heading')).toBeVisible();
 
-  await page.getByTestId('user-profile').click();
+  await page.getByTestId('user-menu-button').click();
   await page.locator('#user-menu-logout-button').click();
 
   // Wait for the full /logout -> Auth0 /v2/logout -> returnTo -> sign-in chain to settle.

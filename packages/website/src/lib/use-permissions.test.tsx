@@ -21,10 +21,12 @@ function meWith(role: OrgRole | undefined): MeResponse {
   return {
     orgId: 'org-1',
     orgName: 'Acme',
+    nameConfirmed: true,
     emailVerified: true,
     mfaEnrollments: [],
     ragAccess: false,
     orgsBeta: false,
+    billingActive: true,
     userId: 'user-1',
     ...(role ? { role } : {}),
     permissions: role ? ROLE_PERMISSIONS[role] : [],
