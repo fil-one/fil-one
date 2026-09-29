@@ -98,6 +98,7 @@ export function OrgSwitcherMenu({ collapsed, testId, onNavigate }: OrgSwitcherMe
   // comes from the switcher row just clicked.
   const pendingSwitch = usePendingOrgSwitchTarget();
   const orgName = me?.orgName ?? pendingSwitch?.orgName ?? 'Organization';
+  const logoUrl = me?.logoUrl ?? pendingSwitch?.logoUrl;
 
   return (
     <>
@@ -112,7 +113,7 @@ export function OrgSwitcherMenu({ collapsed, testId, onNavigate }: OrgSwitcherMe
                 collapsed ? 'w-full justify-center py-1.5' : 'w-full gap-2.5 px-2 py-1.5',
               ].join(' ')}
             >
-              <OrgAvatar name={orgName} />
+              <OrgAvatar name={orgName} logoUrl={logoUrl} />
               {!collapsed && (
                 <>
                   <span className="min-w-0 flex-1 truncate text-left text-sm font-medium leading-tight text-zinc-900">

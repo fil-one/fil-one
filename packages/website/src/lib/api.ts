@@ -487,6 +487,8 @@ import type {
   MeResponse,
   PresignAvatarRequest,
   PresignAvatarResponse,
+  PresignOrgLogoRequest,
+  PresignOrgLogoResponse,
   RegenerateRecoveryCodeResponse,
   RequestAccountDeletionResponse,
   UpdateOrgRequest,
@@ -571,12 +573,19 @@ export function presignAvatarUpload(data: PresignAvatarRequest): Promise<Presign
  * Rename the organization. Its own endpoint because it is its own permission —
  * `org.rename`, which Member and ReadOnly do not hold — while the profile call
  * above changes only the caller's own account.
+ *
+ * `orgId` pins the write to that org rather than the tab's active one; see
+ * `ApiRequestBehavior.orgId`.
  */
-export function updateOrg(data: UpdateOrgRequest): Promise<UpdateOrgResponse> {
-  return apiRequest<UpdateOrgResponse>('/org', {
-    method: 'PATCH',
-    body: JSON.stringify(data),
-  });
+export function updateOrg(data: UpdateOrgRequest, orgId?: string): Promise<UpdateOrgResponse> {
+  return apiRequest<UpdateOrgResponse>(
+    '/org',
+    {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    },
+    orgId ? { orgId } : {},
+  );
 }
 
 /**
@@ -586,6 +595,18 @@ export function updateOrg(data: UpdateOrgRequest): Promise<UpdateOrgResponse> {
  */
 export function createOrg(data: CreateOrgRequest): Promise<CreateOrgResponse> {
   return apiRequest<CreateOrgResponse>('/org', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+/**
+ * Ask for a place to put an org logo before the org exists to attach it to —
+ * the upload happens against the URL this returns, and `logoUrl` from the
+ * result is what gets passed to {@link createOrg}.
+ */
+export function presignOrgLogoUpload(data: PresignOrgLogoRequest): Promise<PresignOrgLogoResponse> {
+  return apiRequest<PresignOrgLogoResponse>('/org/logo-upload-url', {
     method: 'POST',
     body: JSON.stringify(data),
   });

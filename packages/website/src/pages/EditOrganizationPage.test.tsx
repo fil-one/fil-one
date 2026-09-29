@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole, ROLE_PERMISSIONS } from '@filone/shared';
 import type { MeResponse, OrgMembershipSummary } from '@filone/shared';
@@ -10,6 +10,7 @@ import { queryKeys } from '../lib/query-client.js';
 
 const mockGetMe = vi.fn();
 const mockUpdateOrg = vi.fn();
+const mockPresignOrgLogoUpload = vi.fn();
 
 vi.mock('../lib/api.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/api.js')>();
@@ -17,6 +18,7 @@ vi.mock('../lib/api.js', async (importOriginal) => {
     ...actual,
     getMe: (...args: unknown[]) => mockGetMe(...args),
     updateOrg: (...args: unknown[]) => mockUpdateOrg(...args),
+    presignOrgLogoUpload: (...args: unknown[]) => mockPresignOrgLogoUpload(...args),
   };
 });
 
@@ -44,6 +46,14 @@ function me(
     permissions: ROLE_PERMISSIONS[role],
     memberships,
   };
+}
+
+/** Pick a PNG through the avatar button's hidden file input. */
+function pickLogo(trigger: HTMLElement) {
+  const input = trigger.parentElement!.querySelector('input[type="file"]') as HTMLInputElement;
+  fireEvent.change(input, {
+    target: { files: [new File(['data'], 'logo.png', { type: 'image/png' })] },
+  });
 }
 
 function renderPage(role: OrgRole, memberships?: OrgMembershipSummary[]) {
@@ -87,7 +97,7 @@ describe('EditOrganizationPage', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(mockUpdateOrg).toHaveBeenCalledWith({ name: 'Acme Two' }));
+    await waitFor(() => expect(mockUpdateOrg).toHaveBeenCalledWith({ name: 'Acme Two' }, ORG_ID));
     await waitFor(() =>
       expect(client.getQueryData<MeResponse>(queryKeys.me)).toMatchObject({
         orgName: 'Acme Two',
@@ -150,5 +160,185 @@ describe('EditOrganizationPage', () => {
       expect(await screen.findByLabelText('Organization name')).toBeInTheDocument();
       expect(screen.queryByText('Delete organization')).not.toBeInTheDocument();
     });
+  });
+});
+
+describe('EditOrganizationPage: the avatar picker', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUpdateOrg.mockResolvedValue({ name: 'Acme Two' });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('uploads the picked file and saves it, with no extra Save step', async () => {
+    mockPresignOrgLogoUpload.mockResolvedValue({
+      uploadUrl: 'https://upload.example/post',
+      fields: {},
+      logoUrl: 'https://cdn.example/logos/new.png',
+    });
+    mockUpdateOrg.mockResolvedValue({
+      name: 'Acme',
+      logoUrl: 'https://cdn.example/logos/new.png',
+    });
+    renderPage(OrgRole.Owner);
+
+    const trigger = await screen.findByLabelText('Change avatar');
+    const input = trigger.parentElement!.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['data'], 'logo.png', { type: 'image/png' });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() =>
+      expect(mockUpdateOrg).toHaveBeenCalledWith(
+        { logoUrl: 'https://cdn.example/logos/new.png' },
+        ORG_ID,
+      ),
+    );
+    expect(await screen.findByText('Organization logo updated')).toBeInTheDocument();
+  });
+
+  it('puts the saved logo back when the save fails', async () => {
+    mockPresignOrgLogoUpload.mockResolvedValue({
+      uploadUrl: 'https://upload.example/post',
+      fields: {},
+      logoUrl: 'https://cdn.example/logos/new.png',
+    });
+    mockUpdateOrg.mockRejectedValue(new Error('Forbidden'));
+    const { container } = renderPage(OrgRole.Owner);
+
+    pickLogo(await screen.findByLabelText('Change avatar'));
+
+    expect(await screen.findByText('Forbidden')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(container.querySelector('img[src="https://cdn.example/logos/new.png"]')).toBeNull(),
+    );
+  });
+
+  it('saves to the org the logo was picked in, even after a switch', async () => {
+    let finishPresign!: (value: unknown) => void;
+    mockPresignOrgLogoUpload.mockReturnValue(
+      new Promise((resolve) => {
+        finishPresign = resolve;
+      }),
+    );
+    mockUpdateOrg.mockResolvedValue({
+      name: 'Acme',
+      logoUrl: 'https://cdn.example/logos/new.png',
+    });
+    const memberships = [
+      { orgId: ORG_ID, orgName: 'Acme', role: OrgRole.Owner },
+      { orgId: 'org-2', orgName: 'Beta', role: OrgRole.Owner },
+    ];
+    const { client } = renderPage(OrgRole.Owner, memberships);
+    pickLogo(await screen.findByLabelText('Change avatar'));
+
+    // The tab moves to Beta while the upload is still in flight.
+    const beta = { ...me(OrgRole.Owner, memberships), orgId: 'org-2', orgName: 'Beta' };
+    act(() => {
+      client.setQueryData(queryKeys.me, beta);
+      client.setQueryData(queryKeys.meWithMfa, beta);
+    });
+    finishPresign({
+      uploadUrl: 'https://upload.example/post',
+      fields: {},
+      logoUrl: 'https://cdn.example/logos/new.png',
+    });
+
+    await waitFor(() =>
+      expect(mockUpdateOrg).toHaveBeenCalledWith(
+        { logoUrl: 'https://cdn.example/logos/new.png' },
+        ORG_ID,
+      ),
+    );
+    await waitFor(() =>
+      expect(client.getQueryData<MeResponse>(queryKeys.me)).toMatchObject({
+        orgId: 'org-2',
+        orgName: 'Beta',
+        memberships: [
+          { orgId: ORG_ID, logoUrl: 'https://cdn.example/logos/new.png' },
+          { orgId: 'org-2', orgName: 'Beta' },
+        ],
+      }),
+    );
+    expect(client.getQueryData<MeResponse>(queryKeys.me)?.logoUrl).toBeUndefined();
+  });
+
+  // A rename that lands while the upload is running must survive the logo
+  // save: the save sends no name, and takes the stored one from the reply.
+  it('does not undo a rename saved while the logo was uploading', async () => {
+    let finishPresign!: (value: unknown) => void;
+    mockPresignOrgLogoUpload.mockReturnValue(
+      new Promise((resolve) => {
+        finishPresign = resolve;
+      }),
+    );
+    const { client } = renderPage(OrgRole.Owner);
+    pickLogo(await screen.findByLabelText('Change avatar'));
+
+    mockUpdateOrg.mockResolvedValueOnce({ name: 'Acme Two' });
+    fireEvent.change(screen.getByLabelText('Organization name'), {
+      target: { value: 'Acme Two' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByText('This organization is called Acme Two now');
+
+    mockUpdateOrg.mockResolvedValueOnce({
+      name: 'Acme Two',
+      logoUrl: 'https://cdn.example/logos/new.png',
+    });
+    finishPresign({
+      uploadUrl: 'https://upload.example/post',
+      fields: {},
+      logoUrl: 'https://cdn.example/logos/new.png',
+    });
+
+    await waitFor(() =>
+      expect(mockUpdateOrg).toHaveBeenLastCalledWith(
+        { logoUrl: 'https://cdn.example/logos/new.png' },
+        ORG_ID,
+      ),
+    );
+    await waitFor(() =>
+      expect(client.getQueryData<MeResponse>(queryKeys.me)).toMatchObject({
+        orgName: 'Acme Two',
+        logoUrl: 'https://cdn.example/logos/new.png',
+      }),
+    );
+    expect(screen.getByLabelText('Organization name')).toHaveValue('Acme Two');
+  });
+
+  // Visible without hover, so touch and keyboard users can see it running.
+  it('shows the upload in progress, and takes no second pick meanwhile', async () => {
+    mockPresignOrgLogoUpload.mockReturnValue(new Promise(() => {}));
+    renderPage(OrgRole.Owner);
+
+    const trigger = await screen.findByLabelText('Change avatar');
+    pickLogo(trigger);
+
+    await waitFor(() => expect(trigger).toBeDisabled());
+    expect(trigger).toHaveAttribute('aria-busy', 'true');
+  });
+
+  it('keeps a name that is still being typed when the logo saves', async () => {
+    mockPresignOrgLogoUpload.mockResolvedValue({
+      uploadUrl: 'https://upload.example/post',
+      fields: {},
+      logoUrl: 'https://cdn.example/logos/new.png',
+    });
+    mockUpdateOrg.mockResolvedValue({
+      name: 'Acme',
+      logoUrl: 'https://cdn.example/logos/new.png',
+    });
+    renderPage(OrgRole.Owner);
+
+    const nameField = await screen.findByLabelText('Organization name');
+    fireEvent.change(nameField, { target: { value: 'Acme Two' } });
+    pickLogo(screen.getByLabelText('Change avatar'));
+
+    expect(await screen.findByText('Organization logo updated')).toBeInTheDocument();
+    expect(screen.getByLabelText('Organization name')).toHaveValue('Acme Two');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
   });
 });

@@ -5,6 +5,7 @@ import { OrgNameSchema } from '@filone/shared';
 import type { MeResponse } from '@filone/shared';
 
 import { Alert } from '../components/Alert';
+import { AvatarPicker, useOrgLogoUpload } from '../components/OrgLogoPicker.js';
 import { Button } from '../components/Button';
 import { FormField } from '../components/FormField';
 import { Input } from '../components/Input';
@@ -18,24 +19,32 @@ import { errorMessageOf, getMe, updateOrg } from '../lib/api.js';
 import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
-// Identity: name
+// Identity: logo and name
 // ---------------------------------------------------------------------------
 
 /**
- * Write a landed rename into every cache that reads it.
+ * Write a landed rename and/or logo change into every cache that reads them.
  *
  * Both `/me` keys, because Settings reads the one with MFA included and the
- * rest of the console reads the other, and `memberships` alongside `orgName`:
- * the switcher reads both from the list, so patching only the top
+ * rest of the console reads the other, and `memberships` alongside `orgName`/
+ * `logoUrl`: the switcher reads both from the list, so patching only the top
  * level renames the org in the header and leaves the switcher stale.
  *
  * `orgId` is the org the write was for. The top level is patched only while
  * that org is still the one `/me` describes: a save that lands after a switch
  * updates that org's row in the list and leaves the new org's name alone.
  */
-function applyOrgUpdate(client: QueryClient, orgId: string, orgName: string): void {
+function applyOrgUpdate(
+  client: QueryClient,
+  orgId: string,
+  orgName: string,
+  logoUrl?: string,
+): void {
+  // An org created before naming shipped has no stored name, and the server
+  // answers a logo-only save for it with an empty one: nothing to write.
   const change = {
     ...(orgName ? { orgName } : {}),
+    ...(logoUrl !== undefined ? { logoUrl } : {}),
   };
   const patch = (old: MeResponse | undefined): MeResponse | undefined =>
     old
@@ -53,7 +62,8 @@ function applyOrgUpdate(client: QueryClient, orgId: string, orgName: string): vo
 }
 
 /**
- * The name needs an explicit Save. Unlike the personal name field on Settings, a
+ * The logo autosaves the moment a file lands (`onUploaded` below); the name
+ * needs an explicit Save. Unlike the personal name field on Settings, a
  * rename here changes what every member of the org sees, which is enough of
  * a consequence that it shouldn't fire on a stray blur.
  */
@@ -64,17 +74,50 @@ function IdentitySection({ me }: { me: MeResponse }) {
   const [name, setName] = useState(me.orgName);
   const [error, setError] = useState<string | null>(null);
 
-  // `me.orgName` lands once `/me` resolves, and this syncs the form to it the
-  // same way a reopened dialog would, without needing an `open` flag now that
-  // the surface is a page rather than a modal.
+  // The org travels with the save rather than being read when it runs: an
+  // upload can finish after the user has switched to another org, and the logo
+  // still belongs to the one it was picked for. No name goes with it: one read
+  // at pick time can be stale by the time the upload lands (a rename saved in
+  // between, or another admin's), and sending it would rename the org back.
+  // The response carries the stored name, which is what the cache takes.
+  const logoMutation = useMutation({
+    mutationFn: ({ logoUrl, orgId }: { logoUrl: string; orgId: string }) =>
+      updateOrg({ logoUrl }, orgId),
+    onSuccess: (result, { orgId }) => {
+      applyOrgUpdate(client, orgId, result.name, result.logoUrl);
+      toast.success('Organization logo updated');
+    },
+    onError: (err) => {
+      toast.error(errorMessageOf(err, 'Failed to update the logo'));
+    },
+  });
+  const logo = useOrgLogoUpload(me.logoUrl, (logoUrl) =>
+    logoMutation.mutate(
+      { logoUrl, orgId: me.orgId },
+      // The picker shows the upload as soon as it lands; a save that then
+      // fails puts back the logo the org actually has.
+      { onError: () => logo.reset(me.logoUrl) },
+    ),
+  );
+
+  // `me.orgName`/`me.logoUrl` land once `/me` resolves, and these sync the form
+  // to them the same way a reopened dialog would, without needing an `open`
+  // flag now that the surface is a page rather than a modal. Separate effects,
+  // so a saved logo does not reset a name that is still being typed.
   useEffect(() => {
     setName(me.orgName);
   }, [me.orgName]);
+  useEffect(() => {
+    logo.reset(me.logoUrl);
+    // `logo` is a fresh object every render; only the saved logo is what this
+    // effect resyncs to.
+  }, [me.logoUrl]);
 
   const nameMutation = useMutation({
-    mutationFn: ({ next }: { next: string; orgId: string }) => updateOrg({ name: next }),
+    mutationFn: ({ next, orgId }: { next: string; orgId: string }) =>
+      updateOrg({ name: next }, orgId),
     onSuccess: (result, { orgId }) => {
-      applyOrgUpdate(client, orgId, result.name);
+      applyOrgUpdate(client, orgId, result.name, result.logoUrl);
       setName(result.name);
       toast.success(`This organization is called ${result.name} now`);
     },
@@ -100,6 +143,12 @@ function IdentitySection({ me }: { me: MeResponse }) {
   return (
     <SectionCard title="General">
       <div className="flex flex-col gap-4">
+        <AvatarPicker
+          name={me.orgName}
+          logo={logo}
+          disabled={logo.uploading || logoMutation.isPending}
+          layout="row"
+        />
         <div className="flex items-end gap-3">
           <FormField
             label="Organization name"
@@ -201,7 +250,7 @@ function OrganizationDetails() {
 }
 
 /**
- * Rename the organization or delete it — the two things
+ * Rename the organization, replace its logo, or delete it — the three things
  * that are about the organization itself rather than who is in it (that's
  * `OrganizationPage`) or what it pays (`BillingPage`).
  *
