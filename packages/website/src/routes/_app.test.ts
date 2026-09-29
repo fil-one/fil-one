@@ -84,4 +84,36 @@ describe('the app layout’s beforeLoad', () => {
       expect(await redirectTarget()).toBeUndefined();
     });
   });
+
+  describe('an unnamed org', () => {
+    function meWith(overrides: Partial<MeResponse>) {
+      vi.spyOn(queryClient, 'fetchQuery').mockResolvedValue({
+        orgId: 'org-1',
+        orgName: 'Acme',
+        emailVerified: true,
+        email: 'user@example.com',
+        mfaEnrollments: [],
+        nameConfirmed: false,
+        ...overrides,
+      } as MeResponse);
+    }
+
+    it('sends a new signup to name it', async () => {
+      meWith({});
+
+      const thrown = await runBeforeLoad().catch((err: unknown) => err);
+
+      expect((thrown as { options: { to?: string } }).options.to).toBe('/create-organization');
+    });
+
+    // A floor org's owner is not new: they lost their last membership, and are
+    // told so before they are asked to name anything.
+    it('sends the owner of a floor org to /left-organization instead', async () => {
+      meWith({ floorOrg: true });
+
+      const thrown = await runBeforeLoad().catch((err: unknown) => err);
+
+      expect((thrown as { options: { to?: string } }).options.to).toBe('/left-organization');
+    });
+  });
 });

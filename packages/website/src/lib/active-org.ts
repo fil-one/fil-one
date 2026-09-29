@@ -325,6 +325,20 @@ export function switchToOrg(
 }
 
 /**
+ * Send this tab to `/left-organization` once the caller has left their last
+ * org. The removal gave the account a floor org and pointed its home at it, so
+ * with the stash cleared the next `/me` resolves there, and every cached query
+ * belonged to the org just left. The caller has already cancelled any running
+ * work, which is why this does not ask {@link leaveGuardedWork} the way
+ * {@link switchToOrg} does.
+ */
+export function moveToLeftOrganization(): void {
+  clearActiveOrgId();
+  queryClient.clear();
+  void import('../router.js').then(({ router }) => router.navigate({ to: '/left-organization' }));
+}
+
+/**
  * Check the org the server resolved against the one this tab asked for, and
  * recover when they disagree.
  *

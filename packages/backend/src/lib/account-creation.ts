@@ -1,11 +1,13 @@
 import { UpdateItemCommand, type TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
 import { OrgRole } from '@filone/shared';
+import type { AuditEvent } from '@filone/shared';
 import { AuditSubjects, auditEvent, commitAudited, userActor } from './audit.ts';
 import { getDynamoClient } from './ddb-client.ts';
 import { OrgKeys } from './org-membership.ts';
 import type { OrgMembership } from './org-membership.ts';
 import { OrgSetupStatus } from './org-setup-status.ts';
+import { deriveOrgName } from './suggest-org-name.ts';
 
 /**
  * Create the account on first login: identity, profiles, membership, the org's
@@ -103,6 +105,119 @@ export async function createAdditionalOrg({
   });
 
   return { orgId, orgName, ...(logoUrl ? { logoUrl } : {}) };
+}
+
+export interface FloorOrgPreparation {
+  orgId: string;
+  orgName: string;
+  /**
+   * The rows this org needs, plus the two `Update`s that repoint the account's
+   * home-org pointers onto it — not committed here. The caller (a membership
+   * removal that would otherwise leave the account with zero orgs) merges
+   * these into its own transaction: a repointed identity naming an org that
+   * was never created, or an org nobody's identity points at, are each a
+   * broken account on their own, so the two must land together.
+   */
+  items: TransactWriteItem[];
+  /**
+   * The `org.created` event, for the caller to append via {@link auditPut}
+   * alongside its own event — `commitAudited` takes only one.
+   */
+  event: AuditEvent;
+}
+
+/**
+ * Set a home-org pointer to `orgId`, provided it still names `expected`, or
+ * still names nothing when `expected` is undefined.
+ */
+function repointHomeOrg(
+  key: { pk: string; sk: string },
+  orgId: string,
+  expected: string | undefined,
+): TransactWriteItem {
+  return {
+    Update: {
+      TableName: Resource.UserInfoTable.name,
+      Key: { pk: { S: key.pk }, sk: { S: key.sk } },
+      UpdateExpression: 'SET orgId = :orgId',
+      ...(expected
+        ? {
+            ConditionExpression: 'attribute_exists(pk) AND orgId = :expected',
+            ExpressionAttributeValues: { ':orgId': { S: orgId }, ':expected': { S: expected } },
+          }
+        : {
+            ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(orgId)',
+            ExpressionAttributeValues: { ':orgId': { S: orgId } },
+          }),
+    },
+  };
+}
+
+/**
+ * Prepare (but do not commit) a brand-new organization to catch an account a
+ * membership removal would otherwise leave with nowhere to log in.
+ *
+ * Shares {@link orgRows} with {@link createAdditionalOrg} — this
+ * account asked for this org exactly as little as it asked for the removal
+ * that necessitated it, so its membership is stamped `source: 'manual'`, the
+ * same value that path uses for "this org did not come with the account."
+ *
+ * The name is derived the same way signup derives one (unconfirmed, so
+ * `/create-organization` gate fires the next time this account logs in),
+ * since there is no naming step to send an involuntary org through.
+ */
+export async function prepareFloorOrg({
+  userId,
+  sub,
+  homeOrgIds,
+  name,
+  email,
+}: {
+  userId: string;
+  sub: string;
+  /**
+   * What the two home-org pointers named when the caller read them, the
+   * repoints' guard. Not assumed to be the org being left: an account that
+   * left its home org while it still had another keeps pointing at the org it
+   * left, and a guard on the org being left now would refuse every retry.
+   */
+  homeOrgIds: { profile?: string; identity?: string };
+  name?: string;
+  email?: string;
+}): Promise<FloorOrgPreparation> {
+  const orgId = crypto.randomUUID();
+  const orgName = deriveOrgName(name, email);
+  const now = new Date().toISOString();
+
+  const items: TransactWriteItem[] = [
+    ...orgRows({
+      orgId,
+      orgName,
+      userId,
+      now,
+      source: 'manual',
+      nameConfirmed: false,
+      floorOrg: true,
+    }),
+    // Repoint both home-org pointers so the next login (and every fresh
+    // request in flight right now, per `attachIdentity`) resolves this org
+    // rather than the one the account is being removed from. Each is
+    // conditioned on still naming what it named when read, so a pointer
+    // something else has changed since fails the transaction (and the caller's
+    // retry reads again) rather than being clobbered.
+    repointHomeOrg({ pk: `SUB#${sub}`, sk: 'IDENTITY' }, orgId, homeOrgIds.identity),
+    repointHomeOrg({ pk: `USER#${userId}`, sk: 'PROFILE' }, orgId, homeOrgIds.profile),
+  ];
+
+  const event = auditEvent({
+    type: 'org.created',
+    actor: userActor({ userId, email }),
+    orgId,
+    subject: AuditSubjects.org(orgId),
+    details: { orgName, source: 'manual' },
+  });
+
+  return { orgId, orgName, items, event };
 }
 
 /**
@@ -274,6 +389,8 @@ function accountRows({
  * `source` is `'signup'` for the org that came with the account and `'manual'`
  * for one the account asked for. A manual org's profile Put is create-only:
  * its `orgId` is a fresh UUID, so a collision means the id was reused.
+ * `floorOrg` marks the one a removal made so the account is never left with
+ * none, which is how the console tells its naming step apart from a signup's.
  * The owner count sits in OrgTable beside the rows it counts, so every
  * owner-set transaction is single-table.
  */
@@ -285,6 +402,7 @@ function orgRows({
   source,
   nameConfirmed,
   logoUrl,
+  floorOrg,
 }: {
   orgId: string;
   orgName: string;
@@ -293,6 +411,7 @@ function orgRows({
   source: 'signup' | 'manual';
   nameConfirmed: boolean;
   logoUrl?: string;
+  floorOrg?: boolean;
 }): TransactWriteItem[] {
   const orgTableName = Resource.OrgTable.name;
 
@@ -309,6 +428,7 @@ function orgRows({
           createdBy: { S: userId },
           createdAt: { S: now },
           ...(logoUrl ? { logoUrl: { S: logoUrl } } : {}),
+          ...(floorOrg ? { floorOrg: { BOOL: true } } : {}),
         },
         ...(source === 'manual' ? { ConditionExpression: 'attribute_not_exists(pk)' } : {}),
       },
