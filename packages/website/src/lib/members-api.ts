@@ -58,11 +58,17 @@ export function getRoleChangePreview(
 
 /**
  * Remove a member from the org.
+ *
+ * `orgId` pins the removal to that org rather than the tab's active one; see
+ * `ApiRequestBehavior.orgId`. Leaving names the org being left, so a switch in
+ * the meantime cannot turn it into leaving a different one.
  */
-export function removeMember(userId: string): Promise<RemoveMemberResponse> {
-  return apiRequest<RemoveMemberResponse>(`/org/members/${encodeURIComponent(userId)}`, {
-    method: 'DELETE',
-  });
+export function removeMember(userId: string, orgId?: string): Promise<RemoveMemberResponse> {
+  return apiRequest<RemoveMemberResponse>(
+    `/org/members/${encodeURIComponent(userId)}`,
+    { method: 'DELETE' },
+    orgId ? { orgId } : {},
+  );
 }
 
 export function listInvitations(): Promise<ListInvitationsResponse> {

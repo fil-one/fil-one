@@ -124,4 +124,24 @@ describe('ObjectSettingsFields', () => {
     expect(screen.getByText('Days')).toBeInTheDocument();
     expect(screen.getByText('Years')).toBeInTheDocument();
   });
+
+  it('hints why Object Lock is disabled when versioning is off', () => {
+    renderWithDefaults({ versioning: false });
+    expect(screen.getByText(/Requires versioning\./)).toBeInTheDocument();
+  });
+
+  it('does not hint at Object Lock once versioning is on', () => {
+    renderWithDefaults({ versioning: true });
+    expect(screen.queryByText(/Requires versioning\./)).not.toBeInTheDocument();
+  });
+
+  it('hints why Retention is disabled when Object Lock is off', () => {
+    renderWithDefaults({ versioning: true, lock: false });
+    expect(screen.getByText(/Requires Object Lock\./)).toBeInTheDocument();
+  });
+
+  it('does not hint at Retention once Object Lock is on', () => {
+    renderWithDefaults({ versioning: true, lock: true });
+    expect(screen.queryByText(/Requires Object Lock\./)).not.toBeInTheDocument();
+  });
 });

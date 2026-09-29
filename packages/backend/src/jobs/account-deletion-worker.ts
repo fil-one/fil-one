@@ -6,7 +6,12 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
-import { deleteAuth0User, getAuth0UserEmail } from '../lib/auth0-management.ts';
+import {
+  deleteAuth0User,
+  getAuth0UserEmail,
+  getAuth0UserPicture,
+} from '../lib/auth0-management.ts';
+import { deleteReplacedAvatar } from '../lib/avatar-storage.ts';
 import { getDynamoClient } from '../lib/ddb-client.ts';
 import {
   deletionRecordKey,
@@ -17,6 +22,8 @@ import {
 import { resolveDeletionTargets } from '../lib/deletion-targets.ts';
 import { ragAllowlistKey } from '../middleware/rag-access.ts';
 import { scrubOrgRecords } from '../lib/deletion-scrub.ts';
+import { deleteReplacedOrgLogo } from '../lib/org-logo-storage.ts';
+import { getOrgProfile } from '../lib/org-profile.ts';
 import { tearDownStripe } from '../lib/deletion-stripe-teardown.ts';
 import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.ts';
 
@@ -55,6 +62,7 @@ export async function handler(event: AccountDeletionWorkerPayload): Promise<void
   await tearDownAuth0(members);
   await tearDownStripe(orgId, members);
   await deleteTenants(orgId, tenantIds);
+  await deleteOrgLogo(orgId);
   await scrubOrgRecords(orgId, members);
 
   await markDone(orgId);
@@ -157,8 +165,23 @@ async function tearDownAuth0(members: DeletionMember[]): Promise<void> {
     }
     const email = await getAuth0UserEmail(sub);
     if (email) await revokeRagAllowlist(email);
+    // Auth0 holds the only record of which avatar is theirs, so it is read and
+    // deleted before the user is. A saved avatar is claimed, so the bucket's
+    // expiry rule never removes it, and it would stay publicly readable. A
+    // picture that is not one of our uploads (a social provider's) is left
+    // alone: the delete touches only our own avatar prefix.
+    await deleteReplacedAvatar(await getAuth0UserPicture(sub), { rethrow: true });
     await deleteAuth0User(sub);
   }
+}
+
+/**
+ * The org's saved logo, which is claimed and so outlives the org otherwise.
+ * Before the scrub, which deletes the profile row that names it.
+ */
+async function deleteOrgLogo(orgId: string): Promise<void> {
+  const profile = await getOrgProfile(orgId, { consistentRead: true });
+  await deleteReplacedOrgLogo(profile?.logoUrl?.S, { rethrow: true });
 }
 
 /** Presence of the row is the grant, so deleting it revokes the grant. */
