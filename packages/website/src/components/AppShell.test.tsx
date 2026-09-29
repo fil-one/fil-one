@@ -30,6 +30,23 @@ vi.mock('./Banner', () => ({
   Banner: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
+// The content window's bottom-bar controls are covered on their own; here they
+// are stubbed like the sidebar, so the shell's drawer/scroll/focus behaviour is
+// tested without their toast and query dependencies.
+vi.mock('./ReportBugButton', () => ({
+  ReportBugButton: ({ variant }: { variant: string }) => (
+    <button type="button" data-testid={`report-bug-${variant}`}>
+      Report a bug
+    </button>
+  ),
+}));
+
+vi.mock('./StatusIndicator', () => ({
+  StatusIndicator: ({ variant }: { variant: string }) => (
+    <div data-testid={`status-indicator-${variant}`} />
+  ),
+}));
+
 vi.mock('../lib/api', () => ({
   getUsage: vi.fn(),
   getBilling: vi.fn(),
@@ -147,8 +164,23 @@ describe('AppShell mobile drawer', () => {
   it('closes drawer on Escape key', () => {
     renderAppShell();
     fireEvent.click(getHamburger());
-    fireEvent.keyDown(document, { key: 'Escape' });
+    // From inside the drawer, where opening it puts focus.
+    fireEvent.keyDown(getDrawer(), { key: 'Escape' });
     expect(getDrawer().className).toContain('translate-x-full');
+  });
+
+  // The bug-report dialog opened from the drawer is portalled out of it, and
+  // Headless UI handles its Escape on `window`, after the drawer's listener.
+  it('stays open when Escape comes from a dialog opened above it', () => {
+    renderAppShell();
+    fireEvent.click(getHamburger());
+    const dialog = document.createElement('div');
+    document.body.appendChild(dialog);
+
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+
+    expect(getDrawer().className).toContain('translate-x-0');
+    dialog.remove();
   });
 
   it('does not close drawer on other keys', () => {
@@ -230,7 +262,7 @@ describe('AppShell focus management', () => {
       fireEvent.click(hamburger);
     });
     await act(async () => {
-      fireEvent.keyDown(document, { key: 'Escape' });
+      fireEvent.keyDown(getDrawer(), { key: 'Escape' });
     });
     expect(document.activeElement).toBe(hamburger);
   });
@@ -286,6 +318,26 @@ describe('AppShell drawer accessibility', () => {
   it('renders page content', () => {
     renderAppShell();
     expect(screen.getByText('page content')).toBeInTheDocument();
+  });
+});
+
+describe('AppShell utility bar', () => {
+  it('carries the icon bug report and the status pill', () => {
+    renderAppShell();
+    expect(screen.getByTestId('report-bug-icon')).toBeInTheDocument();
+    expect(screen.getByTestId('status-indicator-pill')).toBeInTheDocument();
+  });
+
+  it('collapses and expands the desktop sidebar', () => {
+    renderAppShell();
+    const sidebar = screen.getAllByTestId('sidebar-nav')[0].parentElement!;
+    expect(sidebar.className).toContain('w-60');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }));
+    expect(sidebar.className).toContain('w-20');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand sidebar' }));
+    expect(sidebar.className).toContain('w-60');
   });
 });
 
