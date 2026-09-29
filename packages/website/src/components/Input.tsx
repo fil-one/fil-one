@@ -10,7 +10,7 @@ import type { Ref } from 'react';
 export type InputSize = 'sm' | 'md';
 
 const SIZES: Record<InputSize, string> = {
-  sm: 'h-8 px-2.5 text-[13px]',
+  sm: 'h-8 px-2.5 text-ui',
   md: 'px-3 py-2.5 text-sm',
 };
 

@@ -50,19 +50,19 @@ export const NoPadding: Story = {
 export const AllVariants: Story = {
   render: () => (
     <div className="flex flex-col gap-4 p-6 bg-zinc-50 min-h-screen">
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+      <p className="text-meta font-semibold uppercase tracking-wider text-zinc-400">
         Default (with shadow)
       </p>
       <Card>
         <p className="text-sm text-zinc-700">Shadow, default padding</p>
       </Card>
 
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">No shadow</p>
+      <p className="text-meta font-semibold uppercase tracking-wider text-zinc-400">No shadow</p>
       <Card shadow={false}>
         <p className="text-sm text-zinc-700">No shadow, default padding</p>
       </Card>
 
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+      <p className="text-meta font-semibold uppercase tracking-wider text-zinc-400">
         No padding + shadow
       </p>
       <Card shadow padding="none">
