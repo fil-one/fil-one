@@ -113,6 +113,20 @@ describe('OrgSwitcherMenu', () => {
     }
   });
 
+  it('leaves out Members, Audit log and Create organization outside the organizations beta', () => {
+    renderMenu({ orgsBeta: false });
+
+    fireEvent.click(screen.getByTestId('org-switcher-button'));
+
+    // Each switcher row reads as its avatar's monogram, then the name.
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+      'Edit organization',
+      'Billing',
+      'AAcme',
+      'GGlobex',
+    ]);
+  });
+
   it('opens the create-organization dialog from its own action', () => {
     renderMenu();
 

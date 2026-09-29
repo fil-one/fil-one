@@ -51,6 +51,11 @@ vi.mock('../lib/org-membership.ts', async (importOriginal) => ({
   listMemberships: (...args: unknown[]) => mockListMemberships(...args),
 }));
 
+const mockHasOrgsBetaAccess = vi.fn();
+vi.mock('../lib/orgs-beta.ts', () => ({
+  hasOrgsBetaAccess: (...args: unknown[]) => mockHasOrgsBetaAccess(...args),
+}));
+
 const ddbMock = mockClient(DynamoDBClient);
 
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
@@ -128,6 +133,7 @@ describe('POST /api/org handler', () => {
     mockJwtVerify.mockResolvedValue({
       payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: true },
     });
+    mockHasOrgsBetaAccess.mockResolvedValue(true);
     mockIsUploadedOrgLogoUrl.mockResolvedValue(true);
     mockClaimOrgLogoUrl.mockResolvedValue(undefined);
     mockListMemberships.mockResolvedValue([
@@ -160,6 +166,19 @@ describe('POST /api/org handler', () => {
       })
       .resolves({ Item: { name: { S: 'Active Org' } } });
     callerHolds(OrgRole.Owner);
+  });
+
+  it('refuses a caller outside the organizations beta, and writes nothing', async () => {
+    mockHasOrgsBetaAccess.mockResolvedValue(false);
+
+    const result = await handler(createOrgEvent({ name: 'New Co' }), buildContext());
+
+    expect(result.statusCode).toBe(403);
+    expect(mockHasOrgsBetaAccess).toHaveBeenCalledWith({
+      verifiedEmail: MOCK_EMAIL,
+      orgId: MOCK_ORG_ID,
+    });
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
   });
 
   it('creates the org, owned by the caller and sourced as manual, and returns its identity', async () => {
