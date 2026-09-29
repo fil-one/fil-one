@@ -46,10 +46,18 @@ export type {
   PasskeyEnrollment,
   UpdateProfileRequest,
   UpdateProfileResponse,
+  PresignAvatarRequest,
+  PresignAvatarResponse,
   RegenerateRecoveryCodeResponse,
   StepUpRequiredResponse,
 } from './api/me.ts';
-export { PASSKEY_PER_USER_LIMIT, UpdateProfileSchema } from './api/me.ts';
+export {
+  PASSKEY_PER_USER_LIMIT,
+  UpdateProfileSchema,
+  AVATAR_CONTENT_TYPES,
+  AVATAR_MAX_BYTES,
+  PresignAvatarSchema,
+} from './api/me.ts';
 
 export type { PreferencesResponse, UpdatePreferencesRequest } from './api/preferences.ts';
 export { UpdatePreferencesSchema } from './api/preferences.ts';
@@ -61,12 +69,25 @@ export {
   isOrgRole,
   OrgNameSchema,
   UpdateOrgSchema,
+  CreateOrgSchema,
+  PresignOrgLogoSchema,
   ORG_NAME_MIN_LENGTH,
   ORG_NAME_MAX_LENGTH,
   ORG_NAME_PATTERN,
   ORG_NAME_DISALLOWED_CHARS,
+  ORG_LOGO_CONTENT_TYPES,
+  ORG_LOGO_MAX_BYTES,
+  MAX_OWNED_ORGS,
 } from './api/org.ts';
-export type { OrgMembershipSource, UpdateOrgRequest, UpdateOrgResponse } from './api/org.ts';
+export type {
+  OrgMembershipSource,
+  UpdateOrgRequest,
+  UpdateOrgResponse,
+  CreateOrgRequest,
+  CreateOrgResponse,
+  PresignOrgLogoRequest,
+  PresignOrgLogoResponse,
+} from './api/org.ts';
 
 export {
   INVITATION_STATUSES,

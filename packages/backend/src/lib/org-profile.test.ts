@@ -11,6 +11,7 @@ import {
 vi.mock('sst', () => ({
   Resource: {
     UserInfoTable: { name: 'UserInfoTable' },
+    OrgLogoBucketName: { name: 'OrgLogoBucket' },
   },
 }));
 
@@ -22,8 +23,29 @@ import {
   isOrgDeleting,
   orgNotDeletingCheck,
   OrgDeletingError,
+  orgSummary,
   sendDeletionGuardedWrite,
 } from './org-profile.ts';
+
+describe('orgSummary', () => {
+  const ours = 'https://OrgLogoBucket.s3.us-east-1.amazonaws.com/logos/abc';
+
+  it('emits only a stored logo that is one of our uploads', () => {
+    const summaries = [
+      ours,
+      'https://attacker.example/logos/abc',
+      'http://OrgLogoBucket.s3.us-east-1.amazonaws.com/logos/abc',
+      'https://OrgLogoBucket.s3.us-east-1.amazonaws.com/avatars/abc',
+    ].map((logoUrl) => orgSummary({ name: { S: 'Acme' }, logoUrl: { S: logoUrl } }));
+
+    expect(summaries).toEqual([
+      { name: 'Acme', logoUrl: ours },
+      { name: 'Acme' },
+      { name: 'Acme' },
+      { name: 'Acme' },
+    ]);
+  });
+});
 
 describe('getOrgProfile', () => {
   beforeEach(() => {
