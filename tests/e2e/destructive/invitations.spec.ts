@@ -2,19 +2,12 @@ import { test, expect } from '@playwright/test';
 import { STORAGE_STATE, requireEmail, requireUserId } from './roles.util.ts';
 import {
   deleteInvitationsFor,
-  grantOrgBeta,
   resolvePersonalOrgId,
-  revokeOrgBeta,
   runCleanup,
   uniqueInviteEmail,
 } from './invite.util.ts';
 
 // Inviting somebody and withdrawing it again, through the form an Owner uses.
-//
-// The organizations beta is granted here as the ORG#{orgId} row rather than the
-// caller's allowlist row, so this spec's teardown cannot take the grant away
-// from members.spec.ts, which runs against the same account and grants itself
-// the ALLOWLIST#{email} one.
 //
 // The address is minted per run because the three browser projects run this same
 // spec against the same staging organization, and re-inviting an address revokes
@@ -37,7 +30,6 @@ test.describe('paid user (organizations beta)', () => {
 
   test.beforeAll(async () => {
     orgId = await resolvePersonalOrgId(requireUserId(ROLE));
-    await grantOrgBeta(orgId);
   });
 
   test.afterAll(async () => {
@@ -45,7 +37,6 @@ test.describe('paid user (organizations beta)', () => {
       // Both the row the test withdrew and any row a failure left behind: the
       // pending cap counts addresses, and a leaked one is a slot nobody frees.
       { label: 'invitation rows', run: () => deleteInvitationsFor({ orgId, email: invitedEmail }) },
-      { label: 'beta grant', run: () => revokeOrgBeta(orgId) },
     ]);
   });
 
