@@ -1,4 +1,5 @@
 import { createRouter } from '@tanstack/react-router';
+import { parseSearch, stringifySearch } from './lib/search-params.js';
 import { Route as rootRoute } from './routes/__root.js';
 import { Route as indexRoute } from './routes/index.js';
 import { Route as authRoute } from './routes/_auth.js';
@@ -55,6 +56,8 @@ export const router = createRouter({
   routeTree,
   defaultErrorComponent: RouteErrorPage,
   defaultNotFoundComponent: RouteNotFoundPage,
+  parseSearch,
+  stringifySearch,
 });
 
 declare module '@tanstack/react-router' {

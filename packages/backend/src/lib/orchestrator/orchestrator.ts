@@ -84,6 +84,8 @@ export interface FilOneOrchestratorConfig {
   stage: string;
   /** S3 gateway endpoint for the data plane, e.g. `https://s3.{region}.filonecontent.com`. */
   s3EndpointUrl: string;
+  /** The same gateway as browsers reach it, when that differs from `s3EndpointUrl`. */
+  s3PresignEndpointUrl?: string;
   /**
    * Control-plane Management API access: either connection settings (the
    * factory builds and instruments a client) or a pre-built client (used by
@@ -166,6 +168,9 @@ class FilOneOrchestrator implements ServiceOrchestrator {
       forcePathStyle: true,
       orchestratorId: this.id,
       tenantId,
+      ...(this.config.s3PresignEndpointUrl && {
+        presignEndpointUrl: this.config.s3PresignEndpointUrl,
+      }),
     };
   }
 

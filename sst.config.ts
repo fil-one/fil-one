@@ -5,6 +5,11 @@ export default $config({
     const stage = input?.stage;
     const isProduction = stage === 'production';
     const isStaging = stage === 'staging';
+    // LOCAL=true deploys to a local AWS emulator (floci); see bin/deploy-local.sh.
+    const isLocal = process.env.LOCAL === 'true';
+    if (isLocal && !process.env.AWS_ENDPOINT_URL) {
+      throw new Error('LOCAL=true requires AWS_ENDPOINT_URL; run `eval "$(floci env)"` first');
+    }
 
     // Region: us-east-2 for staging/production, AWS_REGION / profile default for personal dev
     const region =
@@ -25,6 +30,10 @@ export default $config({
       awsProvider.allowedAccountIds = ['811430801166'];
     }
 
+    if (isLocal) {
+      awsProvider.allowedAccountIds = ['000000000000'];
+    }
+
     return {
       name: 'filone',
       removal: isProduction ? 'retain' : 'remove',
@@ -43,6 +52,15 @@ export default $config({
     const isProduction = stage === 'production';
     const isStaging = stage === 'staging';
     const isEphemeralStage = !isProduction && !isStaging;
+    const isLocal = process.env.LOCAL === 'true';
+
+    // floci's UpdateFunction returns no ETag, so publishing an updated CloudFront
+    // Function fails. floci never runs them, so local deploys leave them unpublished.
+    if (isLocal) {
+      $transform(aws.cloudfront.Function, (args) => {
+        args.publish = false;
+      });
+    }
 
     // ── Secrets (set via: pnpx sst secret set <Name> <value>) ─────────
     const auth0ClientId = new sst.Secret('Auth0ClientId');
@@ -365,19 +383,21 @@ export default $config({
         ? PROD_CONSOLE_ALIAS_HOSTS[0]
         : domainName;
     const usEast1 = new aws.Provider('useast1', { region: 'us-east-1' });
-    const cert = await aws.acm.getCertificate(
-      {
-        domain: certDomain,
-        statuses: ['ISSUED'],
-        // The lookup errors if more than one ISSUED cert matches. That happens
-        // transiently whenever a cert is replaced rather than mutated in place,
-        // since both carry the same primary domain until the old one is retired.
-        // Picking the newest is right: the older one is the one going away.
-        mostRecent: true,
-      },
-      { provider: usEast1 },
-    );
-    const certArn = cert.arn;
+    const cert = isLocal
+      ? undefined
+      : await aws.acm.getCertificate(
+          {
+            domain: certDomain,
+            statuses: ['ISSUED'],
+            // The lookup errors if more than one ISSUED cert matches. That happens
+            // transiently whenever a cert is replaced rather than mutated in place,
+            // since both carry the same primary domain until the old one is retired.
+            // Picking the newest is right: the older one is the one going away.
+            mostRecent: true,
+          },
+          { provider: usEast1 },
+        );
+    const certArn = cert?.arn;
 
     // ── API Gateway ──────────────────────────────────────────────────
     // While we stick to a same origin for both website and API,
@@ -526,18 +546,21 @@ export default $config({
           cachePolicy: AWS_CACHING_DISABLED_POLICY,
         },
       },
-      domain: {
-        name: domainName,
-        // Demo aliases keep visitors on the alias hostname (unlike `redirects`,
-        // which would bounce them back to the blocklisted canonical host). The
-        // cert above must cover every entry or CloudFront rejects the deploy.
-        aliases: aliasHosts,
-        // Ephemeral stages: SST creates the Route 53 alias in the delegated
-        // dev.fil.one zone. Staging/prod: records are managed in Cloudflare
-        // by the fil-one/infrastructure Terraform.
-        dns: isEphemeralStage ? sst.aws.dns({ override: true }) : false,
-        cert: certArn,
-      },
+      // Local deploys have no cert or DNS, so they keep the generated CloudFront domain.
+      domain: isLocal
+        ? undefined
+        : {
+            name: domainName,
+            // Demo aliases keep visitors on the alias hostname (unlike `redirects`,
+            // which would bounce them back to the blocklisted canonical host). The
+            // cert above must cover every entry or CloudFront rejects the deploy.
+            aliases: aliasHosts,
+            // Ephemeral stages: SST creates the Route 53 alias in the delegated
+            // dev.fil.one zone. Staging/prod: records are managed in Cloudflare
+            // by the fil-one/infrastructure Terraform.
+            dns: isEphemeralStage ? sst.aws.dns({ override: true }) : false,
+            cert: certArn,
+          },
       transform: {
         cdn: (args) => {
           // Also covered by the SPA rewrite function, which maps `/` to
@@ -606,35 +629,38 @@ export default $config({
       timeout: '10 seconds',
     });
 
-    new aws.cloudformation.Stack('SetupStack', {
-      ...(isEphemeralStage && { onFailure: 'DELETE' }),
-      templateBody: $jsonStringify({
-        AWSTemplateFormatVersion: '2010-09-09',
-        Resources: {
-          Setup: {
-            Type: 'Custom::FiloneSetup',
-            Properties: {
-              ServiceToken: setupFn.arn,
-              SiteUrl: siteUrl,
-              // Derived from aliasHosts rather than allowedOrigins: the latter
-              // also carries https://localhost:5173 outside production, which
-              // must never be written into the shared Auth0 tenant.
-              SiteAliasUrls: aliasHosts.map((h) => `https://${h}`).join(','),
-              Stage: $app.stage,
-              // Bumped for the SiteAliasUrls property: this custom resource only
-              // re-runs when a property changes, and SiteUrl is unchanged, so
-              // without a bump the alias never reaches the Auth0 client.
-              Version: '2.12',
+    // Local deploys skip the Stripe webhook and Auth0 callbacks; bin/deploy-local.sh covers both.
+    if (!isLocal) {
+      new aws.cloudformation.Stack('SetupStack', {
+        ...(isEphemeralStage && { onFailure: 'DELETE' }),
+        templateBody: $jsonStringify({
+          AWSTemplateFormatVersion: '2010-09-09',
+          Resources: {
+            Setup: {
+              Type: 'Custom::FiloneSetup',
+              Properties: {
+                ServiceToken: setupFn.arn,
+                SiteUrl: siteUrl,
+                // Derived from aliasHosts rather than allowedOrigins: the latter
+                // also carries https://localhost:5173 outside production, which
+                // must never be written into the shared Auth0 tenant.
+                SiteAliasUrls: aliasHosts.map((h) => `https://${h}`).join(','),
+                Stage: $app.stage,
+                // Bumped for the SiteAliasUrls property: this custom resource only
+                // re-runs when a property changes, and SiteUrl is unchanged, so
+                // without a bump the alias never reaches the Auth0 client.
+                Version: '2.12',
+              },
             },
           },
-        },
-      }),
-    });
+        }),
+      });
+    }
 
     // Ensure the Stripe webhook endpoint is removed when an ephemeral
     // stage is torn down. The CloudFormation custom resource above may
     // not fire its Delete event if the Lambda is destroyed first.
-    if (isEphemeralStage) {
+    if (isEphemeralStage && !isLocal) {
       const teardownScript = require('path').resolve(
         $cli.paths.root,
         'packages/backend/src/scripts/teardown-stripe-webhook.ts',
@@ -700,9 +726,22 @@ export default $config({
     // Forge (Management-API) — non-prod only. One endpoint per Forge network,
     // serving every region in it; the region is sent per-tenant in the PUT
     // /tenants body.
+    // SMELT=true points a local deploy's dev sandbox slot (us-east-9) at a smelt
+    // network on this machine. Lambdas reach it through host.docker.internal.
+    // Presigned URLs use localhost instead, which https pages may fetch over http.
+    const useSmelt = isLocal && process.env.SMELT === 'true';
+    const smeltHost = process.env.SMELT_HOST ?? 'host.docker.internal';
     const forgeEnv = {
       FORGE_MANAGEMENT_API_URL: isProduction ? '' : 'https://auth.staging.fil-forge.com',
-      FORGE_DEV_MANAGEMENT_API_URL: isProduction ? '' : 'https://auth.latest.dev.fil-forge.com',
+      FORGE_DEV_MANAGEMENT_API_URL: isProduction
+        ? ''
+        : useSmelt
+          ? `http://${smeltHost}:15110`
+          : 'https://auth.latest.dev.fil-forge.com',
+      ...(useSmelt && {
+        FORGE_DEV_S3_ENDPOINT_URL: `http://${smeltHost}:15130`,
+        FORGE_DEV_S3_PRESIGN_ENDPOINT_URL: 'http://localhost:15130',
+      }),
     };
 
     // Everything the service-orchestrator layer needs at runtime. FILONE_STAGE
@@ -1672,6 +1711,7 @@ export default $config({
 
     return {
       baseUrl: siteUrl,
+      ...(isLocal ? { apiUrl: api.url } : {}),
       ...(s3abBillingReadRoleArn ? { s3abBillingReadRoleArn } : {}),
       ...(s3abRespondRoleArn ? { s3abRespondRoleArn } : {}),
     };

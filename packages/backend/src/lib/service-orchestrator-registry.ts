@@ -22,10 +22,11 @@ function getForgeOrchestrator(
   id: string,
   region: S3Region,
   api: () => ForgeManagementApi,
+  s3?: { endpointUrl?: string; presignEndpointUrl?: string },
 ): ServiceOrchestrator {
   let orchestrator = forgeOrchestrators.get(id);
   if (!orchestrator) {
-    orchestrator = createForgeOrchestrator(id, region, api());
+    orchestrator = createForgeOrchestrator(id, region, api(), s3);
     forgeOrchestrators.set(id, orchestrator);
   }
   return orchestrator;
@@ -46,10 +47,18 @@ export function getOrchestratorForRegion(region: S3Region): ServiceOrchestrator 
           accessToken: Resource.ForgeManagementApiToken.value,
         }));
       case S3Region.UsEast9:
-        return getForgeOrchestrator(ORCHESTRATOR_ID_BY_REGION[region], region, () => ({
-          baseUrl: process.env.FORGE_DEV_MANAGEMENT_API_URL!,
-          accessToken: Resource.ForgeDevManagementApiToken.value,
-        }));
+        return getForgeOrchestrator(
+          ORCHESTRATOR_ID_BY_REGION[region],
+          region,
+          () => ({
+            baseUrl: process.env.FORGE_DEV_MANAGEMENT_API_URL!,
+            accessToken: Resource.ForgeDevManagementApiToken.value,
+          }),
+          {
+            endpointUrl: process.env.FORGE_DEV_S3_ENDPOINT_URL,
+            presignEndpointUrl: process.env.FORGE_DEV_S3_PRESIGN_ENDPOINT_URL,
+          },
+        );
     }
   }
   throw new Error(`Unsupported region "${String(region)}".`);
