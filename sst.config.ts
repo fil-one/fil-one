@@ -282,6 +282,42 @@ export default $config({
     // ── S3 Bucket for user file storage ──────────────────────────────
     const userFilesBucket = new sst.aws.Bucket('UserFilesBucket');
 
+    // ── S3 Bucket for org logos ────────────────────────────────────────
+    // Platform identity data, not tenant data — an org logo is uploaded during
+    // "Create organization," before the org (and therefore any tenant) exists,
+    // so it cannot share presign.ts's tenant-scoped signer or trust boundary.
+    // Public read, the same treatment `me.picture` gets: a plain public URL,
+    // no presigned-GET machinery. See packages/backend/src/lib/org-logo-storage.ts.
+    //
+    // Uploads happen before anything references them (a logo is picked before
+    // its org exists), so each lands tagged `state=unclaimed` and the handler
+    // that saves the URL removes the tag. Whatever is still unclaimed a day
+    // later was abandoned: a cancelled dialog, a re-picked file. SST's own
+    // `lifecycle` option filters by prefix only, hence the transform.
+    const orgLogoBucket = new sst.aws.Bucket('OrgLogoBucket', {
+      access: 'public',
+      transform: {
+        lifecycle: (args) => {
+          args.rules = [
+            {
+              id: 'expire-unclaimed-uploads',
+              status: 'Enabled',
+              filter: { tag: { key: 'state', value: 'unclaimed' } },
+              expiration: { days: 1 },
+            },
+          ];
+        },
+      },
+      // The transform only reshapes a rule SST creates, so one has to exist.
+      lifecycle: [{ id: 'expire-unclaimed-uploads', expiresIn: '1 day' }],
+    });
+
+    // The bucket's name alone, with no permissions, for the routes that only
+    // check a stored URL points into it. Linking the bucket itself grants s3:*.
+    const orgLogoBucketName = new sst.Linkable('OrgLogoBucketName', {
+      properties: { name: orgLogoBucket.name },
+    });
+
     // ── S3 Vectors bucket for RAG embeddings (FIL-548) ───────────────
     // One vector bucket hosts one index per RAG-enabled bucket. The
     // @filone/rag-shared S3VectorsStore reads the bucket name at runtime via
@@ -448,6 +484,11 @@ export default $config({
       .map((r) => getS3Endpoint(r, stageForEndpoints))
       .join(' ');
 
+    // Org logos are POSTed straight to OrgLogoBucket and rendered from it, so its
+    // regional host belongs in both `connect-src` and `img-src`. The regional
+    // domain is the exact host `publicOrgLogoUrl` in org-logo-storage.ts builds.
+    const orgLogoOrigin = $interpolate`https://${orgLogoBucket.nodes.bucket.bucketRegionalDomainName}`;
+
     // ── CloudFront security headers (CSP applied to the HTML document) ──
     const sentryCspEndpoint =
       'https://o4507369657991168.ingest.us.sentry.io/api/4511144562655232/security/' +
@@ -459,8 +500,11 @@ export default $config({
         name: $interpolate`filone-${$app.stage}-security-headers`,
         securityHeadersConfig: {
           contentSecurityPolicy: {
-            // i1.wp.com: WordPress Photon CDN — Auth0 proxies some avatar images through it
-            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io https://status.fil.one ${s3GatewayUrls}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
+            // i0/i1/i2.wp.com: WordPress Photon CDN, load-balanced across all three
+            // subdomains by hash of the source URL — Auth0 proxies some avatar images
+            // through whichever one it lands on, so all three need to be allowed, not
+            // just the one a single test happened to hit.
+            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i0.wp.com https://i1.wp.com https://i2.wp.com https://avatars.githubusercontent.com ${orgLogoOrigin}; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io https://status.fil.one ${s3GatewayUrls} ${orgLogoOrigin}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
             override: true,
           },
           frameOptions: {
@@ -1215,8 +1259,9 @@ export default $config({
       },
 
       // ── Account and MFA ────────────────────────────────────────────
+      // OrgLogoBucketName, to check a stored logo is one of its uploads.
       'get-me': {
-        extraLink: mgmtRuntimeResources,
+        extraLink: [...mgmtRuntimeResources, orgLogoBucketName],
         extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
         provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       },
@@ -1262,6 +1307,20 @@ export default $config({
       'transfer-ownership': {
         extraLink: mgmtRuntimeResources,
         extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+      },
+      // Presigns a POST into OrgLogoBucket.
+      'presign-org-logo': {
+        extraLink: [orgLogoBucket],
+      },
+      // Confirms a submitted logoUrl names an unclaimed upload in OrgLogoBucket,
+      // then claims it, so it needs the bucket as much as the presign route does.
+      'create-org': {
+        extraLink: [orgLogoBucket],
+      },
+      // Checks a submitted logo URL against OrgLogoBucket, claims it, and
+      // deletes the logo it replaced.
+      'update-org': {
+        extraLink: [orgLogoBucket, orgLogoBucketName],
       },
 
       // ── Invitations ────────────────────────────────────────────────

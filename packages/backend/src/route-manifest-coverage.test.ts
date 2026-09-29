@@ -478,7 +478,7 @@ const IN_HANDLER_PROBES: {
  * different answer.
  */
 /** Membership-only in-handler routes: see the `'in-handler'` doc in route-manifest.ts. */
-const MEMBERSHIP_ONLY_IN_HANDLER = ['create-org'];
+const MEMBERSHIP_ONLY_IN_HANDLER = ['create-org', 'presign-org-logo'];
 
 describe('what the in-handler routes enforce', () => {
   quietDenialOutput();

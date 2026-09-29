@@ -80,17 +80,19 @@ export async function createNewUserAndOrg({
 export async function createAdditionalOrg({
   userId,
   orgName,
+  logoUrl,
   email,
 }: {
   userId: string;
   orgName: string;
+  logoUrl?: string;
   email?: string;
-}): Promise<{ orgId: string; orgName: string }> {
+}): Promise<{ orgId: string; orgName: string; logoUrl?: string }> {
   const orgId = crypto.randomUUID();
   const now = new Date().toISOString();
 
   await commitAudited({
-    items: orgRows({ orgId, orgName, userId, now, source: 'manual', nameConfirmed: true }),
+    items: orgRows({ orgId, orgName, userId, now, source: 'manual', nameConfirmed: true, logoUrl }),
     event: auditEvent({
       type: 'org.created',
       actor: userActor({ userId, email }),
@@ -100,7 +102,7 @@ export async function createAdditionalOrg({
     }),
   });
 
-  return { orgId, orgName };
+  return { orgId, orgName, ...(logoUrl ? { logoUrl } : {}) };
 }
 
 /**
@@ -282,6 +284,7 @@ function orgRows({
   now,
   source,
   nameConfirmed,
+  logoUrl,
 }: {
   orgId: string;
   orgName: string;
@@ -289,6 +292,7 @@ function orgRows({
   now: string;
   source: 'signup' | 'manual';
   nameConfirmed: boolean;
+  logoUrl?: string;
 }): TransactWriteItem[] {
   const orgTableName = Resource.OrgTable.name;
 
@@ -304,6 +308,7 @@ function orgRows({
           auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
           createdBy: { S: userId },
           createdAt: { S: now },
+          ...(logoUrl ? { logoUrl: { S: logoUrl } } : {}),
         },
         ...(source === 'manual' ? { ConditionExpression: 'attribute_not_exists(pk)' } : {}),
       },
