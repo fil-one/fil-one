@@ -149,6 +149,12 @@ export const queryKeys = {
     ['rag-bucket-enabled', bucketName, region] as const,
   // RAG API keys (query-endpoint bearer tokens) — distinct from `accessKeys`.
   ragApiKeys: ['rag-api-keys'] as const,
+  // Never fetched — only ever `setQueryData`'d by `switchToOrg` and read by
+  // `usePendingOrgSwitchTarget`. Deliberately its own key rather than a field
+  // folded into `['me']`: it carries only what the sidebar needs to paint the
+  // right name and logo the instant a switch starts, never permissions or
+  // anything else a stale value could make a security-relevant surface trust.
+  pendingOrgSwitch: ['pendingOrgSwitch'] as const,
 };
 
 /**

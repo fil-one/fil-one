@@ -84,8 +84,13 @@ export function OrgSwitcher({ memberships, activeOrgId, onClose }: OrgSwitcherPr
                 isInert
                   ? undefined
                   : () => {
+                      // Declined (an upload is running), nothing started: the
+                      // rows stay live and the panel stays open.
+                      const started = switchToOrg(membership.orgId, 'dashboard', {
+                        orgName: membership.orgName,
+                      });
+                      if (!started) return;
                       setChosen(membership.orgId);
-                      switchToOrg(membership.orgId);
                       onClose?.();
                     }
               }

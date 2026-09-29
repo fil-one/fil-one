@@ -16,6 +16,7 @@ import { CreateOrganizationDialog } from './CreateOrganizationDialog.js';
 import { OrgAvatar } from './OrgAvatar.js';
 import { OrgSwitcher } from './OrgSwitcher.js';
 import { getMe } from '../lib/api.js';
+import { usePendingOrgSwitchTarget } from '../lib/active-org.js';
 import { ME_STALE_TIME, queryKeys } from '../lib/query-client.js';
 import { usePermissions } from '../lib/use-permissions.js';
 
@@ -93,7 +94,10 @@ export function OrgSwitcherMenu({ collapsed, testId, onNavigate }: OrgSwitcherMe
     queryFn: () => getMe(),
     staleTime: ME_STALE_TIME,
   });
-  const orgName = me?.orgName ?? 'Organization';
+  // `switchToOrg` clears the cache, so until the new org's `/me` lands the name
+  // comes from the switcher row just clicked.
+  const pendingSwitch = usePendingOrgSwitchTarget();
+  const orgName = me?.orgName ?? pendingSwitch?.orgName ?? 'Organization';
 
   return (
     <>
