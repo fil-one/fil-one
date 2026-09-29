@@ -20,7 +20,7 @@ async function baseHandler(
   // Revoke the refresh token at Auth0 before clearing cookies so it cannot
   // be reused after logout. Fire-and-forget: a revocation failure must not
   // block the user from logging out.
-  const cookies = parseCookies(event.cookies);
+  const cookies = parseCookies(event);
   const refreshToken = cookies[COOKIE_NAMES.REFRESH_TOKEN];
   if (refreshToken) {
     try {
