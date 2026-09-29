@@ -128,7 +128,7 @@ export function AccessKeyPermissionsFields({
                 />
                 <div className="flex flex-col gap-0.5">
                   <span className="text-xs font-medium text-zinc-900">{option.label}</span>
-                  <span className="text-[11px] text-zinc-500">{option.description}</span>
+                  <span className="text-meta text-zinc-500">{option.description}</span>
                 </div>
               </label>
 
@@ -149,7 +149,7 @@ export function AccessKeyPermissionsFields({
                         />
                         <div className="flex flex-col gap-0.5">
                           <span className="text-xs font-medium text-zinc-800">{meta.label}</span>
-                          <span className="text-[11px] text-zinc-500">{meta.description}</span>
+                          <span className="text-meta text-zinc-500">{meta.description}</span>
                         </div>
                       </label>
                     );
@@ -184,7 +184,7 @@ function Section({
 }) {
   return (
     <div className="flex flex-col" data-testid={testId}>
-      <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+      <p className="mb-1 px-3 text-meta font-semibold uppercase tracking-wider text-zinc-400">
         {title}
       </p>
       {children}
@@ -285,7 +285,7 @@ function PermissionRow({
       <Checkbox aria-label={label} checked={checked} disabled={disabled} onChange={onChange} />
       <div className="flex flex-col gap-0.5">
         <span className="text-xs font-medium text-zinc-900">{label}</span>
-        <span className="text-[11px] text-zinc-500">{description}</span>
+        <span className="text-meta text-zinc-500">{description}</span>
       </div>
     </label>
   );
