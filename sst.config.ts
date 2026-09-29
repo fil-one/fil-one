@@ -1338,6 +1338,10 @@ export default $config({
       // by id, never the accept URL, because the URL carries the token.
       // `WEBSITE_URL` is the accept link's origin, taken from configuration rather
       // than from the request, since the link goes to somebody else's inbox.
+      // OrgLogoBucketName, to check the joined org's logo is one of its uploads.
+      'accept-invitation': {
+        extraLink: [orgLogoBucketName],
+      },
       'create-invitation': {
         extraEnv: { WEBSITE_URL: siteUrl },
         ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
