@@ -906,6 +906,23 @@ describe('get-billing baseHandler', () => {
     expect(body.subscription.planName).toBe('Business');
   });
 
+  it('does not surface the Stripe product name for the self-serve price', async () => {
+    ddbMock.on(GetItemCommand).resolves(activeRecordWith());
+    ddbMock.on(UpdateItemCommand).resolves({});
+    mockSubscriptionsRetrieve.mockResolvedValue(
+      stripeSubscription({
+        ...TIERED_PRICE,
+        id: 'price_test_fake',
+        product: { id: PRODUCT_ID, object: 'product', name: 'Fil ONE Storage (GB)', active: true },
+      }),
+    );
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const body = JSON.parse(String(result.body));
+    expect(body.subscription.planName).toBeUndefined();
+  });
+
   it('caches the product name, so an outage does not cost the customer their plan name', async () => {
     ddbMock.on(GetItemCommand).resolves(activeRecordWith());
     ddbMock.on(UpdateItemCommand).resolves({});

@@ -24,8 +24,8 @@ import { Button } from '../components/Button.js';
 import { Checkbox } from '../components/Checkbox.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { CopyButton } from '../components/CopyButton.js';
+import { EmptyStateCard } from '../components/EmptyStateCard.js';
 import { Heading } from '../components/Heading/Heading.js';
-import { IconBox } from '../components/IconBox.js';
 import { IconButton } from '../components/IconButton.js';
 import { Input } from '../components/Input.js';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '../components/Modal/index.js';
@@ -470,27 +470,24 @@ export function RagApiKeysTab({ buckets }: { buckets: RagBucket[] }) {
       )}
 
       {showEmptyState && (
-        <div
-          data-testid="rag-api-keys-empty"
-          className="flex flex-col items-center gap-3 rounded-xl border border-zinc-200 bg-white px-6 py-8 text-center"
+        <EmptyStateCard
+          icon={KeyIcon}
+          iconColor="grey"
+          title="No API keys yet"
+          // The invitation goes with the button: telling a ReadOnly member to
+          // create a key, with nothing to click, is a dead end.
+          description={
+            mayCreate
+              ? 'Create a key to query your indexed buckets from your app or agent.'
+              : 'Keys for the Query API appear here.'
+          }
         >
-          <IconBox icon={KeyIcon} color="grey" size="md" />
-          <div>
-            <p className="text-sm font-medium text-zinc-900">No API keys yet</p>
-            {/* The invitation goes with the button: telling a ReadOnly member to
-                create a key, with nothing to click, is a dead end. */}
-            <p className="mt-1 text-xs text-zinc-500">
-              {mayCreate
-                ? 'Create a key to query your indexed buckets from your app or agent.'
-                : 'Keys for the Query API appear here.'}
-            </p>
-          </div>
           {mayCreate && (
             <Button variant="primary" size="sm" icon={PlusIcon} onClick={() => setCreateOpen(true)}>
               Create API key
             </Button>
           )}
-        </div>
+        </EmptyStateCard>
       )}
 
       {!isPending && !isError && keys.length > 0 && (
