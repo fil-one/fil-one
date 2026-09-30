@@ -1020,7 +1020,7 @@ describe('auroraOrchestrator signal forwarding', () => {
       name: 'getBucket',
       run: () => {
         mockPortalGetBucketInfo.mockResolvedValue(bucketInfo);
-        return auroraOrchestrator.getBucket('t', 'b', { signal });
+        return auroraOrchestrator.getBucket('t', 'b', undefined, { signal });
       },
       mocks: [mockPortalGetBucketInfo],
     },
@@ -1129,7 +1129,7 @@ describe('auroraOrchestrator signal forwarding', () => {
     },
     getBucket: () => {
       mockPortalGetBucketInfo.mockResolvedValue(bucketInfo);
-      return auroraOrchestrator.getBucket('t', 'b', { signal });
+      return auroraOrchestrator.getBucket('t', 'b', undefined, { signal });
     },
   };
 

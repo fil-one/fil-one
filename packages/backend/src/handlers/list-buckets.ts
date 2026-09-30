@@ -8,13 +8,9 @@ import type {
   S3Region,
   SortDirection,
 } from '@filone/shared';
-import {
-  BUCKET_SORT_KEYS,
-  listBucketsUnavailableMessage,
-  OrgRole,
-  SORT_DIRECTIONS,
-} from '@filone/shared';
+import { BUCKET_SORT_KEYS, listBucketsUnavailableMessage, SORT_DIRECTIONS } from '@filone/shared';
 import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.ts';
+import { getScopedMemberId } from '../lib/member-scope.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { BucketSummary } from '../lib/service-orchestrator.ts';
@@ -32,19 +28,6 @@ function parseSortKey(value: string | undefined): BucketSortKey {
 
 function parseSortDirection(value: string | undefined): SortDirection {
   return SORT_DIRECTIONS.find((direction) => direction === value) ?? 'asc';
-}
-
-/**
- * The member the listing is scoped to, or undefined for a caller who sees the
- * tenant's whole set. Owner and Admin are unscoped by role, so the policy store
- * is never read for them and a bucket with no policy is still theirs to see.
- *
- * Not `isRosterRole`: that asks whether the console names a role on every
- * bucket's policy, and this asks whether a role sees every bucket. The two
- * give the same answer today but answer different questions.
- */
-function getScopedMemberId(role: OrgRole | undefined, userId: string): string | undefined {
-  return role === OrgRole.Owner || role === OrgRole.Admin ? undefined : userId;
 }
 
 export async function baseHandler(

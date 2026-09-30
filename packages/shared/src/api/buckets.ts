@@ -137,8 +137,17 @@ export interface CreateBucketResponse {
   bucket: Bucket;
 }
 
+/**
+ * One bucket, as its detail page reads it.
+ *
+ * No `createdAt`: existence is proved by a bucket-addressed read, and neither S3
+ * nor the Management API carries a creation date for a single bucket. The list
+ * carries it, because a listing does.
+ */
+export type BucketDetail = Omit<Bucket, 'createdAt'>;
+
 export interface GetBucketResponse {
-  bucket: Bucket;
+  bucket: BucketDetail;
 }
 
 export interface DeleteBucketRequest {

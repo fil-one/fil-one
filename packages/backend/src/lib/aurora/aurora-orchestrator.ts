@@ -217,6 +217,7 @@ export const auroraOrchestrator = {
   async getBucket(
     tenantId: string,
     bucketName: string,
+    _memberId?: string,
     opts?: OrchestratorRequestOptions,
   ): Promise<BucketDetails | null> {
     const client = await createPortalClient(tenantId, { signal: opts?.signal });
@@ -366,7 +367,7 @@ export const auroraOrchestrator = {
     // getBucketStorageSamples queries Aurora metrics globally by bucket name, so
     // gate it behind a tenant-scoped ownership check: only the owning tenant's
     // Portal client resolves the bucket (404 -> null otherwise).
-    const bucket = await auroraOrchestrator.getBucket(tenantId, bucketName, opts);
+    const bucket = await auroraOrchestrator.getBucket(tenantId, bucketName, undefined, opts);
     if (!bucket) throw new BucketNotFoundError(bucketName);
     const auroraInterval = mapIntervalToAuroraWindow(metricsOpts.interval ?? '1d');
 

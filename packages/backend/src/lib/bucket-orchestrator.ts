@@ -32,7 +32,12 @@ export interface BucketSummary {
 export interface BucketDetails extends BucketProtection {
   bucketName: string;
   region: S3Region;
-  createdAt: string;
+  /**
+   * Absent where existence is proved by a bucket-addressed read rather than a
+   * tenant listing: S3 carries no per-bucket creation date and the Management
+   * API has none either. The bucket list still carries it.
+   */
+  createdAt?: string;
   isPublic: boolean;
   versioning: boolean;
   encrypted: boolean;
@@ -78,9 +83,15 @@ export interface BucketOrchestrator {
     memberId?: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketSummary[]>;
+  /**
+   * One bucket, or null when the tenant has none by that name. With `memberId`
+   * a region serving the `iam` access model answers null for a bucket the
+   * member cannot reach; every other region ignores it.
+   */
   getBucket(
     tenantId: string,
     bucketName: string,
+    memberId?: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketDetails | null>;
 
