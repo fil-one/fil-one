@@ -10,7 +10,6 @@
 // stale edit loses and nothing is written.
 
 import type { BucketPolicy, MemberBucketAccess } from '@filone/shared';
-import type { IssuedAccessKey } from './service-orchestrator.ts';
 
 /** A stored policy and the validator its next write must carry. Opaque to callers. */
 export interface StoredBucketPolicy {
@@ -29,17 +28,6 @@ export interface MemberPolicy extends StoredBucketPolicy {
  * one exists.
  */
 export type PolicyPrecondition = { ifMatch: string } | { ifNoneMatch: '*' };
-
-/** A key bound to a principal: the credential plus the member it belongs to. */
-export interface IssuedMemberKey extends IssuedAccessKey {
-  principalId: string;
-}
-
-export interface IssueMemberKeyOpts {
-  /** Unique within the principal, so two members may each hold a `laptop`. */
-  keyName: string;
-  expiresAt?: string | null;
-}
 
 export interface IamMethods {
   /**
@@ -90,17 +78,4 @@ export interface IamMethods {
    * Buckets the member cannot reach are absent.
    */
   resolveMemberAccess(tenantId: string, userId: string): Promise<MemberBucketAccess[]>;
-
-  /**
-   * Mints a key bound to the member's principal. The key carries no permissions
-   * or bucket list: what it may do is whatever the policies give the member at
-   * the time of each request. Throws {@link PrincipalNotFoundError} when the
-   * member was never synced, and {@link AccessKeyAlreadyExistsError} on a
-   * duplicate name for that principal.
-   */
-  issueMemberKey(
-    tenantId: string,
-    userId: string,
-    opts: IssueMemberKeyOpts,
-  ): Promise<IssuedMemberKey>;
 }

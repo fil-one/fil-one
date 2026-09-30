@@ -1,7 +1,6 @@
 import { effectiveActions } from '@filone/shared';
 import type { BucketPolicy, MemberBucketAccess } from '@filone/shared';
 import {
-  AccessKeyAlreadyExistsError,
   BucketNotFoundError,
   PolicyNotFoundError,
   PolicyPreconditionFailedError,
@@ -9,8 +8,6 @@ import {
 } from '../lib/errors.ts';
 import type {
   IamMethods,
-  IssueMemberKeyOpts,
-  IssuedMemberKey,
   MemberPolicy,
   PolicyPrecondition,
   StoredBucketPolicy,
@@ -30,18 +27,10 @@ export class FakeIamOrchestrator implements IamMethods {
   readonly principals = new Map<string, Set<string>>();
   readonly policies = new Map<string, Map<string, StoredBucketPolicy>>();
   readonly buckets = new Map<string, Set<string>>();
-  readonly keys: Array<{
-    tenantId: string;
-    userId: string;
-    keyName: string;
-    id: string;
-    accessKeyId: string;
-  }> = [];
   /** Every call in order, for tests that assert what ran before what. */
   readonly calls: Array<{ method: keyof IamMethods; tenantId: string; target: string }> = [];
 
   private etagSeq = 0;
-  private keySeq = 0;
   private readonly failures = new Map<keyof IamMethods, Error>();
 
   seedBucket(tenantId: string, bucketName: string): void {
@@ -71,10 +60,6 @@ export class FakeIamOrchestrator implements IamMethods {
   async removeMember(tenantId: string, userId: string): Promise<void> {
     this.record('removeMember', tenantId, userId);
     this.principalsOf(tenantId).delete(userId);
-    for (let i = this.keys.length - 1; i >= 0; i--) {
-      const key = this.keys[i]!;
-      if (key.tenantId === tenantId && key.userId === userId) this.keys.splice(i, 1);
-    }
     for (const [bucketName, stored] of this.policiesOf(tenantId)) {
       const statement = stored.policy.statement
         .map((s) =>
@@ -146,38 +131,6 @@ export class FakeIamOrchestrator implements IamMethods {
         actions: effectiveActions(stored.policy, userId),
       }))
       .filter((access) => access.actions.length > 0);
-  }
-
-  async issueMemberKey(
-    tenantId: string,
-    userId: string,
-    opts: IssueMemberKeyOpts,
-  ): Promise<IssuedMemberKey> {
-    this.record('issueMemberKey', tenantId, userId);
-    if (!this.principalsOf(tenantId).has(userId)) throw new PrincipalNotFoundError(userId);
-    if (
-      this.keys.some(
-        (k) => k.tenantId === tenantId && k.userId === userId && k.keyName === opts.keyName,
-      )
-    ) {
-      throw new AccessKeyAlreadyExistsError();
-    }
-    const n = ++this.keySeq;
-    const key = {
-      tenantId,
-      userId,
-      keyName: opts.keyName,
-      id: `did:key:z${n}`,
-      accessKeyId: `did:key:z${n}`,
-    };
-    this.keys.push(key);
-    return {
-      id: key.id,
-      accessKeyId: key.accessKeyId,
-      accessKeySecret: `secret-${n}`,
-      createdAt: '2026-09-16T12:00:00.000Z',
-      principalId: userId,
-    };
   }
 
   private record(method: keyof IamMethods, tenantId: string, target: string): void {

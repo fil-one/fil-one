@@ -64,6 +64,7 @@ import {
   BucketConfigurationError,
   BucketNotEmptyError,
   BucketNotFoundError,
+  PrincipalNotFoundError,
 } from '../errors.ts';
 import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
 import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
@@ -565,6 +566,45 @@ describe('getBucket', () => {
       retentionDuration: 7,
       retentionDurationType: 'd',
     });
+  });
+});
+
+describe('issueAccessKey bound to a principal', () => {
+  const created = {
+    accessKeyId: 'did:key:z6Mk',
+    name: 'laptop',
+    principal: 'alice',
+    secretAccessKey: 'sk-secret',
+    createdAt: '2026-09-16T12:00:00Z',
+    expiresAt: null,
+  };
+
+  it('sends the principal-bound shape and returns the credential with its principal', async () => {
+    mockCreateAccessKey.mockResolvedValue(ok(created, 201));
+
+    await expect(
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' }),
+    ).resolves.toStrictEqual({
+      id: 'did:key:z6Mk',
+      accessKeyId: 'did:key:z6Mk',
+      accessKeySecret: 'sk-secret',
+      createdAt: '2026-09-16T12:00:00Z',
+      principalId: 'alice',
+    });
+    const { body } = mockCreateAccessKey.mock.calls[0]![0] as { body: Record<string, unknown> };
+    expect(body).toStrictEqual({ name: 'laptop', principalId: 'alice', expiresAt: null });
+  });
+
+  it('maps a duplicate name and an unknown principal to their errors', async () => {
+    mockCreateAccessKey.mockResolvedValueOnce(fail(409, 'name conflict'));
+    await expect(
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' }),
+    ).rejects.toBeInstanceOf(AccessKeyAlreadyExistsError);
+
+    mockCreateAccessKey.mockResolvedValueOnce(fail(422, 'unknown principal'));
+    await expect(
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' }),
+    ).rejects.toBeInstanceOf(PrincipalNotFoundError);
   });
 });
 
