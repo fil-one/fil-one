@@ -54,6 +54,12 @@ export const PERMISSIONS = [
   'keys.manage_own',
   /** List and revoke every key in the org. */
   'keys.manage_all',
+  /**
+   * Mint a service key on a region serving the `iam` access model: a key with
+   * its own permissions and bucket list that answers to no bucket policy. The
+   * creator-authority cap still bounds it.
+   */
+  'keys.create_service',
   /** Read the org's audit log. */
   'audit.view',
   /**
@@ -105,6 +111,7 @@ export const ROLE_PERMISSIONS: Record<OrgRole, readonly Permission[]> = Object.f
     'keys.create',
     'keys.manage_own',
     'keys.manage_all',
+    'keys.create_service',
     'audit.view',
     'audit.export',
     'privileged.grant',
@@ -124,6 +131,7 @@ export const ROLE_PERMISSIONS: Record<OrgRole, readonly Permission[]> = Object.f
     'keys.create',
     'keys.manage_own',
     'keys.manage_all',
+    'keys.create_service',
     'audit.view',
     'audit.export',
   ] as const),
