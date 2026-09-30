@@ -239,6 +239,11 @@ export const auroraOrchestrator = {
     keyOpts: IssueAccessKeyOpts,
     opts?: OrchestratorRequestOptions,
   ): Promise<IssuedAccessKey> {
+    if ('principalId' in keyOpts) {
+      throw new Error(
+        'Aurora serves scoped keys; a principal-bound key needs the iam access model',
+      );
+    }
     const key = await createAuroraAccessKey({
       tenantId,
       keyName: keyOpts.keyName,
