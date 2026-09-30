@@ -4,6 +4,7 @@ import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import {
   S3Client,
+  NoSuchBucket,
   CreateBucketCommand,
   DeleteBucketCommand,
   ListBucketsCommand,
@@ -695,19 +696,104 @@ describe('listBuckets on an iam region', () => {
   });
 });
 
+describe('getBucket on an iam region', () => {
+  const iamOrchestrator = buildOrchestrator({ accessModel: 'iam' });
+  const member = 'user-1';
+  const reaches = (...names: string[]) => ({
+    data: { buckets: names.map((name) => ({ name, actions: ['s3:ListBucket'] })) },
+    error: undefined,
+    response: { status: 200 },
+  });
+
+  beforeEach(() => {
+    stubS3Credentials();
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
+    s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
+  });
+
+  it('reads the bucket when the member reaches it', async () => {
+    mockGetPrincipalAccess.mockReturnValue(reaches('bucket-a'));
+
+    await expect(
+      iamOrchestrator.getBucket(tenantId, 'bucket-a', { actAs: member }),
+    ).resolves.toMatchObject({ bucketName: 'bucket-a' });
+    expect(mockGetPrincipalAccess).toHaveBeenCalledWith(
+      expect.objectContaining({ path: { tenantId, principalId: member } }),
+    );
+  });
+
+  it('answers null without touching S3 for a bucket the member cannot reach', async () => {
+    mockGetPrincipalAccess.mockReturnValue(reaches('other'));
+
+    // The tenant's key would answer for the bucket, so the refusal comes from
+    // the member's policies, and it reads exactly like a missing bucket.
+    await expect(
+      iamOrchestrator.getBucket(tenantId, 'bucket-a', { actAs: member }),
+    ).resolves.toBeNull();
+    expect(s3Mock.commandCalls(GetBucketVersioningCommand)).toHaveLength(0);
+  });
+
+  it('reads unscoped when no member is named', async () => {
+    await expect(iamOrchestrator.getBucket(tenantId, 'bucket-a')).resolves.toMatchObject({
+      bucketName: 'bucket-a',
+    });
+    expect(mockGetPrincipalAccess).not.toHaveBeenCalled();
+  });
+
+  it('rejects rather than reading when the access lookup fails', async () => {
+    mockGetPrincipalAccess.mockReturnValue(fail(503));
+
+    await expect(
+      iamOrchestrator.getBucket(tenantId, 'bucket-a', { actAs: member }),
+    ).rejects.toThrow();
+  });
+});
+
 describe('getBucket', () => {
   beforeEach(stubS3Credentials);
 
-  it('returns null when the bucket is not in the tenant listing', async () => {
-    s3Mock.on(ListBucketsCommand).resolves({ Buckets: [] });
+  const noSuchBucket = () =>
+    new NoSuchBucket({ message: 'The specified bucket does not exist', $metadata: {} });
+
+  it('proves existence without listing the tenant', async () => {
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
+    s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
+
+    await orchestrator.getBucket(tenantId, 'bucket-a');
+
+    // The listing answered for the tenant, so it said yes for a bucket the
+    // caller could not open, and cost a call per bucket to answer about one.
+    expect(s3Mock.commandCalls(ListBucketsCommand)).toHaveLength(0);
+  });
+
+  it('returns null when the versioning read says the bucket is not there', async () => {
+    s3Mock.on(GetBucketVersioningCommand).rejects(noSuchBucket());
+    s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
 
     await expect(orchestrator.getBucket(tenantId, 'missing')).resolves.toBeNull();
   });
 
-  it('returns details including object-lock state', async () => {
-    s3Mock.on(ListBucketsCommand).resolves({
-      Buckets: [{ Name: 'bucket-a', CreationDate: new Date('2026-01-01T00:00:00Z') }],
+  it('returns null when the object-lock read says the bucket is not there', async () => {
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
+    s3Mock.on(GetObjectLockConfigurationCommand).rejects(noSuchBucket());
+
+    await expect(orchestrator.getBucket(tenantId, 'missing')).resolves.toBeNull();
+  });
+
+  it('keeps object lock off for a bucket that simply has no configuration', async () => {
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
+    s3Mock
+      .on(GetObjectLockConfigurationCommand)
+      .rejects(
+        Object.assign(new Error('no config'), { name: 'ObjectLockConfigurationNotFoundError' }),
+      );
+
+    await expect(orchestrator.getBucket(tenantId, 'bucket-a')).resolves.toMatchObject({
+      objectLockEnabled: false,
     });
+  });
+
+  it('returns details including object-lock state', async () => {
     s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
     s3Mock.on(GetObjectLockConfigurationCommand).resolves({
       ObjectLockConfiguration: {
@@ -718,10 +804,11 @@ describe('getBucket', () => {
 
     const result = await orchestrator.getBucket(tenantId, 'bucket-a');
 
+    // No createdAt: S3 carries no creation date for a single bucket, and the
+    // listing that did carry one is gone.
     expect(result).toEqual({
       bucketName: 'bucket-a',
       region: S3Region.UsEast1,
-      createdAt: '2026-01-01T00:00:00.000Z',
       isPublic: false,
       versioning: true,
       encrypted: true,
@@ -1376,25 +1463,17 @@ describe('signal forwarding', () => {
     });
   });
 
-  it('getBucket forwards the signal to the list and both per-bucket reads', async () => {
-    s3Mock.on(ListBucketsCommand).resolves({
-      Buckets: [{ Name: 'b', CreationDate: new Date('2026-01-01T00:00:00Z') }],
-    });
+  it('getBucket forwards the signal to both per-bucket reads', async () => {
     s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
     s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
 
     await orchestrator.getBucket(tenantId, 'b', { signal });
 
     const sent = [
-      sendOptionsOf(s3Mock.commandCalls(ListBucketsCommand)),
       sendOptionsOf(s3Mock.commandCalls(GetBucketVersioningCommand)),
       sendOptionsOf(s3Mock.commandCalls(GetObjectLockConfigurationCommand)),
     ];
-    expect(sent).toEqual([
-      { abortSignal: signal },
-      { abortSignal: signal },
-      { abortSignal: signal },
-    ]);
+    expect(sent).toEqual([{ abortSignal: signal }, { abortSignal: signal }]);
   });
 
   it('createBucket forwards the signal to CreateBucket and both configuration calls', async () => {
