@@ -226,12 +226,42 @@ describe('useAccessKeyForm — on a region serving the iam access model', () => 
       });
 
       expect(result.current.iam).toBe(true);
+      expect(result.current.principal).toBe(true);
       expect(result.current.canSubmit).toBe(true);
       expect(result.current.payload).toStrictEqual({
         keyName: 'laptop',
         region: S3_REGION,
         expiresAt: null,
       });
+    } finally {
+      mockIsIam.mockReturnValue(false);
+    }
+  });
+
+  it('sends the scoped-key shape once a service key is chosen, and needs its permissions', () => {
+    mockIsIam.mockReturnValue(true);
+    try {
+      const { result } = renderForm();
+      act(() => {
+        result.current.setKeyName('nightly-backup');
+        result.current.setServiceKey(true);
+      });
+
+      expect(result.current.principal).toBe(false);
+      expect(result.current.payload).toMatchObject({
+        keyName: 'nightly-backup',
+        permissions: expect.arrayContaining(['read', 'write', 'list']),
+        bucketScope: 'all',
+        region: S3_REGION,
+      });
+      expect(result.current.canSubmit).toBe(true);
+
+      act(() => result.current.setPermissions([]));
+      expect(result.current.canSubmit).toBe(false);
+
+      // Back to a key bound to the caller: no permissions needed again.
+      act(() => result.current.setServiceKey(false));
+      expect(result.current.canSubmit).toBe(true);
     } finally {
       mockIsIam.mockReturnValue(false);
     }
