@@ -19,7 +19,7 @@ import {
   ensureTenantReady as ensureManagementTenantReady,
   type TenantSetupDeps,
 } from './tenant-setup.ts';
-import { buildPermissions } from './permissions.ts';
+import { accessKeyBody } from './access-key-body.ts';
 import { buildIamMethods } from './iam.ts';
 import { extractApiMessage } from './api-message.ts';
 import {
@@ -27,6 +27,7 @@ import {
   AccessKeyValidationError,
   BucketConfigurationError,
   BucketNotFoundError,
+  PrincipalNotFoundError,
 } from '../errors.ts';
 import type {
   BucketDetails,
@@ -71,7 +72,6 @@ import {
   postTenantsByTenantIdAccessKeys,
   postTenantsByTenantIdStatus,
   type Client,
-  type CreateAccessKeyRequest,
   type Metrics,
 } from '@filone/orchestrator-client';
 import { instrumentClient } from './metrics.ts';
@@ -383,36 +383,35 @@ abstract class FilOneOrchestrator implements OrchestratorCore {
     keyOpts: IssueAccessKeyOpts,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<IssuedAccessKey> {
-    const permissions = buildPermissions(keyOpts.permissions, keyOpts.granularPermissions);
-    const buckets = keyOpts.buckets ?? [];
-
+    const body = accessKeyBody(keyOpts);
     console.log(
-      `Creating ${this.id} access key "${keyOpts.keyName}" for tenant ${tenantId} with permissions ` +
-        `[${permissions.join(', ')}] and bucket scopes [${buckets.join(', ')}]`,
+      `Creating ${this.id} access key "${body.name}" for tenant ${tenantId} ` +
+        (body.principalId
+          ? `bound to principal "${body.principalId}"`
+          : `with permissions [${body.permissions?.join(', ')}] and bucket scopes [${body.buckets?.join(', ')}]`),
     );
 
     const { data, error, response } = await postTenantsByTenantIdAccessKeys({
       client: this.client,
       path: { tenantId },
-      body: {
-        name: keyOpts.keyName,
-        // buildPermissions only emits actions from the contract's enum.
-        permissions: permissions as CreateAccessKeyRequest['permissions'],
-        buckets,
-        expiresAt: keyOpts.expiresAt ?? null,
-      },
+      body,
       throwOnError: false,
       ...requestOptions,
     });
 
     if (error || !data) {
+      const message = extractApiMessage(error);
       if (response?.status === 409) {
         throw new AccessKeyAlreadyExistsError({ cause: error });
       }
+      // A 422 naming the principal is one the storage system does not have; any
+      // other 422 is a name or expiry it will not accept.
+      if (body.principalId && response?.status === 422 && /principal/i.test(message ?? '')) {
+        throw new PrincipalNotFoundError(body.principalId, { cause: error });
+      }
       if (response?.status === 400 || response?.status === 422) {
         throw new AccessKeyValidationError(
-          extractApiMessage(error) ??
-            'Invalid access key request. Check the key name and try again.',
+          message ?? 'Invalid access key request. Check the key name and try again.',
           { cause: error },
         );
       }
@@ -422,12 +421,14 @@ abstract class FilOneOrchestrator implements OrchestratorCore {
       );
     }
 
+    const principalId = data.principal ?? body.principalId;
     return {
       // The contract has no identifier separate from the accessKeyId.
       id: data.accessKeyId,
       accessKeyId: data.accessKeyId,
       accessKeySecret: data.secretAccessKey,
       createdAt: data.createdAt,
+      ...(principalId ? { principalId } : {}),
     };
   }
 
