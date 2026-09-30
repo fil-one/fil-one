@@ -154,7 +154,7 @@ describe('SidebarNav e2e selector uniqueness (desktop + drawer mounted)', () => 
     // panel to `document.body` rather than rendering it inside RTL's own
     // `container` — `screen`, which queries the whole document, is what finds
     // it; `container.querySelectorAll` never will, open or not.
-    expect(screen.getAllByText('Log out')).toHaveLength(1);
+    expect(document.querySelectorAll('#user-menu-logout-button')).toHaveLength(1);
   });
 });
 

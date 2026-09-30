@@ -85,16 +85,16 @@ export function UserMenu({ src, initial, displayName, collapsed, testId }: UserM
           <ArrowUpRightIcon size={12} className="ml-auto flex-shrink-0 text-zinc-400" />
         </MenuItem>
         <div className="my-1 border-t border-zinc-100" />
-        <MenuItem>
-          <button
-            type="button"
-            id="user-menu-logout-button"
-            onClick={logout}
-            className={itemClassName}
-          >
-            <SignOutIcon size={13} className="flex-shrink-0 text-zinc-400" />
-            Log out
-          </button>
+        {/* The MenuItem is the button: wrapping one, it replaces the child's id with its own. */}
+        <MenuItem
+          as="button"
+          type="button"
+          id="user-menu-logout-button"
+          onClick={logout}
+          className={itemClassName}
+        >
+          <SignOutIcon size={13} className="flex-shrink-0 text-zinc-400" />
+          Log out
         </MenuItem>
       </MenuItems>
     </Menu>
