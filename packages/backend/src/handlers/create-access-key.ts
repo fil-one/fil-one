@@ -3,6 +3,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import {
   CreateAccessKeySchema,
+  CreatePrincipalAccessKeySchema,
   S3Region,
   excessKeyPermissions,
   isSupportedRegion,
@@ -10,6 +11,7 @@ import {
 import type {
   CreateAccessKeyRequest,
   CreateAccessKeyResponse,
+  CreatePrincipalAccessKeyRequest,
   ErrorResponse,
 } from '@filone/shared';
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
@@ -25,7 +27,6 @@ import {
 } from '../lib/key-mint.ts';
 import type { KeyMinter, MintedKey } from '../lib/key-mint.ts';
 import { listOrgAccessKeys } from '../lib/member-keys.ts';
-import { mintPrincipalKey, principalKeyOrchestrator } from '../lib/mint-principal-key.ts';
 import type { AuditCorrelation } from '../lib/audit.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
@@ -43,7 +44,11 @@ import type { AccessKeyRecord } from '../lib/dynamo-records.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
-import { authorize, requireOrgMembershipMiddleware } from '../middleware/authorize.ts';
+import {
+  authorize,
+  requireOrgMembershipMiddleware,
+  requirePermission,
+} from '../middleware/authorize.ts';
 import { csrfMiddleware } from '../middleware/csrf.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
@@ -53,25 +58,15 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  // A region serving the `iam` access model mints a key bound to the caller's
-  // principal, which takes a different body and no creator-authority cap.
-  const iamOrchestrator = principalKeyOrchestrator(event.body);
-  if (iamOrchestrator) return mintPrincipalKey(event, iamOrchestrator);
-
-  const parsed = parseJsonBody(event.body, CreateAccessKeySchema);
+  const parsed = parseCreateRequest(event.body);
   if ('error' in parsed) return parsed.error;
 
-  const { keyName, permissions, granularPermissions, bucketScope, region } = parsed.data;
-  const buckets = bucketScope === 'specific' ? (parsed.data.buckets ?? []) : undefined;
-  const expiresAt = parsed.data.expiresAt ?? null;
-
-  const denied = checkCreatorAuthority(event, parsed.data);
-  if (denied) return denied;
-
+  const { keyName, region } = parsed.data;
   const { orgId, userId } = getUserInfo(event);
-  // What the cap above admitted. The key row's write asserts the role on file
-  // can still grant it, and the read after that write asks again.
-  const creator = { orgId, userId, key: { permissions, granularPermissions } };
+  const key = requestedKey(parsed.data, userId);
+  // What the cap admits. The key row's write asserts the role on file can
+  // still grant it, and the read after that write asks again.
+  const creator: KeyMinter = { orgId, userId, key: key.minterKey };
   const creatorEmail = getVerifiedEmail(event);
   const attribution = keyAttribution({ userId, creatorEmail });
   const actor = userActor({ userId, email: creatorEmail });
@@ -85,6 +80,8 @@ export async function baseHandler(
   if (await isOrgDeleting(orgId, { consistent: true })) return accountDeletedResponse();
 
   const orchestrator = getOrchestratorForRegion(region);
+  const denied = key.service && serviceKeyRefusal(event, key.service, orchestrator);
+  if (denied) return denied;
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
 
@@ -110,13 +107,7 @@ export async function baseHandler(
 
   let accessKey: IssuedAccessKey;
   try {
-    accessKey = await orchestrator.issueAccessKey(tenantId, {
-      keyName,
-      permissions,
-      granularPermissions,
-      buckets,
-      expiresAt,
-    });
+    accessKey = await issueRequestedKey(orchestrator, tenantId, key);
   } catch (err) {
     return await handleMintRefusal(err, {
       orgId,
@@ -127,6 +118,9 @@ export async function baseHandler(
       attribution,
       mint,
       creator,
+      // A principal-bound key's name is unique only within its principal, so a
+      // duplicate is a duplicate and there is no orphan to recover by name.
+      recoverByName: Boolean(key.service),
     });
   }
 
@@ -148,8 +142,7 @@ export async function baseHandler(
       createdAt: accessKey.createdAt,
       status: 'active',
       region,
-      permissions,
-      ...optionalKeyAttributes({ granularPermissions, bucketScope, buckets, expiresAt }),
+      ...key.rowFields(accessKey),
       ...attribution,
     },
     mint,
@@ -173,8 +166,110 @@ export async function baseHandler(
       accessKeyId: accessKey.accessKeyId,
       secretAccessKey: accessKey.accessKeySecret,
       createdAt: accessKey.createdAt,
+      ...(accessKey.principalId ? { principalId: accessKey.principalId } : {}),
     })
     .build();
+}
+
+type CreateRequest = CreateAccessKeyRequest | CreatePrincipalAccessKeyRequest;
+
+/**
+ * What one request asks for, by its shape: the mint, the cap the row asserts,
+ * and what the row keeps. A service key carries its permissions and buckets; a
+ * key bound to the caller's principal carries nothing of its own and takes no
+ * cap, since what it may do is whatever the bucket policies give the member.
+ */
+function requestedKey(data: CreateRequest, userId: string) {
+  const expiresAt = data.expiresAt ?? null;
+  if (!('permissions' in data)) {
+    return {
+      service: undefined,
+      opts: { keyName: data.keyName, principalId: userId, expiresAt },
+      minterKey: { principalId: userId },
+      rowFields: (issued: IssuedAccessKey) => ({
+        principalId: issued.principalId ?? userId,
+        ...optionalKeyAttributes({ expiresAt }),
+      }),
+    };
+  }
+  const { keyName, permissions, granularPermissions, bucketScope } = data;
+  const buckets = bucketScope === 'specific' ? (data.buckets ?? []) : undefined;
+  return {
+    service: data,
+    opts: { keyName, permissions, granularPermissions, buckets, expiresAt },
+    minterKey: { permissions, granularPermissions },
+    rowFields: () => ({
+      permissions,
+      ...optionalKeyAttributes({ granularPermissions, bucketScope, buckets, expiresAt }),
+    }),
+  };
+}
+
+/**
+ * The two checks a service key answers to before anything is written: the
+ * creator-authority cap, and on a region serving the `iam` access model its own
+ * permission, because such a key answers to no bucket policy.
+ */
+function serviceKeyRefusal(
+  event: AuthenticatedEvent,
+  request: CreateAccessKeyRequest,
+  orchestrator: ServiceOrchestrator,
+): APIGatewayProxyStructuredResultV2 | undefined {
+  const denied = checkCreatorAuthority(event, request);
+  if (denied || orchestrator.accessModel !== 'iam') return denied;
+  return requirePermission(
+    event,
+    'keys.create_service',
+    'Only an Owner or an Admin can create a service key on this region.',
+  );
+}
+
+/**
+ * The mint. A key bound to a principal syncs the principal first: the write is
+ * idempotent, a member invited after tenant setup may not be a principal yet,
+ * and a later key revives a removed one.
+ */
+async function issueRequestedKey(
+  orchestrator: ServiceOrchestrator,
+  tenantId: string,
+  key: ReturnType<typeof requestedKey>,
+): Promise<IssuedAccessKey> {
+  if (!key.service && orchestrator.accessModel === 'iam') {
+    await orchestrator.iam.syncMember(tenantId, key.opts.principalId);
+  }
+  return orchestrator.issueAccessKey(tenantId, key.opts);
+}
+
+/**
+ * The request in the shape the region and the body decide: on a region serving
+ * the `iam` access model a body with no `permissions` asks for a key bound to
+ * the caller's principal, and everything else is the service-key shape. The
+ * raw body is read ahead of validation because the two shapes have different
+ * schemas; a body that is not JSON, or names no supported region, is left to
+ * the service-key schema, which answers the 400.
+ */
+function parseCreateRequest(
+  rawBody: string | undefined,
+): { data: CreateRequest } | { error: APIGatewayProxyStructuredResultV2 } {
+  return asksForPrincipalKey(rawBody)
+    ? parseJsonBody(rawBody, CreatePrincipalAccessKeySchema)
+    : parseJsonBody(rawBody, CreateAccessKeySchema);
+}
+
+function asksForPrincipalKey(rawBody: string | undefined): boolean {
+  try {
+    const body = JSON.parse(rawBody ?? '{}') as { region?: unknown; permissions?: unknown };
+    if (body.permissions !== undefined) return false;
+    if (
+      typeof body.region !== 'string' ||
+      !isSupportedRegion(body.region, process.env.FILONE_STAGE!)
+    ) {
+      return false;
+    }
+    return getOrchestratorForRegion(body.region).accessModel === 'iam';
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -233,7 +328,8 @@ async function handleMintRefusal(
   attempt: MintAttempt,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   if (err instanceof AccessKeyAlreadyExistsError) {
-    await recoverDuplicateKey(attempt);
+    if (attempt.recoverByName) await recoverDuplicateKey(attempt);
+    else await attempt.mint.complete({ outcome: 'failed' });
     return duplicateKeyNameResponse();
   }
   if (err instanceof AccessKeyValidationError) {
@@ -281,6 +377,8 @@ interface MintAttempt {
   /** The intent this attempt already wrote — every exit here closes it. */
   mint: AuditCorrelation<'key.created'>;
   creator: KeyMinter;
+  /** Whether a duplicate name may be an orphan of an earlier attempt. */
+  recoverByName: boolean;
 }
 
 async function recoverDuplicateKey({
