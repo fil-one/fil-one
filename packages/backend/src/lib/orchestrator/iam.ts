@@ -9,25 +9,16 @@ import {
   deleteTenantsByTenantIdPrincipalsByPrincipalId,
   getTenantsByTenantIdPrincipalsByPrincipalIdAccess,
   getTenantsByTenantIdPrincipalsByPrincipalIdPolicies,
-  postTenantsByTenantIdAccessKeys,
   putTenantsByTenantIdPrincipalsByPrincipalId,
   type Client,
 } from '@filone/orchestrator-client';
 import {
-  AccessKeyAlreadyExistsError,
-  AccessKeyValidationError,
   PolicyConflictError,
   PolicyPublishError,
   PolicyValidationError,
   PrincipalNotFoundError,
 } from '../errors.ts';
-import type {
-  IamMethods,
-  IssueMemberKeyOpts,
-  IssuedMemberKey,
-  MemberPolicy,
-  StoredBucketPolicy,
-} from '../iam-orchestrator.ts';
+import type { IamMethods, MemberPolicy, StoredBucketPolicy } from '../iam-orchestrator.ts';
 import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
 import { deleteBucketPolicy, getBucketPolicy, putBucketPolicy } from '../s3-bucket-operations.ts';
 import { createS3Client, type S3ClientContext } from '../s3-client.ts';
@@ -112,7 +103,6 @@ export function buildIamMethods(
   return {
     ...buildPrincipalMethods(ctx),
     ...buildPolicyMethods(ctx),
-    issueMemberKey: (tenantId, userId, opts) => issueMemberKey(ctx, tenantId, userId, opts),
   };
 }
 
@@ -224,60 +214,4 @@ function buildPolicyMethods(
       await withWriteRetry(() => deleteBucketPolicy(s3, bucketName, precondition));
     },
   };
-}
-
-async function issueMemberKey(
-  ctx: IamContext,
-  tenantId: string,
-  userId: string,
-  opts: IssueMemberKeyOpts,
-): Promise<IssuedMemberKey> {
-  const result = await postTenantsByTenantIdAccessKeys({
-    client: ctx.client,
-    path: { tenantId },
-    body: { name: opts.keyName, principalId: userId, expiresAt: opts.expiresAt ?? null },
-    throwOnError: false,
-  });
-  if (result.error || !result.data) {
-    throw memberKeyFailure(
-      result,
-      userId,
-      failed(ctx, `create a key for principal "${userId}"`, tenantId),
-    );
-  }
-  return {
-    id: result.data.accessKeyId,
-    accessKeyId: result.data.accessKeyId,
-    accessKeySecret: result.data.secretAccessKey,
-    createdAt: result.data.createdAt,
-    principalId: result.data.principal ?? userId,
-  };
-}
-
-/**
- * A refused principal-bound key. A 422 is one of two things the storage system
- * spells out in its message: a principal it does not have, or a name or expiry
- * it will not accept.
- */
-function memberKeyFailure(
-  result: SdkResult<unknown>,
-  principalId: string,
-  fallback: string,
-): Error {
-  const cause = result.error;
-  switch (result.response?.status) {
-    case 409:
-      return new AccessKeyAlreadyExistsError({ cause });
-    case 422: {
-      const message = extractApiMessage(cause);
-      return /principal/i.test(message ?? '')
-        ? new PrincipalNotFoundError(principalId, { cause })
-        : new AccessKeyValidationError(
-            message ?? 'Invalid access key request. Check the key name and try again.',
-            { cause },
-          );
-    }
-    default:
-      return new Error(fallback, { cause });
-  }
 }
