@@ -74,10 +74,13 @@ production region. This half is built and merged.
 
 ### IAM (Forge)
 
-Each member is a principal. Bucket policies are the only thing that grants
-access. A key belongs to a member and carries whatever the policies give that
-member, evaluated per request. The role decides who may edit a policy and what
-may go into a statement; it never crosses the interface. Until Hilt ships the
+Each member is a principal. Bucket policies are the only thing that grants a
+principal access. A key belongs to a member and carries whatever the policies
+give that member, evaluated per request. An Owner or Admin may also mint a
+service key from the console: it carries its own permissions and bucket list,
+answers to no policy, and the creator cap bounds it as on a scoped-key region.
+The role decides who may edit a policy and what may go into a statement; it
+never crosses the interface. Until Hilt ships the
 contract a Forge region declares `scoped-keys` and behaves as FTH does, which is
 what its integration does today.
 
@@ -137,8 +140,9 @@ policy. A Deny naming every member locks the whole org out of a bucket until an
 Owner removes it.
 
 Owners and Admins edit policies, through a new `buckets.policy_manage`
-permission. Those are the two roles `members.manage` already sits at, so nobody
-gains or loses an ability the day it ships. Reading a policy takes the same
+permission, and mint service keys through a new `keys.create_service`. Those
+are the two roles `members.manage` already sits at, so nobody gains or loses an
+ability the day it ships. Reading a policy takes the same
 permission; a scoped member learns their reach from the bucket list and the key
 form's preview.
 
@@ -257,7 +261,7 @@ The IAM arm is shaped after AWS IAM, minus its request bodies:
 | `getBucketPolicy`, `putBucketPolicy`, `deleteBucketPolicy` | bucket-addressed; the write carries the token the read returned                          |
 | `listBucketPoliciesForMember(tenantId, userId)`            | the member detail view                                                                   |
 | `resolveMemberAccess(tenantId, userId)`                    | per-bucket permissions, for every route that acts for a scoped member                    |
-| `issueMemberKey(tenantId, userId, opts)`                   | a key bound to a principal, with a name and expiry only; what the key forms mint         |
+| `issueAccessKey(tenantId, opts)`                           | on the core, either shape: a service key with permissions and buckets, or `principalId` with a name and expiry |
 | `listAccessKeys(tenantId, opts)`                           | identity fields plus each key's principal; access is read per principal                  |
 
 A vendor that grows principals and policies moves its region to `iam` by
@@ -535,10 +539,10 @@ second name.
 **Prefix scope** inside a bucket (FIL-1018) fits the statement shape directly
 and is Forge-only.
 
-**Narrow service credentials.** A member-bound key carries the member's whole
-access, so a read-only credential for one application has no home on an IAM
-region. AWS's answer is a user per workload, and the PRD puts service accounts
-out of scope.
+**Service credentials per workload.** A service key is bounded by its
+creator's role and its bucket list, and answers to no policy. A credential
+scoped to one application's exact needs would take a user per workload, which
+is AWS's answer and which the PRD puts out of scope.
 
 **Bucket lifecycle observation.** Key-mediated bucket creation and deletion stay
 unobserved, because no management API exposes which key acted. The
