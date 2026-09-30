@@ -46,6 +46,8 @@ const iamOrchestrator = {
   accessModel: 'iam',
   iam: iamFake,
   ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
+  issueAccessKey: (...args: unknown[]) => mockIssueAccessKey(...args),
+  findAccessKeyByName: (...args: unknown[]) => mockFindAccessKeyByName(...args),
   deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
 };
 
@@ -1259,9 +1261,11 @@ describe('create-access-key baseHandler', () => {
 
     beforeEach(() => {
       iamFake.principals.clear();
-      iamFake.keys.length = 0;
       iamFake.calls.length = 0;
       mockEnsureTenantReady.mockResolvedValue('tenant-9');
+      mockIssueAccessKey.mockImplementation((_tenantId: string, opts: { principalId?: string }) =>
+        Promise.resolve({ ...issuedAccessKey(), principalId: opts.principalId }),
+      );
       // The org shows no key under this name yet.
       ddbMock.on(QueryCommand).resolves({ Items: [] });
       stubWrites();
@@ -1274,16 +1278,12 @@ describe('create-access-key baseHandler', () => {
       const body = JSON.parse(result.body!);
       expect(body).toMatchObject({ keyName: 'laptop', principalId: 'user-1' });
       expect(body.secretAccessKey).toBeDefined();
-      expect(iamFake.calls.map((call) => call.method)).toStrictEqual([
-        'syncMember',
-        'issueMemberKey',
-      ]);
-      expect(iamFake.keys[0]).toMatchObject({
-        tenantId: 'tenant-9',
-        userId: 'user-1',
+      expect(iamFake.calls.map((call) => call.method)).toStrictEqual(['syncMember']);
+      expect(mockIssueAccessKey).toHaveBeenCalledWith('tenant-9', {
         keyName: 'laptop',
+        principalId: 'user-1',
+        expiresAt: null,
       });
-      expect(mockIssueAccessKey).not.toHaveBeenCalled();
     });
 
     it('records the principal on the row and no permission set or bucket scope', async () => {
@@ -1309,13 +1309,89 @@ describe('create-access-key baseHandler', () => {
       expect(result.statusCode).toBe(201);
     });
 
-    it('refuses the scoped-key body shape on an iam region', async () => {
-      const result = await baseHandler(
-        buildEvent({ body: principalBody({ permissions: ['read'] }), userInfo: USER_INFO }),
-      );
+    it('answers 409 for a duplicate name without recovering by name', async () => {
+      mockIssueAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
 
-      expect(result.statusCode).toBe(400);
-      expect(iamFake.calls).toHaveLength(0);
+      const result = await baseHandler(buildEvent({ body: principalBody(), userInfo: USER_INFO }));
+
+      // The name is unique only within the principal, so a duplicate names no
+      // orphan of an earlier attempt; the intent closes as the refusal it was.
+      expect(result.statusCode).toBe(409);
+      expect(mockFindAccessKeyByName).not.toHaveBeenCalled();
+      expect(standaloneEvents().map((event) => event.phase)).toStrictEqual([
+        'intent',
+        'completion',
+      ]);
+    });
+
+    describe('a service key, when the body carries permissions', () => {
+      const serviceBody = (overrides: Record<string, unknown> = {}) =>
+        principalBody({
+          permissions: ['read', 'list'],
+          bucketScope: 'specific',
+          buckets: ['photos'],
+          ...overrides,
+        });
+
+      it('mints a key with its own permissions and buckets for an Owner', async () => {
+        const result = await baseHandler(buildEvent({ body: serviceBody(), userInfo: USER_INFO }));
+
+        expect(result.statusCode).toBe(201);
+        expect(JSON.parse(result.body!)).not.toHaveProperty('principalId');
+        // Nothing about the principal: no sync, and no binding on the mint.
+        expect(iamFake.calls).toHaveLength(0);
+        expect(mockIssueAccessKey).toHaveBeenCalledWith('tenant-9', {
+          keyName: 'laptop',
+          permissions: ['read', 'list'],
+          granularPermissions: undefined,
+          buckets: ['photos'],
+          expiresAt: null,
+        });
+        expect(keyRowWritten()).toMatchObject({
+          permissions: ['read', 'list'],
+          bucketScope: 'specific',
+          buckets: ['photos'],
+        });
+        expect(keyRowWritten()).not.toHaveProperty('principalId');
+      });
+
+      it('refuses a Member, who holds keys.create but not keys.create_service', async () => {
+        stubWrites(OrgRole.Member);
+
+        const result = await baseHandler(
+          buildEvent({
+            body: serviceBody(),
+            userInfo: {
+              ...USER_INFO,
+              membership: membershipFor('org-1', 'user-1', OrgRole.Member),
+            },
+          }),
+        );
+
+        expect(result.statusCode).toBe(403);
+        expect(mockIssueAccessKey).not.toHaveBeenCalled();
+        expect(intentEvents()).toHaveLength(0);
+      });
+
+      it('still caps the key at the creator: an Admin cannot name a retention write', async () => {
+        stubWrites(OrgRole.Admin);
+
+        const result = await baseHandler(
+          buildEvent({
+            body: serviceBody({
+              permissions: ['read', 'write', 'list'],
+              granularPermissions: ['PutObjectRetention'],
+            }),
+            userInfo: {
+              ...USER_INFO,
+              membership: membershipFor('org-1', 'user-1', OrgRole.Admin),
+            },
+          }),
+        );
+
+        expect(result.statusCode).toBe(403);
+        expect(mockIssueAccessKey).not.toHaveBeenCalled();
+      });
     });
 
     it('refuses a name the org already shows in the region, before the vendor', async () => {
