@@ -273,7 +273,9 @@ describe('activate-subscription baseHandler', () => {
     });
     await baseHandler(event);
 
-    expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith('org-1', 'active');
+    expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith('org-1', 'active', {
+      signal: expect.any(AbortSignal),
+    });
   });
 
   it('attaches payment method before ending trial to prevent cancellation', async () => {

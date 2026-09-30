@@ -447,7 +447,7 @@ describe('signal forwarding', () => {
     ]);
   });
 
-  it('passes the caller signal to the rollback DELETE when the pointer write is refused', async () => {
+  it('gives the rollback DELETE a signal of its own when the pointer write is refused', async () => {
     stubHappyPath();
     ddbMock.on(UpdateItemCommand).rejects(
       new ConditionalCheckFailedException({
@@ -459,8 +459,12 @@ describe('signal forwarding', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     try {
+      // Not the caller's: the setup that reached this refusal may have spent
+      // it, and the DELETE is what stops the tenant being orphaned.
       await ensureTenantReady(deps, orgId, { signal }).catch(() => {});
-      expect(mockDeleteTenant).toHaveBeenCalledWith(expect.objectContaining({ signal }));
+      expect(mockDeleteTenant).toHaveBeenCalledWith(
+        expect.objectContaining({ signal: expect.not.objectContaining({ aborted: true }) }),
+      );
     } finally {
       warn.mockRestore();
     }

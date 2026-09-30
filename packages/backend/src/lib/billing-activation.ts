@@ -5,6 +5,7 @@ import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
 } from './region-helpers.ts';
+import { ORCHESTRATOR_REQUEST_TIMEOUT_MS } from './service-orchestrator.ts';
 import { updateSubscription, type SubscriptionOwner } from './subscription-store.ts';
 
 export async function saveBillingRecord(
@@ -58,7 +59,12 @@ export async function saveBillingRecord(
 // has none there, so this is a no-op for orchestrators the org never used.
 export async function unlockAllProvisionedRegions(orgId: string): Promise<void> {
   try {
-    assertRegionSyncSucceeded(await syncTenantStatusInProvisionedRegions(orgId, 'active'));
+    assertRegionSyncSucceeded(
+      await syncTenantStatusInProvisionedRegions(orgId, 'active', {
+        // Called from activate-subscription, a 10 s route.
+        signal: AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS),
+      }),
+    );
     console.log('[billing-activation] Tenant unlocked', { orgId });
   } catch (error) {
     console.error('[billing-activation] Failed to unlock tenant', {

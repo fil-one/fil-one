@@ -4,6 +4,7 @@ import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
 } from '../lib/region-helpers.ts';
+import { ORCHESTRATOR_JOB_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
 import { scanSubscriptions, updateSubscriptionByUser } from '../lib/subscription-store.ts';
 
 type Action = 'cancel' | 'write_lock';
@@ -110,7 +111,9 @@ async function scanGracePeriodCandidates(nowMs: number): Promise<Candidate[]> {
 // cancel proceeds).
 async function cancelSubscriptionAndDisableTenant(candidate: Candidate, now: Date): Promise<void> {
   assertRegionSyncSucceeded(
-    await syncTenantStatusInProvisionedRegions(candidate.orgId, 'disabled'),
+    await syncTenantStatusInProvisionedRegions(candidate.orgId, 'disabled', {
+      signal: AbortSignal.timeout(ORCHESTRATOR_JOB_TIMEOUT_MS),
+    }),
   );
   // Transition DynamoDB status to canceled, on both keys — a cancel that
   // reached only the row this scan happened to pick would leave the twin in
@@ -135,7 +138,11 @@ async function cancelSubscriptionAndDisableTenant(candidate: Candidate, now: Dat
 // lock calls are skipped and a tenant that is already `disabled` is never
 // downgraded back to `write-locked`.
 async function ensureTenantWriteLocked(candidate: Candidate): Promise<CandidateOutcome> {
-  const outcomes = await syncTenantStatusInProvisionedRegions(candidate.orgId, 'write-locked');
+  // One budget per candidate, as the rest of this cron does: it is what a hung
+  // tenant costs before the loop moves on to the next org.
+  const outcomes = await syncTenantStatusInProvisionedRegions(candidate.orgId, 'write-locked', {
+    signal: AbortSignal.timeout(ORCHESTRATOR_JOB_TIMEOUT_MS),
+  });
 
   if (outcomes.length === 0) {
     console.warn('[grace-period-enforcer] No ready tenant on any orchestrator, skipping', {

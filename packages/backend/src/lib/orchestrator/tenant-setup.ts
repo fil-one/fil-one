@@ -17,7 +17,7 @@ import { Resource } from 'sst';
 import { getDynamoClient } from '../ddb-client.ts';
 import { OrgDeletingError } from '../org-profile.ts';
 import { resolveRefusedTenantWrite } from '../tenant-setup-fence.ts';
-import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
+import { cleanupDeadline, type OrchestratorRequestOptions } from '../service-orchestrator.ts';
 import {
   deleteTenantsByTenantId,
   deleteTenantsByTenantIdAccessKeysByAccessKeyId,
@@ -72,8 +72,8 @@ export interface TenantSetupDeps {
 // handler can return the standard 503 tenant-not-ready response. Setup
 // resumes from whatever step is next on the user's retry.
 // `requestOptions.signal` bounds every upstream call the setup makes: the
-// Management API calls (including the rollback delete) and the DynamoDB and
-// SSM reads and writes.
+// Management API calls and the DynamoDB and SSM reads and writes. The rollback
+// delete is the exception and mints its own deadline.
 export async function ensureTenantReady(
   deps: TenantSetupDeps,
   orgId: string,
@@ -182,11 +182,16 @@ async function processTenantSetup(
       tenantId: orgId,
       err,
       deleteTenant: async () => {
+        // Its own deadline, not the caller's. The refusal this undoes is a
+        // profile row that has entered deletion, and the setup that reached it
+        // may have spent the caller's budget getting here — the generated
+        // client would then refuse to issue the DELETE and leave the tenant it
+        // just provisioned, credentials and all, with nothing pointing at it.
         const { error } = await deleteTenantsByTenantId({
           client,
           path: { tenantId: orgId },
           throwOnError: false,
-          ...requestOptions,
+          signal: cleanupDeadline(),
         });
         if (error) throw new Error(`Failed to delete tenant ${orgId}`, { cause: error });
       },

@@ -4,6 +4,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { BucketRagEnablementResponse, ErrorResponse } from '@filone/shared';
 import { S3_REGION, isSupportedRegion } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import { ORCHESTRATOR_REQUEST_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import {
   ResponseBuilder,
@@ -51,7 +52,9 @@ export async function baseHandler(
   if (!tenantId) return tenantNotReadyResponse();
 
   // Enforce tenant/org scope: a bucket the caller's tenant does not own is 404.
-  const bucket = await orchestrator.getBucket(tenantId, bucketName);
+  const bucket = await orchestrator.getBucket(tenantId, bucketName, {
+    signal: AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS),
+  });
   if (!bucket) {
     return new ResponseBuilder()
       .status(404)

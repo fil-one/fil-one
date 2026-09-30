@@ -180,6 +180,7 @@ describe('usage-reporting-worker', () => {
     expect(mockGetTenantUsageMetrics).toHaveBeenCalledWith(
       'aurora-tenant-123',
       expect.objectContaining({ interval: '1d' }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(mockGetTenantUsageMetrics).not.toHaveBeenCalledWith('org-1', expect.anything());
   });
@@ -319,6 +320,7 @@ describe('usage-reporting-worker', () => {
       expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith(
         'aurora-tenant-123',
         'write-locked',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
       expect(item.lockAction).toEqual({ S: 'write-locked' });
@@ -332,7 +334,11 @@ describe('usage-reporting-worker', () => {
 
       await handler(trialPayload);
 
-      expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith('aurora-tenant-123', 'disabled');
+      expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith(
+        'aurora-tenant-123',
+        'disabled',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
       expect(item.lockAction).toEqual({ S: 'disabled' });
     });
@@ -345,7 +351,11 @@ describe('usage-reporting-worker', () => {
 
       await handler(trialPayload);
 
-      expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith('aurora-tenant-123', 'disabled');
+      expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith(
+        'aurora-tenant-123',
+        'disabled',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
       expect(item.lockAction).toEqual({ S: 'disabled' });
     });
@@ -652,6 +662,7 @@ describe('usage-reporting-worker', () => {
       expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith(
         'aurora-tenant-123',
         'write-locked',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
       expect(auditItem()).toEqual(
         expect.objectContaining({
@@ -982,7 +993,10 @@ describe('usage-reporting-worker', () => {
 
       await handler(fthOnlyPayload);
 
-      expect(mockFthGetTenantStatus).toHaveBeenCalledWith('fth-client-9');
+      expect(mockFthGetTenantStatus).toHaveBeenCalledWith(
+        'fth-client-9',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
       expect(mockFthUpdateTenantStatus).not.toHaveBeenCalled();
 
       // Stripe meter must still be emitted
@@ -1009,7 +1023,11 @@ describe('usage-reporting-worker', () => {
 
       await handler(fthOnlyPayload);
 
-      expect(mockFthUpdateTenantStatus).toHaveBeenCalledWith('fth-client-9', 'write-locked');
+      expect(mockFthUpdateTenantStatus).toHaveBeenCalledWith(
+        'fth-client-9',
+        'write-locked',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
       expect(item.lockAction).toEqual({ S: 'write-locked' });
     });
@@ -1031,7 +1049,11 @@ describe('usage-reporting-worker', () => {
       await handler(trialPayload);
 
       expect(mockAuroraUpdateTenantStatus).not.toHaveBeenCalled();
-      expect(mockFthUpdateTenantStatus).toHaveBeenCalledWith('fth-client-9', 'write-locked');
+      expect(mockFthUpdateTenantStatus).toHaveBeenCalledWith(
+        'fth-client-9',
+        'write-locked',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
       expect(item.lockAction).toEqual({ S: 'write-locked' });
     });
@@ -1056,6 +1078,7 @@ describe('usage-reporting-worker', () => {
       expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith(
         'aurora-tenant-123',
         'write-locked',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
       expect(mockMeterEventsCreate).toHaveBeenCalledOnce();
       const putCalls = ddbMock.commandCalls(PutItemCommand);
@@ -1081,7 +1104,11 @@ describe('usage-reporting-worker', () => {
       await vi.runAllTimersAsync();
       await promise;
 
-      expect(mockFthUpdateTenantStatus).toHaveBeenCalledWith('fth-client-9', 'write-locked');
+      expect(mockFthUpdateTenantStatus).toHaveBeenCalledWith(
+        'fth-client-9',
+        'write-locked',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
       expect(item.lockAction).toEqual({ S: 'error:sync-failed:aurora' });
       vi.useRealTimers();
@@ -1115,10 +1142,12 @@ describe('usage-reporting-worker', () => {
       expect(mockGetTenantUsageMetrics).toHaveBeenCalledWith(
         'aurora-tenant-123',
         expect.objectContaining({ interval: '1d' }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
       expect(mockGetTenantUsageMetrics).toHaveBeenCalledWith(
         'fth-client-9',
         expect.objectContaining({ interval: '1d' }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
 
       // Stripe meter value should be the sum: 1 TB + 500 GB = 1500 GB → '1500'

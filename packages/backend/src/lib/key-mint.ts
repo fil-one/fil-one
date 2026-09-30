@@ -174,14 +174,17 @@ export async function discardUnrecordedKey({
   minted,
   mint,
   minter,
+  signal,
 }: {
   minted: MintedKey;
   mint: AuditCorrelation<MintAuditEventType>;
   minter: Pick<KeyMinter, 'orgId' | 'userId'>;
+  /** The caller's deadline for the vendor call. */
+  signal?: AbortSignal;
 }): Promise<void> {
   let cleanupFailed = false;
   try {
-    await minted.orchestrator.deleteAccessKey(minted.tenantId, minted.keyId);
+    await minted.orchestrator.deleteAccessKey(minted.tenantId, minted.keyId, { signal });
   } catch (err) {
     cleanupFailed = true;
     console.error('[key-mint] Could not discard a key whose row never landed', {
@@ -212,13 +215,22 @@ export async function discardRecordedKey({
   minted,
   minter,
   actor,
+  signal,
 }: {
   minted: MintedKey;
   minter: Pick<KeyMinter, 'orgId' | 'userId'>;
   actor: AuditActor;
+  /** The caller's deadline for the vendor call. */
+  signal?: AbortSignal;
 }): Promise<boolean> {
   try {
-    await revokeAccessKey({ orgId: minter.orgId, ...minted, actor, reason: 'stale_role_at_mint' });
+    await revokeAccessKey({
+      orgId: minter.orgId,
+      ...minted,
+      actor,
+      reason: 'stale_role_at_mint',
+      signal,
+    });
     return true;
   } catch (err) {
     // Left for the operator rather than retried: a second delete against a

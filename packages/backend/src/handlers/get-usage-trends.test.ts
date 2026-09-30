@@ -243,6 +243,7 @@ describe('get-usage-trends baseHandler', () => {
     expect(aurora.getTenantUsageMetrics).toHaveBeenCalledWith(
       AURORA_TENANT_ID,
       expect.objectContaining({ interval: '1h' }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 
@@ -277,6 +278,7 @@ describe('get-usage-trends baseHandler', () => {
     expect(aurora.getTenantUsageMetrics).toHaveBeenCalledWith(
       AURORA_TENANT_ID,
       expect.objectContaining({ interval: '1d' }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 
@@ -329,6 +331,7 @@ describe('get-usage-trends baseHandler', () => {
         to: '2026-01-08T12:00:00.000Z',
         interval: '1d',
       }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 
@@ -354,10 +357,12 @@ describe('get-usage-trends baseHandler', () => {
     expect(aurora.getTenantUsageMetrics).toHaveBeenCalledWith(
       tenantFor('aurora', USER_INFO.orgId),
       expect.any(Object),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(fth.getTenantUsageMetrics).toHaveBeenCalledWith(
       tenantFor('fth', USER_INFO.orgId),
       expect.any(Object),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 

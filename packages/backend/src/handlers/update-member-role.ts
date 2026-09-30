@@ -10,6 +10,7 @@ import type {
 } from '@filone/shared';
 import { AuditSubjects, userActor } from '../lib/audit.ts';
 import { commitAfterRevokingKeys } from '../lib/commit-after-revoking-keys.ts';
+import { ORCHESTRATOR_SETUP_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
 import { reviewKeysForRoleChange } from '../lib/member-keys.ts';
 import { notifyRevokedKeys } from '../lib/key-revocation-email.ts';
 import { pendingInvitationsFrom, planRevocations, revokeDeferred } from '../lib/invitations.ts';
@@ -176,6 +177,8 @@ export async function baseHandler(
       ...(invitationsToRevoke.length > 0 ? { revokedInvitations: invitationsToRevoke.length } : {}),
     },
     source: SOURCE,
+    // One deadline for the whole revocation pass; this route has 30 s.
+    signal: AbortSignal.timeout(ORCHESTRATOR_SETUP_TIMEOUT_MS),
     onCancelled: (err, revokedKeys) => changeFailureResponse(err, { ...failure, revokedKeys }),
     onRefused: (refused, revoked) => vendorRefusedResponse(revoked, refused),
     notifyMember: (revoked) =>

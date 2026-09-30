@@ -26,6 +26,7 @@ import { deleteReplacedOrgLogo } from '../lib/org-logo-storage.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import { tearDownStripe } from '../lib/deletion-stripe-teardown.ts';
 import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.ts';
+import { ORCHESTRATOR_JOB_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
 
 const LOG = '[account-deletion-worker]';
 
@@ -134,7 +135,9 @@ async function deleteTenants(orgId: string, tenantIds: Record<string, string>): 
       continue;
     }
 
-    await orchestrator.deleteTenant(tenantId);
+    await orchestrator.deleteTenant(tenantId, {
+      signal: AbortSignal.timeout(ORCHESTRATOR_JOB_TIMEOUT_MS),
+    });
     console.log(`${LOG} tenant deleted`, { orgId, orchestratorId, tenantId });
   }
 }

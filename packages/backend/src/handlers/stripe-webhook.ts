@@ -17,6 +17,7 @@ import {
   syncTenantStatusInProvisionedRegions,
   WEBHOOK_STATUS_SYNC_RETRY,
 } from '../lib/region-helpers.ts';
+import { ORCHESTRATOR_REQUEST_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
 import {
   invoiceSubscriptionId,
   invoiceSubscriptionMetadata,
@@ -462,11 +463,13 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
   try {
     if (orgId) {
       assertRegionSyncSucceeded(
-        await syncTenantStatusInProvisionedRegions(
-          orgId,
-          'write-locked',
-          WEBHOOK_STATUS_SYNC_RETRY,
-        ),
+        await syncTenantStatusInProvisionedRegions(orgId, 'write-locked', {
+          retry: WEBHOOK_STATUS_SYNC_RETRY,
+          // The webhook runs in a 10 s Lambda and Stripe gives it ~2 s before it
+          // retries the event, so the sync must fail inside the invocation
+          // rather than have the invocation killed under it.
+          signal: AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS),
+        }),
       );
       console.log('[stripe-webhook] Tenant write-locked', { userId, orgId });
     }
@@ -542,7 +545,10 @@ async function handlePaymentSucceeded(invoice: Stripe.Invoice): Promise<void> {
   try {
     if (orgId && !updateResult.refused) {
       assertRegionSyncSucceeded(
-        await syncTenantStatusInProvisionedRegions(orgId, 'active', WEBHOOK_STATUS_SYNC_RETRY),
+        await syncTenantStatusInProvisionedRegions(orgId, 'active', {
+          retry: WEBHOOK_STATUS_SYNC_RETRY,
+          signal: AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS),
+        }),
       );
       console.log('[stripe-webhook] Tenant re-activated', { userId, orgId });
     }

@@ -49,22 +49,27 @@ export function assertRegionSyncSucceeded(outcomes: RegionSyncOutcome[]): void {
   }
 }
 
-// Default for background callers — the grace-period enforcer and usage-reporting
-// worker crons (60s timeouts, re-run on schedule) and the activate-subscription
-// API. They have generous time budgets, so they ride out transient outages with
-// several retries (p-retry's default 1s/2s/4s backoff).
+// Default for callers that can afford to ride out a transient outage: the
+// grace-period enforcer and usage-reporting worker crons, which re-run on
+// schedule, and the account teardown. Three retries on p-retry's default
+// 1s/2s/4s backoff. What stops the loop is the caller's signal, so
+// activate-subscription can take this default inside its 10 s route.
 const STATUS_SYNC_RETRY: RetryOptions = { retries: 3 };
 
 // Override for the Stripe webhook, which awaits this sync synchronously and
-// should return 2xx quickly (Stripe's ~2s window). syncRegionTenantStatus probes
-// then updates each region (two sequential pRetry calls); with ~200-300ms
-// round-trips the worst case (probe succeeds on its retry, then update exhausts
-// its retry) is ≈ 2 × (2×300ms + 200ms) ≈ 1.6s — comfortably under ~2s. A
-// momentary blip is ridden out; a persistent failure leaves the region out of
-// sync until a later billing event re-runs this probe-first sync or the
-// grace-period-enforcer cron re-attempts the lock. (The subscription-drift-checker
-// only observes drift via telemetry; it does not reconcile.)
+// should return 2xx quickly (Stripe's ~2s window). One retry rides out a
+// momentary blip; a persistent failure leaves the region out of sync until a
+// later billing event re-runs this probe-first sync or the grace-period-enforcer
+// cron re-attempts the lock. (The subscription-drift-checker only observes drift
+// via telemetry; it does not reconcile.) What actually keeps the webhook inside
+// its Lambda is the caller's signal, not this count: retries here restart, so
+// the count alone bounds nothing.
 export const WEBHOOK_STATUS_SYNC_RETRY: RetryOptions = { retries: 1, minTimeout: 200 };
+
+export interface StatusSyncOptions {
+  signal: AbortSignal;
+  retry?: RetryOptions;
+}
 
 // Reconciles every provisioned region with the desired tenant status. Each
 // region's live status is its own source of truth: probe first, update only
@@ -74,13 +79,17 @@ export const WEBHOOK_STATUS_SYNC_RETRY: RetryOptions = { retries: 1, minTimeout:
 export async function syncTenantStatusInProvisionedRegions(
   orgId: string,
   desired: TenantStatus,
-  retry: RetryOptions = STATUS_SYNC_RETRY,
+  // The caller's deadline, which is what bounds the sync: every attempt shares
+  // it, so the retry loop ends when it expires instead of starting another
+  // attempt under a fresh one. Required, because the retry count on its own
+  // says nothing about how long this can run.
+  { signal, retry = STATUS_SYNC_RETRY }: StatusSyncOptions,
 ): Promise<RegionSyncOutcome[]> {
   const ready = await getProvisionedRegions(orgId);
 
   return Promise.all(
     ready.map(({ orchestrator, tenantId }) =>
-      syncRegionTenantStatus({ orgId, orchestrator, tenantId, desired, retry }),
+      syncRegionTenantStatus({ orgId, orchestrator, tenantId, desired, retry, signal }),
     ),
   );
 }
@@ -91,26 +100,33 @@ async function syncRegionTenantStatus({
   tenantId,
   desired,
   retry,
+  signal,
 }: {
   orgId: string;
   orchestrator: ServiceOrchestrator;
   tenantId: string;
   desired: TenantStatus;
   retry: RetryOptions;
+  signal: AbortSignal;
 }): Promise<RegionSyncOutcome> {
   const base = { orchestratorId: orchestrator.id, tenantId };
   try {
     // getTenantStatus never throws; surface `error` probes as exceptions so
-    // pRetry can ride out transient orchestrator outages.
-    const probe = await pRetry(async () => {
-      const result = await orchestrator.getTenantStatus(tenantId);
-      if (result.kind === 'error') {
-        throw new Error(`${orchestrator.id} status probe failed for tenant ${tenantId}`, {
-          cause: result.cause,
-        });
-      }
-      return result;
-    }, retry);
+    // pRetry can ride out transient orchestrator outages. The caller's signal
+    // goes to both the probe and pRetry itself, so an expired deadline ends the
+    // loop rather than being handed to another attempt.
+    const probe = await pRetry(
+      async () => {
+        const result = await orchestrator.getTenantStatus(tenantId, { signal });
+        if (result.kind === 'error') {
+          throw new Error(`${orchestrator.id} status probe failed for tenant ${tenantId}`, {
+            cause: result.cause,
+          });
+        }
+        return result;
+      },
+      { ...retry, signal },
+    );
 
     if (probe.kind === 'not_found') {
       console.warn('[region-helpers] tenant not found, skipping status sync', {
@@ -134,9 +150,12 @@ async function syncRegionTenantStatus({
 
     // A status update sets an absolute value (idempotent), so transient
     // failures are safe to retry here rather than inside each orchestrator.
-    // Retrying at this level keeps the whole status-sync retry budget
-    // (probe + update) in one place.
-    await pRetry(() => orchestrator.updateTenantStatus(tenantId, desired), retry);
+    // Retrying at this level keeps the probe's retry policy and the update's
+    // in one place.
+    await pRetry(() => orchestrator.updateTenantStatus(tenantId, desired, { signal }), {
+      ...retry,
+      signal,
+    });
     return { ...base, outcome: 'updated' };
   } catch (cause) {
     console.error('[region-helpers] tenant status sync failed', {

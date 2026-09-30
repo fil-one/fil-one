@@ -45,9 +45,12 @@ export async function reportOrgUsage(params: {
   currentPeriodStart: string;
   to: string;
   meterEventName: string;
+  /** The caller's deadline, shared by every region's metrics fetch. */
+  signal?: AbortSignal;
 }): Promise<OrgUsageReport | undefined> {
   const { orgId, subscriptionId, stripeCustomerId, currentPeriodStart, to, meterEventName } =
     params;
+  const { signal } = params;
 
   // Each region resolves its own tenant id (side-effect-free), is fetched
   // independently, then aggregated and reported at the org level.
@@ -63,11 +66,11 @@ export async function reportOrgUsage(params: {
     usageMetrics = await Promise.all(
       orgRegions.map(async (t) => {
         try {
-          return await t.orchestrator.getTenantUsageMetrics(t.tenantId, {
-            from: currentPeriodStart,
-            to,
-            interval: '1d',
-          });
+          return await t.orchestrator.getTenantUsageMetrics(
+            t.tenantId,
+            { from: currentPeriodStart, to, interval: '1d' },
+            { signal },
+          );
         } catch (error) {
           // Attach the failing region/tenant to the error itself — Promise.all
           // only surfaces an index, and the escaping error is what the runtime

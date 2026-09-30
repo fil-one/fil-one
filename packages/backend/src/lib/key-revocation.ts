@@ -20,6 +20,8 @@ export interface RevokeAccessKeyArgs {
   actor: AuditActor;
   /** What took the key. Required, so no revocation goes unexplained. */
   reason: RevocationTrigger;
+  /** The caller's deadline for the vendor call. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -66,6 +68,7 @@ export async function revokeAccessKey({
   tenantId,
   actor,
   reason,
+  signal,
 }: RevokeAccessKeyArgs): Promise<void> {
   const revocation = await twoPhaseAudit({
     type: 'key.deleted',
@@ -87,7 +90,7 @@ export async function revokeAccessKey({
   });
 
   try {
-    await orchestrator.deleteAccessKey(tenantId, keyId);
+    await orchestrator.deleteAccessKey(tenantId, keyId, { signal });
   } catch (err) {
     await revocation.complete({ outcome: 'failed' });
     throw err;

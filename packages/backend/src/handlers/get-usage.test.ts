@@ -244,8 +244,15 @@ describe('get-usage baseHandler', () => {
     expect(body.buckets).toEqual({ count: 3 });
     expect(body.accessKeys).toEqual({ count: 4 });
 
-    expect(aurora.getTenantUsageMetrics).toHaveBeenCalledWith(AURORA_TENANT_ID, expect.any(Object));
-    expect(fth.getTenantInfo).toHaveBeenCalledWith(FTH_TENANT_ID);
+    expect(aurora.getTenantUsageMetrics).toHaveBeenCalledWith(
+      AURORA_TENANT_ID,
+      expect.any(Object),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(fth.getTenantInfo).toHaveBeenCalledWith(
+      FTH_TENANT_ID,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('surfaces the most-restrictive tenant status across regions', async () => {

@@ -12,6 +12,7 @@ import { keyScope, notYourKeyResponse, withinScope } from '../lib/key-scope.ts';
 import { revokeAccessKey } from '../lib/key-revocation.ts';
 import { ResponseBuilder, tenantNotReadyResponse } from '../lib/response-builder.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import { ORCHESTRATOR_REQUEST_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
@@ -78,6 +79,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     tenantId,
     actor: userActor({ userId, email: getVerifiedEmail(event) }),
     reason: 'user_requested',
+    signal: AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS),
   });
 
   return { statusCode: 204, body: '' };

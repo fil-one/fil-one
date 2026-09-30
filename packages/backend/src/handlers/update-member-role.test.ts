@@ -616,7 +616,9 @@ describe('a narrowing revokes the keys the new role could not mint', () => {
         excess: ['DeleteBucket'],
       },
     ]);
-    expect(mockDeleteAccessKey.mock.calls).toStrictEqual([['tenant:us-east-1', 'key-0']]);
+    expect(mockDeleteAccessKey.mock.calls).toStrictEqual([
+      ['tenant:us-east-1', 'key-0', expect.objectContaining({ signal: expect.any(AbortSignal) })],
+    ]);
   });
 
   it('revokes at the vendor before it writes the role', async () => {
