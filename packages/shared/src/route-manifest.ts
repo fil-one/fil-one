@@ -199,6 +199,9 @@ const MANIFEST = [
   // Minting a key is `keys.create`. The creator-authority cap runs in the
   // handler on top of it: the requested key permissions are intersected with the
   // creator's own, so a key can never carry more than the member minting it.
+  // A service-key body on a region serving the `iam` model also takes
+  // `keys.create_service`, checked in the handler beside the cap: which check
+  // applies depends on the body, which the chain cannot read.
   {
     method: 'POST',
     path: '/api/access-keys',
