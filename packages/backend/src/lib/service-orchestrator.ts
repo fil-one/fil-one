@@ -13,8 +13,6 @@ import type { IamMethods } from './iam-orchestrator.ts';
 
 export type {
   IamMethods,
-  IssueMemberKeyOpts,
-  IssuedMemberKey,
   MemberPolicy,
   PolicyPrecondition,
   StoredBucketPolicy,
@@ -79,7 +77,8 @@ export interface CreateBucketArgs {
   };
 }
 
-export interface IssueAccessKeyOpts {
+/** A service key: its own permissions and bucket list, fixed at creation. */
+export interface IssueServiceKeyOpts {
   keyName: string;
   permissions: AccessKeyPermission[];
   granularPermissions?: GranularPermission[];
@@ -87,11 +86,28 @@ export interface IssueAccessKeyOpts {
   expiresAt?: string | null;
 }
 
+/**
+ * A key bound to a principal. It carries nothing of its own: what it may do is
+ * whatever the bucket policies give that principal at the time of each request.
+ * Only a region serving the `iam` access model mints one.
+ */
+export interface IssuePrincipalKeyOpts {
+  /** Unique within the principal, so two members may each hold a `laptop`. */
+  keyName: string;
+  principalId: string;
+  expiresAt?: string | null;
+}
+
+/** The request's shape is the key's kind, as it is at the storage system. */
+export type IssueAccessKeyOpts = IssueServiceKeyOpts | IssuePrincipalKeyOpts;
+
 export interface IssuedAccessKey {
   id: string;
   accessKeyId: string;
   accessKeySecret: string;
   createdAt: string;
+  /** The member a principal-bound key belongs to; absent on a service key. */
+  principalId?: string;
 }
 
 /**

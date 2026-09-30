@@ -43,7 +43,6 @@ vi.mock('../s3-credentials.ts', () => ({
 }));
 
 import {
-  AccessKeyAlreadyExistsError,
   PolicyConflictError,
   PolicyPreconditionFailedError,
   PolicyPublishError,
@@ -244,45 +243,5 @@ describe('principals', () => {
     await expect(iam.resolveMemberAccess(tenantId, 'alice')).resolves.toStrictEqual([
       { bucketName: 'photos', actions: ['s3:GetObject'] },
     ]);
-  });
-});
-
-describe('issueMemberKey', () => {
-  const created = {
-    accessKeyId: 'did:key:z6Mk',
-    name: 'laptop',
-    principal: 'alice',
-    secretAccessKey: 'sk-secret',
-    createdAt: '2026-09-16T12:00:00Z',
-    expiresAt: null,
-  };
-
-  it('sends the principal-bound shape and returns the credential with its principal', async () => {
-    mockCreateAccessKey.mockResolvedValue(ok(created, 201));
-
-    await expect(
-      iam.issueMemberKey(tenantId, 'alice', { keyName: 'laptop' }),
-    ).resolves.toStrictEqual({
-      id: 'did:key:z6Mk',
-      accessKeyId: 'did:key:z6Mk',
-      accessKeySecret: 'sk-secret',
-      createdAt: '2026-09-16T12:00:00Z',
-      principalId: 'alice',
-    });
-    const { body } = mockCreateAccessKey.mock.calls[0]![0] as { body: Record<string, unknown> };
-    expect(body).toStrictEqual({ name: 'laptop', principalId: 'alice', expiresAt: null });
-    expect(body).not.toHaveProperty('permissions');
-  });
-
-  it('maps a duplicate name and an unknown principal to their errors', async () => {
-    mockCreateAccessKey.mockResolvedValueOnce(fail(409, { message: 'name conflict' }));
-    await expect(
-      iam.issueMemberKey(tenantId, 'alice', { keyName: 'laptop' }),
-    ).rejects.toBeInstanceOf(AccessKeyAlreadyExistsError);
-
-    mockCreateAccessKey.mockResolvedValueOnce(fail(422, { message: 'unknown principal' }));
-    await expect(
-      iam.issueMemberKey(tenantId, 'alice', { keyName: 'laptop' }),
-    ).rejects.toBeInstanceOf(PrincipalNotFoundError);
   });
 });

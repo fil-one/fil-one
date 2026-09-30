@@ -308,6 +308,9 @@ class FthOrchestrator implements ScopedKeysOrchestrator {
     keyOpts: IssueAccessKeyOpts,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<IssuedAccessKey> {
+    if ('principalId' in keyOpts) {
+      throw new Error('FTH serves scoped keys; a principal-bound key needs the iam access model');
+    }
     const storageUserId = await this.getFthConsoleStorageUserId(tenantId, requestOptions);
 
     const permissions = buildFthPermissions(keyOpts.permissions, keyOpts.granularPermissions);
