@@ -202,72 +202,42 @@ first policy is the same check against no policy existing.
 Our goal is to leave most of the console alone. The membership rows, the audit
 path, the key attribution, and the whole scoped-key flow are untouched.
 
-### Per-member console credentials
+### One console credential per tenant
 
-Today the console signs all its S3 traffic with one tenant-wide credential per
-region and filters the results itself. On an IAM region it instead signs each
-member's traffic with a credential belonging to that member, and the data plane
-authorizes and filters.
+The console signs all its S3 traffic with one tenant-wide credential per region
+and filters the results itself, and that stays on an IAM region. The storage
+system never evaluates a bucket policy for that credential, so the console is
+the enforcement point for its own traffic, and it enforces from the storage
+system's answer: every route that acts for a scoped member reads the member's
+per-bucket access first, filters the bucket list and the activity feed to it,
+and refuses a bucket-addressed route whose bucket is absent from it or whose
+action the bucket's effective set leaves out. Owners and Admins are unscoped and
+served without the read.
 
-That removes the second enforcement point for object traffic. It does not remove
-it everywhere: `ListBuckets` is a tenant-wide name listing and every principal
-holds `s3:ListAllMyBuckets`, so the bucket list and the activity feed still
-filter in the handler against the member's resolved access.
-
-- The console mints `filone-console/{userId}` through the member-key call,
-  lazily on that member's first signing request in a region. Key names are
-  unique per principal, so it cannot collide with a customer key.
-- The secret lives on `UserInfoTable` as a KMS-encrypted attribute under the
-  org's partition, which the account-deletion scrub already sweeps. SSM holds
-  one secret per org today; per member the count becomes members multiplied by
-  IAM regions, past what a parameter store is meant to carry. There is no
-  envelope-encryption helper in the console yet, so this is new code.
-- The credential cache is keyed by tenant today. It gains the user id and a
-  maximum age, so a credential the storage system deleted cannot stay warm. A
-  403 evicts and re-mints once.
-- The credential is deleted with the principal, in the same narrowing
-  transaction that already deletes the member's keys.
-
-Some traffic has no member actor and stays on the tenant-wide credential: tenant
-setup, bucket create, bucket delete, the bulk-delete and RAG-indexer workers,
-and the activity feed's bucket fan-out. Usage and analytics never touch an S3
-credential at all; they are management-API calls under the partner key.
-
-The usage handler subtracts one console key from the org's key count, and that
-arithmetic has to change once there are N member credentials. Nothing else
-counts them: Hilt enforces no key limit, and the per-tenant limit the console
-reads is the vendors' own.
+A member's own keys take the other path. They bind to the member's principal,
+and the data plane authorizes them against the bucket policies directly.
 
 `getBucket` has to change first. It proves a bucket exists by filtering a
-tenant-wide listing, so today it answers 200 for a bucket the caller cannot
-reach. Existence moves onto the bucket-addressed versioning and object-lock
-calls the handler already issues, which the storage system authorizes per
-bucket.
+tenant-wide listing, which costs a call per bucket in the tenant to answer about
+one. Existence moves onto the bucket-addressed versioning and object-lock calls
+the handler already issues, and reach comes from the member's resolved access.
 
-**Presigned URLs get authorized per member.** A URL signed with the member's
-credential is authorized against the member's principal when it is redeemed, and
-a redeemed URL never re-enters the console, so this is the one place the second
-check disappears completely. The 7-day download limit becomes the shortest of 7
-days, the credential's remaining life, and SigV4's own limit, which means a
-member credential that expires shortens the longest share link a member can
-create. We keep the credential unexpiring for that reason.
+**Presigned URLs are authorized when they are issued.** The console checks the
+member's access to the bucket and the action, then signs the URL with the tenant
+credential. A redeemed URL never re-enters the console, so a member removed from
+a bucket keeps a link they already hold until it expires, up to the 7-day
+download limit.
 
-**The cost is freshness on object traffic.** A per-request resolve is consistent
-with the storage system's last write. A credential cached at the gateway is good
-until the staleness bound, so removing a member from a bucket's policy stops
-their object browsing when the revocation reaches the gateway rather than at
-their next click, a firehose hop, well short of the cache lifetime.
-Bucket-addressed reads are never served from that cache and stay as fresh as
-they are today.
+**Console traffic is as fresh as the storage system's last write.** The access
+read is consistent with Hilt's last committed policy, so a member removed from a
+bucket loses it in the console on their next request. Their own keys follow when
+the revocation reaches the gateway. A failed access read fails closed: the
+region is reported unavailable rather than answered unfiltered, so nothing
+widens during a Hilt outage.
 
-The console can no longer refuse on its own, only relay what the data plane
-answered, so containment on Forge becomes wholly the storage system's. A bucket
-out of reach comes back as a missing bucket and a forbidden action as a refusal,
-which is the pair the console shows. Nothing widens, because a narrowing that
-cannot reach the storage system is refused.
-
-During a Hilt outage a warm credential keeps a scoped member's object browsing
-working, where today those reads fail closed.
+A bucket out of reach comes back as a missing bucket and a forbidden action as a
+refusal, the same pair the data plane answers a member's own key with, so the
+console shows one thing whichever path a request took.
 
 ### The orchestrator interface
 
@@ -286,8 +256,8 @@ The IAM arm is shaped after AWS IAM, minus its request bodies:
 | `removeMember(tenantId, userId)`                           | deletes the principal, its keys, and every statement naming it; idempotent               |
 | `getBucketPolicy`, `putBucketPolicy`, `deleteBucketPolicy` | bucket-addressed; the write carries the token the read returned                          |
 | `listBucketPoliciesForMember(tenantId, userId)`            | the member detail view                                                                   |
-| `resolveMemberAccess(tenantId, userId)`                    | per-bucket permissions, for the bucket list and the activity feed                        |
-| `issueMemberKey(tenantId, userId, opts)`                   | a key bound to a principal, with a name and expiry only                                  |
+| `resolveMemberAccess(tenantId, userId)`                    | per-bucket permissions, for every route that acts for a scoped member                    |
+| `issueMemberKey(tenantId, userId, opts)`                   | a key bound to a principal, with a name and expiry only; what the key forms mint         |
 | `listAccessKeys(tenantId, opts)`                           | identity fields plus each key's principal; access is read per principal                  |
 
 A vendor that grows principals and policies moves its region to `iam` by
@@ -314,14 +284,15 @@ log.
 
 **A member reaches a bucket.**
 
-1. The console resolves the member's role and, on an IAM region, gets or mints
-   their credential for that region.
-2. For the bucket list and the activity feed, the handler reads the member's
-   per-bucket access and filters the region's results.
-3. Every other bucket-addressed route goes to the data plane signed with the
-   member's credential.
-4. The storage system evaluates the bucket's policy against the principal and
-   answers.
+1. The console resolves the member's role. An Owner or Admin is unscoped; for
+   anyone else on an IAM region the console reads the member's per-bucket
+   access from the storage system.
+2. The bucket list and the activity feed are filtered to that access.
+3. A bucket-addressed route is refused when its bucket is outside that access
+   or its action is outside the bucket's effective set, and otherwise goes to
+   the data plane signed with the tenant credential.
+4. A request signed with the member's own key skips the console: the storage
+   system evaluates the bucket's policy against the principal and answers.
 5. An out-of-reach bucket answers exactly like a bucket that does not exist:
    same status, same body. A distinct code would confirm the bucket exists. A
    member whose access was removed while their tab was open sees "Bucket not
@@ -379,8 +350,7 @@ authorized it.
    rows are deleted.
 2. It deletes the principal, every key bound to it, and every statement naming
    it.
-3. The member's console credential and key rows for that region go in the
-   membership transaction.
+3. The member's key rows for that region go in the membership transaction.
 
 Removal strips the statements because a re-invited member keeps the same console
 user id, and leftover statements would restore their old access on the new
@@ -445,8 +415,7 @@ is the one existing path for pushing a change to a warm key.
    conditional; and a query by principal. The management API carries no actor,
    since who may edit a policy is the console's decision.
 4. **Keys bound to a principal**, issued with a name and expiry only, names
-   unique per principal. The console holds one such key per member for its own
-   traffic.
+   unique per principal.
 5. **Per-request authority** computed from the bucket's policy alone, `Allow \
 Deny` for the calling principal, with an explicit Deny winning. A key's
 permission set is derived, never stored: the flat permissions and buckets fields
@@ -454,8 +423,8 @@ on today's key do not describe an IAM key. What the policies give the key's
 principal is materialized as the key's delegations, one per bucket and Forge
 command, and rewritten when a policy changes. A member-access read returns a
 principal's per-bucket access, is consistent with Hilt's own last write, and
-carries a latency target, since the bucket list and the activity feed resolve it
-per request. Deny is what makes this more than a proof-chain check: several S3
+carries a latency target, since the console resolves it on every request it
+serves for a scoped member. Deny is what makes this more than a proof-chain check: several S3
 actions map to the same Forge commands, so the gateway has to hold each key's
 effective action set per bucket and refuse anything outside it rather than
 probing for a chain.
@@ -489,8 +458,8 @@ depends on it.
 3. The IAM console surfaces, `buckets.policy_manage`, and the IAM fake. Dark,
    because no region declares `iam`, and behind the `ORGS_BETA` row pattern
    besides, where granting an org access is a row rather than a redeploy.
-4. The per-member credential store with its envelope encryption, and the
-   `getBucket` existence change. Both are prerequisites for the flip.
+4. The `getBucket` existence change and the access check on the routes that act
+   for a scoped member, both dark until a region declares `iam`.
 5. The per-network flip when a Hilt network ships the contract. The gateway
    ships before the management API, since it has to enforce the new action sets
    before any key depends on them. The flip then retires every key on the
@@ -514,10 +483,18 @@ which puts the rule back outside the system enforcing it. Overlapping policies
 also compose upward only, so an admin who narrows one has not narrowed the
 member.
 
-**Console-side resolution with a shared tenant credential.** Signing every
-request with one key and filtering the results ourselves asks nothing new of the
-storage system. It also means two enforcement points for one rule, a round trip
-on the console request path, and no protection at all for a direct S3 key.
+**Per-member console credentials.** The console could mint a key bound to each
+member's principal on their first request in a region and sign that member's
+traffic with it, so the data plane would authorize console traffic against the
+bucket policies and a presigned URL would be checked when it is redeemed. The
+price is a secret per member per IAM region, past what the parameter store
+holds for tenant keys today; a mint on the request path, with orphan recovery
+when the secret write fails; a credential cache with a maximum age, because the
+storage system can retire a key without telling the console; and a delete
+inside the membership transaction. The bucket list and the activity feed stay
+filtered against the member's access either way, since every principal holds
+`s3:ListAllMyBuckets`. That machinery outweighs what it adds over the console's
+own check.
 
 **An all-buckets flag on the principal.** One boolean meaning "this principal
 reaches every bucket" makes a promotion a single write instead of one per
@@ -541,8 +518,8 @@ second name.
    out of its own bucket until an Owner edits it back. A statement naming
    everybody is useful in an Allow, as the way to grant a bucket to the whole
    org.
-3. What is the latency of the per-bucket access read, which the bucket list and
-   the activity feed resolve on every request?
+3. What is the latency of the per-bucket access read, which the console resolves
+   on every request it serves for a scoped member?
 4. Should FIL-1017's `ListBuckets` criterion be relaxed, or should the gateway
    filter the listing? Filtering is a change to a system we own, and the closed
    Hilt PR is the prior attempt at it.
