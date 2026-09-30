@@ -122,7 +122,11 @@ export async function baseHandler(
   reportDuration('GetActivityDuration', { handler: 'get-activity' }, totalMs);
   // Single summary line so a slow request shows which phase dominated without
   // stitching together the per-phase metrics. Phases run concurrently, so the
-  // total is ~max(phases), not their sum.
+  // total is ~max(phases), not their sum. This line ships only on
+  // non-production stages: production logs at WARN (sst.config.ts), so there
+  // the GetActivityPhaseDuration series emitted by timed() is the diagnostic,
+  // at one-minute granularity. A phase that never completes (Lambda timeout)
+  // emits neither the metric nor this line.
   console.log('[get-activity] completed', {
     orgId,
     regionCount: regions.length,
@@ -165,8 +169,12 @@ async function listBucketActivities(
     const buckets = await orchestrator.listBuckets(tenantId, { signal });
     const durationMs = performance.now() - start;
     reportDuration('ListBucketsDuration', { region: orchestrator.region }, durationMs);
-    // bucketCount vs durationMs exposes the per-bucket cost — a duration that
+    // bucketCount vs durationMs exposes the per-bucket cost: a duration that
     // grows with bucketCount points at an N+1 in the orchestrator's listBuckets.
+    // This line ships only on non-production stages: production logs at WARN
+    // (sst.config.ts), so there ListBucketsDuration is the diagnostic, at
+    // one-minute granularity. A listBuckets that never returns (Lambda timeout)
+    // emits neither the metric nor this line.
     console.log('[get-activity] listed buckets', {
       orgId,
       tenantId,
