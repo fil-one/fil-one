@@ -226,21 +226,24 @@ test('14. deleting the policy leaves the bucket to service keys alone', async ()
 
 test('15. a member presigned GET follows their grants', async () => {
   await owner.setStatements(B1, [ownersStatement(ownerId), allow([memberId], ['s3:GetObject'])]);
-  const fetchPresigned = async (bucket: string) => {
-    const res = await member.send('POST', `/presign?region=${REGION}`, [
+  const presign = (bucket: string) =>
+    member.send('POST', `/presign?region=${REGION}`, [
       { op: 'getObject', bucket, key: SEEDED_KEY },
     ]);
-    expect(res.status(), await res.text()).toBe(200);
-    const { items } = (await res.json()) as { items: { url: string }[] };
-    const got = await fetch(items[0].url);
-    return [
-      got.status,
-      got.ok ? await got.text() : (await got.text()).match(/<Code>(\w+)<\/Code>/)?.[1],
-    ];
-  };
-  expect([await fetchPresigned(B1), await fetchPresigned(B2)]).toEqual([
-    [200, PAYLOAD.toString()],
-    [404, 'NoSuchBucket'],
+
+  const granted = await presign(B1);
+  expect(granted.status(), await granted.text()).toBe(200);
+  const { items } = (await granted.json()) as { items: { url: string }[] };
+  const got = await fetch(items[0].url);
+  expect([got.status, await got.text()]).toEqual([200, PAYLOAD.toString()]);
+
+  // The URL would carry the tenant's key, which reaches every bucket, so the
+  // console refuses to issue one for a bucket outside the member's policies,
+  // and answers as it would for a bucket that does not exist.
+  const refused = await presign(B2);
+  expect([refused.status(), ((await refused.json()) as { message: string }).message]).toEqual([
+    404,
+    'Bucket not found',
   ]);
 });
 
