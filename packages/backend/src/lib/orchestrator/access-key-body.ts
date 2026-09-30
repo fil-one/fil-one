@@ -29,3 +29,10 @@ export function accessKeyBody(keyOpts: IssueAccessKeyOpts): CreateAccessKeyReque
     expiresAt,
   };
 }
+
+/** What a log line says about the key being created; it carries no secret. */
+export function describeAccessKeyBody(body: CreateAccessKeyRequest): string {
+  return 'principalId' in body
+    ? `bound to principal "${body.principalId}"`
+    : `with permissions [${body.permissions.join(', ')}] and bucket scopes [${body.buckets?.join(', ')}]`;
+}
