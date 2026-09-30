@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole, S3Region } from '@filone/shared';
 import { ToastProvider } from './Toast';
@@ -22,11 +22,14 @@ function Harness({ apply }: { apply: (form: ReturnType<typeof useAccessKeyForm>)
   return <AccessKeyFormFields form={form} region={S3Region.UsEast1} />;
 }
 
-function renderForm(apply: (form: ReturnType<typeof useAccessKeyForm>) => void) {
+function renderForm(
+  apply: (form: ReturnType<typeof useAccessKeyForm>) => void,
+  role: OrgRole = OrgRole.Owner,
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   // The permission checkboxes are filtered by what the caller's role can grant,
   // so the role has to be in the cache before the form renders.
-  seedPermissions(qc, OrgRole.Owner);
+  seedPermissions(qc, role);
   return render(
     <QueryClientProvider client={qc}>
       <ToastProvider>
@@ -72,6 +75,39 @@ describe('AccessKeyFormFields — on a region serving the iam access model', () 
       expect(screen.queryByText('What can this key do?')).not.toBeInTheDocument();
       expect(screen.queryByText('Which buckets can this key access?')).not.toBeInTheDocument();
       expect(screen.getByText('Key name')).toBeInTheDocument();
+    } finally {
+      mockIsIam.mockReturnValue(false);
+    }
+  });
+
+  it('lets an Owner choose a service key, which asks for permissions and bucket scope', async () => {
+    mockIsIam.mockReturnValue(true);
+    try {
+      renderForm(() => {});
+      fireEvent.click(await screen.findByLabelText(/Service key/));
+
+      expect(await screen.findByText('What can this key do?')).toBeInTheDocument();
+      expect(screen.getByText('Which buckets can this key access?')).toBeInTheDocument();
+      expect(
+        screen.queryByText(
+          "This key acts as you. What it can reach is decided by each bucket's policy.",
+        ),
+      ).not.toBeInTheDocument();
+    } finally {
+      mockIsIam.mockReturnValue(false);
+    }
+  });
+
+  it('offers a Member no choice: their key follows the policies', async () => {
+    mockIsIam.mockReturnValue(true);
+    try {
+      renderForm(() => {}, OrgRole.Member);
+      expect(
+        await screen.findByText(
+          "This key acts as you. What it can reach is decided by each bucket's policy.",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByText('What kind of key?')).not.toBeInTheDocument();
     } finally {
       mockIsIam.mockReturnValue(false);
     }
