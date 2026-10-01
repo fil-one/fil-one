@@ -711,6 +711,20 @@ describe('listBuckets for a member', () => {
     const [listCall] = s3Mock.commandCalls(ListBucketsCommand) as Array<{ args: unknown[] }>;
     expect(listCall.args[1]).toStrictEqual({ abortSignal: signal });
   });
+
+  it('starts the access lookup before the S3 listing answers', async () => {
+    stubS3Credentials();
+    let lookupsWhenListed = -1;
+    s3Mock.on(ListBucketsCommand).callsFake(() => {
+      lookupsWhenListed = mockGetPrincipalAccess.mock.calls.length;
+      return { Buckets: [{ Name: 'photos', CreationDate: new Date('2026-01-01T00:00:00Z') }] };
+    });
+    mockGetPrincipalAccess.mockReturnValue(buildAccessResponse('photos'));
+
+    await iamOrchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID });
+
+    expect(lookupsWhenListed).toBe(1);
+  });
 });
 
 describe('getBucket', () => {
