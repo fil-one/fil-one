@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { seedPermissions } from '../lib/test-permissions.js';
@@ -65,5 +65,26 @@ describe('CreateBucketPage — a service key on an iam region', () => {
       bucketScope: 'specific',
       buckets: [BUCKET],
     });
+  });
+
+  it('will not create the bucket while the service key has no permissions', async () => {
+    await fillWithServiceKey();
+    for (const p of [
+      'read',
+      'write',
+      'list',
+      'GetBucketVersioning',
+      'GetBucketObjectLockConfiguration',
+    ]) {
+      const box = within(screen.getByTestId(`permission-${p}`)).getByRole('checkbox');
+      if (box.getAttribute('aria-checked') === 'true' || (box as HTMLInputElement).checked)
+        fireEvent.click(box);
+    }
+    await screen.findByText('Select at least one permission.');
+
+    const submit = screen.getByRole('button', { name: 'Create bucket and API key' });
+    expect(submit).toBeDisabled();
+    fireEvent.click(submit);
+    expect(mockApiRequest).not.toHaveBeenCalledWith('/buckets', expect.anything());
   });
 });
