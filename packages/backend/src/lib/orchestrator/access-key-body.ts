@@ -4,6 +4,7 @@
 import type { AccessModel } from '@filone/shared';
 import type { CreateAccessKeyRequest } from '@filone/orchestrator-client';
 import type { IssueAccessKeyOpts } from '../service-orchestrator.ts';
+import { AccessKeyValidationError } from '../errors.ts';
 import { buildPermissions } from './permissions.ts';
 
 /**
@@ -21,6 +22,15 @@ export function accessKeyBody(
     if (arm.accessModel !== 'iam') {
       throw new Error(
         `${arm.id} serves scoped keys; a principal-bound key needs the iam access model`,
+      );
+    }
+    // The type forbids these; a non-literal object can still carry them, and
+    // dropping them would mint a key the caller did not ask for.
+    if (
+      ['permissions', 'granularPermissions', 'buckets', 'bucketScope'].some((f) => f in keyOpts)
+    ) {
+      throw new AccessKeyValidationError(
+        'A principal-bound key carries no permissions or buckets of its own.',
       );
     }
     return { name: keyOpts.keyName, principalId: keyOpts.principalId, expiresAt };
