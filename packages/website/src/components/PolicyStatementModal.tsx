@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import type { PolicyStatement } from '@filone/shared';
 import {
   POLICY_SID_MAX_LENGTH,
@@ -61,7 +61,10 @@ export function PolicyStatementModal({
 }: PolicyStatementModalProps) {
   const [statement, setStatement] = useState<PolicyStatement>(initial ?? EMPTY);
   // Re-seed each time the modal opens, so a cancelled edit leaves no trace.
-  useEffect(() => {
+  // A layout effect, so it lands before the action fields' effect prunes what
+  // the caller may not hold; run after it, the re-seed would put the pruned
+  // action back into a draft that no longer shows it.
+  useLayoutEffect(() => {
     if (open) setStatement(initial ?? EMPTY);
   }, [open, initial]);
 
