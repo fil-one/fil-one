@@ -95,6 +95,9 @@ export interface IssuePrincipalKeyOpts {
   keyName: string;
   principalId: string;
   expiresAt?: string | null;
+  permissions?: never;
+  granularPermissions?: never;
+  buckets?: never;
 }
 
 /** The request's shape is the key's kind, as it is at the storage system. */

@@ -66,7 +66,7 @@ import {
   BucketNotFoundError,
   PrincipalNotFoundError,
 } from '../errors.ts';
-import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
+import type { IssueAccessKeyOpts, OrchestratorRequestOptions } from '../service-orchestrator.ts';
 import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
 import { instrumentClient } from './metrics.ts';
 import { createFilOneOrchestrator, type FilOneOrchestratorConfig } from './orchestrator.ts';
@@ -610,6 +610,41 @@ describe('issueAccessKey bound to a principal', () => {
     await expect(
       orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' }),
     ).rejects.toBeInstanceOf(PrincipalNotFoundError);
+  });
+});
+
+describe('issueAccessKey with a mixed shape', () => {
+  const orchestrator = buildOrchestrator({ accessModel: 'iam' });
+
+  it('refuses principalId together with service-key fields instead of dropping them', async () => {
+    mockCreateAccessKey.mockResolvedValue(
+      ok(
+        {
+          accessKeyId: 'k',
+          name: 'laptop',
+          principal: 'alice',
+          secretAccessKey: 's',
+          createdAt: 'now',
+        },
+        201,
+      ),
+    );
+    const mixed = {
+      keyName: 'laptop',
+      principalId: 'alice',
+      permissions: ['read' as const],
+      buckets: ['photos'],
+    };
+    await expect(orchestrator.issueAccessKey(tenantId, mixed)).rejects.toBeInstanceOf(
+      AccessKeyValidationError,
+    );
+    expect(mockCreateAccessKey).not.toHaveBeenCalled();
+  });
+
+  it('does not type-check a mixed shape', () => {
+    // @ts-expect-error a principal-bound key carries no permissions of its own
+    const opts: IssueAccessKeyOpts = { keyName: 'k', principalId: 'alice', permissions: ['read'] };
+    expect(opts).toBeDefined();
   });
 });
 
