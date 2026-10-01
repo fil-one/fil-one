@@ -1048,6 +1048,25 @@ describe('the roster statements on iam regions', () => {
     expect(mockSyncRoster).toHaveBeenCalled();
   });
 
+  it('resolves the iam regions from a consistent read of the org profile', async () => {
+    targetHolds(OrgRole.Admin);
+    const profileKey = { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'PROFILE' } };
+    // A replica that has not seen the tenant id written moments ago.
+    ddbMock.on(GetItemCommand, { TableName: 'UserInfoTable', Key: profileKey }).resolves({});
+    ddbMock
+      .on(GetItemCommand, { TableName: 'UserInfoTable', Key: profileKey, ConsistentRead: true })
+      .resolves({ Item: { ...profileKey, forgeDevTenantId: { S: 'tenant-fresh' } } });
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+    await handler(roleEvent(OrgRole.Member), buildContext());
+
+    expect(mockSyncRoster).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orgProfile: expect.objectContaining({ forgeDevTenantId: { S: 'tenant-fresh' } }),
+      }),
+    );
+  });
+
   it('rewrites nothing for a change that touches neither Owner nor Admin', async () => {
     targetHolds(OrgRole.Member);
     ddbMock.on(TransactWriteItemsCommand).resolves({});

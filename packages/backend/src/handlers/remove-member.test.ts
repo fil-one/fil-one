@@ -1166,6 +1166,24 @@ describe('the principal on iam regions', () => {
     ]);
   });
 
+  it('resolves the iam regions from a consistent read of the org profile', async () => {
+    const profileKey = { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'PROFILE' } };
+    // A replica that has not seen the tenant id written moments ago.
+    ddbMock.on(GetItemCommand, { TableName: 'UserInfoTable', Key: profileKey }).resolves({});
+    ddbMock
+      .on(GetItemCommand, { TableName: 'UserInfoTable', Key: profileKey, ConsistentRead: true })
+      .resolves({ Item: { ...profileKey, forgeDevTenantId: { S: 'tenant-fresh' } } });
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+    await handler(removeEvent(), buildContext());
+
+    expect(mockRemovePrincipals).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orgProfile: expect.objectContaining({ forgeDevTenantId: { S: 'tenant-fresh' } }),
+      }),
+    );
+  });
+
   it('leaves the member in the org when a region refuses to remove the principal', async () => {
     mockRemovePrincipals.mockResolvedValue({ removed: [], failed: [S3Region.UsEast9] });
     ddbMock.on(TransactWriteItemsCommand).resolves({});
