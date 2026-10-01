@@ -194,6 +194,28 @@ describe('put-bucket-policy baseHandler', () => {
     expect(statuses).toStrictEqual([200, 200]);
   });
 
+  it('refuses an Admin dropping the deny that withheld a retention write', async () => {
+    iam.seedPrincipal(TENANT_ID, 'friend');
+    const allow: PolicyStatement = {
+      effect: 'allow',
+      principal: ['friend'],
+      action: ['s3:PutObjectRetention'],
+    };
+    const etag = iam.seedPolicy(TENANT_ID, BUCKET, {
+      statement: [
+        allow,
+        { effect: 'deny', principal: ['friend'], action: ['s3:PutObjectRetention'] },
+      ],
+    });
+
+    const result = await baseHandler(
+      request({ policy: { statement: [allow] }, etag }, { role: OrgRole.Admin }),
+    );
+
+    expect(result.statusCode).toBe(403);
+    expect(iam.policies.get(TENANT_ID)?.get(BUCKET)?.etag).toBe(etag);
+  });
+
   it('refuses an Admin widening a retention write to a new principal', async () => {
     const etag = iam.seedPolicy(TENANT_ID, BUCKET, {
       statement: [
