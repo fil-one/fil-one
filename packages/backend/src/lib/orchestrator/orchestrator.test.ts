@@ -671,6 +671,20 @@ describe('listBuckets on an iam region', () => {
     expect(mockGetPrincipalAccess).toHaveBeenCalledWith(expect.objectContaining({ signal }));
   });
 
+  it('starts the access lookup before the S3 listing answers', async () => {
+    stubS3Credentials();
+    let lookupsWhenListed = -1;
+    s3Mock.on(ListBucketsCommand).callsFake(() => {
+      lookupsWhenListed = mockGetPrincipalAccess.mock.calls.length;
+      return { Buckets: [{ Name: 'photos', CreationDate: new Date('2026-01-01T00:00:00Z') }] };
+    });
+    mockGetPrincipalAccess.mockReturnValue(reaches('photos'));
+
+    await iamOrchestrator.listBuckets(tenantId, { actAs: member });
+
+    expect(lookupsWhenListed).toBe(1);
+  });
+
   it('ignores the named member on a scoped-keys region', async () => {
     stubTenantListing();
 
