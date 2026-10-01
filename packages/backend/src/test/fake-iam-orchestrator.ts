@@ -13,6 +13,7 @@ import type {
   StoredBucketPolicy,
 } from '../lib/bucket-policy-orchestrator.ts';
 import type { MemberBucketPolicy, MemberOrchestrator } from '../lib/member-orchestrator.ts';
+import type { OrchestratorRequestOptions } from '../lib/service-orchestrator.ts';
 
 /**
  * An in-memory bucket-policy and member orchestrator with the storage system's semantics: real ETags and
@@ -143,7 +144,11 @@ export class FakeIamOrchestrator implements BucketPolicyOrchestrator, MemberOrch
       .map(([bucketName, { policy }]) => ({ bucketName, policy }));
   }
 
-  async resolveMemberAccess(tenantId: string, userId: string): Promise<MemberBucketAccess[]> {
+  async resolveMemberAccess(
+    tenantId: string,
+    userId: string,
+    _opts?: OrchestratorRequestOptions,
+  ): Promise<MemberBucketAccess[]> {
     this.recordCall('resolveMemberAccess', tenantId, userId);
     this.throwInjectedFailure('resolveMemberAccess');
     // A principal Hilt does not know reaches no bucket.
