@@ -20,6 +20,17 @@ import { FakeIamOrchestrator } from '../test/fake-iam-orchestrator.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
+// No committed region declares `iam`; the mock stands one up where the registry
+// mock below serves it, so the shared retention rule and the handler agree.
+vi.mock('../../../shared/src/constants.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../shared/src/constants.ts')>();
+  return {
+    ...actual,
+    getRegionAccessModel: (region: string) =>
+      region === actual.S3Region.UsEast9 ? 'iam' : 'scoped-keys',
+  };
+});
+
 const mockEnsureTenantReady = vi.fn();
 const mockIssueAccessKey = vi.fn();
 const mockFindAccessKeyByName = vi.fn();
@@ -1371,6 +1382,27 @@ describe('create-access-key baseHandler', () => {
         expect(result.statusCode).toBe(403);
         expect(mockIssueAccessKey).not.toHaveBeenCalled();
         expect(intentEvents()).toHaveLength(0);
+      });
+
+      it('discards the service key when the creator lost keys.create_service mid-mint', async () => {
+        // The permission was checked against the Admin snapshot. A Member may
+        // hold a read/list key, so neither the row's ConditionCheck nor the
+        // read after it notices that a Member may not mint a service key here.
+        stubCreatorRole(OrgRole.Member);
+        mockDeleteAccessKey.mockResolvedValue(undefined);
+
+        const result = await baseHandler(
+          buildEvent({
+            body: serviceBody(),
+            userInfo: {
+              ...USER_INFO,
+              membership: membershipFor('org-1', 'user-1', OrgRole.Admin),
+            },
+          }),
+        );
+
+        expect(result.statusCode).toBe(409);
+        expect(mockDeleteAccessKey).toHaveBeenCalledWith('tenant-9', 'aurora-key-1');
       });
 
       it('still caps the key at the creator: an Admin cannot name a retention write', async () => {
