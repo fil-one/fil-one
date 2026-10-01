@@ -261,29 +261,21 @@ export async function removeMemberPrincipals({
   userId: string;
 }): Promise<{ removed: S3Region[]; failed: S3Region[] }> {
   const regions = readyIamRegions(orgProfile);
+  // The PROFILE set is pruned as part of the region's removal: an id left
+  // behind would make a later ensureTenantReady skip registering a re-invited
+  // member, so a prune that fails refuses the region and the retry runs both.
   const outcomes = await Promise.allSettled(
-    regions.map(({ orchestrator, tenantId }) => orchestrator.iam.removeMember(tenantId, userId)),
+    regions.map(async ({ orchestrator, tenantId }) => {
+      await orchestrator.iam.removeMember(tenantId, userId);
+      await removeRegisteredPrincipal(orgId, orchestrator.id, userId);
+    }),
   );
   const removed: S3Region[] = [];
   const failed: S3Region[] = [];
-  // Keeps the PROFILE set in step with the orchestrator: an id left behind
-  // would make a later ensureTenantReady treat the member as registered.
-  const pruned: Array<Promise<unknown>> = [];
   outcomes.forEach((outcome, index) => {
-    const { region, id } = regions[index]!.orchestrator;
+    const { region } = regions[index]!.orchestrator;
     if (outcome.status === 'fulfilled') {
       removed.push(region);
-      pruned.push(
-        removeRegisteredPrincipal(orgId, id, userId).catch((error: unknown) => {
-          // A stale entry only costs a skipped re-registration for a member who
-          // is no longer in the org, so the removal itself still stands.
-          console.error('[iam-policy-fanout] Could not prune a registered principal', {
-            region,
-            userId,
-            error,
-          });
-        }),
-      );
       return;
     }
     console.error('[iam-policy-fanout] Could not remove a principal', {
@@ -293,6 +285,5 @@ export async function removeMemberPrincipals({
     });
     failed.push(region);
   });
-  await Promise.all(pruned);
   return { removed, failed };
 }
