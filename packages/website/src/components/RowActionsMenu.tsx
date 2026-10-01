@@ -38,6 +38,8 @@ export type RowActionsMenuProps = {
   /** Names the menu for the row it belongs to — "Actions for Ada Lovelace". */
   'aria-label': string;
   disabled?: boolean;
+  /** A handle on the trigger for tests, as `RowAction` carries for its item. */
+  testId?: string;
 };
 
 /**
@@ -58,6 +60,7 @@ export function RowActionsMenu({
   actions,
   'aria-label': ariaLabel,
   disabled = false,
+  testId,
 }: RowActionsMenuProps) {
   if (actions.length === 0) return null;
 
@@ -67,6 +70,7 @@ export function RowActionsMenu({
         as={IconButton}
         icon={DotsTrigger}
         aria-label={ariaLabel}
+        data-testid={testId}
         disabled={disabled}
         className="text-zinc-600 data-open:bg-zinc-100 data-open:text-zinc-900"
       />
