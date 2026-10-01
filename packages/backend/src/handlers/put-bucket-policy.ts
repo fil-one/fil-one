@@ -8,9 +8,15 @@ import {
   PutBucketPolicyRequestSchema,
   RETENTION_WRITE_ACTIONS,
   addsRetentionGrants,
+  isRosterSid,
   roleHasPermission,
 } from '@filone/shared';
-import type { BucketPolicy, ErrorResponse, PutBucketPolicyResponse } from '@filone/shared';
+import type {
+  BucketPolicy,
+  ErrorResponse,
+  PutBucketPolicyRequest,
+  PutBucketPolicyResponse,
+} from '@filone/shared';
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
 import {
   bucketPolicyErrorResponse,
@@ -20,6 +26,7 @@ import {
 } from '../lib/bucket-policy-route.ts';
 import type { IamMethods } from '../lib/iam-orchestrator.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
+import type { ParsedBody } from '../lib/parse-json-body.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
@@ -59,7 +66,7 @@ export async function baseHandler(
   if ('response' in resolved) return resolved.response;
   const { bucketName, region } = resolved.target;
 
-  const parsed = parseJsonBody(event.body, PutBucketPolicyRequestSchema);
+  const parsed = parsePolicyBody(event.body);
   if ('error' in parsed) return parsed.error;
   const { policy, etag } = parsed.data;
 
@@ -109,6 +116,33 @@ export async function baseHandler(
     await audit.complete({ outcome: 'failed' });
     return response;
   }
+}
+
+/**
+ * The body, parsed, with one rule the schema leaves to the route: the roster
+ * labels name the console's own statements, which the role-change fan-out
+ * finds and rewrites by label. Each may appear once and only on an allow, so
+ * the fan-out never drops a statement a user wrote. Its principals and actions
+ * stay editable.
+ */
+function parsePolicyBody(raw: string | undefined): ParsedBody<PutBucketPolicyRequest> {
+  const parsed = parseJsonBody(raw, PutBucketPolicyRequestSchema);
+  if ('error' in parsed) return parsed;
+  const seen = new Set<string>();
+  for (const { sid, effect } of parsed.data.policy.statement) {
+    if (!sid || !isRosterSid(sid)) continue;
+    if (effect !== 'allow' || seen.has(sid)) {
+      const error = new ResponseBuilder()
+        .status(400)
+        .body<ErrorResponse>({
+          message: `The label "${sid}" is reserved for the console\u2019s own allow statement.`,
+        })
+        .build();
+      return { error };
+    }
+    seen.add(sid);
+  }
+  return parsed;
 }
 
 /**

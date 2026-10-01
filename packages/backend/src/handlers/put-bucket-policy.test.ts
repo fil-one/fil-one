@@ -267,6 +267,68 @@ describe('put-bucket-policy baseHandler', () => {
     expect(iam.calls).toHaveLength(0);
   });
 
+  it('refuses a statement that borrows a roster label for anything but an allow', async () => {
+    const result = await baseHandler(
+      request({
+        policy: {
+          statement: [
+            {
+              sid: 'filone-admins',
+              effect: 'deny',
+              principal: [USER_ID],
+              action: ['s3:GetObject'],
+            },
+          ],
+        },
+      }),
+    );
+
+    expect([result.statusCode, body(result).message]).toStrictEqual([
+      400,
+      'The label "filone-admins" is reserved for the console\u2019s own allow statement.',
+    ]);
+    expect(iam.calls).toHaveLength(0);
+  });
+
+  it('refuses two statements carrying the same roster label', async () => {
+    const owners: PolicyStatement = {
+      sid: 'filone-owners',
+      effect: 'allow',
+      principal: [USER_ID],
+      action: ['s3:*'],
+    };
+
+    const result = await baseHandler(
+      request({ policy: { statement: [owners, { ...owners, action: ['s3:GetObject'] }] } }),
+    );
+
+    expect([result.statusCode, body(result).message]).toStrictEqual([
+      400,
+      'The label "filone-owners" is reserved for the console\u2019s own allow statement.',
+    ]);
+    expect(iam.calls).toHaveLength(0);
+  });
+
+  it('accepts the roster statements round-tripped with their principals edited', async () => {
+    iam.seedPrincipal(TENANT_ID, 'friend');
+    const etag = iam.seedPolicy(TENANT_ID, BUCKET, {
+      statement: [
+        { sid: 'filone-owners', effect: 'allow', principal: [USER_ID], action: ['s3:*'] },
+        { sid: 'filone-creator', effect: 'allow', principal: ['friend'], action: ['s3:GetObject'] },
+      ],
+    });
+    const edited: BucketPolicy = {
+      statement: [
+        { sid: 'filone-owners', effect: 'allow', principal: [USER_ID, 'friend'], action: ['s3:*'] },
+        { sid: 'filone-creator', effect: 'allow', principal: '*', action: ['s3:GetObject'] },
+      ],
+    };
+
+    const result = await baseHandler(request({ policy: edited, etag }));
+
+    expect(result.statusCode).toBe(200);
+  });
+
   it('answers as a bucket with no policy on a region that serves none', async () => {
     const result = await baseHandler(request({ policy: readPolicy }, { region: SCOPED_REGION }));
 
