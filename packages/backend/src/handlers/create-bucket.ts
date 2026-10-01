@@ -85,6 +85,20 @@ export async function baseHandler(
       ...(policy ? { policy } : {}),
     });
   } catch (err) {
+    // The bucket was created but couldn't be fully configured. Surface the
+    // actionable message so the caller can finish setup via the S3 API instead
+    // of getting the generic 500 from errorHandlerMiddleware. The create stored
+    // the bucket and its policy together, so the policy write did succeed.
+    if (err instanceof BucketConfigurationError) {
+      await audit?.complete({
+        outcome: 'succeeded',
+        details: { statements: policy?.statement.length },
+      });
+      return new ResponseBuilder()
+        .status(500)
+        .body<ErrorResponse>({ message: err.message })
+        .build();
+    }
     await audit?.complete({ outcome: 'failed' });
     if (err instanceof BucketAlreadyExistsError) {
       return new ResponseBuilder()
@@ -97,15 +111,6 @@ export async function baseHandler(
     if (err instanceof PolicyValidationError) {
       return new ResponseBuilder()
         .status(400)
-        .body<ErrorResponse>({ message: err.message })
-        .build();
-    }
-    // The bucket was created but couldn't be fully configured. Surface the
-    // actionable message so the caller can finish setup via the S3 API instead
-    // of getting the generic 500 from errorHandlerMiddleware.
-    if (err instanceof BucketConfigurationError) {
-      return new ResponseBuilder()
-        .status(500)
         .body<ErrorResponse>({ message: err.message })
         .build();
     }
