@@ -1,5 +1,17 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { OrgRole } from './api/org.ts';
+import { S3Region } from './constants.ts';
+
+// No region declares `iam` yet; the mock stands one up so the service-key rule
+// can be exercised before the first such region ships.
+vi.mock('./constants.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./constants.ts')>();
+  return {
+    ...actual,
+    getRegionAccessModel: (region: string) =>
+      region === actual.S3Region.UsEast9 ? 'iam' : 'scoped-keys',
+  };
+});
 import {
   ACCESS_KEY_PERMISSIONS,
   GRANULAR_PERMISSIONS,
@@ -261,6 +273,17 @@ describe('canRetainAccessKey', () => {
       retained: false,
       reason: 'permissions_unrecorded',
     });
+  });
+
+  it('takes a service key from a Member on an iam region, who cannot mint one', () => {
+    // A service key on an `iam` region is bound to no principal, so bucket
+    // policies never see it; only `keys.create_service` mints one.
+    const serviceKey = { permissions: ['read', 'write'], region: S3Region.UsEast9 };
+    expect(canRetainAccessKey(OrgRole.Member, serviceKey)).toStrictEqual({
+      retained: false,
+      reason: 'role_cannot_mint',
+    });
+    expect(canRetainAccessKey(OrgRole.Admin, serviceKey).retained).toBe(true);
   });
 
   it('reads an empty permission list as a recorded set, and keeps it', () => {
