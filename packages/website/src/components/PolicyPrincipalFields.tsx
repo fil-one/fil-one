@@ -43,7 +43,7 @@ export function PolicyPrincipalFields({ value, onChange }: PolicyPrincipalFields
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row">
         <RadioOption
           name="policy-principal"
           value="everyone"

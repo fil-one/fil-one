@@ -93,7 +93,7 @@ export function PolicyStatementModal({
           </FormField>
 
           <FormField label="Effect">
-            <div className="flex gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row">
               <RadioOption
                 name="policy-effect"
                 value="allow"
