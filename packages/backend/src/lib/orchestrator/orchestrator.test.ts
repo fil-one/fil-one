@@ -12,6 +12,7 @@ import {
   PutObjectLockConfigurationCommand,
   GetBucketVersioningCommand,
   GetObjectLockConfigurationCommand,
+  S3ServiceException,
 } from '@aws-sdk/client-s3';
 import { S3Region } from '@filone/shared';
 import type { BucketPolicy } from '@filone/shared';
@@ -778,6 +779,30 @@ describe('getBucket', () => {
     s3Mock.on(GetObjectLockConfigurationCommand).rejects(noSuchBucket());
 
     await expect(orchestrator.getBucket(tenantId, 'missing')).resolves.toBeNull();
+  });
+
+  const accessDenied = () =>
+    new S3ServiceException({
+      name: 'AccessDenied',
+      $fault: 'client',
+      message: 'Access Denied',
+      $metadata: { httpStatusCode: 403 },
+    });
+
+  it("returns null for another tenant's bucket, which the gateway answers AccessDenied", async () => {
+    s3Mock.on(GetBucketVersioningCommand).rejects(accessDenied());
+    s3Mock.on(GetObjectLockConfigurationCommand).rejects(accessDenied());
+    s3Mock.on(ListBucketsCommand).resolves({ Buckets: [{ Name: 'bucket-a' }] });
+
+    await expect(orchestrator.getBucket(tenantId, 'someone-elses')).resolves.toBeNull();
+  });
+
+  it("rethrows AccessDenied on the tenant's own bucket, which a key without the reads gets", async () => {
+    s3Mock.on(GetBucketVersioningCommand).rejects(accessDenied());
+    s3Mock.on(GetObjectLockConfigurationCommand).rejects(accessDenied());
+    s3Mock.on(ListBucketsCommand).resolves({ Buckets: [{ Name: 'bucket-a' }] });
+
+    await expect(orchestrator.getBucket(tenantId, 'bucket-a')).rejects.toThrow('Access Denied');
   });
 
   it('keeps object lock off for a bucket that simply has no configuration', async () => {
