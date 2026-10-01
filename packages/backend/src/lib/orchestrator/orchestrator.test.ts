@@ -606,10 +606,40 @@ describe('issueAccessKey bound to a principal', () => {
       orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' }),
     ).rejects.toBeInstanceOf(AccessKeyAlreadyExistsError);
 
-    mockCreateAccessKey.mockResolvedValueOnce(fail(422, 'unknown principal'));
+    mockCreateAccessKey.mockResolvedValueOnce({
+      data: undefined,
+      error: { message: 'unknown principal', code: 'UnknownPrincipal' },
+      response: { status: 422 },
+    });
     await expect(
       orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' }),
     ).rejects.toBeInstanceOf(PrincipalNotFoundError);
+  });
+});
+
+describe('issueAccessKey 422 classification', () => {
+  const orchestrator = buildOrchestrator({ accessModel: 'iam' });
+  function fail422(message: string, code: string) {
+    return { data: undefined, error: { message, code }, response: { status: 422 } };
+  }
+
+  it('maps an absent principal by its code even when the message omits the word', async () => {
+    mockCreateAccessKey.mockResolvedValueOnce(fail422('no such member', 'UnknownPrincipal'));
+    await expect(
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' }),
+    ).rejects.toBeInstanceOf(PrincipalNotFoundError);
+  });
+
+  it('maps a 422 that mentions the principal under another code to a validation error', async () => {
+    mockCreateAccessKey.mockResolvedValueOnce(
+      fail422(
+        'a principal-bound access key takes no permissions or buckets',
+        'PrincipalScopedAccessKey',
+      ),
+    );
+    await expect(
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' }),
+    ).rejects.toBeInstanceOf(AccessKeyValidationError);
   });
 });
 
