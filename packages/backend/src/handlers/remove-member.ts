@@ -178,7 +178,7 @@ export async function baseHandler(
     lastMembership,
   });
 
-  const orgProfile = await getOrgProfile(orgId);
+  const orgProfile = await getOrgProfile(orgId, { consistentRead: true });
   const { keysToRevoke, fence } = await reviewKeysForRoleChange(orgId, targetUserId, NO_ROLE);
   const changedBy = actorEmail ?? userId;
 
