@@ -91,6 +91,9 @@ export default defineConfig({
           {
             name: 'policies-setup',
             testMatch: /policies\/policies\.setup\.ts/,
+            // The seat test activates the billing row the owner's login creates.
+            fullyParallel: false,
+            workers: 1,
           },
           {
             name: 'policies-local',
