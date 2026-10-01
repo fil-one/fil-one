@@ -1,6 +1,7 @@
 // The access-key create request as the storage system takes it. Shared by the
 // two arms: the body's shape is the key's kind on both.
 
+import type { AccessModel } from '@filone/shared';
 import type {
   CreateAccessKeyRequest,
   CreateServiceAccessKeyRequest,
@@ -13,9 +14,18 @@ import { buildPermissions } from './permissions.ts';
  * principal-bound key carries `principalId` and nothing of its own, a service
  * key its permissions and bucket list.
  */
-export function accessKeyBody(keyOpts: IssueAccessKeyOpts): CreateAccessKeyRequest {
+export function accessKeyBody(
+  keyOpts: IssueAccessKeyOpts,
+  arm: { id: string; accessModel: AccessModel },
+): CreateAccessKeyRequest {
   const expiresAt = keyOpts.expiresAt ?? null;
   if ('principalId' in keyOpts) {
+    // Only the iam arm has principals to bind to, as on Aurora and FTH.
+    if (arm.accessModel !== 'iam') {
+      throw new Error(
+        `${arm.id} serves scoped keys; a principal-bound key needs the iam access model`,
+      );
+    }
     return { name: keyOpts.keyName, principalId: keyOpts.principalId, expiresAt };
   }
   return {
