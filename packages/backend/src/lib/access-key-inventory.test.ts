@@ -82,6 +82,18 @@ describe('getAccessKeysInScope', () => {
     expect(input.ExpressionAttributeValues?.[':bucket']).toEqual({ S: 'target-bucket' });
   });
 
+  it('keeps principal-bound rows in a bucket-filtered listing', async () => {
+    // A principal-bound row stores neither bucketScope nor buckets: what it
+    // reaches follows the bucket policies. A predicate built only from the
+    // stored scope drops every such key from the bucket's Keys tab.
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+    await getAccessKeysInScope('org-1', { sees: 'all' }, { bucketFilter: 'target-bucket' });
+
+    const input = ddbMock.commandCalls(QueryCommand)[0].args[0].input;
+    expect(input.FilterExpression).toMatch(/principalId/);
+  });
+
   it('narrows to a region filter via the DynamoDB FilterExpression', async () => {
     ddbMock.on(QueryCommand).resolves({ Items: [] });
 

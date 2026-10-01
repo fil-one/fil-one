@@ -74,8 +74,12 @@ function buildQueryInput(
 
   // When a bucket filter is provided, only return keys that have access to that bucket:
   // either keys with bucketScope = 'all' or keys that include the bucket in their buckets list.
+  // A principal-bound key stores neither: what it reaches follows the bucket's
+  // policy, which the list route asks, so every such row comes through.
   if (bucketFilter) {
-    filterExpressions.push('(bucketScope = :all OR contains(buckets, :bucket))');
+    filterExpressions.push(
+      '(bucketScope = :all OR contains(buckets, :bucket) OR attribute_exists(principalId))',
+    );
     values[':all'] = { S: 'all' };
     values[':bucket'] = { S: bucketFilter };
   }
