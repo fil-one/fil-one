@@ -16,6 +16,7 @@ import {
   s3For,
   uniqueBucketName,
   canonical,
+  chooseStatementAction,
 } from './policy.util.ts';
 
 // The Policy tab, driven by the Owner. Every case gets its own bucket, and
@@ -121,12 +122,12 @@ test('U1. the tab lists the roster statements of a new bucket', async ({ page })
 
 test('U2. a roster statement keeps its name but can be removed', async ({ page }) => {
   await openPolicyTab(page);
-  await card(page, 'Owners').getByTestId('policy-statement-edit').click();
+  await chooseStatementAction(page, 'Owners', 'edit');
   await expect(nameInput(page)).toBeDisabled();
   await expect(nameInput(page)).toHaveValue('Owners');
   await modal(page).locator('#policy-statement-cancel').click();
 
-  await card(page, 'Owners').getByTestId('policy-statement-remove').click();
+  await chooseStatementAction(page, 'Owners', 'remove');
   await expect(cards(page)).toHaveCount(1);
   await savePolicy(page);
   expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
@@ -163,7 +164,7 @@ test('U4. editing a statement widens the grant', async ({ page }) => {
     allow([memberId], ['s3:ListBucket'], 'member-read'),
   ]);
   await openPolicyTab(page);
-  await card(page, 'member-read').getByTestId('policy-statement-edit').click();
+  await chooseStatementAction(page, 'member-read', 'edit');
   await pickActions(page, ['s3:PutObject']);
   await submitStatement(page);
   await savePolicy(page);
@@ -180,7 +181,7 @@ test('U5. removing a statement takes its grant away', async ({ page }) => {
     allow([memberId], ['s3:ListBucket'], 'member-read'),
   ]);
   await openPolicyTab(page);
-  await card(page, 'member-read').getByTestId('policy-statement-remove').click();
+  await chooseStatementAction(page, 'member-read', 'remove');
   await expect(cards(page)).toHaveCount(1);
   await savePolicy(page);
 
@@ -207,7 +208,7 @@ test('U6. a deny for everyone warns, locks the owner out, and can be undone', as
   );
   expect(await outcome(listObjects(await freshS3(owner), bucket))).toBe('404 NoSuchBucket');
 
-  await card(page, 'lockdown').getByTestId('policy-statement-remove').click();
+  await chooseStatementAction(page, 'lockdown', 'remove');
   await expect(page.getByTestId('policy-denies-everyone')).toBeHidden();
   await savePolicy(page);
   expect(await outcome(listObjects(await freshS3(owner), bucket))).toBe('ok');

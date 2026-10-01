@@ -13,6 +13,7 @@ import {
   rosterPolicy,
   uniqueBucketName,
   canonical,
+  chooseStatementAction,
 } from './policy.util.ts';
 
 // Granting a retention or legal-hold write is `privileged.grant`, which only an
@@ -155,10 +156,7 @@ test.describe('in the editor', () => {
     test('PU2. the admin cannot save the owners statement back', async ({ page }) => {
       const { etag } = await owner.readPolicy(bucket);
       await openAs(page);
-      await page
-        .locator('[data-testid="policy-statement"][data-statement-label="Owners"]')
-        .getByTestId('policy-statement-edit')
-        .click();
+      await chooseStatementAction(page, 'Owners', 'edit');
       // `s3:*` is pruned from what the admin may offer, leaving no action.
       await expect(modal(page).locator('#policy-statement-submit')).toBeDisabled();
       await modal(page).locator('#policy-statement-cancel').click();
