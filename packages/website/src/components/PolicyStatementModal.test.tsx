@@ -118,6 +118,15 @@ describe('PolicyStatementModal', () => {
     expect(onSubmit).toHaveBeenCalledWith(initial);
   });
 
+  it('stacks the effect and principal choices below the sm breakpoint', () => {
+    renderModal();
+
+    for (const name of [/^Allow/, 'Everyone in this organization']) {
+      const pair = screen.getByRole('radio', { name }).closest('label')?.parentElement;
+      expect(pair).toHaveClass('flex-col', 'sm:flex-row');
+    }
+  });
+
   it('warns as soon as a deny names everyone', () => {
     renderModal();
     fireEvent.click(screen.getByRole('radio', { name: /^Deny/ }));
