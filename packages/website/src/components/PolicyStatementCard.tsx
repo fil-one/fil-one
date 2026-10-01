@@ -1,5 +1,5 @@
 import { PencilSimpleIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
-import type { PolicyActionOrWildcard, PolicyStatement } from '@filone/shared';
+import type { PolicyActionGroup, PolicyActionOrWildcard, PolicyStatement } from '@filone/shared';
 import {
   POLICY_ACTION_GROUPS,
   POLICY_ACTION_GROUP_LABELS,
@@ -9,9 +9,9 @@ import {
   getPolicyActionsInGroup,
 } from '@filone/shared';
 
-import { Badge } from './Badge.js';
+import { Badge, type BadgeColor } from './Badge.js';
 import { Card } from './Card.js';
-import { IconButton } from './IconButton.js';
+import { RowActionsMenu } from './RowActionsMenu.js';
 
 /** How many members a statement names before the rest fold into one badge. */
 const MAX_MEMBER_BADGES = 3;
@@ -20,6 +20,15 @@ const MAX_MEMBER_BADGES = 3;
 export function getStatementTitle(statement: Pick<PolicyStatement, 'Sid'>, index: number): string {
   return statement.Sid ?? `Statement ${index + 1}`;
 }
+
+/** Badge colour by risk: delete and data protection are the widest grants. */
+const ACTION_GROUP_COLOR: Record<PolicyActionGroup, BadgeColor> = {
+  read: 'blue',
+  list: 'blue',
+  write: 'amber',
+  delete: 'red',
+  protect: 'red',
+};
 
 export type PolicyStatementCardProps = {
   statement: PolicyStatement;
@@ -53,25 +62,25 @@ export function PolicyStatementCard({
           </Badge>
           <span className="text-ui font-medium text-zinc-900">{title}</span>
           {(onEdit || onRemove) && (
-            <div className="ml-auto flex items-center gap-1">
-              {onEdit && (
-                <IconButton
-                  icon={PencilSimpleIcon}
-                  size="sm"
-                  aria-label={`Edit ${title}`}
-                  tooltip="Edit statement"
-                  onClick={onEdit}
-                />
-              )}
-              {onRemove && (
-                <IconButton
-                  icon={TrashIcon}
-                  size="sm"
-                  aria-label={`Remove ${title}`}
-                  tooltip="Remove statement"
-                  onClick={onRemove}
-                />
-              )}
+            <div className="ml-auto">
+              <RowActionsMenu
+                aria-label={`Actions for ${title}`}
+                actions={[
+                  ...(onEdit
+                    ? [{ label: 'Edit statement', icon: PencilSimpleIcon, onSelect: onEdit }]
+                    : []),
+                  ...(onRemove
+                    ? [
+                        {
+                          label: 'Remove statement',
+                          icon: TrashIcon,
+                          destructive: true,
+                          onSelect: onRemove,
+                        },
+                      ]
+                    : []),
+                ]}
+              />
             </div>
           )}
         </div>
@@ -152,7 +161,7 @@ function PrincipalBadges({
 function ActionBadges({ actions }: { actions: PolicyStatement['Action'] }) {
   if (actions.includes(POLICY_ACTION_WILDCARD)) {
     return (
-      <Badge color="blue" size="sm">
+      <Badge color="red" size="sm">
         All actions
       </Badge>
     );
@@ -168,7 +177,7 @@ function ActionBadges({ actions }: { actions: PolicyStatement['Action'] }) {
         return (
           <Badge
             key={group}
-            color="blue"
+            color={ACTION_GROUP_COLOR[group]}
             size="sm"
             data-testid={`policy-actions-${group}`}
             description={
