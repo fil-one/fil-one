@@ -1394,6 +1394,22 @@ describe('create-access-key baseHandler', () => {
       });
     });
 
+    it('leaves no intent dangling when the principal sync fails before the mint', async () => {
+      // The sync runs before the vendor mint, so no credential can exist yet;
+      // an intent left dangling here reads to an operator as a possible orphan
+      // key, which is the one thing a dangling intent is meant to mean.
+      iamFake.failNext('syncMember', new Error('iam down'));
+
+      await baseHandler(buildEvent({ body: principalBody(), userInfo: USER_INFO })).catch(
+        () => undefined,
+      );
+
+      expect(mockIssueAccessKey).not.toHaveBeenCalled();
+      const completions = standaloneEvents().filter((event) => event.phase === 'completion');
+      expect(completions).toHaveLength(intentEvents().length);
+      for (const completion of completions) expect(completion.outcome).toBe('failed');
+    });
+
     it('refuses a name the org already shows in the region, before the vendor', async () => {
       ddbMock.on(QueryCommand).resolves({
         Items: [
