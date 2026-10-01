@@ -36,6 +36,18 @@ describe('PolicyStatementCard', () => {
     expect(screen.queryByTestId('policy-actions-delete')).not.toBeInTheDocument();
   });
 
+  it('colours action groups by risk', () => {
+    renderCard({
+      effect: 'allow',
+      principal: ['a'],
+      action: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
+    });
+
+    expect(screen.getByTestId('policy-actions-read').className).toContain('brand');
+    expect(screen.getByTestId('policy-actions-write').className).toContain('amber');
+    expect(screen.getByTestId('policy-actions-delete').className).toContain('red');
+  });
+
   it('labels a statement with no sid by its position and shows a deny in red', () => {
     renderCard({ Effect: 'Deny', Principal: '*', Action: ['s3:DeleteObject'] }, { index: 2 });
 
@@ -50,12 +62,19 @@ describe('PolicyStatementCard', () => {
         { Sid: sid, Effect: 'Allow', Principal: ['a'], Action: ['s3:GetObject'] },
         { onEdit: () => {} },
       );
-      const label = screen.getByRole('button', { name: /^Edit / }).getAttribute('aria-label');
+      const label = screen
+        .getByRole('button', { name: /^Actions for / })
+        .getAttribute('aria-label');
       unmount();
       return label;
     });
 
-    expect(titles).toEqual(['Edit Owners', 'Edit Admins', 'Edit Bucket creator', 'Edit team']);
+    expect(titles).toEqual([
+      'Actions for Owners',
+      'Actions for Admins',
+      'Actions for Bucket creator',
+      'Actions for team',
+    ]);
   });
 
   it('folds members past the third into one badge and names an unknown member honestly', () => {
@@ -91,9 +110,12 @@ describe('PolicyStatementCard', () => {
         onRemove={onRemove}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Edit Statement 1' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Remove Statement 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Statement 1' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Edit statement' }));
     expect(onEdit).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Statement 1' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove statement' }));
     expect(onRemove).toHaveBeenCalledTimes(1);
   });
 });
