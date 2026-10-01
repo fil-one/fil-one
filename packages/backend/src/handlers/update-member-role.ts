@@ -79,7 +79,7 @@ async function readProfilesForNarrowing(
   if (!narrows && !rewritesRoster) return {};
 
   const [orgProfile, targetProfile] = await Promise.all([
-    getOrgProfile(orgId),
+    getOrgProfile(orgId, { consistentRead: true }),
     readUserProfile(targetUserId),
   ]);
   return { orgProfile, targetProfile };
@@ -326,7 +326,7 @@ async function unchangedRoleResponse(
   role: OrgRole,
   actor: AuditActor,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const orgProfile = await getOrgProfile(orgId);
+  const orgProfile = await getOrgProfile(orgId, { consistentRead: true });
   const policySync = await syncRosterStatements({
     orgId,
     orgProfile,
