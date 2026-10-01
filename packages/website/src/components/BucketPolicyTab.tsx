@@ -60,18 +60,18 @@ export function BucketPolicyTab({ bucketName, region }: BucketPolicyTabProps) {
           tag="h2"
           size="md"
           className="gap-0.5"
-          description="Who can do what in this bucket"
+          description="Access is the union of Allow statements, minus anything a Deny statement covers"
         >
           Bucket policy
         </Heading>
         {ready && (
           <div className="flex items-center gap-2">
             {policy.snapshot && (
-              <Button variant="ghost" size="sm" onClick={() => setConfirmRemove(true)}>
+              <Button variant="tertiary" size="sm" onClick={() => setConfirmRemove(true)}>
                 Remove policy
               </Button>
             )}
-            <Button variant="ghost" size="sm" icon={PlusIcon} onClick={() => setEditing({})}>
+            <Button variant="primary" size="sm" icon={PlusIcon} onClick={() => setEditing({})}>
               Add statement
             </Button>
           </div>
