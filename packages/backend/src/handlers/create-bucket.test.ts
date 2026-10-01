@@ -347,6 +347,19 @@ describe('create-bucket baseHandler', () => {
       expect(events[1]).toMatchObject({ outcome: 'succeeded', details: { statements: 1 } });
     });
 
+    it('records the first policy as created when configuration fails after the create', async () => {
+      mockListMembers.mockResolvedValue([{ userId: 'user-1', role: OrgRole.Owner }]);
+      mockCreateBucket.mockRejectedValue(new BucketConfigurationError('my-bucket'));
+
+      const result = await baseHandler(buildEvent({ body: iamBody(), userInfo: USER_INFO }));
+
+      const events = ddbMock
+        .commandCalls(PutItemCommand)
+        .map((call) => unmarshall(call.args[0].input.Item ?? {}));
+      expect(result.statusCode).toBe(500);
+      expect(events[1]).toMatchObject({ phase: 'completion', outcome: 'succeeded' });
+    });
+
     it('answers 400 when the storage system refuses the policy, since no bucket was created', async () => {
       mockListMembers.mockResolvedValue([{ userId: 'user-1', role: OrgRole.Owner }]);
       mockCreateBucket.mockRejectedValue(new PolicyValidationError('unknown principal'));
