@@ -9,7 +9,13 @@ import {
   S3Client,
   S3ServiceException,
 } from '@aws-sdk/client-s3';
-import { expect, request, type APIRequestContext, type APIResponse } from '@playwright/test';
+import {
+  expect,
+  request,
+  type APIRequestContext,
+  type APIResponse,
+  type Page,
+} from '@playwright/test';
 import { ROSTER_ADMIN_ACTIONS } from '@filone/shared';
 import type {
   BucketPolicy,
@@ -307,4 +313,20 @@ export function canonical(policy: BucketPolicy): BucketPolicy {
   }));
   statement.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
   return { statement } as BucketPolicy;
+}
+
+/**
+ * Edit or remove a statement card from its overflow menu. The menu panel is
+ * portalled out of the card, so the item is found from the page.
+ */
+export async function chooseStatementAction(
+  page: Page,
+  label: string,
+  action: 'edit' | 'remove',
+): Promise<void> {
+  await page
+    .locator(`[data-testid="policy-statement"][data-statement-label="${label}"]`)
+    .getByTestId('policy-statement-actions')
+    .click();
+  await page.getByTestId(`policy-statement-${action}`).click();
 }

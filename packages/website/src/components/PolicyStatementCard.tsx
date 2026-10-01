@@ -68,6 +68,7 @@ export function PolicyStatementCard({
             <div className="ml-auto">
               <RowActionsMenu
                 aria-label={`Actions for ${title}`}
+                testId="policy-statement-actions"
                 actions={[
                   {
                     label: 'Edit statement',
