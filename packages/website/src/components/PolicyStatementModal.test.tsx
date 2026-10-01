@@ -102,6 +102,25 @@ describe('PolicyStatementModal', () => {
     expect(screen.getByRole('button', { name: 'Add statement' })).toBeEnabled();
   });
 
+  it('refuses the names of the statements Fil One writes', () => {
+    renderModal();
+    fireEvent.click(screen.getByRole('radio', { name: 'Everyone in this organization' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Read objects' }));
+    const name = screen.getByLabelText('Name (optional)');
+    const submit = screen.getByRole('button', { name: 'Add statement' });
+
+    for (const reserved of ['filone-owners', 'filone-admins', ' filone-creator ']) {
+      fireEvent.change(name, { target: { value: reserved } });
+      expect(submit).toBeDisabled();
+      expect(
+        screen.getByText('This name is reserved for a statement Fil One writes.'),
+      ).toBeInTheDocument();
+    }
+
+    fireEvent.change(name, { target: { value: 'filone-x' } });
+    expect(submit).toBeEnabled();
+  });
+
   it('shows a roster statement its label and will not let it be renamed', async () => {
     const initial: PolicyStatement = {
       sid: ROSTER_OWNERS_SID,
