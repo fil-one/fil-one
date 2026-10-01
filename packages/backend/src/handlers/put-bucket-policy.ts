@@ -163,7 +163,8 @@ async function refuseNewRetentionGrants(
 function addsNamedRetentionGrants(current: BucketPolicy | null, next: BucketPolicy): boolean {
   const before = namedRetentionGrants(current);
   return [...namedRetentionGrants(next)].some((grant) => {
-    const action = grant.slice(grant.indexOf('|') + 1);
+    // Split at the last bar: principal ids may hold one (`auth0|…`), actions never do.
+    const action = grant.slice(grant.lastIndexOf('|') + 1);
     return !before.has(grant) && !before.has(`${POLICY_WILDCARD_PRINCIPAL}|${action}`);
   });
 }
