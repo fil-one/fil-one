@@ -231,42 +231,34 @@ export function effectiveActions(policy: BucketPolicy, principalId: string): Pol
   return [...allowed].filter((action) => !denied.has(action)).sort();
 }
 
-/**
- * The retention grants a document makes: each principal (or `*`) that an
- * `allow` statement gives a retention or legal-hold write, keyed with the
- * action. `s3:*` counts, since it expands to both. A `deny` never counts:
- * withholding the pair is not a grant.
- */
-function retentionGrants(policy: BucketPolicy | null): Set<string> {
-  const grants = new Set<string>();
-  for (const statement of policy?.statement ?? []) {
-    if (statement.effect !== 'allow') continue;
-    const writes = expandActions(statement.action).filter((action) =>
-      (RETENTION_WRITE_ACTIONS as readonly PolicyAction[]).includes(action),
-    );
-    const principals =
-      statement.principal === POLICY_WILDCARD_PRINCIPAL ? ['*'] : statement.principal;
-    for (const principal of principals) {
-      for (const action of writes) grants.add(`${principal}|${action}`);
-    }
-  }
-  return grants;
+/** Every principal a document names outright. */
+function namedPrincipals(policy: BucketPolicy | null): string[] {
+  return (policy?.statement ?? []).flatMap((statement) =>
+    statement.principal === POLICY_WILDCARD_PRINCIPAL ? [] : statement.principal,
+  );
 }
 
 /**
  * Whether `next` grants a retention or legal-hold write that `current` does
- * not, which only an Owner may do. Compared against the stored document rather
+ * not, which only an Owner may do. Compared as the storage system evaluates
+ * them, per principal with deny winning, against the stored document rather
  * than read off the new one alone: the roster statement the console writes for
  * Owners carries `s3:*`, so every console-created bucket already grants the
  * pair, and an Admin editing an unrelated statement is not granting it again.
- * A grant to everyone covers every named principal.
+ * The wildcard principal stands for a member neither document names.
  */
 export function addsRetentionGrants(current: BucketPolicy | null, next: BucketPolicy): boolean {
-  const before = retentionGrants(current);
-  return [...retentionGrants(next)].some((grant) => {
-    const action = grant.slice(grant.indexOf('|') + 1);
-    return !before.has(grant) && !before.has(`*|${action}`);
-  });
+  const principals = new Set([
+    POLICY_WILDCARD_PRINCIPAL,
+    ...namedPrincipals(current),
+    ...namedPrincipals(next),
+  ]);
+  for (const principal of principals) {
+    const before = current ? effectiveActions(current, principal) : [];
+    const after = effectiveActions(next, principal);
+    if (RETENTION_WRITE_ACTIONS.some((a) => after.includes(a) && !before.includes(a))) return true;
+  }
+  return false;
 }
 
 /**

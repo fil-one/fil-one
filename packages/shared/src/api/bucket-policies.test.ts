@@ -16,7 +16,7 @@ import {
   policyActionsInGroup,
   withRosterStatements,
 } from './bucket-policies.ts';
-import type { BucketPolicy } from './bucket-policies.ts';
+import type { BucketPolicy, PolicyStatement } from './bucket-policies.ts';
 
 const read: BucketPolicy = {
   statement: [{ effect: 'allow', principal: ['alice'], action: ['s3:GetObject', 's3:ListBucket'] }],
@@ -213,6 +213,33 @@ describe('addsRetentionGrants', () => {
     };
     expect(addsRetentionGrants(everyone, widened)).toBe(false);
     expect(addsRetentionGrants(ownersAll, everyone)).toBe(true);
+  });
+
+  it('counts removing a deny that masked an allow as a new grant', () => {
+    // Deny wins at the storage system, so the allow grants nothing until the
+    // deny goes; removing it is the grant.
+    const allow: PolicyStatement = {
+      effect: 'allow',
+      principal: ['a'],
+      action: ['s3:PutObjectRetention'],
+    };
+    const masked: BucketPolicy = {
+      statement: [allow, { effect: 'deny', principal: ['a'], action: ['s3:PutObjectRetention'] }],
+    };
+    expect(addsRetentionGrants(masked, { statement: [allow] })).toBe(true);
+  });
+
+  it('reads a principal id containing a pipe whole, as Auth0 subs are spelled', () => {
+    const everyone: BucketPolicy = {
+      statement: [{ effect: 'allow', principal: '*', action: ['s3:PutObjectRetention'] }],
+    };
+    const redundant: BucketPolicy = {
+      statement: [
+        ...everyone.statement,
+        { effect: 'allow', principal: ['auth0|alice'], action: ['s3:PutObjectRetention'] },
+      ],
+    };
+    expect(addsRetentionGrants(everyone, redundant)).toBe(false);
   });
 });
 
