@@ -602,6 +602,43 @@ describe('presign baseHandler', () => {
       expect(mockGetPresignedPutObjectUrl).not.toHaveBeenCalled();
     });
 
+    it('refuses a version read or delete the policy grants only on the current object', async () => {
+      mockResolveMemberAccess.mockResolvedValue(reaches('b', ['s3:GetObject', 's3:DeleteObject']));
+
+      const statuses: Array<number | undefined> = [];
+      for (const op of [
+        { op: 'getObject', bucket: 'b', key: 'k', versionId: 'v1' },
+        { op: 'headObject', bucket: 'b', key: 'k', versionId: 'v1' },
+        { op: 'deleteObject', bucket: 'b', key: 'k', versionId: 'v1' },
+      ]) {
+        const result = await baseHandler(buildPresignEvent([op], { role: OrgRole.Member }));
+        statuses.push(result.statusCode);
+      }
+
+      // The gateway classifies these as s3:GetObjectVersion and
+      // s3:DeleteObjectVersion; the tenant-signed URL skips that evaluation.
+      expect(statuses).toStrictEqual([403, 403, 403]);
+    });
+
+    it('signs a version read or delete the policy grants on versions', async () => {
+      mockResolveMemberAccess.mockResolvedValue(
+        reaches('b', ['s3:GetObjectVersion', 's3:DeleteObjectVersion']),
+      );
+
+      const result = await baseHandler(
+        buildPresignEvent(
+          [
+            { op: 'getObject', bucket: 'b', key: 'k', versionId: 'v1' },
+            { op: 'headObject', bucket: 'b', key: 'k', versionId: 'v1' },
+            { op: 'deleteObject', bucket: 'b', key: 'k', versionId: 'v1' },
+          ],
+          { role: OrgRole.Member },
+        ),
+      );
+
+      expect(result.statusCode).toBe(200);
+    });
+
     it('reads member access for a scoped caller only', async () => {
       // An Owner or Admin must reach a bucket whose policy leaves them out, or
       // has none, to repair it, so the console never reads their access.
