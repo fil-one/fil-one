@@ -68,4 +68,15 @@ describe('PolicyActionFields', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Read objects' }));
     expect(onChange).toHaveBeenCalledWith([]);
   });
+
+  it('toggles an action once when its visible text is clicked', () => {
+    const onChange = renderFields([]);
+
+    fireEvent.click(screen.getByText('Browse and list objects'));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith(['s3:ListBucket']);
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'List objects' }));
+    expect(onChange).toHaveBeenCalledTimes(2);
+  });
 });

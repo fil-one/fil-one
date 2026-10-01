@@ -44,6 +44,15 @@ describe('PolicyPrincipalFields', () => {
     expect(onChange).toHaveBeenCalledWith([]);
   });
 
+  it('toggles a member once when their name is clicked', async () => {
+    const onChange = renderFields(['a']);
+
+    await waitFor(() => expect(screen.getByText('ben@example.com')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('ben@example.com'));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith(['a', 'b']);
+  });
+
   it('reads no roster for everyone, and switches between the two', () => {
     const onChange = renderFields('*');
     expect(mockListMembers).not.toHaveBeenCalled();
