@@ -26,6 +26,19 @@ export type PolicyStatementModalProps = {
 const EMPTY: PolicyStatement = { effect: 'allow', principal: [], action: [] };
 
 /**
+ * The sids the role-change fan-out finds its statements by. A person's
+ * statement may not take one, or the next role change would replace it.
+ * Spelled out here until `isRosterSid` arrives from `@filone/shared`.
+ */
+const ROSTER_SIDS = new Set(['filone-owners', 'filone-admins', 'filone-creator']);
+
+/** The refusal a typed name earns. A roster statement's own fixed name earns none. */
+function reservedNameError(statement: PolicyStatement, rosterLabel: string | undefined) {
+  if (rosterLabel || !ROSTER_SIDS.has(statement.sid?.trim() ?? '')) return undefined;
+  return 'This name is reserved for a statement Fil One writes.';
+}
+
+/**
  * A name of their own, or none. The schema is strict and takes `sid` only as a
  * non-empty string, so a name that is empty or all spaces drops the key rather
  * than sending one the backend refuses. Held untrimmed while it is being typed,
@@ -72,7 +85,8 @@ export function PolicyStatementModal({
   const noPrincipal =
     statement.principal !== POLICY_WILDCARD_PRINCIPAL && statement.principal.length === 0;
   const noAction = statement.action.length === 0;
-  const canSubmit = !noPrincipal && !noAction;
+  const nameError = reservedNameError(statement, rosterLabel);
+  const canSubmit = !noPrincipal && !noAction && !nameError;
 
   function submit() {
     onSubmit(withSid(statement, statement.sid?.trim() ?? ''));
@@ -84,7 +98,7 @@ export function PolicyStatementModal({
       <ModalHeader onClose={onClose}>{initial ? 'Edit statement' : 'Add statement'}</ModalHeader>
       <ModalBody>
         <div className="flex flex-col gap-6">
-          <FormField label="Name (optional)" htmlFor="policy-statement-name">
+          <FormField label="Name (optional)" htmlFor="policy-statement-name" error={nameError}>
             <Input
               id="policy-statement-name"
               value={rosterLabel ?? statement.sid ?? ''}
