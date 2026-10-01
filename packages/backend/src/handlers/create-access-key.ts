@@ -90,6 +90,15 @@ export async function baseHandler(
   // for it would leave an operator reading a mint that never started.
   if (await orgAlreadyShowsKeyName({ orgId, keyName, region })) return duplicateKeyNameResponse();
 
+  // A key bound to a principal syncs the principal first: the write is
+  // idempotent, a member invited after tenant setup may not be a principal yet,
+  // and a later key revives a removed one. Before the intent, because it mints
+  // nothing: a failure here leaves no credential anywhere, and an intent left
+  // dangling by it would read to an operator as a possible orphan key.
+  if (!key.service && orchestrator.accessModel === 'iam') {
+    await orchestrator.iam.syncMember(tenantId, userId);
+  }
+
   // Fail-closed, and before the vendor: the credential is created at the storage
   // vendor before anything local is written, so no SigV4 key may come into
   // existence without a record that somebody asked for it. The intent cannot
@@ -107,7 +116,7 @@ export async function baseHandler(
 
   let accessKey: IssuedAccessKey;
   try {
-    accessKey = await issueRequestedKey(orchestrator, tenantId, key);
+    accessKey = await orchestrator.issueAccessKey(tenantId, key.opts);
   } catch (err) {
     return await handleMintRefusal(err, {
       orgId,
@@ -222,22 +231,6 @@ function serviceKeyRefusal(
     'keys.create_service',
     'Only an Owner or an Admin can create a service key on this region.',
   );
-}
-
-/**
- * The mint. A key bound to a principal syncs the principal first: the write is
- * idempotent, a member invited after tenant setup may not be a principal yet,
- * and a later key revives a removed one.
- */
-async function issueRequestedKey(
-  orchestrator: ServiceOrchestrator,
-  tenantId: string,
-  key: ReturnType<typeof requestedKey>,
-): Promise<IssuedAccessKey> {
-  if (!key.service && orchestrator.accessModel === 'iam') {
-    await orchestrator.iam.syncMember(tenantId, key.opts.principalId);
-  }
-  return orchestrator.issueAccessKey(tenantId, key.opts);
 }
 
 /**
