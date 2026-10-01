@@ -201,12 +201,15 @@ function requestedKey(data: CreateRequest, userId: string) {
       }),
     };
   }
-  const { keyName, permissions, granularPermissions, bucketScope } = data;
+  const { keyName, permissions, granularPermissions, bucketScope, region } = data;
   const buckets = bucketScope === 'specific' ? (data.buckets ?? []) : undefined;
   return {
     service: data,
     opts: { keyName, permissions, granularPermissions, buckets, expiresAt },
-    minterKey: { permissions, granularPermissions },
+    // With the region: on one serving the `iam` access model only a role
+    // holding `keys.create_service` keeps a service key, and the role fences
+    // after the mint ask the same question the pre-check did.
+    minterKey: { permissions, granularPermissions, region },
     rowFields: () => ({
       permissions,
       ...optionalKeyAttributes({ granularPermissions, bucketScope, buckets, expiresAt }),
