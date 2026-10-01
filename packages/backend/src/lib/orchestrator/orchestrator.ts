@@ -57,7 +57,7 @@ import {
   getBucketVersioning,
   getBucketObjectLock,
 } from '../s3-bucket-operations.ts';
-import { isNoSuchBucketError } from '../s3-errors.ts';
+import { isAccessDeniedError, isNoSuchBucketError } from '../s3-errors.ts';
 import { getConsoleS3Credentials } from '../s3-credentials.ts';
 import {
   createClient,
@@ -365,6 +365,12 @@ export abstract class FilOneOrchestrator implements OrchestratorCore {
       ]);
     } catch (err) {
       if (isNoSuchBucketError(err)) return null;
+      // The gateway answers another tenant's bucket AccessDenied, and so a key
+      // missing these reads; only a bucket the tenant does not list is absent.
+      if (isAccessDeniedError(err)) {
+        const { buckets } = await s3ListBuckets(s3, requestOptions);
+        if (!buckets.some((b) => b.name === bucketName)) return null;
+      }
       throw err;
     }
 
