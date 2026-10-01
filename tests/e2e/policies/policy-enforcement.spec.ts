@@ -217,12 +217,7 @@ test('A8. multipart parts listing and abort are granted on their own', async () 
   ]).toEqual(['ok', 'ok']);
 });
 
-// Hilt classifies a request by method, path and the multipart query alone
-// (pkg/rpc/service/auth/operation.go, classifyRequest), so ?versionId,
-// ?versions, ?retention and ?legal-hold are checked as the plain object or
-// listing action. Expected to fail until it tells them apart (FIL-1307).
 test('A9. versions are read and deleted under their own actions', async () => {
-  test.fail();
   const bucket = await bucketWith(
     [allow([memberId], ['s3:GetObject', 's3:DeleteObject', 's3:ListBucket'])],
     { versioning: true },
@@ -246,12 +241,7 @@ test('A10. reading bucket configuration counts as listing', async () => {
   ).toBe('403 AccessDenied');
 });
 
-// Hilt classifies a request by method, path and the multipart query alone
-// (pkg/rpc/service/auth/operation.go, classifyRequest), so ?versionId,
-// ?versions, ?retention and ?legal-hold are checked as the plain object or
-// listing action. Expected to fail until it tells them apart (FIL-1307).
 test('A11. a write or read grant does not carry retention or legal holds', async () => {
-  test.fail();
   const bucket = await bucketWith([allow([memberId], ['s3:PutObject', 's3:GetObject'])], {
     lock: true,
   });
@@ -280,12 +270,7 @@ test('A11. a write or read grant does not carry retention or legal holds', async
   }
 });
 
-// Hilt classifies a request by method, path and the multipart query alone
-// (pkg/rpc/service/auth/operation.go, classifyRequest), so ?versionId,
-// ?versions, ?retention and ?legal-hold are checked as the plain object or
-// listing action. Expected to fail until it tells them apart (FIL-1307).
 test('A12. listing versions is granted on its own', async () => {
-  test.fail();
   const bucket = await bucketWith([allow([memberId], ['s3:ListBucket'])], { versioning: true });
   const s3 = await freshS3(member);
   expect([
