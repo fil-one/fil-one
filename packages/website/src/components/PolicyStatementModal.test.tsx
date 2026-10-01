@@ -13,11 +13,14 @@ vi.mock('../lib/members-api.js', () => ({
 import { PolicyStatementModal, deniesEveryone } from './PolicyStatementModal.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 
-function renderModal(props: Partial<React.ComponentProps<typeof PolicyStatementModal>> = {}) {
+function renderModal(
+  props: Partial<React.ComponentProps<typeof PolicyStatementModal>> = {},
+  role: OrgRole = OrgRole.Owner,
+) {
   const onSubmit = vi.fn();
   const onClose = vi.fn();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  seedPermissions(client, OrgRole.Owner);
+  seedPermissions(client, role);
   render(
     <QueryClientProvider client={client}>
       <PolicyStatementModal open onClose={onClose} onSubmit={onSubmit} {...props} />
@@ -125,6 +128,20 @@ describe('PolicyStatementModal', () => {
       const pair = screen.getByRole('radio', { name }).closest('label')?.parentElement;
       expect(pair).toHaveClass('flex-col', 'sm:flex-row');
     }
+  });
+
+  it('hands an Admin back only the actions it showed them, even saved at once', () => {
+    const initial: PolicyStatement = {
+      effect: 'allow',
+      principal: ['a'],
+      action: ['s3:GetObject', 's3:PutObjectRetention'],
+    };
+    const { onSubmit } = renderModal({ initial }, OrgRole.Admin);
+
+    expect(screen.queryByTestId('policy-action-s3:PutObjectRetention')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save statement' }));
+
+    expect(onSubmit).toHaveBeenCalledWith({ ...initial, action: ['s3:GetObject'] });
   });
 
   it('warns as soon as a deny names everyone', () => {
