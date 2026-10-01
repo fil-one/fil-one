@@ -87,7 +87,7 @@ export function AddBucketKeyModal({
                     anyone, including support. Store it in a password manager or secrets vault.
                   </p>
                 </div>
-                {form.iam ? (
+                {form.principal ? (
                   <div>
                     <p className="mb-1 font-medium text-zinc-800">Follows the bucket policies</p>
                     <p>
