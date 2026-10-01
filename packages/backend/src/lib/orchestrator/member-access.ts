@@ -25,9 +25,12 @@ export async function reachableBuckets(
   iam: IamMethods,
   listing: Promise<BucketSummary[]>,
   tenantId: string,
-  userId: string,
+  member: { userId: string; signal?: AbortSignal },
 ): Promise<BucketSummary[]> {
-  const [buckets, access] = await Promise.all([listing, iam.resolveMemberAccess(tenantId, userId)]);
+  const [buckets, access] = await Promise.all([
+    listing,
+    iam.resolveMemberAccess(tenantId, member.userId, { signal: member.signal }),
+  ]);
   const reachable = new Set(access.map((entry) => entry.bucketName));
   return buckets.filter((bucket) => reachable.has(bucket.bucketName));
 }

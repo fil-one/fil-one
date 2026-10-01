@@ -58,7 +58,9 @@ class IamFilOneOrchestrator extends FilOneOrchestrator implements IamOrchestrato
   ): Promise<BucketSummary[]> {
     const userId = requestOptions?.actAs;
     const listing = super.listBuckets(tenantId, requestOptions);
-    return userId ? reachableBuckets(this.iam, listing, tenantId, userId) : listing;
+    return userId
+      ? reachableBuckets(this.iam, listing, tenantId, { userId, signal: requestOptions?.signal })
+      : listing;
   }
 }
 
