@@ -6,7 +6,10 @@ import type { IamMethods } from '../iam-orchestrator.ts';
 import type { BucketSummary } from '../service-orchestrator.ts';
 
 /**
- * The buckets in a tenant listing that one member can actually reach.
+ * The buckets in a tenant listing that one member can actually reach. The
+ * access lookup runs beside the listing; a failed lookup rejects, so the
+ * caller's fan-out reports the region as unavailable rather than handing the
+ * member every bucket name in the tenant.
  *
  * The console filters because the data plane does not: every principal holds
  * `s3:ListAllMyBuckets`, so the gateway answers with the tenant's whole set by
@@ -20,11 +23,11 @@ import type { BucketSummary } from '../service-orchestrator.ts';
  */
 export async function reachableBuckets(
   iam: IamMethods,
-  buckets: BucketSummary[],
+  listing: Promise<BucketSummary[]>,
   tenantId: string,
   userId: string,
 ): Promise<BucketSummary[]> {
-  const access = await iam.resolveMemberAccess(tenantId, userId);
+  const [buckets, access] = await Promise.all([listing, iam.resolveMemberAccess(tenantId, userId)]);
   const reachable = new Set(access.map((entry) => entry.bucketName));
   return buckets.filter((bucket) => reachable.has(bucket.bucketName));
 }
