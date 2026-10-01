@@ -678,8 +678,10 @@ function iamOrchestratorReachingOnly(bucketName: string): FakeOrchestrator {
   });
   const o = fakeOrchestrator('forge', { bucket: BUCKET, iam });
   o.getBucket.mockImplementation(
-    async (tenantId: string, name: string, opts?: { actAs?: string }) =>
-      opts?.actAs && !(await reachesBucket(iam, tenantId, opts.actAs, name)) ? null : BUCKET,
+    async (tenantId: string, name: string, opts?: { scopeToMemberId?: string }) =>
+      opts?.scopeToMemberId && !(await reachesBucket(iam, tenantId, opts.scopeToMemberId, name))
+        ? null
+        : BUCKET,
   );
   return o;
 }

@@ -17,7 +17,7 @@ import {
 } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
-import { scopedTo } from '../lib/member-scope.ts';
+import { getScopedMemberId } from '../lib/member-scope.ts';
 import { ragQueryAuthMiddleware } from '../middleware/rag-query-auth.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 import { ragAccessMiddleware } from '../middleware/rag-access.ts';
@@ -96,7 +96,7 @@ export async function baseHandler(
   // A cookie caller also answers to their member scope; a RAG key carries its
   // own bucket scope, which the auth middleware already applied.
   const bucket = await orchestrator.getBucket(tenantId, bucketName, {
-    actAs: apiKeySession ? undefined : scopedTo(membership?.role, userId),
+    scopeToMemberId: apiKeySession ? undefined : getScopedMemberId(membership?.role, userId),
   });
   if (!bucket) {
     return new ResponseBuilder()
