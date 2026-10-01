@@ -17,6 +17,7 @@ import {
 } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
+import { scopedTo } from '../lib/member-scope.ts';
 import { ragQueryAuthMiddleware } from '../middleware/rag-query-auth.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 import { ragAccessMiddleware } from '../middleware/rag-access.ts';
@@ -80,7 +81,7 @@ export async function baseHandler(
   }
   const { query, top_k, model } = parsed.data;
 
-  const { orgId } = getUserInfo(event);
+  const { orgId, userId, membership, apiKeySession } = getUserInfo(event);
 
   const region = event.queryStringParameters?.region ?? S3Region.EuWest1;
   if (!isSupportedRegion(region, process.env.FILONE_STAGE!)) {
@@ -92,7 +93,11 @@ export async function baseHandler(
   if (!tenantId) return tenantNotReadyResponse();
 
   // Enforce tenant/org scope: a bucket the caller's tenant does not own is 404.
-  const bucket = await orchestrator.getBucket(tenantId, bucketName);
+  // A cookie caller also answers to their member scope; a RAG key carries its
+  // own bucket scope, which the auth middleware already applied.
+  const bucket = await orchestrator.getBucket(tenantId, bucketName, {
+    actAs: apiKeySession ? undefined : scopedTo(membership?.role, userId),
+  });
   if (!bucket) {
     return new ResponseBuilder()
       .status(404)
