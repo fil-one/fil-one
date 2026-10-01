@@ -13,6 +13,7 @@ import {
   addsRetentionGrants,
   defaultBucketPolicy,
   effectiveActions,
+  isRosterSid,
   policyActionsInGroup,
   withRosterStatements,
 } from './bucket-policies.ts';
@@ -244,6 +245,15 @@ describe('addsRetentionGrants', () => {
 });
 
 describe('the roster statements', () => {
+  it('reserves exactly the three labels the console writes', () => {
+    for (const sid of [ROSTER_OWNERS_SID, ROSTER_ADMINS_SID, ROSTER_CREATOR_SID]) {
+      expect(isRosterSid(sid)).toBe(true);
+    }
+    for (const sid of [undefined, '', 'filone-owner', 'Filone-Owners', 'filone-members']) {
+      expect(isRosterSid(sid)).toBe(false);
+    }
+  });
+
   it('names Owners with every action, Admins with the Admin set, and a Member creator apart', () => {
     const policy = defaultBucketPolicy({ owners: ['o1'], admins: ['a1'], creatorId: 'm1' });
     expect(policy.statement).toStrictEqual([

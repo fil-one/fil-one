@@ -271,6 +271,15 @@ export const ROSTER_ADMINS_SID = 'filone-admins';
 export const ROSTER_CREATOR_SID = 'filone-creator';
 
 /**
+ * Whether a label is one the console reserves for its own statements. Statements
+ * carrying one round-trip through GET and PUT, so the schema accepts them; the
+ * editor and the PUT handler refuse a user statement that borrows one.
+ */
+export function isRosterSid(sid: string | undefined): boolean {
+  return sid === ROSTER_OWNERS_SID || sid === ROSTER_ADMINS_SID || sid === ROSTER_CREATOR_SID;
+}
+
+/**
  * Every action but the two retention writes: what an Admin, and a Member who
  * created the bucket, receives. An Owner may still grant the pair to an Admin on
  * one bucket, which is why the roster statement lists actions rather than
