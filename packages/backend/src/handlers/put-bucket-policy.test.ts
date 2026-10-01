@@ -216,6 +216,26 @@ describe('put-bucket-policy baseHandler', () => {
     expect(iam.policies.get(TENANT_ID)?.get(BUCKET)?.etag).toBe(etag);
   });
 
+  it('lets an Admin name an Auth0 user for a retention write everyone already holds by name', async () => {
+    iam.seedPrincipal(TENANT_ID, 'auth0|abc');
+    const everyone: PolicyStatement = {
+      effect: 'allow',
+      principal: '*',
+      action: ['s3:PutObjectRetention'],
+    };
+    const etag = iam.seedPolicy(TENANT_ID, BUCKET, { statement: [everyone] });
+    const named: BucketPolicy = {
+      statement: [
+        everyone,
+        { effect: 'allow', principal: ['auth0|abc'], action: ['s3:PutObjectRetention'] },
+      ],
+    };
+
+    const result = await baseHandler(request({ policy: named, etag }, { role: OrgRole.Admin }));
+
+    expect(result.statusCode).toBe(200);
+  });
+
   it('refuses an Admin widening a retention write to a new principal', async () => {
     const etag = iam.seedPolicy(TENANT_ID, BUCKET, {
       statement: [
