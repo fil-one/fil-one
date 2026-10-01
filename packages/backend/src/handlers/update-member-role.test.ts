@@ -1028,6 +1028,26 @@ describe('the roster statements on iam regions', () => {
     ]);
   });
 
+  it('reaches a bucket the demotion missed when the same PATCH is sent again', async () => {
+    targetHolds(OrgRole.Admin);
+    mockSyncRoster.mockResolvedValue([
+      { region: S3Region.UsEast9, bucketsReached: 1, bucketsFailed: ['photos'] },
+    ]);
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+    const first = await handler(roleEvent(OrgRole.Member), buildContext());
+    expect(first).toMatchObject({ statusCode: 200 });
+    expect(body(first).policySync[0].bucketsFailed).toStrictEqual(['photos']);
+
+    // The role row landed, so the retry finds the member already at Member.
+    targetHolds(OrgRole.Member);
+    mockSyncRoster.mockClear();
+    const retry = await handler(roleEvent(OrgRole.Member), buildContext());
+
+    expect(retry).toMatchObject({ statusCode: 200 });
+    expect(mockSyncRoster).toHaveBeenCalled();
+  });
+
   it('rewrites nothing for a change that touches neither Owner nor Admin', async () => {
     targetHolds(OrgRole.Member);
     ddbMock.on(TransactWriteItemsCommand).resolves({});
