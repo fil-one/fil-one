@@ -12,6 +12,7 @@ import {
 } from '../lib/response-builder.ts';
 import { getBucketRagEnablement, toEnablementResponse } from '../lib/bucket-rag-enablement.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { scopedTo } from '../lib/member-scope.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { authorize } from '../middleware/authorize.ts';
@@ -39,7 +40,7 @@ export async function baseHandler(
       .build();
   }
 
-  const { orgId } = getUserInfo(event);
+  const { orgId, userId, membership } = getUserInfo(event);
 
   const region = event.queryStringParameters?.region ?? S3_REGION;
   if (!isSupportedRegion(region, process.env.FILONE_STAGE!)) {
@@ -51,7 +52,9 @@ export async function baseHandler(
   if (!tenantId) return tenantNotReadyResponse();
 
   // Enforce tenant/org scope: a bucket the caller's tenant does not own is 404.
-  const bucket = await orchestrator.getBucket(tenantId, bucketName);
+  const bucket = await orchestrator.getBucket(tenantId, bucketName, {
+    actAs: scopedTo(membership?.role, userId),
+  });
   if (!bucket) {
     return new ResponseBuilder()
       .status(404)
