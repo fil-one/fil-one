@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, PutItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { mockClient } from 'aws-sdk-client-mock';
 import { OrgRole, ROSTER_ADMINS_SID, ROSTER_OWNERS_SID, S3Region } from '@filone/shared';
 import type { BucketPolicy } from '@filone/shared';
@@ -182,6 +182,15 @@ describe('removeMemberPrincipals', () => {
       removed: [],
       failed: [S3Region.UsEast9],
     });
+  });
+
+  it('names a region as refused when its principal marker could not be pruned', async () => {
+    iam.seedPrincipal(TENANT, 'member-1');
+    ddbMock.on(UpdateItemCommand).rejects(new Error('ProvisionedThroughputExceededException'));
+
+    await expect(
+      removeMemberPrincipals({ orgId: 'org-1', orgProfile, userId: 'member-1' }),
+    ).resolves.toStrictEqual({ removed: [], failed: [S3Region.UsEast9] });
   });
 
   it('skips a region whose tenant is not provisioned', async () => {
