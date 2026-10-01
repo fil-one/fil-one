@@ -86,13 +86,16 @@ function fail(status: number, message = 'error') {
   return { data: undefined, error: { message }, response: { status } };
 }
 
-function buildOrchestrator(overrides?: { api?: FilOneOrchestratorConfig['api'] }) {
+function buildOrchestrator(
+  overrides?: Pick<Partial<FilOneOrchestratorConfig>, 'api' | 'accessModel'>,
+) {
   return createFilOneOrchestrator({
     id: 'forge',
     region: S3Region.UsEast1,
     stage: 'test',
     s3EndpointUrl: 'https://us-east-1.s3.test.example.com',
     api: overrides?.api ?? { baseUrl: 'https://api.example.com', accessToken: 'partner-key' },
+    accessModel: overrides?.accessModel,
   });
 }
 
@@ -570,6 +573,8 @@ describe('getBucket', () => {
 });
 
 describe('issueAccessKey bound to a principal', () => {
+  // Only the iam arm mints a principal-bound key.
+  const orchestrator = buildOrchestrator({ accessModel: 'iam' });
   const created = {
     accessKeyId: 'did:key:z6Mk',
     name: 'laptop',
@@ -605,6 +610,16 @@ describe('issueAccessKey bound to a principal', () => {
     await expect(
       orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' }),
     ).rejects.toBeInstanceOf(PrincipalNotFoundError);
+  });
+});
+
+describe('issueAccessKey on the scoped-keys arm', () => {
+  it('refuses a principal-bound key without calling the storage system, as Aurora and FTH do', async () => {
+    expect(orchestrator.accessModel).toBe('scoped-keys');
+    await expect(
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' }),
+    ).rejects.toThrow(/iam access model/);
+    expect(mockCreateAccessKey).not.toHaveBeenCalled();
   });
 });
 

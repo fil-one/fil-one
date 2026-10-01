@@ -383,7 +383,7 @@ abstract class FilOneOrchestrator implements OrchestratorCore {
     keyOpts: IssueAccessKeyOpts,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<IssuedAccessKey> {
-    const body = accessKeyBody(keyOpts);
+    const body = accessKeyBody(keyOpts, this);
     console.log(
       `Creating ${this.id} access key "${body.name}" for tenant ${tenantId} ${describeAccessKeyBody(body)}`,
     );
