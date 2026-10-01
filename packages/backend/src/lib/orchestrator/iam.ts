@@ -169,11 +169,12 @@ function buildPrincipalMethods(
       }));
     },
 
-    async resolveMemberAccess(tenantId, userId): Promise<MemberBucketAccess[]> {
+    async resolveMemberAccess(tenantId, userId, opts): Promise<MemberBucketAccess[]> {
       const result = await getTenantsByTenantIdPrincipalsByPrincipalIdAccess({
         client,
         path: { tenantId, principalId: userId },
         throwOnError: false,
+        signal: opts?.signal,
       });
       if (result.error || !result.data) {
         throw principalFailure(

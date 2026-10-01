@@ -658,6 +658,16 @@ describe('listBuckets on an iam region', () => {
     );
   });
 
+  it('forwards the signal to the access lookup as well as S3', async () => {
+    stubTenantListing();
+    mockGetPrincipalAccess.mockReturnValue(reaches('photos'));
+    const signal = new AbortController().signal;
+
+    await iamOrchestrator.listBuckets(tenantId, { actAs: member, signal });
+
+    expect(mockGetPrincipalAccess).toHaveBeenCalledWith(expect.objectContaining({ signal }));
+  });
+
   it('ignores the named member on a scoped-keys region', async () => {
     stubTenantListing();
 

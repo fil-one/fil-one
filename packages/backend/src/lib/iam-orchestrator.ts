@@ -10,6 +10,7 @@
 // stale edit loses and nothing is written.
 
 import type { BucketPolicy, MemberBucketAccess } from '@filone/shared';
+import type { OrchestratorRequestOptions } from './service-orchestrator.ts';
 
 /** A stored policy and the validator its next write must carry. Opaque to callers. */
 export interface StoredBucketPolicy {
@@ -81,5 +82,9 @@ export interface IamMethods {
    * from its own tables, so the answer is consistent with its last write.
    * Buckets the member cannot reach are absent.
    */
-  resolveMemberAccess(tenantId: string, userId: string): Promise<MemberBucketAccess[]>;
+  resolveMemberAccess(
+    tenantId: string,
+    userId: string,
+    opts?: OrchestratorRequestOptions,
+  ): Promise<MemberBucketAccess[]>;
 }
