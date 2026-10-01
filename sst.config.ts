@@ -1236,6 +1236,8 @@ export default $config({
         ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
         timeout: '30 seconds',
       },
+      // Registers the new member as a principal on each ready iam region.
+      'accept-invitation': { extraEnv: orchestratorEnv },
 
       // ── RAG ────────────────────────────────────────────────────────
       // RAG query playground (FIL-554): embed the question, vector-search the
