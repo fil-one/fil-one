@@ -262,7 +262,14 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: |
+            The body fails semantic validation, or `principalId` names no
+            live principal of the tenant; the latter carries the error
+            `code` `UnknownPrincipal` so a client can tell it apart.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
     get:
       tags: [Access Keys]
       summary: List S3 access keys

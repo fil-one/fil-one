@@ -577,9 +577,9 @@ export type PostTenantsByTenantIdAccessKeysErrors = {
    */
   409: Error;
   /**
-   * Request body is well-formed but fails semantic validation
-   * (missing required field, value out of range, enum mismatch,
-   * cross-field constraint, etc.).
+   * The body fails semantic validation, or `principalId` names no
+   * live principal of the tenant; the latter carries the error
+   * `code` `UnknownPrincipal` so a client can tell it apart.
    *
    */
   422: Error;
