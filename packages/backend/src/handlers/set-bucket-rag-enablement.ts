@@ -4,6 +4,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { BucketRagEnablementResponse, ErrorResponse } from '@filone/shared';
 import { S3_REGION, SetBucketRagEnabledSchema, isSupportedRegion } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import type { ServiceOrchestrator } from '../lib/service-orchestrator.ts';
 import { getOrgProfile, isOrgDeleting } from '../lib/org-profile.ts';
 import {
   accountDeletedResponse,
@@ -25,6 +26,37 @@ import { csrfMiddleware } from '../middleware/csrf.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 import { ragAccessMiddleware } from '../middleware/rag-access.ts';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
+
+/**
+ * Refuse a bucket the caller cannot reach, or cannot index.
+ *
+ * A bucket the caller's tenant does not own is 404, as is one outside a scoped
+ * member's policies. Turning indexing on also needs the member's policies to
+ * grant listing and reading the bucket: the indexer lists and reads it with the
+ * tenant's key, and the query path answers from that content. A region serving
+ * scoped keys has no policies to consult.
+ */
+async function checkBucketReach(
+  orchestrator: ServiceOrchestrator,
+  tenantId: string,
+  bucketName: string,
+  { actAs, indexing }: { actAs: string | undefined; indexing: boolean },
+): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
+  if (!(await orchestrator.getBucket(tenantId, bucketName, { actAs }))) {
+    return new ResponseBuilder()
+      .status(404)
+      .body<ErrorResponse>({ message: 'Bucket not found' })
+      .build();
+  }
+  if (!indexing || !actAs || orchestrator.accessModel !== 'iam') return undefined;
+  const access = await orchestrator.iam.resolveMemberAccess(tenantId, actAs);
+  const actions = access.find((entry) => entry.bucketName === bucketName)?.actions ?? [];
+  if (actions.includes('s3:ListBucket') && actions.includes('s3:GetObject')) return undefined;
+  return new ResponseBuilder()
+    .status(403)
+    .body<ErrorResponse>({ message: `Your access to ${bucketName} does not permit indexing it.` })
+    .build();
+}
 
 /**
  * POST /api/buckets/{name}/rag/enabled — toggle a bucket's RAG indexing on/off
@@ -91,16 +123,11 @@ export async function baseHandler(
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) return tenantNotReadyResponse();
 
-  // Enforce tenant/org scope: a bucket the caller's tenant does not own is 404.
-  const bucket = await orchestrator.getBucket(tenantId, bucketName, {
+  const refused = await checkBucketReach(orchestrator, tenantId, bucketName, {
     actAs: scopedTo(membership?.role, userId),
+    indexing: enabled,
   });
-  if (!bucket) {
-    return new ResponseBuilder()
-      .status(404)
-      .body<ErrorResponse>({ message: 'Bucket not found' })
-      .build();
-  }
+  if (refused) return refused;
 
   const existing = await getBucketRagEnablement(orgId, region, bucketName);
   // Defense in depth: never carry over a record stamped with a different org.
