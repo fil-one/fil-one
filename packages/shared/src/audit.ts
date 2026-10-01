@@ -486,14 +486,20 @@ export type AuditEvent = { [T in AuditEventType]: AuditEventRecord<T> }[AuditEve
  */
 export type VendorBackedKeyEvent = Extract<AuditEvent, { details: { keyKind: 's3' } }>;
 
+/** A bucket-policy event: the document lives at the vendor, like an S3 key. */
+export type BucketPolicyEvent = Extract<AuditEvent, { type: `bucket_policy.${string}` }>;
+
 /**
  * An event that may ride a local transaction — what `commitAudited` accepts.
  *
- * Everything except a vendor-backed key event with no phase: that one names a
- * credential minted outside the transaction, so a single row recording it is a
- * half with nothing to pair it to.
+ * Everything except a vendor-backed key or bucket-policy event with no phase:
+ * that one names a write made outside the transaction, so a single row
+ * recording it is a half with nothing to pair it to.
  */
-export type CommittableAuditEvent = Exclude<AuditEvent, VendorBackedKeyEvent & AuditSinglePhase>;
+export type CommittableAuditEvent = Exclude<
+  AuditEvent,
+  (VendorBackedKeyEvent | BucketPolicyEvent) & AuditSinglePhase
+>;
 
 /**
  * A phased event — what `appendAuditEvent` accepts.
