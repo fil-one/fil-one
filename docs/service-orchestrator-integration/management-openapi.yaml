@@ -847,10 +847,11 @@ components:
         - 's3:*'
       description: |
         An action a bucket policy statement may carry: every
-        `AccessKeyPermission` except the three bucket-level actions
-        (`s3:CreateBucket`, `s3:DeleteBucket`, `s3:ListAllMyBuckets`),
-        plus `s3:*`, which stands for all of the others and never for
-        those three.
+        `AccessKeyPermission` except the six bucket-level actions
+        (`s3:CreateBucket`, `s3:DeleteBucket`, `s3:ListAllMyBuckets`,
+        `s3:GetBucketPolicy`, `s3:PutBucketPolicy`,
+        `s3:DeleteBucketPolicy`), plus `s3:*`, which stands for exactly
+        the concrete `PolicyAction` values and never for those six.
 
     PolicyStatement:
       type: object
