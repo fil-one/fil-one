@@ -114,7 +114,7 @@ export function CreateBucketPage() {
 
   // eslint-disable-next-line complexity/complexity
   async function handleSubmit() {
-    if (createKeyToggled && !form.iam && form.permissions.length === 0) return;
+    if (createKeyToggled && !form.principal && form.permissions.length === 0) return;
 
     const bucketBody = {
       bucketName: bucketName.trim(),
@@ -221,7 +221,7 @@ export function CreateBucketPage() {
   const accessKeyFormValid =
     !createKeyToggled ||
     (accessKeyNameValid &&
-      (form.iam ||
+      (form.principal ||
         (form.permissions.length > 0 &&
           (form.bucketScope !== 'specific' || form.selectedBuckets.length > 0))));
 
