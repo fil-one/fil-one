@@ -132,10 +132,10 @@ export async function baseHandler(
 
   // The console submits the form whether or not the select changed, and an
   // event saying a member went from Admin to Admin is noise in a log a customer
-  // reads.
-  if (target.role === role) {
-    return roleResponse({ userId: targetUserId, role, previousRole: role });
-  }
+  // reads. The roster is still rewritten, since this is how a retry reaches the
+  // buckets an earlier change missed.
+  const actor = userActor({ userId, email: actorEmail });
+  if (target.role === role) return unchangedRoleResponse(orgId, targetUserId, role, actor);
 
   // A widening strands nothing: every key its holder could mint before, they
   // could mint after, so only a narrowing reads keys or the profile.
@@ -155,7 +155,6 @@ export async function baseHandler(
   const refused = refuseBeforeRevokingKeys(orgId, delta, owners);
   if (refused) return refused;
 
-  const actor = userActor({ userId, email: actorEmail });
   const rosterSync = rosterSyncPlan({
     rewritesRoster,
     narrows,
@@ -318,6 +317,28 @@ async function commitWithRosterRestore(
     throw err;
   }
   return { committed, policySync: await rosterSync.after(before, 'revoked' in committed) };
+}
+
+/** A role already held, with the roster rewritten from the membership rows as they stand. */
+async function unchangedRoleResponse(
+  orgId: string,
+  targetUserId: string,
+  role: OrgRole,
+  actor: AuditActor,
+): Promise<APIGatewayProxyStructuredResultV2> {
+  const orgProfile = await getOrgProfile(orgId);
+  const policySync = await syncRosterStatements({
+    orgId,
+    orgProfile,
+    roster: await rosterAfterChange(orgId),
+    actor,
+  });
+  return roleResponse({
+    userId: targetUserId,
+    role,
+    previousRole: role,
+    ...(policySync.length ? { policySync } : {}),
+  });
 }
 
 /** Whether a change touches a role the console names on every bucket's policy. */
