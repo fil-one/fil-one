@@ -26,20 +26,30 @@ export function CheckboxRow({
   tooltip,
   onChange,
 }: CheckboxRowProps) {
+  // A `<label>` cannot reach the `<span role="checkbox">` Headless UI renders,
+  // so the row toggles on its own click, and the checkbox keeps its click to
+  // itself rather than toggling twice.
   const row = (
-    <label
+    <div
       data-testid={testId}
       className={
         'flex items-center gap-3 rounded-lg px-3 py-2 transition-colors duration-150 ' +
         (disabled ? 'cursor-not-allowed' : 'cursor-pointer hover:bg-zinc-50')
       }
+      onClick={disabled ? undefined : onChange}
     >
-      <Checkbox aria-label={label} checked={checked} disabled={disabled} onChange={onChange} />
+      <Checkbox
+        aria-label={label}
+        checked={checked}
+        disabled={disabled}
+        onChange={onChange}
+        onClick={(e) => e.stopPropagation()}
+      />
       <div className="flex flex-col gap-0.5">
         <span className="text-xs font-medium text-zinc-900">{label}</span>
         <span className="text-meta text-zinc-500">{description}</span>
       </div>
-    </label>
+    </div>
   );
 
   if (!tooltip) return row;

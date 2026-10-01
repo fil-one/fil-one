@@ -118,11 +118,17 @@ function MemberRow({
   onChange: () => void;
 }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2.5 py-1">
-      <Checkbox aria-label={label} checked={checked} onChange={onChange} />
+    // Same shape as CheckboxRow: the row toggles, the checkbox's click stays its own.
+    <div className="flex cursor-pointer items-center gap-2.5 py-1" onClick={onChange}>
+      <Checkbox
+        aria-label={label}
+        checked={checked}
+        onChange={onChange}
+        onClick={(e) => e.stopPropagation()}
+      />
       <span className="text-xs text-zinc-900">{label}</span>
       <span className="text-meta text-zinc-500">{detail}</span>
-    </label>
+    </div>
   );
 }
 
