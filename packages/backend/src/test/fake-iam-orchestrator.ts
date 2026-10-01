@@ -12,6 +12,7 @@ import type {
   PolicyPrecondition,
   StoredBucketPolicy,
 } from '../lib/iam-orchestrator.ts';
+import type { OrchestratorRequestOptions } from '../lib/service-orchestrator.ts';
 
 /**
  * An in-memory `iam` arm with the storage system's semantics: real ETags and
@@ -125,7 +126,11 @@ export class FakeIamOrchestrator implements IamMethods {
       .map(([bucketName, stored]) => ({ bucketName, ...stored }));
   }
 
-  async resolveMemberAccess(tenantId: string, userId: string): Promise<MemberBucketAccess[]> {
+  async resolveMemberAccess(
+    tenantId: string,
+    userId: string,
+    _opts?: OrchestratorRequestOptions,
+  ): Promise<MemberBucketAccess[]> {
     this.record('resolveMemberAccess', tenantId, userId);
     // Hilt answers the access reads 404 for a principal it does not know.
     if (!this.principalsOf(tenantId).has(userId)) throw new PrincipalNotFoundError(userId);

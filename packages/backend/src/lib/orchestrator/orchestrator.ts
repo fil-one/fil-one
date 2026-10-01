@@ -617,7 +617,7 @@ class IamFilOneOrchestrator extends FilOneOrchestrator implements IamOrchestrato
     // would hand the member every bucket name in the tenant.
     const [buckets, access] = await Promise.all([
       super.listBuckets(tenantId, requestOptions),
-      this.iam.resolveMemberAccess(tenantId, requestOptions.actAs),
+      this.iam.resolveMemberAccess(tenantId, requestOptions.actAs, requestOptions),
     ]);
     const reachable = new Set(access.map((entry) => entry.bucketName));
     return buckets.filter((bucket) => reachable.has(bucket.bucketName));
