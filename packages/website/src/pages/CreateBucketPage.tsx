@@ -165,11 +165,12 @@ export function CreateBucketPage() {
 
     // Step 2: Optionally create API key scoped to this bucket
     if (createKeyToggled) {
-      // The form's own payload: on an `iam` region a name and an expiry, since
-      // the key carries whatever the bucket policies give its holder.
-      const parsed = (form.iam ? CreatePrincipalAccessKeySchema : CreateAccessKeySchema).safeParse(
-        form.payload,
-      );
+      // The form's own payload: for a personal key on an `iam` region a name and
+      // an expiry, since the key carries whatever the bucket policies give its
+      // holder. A service key sends the scoped-key shape.
+      const parsed = (
+        form.principal ? CreatePrincipalAccessKeySchema : CreateAccessKeySchema
+      ).safeParse(form.payload);
       if (!parsed.success) {
         toast.error(parsed.error.issues[0].message);
         setCreating(false);
