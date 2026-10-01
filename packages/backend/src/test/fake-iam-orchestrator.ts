@@ -116,6 +116,8 @@ export class FakeIamOrchestrator implements IamMethods {
 
   async listBucketPoliciesForMember(tenantId: string, userId: string): Promise<MemberPolicy[]> {
     this.record('listBucketPoliciesForMember', tenantId, userId);
+    // Hilt answers the access reads 404 for a principal it does not know.
+    if (!this.principalsOf(tenantId).has(userId)) throw new PrincipalNotFoundError(userId);
     return [...this.policiesOf(tenantId)]
       .filter(([, stored]) =>
         stored.policy.statement.some((s) => s.principal === '*' || s.principal.includes(userId)),
@@ -125,6 +127,8 @@ export class FakeIamOrchestrator implements IamMethods {
 
   async resolveMemberAccess(tenantId: string, userId: string): Promise<MemberBucketAccess[]> {
     this.record('resolveMemberAccess', tenantId, userId);
+    // Hilt answers the access reads 404 for a principal it does not know.
+    if (!this.principalsOf(tenantId).has(userId)) throw new PrincipalNotFoundError(userId);
     return [...this.policiesOf(tenantId)]
       .map(([bucketName, stored]) => ({
         bucketName,
