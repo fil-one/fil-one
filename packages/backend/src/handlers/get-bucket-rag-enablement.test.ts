@@ -247,6 +247,7 @@ describe('get-bucket-rag-enablement member scope on an iam region', () => {
     vi.clearAllMocks();
     mockGetEnablement.mockResolvedValue(enablementRecord());
     const iam = new FakeIamOrchestrator();
+    iam.seedPrincipal(tenantFor('forge', 'org-1'), 'user-1');
     iam.seedPolicy(tenantFor('forge', 'org-1'), 'other-bucket', {
       statement: [{ effect: 'allow', principal: ['user-1'], action: ['s3:GetObject'] }],
     });

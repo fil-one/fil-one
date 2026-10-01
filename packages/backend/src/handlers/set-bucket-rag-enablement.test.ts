@@ -297,6 +297,7 @@ describe('set-bucket-rag-enablement member scope on an iam region', () => {
   /** An iam orchestrator whose policy on my-bucket grants user-1 `actions`. */
   function grantingOnBucket(actions: PolicyAction[]): FakeOrchestrator {
     const iam = new FakeIamOrchestrator();
+    iam.seedPrincipal(tenantFor('forge', 'org-1'), 'user-1');
     iam.seedPolicy(tenantFor('forge', 'org-1'), 'my-bucket', {
       statement: [{ effect: 'allow', principal: ['user-1'], action: actions }],
     });
