@@ -5,6 +5,7 @@
 // console user ids.
 
 import type { BucketPolicy, MemberBucketAccess } from '@filone/shared';
+import type { OrchestratorRequestOptions } from './service-orchestrator.ts';
 
 /** A policy naming a principal, as the member detail view lists them. */
 export interface MemberBucketPolicy {
@@ -35,5 +36,9 @@ export interface MemberOrchestrator {
    * from its own tables, so the answer is consistent with its last write.
    * Buckets the member cannot access are absent.
    */
-  resolveMemberAccess(tenantId: string, userId: string): Promise<MemberBucketAccess[]>;
+  resolveMemberAccess(
+    tenantId: string,
+    userId: string,
+    opts?: OrchestratorRequestOptions,
+  ): Promise<MemberBucketAccess[]>;
 }
