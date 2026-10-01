@@ -104,6 +104,18 @@ const OP_ACTIONS: Record<PresignOp['op'], PolicyAction> = {
 };
 
 /**
+ * The action an operation needs. A read or delete naming a version takes the
+ * version action, as the storage system classifies it.
+ */
+function requiredAction(op: PresignOp): PolicyAction {
+  if (op.op === 'getObject' || op.op === 'headObject') {
+    return op.versionId ? 's3:GetObjectVersion' : 's3:GetObject';
+  }
+  if (op.op === 'deleteObject' && op.versionId) return 's3:DeleteObjectVersion';
+  return OP_ACTIONS[op.op];
+}
+
+/**
  * Refuse a scoped member's batch when their bucket policies do not cover it.
  *
  * The URLs are signed with the tenant's key, which the storage system never
@@ -132,7 +144,7 @@ async function checkMemberReach(
         .body<ErrorResponse>({ message: 'Bucket not found' })
         .build();
     }
-    if (!actions.has(OP_ACTIONS[op.op])) {
+    if (!actions.has(requiredAction(op))) {
       return new ResponseBuilder()
         .status(403)
         .body<ErrorResponse>({ message: `Your access to ${op.bucket} does not permit ${op.op}.` })
