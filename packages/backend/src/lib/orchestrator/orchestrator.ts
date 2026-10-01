@@ -21,7 +21,7 @@ import {
 } from './tenant-setup.ts';
 import { accessKeyBody, describeAccessKeyBody } from './access-key-body.ts';
 import { buildIamMethods } from './iam.ts';
-import { extractApiMessage } from './api-message.ts';
+import { extractApiCode, extractApiMessage } from './api-message.ts';
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
@@ -401,9 +401,9 @@ abstract class FilOneOrchestrator implements OrchestratorCore {
       if (response?.status === 409) {
         throw new AccessKeyAlreadyExistsError({ cause: error });
       }
-      // A 422 naming the principal is one the storage system does not have; any
-      // other 422 is a name or expiry it will not accept.
-      if (body.principalId && response?.status === 422 && /principal/i.test(message ?? '')) {
+      // The storage system codes a principal it does not have UnknownPrincipal
+      // (on a 422); any other 422 is a request it will not accept.
+      if (body.principalId && extractApiCode(error) === 'UnknownPrincipal') {
         throw new PrincipalNotFoundError(body.principalId, { cause: error });
       }
       if (response?.status === 400 || response?.status === 422) {
