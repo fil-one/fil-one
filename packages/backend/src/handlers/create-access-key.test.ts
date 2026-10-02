@@ -1320,19 +1320,33 @@ describe('create-access-key baseHandler', () => {
       expect(result.statusCode).toBe(201);
     });
 
-    it('answers 409 for a duplicate name without recovering by name', async () => {
+    it('answers 409 for a duplicate name and recovers the orphan by name and principal', async () => {
       mockIssueAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
+      mockFindAccessKeyByName.mockResolvedValue({
+        id: 'iam-key-1',
+        accessKeyId: 'AKIA1234567890',
+        createdAt: '2026-03-10T00:00:00Z',
+      });
 
       const result = await baseHandler(buildEvent({ body: principalBody(), userInfo: USER_INFO }));
 
-      // The name is unique only within the principal, so a duplicate names no
-      // orphan of an earlier attempt; the intent closes as the refusal it was.
+      // The name is unique only within the principal, so the orphan is looked
+      // up under the caller's principal, never another member's.
       expect(result.statusCode).toBe(409);
-      expect(mockFindAccessKeyByName).not.toHaveBeenCalled();
-      expect(standaloneEvents().map((event) => event.phase)).toStrictEqual([
-        'intent',
-        'completion',
-      ]);
+      expect(mockFindAccessKeyByName).toHaveBeenCalledWith(
+        'tenant-9',
+        'laptop',
+        undefined,
+        'user-1',
+      );
+      expect(keyRowWritten()).toMatchObject({
+        keyName: 'laptop',
+        accessKeyId: 'AKIA1234567890',
+        principalId: 'user-1',
+        createdBy: 'user-1',
+        recovered: true,
+      });
+      expect(keyRowWritten()).not.toHaveProperty('permissions');
     });
 
     describe('a service key, when the body carries permissions', () => {
