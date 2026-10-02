@@ -1432,6 +1432,11 @@ export default $config({
         extraEnv: orchestratorEnv,
         extraLink: [orgLogoBucketName],
       },
+      // The only route that sends mail. `SendGridApiKey` exists on staging and
+      // production alone; every other stage sends no email and logs the invitation
+      // by id, never the accept URL, because the URL carries the token.
+      // `WEBSITE_URL` is the accept link's origin, taken from configuration rather
+      // than from the request, since the link goes to somebody else's inbox.
       'create-invitation': {
         extraEnv: { WEBSITE_URL: siteUrl },
         ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
