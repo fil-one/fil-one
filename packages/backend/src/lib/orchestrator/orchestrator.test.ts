@@ -35,6 +35,7 @@ const mockDeleteTenant = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetTenantMetrics = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetBucketMetrics = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetPrincipalAccess = vi.fn((_o: Record<string, unknown>) => ({}));
+const mockPutPrincipal = vi.fn((_o: Record<string, unknown>) => ({}));
 
 vi.mock('@filone/orchestrator-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
@@ -50,6 +51,7 @@ vi.mock('@filone/orchestrator-client', () => ({
     mockGetBucketMetrics(o),
   getTenantsByTenantIdPrincipalsByPrincipalIdAccess: (o: Record<string, unknown>) =>
     mockGetPrincipalAccess(o),
+  putTenantsByTenantIdPrincipalsByPrincipalId: (o: Record<string, unknown>) => mockPutPrincipal(o),
 }));
 
 vi.mock('./metrics.ts', () => ({
@@ -72,7 +74,8 @@ import {
 import type { IssueAccessKeyOpts, OrchestratorRequestOptions } from '../service-orchestrator.ts';
 import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
 import { instrumentClient } from './metrics.ts';
-import { createFilOneOrchestrator, type FilOneOrchestratorConfig } from './orchestrator.ts';
+import { createFilOneOrchestrator } from './arms.ts';
+import { type FilOneOrchestratorConfig } from './orchestrator.ts';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 // tenantId === orgId for Management API orchestrators (client-supplied UUID).
@@ -609,6 +612,20 @@ describe('listBuckets on an iam region', () => {
     await iamOrchestrator.listBuckets(tenantId, { actAs: member, signal });
 
     expect(mockGetPrincipalAccess).toHaveBeenCalledWith(expect.objectContaining({ signal }));
+  });
+
+  it('starts the access lookup before the S3 listing answers', async () => {
+    stubS3Credentials();
+    let lookupsWhenListed = -1;
+    s3Mock.on(ListBucketsCommand).callsFake(() => {
+      lookupsWhenListed = mockGetPrincipalAccess.mock.calls.length;
+      return { Buckets: [{ Name: 'photos', CreationDate: new Date('2026-01-01T00:00:00Z') }] };
+    });
+    mockGetPrincipalAccess.mockReturnValue(reaches('photos'));
+
+    await iamOrchestrator.listBuckets(tenantId, { actAs: member });
+
+    expect(lookupsWhenListed).toBe(1);
   });
 
   it('ignores the named member on a scoped-keys region', async () => {
