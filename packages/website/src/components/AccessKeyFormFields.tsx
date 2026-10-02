@@ -98,6 +98,7 @@ export function AccessKeyFormFields({
             <RadioOption
               name="key-kind"
               value="principal"
+              testId="access-key-kind-principal"
               checked={!form.serviceKey}
               onChange={() => form.setServiceKey(false)}
               description="Acts as you. Each bucket's policy decides what it can reach."
@@ -107,6 +108,7 @@ export function AccessKeyFormFields({
             <RadioOption
               name="key-kind"
               value="service"
+              testId="access-key-kind-service"
               checked={form.serviceKey}
               onChange={() => form.setServiceKey(true)}
               description="Carries its own permissions and buckets. Bucket policies do not apply."
@@ -118,11 +120,13 @@ export function AccessKeyFormFields({
       )}
 
       {form.principal ? (
-        <Alert
-          variant="blue"
-          assertive={false}
-          description="This key acts as you. What it can reach is decided by each bucket's policy."
-        />
+        <div data-testid="access-key-follows-policy">
+          <Alert
+            variant="blue"
+            assertive={false}
+            description="This key acts as you. What it can reach is decided by each bucket's policy."
+          />
+        </div>
       ) : (
         <>
           {/* Permissions */}
