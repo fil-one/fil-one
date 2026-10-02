@@ -1,8 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { S3_REGION, S3Region } from '@filone/shared';
 import { ToastProvider } from '../components/Toast';
+const mockIsIam = vi.fn(() => false);
+vi.mock('./access-model.js', () => ({ isIamRegion: () => mockIsIam() }));
+
 import { useAccessKeyForm } from './use-access-key-form.js';
 
 function wrapper({ children }: { children: React.ReactNode }) {
@@ -209,5 +212,58 @@ describe('useAccessKeyForm — granular permission filtering', () => {
 
     act(() => result.current.setPermissions(['CreateBucket']));
     expect(result.current.permissions).toEqual(['CreateBucket']);
+  });
+});
+
+describe('useAccessKeyForm — on a region serving the iam access model', () => {
+  it('sends a name and an expiry only, and needs no permission to submit', () => {
+    mockIsIam.mockReturnValue(true);
+    try {
+      const { result } = renderForm();
+      act(() => {
+        result.current.setKeyName('laptop');
+        result.current.setPermissions([]);
+      });
+
+      expect(result.current.iam).toBe(true);
+      expect(result.current.principal).toBe(true);
+      expect(result.current.canSubmit).toBe(true);
+      expect(result.current.payload).toStrictEqual({
+        keyName: 'laptop',
+        region: S3_REGION,
+        expiresAt: null,
+      });
+    } finally {
+      mockIsIam.mockReturnValue(false);
+    }
+  });
+
+  it('sends the scoped-key shape once a service key is chosen, and needs its permissions', () => {
+    mockIsIam.mockReturnValue(true);
+    try {
+      const { result } = renderForm();
+      act(() => {
+        result.current.setKeyName('nightly-backup');
+        result.current.setServiceKey(true);
+      });
+
+      expect(result.current.principal).toBe(false);
+      expect(result.current.payload).toMatchObject({
+        keyName: 'nightly-backup',
+        permissions: expect.arrayContaining(['read', 'write', 'list']),
+        bucketScope: 'all',
+        region: S3_REGION,
+      });
+      expect(result.current.canSubmit).toBe(true);
+
+      act(() => result.current.setPermissions([]));
+      expect(result.current.canSubmit).toBe(false);
+
+      // Back to a key bound to the caller: no permissions needed again.
+      act(() => result.current.setServiceKey(false));
+      expect(result.current.canSubmit).toBe(true);
+    } finally {
+      mockIsIam.mockReturnValue(false);
+    }
   });
 });
