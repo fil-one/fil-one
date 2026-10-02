@@ -550,6 +550,18 @@ describe('rotate-access-key baseHandler', () => {
     expect(mockDeleteAccessKey).toHaveBeenCalledWith(TENANT_ID, KEY_ID);
   });
 
+  it('records in the rotation audit that the key is principal-bound', async () => {
+    stubStoredKey({ permissions: undefined, principalId: 'user-1' });
+    stubWrites();
+
+    await baseHandler(eventFor());
+
+    const intent = standaloneEvents().find(
+      (event) => event.type === 'key.rotated' && event.phase === 'intent',
+    );
+    expect(intent?.details).toMatchObject({ keyName: 'My Key', principalBound: true });
+  });
+
   it('refuses a row that never recorded what its key carries', async () => {
     stubStoredKey({ permissions: undefined });
 
