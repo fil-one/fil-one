@@ -1,7 +1,11 @@
 import type { S3Client } from '@aws-sdk/client-s3';
 import { test, expect } from '@playwright/test';
 import { ROSTER_ADMIN_ACTIONS } from '@filone/shared';
-import type { CreateAccessKeyResponse, PolicyStatement } from '@filone/shared';
+import type {
+  CreateAccessKeyResponse,
+  PolicyStatement,
+  RotateAccessKeyResponse,
+} from '@filone/shared';
 import {
   resolvePersonalOrgId,
   runCleanup,
@@ -173,13 +177,18 @@ test('B3. a bucket deleted and created again under its name starts from the rost
   );
 });
 
-test('B4. a deleted principal key stops working and one cannot be rotated', async () => {
+test('B4. a deleted principal key stops working and a rotated one is replaced by a working key', async () => {
   const bucket = await newBucket([allow([memberId], ['s3:ListBucket'])]);
   const deleted = await mint(member);
   await member.deleteKey(deleted.id);
   expect(await outcome(listObjects(s3For(deleted), bucket))).toBe('403 InvalidAccessKeyId');
 
-  const kept = await mint(member);
-  expect((await member.rotateKey(kept.id)).status()).toBe(409);
-  expect(await outcome(listObjects(s3For(kept), bucket))).toBe('ok');
+  const old = await mint(member);
+  const rotated = await member.rotateKey(old.id);
+  expect(rotated.status(), await rotated.text()).toBe(201);
+  const replacement = (await rotated.json()) as RotateAccessKeyResponse;
+  minted.push({ api: member, id: replacement.id });
+  expect(replacement.previousKeyRevoked).toBe(true);
+  expect(await outcome(listObjects(s3For(replacement), bucket))).toBe('ok');
+  expect(await outcome(listObjects(s3For(old), bucket))).toBe('403 InvalidAccessKeyId');
 });
