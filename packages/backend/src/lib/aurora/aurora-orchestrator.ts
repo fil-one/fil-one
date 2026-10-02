@@ -47,7 +47,7 @@ import type {
   IssueAccessKeyOpts,
   IssuedAccessKey,
   OrchestratorRequestOptions,
-  ServiceOrchestrator,
+  ScopedKeysOrchestrator,
   TenantStatusProbe,
   StorageUsageSample,
   TenantInfo,
@@ -362,7 +362,7 @@ export const auroraOrchestrator = {
         objectCount: s.objectCount ?? 0,
       }));
   },
-} satisfies ServiceOrchestrator;
+} satisfies ScopedKeysOrchestrator;
 
 // Aurora's metrics API only accepts windows in m/h units, so the
 // orchestrator-agnostic '1d' value is translated before it hits the wire.
