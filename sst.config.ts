@@ -1090,6 +1090,17 @@ export default $config({
     // Minting a key reaches the orchestrator and its SSM-held credentials and
     // waits on a vendor call. Rotation does the same and then revokes, so both
     // routes take one grant set; rotation takes more time.
+    const bucketPolicyWriteRoute: RouteInfraConfig = {
+      extraEnv: orchestratorEnv,
+      permissions: [
+        {
+          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+          resources: [forgeS3KeySsmArn, forgeDevS3KeySsmArn],
+        },
+      ],
+      timeout: '30 seconds',
+    };
+
     const accessKeyMintRoute: RouteInfraConfig = {
       extraEnv: orchestratorEnv,
       permissions: [
@@ -1153,6 +1164,19 @@ export default $config({
         permissions: bucketReadPermissions,
         extraEnv: orchestratorEnv,
       },
+      // Bucket policies are S3 operations signed with the tenant's console S3
+      // key, which getConsoleS3Credentials reads from SSM. A write may first
+      // provision the tenant (ensureTenantReady), which stores that key. Only
+      // Forge regions carry bucket policies, so only their key parameters.
+      // Dark until a region declares the `iam` access model.
+      'get-bucket-policy': {
+        extraEnv: orchestratorEnv,
+        permissions: [
+          { actions: ['ssm:GetParameter'], resources: [forgeS3KeySsmArn, forgeDevS3KeySsmArn] },
+        ],
+      },
+      'put-bucket-policy': bucketPolicyWriteRoute,
+      'delete-bucket-policy': bucketPolicyWriteRoute,
 
       // ── Keys ───────────────────────────────────────────────────────
       // The RAG API key routes take no entry: they are named bearer tokens
