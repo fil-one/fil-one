@@ -71,7 +71,7 @@ export async function baseHandler(
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
 
-  const policy = await firstPolicyFor(orchestrator, orgId, userId);
+  const policy = await getOrgDefaultPolicy(orchestrator, orgId, userId);
   const audit = policy
     ? await auditFirstPolicy({ event, orgId, userId, region, bucketName })
     : undefined;
@@ -145,7 +145,7 @@ export async function baseHandler(
  * moment. Undefined on a `scoped-keys` orchestrator, where nothing evaluates a
  * policy.
  */
-async function firstPolicyFor(
+async function getOrgDefaultPolicy(
   orchestrator: ServiceOrchestrator,
   orgId: string,
   creatorId: string,
