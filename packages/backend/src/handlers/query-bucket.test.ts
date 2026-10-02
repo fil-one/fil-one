@@ -85,8 +85,15 @@ process.env.FILONE_STAGE = 'test';
 
 import { baseHandler, handler } from './query-bucket.ts';
 import { hashRagKeyToken, RagApiKeyKeys } from '../lib/rag-api-keys.ts';
-import { buildEvent, buildContext, stubMembershipRead } from '../test/lambda-test-utilities.ts';
-import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.ts';
+import {
+  buildEvent,
+  buildContext,
+  membershipFor,
+  stubMembershipRead,
+} from '../test/lambda-test-utilities.ts';
+import { FakeIamOrchestrator } from '../test/fake-iam-orchestrator.ts';
+import { reachesBucket } from '../lib/orchestrator/member-access.ts';
+import { fakeOrchestrator, tenantFor, type FakeOrchestrator } from '../test/fake-orchestrator.ts';
 import { OrgRole, S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 
@@ -629,6 +636,16 @@ describe('query-bucket handler (RAG API key bearer auth)', () => {
     expect(mockEmbed).not.toHaveBeenCalled();
   });
 
+  it("keeps the key's own scope on an iam region, not its creator's policies", async () => {
+    stubKey();
+    orch = iamOrchestratorReachingOnly('other-bucket');
+    mockGetOrchestratorForRegion.mockReturnValue(orch);
+
+    const result = await handler(bearerEvent(`Bearer ${TOKEN}`), buildContext());
+
+    expect(result.statusCode).toBe(200);
+  });
+
   it('returns 401 for a deleted/unknown key', async () => {
     ddbMock.on(GetItemCommand).resolves({});
 
@@ -646,5 +663,58 @@ describe('query-bucket handler (RAG API key bearer auth)', () => {
 
     expect(result.statusCode).toBe(403);
     expect(mockEmbed).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * An iam-region orchestrator whose policies grant user-1 only `bucketName`,
+ * with the real iam arm's getBucket rule: null when the named member cannot
+ * reach the bucket.
+ */
+function iamOrchestratorReachingOnly(bucketName: string): FakeOrchestrator {
+  const iam = new FakeIamOrchestrator();
+  iam.seedPrincipal(tenantFor('forge', 'org-1'), 'user-1');
+  iam.seedPolicy(tenantFor('forge', 'org-1'), bucketName, {
+    statement: [{ effect: 'allow', principal: ['user-1'], action: ['s3:GetObject'] }],
+  });
+  const o = fakeOrchestrator('forge', { bucket: BUCKET, iam });
+  o.getBucket.mockImplementation(
+    async (tenantId: string, name: string, opts?: { actAs?: string }) =>
+      opts?.actAs && !(await reachesBucket(iam, tenantId, opts.actAs, name)) ? null : BUCKET,
+  );
+  return o;
+}
+
+describe('query-bucket member scope on an iam region', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockEmbed.mockResolvedValue([0.1, 0.2, 0.3]);
+    mockComplete.mockResolvedValue('grounded answer');
+    mockQuery.mockResolvedValue([vector('secret.pdf#0', 'secret.pdf')]);
+    mockGetEnablement.mockResolvedValue(SYNCED_ENABLEMENT);
+    orch = iamOrchestratorReachingOnly('other-bucket');
+    mockGetOrchestratorForRegion.mockReturnValue(orch);
+  });
+
+  function cookieEvent(role: OrgRole): AuthenticatedEvent {
+    const event = queryEvent({ query: 'what is in here?' });
+    event.requestContext.userInfo.membership = membershipFor('org-1', 'user-1', role);
+    return event;
+  }
+
+  it("answers not found for a bucket outside a cookie Member's policies", async () => {
+    const result = await baseHandler(cookieEvent(OrgRole.Member));
+
+    expect(result.statusCode).toBe(404);
+    expect(mockComplete).not.toHaveBeenCalled();
+  });
+
+  it('answers an Owner or Admin on a bucket their policies leave out', async () => {
+    const statuses: Array<number | undefined> = [];
+    for (const role of [OrgRole.Owner, OrgRole.Admin]) {
+      statuses.push((await baseHandler(cookieEvent(role))).statusCode);
+    }
+
+    expect(statuses).toStrictEqual([200, 200]);
   });
 });

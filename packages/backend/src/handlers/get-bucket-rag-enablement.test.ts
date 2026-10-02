@@ -36,9 +36,11 @@ vi.mock('../lib/bucket-rag-enablement.ts', async () => {
 process.env.FILONE_STAGE = 'test';
 
 import { baseHandler } from './get-bucket-rag-enablement.ts';
-import { buildEvent } from '../test/lambda-test-utilities.ts';
-import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.ts';
-import { S3_REGION, S3Region } from '@filone/shared';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
+import { FakeIamOrchestrator } from '../test/fake-iam-orchestrator.ts';
+import { reachesBucket } from '../lib/orchestrator/member-access.ts';
+import { fakeOrchestrator, tenantFor, type FakeOrchestrator } from '../test/fake-orchestrator.ts';
+import { OrgRole, S3_REGION, S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import type { BucketRAGEnablementRecord } from '../lib/dynamo-records.ts';
 
@@ -237,5 +239,47 @@ describe('get-bucket-rag-enablement baseHandler', () => {
   it('selects the orchestrator from the region query param', async () => {
     await baseHandler(event({ region: S3Region.UsEast1 }));
     expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith(S3Region.UsEast1);
+  });
+});
+
+describe('get-bucket-rag-enablement member scope on an iam region', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetEnablement.mockResolvedValue(enablementRecord());
+    const iam = new FakeIamOrchestrator();
+    iam.seedPrincipal(tenantFor('forge', 'org-1'), 'user-1');
+    iam.seedPolicy(tenantFor('forge', 'org-1'), 'other-bucket', {
+      statement: [{ effect: 'allow', principal: ['user-1'], action: ['s3:GetObject'] }],
+    });
+    orch = fakeOrchestrator('forge', { bucket: BUCKET, iam });
+    // The real iam arm's getBucket: null when the named member cannot reach it.
+    orch.getBucket.mockImplementation(
+      async (tenantId: string, bucketName: string, opts?: { actAs?: string }) =>
+        opts?.actAs && !(await reachesBucket(iam, tenantId, opts.actAs, bucketName))
+          ? null
+          : BUCKET,
+    );
+    mockGetOrchestratorForRegion.mockReturnValue(orch);
+  });
+
+  function eventAs(role: OrgRole): AuthenticatedEvent {
+    const e = event();
+    e.requestContext.userInfo.membership = membershipFor('org-1', 'user-1', role);
+    return e;
+  }
+
+  it("answers not found for a bucket outside a Member's policies", async () => {
+    const result = await baseHandler(eventAs(OrgRole.Member));
+
+    expect(result.statusCode).toBe(404);
+  });
+
+  it('answers an Owner or Admin on a bucket their policies leave out', async () => {
+    const statuses: Array<number | undefined> = [];
+    for (const role of [OrgRole.Owner, OrgRole.Admin]) {
+      statuses.push((await baseHandler(eventAs(role))).statusCode);
+    }
+
+    expect(statuses).toStrictEqual([200, 200]);
   });
 });

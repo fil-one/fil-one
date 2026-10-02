@@ -10,11 +10,13 @@ import {
 import type {
   ErrorResponse,
   Permission,
+  PolicyAction,
   PresignOp,
   PresignResponse,
   PresignResponseItem,
 } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import type { ServiceOrchestrator } from '../lib/service-orchestrator.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import type { S3ClientContext } from '../lib/s3-client.ts';
 import {
@@ -32,6 +34,7 @@ import {
   unsupportedRegionResponse,
 } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { scopedTo } from '../lib/member-scope.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { requireOrgMembershipMiddleware, requirePermission } from '../middleware/authorize.ts';
@@ -82,6 +85,71 @@ function checkPresignPermissions(
       `Your role in this organization does not permit ${op.op}.`,
     );
     if (denied) return denied;
+  }
+  return undefined;
+}
+
+/**
+ * The policy action each presign operation needs on a region serving the `iam`
+ * access model. A HEAD reads the object, so it takes `s3:GetObject`.
+ */
+const OP_ACTIONS: Record<PresignOp['op'], PolicyAction> = {
+  getObject: 's3:GetObject',
+  headObject: 's3:GetObject',
+  listObjects: 's3:ListBucket',
+  listObjectVersions: 's3:ListBucketVersions',
+  getObjectRetention: 's3:GetObjectRetention',
+  putObject: 's3:PutObject',
+  deleteObject: 's3:DeleteObject',
+};
+
+/**
+ * The action an operation needs. A read or delete naming a version takes the
+ * version action, as the storage system classifies it.
+ */
+function requiredAction(op: PresignOp): PolicyAction {
+  if (op.op === 'getObject' || op.op === 'headObject') {
+    return op.versionId ? 's3:GetObjectVersion' : 's3:GetObject';
+  }
+  if (op.op === 'deleteObject' && op.versionId) return 's3:DeleteObjectVersion';
+  return OP_ACTIONS[op.op];
+}
+
+/**
+ * Refuse a scoped member's batch when their bucket policies do not cover it.
+ *
+ * The URLs are signed with the tenant's key, which the storage system never
+ * evaluates a policy for, so this check is the whole enforcement for a share
+ * link: a redeemed URL never re-enters the console. A bucket outside the
+ * member's policies answers exactly like a bucket that does not exist, since a
+ * distinct code would confirm it exists. An unscoped caller, and every region
+ * serving scoped keys, skips the read.
+ */
+async function checkMemberReach(
+  orchestrator: ServiceOrchestrator,
+  tenantId: string,
+  userId: string | undefined,
+  ops: PresignOp[],
+): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
+  if (!userId || orchestrator.accessModel !== 'iam') return undefined;
+  const access = await orchestrator.iam.resolveMemberAccess(tenantId, userId);
+  const granted = new Map<string, Set<PolicyAction>>(
+    access.map((entry) => [entry.bucketName, new Set(entry.actions)]),
+  );
+  for (const op of ops) {
+    const actions = granted.get(op.bucket);
+    if (!actions) {
+      return new ResponseBuilder()
+        .status(404)
+        .body<ErrorResponse>({ message: 'Bucket not found' })
+        .build();
+    }
+    if (!actions.has(requiredAction(op))) {
+      return new ResponseBuilder()
+        .status(403)
+        .body<ErrorResponse>({ message: `Your access to ${op.bucket} does not permit ${op.op}.` })
+        .build();
+    }
   }
   return undefined;
 }
@@ -273,7 +341,7 @@ export async function baseHandler(
   }
 
   const ops = parsed.data;
-  const { orgId } = getUserInfo(event);
+  const { orgId, userId, membership } = getUserInfo(event);
 
   // Authorization first: what the caller's role permits does not depend on
   // their billing state, and a member denied an operation should hear that
@@ -287,6 +355,14 @@ export async function baseHandler(
   const orchestrator = getOrchestratorForRegion(region);
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) return tenantNotReadyResponse();
+
+  const outOfReach = await checkMemberReach(
+    orchestrator,
+    tenantId,
+    scopedTo(membership?.role, userId),
+    ops,
+  );
+  if (outOfReach) return outOfReach;
 
   const s3Ctx = await orchestrator.getS3ClientContext(tenantId);
   const ctx = s3Ctx.presignEndpointUrl

@@ -25,9 +25,9 @@ vi.mock('../lib/org-profile.ts', () => ({
 process.env.FILONE_STAGE = 'test';
 
 import { baseHandler } from './get-bucket.ts';
-import { buildEvent } from '../test/lambda-test-utilities.ts';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
 import { fakeOrchestrator, tenantFor, type FakeOrchestrator } from '../test/fake-orchestrator.ts';
-import { S3_REGION, S3Region } from '@filone/shared';
+import { OrgRole, S3_REGION, S3Region } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -146,7 +146,29 @@ describe('get-bucket baseHandler', () => {
     event.pathParameters = { name: 'my-bucket' };
     await baseHandler(event);
 
-    expect(orch.getBucket).toHaveBeenCalledWith(tenantFor('aurora', 'org-1'), 'my-bucket');
+    // The default caller is an Owner, whom the console reads for unscoped.
+    expect(orch.getBucket).toHaveBeenCalledWith(tenantFor('aurora', 'org-1'), 'my-bucket', {
+      actAs: undefined,
+    });
+  });
+
+  it('reads as the member for a scoped caller and unscoped for Owner and Admin', async () => {
+    orch.getBucket.mockResolvedValue(null);
+
+    // An Owner or Admin must reach a bucket whose policy leaves them out, or
+    // has none, to repair it; everyone else sees only what a statement grants.
+    const actors: (string | undefined)[] = [];
+    for (const role of [OrgRole.Owner, OrgRole.Admin, OrgRole.Member, OrgRole.ReadOnly]) {
+      orch.getBucket.mockClear();
+      const event = buildEvent({
+        userInfo: { ...USER_INFO, membership: membershipFor('org-1', 'user-1', role) },
+      });
+      event.pathParameters = { name: 'my-bucket' };
+      await baseHandler(event);
+      actors.push(orch.getBucket.mock.calls[0][2].actAs);
+    }
+
+    expect(actors).toStrictEqual([undefined, undefined, 'user-1', 'user-1']);
   });
 
   it('returns 404 when orchestrator.getBucket returns null', async () => {

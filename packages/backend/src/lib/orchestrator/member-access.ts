@@ -34,3 +34,14 @@ export async function reachableBuckets(
   const reachable = new Set(access.map((entry) => entry.bucketName));
   return buckets.filter((bucket) => reachable.has(bucket.bucketName));
 }
+
+/** Whether one member reaches one bucket, by the same evaluation. */
+export async function reachesBucket(
+  iam: IamMethods,
+  tenantId: string,
+  userId: string,
+  bucketName: string,
+): Promise<boolean> {
+  const access = await iam.resolveMemberAccess(tenantId, userId);
+  return access.some((entry) => entry.bucketName === bucketName);
+}

@@ -6,9 +6,10 @@
 import { FilOneOrchestrator } from './orchestrator.ts';
 import type { FilOneOrchestratorConfig } from './orchestrator.ts';
 import { buildIamMethods } from './iam.ts';
-import { reachableBuckets } from './member-access.ts';
+import { reachableBuckets, reachesBucket } from './member-access.ts';
 import { registerMemberPrincipals } from './principals.ts';
 import type {
+  BucketDetails,
   BucketSummary,
   IamMethods,
   IamOrchestrator,
@@ -61,6 +62,24 @@ class IamFilOneOrchestrator extends FilOneOrchestrator implements IamOrchestrato
     return userId
       ? reachableBuckets(this.iam, listing, tenantId, { userId, signal: requestOptions?.signal })
       : listing;
+  }
+
+  /**
+   * One bucket's details, or null when the named member cannot reach it.
+   *
+   * The console signs with the tenant's key, which every bucket answers, so
+   * reach is settled here from the storage system's own evaluation of the
+   * member's policies. A bucket outside them answers exactly like a bucket that
+   * does not exist.
+   */
+  override async getBucket(
+    tenantId: string,
+    bucketName: string,
+    requestOptions?: S3ActorOptions,
+  ): Promise<BucketDetails | null> {
+    const userId = requestOptions?.actAs;
+    if (userId && !(await reachesBucket(this.iam, tenantId, userId, bucketName))) return null;
+    return super.getBucket(tenantId, bucketName, requestOptions);
   }
 }
 
