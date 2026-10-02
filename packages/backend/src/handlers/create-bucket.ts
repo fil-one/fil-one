@@ -73,7 +73,7 @@ export async function baseHandler(
 
   const policy = await getOrgDefaultPolicy(orchestrator, orgId, userId);
   const audit = policy
-    ? await auditFirstPolicy({ event, orgId, userId, region, bucketName })
+    ? await auditDefaultBucketPolicy({ event, orgId, userId, region, bucketName })
     : undefined;
 
   try {
@@ -160,13 +160,13 @@ async function getOrgDefaultPolicy(
 }
 
 /**
- * The first policy is written at the storage system with the bucket, so it is
+ * The default policy is written at the storage system with the bucket, so it is
  * recorded like every other policy write: an intent before the call and a
  * completion after it. Best-effort rather than fail-closed, because the
  * document is the roster the console derives rather than a grant somebody
  * authored, and an audit outage must not stop buckets being created.
  */
-function auditFirstPolicy({
+function auditDefaultBucketPolicy({
   event,
   orgId,
   userId,
