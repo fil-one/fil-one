@@ -14,26 +14,33 @@
 //     `filone-console` system key stashed in SSM during setup.
 
 import pRetry from 'p-retry';
-import type { S3Region, TenantStatus } from '@filone/shared';
+import type { AccessModel, S3Region, TenantStatus } from '@filone/shared';
 import {
   ensureTenantReady as ensureManagementTenantReady,
   type TenantSetupDeps,
 } from './tenant-setup.ts';
-import { buildPermissions } from './permissions.ts';
+import { accessKeyBody, describeAccessKeyBody } from './access-key-body.ts';
+import { buildIamMethods } from './iam.ts';
+import { extractApiCode, extractApiMessage } from './api-message.ts';
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
   BucketConfigurationError,
   BucketNotFoundError,
+  PrincipalNotFoundError,
 } from '../errors.ts';
 import type {
   BucketDetails,
   BucketSummary,
   CreateBucketArgs,
   GetTenantUsageMetricsOptions,
+  IamMethods,
+  IamOrchestrator,
   IssueAccessKeyOpts,
   IssuedAccessKey,
+  OrchestratorCore,
   OrchestratorRequestOptions,
+  ScopedKeysOrchestrator,
   ServiceOrchestrator,
   StorageUsageSample,
   TenantInfo,
@@ -65,7 +72,6 @@ import {
   postTenantsByTenantIdAccessKeys,
   postTenantsByTenantIdStatus,
   type Client,
-  type CreateAccessKeyRequest,
   type Metrics,
 } from '@filone/orchestrator-client';
 import { instrumentClient } from './metrics.ts';
@@ -92,6 +98,13 @@ export interface FilOneOrchestratorConfig {
    * tests and advanced callers; NOT auto-instrumented).
    */
   api: { client: Client } | { baseUrl: string; accessToken: string; fetch?: typeof fetch };
+  /**
+   * Which arm of the interface this instance serves. `iam` attaches the
+   * principal and bucket-policy methods; the registry passes the shared
+   * `getRegionAccessModel(region)` so the two never disagree. Defaults to
+   * `scoped-keys`.
+   */
+  accessModel?: AccessModel;
 }
 
 // Versioning / object-lock are applied as separate, idempotent S3 calls after the
@@ -100,16 +113,22 @@ export interface FilOneOrchestratorConfig {
 const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
 
 export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): ServiceOrchestrator {
-  return new FilOneOrchestrator(config);
+  return config.accessModel === 'iam'
+    ? new IamFilOneOrchestrator(config)
+    : new ScopedKeysFilOneOrchestrator(config);
 }
 
-class FilOneOrchestrator implements ServiceOrchestrator {
+// The core every arm shares. `implements OrchestratorCore` rather than
+// ServiceOrchestrator: the latter is a union, and a class may only implement an
+// object type. Each subclass implements its own arm, so an arm that forgot its
+// members would not compile.
+abstract class FilOneOrchestrator implements OrchestratorCore {
+  abstract readonly accessModel: AccessModel;
   readonly id: string;
   readonly region: S3Region;
-  readonly accessModel = 'scoped-keys';
 
   private readonly config: FilOneOrchestratorConfig;
-  private readonly client: Client;
+  protected readonly client: Client;
   private readonly setupDeps: TenantSetupDeps;
   private readonly tenantIdAttribute: string;
 
@@ -364,36 +383,32 @@ class FilOneOrchestrator implements ServiceOrchestrator {
     keyOpts: IssueAccessKeyOpts,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<IssuedAccessKey> {
-    const permissions = buildPermissions(keyOpts.permissions, keyOpts.granularPermissions);
-    const buckets = keyOpts.buckets ?? [];
-
+    const body = accessKeyBody(keyOpts, this);
     console.log(
-      `Creating ${this.id} access key "${keyOpts.keyName}" for tenant ${tenantId} with permissions ` +
-        `[${permissions.join(', ')}] and bucket scopes [${buckets.join(', ')}]`,
+      `Creating ${this.id} access key "${body.name}" for tenant ${tenantId} ${describeAccessKeyBody(body)}`,
     );
 
     const { data, error, response } = await postTenantsByTenantIdAccessKeys({
       client: this.client,
       path: { tenantId },
-      body: {
-        name: keyOpts.keyName,
-        // buildPermissions only emits actions from the contract's enum.
-        permissions: permissions as CreateAccessKeyRequest['permissions'],
-        buckets,
-        expiresAt: keyOpts.expiresAt ?? null,
-      },
+      body,
       throwOnError: false,
       ...requestOptions,
     });
 
     if (error || !data) {
+      const message = extractApiMessage(error);
       if (response?.status === 409) {
         throw new AccessKeyAlreadyExistsError({ cause: error });
       }
+      // The storage system codes a principal it does not have UnknownPrincipal
+      // (on a 422); any other 422 is a request it will not accept.
+      if (body.principalId && extractApiCode(error) === 'UnknownPrincipal') {
+        throw new PrincipalNotFoundError(body.principalId, { cause: error });
+      }
       if (response?.status === 400 || response?.status === 422) {
         throw new AccessKeyValidationError(
-          extractApiMessage(error) ??
-            'Invalid access key request. Check the key name and try again.',
+          message ?? 'Invalid access key request. Check the key name and try again.',
           { cause: error },
         );
       }
@@ -403,12 +418,14 @@ class FilOneOrchestrator implements ServiceOrchestrator {
       );
     }
 
+    const principalId = data.principal ?? body.principalId;
     return {
       // The contract has no identifier separate from the accessKeyId.
       id: data.accessKeyId,
       accessKeyId: data.accessKeyId,
       accessKeySecret: data.secretAccessKey,
       createdAt: data.createdAt,
+      ...(principalId ? { principalId } : {}),
     };
   }
 
@@ -548,6 +565,19 @@ class FilOneOrchestrator implements ServiceOrchestrator {
   }
 }
 
+// The two arms. `as const` on each discriminant is load-bearing: the abstract
+// declaration would otherwise widen the initializer back to AccessModel and the
+// union would stop narrowing.
+class ScopedKeysFilOneOrchestrator extends FilOneOrchestrator implements ScopedKeysOrchestrator {
+  readonly accessModel = 'scoped-keys' as const;
+}
+
+class IamFilOneOrchestrator extends FilOneOrchestrator implements IamOrchestrator {
+  readonly accessModel = 'iam' as const;
+  // Field initializers run after the base constructor, so `client` is set.
+  readonly iam: IamMethods = buildIamMethods(this.client, this.id, this);
+}
+
 function resolveClient(config: FilOneOrchestratorConfig): Client {
   if ('client' in config.api) return config.api.client;
   const { baseUrl, accessToken: token, fetch } = config.api;
@@ -587,14 +617,4 @@ function mapStorageSamples(metrics: Metrics): StorageUsageSample[] {
     bytesUsed: s.bytesUsed,
     objectCount: s.objectCount,
   }));
-}
-
-// Pulls the human-readable message out of the contract's error body
-// (`{ message, code? }`) returned in the SDK result's `error` field.
-function extractApiMessage(body: unknown): string | undefined {
-  if (body && typeof body === 'object' && 'message' in body) {
-    const message = (body as { message?: unknown }).message;
-    if (typeof message === 'string') return message;
-  }
-  return undefined;
 }

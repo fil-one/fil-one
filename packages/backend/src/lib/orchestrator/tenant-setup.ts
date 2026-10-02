@@ -52,6 +52,10 @@ const CONSOLE_KEY_PERMISSIONS = [
   's3:AbortMultipartUpload',
   's3:DeleteObject',
   's3:DeleteObjectVersion',
+  // Bucket policies are read and written over S3 with this key (fil-one/RFC#30).
+  's3:GetBucketPolicy',
+  's3:PutBucketPolicy',
+  's3:DeleteBucketPolicy',
 ] as const;
 
 const dynamo = getDynamoClient();
