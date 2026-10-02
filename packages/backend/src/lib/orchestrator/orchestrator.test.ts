@@ -936,6 +936,16 @@ describe('findAccessKeyByName', () => {
 
     await expect(orchestrator.findAccessKeyByName(tenantId, 'target')).resolves.toBeUndefined();
   });
+
+  it("looks only among a principal's keys when given one", async () => {
+    mockListAccessKeys.mockResolvedValue(ok({ items: [] }));
+
+    await orchestrator.findAccessKeyByName(tenantId, 'target', undefined, 'user-1');
+
+    expect(mockListAccessKeys).toHaveBeenCalledWith(
+      expect.objectContaining({ path: { tenantId }, query: { principalId: 'user-1' } }),
+    );
+  });
 });
 
 describe('deleteAccessKey', () => {
