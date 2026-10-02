@@ -127,9 +127,7 @@ export async function baseHandler(
       attribution,
       mint,
       creator,
-      // A principal-bound key's name is unique only within its principal, so a
-      // duplicate is a duplicate and there is no orphan to recover by name.
-      recoverByName: Boolean(key.service),
+      principalId: creator.key.principalId,
     });
   }
 
@@ -324,8 +322,7 @@ async function handleMintRefusal(
   attempt: MintAttempt,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   if (err instanceof AccessKeyAlreadyExistsError) {
-    if (attempt.recoverByName) await recoverDuplicateKey(attempt);
-    else await attempt.mint.complete({ outcome: 'failed' });
+    await recoverDuplicateKey(attempt);
     return duplicateKeyNameResponse();
   }
   if (err instanceof AccessKeyValidationError) {
@@ -373,8 +370,8 @@ interface MintAttempt {
   /** The intent this attempt already wrote — every exit here closes it. */
   mint: AuditCorrelation<'key.created'>;
   creator: KeyMinter;
-  /** Whether a duplicate name may be an orphan of an earlier attempt. */
-  recoverByName: boolean;
+  /** The principal a principal-bound key is bound to; its name is unique only within it. */
+  principalId?: string;
 }
 
 async function recoverDuplicateKey({
@@ -386,6 +383,7 @@ async function recoverDuplicateKey({
   attribution,
   mint,
   creator,
+  principalId,
 }: MintAttempt): Promise<void> {
   if (await orgAlreadyShowsKeyName({ orgId, keyName, region })) {
     // A plain duplicate name: the vendor refused and there is nothing to
@@ -396,7 +394,12 @@ async function recoverDuplicateKey({
 
   // Partial failure: key exists in Orchestrator's DB, but our DynamoDB record is missing.
   // Recover by fetching key details from the provider and writing the DB record.
-  const recovered = await orchestrator.findAccessKeyByName(tenantId, keyName);
+  const recovered = await orchestrator.findAccessKeyByName(
+    tenantId,
+    keyName,
+    undefined,
+    principalId,
+  );
 
   if (!recovered) {
     // Shouldn't happen — orchestrator returned conflict but key not found in list.
@@ -436,6 +439,7 @@ async function recoverDuplicateKey({
       // no owner at all is the worse outcome, and `recovered` keeps the
       // record honest about which of the two this is.
       ...attribution,
+      ...(principalId ? { principalId } : {}),
       recovered: true,
     },
     mint,

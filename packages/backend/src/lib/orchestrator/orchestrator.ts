@@ -422,10 +422,12 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
     tenantId: string,
     keyName: string,
     requestOptions?: OrchestratorRequestOptions,
+    principalId?: string,
   ) {
     const { data, error } = await getTenantsByTenantIdAccessKeys({
       client: this.client,
       path: { tenantId },
+      ...(principalId ? { query: { principalId } } : {}),
       throwOnError: false,
       ...requestOptions,
     });
