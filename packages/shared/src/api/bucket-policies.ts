@@ -154,8 +154,9 @@ export const POLICY_WILDCARD_PRINCIPAL = '*';
 export const PRINCIPAL_ID_MAX_LENGTH = 255;
 export const POLICY_SID_MAX_LENGTH = 128;
 
+// A member is named by its console user id, which is a UUID (`middleware/auth.ts`).
 const PrincipalIdSchema = z
-  .string()
+  .uuid('A principal id is a console user id, a UUID')
   .min(1, 'A principal id is required')
   .max(PRINCIPAL_ID_MAX_LENGTH, `A principal id is at most ${PRINCIPAL_ID_MAX_LENGTH} characters`)
   .refine((id) => id !== POLICY_WILDCARD_PRINCIPAL, {
