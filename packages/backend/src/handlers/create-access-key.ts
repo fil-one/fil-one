@@ -111,7 +111,7 @@ export async function baseHandler(
     actor,
     orgId,
     subject: AuditSubjects.org(orgId),
-    details: { keyKind: 's3', keyName, region },
+    details: { keyKind: 's3', keyName, region, ...key.auditDetails },
   });
 
   let accessKey: IssuedAccessKey;
@@ -193,6 +193,7 @@ function requestedKey(data: CreateRequest, userId: string) {
       service: undefined,
       opts: { keyName: data.keyName, principalId: userId, expiresAt },
       minterKey: { principalId: userId },
+      auditDetails: { principalBound: true },
       rowFields: (issued: IssuedAccessKey) => ({
         principalId: issued.principalId ?? userId,
         ...optionalKeyAttributes({ expiresAt }),
@@ -208,6 +209,7 @@ function requestedKey(data: CreateRequest, userId: string) {
     // holding `keys.create_service` keeps a service key, and the role fences
     // after the mint ask the same question the pre-check did.
     minterKey: { permissions, granularPermissions, region },
+    auditDetails: {},
     rowFields: () => ({
       permissions,
       ...optionalKeyAttributes({ granularPermissions, bucketScope, buckets, expiresAt }),
