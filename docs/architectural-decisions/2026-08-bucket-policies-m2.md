@@ -254,15 +254,15 @@ unchanged.
 
 The IAM arm is shaped after AWS IAM, minus its request bodies:
 
-| Method                                                     | Contract                                                                                 |
-| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `syncMember(tenantId, userId)`                             | asserts the principal exists so a key can bind to it; carries no permissions; idempotent |
-| `removeMember(tenantId, userId)`                           | deletes the principal, its keys, and every statement naming it; idempotent               |
-| `getBucketPolicy`, `putBucketPolicy`, `deleteBucketPolicy` | bucket-addressed; the write carries the token the read returned                          |
-| `listBucketPoliciesForMember(tenantId, userId)`            | the member detail view                                                                   |
-| `resolveMemberAccess(tenantId, userId)`                    | per-bucket permissions, for every route that acts for a scoped member                    |
+| Method                                                     | Contract                                                                                                       |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `syncMember(tenantId, userId)`                             | asserts the principal exists so a key can bind to it; carries no permissions; idempotent                       |
+| `removeMember(tenantId, userId)`                           | deletes the principal, its keys, and every statement naming it; idempotent                                     |
+| `getBucketPolicy`, `putBucketPolicy`, `deleteBucketPolicy` | bucket-addressed; the write carries the token the read returned                                                |
+| `listBucketPoliciesForMember(tenantId, userId)`            | the member detail view                                                                                         |
+| `resolveMemberAccess(tenantId, userId)`                    | per-bucket permissions, for every route that acts for a scoped member                                          |
 | `issueAccessKey(tenantId, opts)`                           | on the core, either shape: a service key with permissions and buckets, or `principalId` with a name and expiry |
-| `listAccessKeys(tenantId, opts)`                           | identity fields plus each key's principal; access is read per principal                  |
+| `listAccessKeys(tenantId, opts)`                           | identity fields plus each key's principal; access is read per principal                                        |
 
 A vendor that grows principals and policies moves its region to `iam` by
 implementing that arm, with no console change.
@@ -422,16 +422,16 @@ is the one existing path for pushing a change to a warm key.
    unique per principal.
 5. **Per-request authority** computed from the bucket's policy alone, `Allow \
 Deny` for the calling principal, with an explicit Deny winning. A key's
-permission set is derived, never stored: the flat permissions and buckets fields
-on today's key do not describe an IAM key. What the policies give the key's
-principal is materialized as the key's delegations, one per bucket and Forge
-command, and rewritten when a policy changes. A member-access read returns a
-principal's per-bucket access, is consistent with Hilt's own last write, and
-carries a latency target, since the console resolves it on every request it
-serves for a scoped member. Deny is what makes this more than a proof-chain check: several S3
-actions map to the same Forge commands, so the gateway has to hold each key's
-effective action set per bucket and refuse anything outside it rather than
-probing for a chain.
+   permission set is derived, never stored: the flat permissions and buckets fields
+   on today's key do not describe an IAM key. What the policies give the key's
+   principal is materialized as the key's delegations, one per bucket and Forge
+   command, and rewritten when a policy changes. A member-access read returns a
+   principal's per-bucket access, is consistent with Hilt's own last write, and
+   carries a latency target, since the console resolves it on every request it
+   serves for a scoped member. Deny is what makes this more than a proof-chain check: several S3
+   actions map to the same Forge commands, so the gateway has to hold each key's
+   effective action set per bucket and refuse anything outside it rather than
+   probing for a chain.
 6. **Revocation before acknowledgement.** Every change to a principal's access,
    narrowing or widening, publishes revocations for the grants it invalidates
    before Hilt acknowledges the change, and refuses the change outright when it
