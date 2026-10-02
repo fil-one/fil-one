@@ -70,6 +70,15 @@ const DETAILS: { [T in AuditEventType]: AuditEventDetails[T] } = {
     actorId: USER_ID,
     rowCount: 12,
   },
+  'bucket_policy.created': {
+    region: 'us-east-9',
+    bucketName: 'photos',
+    trigger: 'bucket_created',
+    statements: 2,
+    principals: 3,
+  },
+  'bucket_policy.updated': { region: 'us-east-9', bucketName: 'photos', trigger: 'policy_edit' },
+  'bucket_policy.deleted': { region: 'us-east-9', bucketName: 'photos', trigger: 'policy_edit' },
 };
 
 function renamed(): AuditEventRecord<'org.renamed'> {
@@ -574,6 +583,27 @@ describe('commitAudited', () => {
 
     expect(refused).toBeTypeOf('function');
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+  });
+
+  it('will not take a bucket-policy event with no phase', () => {
+    const updated = auditEvent({
+      type: 'bucket_policy.updated',
+      actor: ACTOR,
+      orgId: ORG_ID,
+      subject: AuditSubjects.bucket('us-east-9', 'photos'),
+      details: DETAILS['bucket_policy.updated'],
+    });
+
+    // Compiled, never run. The document is written at the vendor, so a row
+    // with no phase records a write the transaction never carried.
+    const refused = () =>
+      commitAudited({
+        items: [MUTATION],
+        // @ts-expect-error — an unphased bucket-policy event is not committable.
+        event: updated,
+      });
+
+    expect(refused).toBeTypeOf('function');
   });
 
   it('composes with a transaction that already spans tables', async () => {

@@ -48,6 +48,9 @@ export const AUDIT_EVENT_TYPES = [
   'key.deleted',
   'audit.exported',
   'key.rotated',
+  'bucket_policy.created',
+  'bucket_policy.updated',
+  'bucket_policy.deleted',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -79,6 +82,9 @@ export const TWO_PHASE_AUDIT_EVENT_TYPES = [
   'member.removed',
   'ownership.transferred',
   'key.rotated',
+  'bucket_policy.created',
+  'bucket_policy.updated',
+  'bucket_policy.deleted',
 ] as const;
 export type TwoPhaseAuditEventType = (typeof TWO_PHASE_AUDIT_EVENT_TYPES)[number];
 
@@ -143,7 +149,8 @@ export type AuditSubject =
   | `org:${string}`
   | `user:${string}`
   | `invite:${string}`
-  | `key:${string}`;
+  | `key:${string}`
+  | `bucket:${string}`;
 
 /** Which credential a key event is about: an S3 access key or a RAG API key. */
 export type AuditKeyKind = 's3' | 'rag';
@@ -191,6 +198,24 @@ export type RevocationTrigger =
   | 'role_narrowing'
   | 'member_removed'
   | 'stale_role_at_mint';
+
+/** What asked for a bucket policy write. */
+export type BucketPolicyChangeTrigger = 'policy_edit' | 'role_change' | 'bucket_created';
+
+/**
+ * Shared by the three `bucket_policy.*` events. A type literal rather than an
+ * interface, so it carries the implicit index signature `AuditDetailRecord`
+ * asks of every payload.
+ */
+export type BucketPolicyEventDetails = {
+  region: string;
+  bucketName: string;
+  trigger: BucketPolicyChangeTrigger;
+  /** How many statements the written document carries. Absent on a delete. */
+  statements?: number;
+  /** How many distinct members the document names. Absent on a delete or a wildcard-only policy. */
+  principals?: number;
+};
 
 /**
  * The payload each event type carries, keyed by type.
@@ -325,6 +350,17 @@ export interface AuditEventDetails {
     cleanupFailed?: boolean;
   };
   /**
+   * A bucket's policy written, replaced, or removed at the storage system. One
+   * event per write rather than one per member named: an edit touching twenty
+   * members is one act. Two-phase because the document lives at the vendor and
+   * nothing local records it. `trigger` says what asked for the write: an
+   * admin editing the policy tab, a role change rewriting the roster
+   * statements, or the create request that carried the first document.
+   */
+  'bucket_policy.created': BucketPolicyEventDetails;
+  'bucket_policy.updated': BucketPolicyEventDetails;
+  'bucket_policy.deleted': BucketPolicyEventDetails;
+  /**
    * The one event written on a read path, and the highest-signal action the log
    * records: it is the one that takes an org's security history out of the
    * system. The filters travel with it, because who exported everything and who
@@ -450,14 +486,20 @@ export type AuditEvent = { [T in AuditEventType]: AuditEventRecord<T> }[AuditEve
  */
 export type VendorBackedKeyEvent = Extract<AuditEvent, { details: { keyKind: 's3' } }>;
 
+/** A bucket-policy event: the document lives at the vendor, like an S3 key. */
+export type BucketPolicyEvent = Extract<AuditEvent, { type: `bucket_policy.${string}` }>;
+
 /**
  * An event that may ride a local transaction — what `commitAudited` accepts.
  *
- * Everything except a vendor-backed key event with no phase: that one names a
- * credential minted outside the transaction, so a single row recording it is a
- * half with nothing to pair it to.
+ * Everything except a vendor-backed key or bucket-policy event with no phase:
+ * that one names a write made outside the transaction, so a single row
+ * recording it is a half with nothing to pair it to.
  */
-export type CommittableAuditEvent = Exclude<AuditEvent, VendorBackedKeyEvent & AuditSinglePhase>;
+export type CommittableAuditEvent = Exclude<
+  AuditEvent,
+  (VendorBackedKeyEvent | BucketPolicyEvent) & AuditSinglePhase
+>;
 
 /**
  * A phased event — what `appendAuditEvent` accepts.
@@ -514,6 +556,9 @@ export const AUDIT_EVENT_TYPE_LABELS: Record<AuditEventType, string> = {
   'key.deleted': 'Key deleted',
   'audit.exported': 'Audit log exported',
   'key.rotated': 'Key rotated',
+  'bucket_policy.created': 'Bucket policy created',
+  'bucket_policy.updated': 'Bucket policy updated',
+  'bucket_policy.deleted': 'Bucket policy deleted',
 };
 
 /**
