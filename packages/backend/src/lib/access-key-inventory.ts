@@ -74,8 +74,12 @@ function buildQueryInput(
 
   // When a bucket filter is provided, only return keys that have access to that bucket:
   // either keys with bucketScope = 'all' or keys that include the bucket in their buckets list.
+  // A principal-bound key stores neither: what it reaches follows the bucket's
+  // policy, which the list route asks, so every such row comes through.
   if (bucketFilter) {
-    filterExpressions.push('(bucketScope = :all OR contains(buckets, :bucket))');
+    filterExpressions.push(
+      '(bucketScope = :all OR contains(buckets, :bucket) OR attribute_exists(principalId))',
+    );
     values[':all'] = { S: 'all' };
     values[':bucket'] = { S: bucketFilter };
   }
@@ -147,6 +151,9 @@ function toAccessKey(record: Record<string, unknown>): AccessKey {
     // Shipped so the console can gate the per-row revoke button on the same
     // rule the delete route enforces.
     ...(record.createdBy ? { createdBy: record.createdBy as string } : {}),
+    // A principal-bound key: the console shows it following the bucket
+    // policies rather than a permission set, which such a row does not carry.
+    ...(record.principalId ? { principalId: record.principalId as string } : {}),
     ...(record.rotatedBy
       ? { rotatedBy: record.rotatedBy as string, rotatedAt: record.rotatedAt as string }
       : {}),

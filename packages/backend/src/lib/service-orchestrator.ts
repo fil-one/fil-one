@@ -330,10 +330,15 @@ export interface OrchestratorCore {
     keyOpts: IssueAccessKeyOpts,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<IssuedAccessKey>;
+  /**
+   * A principal-bound key's name is unique only within its principal, so a
+   * lookup for one names the principal; only an `iam` region mints such keys.
+   */
   findAccessKeyByName(
     tenantId: string,
     keyName: string,
     requestOptions?: OrchestratorRequestOptions,
+    principalId?: string,
   ): Promise<{ id: string; accessKeyId: string; createdAt: string } | undefined>;
 
   /**

@@ -12,12 +12,7 @@ import {
   canRetainAccessKey,
   isSupportedRegion,
 } from '@filone/shared';
-import type {
-  AccessKeyPermission,
-  ErrorResponse,
-  KeyRetentionResult,
-  RotateAccessKeyResponse,
-} from '@filone/shared';
+import type { ErrorResponse, KeyRetentionResult, RotateAccessKeyResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
 import type { AuditCorrelation } from '../lib/audit.ts';
@@ -48,7 +43,11 @@ import {
 } from '../lib/response-builder.ts';
 import { vendorNameForRotation } from '../lib/rotation-key-name.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
-import type { IssuedAccessKey, ServiceOrchestrator } from '../lib/service-orchestrator.ts';
+import type {
+  IssueAccessKeyOpts,
+  IssuedAccessKey,
+  ServiceOrchestrator,
+} from '../lib/service-orchestrator.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -70,8 +69,8 @@ const dynamo = getDynamoClient();
  * whose mint then failed with no credential at all.
  *
  * What carries over is everything the row records: permissions, granulars,
- * bucket scope, buckets, expiry, region and owner. What changes is the
- * credential.
+ * bucket scope, buckets, expiry, region, owner, and the principal a
+ * principal-bound key is bound to. What changes is the credential.
  *
  * The order of everything before the vendor call is `create-access-key.ts`'s,
  * for its reasons. What is new is that the key already exists, so the cap is
@@ -132,11 +131,13 @@ async function prepareRotation(
 
   const stored = readStoredKey(Item, keyId);
 
-  // Read off the row before anything else asks about it: the permission set is
-  // what the replacement is minted from, and a row that records none cannot
-  // produce one. Nothing at the vendor can be read back to fill the gap.
-  const { permissions } = stored;
-  if (!permissions?.length) return unrecordedPermissionsResponse();
+  // Read off the row before anything else asks about it: a service key's
+  // permission set is what the replacement is minted from, and a row that
+  // records none cannot produce one. Nothing at the vendor can be read back to
+  // fill the gap. A principal-bound key carries none by design; its replacement
+  // is bound to the same principal instead.
+  const { permissions, principalId } = stored;
+  if (!principalId && !permissions?.length) return unrecordedPermissionsResponse();
 
   // A row already naming its replacement had a rotation land whose revoke did
   // not. The replacement is the key to use; this one is only left to delete.
@@ -148,6 +149,7 @@ async function prepareRotation(
     permissions,
     granularPermissions: stored.granularPermissions,
     region: stored.region,
+    principalId,
   });
   if (!retention.retained) return refusedRotation(retention);
 
@@ -175,7 +177,7 @@ async function prepareRotation(
 
   return {
     keyId,
-    stored: { ...stored, permissions },
+    stored,
     orchestrator,
     tenantId,
     rotator: { orgId, userId, email: getVerifiedEmail(event) },
@@ -220,6 +222,7 @@ async function issueReplacement({
       keyName: stored.keyName,
       region: stored.region,
       replacedKeyIdSuffix: auditKeyIdSuffix('s3', stored.accessKeyId ?? keyId),
+      ...(stored.principalId ? { principalBound: true } : {}),
     },
   });
 
@@ -227,13 +230,10 @@ async function issueReplacement({
 
   let replacement: IssuedAccessKey;
   try {
-    replacement = await orchestrator.issueAccessKey(tenantId, {
-      keyName: vendorKeyName,
-      permissions: stored.permissions,
-      granularPermissions: stored.granularPermissions,
-      buckets: stored.bucketScope === 'specific' ? (stored.buckets ?? []) : undefined,
-      expiresAt: stored.expiresAt ?? null,
-    });
+    replacement = await orchestrator.issueAccessKey(
+      tenantId,
+      replacementOpts(stored, vendorKeyName),
+    );
   } catch (err) {
     return await handleMintRefusal(err, mint);
   }
@@ -328,8 +328,8 @@ async function issueReplacement({
 interface Rotation {
   /** The orchestrator's id for the key being replaced. */
   keyId: string;
-  /** The row, its permission set having been found present. */
-  stored: StoredKey & { permissions: AccessKeyPermission[] };
+  /** The row, its permission set found present unless it is principal-bound. */
+  stored: StoredKey;
   orchestrator: ServiceOrchestrator;
   tenantId: string;
   /** Who asked. Everything the mint needs about them is derived from this. */
@@ -349,6 +349,23 @@ type StoredKey = Partial<AccessKeyRecord> & { keyName: string; region: S3Region 
 function readStoredKey(item: Record<string, AttributeValue>, keyId: string): StoredKey {
   const row = unmarshall(item) as Partial<AccessKeyRecord>;
   return { ...row, keyName: row.keyName ?? keyId, region: row.region ?? DEFAULT_ACCESS_KEY_REGION };
+}
+
+/**
+ * What the replacement is minted with: a principal-bound key is bound to the
+ * same principal and carries nothing else, a service key what the row records.
+ */
+function replacementOpts(stored: StoredKey, keyName: string): IssueAccessKeyOpts {
+  const expiresAt = stored.expiresAt ?? null;
+  if (stored.principalId) return { keyName, principalId: stored.principalId, expiresAt };
+  return {
+    keyName,
+    // Present: `prepareRotation` refused a service key's row without it.
+    permissions: stored.permissions ?? [],
+    granularPermissions: stored.granularPermissions,
+    buckets: stored.bucketScope === 'specific' ? (stored.buckets ?? []) : undefined,
+    expiresAt,
+  };
 }
 
 /** The replacement's row: the original's shape, a new credential, and who reissued it. */
@@ -373,7 +390,8 @@ function replacementRow({
     createdAt: replacement.createdAt,
     status: 'active',
     region: stored.region,
-    permissions: stored.permissions,
+    ...(stored.permissions ? { permissions: stored.permissions } : {}),
+    ...(stored.principalId ? { principalId: stored.principalId } : {}),
     vendorKeyName,
     // Who reissued it and when, beside the owner the row keeps.
     rotatedBy,
