@@ -19,7 +19,8 @@ import { PolicyPreconditionFailedError } from './errors.ts';
 import type { StoredBucketPolicy } from './iam-orchestrator.ts';
 import { listMembers } from './org-membership.ts';
 import type { OrgProfileItem } from './org-profile.ts';
-import { removeRegisteredPrincipal } from './org-profile.ts';
+import { getOrgProfile, removeRegisteredPrincipal } from './org-profile.ts';
+import { registerMemberPrincipals } from './orchestrator/principals.ts';
 import { getAvailableOrchestrators } from './service-orchestrator-registry.ts';
 import type { IamOrchestrator } from './service-orchestrator.ts';
 
@@ -286,4 +287,44 @@ export async function removeMemberPrincipals({
     failed.push(region);
   });
   return { removed, failed };
+}
+
+/**
+ * Register a member who just joined as a principal on every ready `iam`
+ * region. The storage system answers the access reads 404 for a principal it
+ * does not know, so without this a new member's bucket listing fails until the
+ * next `ensureTenantReady`.
+ *
+ * Never throws, as the roster sync on a role change does not: the membership
+ * stands, and a region that refused is logged. The PROFILE set does not name
+ * the member there yet, so the next `ensureTenantReady` registers them.
+ */
+export async function registerJoinedMember({
+  orgId,
+  userId,
+}: {
+  orgId: string;
+  userId: string;
+}): Promise<void> {
+  if (!getAvailableOrchestrators().some((o) => o.accessModel === 'iam')) return;
+  let regions: ReturnType<typeof readyIamRegions>;
+  try {
+    regions = readyIamRegions(await getOrgProfile(orgId));
+  } catch (error) {
+    console.error('[iam-policy-fanout] Could not register a joined member', { userId, error });
+    return;
+  }
+  await Promise.all(
+    regions.map(({ orchestrator, tenantId }) =>
+      registerMemberPrincipals(orchestrator.iam, orchestrator.id, orgId, tenantId).catch(
+        (error: unknown) => {
+          console.error('[iam-policy-fanout] Could not register a joined member', {
+            region: orchestrator.region,
+            userId,
+            error,
+          });
+        },
+      ),
+    ),
+  );
 }

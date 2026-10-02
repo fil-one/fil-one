@@ -5,6 +5,7 @@ import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { AcceptInvitationSchema, ApiErrorCode, OrgRole } from '@filone/shared';
 import type { AcceptInvitationResponse, ErrorResponse } from '@filone/shared';
 import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.ts';
+import { registerJoinedMember } from '../lib/iam-policy-fanout.ts';
 import {
   isInvitationUsable,
   normalizeInviteEmail,
@@ -68,6 +69,9 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
  * `USER#{userId}/PROFILE` row. That is the row a removal reads to find the
  * invitations addressed TO the member it is removing, and acceptance is one of
  * only two moments the control plane learns a verified address.
+ *
+ * A new member is then registered as a principal on each ready `iam` region,
+ * so their first bucket listing finds them (`registerJoinedMember`).
  */
 export async function baseHandler(
   event: AuthenticatedEvent,
@@ -123,6 +127,7 @@ export async function baseHandler(
   }
 
   await rememberVerifiedEmail(userId, verifiedEmail);
+  if (!existing) await registerJoinedMember({ orgId: invitation.orgId, userId });
 
   return await acceptedResponse({
     invitation,
