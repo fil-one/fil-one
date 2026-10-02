@@ -321,13 +321,14 @@ test.describe('C. policy writes', () => {
     );
   });
 
-  test('C3. the schema is strict about fields and lengths', async () => {
+  test('C3. the schema is strict about fields, lengths and principal ids', async () => {
     const { etag } = await owner.readPolicy(bucket);
     const statuses = [];
     for (const statement of [
       { ...allow([memberId], ['s3:GetObject']), resource: 'arn:aws:s3:::x' },
       allow([memberId], ['s3:GetObject'], 'x'.repeat(129)),
       allow(['x'.repeat(256)], ['s3:GetObject']),
+      allow(['not-a-uuid'], ['s3:GetObject']),
     ]) {
       const res = await owner.putPolicy(bucket, {
         policy: { statement: [ownersStatement(ownerId), statement] },
@@ -335,6 +336,6 @@ test.describe('C. policy writes', () => {
       });
       statuses.push(res.status());
     }
-    expect(statuses).toEqual([400, 400, 400]);
+    expect(statuses).toEqual([400, 400, 400, 400]);
   });
 });
