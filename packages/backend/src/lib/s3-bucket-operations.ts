@@ -30,6 +30,14 @@ import {
 import type { PolicyPrecondition } from './iam-orchestrator.ts';
 
 /**
+ * The header a bucket's first policy travels in on the S3 create request, as
+ * the Forge storage system reads it (fil-one/RFC#30, "Bucket creation"): the
+ * document as JSON, base64-encoded, and signed with the rest of the request.
+ * A gateway that does not know the header ignores it.
+ */
+export const BUCKET_POLICY_HEADER = 'x-bucket-policy';
+
+/**
  * Per-call options a caller passes to bound one S3 operation. The caller owns
  * the budget: a deadline signal makes a hung S3 endpoint fail the call instead
  * of holding the Lambda open until its own timeout.
@@ -48,6 +56,35 @@ const toSendOptions = (requestOptions?: S3RequestOptions) =>
 export interface CreateBucketOptions {
   bucketName: string;
   objectLockEnabled?: boolean;
+  /**
+   * The policy the new bucket starts with, on a region serving the `iam`
+   * access model. Carried on the create so no bucket outlives a failed policy
+   * write: the storage system validates the document, creates the bucket and
+   * stores the policy together, and refuses the create if the document fails.
+   */
+  policy?: BucketPolicy;
+}
+
+export function encodeBucketPolicyHeader(policy: BucketPolicy): string {
+  return Buffer.from(JSON.stringify(policy)).toString('base64');
+}
+
+/**
+ * Attach the policy header to this one command. Added at the `build` step,
+ * which runs before SigV4 signs in `finalizeRequest`, so the header lands in
+ * `SignedHeaders` as the storage system requires. Per command rather than on
+ * the client: the same client presigns and serves every other data-plane
+ * call, none of which may carry it.
+ */
+function withBucketPolicyHeader(command: CreateBucketCommand, policy: BucketPolicy): void {
+  command.middlewareStack.add(
+    (next) => async (args) => {
+      const request = args.request as { headers?: Record<string, string> };
+      if (request.headers) request.headers[BUCKET_POLICY_HEADER] = encodeBucketPolicyHeader(policy);
+      return next(args);
+    },
+    { step: 'build', name: 'bucketPolicyHeaderMiddleware' },
+  );
 }
 
 export async function createBucket(
@@ -55,18 +92,28 @@ export async function createBucket(
   options: CreateBucketOptions,
   requestOptions?: S3RequestOptions,
 ): Promise<void> {
+  const command = new CreateBucketCommand({
+    Bucket: options.bucketName,
+    ...(options.objectLockEnabled && { ObjectLockEnabledForBucket: true }),
+  });
+  if (options.policy) withBucketPolicyHeader(command, options.policy);
+
   try {
-    await s3.send(
-      new CreateBucketCommand({
-        Bucket: options.bucketName,
-        ...(options.objectLockEnabled && { ObjectLockEnabledForBucket: true }),
-      }),
-      toSendOptions(requestOptions),
-    );
+    await s3.send(command, toSendOptions(requestOptions));
   } catch (err) {
     const name = (err as { name?: string }).name;
     if (name === 'BucketAlreadyOwnedByYou' || name === 'BucketAlreadyExists') {
       throw new BucketAlreadyExistsError(options.bucketName, { cause: err as Error });
+    }
+    // The storage system refused the policy the create carried, and created
+    // nothing. Only a create that sent one can mean this. The gateway renders
+    // it as MalformedPolicy, the code a refused PutBucketPolicy body gets, from
+    // fil-forge/ingot#194 on; InvalidArgument is what it answered before.
+    if (options.policy && (name === 'MalformedPolicy' || name === 'InvalidArgument')) {
+      throw new PolicyValidationError(
+        (err as Error).message || 'The storage system refused the bucket policy.',
+        { cause: err as Error },
+      );
     }
     throw err;
   }
