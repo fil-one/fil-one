@@ -55,7 +55,7 @@ process.env.FILONE_STAGE ??= 'test';
 process.env.FTH_MANAGEMENT_API_URL ??= 'https://fth.test.invalid';
 
 const ORG_ID = 'org-1';
-const USER_ID = 'user-1';
+const USER_ID = '00000000-0000-4000-8000-000000000001';
 /** Not a foundation address, so the RAG gate's answer hinges on the allowlist. */
 const OUTSIDER_EMAIL = 'outsider@example.com';
 /** The refusal `ragAccessMiddleware` writes, verbatim. */
