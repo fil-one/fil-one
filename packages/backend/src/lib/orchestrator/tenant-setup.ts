@@ -32,11 +32,8 @@ import {
 export const CONSOLE_KEY_NAME = 'filone-console';
 
 // The contract-legal maximum: every action in the Management API's
-// AccessKeyPermission enum. Note the contract (unlike FTH) has no
-// s3:Get/PutBucketVersioning or s3:Get/PutBucketObjectLockConfiguration
-// actions, yet the console key drives exactly those S3 calls for bucket
-// create/get/list — orchestrators are expected to authorize bucket-config
-// operations implicitly for tenant-scoped keys (flagged against the spec).
+// AccessKeyPermission enum. The console key drives bucket create, list and
+// the two bucket-configuration reads for the console, so it holds all of it.
 const CONSOLE_KEY_PERMISSIONS = [
   's3:CreateBucket',
   's3:ListAllMyBuckets',
@@ -51,6 +48,8 @@ const CONSOLE_KEY_PERMISSIONS = [
   's3:ListBucket',
   's3:ListBucketVersions',
   's3:ListBucketMultipartUploads',
+  's3:ListMultipartUploadParts',
+  's3:AbortMultipartUpload',
   's3:DeleteObject',
   's3:DeleteObjectVersion',
 ] as const;
