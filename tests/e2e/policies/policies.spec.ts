@@ -5,6 +5,7 @@ import {
   ListBucketsCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import { randomUUID } from 'node:crypto';
 import { test, expect } from '@playwright/test';
 import { ROSTER_ADMIN_ACTIONS } from '@filone/shared';
 import { resolvePersonalOrgId, runCleanup } from '../destructive/invite.util.ts';
@@ -177,7 +178,8 @@ test('10. invalid documents are refused', async () => {
     [{ effect: 'allow', principal: [memberId], action: ['s3:Unknown'] }],
     [{ effect: 'allow', principal: ['*'], action: ['s3:GetObject'] }],
     [],
-    [ownersStatement(ownerId), allow(['no-such-principal'], ['s3:GetObject'])],
+    // A well-formed id nobody in the tenant holds.
+    [ownersStatement(ownerId), allow([randomUUID()], ['s3:GetObject'])],
   ]) {
     statuses.push((await owner.putPolicy(B1, { policy: { statement }, etag })).status());
   }
