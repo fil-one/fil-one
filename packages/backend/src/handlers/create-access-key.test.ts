@@ -1307,6 +1307,17 @@ describe('create-access-key baseHandler', () => {
       expect(row).not.toHaveProperty('secretAccessKey');
     });
 
+    it('records in the audit that the key is principal-bound', async () => {
+      await baseHandler(buildEvent({ body: principalBody(), userInfo: USER_INFO }));
+
+      expect(intentEvents()[0].details).toStrictEqual({
+        keyKind: 's3',
+        keyName: 'laptop',
+        region: IAM_REGION,
+        principalBound: true,
+      });
+    });
+
     it('runs no creator-authority cap: a Member mints with no permissions named', async () => {
       stubWrites(OrgRole.Member);
 
