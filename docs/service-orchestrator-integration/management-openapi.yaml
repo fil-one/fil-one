@@ -390,7 +390,11 @@ paths:
         '409':
           $ref: '#/components/responses/ConcurrentChange'
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: The `principalId` path value is not a valid principal id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
     get:
       tags: [Principals]
       summary: Get a principal
