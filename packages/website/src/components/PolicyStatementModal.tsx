@@ -23,7 +23,7 @@ export type PolicyStatementModalProps = {
   onSubmit: (statement: PolicyStatement) => void;
 };
 
-const EMPTY: PolicyStatement = { effect: 'allow', principal: [], action: [] };
+const EMPTY: PolicyStatement = { Effect: 'Allow', Principal: [], Action: [] };
 
 /**
  * The sids the role-change fan-out finds its statements by. A person's
@@ -34,7 +34,7 @@ const ROSTER_SIDS = new Set(['filone-owners', 'filone-admins', 'filone-creator']
 
 /** The refusal a typed name earns. A roster statement's own fixed name earns none. */
 function reservedNameError(statement: PolicyStatement, rosterLabel: string | undefined) {
-  if (rosterLabel || !ROSTER_SIDS.has(statement.sid?.trim() ?? '')) return undefined;
+  if (rosterLabel || !ROSTER_SIDS.has(statement.Sid?.trim() ?? '')) return undefined;
   return 'This name is reserved for a statement Fil One writes.';
 }
 
@@ -45,8 +45,8 @@ function reservedNameError(statement: PolicyStatement, rosterLabel: string | und
  * since trimming each keystroke would swallow the space between two words.
  */
 function withSid(statement: PolicyStatement, name: string): PolicyStatement {
-  const { sid: _dropped, ...rest } = statement;
-  return name.trim() ? { ...rest, sid: name } : rest;
+  const { Sid: _dropped, ...rest } = statement;
+  return name.trim() ? { ...rest, Sid: name } : rest;
 }
 
 /**
@@ -54,12 +54,12 @@ function withSid(statement: PolicyStatement, name: string): PolicyStatement {
  * fan-out finds the statement again, so its name is fixed.
  */
 function rosterLabelOf(initial: PolicyStatement | undefined): string | undefined {
-  return initial?.sid ? ROSTER_SID_LABELS[initial.sid] : undefined;
+  return initial?.Sid ? ROSTER_SID_LABELS[initial.Sid] : undefined;
 }
 
 /** Whether a deny names everyone, which locks the org out of the bucket until an Owner edits it. */
-export function deniesEveryone(statement: Pick<PolicyStatement, 'effect' | 'principal'>): boolean {
-  return statement.effect === 'deny' && statement.principal === POLICY_WILDCARD_PRINCIPAL;
+export function deniesEveryone(statement: Pick<PolicyStatement, 'Effect' | 'Principal'>): boolean {
+  return statement.Effect === 'Deny' && statement.Principal === POLICY_WILDCARD_PRINCIPAL;
 }
 
 /**
@@ -83,13 +83,13 @@ export function PolicyStatementModal({
 
   const rosterLabel = rosterLabelOf(initial);
   const noPrincipal =
-    statement.principal !== POLICY_WILDCARD_PRINCIPAL && statement.principal.length === 0;
-  const noAction = statement.action.length === 0;
+    statement.Principal !== POLICY_WILDCARD_PRINCIPAL && statement.Principal.length === 0;
+  const noAction = statement.Action.length === 0;
   const nameError = reservedNameError(statement, rosterLabel);
   const canSubmit = !noPrincipal && !noAction && !nameError;
 
   function submit() {
-    onSubmit(withSid(statement, statement.sid?.trim() ?? ''));
+    onSubmit(withSid(statement, statement.Sid?.trim() ?? ''));
     onClose();
   }
 
@@ -101,7 +101,7 @@ export function PolicyStatementModal({
           <FormField label="Name (optional)" htmlFor="policy-statement-name" error={nameError}>
             <Input
               id="policy-statement-name"
-              value={rosterLabel ?? statement.sid ?? ''}
+              value={rosterLabel ?? statement.Sid ?? ''}
               disabled={Boolean(rosterLabel)}
               maxLength={POLICY_SID_MAX_LENGTH}
               placeholder="Analytics team read"
@@ -113,18 +113,18 @@ export function PolicyStatementModal({
             <div className="flex flex-col gap-2 sm:flex-row">
               <RadioOption
                 name="policy-effect"
-                value="allow"
-                checked={statement.effect === 'allow'}
-                onChange={() => setStatement({ ...statement, effect: 'allow' })}
+                value="Allow"
+                checked={statement.Effect === 'Allow'}
+                onChange={() => setStatement({ ...statement, Effect: 'Allow' })}
                 description="Grant the actions below"
               >
                 Allow
               </RadioOption>
               <RadioOption
                 name="policy-effect"
-                value="deny"
-                checked={statement.effect === 'deny'}
-                onChange={() => setStatement({ ...statement, effect: 'deny' })}
+                value="Deny"
+                checked={statement.Effect === 'Deny'}
+                onChange={() => setStatement({ ...statement, Effect: 'Deny' })}
                 description="Withhold them, even if another statement grants them"
               >
                 Deny
@@ -137,8 +137,8 @@ export function PolicyStatementModal({
             error={noPrincipal ? 'Pick at least one member, or everyone.' : undefined}
           >
             <PolicyPrincipalFields
-              value={statement.principal}
-              onChange={(principal) => setStatement({ ...statement, principal })}
+              value={statement.Principal}
+              onChange={(principal) => setStatement({ ...statement, Principal: principal })}
             />
           </FormField>
 
@@ -156,8 +156,8 @@ export function PolicyStatementModal({
             error={noAction ? 'Pick at least one action.' : undefined}
           >
             <PolicyActionFields
-              value={statement.action}
-              onChange={(action) => setStatement({ ...statement, action })}
+              value={statement.Action}
+              onChange={(action) => setStatement({ ...statement, Action: action })}
             />
           </FormField>
         </div>
