@@ -310,19 +310,19 @@ describe('create-bucket baseHandler', () => {
         'aurora-t-1',
         expect.objectContaining({
           policy: {
-            statement: [
-              { sid: ROSTER_OWNERS_SID, effect: 'allow', principal: ['owner-1'], action: ['s3:*'] },
+            Statement: [
+              { Sid: ROSTER_OWNERS_SID, Effect: 'Allow', Principal: ['owner-1'], Action: ['s3:*'] },
               {
-                sid: ROSTER_ADMINS_SID,
-                effect: 'allow',
-                principal: ['admin-1'],
-                action: ROSTER_ADMIN_ACTIONS,
+                Sid: ROSTER_ADMINS_SID,
+                Effect: 'Allow',
+                Principal: ['admin-1'],
+                Action: ROSTER_ADMIN_ACTIONS,
               },
               {
-                sid: ROSTER_CREATOR_SID,
-                effect: 'allow',
-                principal: ['user-1'],
-                action: ROSTER_ADMIN_ACTIONS,
+                Sid: ROSTER_CREATOR_SID,
+                Effect: 'Allow',
+                Principal: ['user-1'],
+                Action: ROSTER_ADMIN_ACTIONS,
               },
             ],
           },
