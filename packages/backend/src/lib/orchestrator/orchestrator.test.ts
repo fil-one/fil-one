@@ -578,6 +578,7 @@ describe('issueAccessKey bound to a principal', () => {
   const created = {
     accessKeyId: 'did:key:z6Mk',
     name: 'laptop',
+    type: 'principal',
     principal: 'alice',
     secretAccessKey: 'sk-secret',
     createdAt: '2026-09-16T12:00:00Z',
@@ -598,6 +599,17 @@ describe('issueAccessKey bound to a principal', () => {
     });
     const { body } = mockCreateAccessKey.mock.calls[0]![0] as { body: Record<string, unknown> };
     expect(body).toStrictEqual({ name: 'laptop', principalId: 'alice', expiresAt: null });
+  });
+
+  it('reads the key kind from the type, not from a principal field', async () => {
+    mockCreateAccessKey.mockResolvedValue(ok({ ...created, type: 'service' }, 201));
+
+    const issued = await orchestrator.issueAccessKey(tenantId, {
+      keyName: 'laptop',
+      permissions: ['read'],
+    });
+
+    expect(issued).not.toHaveProperty('principalId');
   });
 
   it('maps a duplicate name and an unknown principal to their errors', async () => {
@@ -652,6 +664,7 @@ describe('issueAccessKey with a mixed shape', () => {
         {
           accessKeyId: 'k',
           name: 'laptop',
+          type: 'principal',
           principal: 'alice',
           secretAccessKey: 's',
           createdAt: 'now',
