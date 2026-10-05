@@ -368,7 +368,7 @@ function captureEtag(command: PolicyCommand): { etag?: string } {
 }
 
 function preconditionHeaders(precondition: PolicyPrecondition): Record<string, string> {
-  return 'ifMatch' in precondition
+  return precondition.ifMatch !== undefined
     ? { 'If-Match': precondition.ifMatch }
     : { 'If-None-Match': precondition.ifNoneMatch };
 }

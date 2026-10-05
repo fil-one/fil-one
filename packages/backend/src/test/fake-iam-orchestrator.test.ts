@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { PolicyValidationError, PrincipalNotFoundError } from '../lib/errors.ts';
+import type { PolicyPrecondition } from '../lib/iam-orchestrator.ts';
 import { FakeIamOrchestrator } from './fake-iam-orchestrator.ts';
 
 describe('FakeIamOrchestrator principal reads', () => {
@@ -46,5 +47,11 @@ describe('FakeIamOrchestrator policy writes', () => {
     await expect(
       fake.putBucketPolicy('t1', 'photos', policy, { ifNoneMatch: '*' }),
     ).rejects.toBeInstanceOf(PolicyValidationError);
+  });
+
+  it('takes exactly one precondition', () => {
+    // @ts-expect-error — a write carries If-Match or If-None-Match, never both.
+    const _p: PolicyPrecondition = { ifMatch: '"e1"', ifNoneMatch: '*' };
+    void _p;
   });
 });
