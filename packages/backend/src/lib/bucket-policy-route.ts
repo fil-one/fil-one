@@ -162,12 +162,12 @@ export function bucketPolicyErrorResponse(
 
 /** How many distinct members a document names, for the audit record. Absent when only `*` is named. */
 export function namedPrincipalCount(policy: {
-  statement: readonly { principal: readonly string[] | '*' }[];
+  Statement: readonly { Principal: readonly string[] | '*' }[];
 }): number | undefined {
   const ids = new Set<string>();
-  for (const statement of policy.statement) {
-    if (statement.principal === '*') continue;
-    for (const id of statement.principal) ids.add(id);
+  for (const statement of policy.Statement) {
+    if (statement.Principal === '*') continue;
+    for (const id of statement.Principal) ids.add(id);
   }
   return ids.size > 0 ? ids.size : undefined;
 }

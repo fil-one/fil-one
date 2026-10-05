@@ -104,7 +104,7 @@ export async function baseHandler(
     );
     await audit.complete({
       outcome: 'succeeded',
-      details: { statements: policy.statement.length, principals: namedPrincipalCount(policy) },
+      details: { statements: policy.Statement.length, principals: namedPrincipalCount(policy) },
     });
     return new ResponseBuilder()
       .status(written.created ? 201 : 200)
@@ -129,9 +129,9 @@ function parsePolicyBody(raw: string | undefined): ParsedBody<PutBucketPolicyReq
   const parsed = parseJsonBody(raw, PutBucketPolicyRequestSchema);
   if ('error' in parsed) return parsed;
   const seen = new Set<string>();
-  for (const { sid, effect } of parsed.data.policy.statement) {
+  for (const { Sid: sid, Effect: effect } of parsed.data.policy.Statement) {
     if (!sid || !isRosterSid(sid)) continue;
-    if (effect !== 'allow' || seen.has(sid)) {
+    if (effect !== 'Allow' || seen.has(sid)) {
       const error = new ResponseBuilder()
         .status(400)
         .body<ErrorResponse>({
@@ -206,13 +206,13 @@ function addsNamedRetentionGrants(current: BucketPolicy | null, next: BucketPoli
 /** Each principal an allow names a retention write for outright, keyed with the action. */
 function namedRetentionGrants(policy: BucketPolicy | null): Set<string> {
   const grants = new Set<string>();
-  for (const statement of policy?.statement ?? []) {
-    if (statement.effect !== 'allow') continue;
+  for (const statement of policy?.Statement ?? []) {
+    if (statement.Effect !== 'Allow') continue;
     const principals =
-      statement.principal === POLICY_WILDCARD_PRINCIPAL
+      statement.Principal === POLICY_WILDCARD_PRINCIPAL
         ? [POLICY_WILDCARD_PRINCIPAL]
-        : statement.principal;
-    for (const action of statement.action) {
+        : statement.Principal;
+    for (const action of statement.Action) {
       if (!(RETENTION_WRITE_ACTIONS as readonly string[]).includes(action)) continue;
       for (const principal of principals) grants.add(`${principal}|${action}`);
     }

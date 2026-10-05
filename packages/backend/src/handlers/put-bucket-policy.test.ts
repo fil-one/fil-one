@@ -59,7 +59,7 @@ const PRINCIPAL_B = '00000000-0000-4000-8000-00000000000b';
 const PRINCIPAL_C = '00000000-0000-4000-8000-00000000000c';
 
 const retentionGrant: BucketPolicy = {
-  statement: [{ effect: 'allow', principal: [USER_ID], action: ['s3:PutObjectRetention'] }],
+  Statement: [{ Effect: 'Allow', Principal: [USER_ID], Action: ['s3:PutObjectRetention'] }],
 };
 
 describe('put-bucket-policy baseHandler', () => {
@@ -76,7 +76,7 @@ describe('put-bucket-policy baseHandler', () => {
   it('replaces the policy under the etag it read and answers 200', async () => {
     const etag = iam.seedPolicy(TENANT_ID, BUCKET, readPolicy);
     const next: BucketPolicy = {
-      statement: [{ effect: 'deny', principal: '*', action: ['s3:DeleteObject'] }],
+      Statement: [{ Effect: 'Deny', Principal: '*', Action: ['s3:DeleteObject'] }],
     };
 
     const result = await baseHandler(request({ policy: next, etag }));
@@ -118,15 +118,15 @@ describe('put-bucket-policy baseHandler', () => {
 
   it('lets an Admin edit around the roster statement\u2019s s3:* without granting it again', async () => {
     const etag = iam.seedPolicy(TENANT_ID, BUCKET, {
-      statement: [
-        { sid: 'filone-owners', effect: 'allow', principal: [USER_ID], action: ['s3:*'] },
+      Statement: [
+        { Sid: 'filone-owners', Effect: 'Allow', Principal: [USER_ID], Action: ['s3:*'] },
       ],
     });
     iam.seedPrincipal(TENANT_ID, PRINCIPAL_A);
     const edited: BucketPolicy = {
-      statement: [
-        { sid: 'filone-owners', effect: 'allow', principal: [USER_ID], action: ['s3:*'] },
-        { effect: 'allow', principal: [PRINCIPAL_A], action: ['s3:GetObject'] },
+      Statement: [
+        { Sid: 'filone-owners', Effect: 'Allow', Principal: [USER_ID], Action: ['s3:*'] },
+        { Effect: 'Allow', Principal: [PRINCIPAL_A], Action: ['s3:GetObject'] },
       ],
     };
 
@@ -140,8 +140,8 @@ describe('put-bucket-policy baseHandler', () => {
       request(
         {
           policy: {
-            statement: [
-              { sid: 'filone-owners', effect: 'allow', principal: [USER_ID], action: ['s3:*'] },
+            Statement: [
+              { Sid: 'filone-owners', Effect: 'Allow', Principal: [USER_ID], Action: ['s3:*'] },
             ],
           },
         },
@@ -157,16 +157,16 @@ describe('put-bucket-policy baseHandler', () => {
 
   it('refuses an Admin naming a retention write even for an Owner who holds s3:*', async () => {
     const owners: PolicyStatement = {
-      sid: 'filone-owners',
-      effect: 'allow',
-      principal: [USER_ID],
-      action: ['s3:*'],
+      Sid: 'filone-owners',
+      Effect: 'Allow',
+      Principal: [USER_ID],
+      Action: ['s3:*'],
     };
-    const etag = iam.seedPolicy(TENANT_ID, BUCKET, { statement: [owners] });
+    const etag = iam.seedPolicy(TENANT_ID, BUCKET, { Statement: [owners] });
     const named: BucketPolicy = {
-      statement: [
+      Statement: [
         owners,
-        { effect: 'allow', principal: [USER_ID], action: ['s3:PutObjectLegalHold'] },
+        { Effect: 'Allow', Principal: [USER_ID], Action: ['s3:PutObjectLegalHold'] },
       ],
     };
 
@@ -181,18 +181,18 @@ describe('put-bucket-policy baseHandler', () => {
 
   it('lets an Admin keep or narrow a retention write an Owner named', async () => {
     const hold: PolicyStatement = {
-      sid: 'hold',
-      effect: 'allow',
-      principal: [PRINCIPAL_A],
-      action: ['s3:PutObjectRetention', 's3:PutObjectLegalHold'],
+      Sid: 'hold',
+      Effect: 'Allow',
+      Principal: [PRINCIPAL_A],
+      Action: ['s3:PutObjectRetention', 's3:PutObjectLegalHold'],
     };
     const statuses = [];
-    for (const next of [hold, { ...hold, action: ['s3:PutObjectRetention'] } as PolicyStatement]) {
+    for (const next of [hold, { ...hold, Action: ['s3:PutObjectRetention'] } as PolicyStatement]) {
       resetFixture();
       iam.seedPrincipal(TENANT_ID, PRINCIPAL_A);
-      const etag = iam.seedPolicy(TENANT_ID, BUCKET, { statement: [hold] });
+      const etag = iam.seedPolicy(TENANT_ID, BUCKET, { Statement: [hold] });
       const result = await baseHandler(
-        request({ policy: { statement: [next] }, etag }, { role: OrgRole.Admin }),
+        request({ policy: { Statement: [next] }, etag }, { role: OrgRole.Admin }),
       );
       statuses.push(result.statusCode);
     }
@@ -203,19 +203,19 @@ describe('put-bucket-policy baseHandler', () => {
   it('refuses an Admin dropping the deny that withheld a retention write', async () => {
     iam.seedPrincipal(TENANT_ID, PRINCIPAL_A);
     const allow: PolicyStatement = {
-      effect: 'allow',
-      principal: [PRINCIPAL_A],
-      action: ['s3:PutObjectRetention'],
+      Effect: 'Allow',
+      Principal: [PRINCIPAL_A],
+      Action: ['s3:PutObjectRetention'],
     };
     const etag = iam.seedPolicy(TENANT_ID, BUCKET, {
-      statement: [
+      Statement: [
         allow,
-        { effect: 'deny', principal: [PRINCIPAL_A], action: ['s3:PutObjectRetention'] },
+        { Effect: 'Deny', Principal: [PRINCIPAL_A], Action: ['s3:PutObjectRetention'] },
       ],
     });
 
     const result = await baseHandler(
-      request({ policy: { statement: [allow] }, etag }, { role: OrgRole.Admin }),
+      request({ policy: { Statement: [allow] }, etag }, { role: OrgRole.Admin }),
     );
 
     expect(result.statusCode).toBe(403);
@@ -225,15 +225,15 @@ describe('put-bucket-policy baseHandler', () => {
   it('lets an Admin name a member for a retention write everyone already holds by name', async () => {
     iam.seedPrincipal(TENANT_ID, PRINCIPAL_B);
     const everyone: PolicyStatement = {
-      effect: 'allow',
-      principal: '*',
-      action: ['s3:PutObjectRetention'],
+      Effect: 'Allow',
+      Principal: '*',
+      Action: ['s3:PutObjectRetention'],
     };
-    const etag = iam.seedPolicy(TENANT_ID, BUCKET, { statement: [everyone] });
+    const etag = iam.seedPolicy(TENANT_ID, BUCKET, { Statement: [everyone] });
     const named: BucketPolicy = {
-      statement: [
+      Statement: [
         everyone,
-        { effect: 'allow', principal: [PRINCIPAL_B], action: ['s3:PutObjectRetention'] },
+        { Effect: 'Allow', Principal: [PRINCIPAL_B], Action: ['s3:PutObjectRetention'] },
       ],
     };
 
@@ -244,15 +244,15 @@ describe('put-bucket-policy baseHandler', () => {
 
   it('refuses an Admin widening a retention write to a new principal', async () => {
     const etag = iam.seedPolicy(TENANT_ID, BUCKET, {
-      statement: [
-        { sid: 'filone-owners', effect: 'allow', principal: [USER_ID], action: ['s3:*'] },
+      Statement: [
+        { Sid: 'filone-owners', Effect: 'Allow', Principal: [USER_ID], Action: ['s3:*'] },
       ],
     });
     iam.seedPrincipal(TENANT_ID, PRINCIPAL_A);
     const widened: BucketPolicy = {
-      statement: [
-        { sid: 'filone-owners', effect: 'allow', principal: [USER_ID], action: ['s3:*'] },
-        { effect: 'allow', principal: [PRINCIPAL_A], action: ['s3:PutObjectRetention'] },
+      Statement: [
+        { Sid: 'filone-owners', Effect: 'Allow', Principal: [USER_ID], Action: ['s3:*'] },
+        { Effect: 'Allow', Principal: [PRINCIPAL_A], Action: ['s3:PutObjectRetention'] },
       ],
     };
 
@@ -266,7 +266,7 @@ describe('put-bucket-policy baseHandler', () => {
   it('refuses a document the schema does not accept as a 400', async () => {
     const result = await baseHandler(
       request({
-        policy: { statement: [{ effect: 'allow', principal: ['*'], action: ['s3:GetObject'] }] },
+        policy: { Statement: [{ Effect: 'Allow', Principal: ['*'], Action: ['s3:GetObject'] }] },
       }),
     );
     expect(result.statusCode).toBe(400);
@@ -277,12 +277,12 @@ describe('put-bucket-policy baseHandler', () => {
     const result = await baseHandler(
       request({
         policy: {
-          statement: [
+          Statement: [
             {
-              sid: 'filone-admins',
-              effect: 'deny',
-              principal: [USER_ID],
-              action: ['s3:GetObject'],
+              Sid: 'filone-admins',
+              Effect: 'Deny',
+              Principal: [USER_ID],
+              Action: ['s3:GetObject'],
             },
           ],
         },
@@ -298,14 +298,14 @@ describe('put-bucket-policy baseHandler', () => {
 
   it('refuses two statements carrying the same roster label', async () => {
     const owners: PolicyStatement = {
-      sid: 'filone-owners',
-      effect: 'allow',
-      principal: [USER_ID],
-      action: ['s3:*'],
+      Sid: 'filone-owners',
+      Effect: 'Allow',
+      Principal: [USER_ID],
+      Action: ['s3:*'],
     };
 
     const result = await baseHandler(
-      request({ policy: { statement: [owners, { ...owners, action: ['s3:GetObject'] }] } }),
+      request({ policy: { Statement: [owners, { ...owners, Action: ['s3:GetObject'] }] } }),
     );
 
     expect([result.statusCode, body(result).message]).toStrictEqual([
@@ -318,25 +318,25 @@ describe('put-bucket-policy baseHandler', () => {
   it('accepts the roster statements round-tripped with their principals edited', async () => {
     iam.seedPrincipal(TENANT_ID, PRINCIPAL_A);
     const etag = iam.seedPolicy(TENANT_ID, BUCKET, {
-      statement: [
-        { sid: 'filone-owners', effect: 'allow', principal: [USER_ID], action: ['s3:*'] },
+      Statement: [
+        { Sid: 'filone-owners', Effect: 'Allow', Principal: [USER_ID], Action: ['s3:*'] },
         {
-          sid: 'filone-creator',
-          effect: 'allow',
-          principal: [PRINCIPAL_A],
-          action: ['s3:GetObject'],
+          Sid: 'filone-creator',
+          Effect: 'Allow',
+          Principal: [PRINCIPAL_A],
+          Action: ['s3:GetObject'],
         },
       ],
     });
     const edited: BucketPolicy = {
-      statement: [
+      Statement: [
         {
-          sid: 'filone-owners',
-          effect: 'allow',
-          principal: [USER_ID, PRINCIPAL_A],
-          action: ['s3:*'],
+          Sid: 'filone-owners',
+          Effect: 'Allow',
+          Principal: [USER_ID, PRINCIPAL_A],
+          Action: ['s3:*'],
         },
-        { sid: 'filone-creator', effect: 'allow', principal: '*', action: ['s3:GetObject'] },
+        { Sid: 'filone-creator', Effect: 'Allow', Principal: '*', Action: ['s3:GetObject'] },
       ],
     };
 
@@ -364,7 +364,7 @@ describe('put-bucket-policy baseHandler', () => {
 
   it('surfaces a principal the storage system does not know as a 400', async () => {
     const stranger: BucketPolicy = {
-      statement: [{ effect: 'allow', principal: [PRINCIPAL_C], action: ['s3:GetObject'] }],
+      Statement: [{ Effect: 'Allow', Principal: [PRINCIPAL_C], Action: ['s3:GetObject'] }],
     };
     const result = await baseHandler(request({ policy: stranger }));
     expect(result.statusCode).toBe(400);
@@ -381,9 +381,9 @@ describe('put-bucket-policy baseHandler', () => {
   it('writes the intent before the vendor call and closes it with the document size', async () => {
     const etag = iam.seedPolicy(TENANT_ID, BUCKET, readPolicy);
     const next: BucketPolicy = {
-      statement: [
-        { effect: 'allow', principal: [USER_ID, PRINCIPAL_A], action: ['s3:GetObject'] },
-        { effect: 'deny', principal: '*', action: ['s3:DeleteObject'] },
+      Statement: [
+        { Effect: 'Allow', Principal: [USER_ID, PRINCIPAL_A], Action: ['s3:GetObject'] },
+        { Effect: 'Deny', Principal: '*', Action: ['s3:DeleteObject'] },
       ],
     };
     iam.seedPrincipal(TENANT_ID, PRINCIPAL_A);
