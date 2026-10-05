@@ -459,8 +459,8 @@ paths:
       summary: A principal's effective actions per bucket
       description: |
         For every bucket whose policy gives the principal at least one
-        action, the sorted effective set: the union of the `allow`
-        statements naming them or `*`, minus the union of the `deny`
+        action, the sorted effective set: the union of the `Allow`
+        statements naming them or `*`, minus the union of the `Deny`
         statements naming them or `*`. Buckets with an empty set are
         omitted. Computed from the orchestrator's own tables on every
         call, so the answer is consistent with its last write.
@@ -862,16 +862,16 @@ components:
 
     PolicyStatement:
       type: object
-      required: [effect, principal, action]
+      required: [Effect, Principal, Action]
       additionalProperties: false
       properties:
-        sid:
+        Sid:
           type: string
           description: Optional label. Stored and returned; nothing evaluates it.
-        effect:
+        Effect:
           type: string
-          enum: [allow, deny]
-        principal:
+          enum: [Allow, Deny]
+        Principal:
           description: |
             The principals the statement applies to: a list of principal
             ids, or the bare string `*` for every live principal of the
@@ -883,7 +883,7 @@ components:
               minItems: 1
               items:
                 $ref: '#/components/schemas/PrincipalId'
-        action:
+        Action:
           type: array
           minItems: 1
           items:
@@ -891,16 +891,16 @@ components:
 
     BucketPolicy:
       type: object
-      required: [statement]
+      required: [Statement]
       additionalProperties: false
       description: |
         A bucket's policy, reduced to what the orchestrator evaluates.
-        There is no `resource` field: the document governs the bucket it
+        There is no `Resource` field: the document governs the bucket it
         is stored on. A principal's effective actions are the union of
-        the `allow` statements naming them minus the union of the `deny`
+        the `Allow` statements naming them minus the union of the `Deny`
         statements naming them; an explicit deny wins.
       properties:
-        statement:
+        Statement:
           type: array
           minItems: 1
           items:
