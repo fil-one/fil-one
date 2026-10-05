@@ -137,13 +137,8 @@ abstract class FilOneOrchestrator implements OrchestratorCore {
     this.id = config.id;
     this.region = config.region;
     this.client = resolveClient(config);
-    this.setupDeps = {
-      client: this.client,
-      id: config.id,
-      stage: config.stage,
-      region: config.region,
-      accessModel: config.accessModel,
-    };
+    const { id, stage, region, accessModel } = config;
+    this.setupDeps = { client: this.client, id, stage, region, accessModel };
     this.tenantIdAttribute = `${config.id}TenantId`;
   }
 
