@@ -299,7 +299,7 @@ describe('set-bucket-rag-enablement member scope on an iam region', () => {
     const iam = new FakeIamOrchestrator();
     iam.seedPrincipal(tenantFor('forge', 'org-1'), 'user-1');
     iam.seedPolicy(tenantFor('forge', 'org-1'), 'my-bucket', {
-      statement: [{ effect: 'allow', principal: ['user-1'], action: actions }],
+      Statement: [{ Effect: 'Allow', Principal: ['user-1'], Action: actions }],
     });
     const o = fakeOrchestrator('forge', { bucket: BUCKET, iam });
     // The real iam arm's getBucket: null when the named member cannot reach it.
