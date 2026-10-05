@@ -43,7 +43,7 @@ export function PolicyStatementCard({
     <Card padding="md" shadow={false} data-testid="policy-statement">
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
-          {statement.effect === 'allow' ? (
+          {statement.Effect === 'Allow' ? (
             <Badge color="green" size="sm" weight="medium">
               Allow
             </Badge>
@@ -78,10 +78,10 @@ export function PolicyStatementCard({
         </div>
 
         <Row label="Who">
-          <PrincipalBadges principal={statement.principal} memberName={memberName} />
+          <PrincipalBadges principal={statement.Principal} memberName={memberName} />
         </Row>
         <Row label="Actions">
-          <ActionBadges actions={statement.action} />
+          <ActionBadges actions={statement.Action} />
         </Row>
       </div>
     </Card>
@@ -103,7 +103,7 @@ function PrincipalBadges({
   principal,
   memberName,
 }: {
-  principal: PolicyStatement['principal'];
+  principal: PolicyStatement['Principal'];
   memberName: (userId: string) => string | undefined;
 }) {
   if (principal === POLICY_WILDCARD_PRINCIPAL) {
@@ -150,7 +150,7 @@ function PrincipalBadges({
  * members in the badge's tooltip. `s3:*` collapses to one badge, because
  * listing sixteen actions says less than "all of them".
  */
-function ActionBadges({ actions }: { actions: PolicyStatement['action'] }) {
+function ActionBadges({ actions }: { actions: PolicyStatement['Action'] }) {
   if (actions.includes(POLICY_ACTION_WILDCARD)) {
     return (
       <Badge color="blue" size="sm">

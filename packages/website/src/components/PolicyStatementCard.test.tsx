@@ -19,10 +19,10 @@ function renderCard(
 describe('PolicyStatementCard', () => {
   it('names the effect, the members, and the action groups', () => {
     renderCard({
-      sid: 'team',
-      effect: 'allow',
-      principal: ['a', 'b'],
-      action: ['s3:GetObject', 's3:ListBucket', 's3:PutObject'],
+      Sid: 'team',
+      Effect: 'Allow',
+      Principal: ['a', 'b'],
+      Action: ['s3:GetObject', 's3:ListBucket', 's3:PutObject'],
     });
 
     expect(screen.getByText('Allow')).toBeInTheDocument();
@@ -36,7 +36,7 @@ describe('PolicyStatementCard', () => {
   });
 
   it('labels a statement with no sid by its position and shows a deny in red', () => {
-    renderCard({ effect: 'deny', principal: '*', action: ['s3:DeleteObject'] }, { index: 2 });
+    renderCard({ Effect: 'Deny', Principal: '*', Action: ['s3:DeleteObject'] }, { index: 2 });
 
     expect(screen.getByText('Deny')).toBeInTheDocument();
     expect(screen.getByText('Statement 3')).toBeInTheDocument();
@@ -44,7 +44,7 @@ describe('PolicyStatementCard', () => {
   });
 
   it('folds members past the third into one badge and names an unknown member honestly', () => {
-    renderCard({ effect: 'allow', principal: ['a', 'b', 'c', 'd', 'gone'], action: ['s3:*'] });
+    renderCard({ Effect: 'Allow', Principal: ['a', 'b', 'c', 'd', 'gone'], Action: ['s3:*'] });
 
     expect(screen.getByText('Ada')).toBeInTheDocument();
     expect(screen.getByText('Cy')).toBeInTheDocument();
@@ -59,9 +59,9 @@ describe('PolicyStatementCard', () => {
     const onEdit = vi.fn();
     const onRemove = vi.fn();
     const statement: PolicyStatement = {
-      effect: 'allow',
-      principal: ['a'],
-      action: ['s3:GetObject'],
+      Effect: 'Allow',
+      Principal: ['a'],
+      Action: ['s3:GetObject'],
     };
 
     const { rerender } = renderCard(statement);
