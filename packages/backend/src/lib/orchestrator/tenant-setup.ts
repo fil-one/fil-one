@@ -14,6 +14,7 @@ import { format } from 'node:util';
 import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand, PutParameterCommand } from '@aws-sdk/client-ssm';
 import { Resource } from 'sst';
+import type { AccessModel } from '@filone/shared';
 import { getDynamoClient } from '../ddb-client.ts';
 import { OrgDeletingError } from '../org-profile.ts';
 import { resolveRefusedTenantWrite } from '../tenant-setup-fence.ts';
@@ -33,7 +34,8 @@ export const CONSOLE_KEY_NAME = 'filone-console';
 
 // The contract-legal maximum: every action in the Management API's
 // AccessKeyPermission enum. The console key drives bucket create, list and
-// the two bucket-configuration reads for the console, so it holds all of it.
+// the two bucket-configuration reads for the console, so it holds all of it,
+// plus the policy actions on an iam region.
 const CONSOLE_KEY_PERMISSIONS = [
   's3:CreateBucket',
   's3:ListAllMyBuckets',
@@ -52,7 +54,12 @@ const CONSOLE_KEY_PERMISSIONS = [
   's3:AbortMultipartUpload',
   's3:DeleteObject',
   's3:DeleteObjectVersion',
-  // Bucket policies are read and written over S3 with this key (fil-one/RFC#30).
+] as const;
+
+// Bucket policies are read and written over S3 with this key (fil-one/RFC#30).
+// Only an iam region's storage system knows these actions; a scoped-keys
+// region refuses the whole key request over them.
+const CONSOLE_KEY_POLICY_PERMISSIONS = [
   's3:GetBucketPolicy',
   's3:PutBucketPolicy',
   's3:DeleteBucketPolicy',
@@ -68,6 +75,8 @@ export interface TenantSetupDeps {
   stage: string;
   /** Region the tenant is provisioned in, sent on `PUT /tenants/{tenantId}`. */
   region: string;
+  /** The region's access model; `iam` adds the bucket-policy permissions to the console key. Defaults to `scoped-keys`. */
+  accessModel?: AccessModel;
 }
 
 // Public entry point for synchronous tenant setup from request handlers.
@@ -223,7 +232,10 @@ async function createConsoleAccessKey(
   const { client } = deps;
   const createArgs: CreateAccessKeyRequest = {
     name: CONSOLE_KEY_NAME,
-    permissions: [...CONSOLE_KEY_PERMISSIONS],
+    permissions:
+      deps.accessModel === 'iam'
+        ? [...CONSOLE_KEY_PERMISSIONS, ...CONSOLE_KEY_POLICY_PERMISSIONS]
+        : [...CONSOLE_KEY_PERMISSIONS],
     buckets: [],
     expiresAt: null,
   };
