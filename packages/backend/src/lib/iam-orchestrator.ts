@@ -27,7 +27,9 @@ export interface MemberPolicy extends StoredBucketPolicy {
  * caller read, `ifNoneMatch` creates a bucket's first policy and is refused if
  * one exists.
  */
-export type PolicyPrecondition = { ifMatch: string } | { ifNoneMatch: '*' };
+export type PolicyPrecondition =
+  | { ifMatch: string; ifNoneMatch?: never }
+  | { ifNoneMatch: '*'; ifMatch?: never };
 
 export interface IamMethods {
   /**
