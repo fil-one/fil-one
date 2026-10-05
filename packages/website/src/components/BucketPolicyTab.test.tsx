@@ -38,12 +38,12 @@ import { BucketPolicyTab } from './BucketPolicyTab.js';
 import { ToastProvider } from './Toast/ToastProvider.js';
 
 const policy: BucketPolicy = {
-  statement: [
+  Statement: [
     {
-      sid: 'team',
-      effect: 'allow',
-      principal: ['user-2'],
-      action: ['s3:GetObject', 's3:ListBucket'],
+      Sid: 'team',
+      Effect: 'Allow',
+      Principal: ['user-2'],
+      Action: ['s3:GetObject', 's3:ListBucket'],
     },
   ],
 };
@@ -132,9 +132,9 @@ describe('BucketPolicyTab', () => {
     await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
     expect(mockPut).toHaveBeenCalledWith('photos', S3Region.UsEast9, {
       policy: {
-        statement: [
-          ...policy.statement,
-          { effect: 'allow', principal: '*', action: ['s3:GetObject'] },
+        Statement: [
+          ...policy.Statement,
+          { Effect: 'Allow', Principal: '*', Action: ['s3:GetObject'] },
         ],
       },
       etag: '"v1"',
@@ -201,7 +201,7 @@ describe('BucketPolicyTab', () => {
 
   it('warns when a deny names everyone', async () => {
     mockGet.mockResolvedValue({
-      policy: { statement: [{ effect: 'deny', principal: '*', action: ['s3:DeleteObject'] }] },
+      policy: { Statement: [{ Effect: 'Deny', Principal: '*', Action: ['s3:DeleteObject'] }] },
       etag: '"v1"',
     });
     renderTab();
