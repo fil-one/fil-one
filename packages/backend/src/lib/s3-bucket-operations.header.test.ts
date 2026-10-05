@@ -48,7 +48,7 @@ function clientCapturing(
 }
 
 const policy: BucketPolicy = {
-  statement: [{ effect: 'allow', principal: ['alice'], action: ['s3:GetObject'] }],
+  Statement: [{ Effect: 'Allow', Principal: ['alice'], Action: ['s3:GetObject'] }],
 };
 
 describe('the x-bucket-policy header on CreateBucket', () => {

@@ -92,7 +92,7 @@ export async function baseHandler(
     if (err instanceof BucketConfigurationError) {
       await audit?.complete({
         outcome: 'succeeded',
-        details: { statements: policy?.statement.length },
+        details: { statements: policy?.Statement.length },
       });
       return new ResponseBuilder()
         .status(500)
@@ -118,7 +118,7 @@ export async function baseHandler(
   }
   await audit?.complete({
     outcome: 'succeeded',
-    details: { statements: policy?.statement.length },
+    details: { statements: policy?.Statement.length },
   });
 
   const now = new Date().toISOString();
