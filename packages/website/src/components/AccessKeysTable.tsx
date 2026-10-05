@@ -108,7 +108,7 @@ function GroupBadge({
       data-testid={testId}
       description={
         <>
-          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+          <p className="mb-1 text-meta font-semibold uppercase tracking-wider text-zinc-400">
             {title}
           </p>
           <ul className="flex flex-col gap-0.5">

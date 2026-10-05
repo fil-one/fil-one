@@ -16,6 +16,7 @@ vi.mock('./use-presign.js', () => ({
 }));
 
 import { batchPresign } from './use-presign.js';
+import { leaveGuardedWork } from './use-warn-before-unload.js';
 const mockBatchPresign = vi.mocked(batchPresign);
 
 function makeFile(name: string, size = 100): File {
@@ -413,6 +414,153 @@ describe('useFileUpload — retry', () => {
     act(() => requests[2].onload?.());
     await retry!;
     await waitFor(() => expect(result.current.progressPercent).toBe(100));
+  });
+});
+
+describe('useFileUpload: cancel', () => {
+  type AbortableXHR = {
+    upload: { onprogress: unknown };
+    onload: (() => void) | null;
+    onerror: (() => void) | null;
+    onabort: (() => void) | null;
+    onloadend: (() => void) | null;
+    open: ReturnType<typeof vi.fn>;
+    setRequestHeader: ReturnType<typeof vi.fn>;
+    send: ReturnType<typeof vi.fn>;
+    abort: ReturnType<typeof vi.fn>;
+    status: number;
+  };
+  let requests: AbortableXHR[];
+
+  const presigned = (count: number) => ({
+    endpoint: 'https://s3.example.com',
+    items: Array.from({ length: count }, (_, i) => ({
+      url: `https://s3.example.com/${i}`,
+      method: 'PUT' as const,
+      expiresAt: '2099-01-01T00:00:00Z',
+    })),
+  });
+
+  const elevenFiles = () => Array.from({ length: 11 }, (_, i) => makeFile(`f${i}.txt`));
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Every cancel here goes the way an org switch's does: through the guard,
+    // with the user agreeing to leave.
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    requests = [];
+    global.XMLHttpRequest = function AbortableFakeXHR(this: AbortableXHR) {
+      this.upload = { onprogress: null };
+      this.onload = null;
+      this.onerror = null;
+      this.onabort = null;
+      this.onloadend = null;
+      this.status = 200;
+      this.open = vi.fn();
+      this.setRequestHeader = vi.fn();
+      this.send = vi.fn();
+      this.abort = vi.fn(() => {
+        this.onabort?.();
+        this.onloadend?.();
+      });
+      requests.push(this);
+    } as unknown as typeof XMLHttpRequest;
+  });
+
+  it('requests no further presign batch once cancelled', async () => {
+    let firstBatch: { signal?: AbortSignal } = {};
+    mockBatchPresign.mockImplementationOnce(
+      (_region, _ops, signal) =>
+        new Promise((_resolve, reject) => {
+          firstBatch = { signal };
+          signal?.addEventListener('abort', () => reject(new DOMException('', 'AbortError')));
+        }),
+    );
+    const onSuccess = vi.fn();
+    const { result } = renderUpload(onSuccess);
+    act(() => result.current.addFiles(elevenFiles(), ''));
+
+    let upload: Promise<void>;
+    act(() => {
+      upload = result.current.handleUpload();
+    });
+    await waitFor(() => expect(mockBatchPresign).toHaveBeenCalledTimes(1));
+    act(() => void leaveGuardedWork());
+    await act(() => upload);
+
+    // The second batch would have been signed in whichever org the tab moved to.
+    expect(firstBatch.signal?.aborted).toBe(true);
+    expect(mockBatchPresign).toHaveBeenCalledTimes(1);
+    expect(requests).toHaveLength(0);
+    expect(result.current.uploadStep).toBe('idle');
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it('aborts transfers already under way', async () => {
+    mockBatchPresign.mockResolvedValueOnce(presigned(10)).mockResolvedValueOnce(presigned(1));
+    const onSuccess = vi.fn();
+    const { result } = renderUpload(onSuccess);
+    act(() => result.current.addFiles(elevenFiles(), ''));
+
+    let upload: Promise<void>;
+    act(() => {
+      upload = result.current.handleUpload();
+    });
+    await waitFor(() => expect(requests).toHaveLength(11));
+    act(() => void leaveGuardedWork());
+    await act(() => upload);
+
+    for (const request of requests) expect(request.abort).toHaveBeenCalledOnce();
+    expect(result.current.files.every((e) => e.error === 'Upload cancelled')).toBe(true);
+    expect(result.current.uploadStep).toBe('idle');
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(screen.queryByText(/failed to upload/)).toBeNull();
+  });
+
+  it('stays cancellable after its page unmounts', async () => {
+    let firstBatch: { signal?: AbortSignal } = {};
+    mockBatchPresign.mockImplementationOnce(
+      (_region, _ops, signal) =>
+        new Promise((_resolve, reject) => {
+          firstBatch = { signal };
+          signal?.addEventListener('abort', () => reject(new DOMException('', 'AbortError')));
+        }),
+    );
+    const { result, unmount } = renderUpload();
+    act(() => result.current.addFiles(elevenFiles(), ''));
+
+    let upload: Promise<void>;
+    act(() => {
+      upload = result.current.handleUpload();
+    });
+    await waitFor(() => expect(mockBatchPresign).toHaveBeenCalledTimes(1));
+    // The user leaves for another page in the same org; the upload carries on.
+    unmount();
+
+    // Then switches org: the upload still has to be asked about and stopped.
+    expect(leaveGuardedWork()).toBe(true);
+    await upload!;
+
+    expect(window.confirm).toHaveBeenCalledOnce();
+    expect(firstBatch.signal?.aborted).toBe(true);
+    expect(mockBatchPresign).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases its guard once it finishes', async () => {
+    mockBatchPresign.mockResolvedValueOnce(presigned(1));
+    const { result } = renderUpload();
+    act(() => result.current.addFiles([makeFile('a.txt')], ''));
+
+    let upload: Promise<void>;
+    act(() => {
+      upload = result.current.handleUpload();
+    });
+    await waitFor(() => expect(requests).toHaveLength(1));
+    act(() => requests[0].onload?.());
+    await act(() => upload);
+
+    expect(leaveGuardedWork()).toBe(true);
+    expect(window.confirm).not.toHaveBeenCalled();
   });
 });
 

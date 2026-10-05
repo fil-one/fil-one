@@ -86,11 +86,10 @@ export function isFoundationEmail(email: string | undefined): boolean {
  * will want staging only regions temporarily.
  */
 export function getAvailableRegions(stage: StageLike): S3Region[] {
-  const regions: S3Region[] = [S3Region.EuWest1, S3Region.UsEast1];
   if (stage !== Stage.Production) {
-    regions.push(S3Region.EuCentral3, S3Region.UsEast9);
+    return [S3Region.EuWest1, S3Region.EuCentral3, S3Region.UsEast1, S3Region.UsEast9];
   }
-  return regions;
+  return [S3Region.EuWest1, S3Region.UsEast1];
 }
 
 /**

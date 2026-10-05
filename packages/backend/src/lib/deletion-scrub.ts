@@ -240,6 +240,10 @@ async function scrubMembers(orgId: string, members: DeletionMember[]): Promise<v
     if (member.deleteIdentity) {
       await scrubRow({ key: { pk: `SUB#${member.sub}`, sk: 'IDENTITY' } });
       await scrubRow({ key: { pk: `USER#${member.userId}`, sk: 'PROFILE' } });
+      await deleteRow(Resource.UserInfoTable.name, {
+        pk: `USER#${member.userId}`,
+        sk: 'AVATAR_UPLOAD_RATE',
+      });
     } else {
       await repointHomeOrg(orgId, member);
     }
@@ -422,11 +426,11 @@ async function deleteInviteTokenLookups(orgRows: Item[]): Promise<void> {
   }
 }
 
-/** `name` is the org's only personal data. `deleting` stays, permanently. */
+/** `name` and `logoUrl` are the org's only personal data. `deleting` stays, permanently. */
 async function scrubOrgProfile(orgId: string): Promise<void> {
   await scrubRow({
     key: { pk: `ORG#${orgId}`, sk: 'PROFILE' },
-    remove: '#name',
+    remove: '#name, logoUrl',
     names: { '#name': 'name' },
   });
 }

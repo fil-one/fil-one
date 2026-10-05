@@ -30,7 +30,7 @@ function TokenLabel({ name, value, dark }: { name: string; value?: string; dark?
         {name}
       </span>
       {value && (
-        <span className={`font-mono text-[11px] ${dark ? 'text-zinc-400' : 'text-zinc-400'}`}>
+        <span className={`font-mono text-meta ${dark ? 'text-zinc-400' : 'text-zinc-400'}`}>
           {value}
         </span>
       )}
@@ -103,7 +103,7 @@ function ColorTokens() {
               />
               <div className="flex flex-col gap-0.5">
                 <span className="font-mono text-xs font-medium text-zinc-800">brand-{label}</span>
-                <span className="font-mono text-[10px] text-zinc-400 leading-tight">{oklch}</span>
+                <span className="font-mono text-meta text-zinc-400 leading-tight">{oklch}</span>
               </div>
             </div>
           ))}
