@@ -241,7 +241,7 @@ async function auditedWrite(
   }
   await audit.complete({
     outcome: 'succeeded',
-    ...(next ? { details: { statements: next.statement.length } } : {}),
+    ...(next ? { details: { statements: next.Statement.length } } : {}),
   });
 }
 
