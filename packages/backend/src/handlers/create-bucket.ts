@@ -87,8 +87,8 @@ export async function baseHandler(
   } catch (err) {
     // The bucket was created but couldn't be fully configured. Surface the
     // actionable message so the caller can finish setup via the S3 API instead
-    // of getting the generic 500 from errorHandlerMiddleware. The create stored
-    // the bucket and its policy together, so the policy write did succeed.
+    // of getting the generic 500 from errorHandlerMiddleware. The policy is
+    // written before the configuration calls, so the policy write did succeed.
     if (err instanceof BucketConfigurationError) {
       await audit?.complete({
         outcome: 'succeeded',
@@ -106,8 +106,9 @@ export async function baseHandler(
         .body<ErrorResponse>({ message: `Bucket "${bucketName}" already exists` })
         .build();
     }
-    // The storage system refused the policy the create carried; no bucket
-    // was created, so the caller can fix the roster and try again.
+    // The storage system refused the policy written after the create; the
+    // bucket exists without a policy. Any other failure of that write answers
+    // the generic 500.
     if (err instanceof PolicyValidationError) {
       return new ResponseBuilder()
         .status(400)

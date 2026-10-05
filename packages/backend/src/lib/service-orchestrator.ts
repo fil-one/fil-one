@@ -72,9 +72,8 @@ export interface CreateBucketArgs {
   lock?: boolean;
   /**
    * The bucket's first policy, on a region serving the `iam` access model.
-   * Travels on the create request so the bucket and its policy are written
-   * together (see `s3-bucket-operations.ts`). Ignored by a `scoped-keys`
-   * orchestrator.
+   * Written with `PutBucketPolicy` and `If-None-Match: *` right after the
+   * bucket is created. Never set on a `scoped-keys` region.
    */
   policy?: BucketPolicy;
   retention?: {

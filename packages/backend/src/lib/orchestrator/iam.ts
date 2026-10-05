@@ -4,6 +4,7 @@
 // about one half of the contract.
 
 import pRetry from 'p-retry';
+import type { S3Client } from '@aws-sdk/client-s3';
 import type { BucketPolicy, MemberBucketAccess } from '@filone/shared';
 import {
   deleteTenantsByTenantIdPrincipalsByPrincipalId,
@@ -187,6 +188,19 @@ function buildPrincipalMethods(
       }));
     },
   };
+}
+
+/**
+ * A new bucket's first policy, written once the bucket exists (fil-one/RFC#30,
+ * "Bucket creation") and refused if one is already stored. Called from
+ * `createBucket` with the client that created the bucket.
+ */
+export function putFirstBucketPolicy(
+  s3: S3Client,
+  bucketName: string,
+  policy: BucketPolicy,
+): Promise<{ etag: string }> {
+  return withWriteRetry(() => putBucketPolicy(s3, bucketName, policy, { ifNoneMatch: '*' }));
 }
 
 function buildPolicyMethods(

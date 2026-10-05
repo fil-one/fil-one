@@ -13,6 +13,7 @@ import {
   GetObjectLockConfigurationCommand,
 } from '@aws-sdk/client-s3';
 import { S3Region } from '@filone/shared';
+import type { BucketPolicy } from '@filone/shared';
 import type { Client } from '@filone/orchestrator-client';
 
 vi.mock('sst', () => ({
@@ -64,6 +65,7 @@ import {
   BucketConfigurationError,
   BucketNotEmptyError,
   BucketNotFoundError,
+  PolicyConflictError,
   PrincipalNotFoundError,
 } from '../errors.ts';
 import type { IssueAccessKeyOpts, OrchestratorRequestOptions } from '../service-orchestrator.ts';
@@ -382,8 +384,63 @@ describe('getS3ClientContext', () => {
   });
 });
 
+// The policy write's If-None-Match header is added by command middleware,
+// which the S3 client mock never runs, so the write is observed at the call.
+const { mockPutBucketPolicy } = vi.hoisted(() => ({ mockPutBucketPolicy: vi.fn() }));
+vi.mock('../s3-bucket-operations.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../s3-bucket-operations.ts')>()),
+  putBucketPolicy: (...args: unknown[]) => mockPutBucketPolicy(...args),
+}));
+
 describe('createBucket', () => {
   beforeEach(stubS3Credentials);
+
+  const policy: BucketPolicy = {
+    Statement: [{ Effect: 'Allow', Principal: ['alice'], Action: ['s3:*'] }],
+  };
+
+  it('writes the first policy with If-None-Match * after the create, before configuration', async () => {
+    const order: string[] = [];
+    s3Mock.on(CreateBucketCommand).callsFake(() => order.push('create'));
+    s3Mock.on(PutBucketVersioningCommand).callsFake(() => order.push('versioning'));
+    mockPutBucketPolicy.mockImplementation(async () => {
+      order.push('policy');
+      return { etag: '"e1"' };
+    });
+
+    await buildOrchestrator({ accessModel: 'iam' }).createBucket(tenantId, {
+      bucketName: 'my-bucket',
+      versioning: true,
+      policy,
+    });
+
+    expect(order).toStrictEqual(['create', 'policy', 'versioning']);
+    expect(mockPutBucketPolicy).toHaveBeenCalledWith(expect.anything(), 'my-bucket', policy, {
+      ifNoneMatch: '*',
+    });
+  });
+
+  it('retries a policy write the storage system answers with a lock timeout', async () => {
+    s3Mock.on(CreateBucketCommand).resolves({});
+    mockPutBucketPolicy
+      .mockRejectedValueOnce(new PolicyConflictError())
+      .mockResolvedValue({ etag: '"e1"' });
+
+    await buildOrchestrator({ accessModel: 'iam' }).createBucket(tenantId, {
+      bucketName: 'my-bucket',
+      policy,
+    });
+
+    expect(mockPutBucketPolicy).toHaveBeenCalledTimes(2);
+  });
+
+  it('writes no policy when the create carries none, as on a scoped-keys region', async () => {
+    s3Mock.on(CreateBucketCommand).resolves({});
+
+    await orchestrator.createBucket(tenantId, { bucketName: 'my-bucket' });
+
+    expect(mockPutBucketPolicy).not.toHaveBeenCalled();
+  });
 
   it('issues a CreateBucketCommand for the given bucket name', async () => {
     s3Mock.on(CreateBucketCommand).resolves({});

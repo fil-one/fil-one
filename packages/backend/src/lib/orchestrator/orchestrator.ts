@@ -20,7 +20,7 @@ import {
   type TenantSetupDeps,
 } from './tenant-setup.ts';
 import { accessKeyBody, describeAccessKeyBody } from './access-key-body.ts';
-import { buildIamMethods } from './iam.ts';
+import { buildIamMethods, putFirstBucketPolicy } from './iam.ts';
 import { extractApiCode, extractApiMessage } from './api-message.ts';
 import {
   AccessKeyAlreadyExistsError,
@@ -278,10 +278,11 @@ abstract class FilOneOrchestrator implements OrchestratorCore {
       {
         bucketName: args.bucketName,
         objectLockEnabled: args.lock === true,
-        ...(args.policy ? { policy: args.policy } : {}),
       },
       requestOptions,
     );
+    // TODO: move this write to a durable job if bucket creation starts timing out.
+    if (args.policy) await putFirstBucketPolicy(s3, args.bucketName, args.policy);
 
     // The signal on the retry options stops retrying once the deadline has
     // passed, instead of burning the remaining attempts on instant aborts.
