@@ -9,7 +9,10 @@ describe('generated contract types', () => {
     const _a: PolicyAction = 's3:GetBucketPolicy';
     // @ts-expect-error — nor s3:PutBucketPolicy.
     const _b: PolicyAction = 's3:PutBucketPolicy';
+    // @ts-expect-error — nor s3:DeleteBucketPolicy.
+    const _c: PolicyAction = 's3:DeleteBucketPolicy';
     void _a;
     void _b;
+    void _c;
   });
 });
