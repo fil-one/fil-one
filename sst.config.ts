@@ -1236,9 +1236,6 @@ export default $config({
         ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
         timeout: '30 seconds',
       },
-      // Registers the new member as a principal on each ready iam region.
-      'accept-invitation': { extraEnv: orchestratorEnv },
-
       // ── RAG ────────────────────────────────────────────────────────
       // RAG query playground (FIL-554): embed the question, vector-search the
       // bucket's index, and ground a Bedrock completion on the retrieved chunks.
@@ -1377,8 +1374,10 @@ export default $config({
       // by id, never the accept URL, because the URL carries the token.
       // `WEBSITE_URL` is the accept link's origin, taken from configuration rather
       // than from the request, since the link goes to somebody else's inbox.
-      // OrgLogoBucketName, to check the joined org's logo is one of its uploads.
+      // Registers the new member as a principal on each ready iam region, and
+      // reads OrgLogoBucketName to check the joined org's logo is one of its uploads.
       'accept-invitation': {
+        extraEnv: orchestratorEnv,
         extraLink: [orgLogoBucketName],
       },
       'create-invitation': {
