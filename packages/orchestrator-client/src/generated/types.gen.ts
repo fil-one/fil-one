@@ -180,28 +180,28 @@ export type PolicyStatement = {
   /**
    * Optional label. Stored and returned; nothing evaluates it.
    */
-  sid?: string;
-  effect: 'allow' | 'deny';
+  Sid?: string;
+  Effect: 'Allow' | 'Deny';
   /**
    * The principals the statement applies to: a list of principal
    * ids, or the bare string `*` for every live principal of the
    * tenant. `*` inside a list is rejected (422).
    *
    */
-  principal: '*' | Array<PrincipalId>;
-  action: Array<PolicyAction>;
+  Principal: '*' | Array<PrincipalId>;
+  Action: Array<PolicyAction>;
 };
 
 /**
  * A bucket's policy, reduced to what the orchestrator evaluates.
- * There is no `resource` field: the document governs the bucket it
+ * There is no `Resource` field: the document governs the bucket it
  * is stored on. A principal's effective actions are the union of
- * the `allow` statements naming them minus the union of the `deny`
+ * the `Allow` statements naming them minus the union of the `Deny`
  * statements naming them; an explicit deny wins.
  *
  */
 export type BucketPolicy = {
-  statement: Array<PolicyStatement>;
+  Statement: Array<PolicyStatement>;
 };
 
 export type PrincipalPolicies = {
