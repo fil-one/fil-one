@@ -182,10 +182,11 @@ deliberately on a given bucket.
 
 The console writes these as statements labelled `filone-owners` and
 `filone-admins`, plus `filone-creator` for a Member who creates a bucket, and the
-fan-out finds them again by those labels. The labels are defaults, not a
-reserved namespace: a person may give any statement any label. The console only
-keeps the three it writes from being renamed, so the fan-out can still find
-them.
+fan-out finds them again by those labels. The console reserves the three labels
+for the statements it writes, since the next role change would replace any
+other statement carrying one: the statement editor refuses them on a person's
+statement, and the policy write takes each at most once and only on an allow.
+The storage system treats them as ordinary labels.
 
 The fan-out is the price of keeping roles out of the storage system, and it
 cannot be atomic. A promotion that fails halfway leaves the member unscoped on
