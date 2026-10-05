@@ -4,7 +4,7 @@ import { FakeIamOrchestrator } from './fake-iam-orchestrator.ts';
 
 describe('FakeIamOrchestrator principal reads', () => {
   const wildcard = {
-    statement: [{ effect: 'allow', principal: '*', action: ['s3:GetObject'] }],
+    Statement: [{ Effect: 'Allow', Principal: '*', Action: ['s3:GetObject'] }],
   } as never;
 
   it('refuses resolveMemberAccess for a principal never synced, as Hilt does', async () => {
