@@ -53,7 +53,7 @@ import { createFilOneOrchestrator } from './orchestrator.ts';
 
 const tenantId = '00000000-0000-0000-0000-000000000001';
 const policy: BucketPolicy = {
-  statement: [{ effect: 'allow', principal: ['alice'], action: ['s3:GetObject'] }],
+  Statement: [{ Effect: 'Allow', Principal: ['alice'], Action: ['s3:GetObject'] }],
 };
 
 function respond(
