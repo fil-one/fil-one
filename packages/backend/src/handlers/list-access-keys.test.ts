@@ -695,7 +695,7 @@ describe('who sees which keys', () => {
       // A member who can see the bucket can act on it with their
       // principal-bound key, so that key belongs in the bucket's list.
       iamFake.seedPolicy(TENANT_ID, BUCKET, {
-        statement: [{ effect: 'allow', principal: ['user-1'], action: ['s3:GetObject'] }],
+        Statement: [{ Effect: 'Allow', Principal: ['user-1'], Action: ['s3:GetObject'] }],
       });
       ddbMock.on(QueryCommand).resolves({ Items: [principalRow('key-1', 'user-1')] });
 
@@ -704,7 +704,7 @@ describe('who sees which keys', () => {
 
     it('leaves out a principal-bound key the bucket policy gives nothing', async () => {
       iamFake.seedPolicy(TENANT_ID, BUCKET, {
-        statement: [{ effect: 'allow', principal: ['user-1'], action: ['s3:GetObject'] }],
+        Statement: [{ Effect: 'Allow', Principal: ['user-1'], Action: ['s3:GetObject'] }],
       });
       ddbMock.on(QueryCommand).resolves({
         Items: [principalRow('key-1', 'user-1'), principalRow('key-2', 'user-2')],
@@ -715,7 +715,7 @@ describe('who sees which keys', () => {
 
     it('keeps a scoped key on its stored scope, reading the policy once', async () => {
       iamFake.seedPolicy(TENANT_ID, BUCKET, {
-        statement: [{ effect: 'allow', principal: ['user-1'], action: ['s3:GetObject'] }],
+        Statement: [{ Effect: 'Allow', Principal: ['user-1'], Action: ['s3:GetObject'] }],
       });
       ddbMock.on(QueryCommand).resolves({
         Items: [
