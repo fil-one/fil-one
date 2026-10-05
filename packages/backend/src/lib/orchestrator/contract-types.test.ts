@@ -1,5 +1,5 @@
 import { describe, it } from 'vitest';
-import type { PolicyAction } from '@filone/orchestrator-client';
+import type { PolicyAction, PrincipalAccess } from '@filone/orchestrator-client';
 
 // Type-level claims about the generated Management API client. The runtime
 // body is empty; `tsc --noEmit` is the assertion.
@@ -14,5 +14,11 @@ describe('generated contract types', () => {
     void _a;
     void _b;
     void _c;
+  });
+
+  it('a principal access entry lists expanded actions, never s3:*', () => {
+    // @ts-expect-error — the effective set is expanded before it is returned.
+    const _a: PrincipalAccess['buckets'][number]['actions'][number] = 's3:*';
+    void _a;
   });
 });

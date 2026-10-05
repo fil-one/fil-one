@@ -101,6 +101,7 @@ export type {
   MetricsTo,
   MetricsWindow,
   PolicyAction,
+  PolicyConcreteAction,
   PolicyStatement,
   PostTenantsByTenantIdAccessKeysData,
   PostTenantsByTenantIdAccessKeysError,

@@ -834,8 +834,11 @@ components:
           items:
             $ref: '#/components/schemas/Principal'
 
-    PolicyAction:
+    PolicyConcreteAction:
       type: string
+      description: |
+        A concrete `PolicyAction`: every value except `s3:*`. A
+        principal's effective actions are always reported in this form.
       enum:
         - s3:GetObject
         - s3:GetObjectVersion
@@ -851,7 +854,12 @@ components:
         - s3:PutObjectLegalHold
         - s3:DeleteObject
         - s3:DeleteObjectVersion
-        - 's3:*'
+
+    PolicyAction:
+      anyOf:
+        - $ref: '#/components/schemas/PolicyConcreteAction'
+        - type: string
+          enum: ['s3:*']
       description: |
         An action a bucket policy statement may carry: every
         `AccessKeyPermission` except the six bucket-level actions
@@ -938,7 +946,7 @@ components:
               actions:
                 type: array
                 items:
-                  $ref: '#/components/schemas/PolicyAction'
+                  $ref: '#/components/schemas/PolicyConcreteAction'
 
     CreateAccessKeyRequest:
       type: object

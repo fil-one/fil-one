@@ -151,15 +151,11 @@ export type PrincipalList = {
 };
 
 /**
- * An action a bucket policy statement may carry: every
- * `AccessKeyPermission` except the six bucket-level actions
- * (`s3:CreateBucket`, `s3:DeleteBucket`, `s3:ListAllMyBuckets`,
- * `s3:GetBucketPolicy`, `s3:PutBucketPolicy`,
- * `s3:DeleteBucketPolicy`), plus `s3:*`, which stands for exactly
- * the concrete `PolicyAction` values and never for those six.
+ * A concrete `PolicyAction`: every value except `s3:*`. A
+ * principal's effective actions are always reported in this form.
  *
  */
-export type PolicyAction =
+export type PolicyConcreteAction =
   | 's3:GetObject'
   | 's3:GetObjectVersion'
   | 's3:GetObjectRetention'
@@ -173,8 +169,18 @@ export type PolicyAction =
   | 's3:PutObjectRetention'
   | 's3:PutObjectLegalHold'
   | 's3:DeleteObject'
-  | 's3:DeleteObjectVersion'
-  | 's3:*';
+  | 's3:DeleteObjectVersion';
+
+/**
+ * An action a bucket policy statement may carry: every
+ * `AccessKeyPermission` except the six bucket-level actions
+ * (`s3:CreateBucket`, `s3:DeleteBucket`, `s3:ListAllMyBuckets`,
+ * `s3:GetBucketPolicy`, `s3:PutBucketPolicy`,
+ * `s3:DeleteBucketPolicy`), plus `s3:*`, which stands for exactly
+ * the concrete `PolicyAction` values and never for those six.
+ *
+ */
+export type PolicyAction = PolicyConcreteAction | 's3:*';
 
 export type PolicyStatement = {
   /**
@@ -215,7 +221,7 @@ export type PrincipalPolicies = {
 export type PrincipalAccess = {
   buckets: Array<{
     name: BucketName;
-    actions: Array<PolicyAction>;
+    actions: Array<PolicyConcreteAction>;
   }>;
 };
 
@@ -811,10 +817,7 @@ export type PutTenantsByTenantIdPrincipalsByPrincipalIdErrors = {
    */
   409: Error;
   /**
-   * Request body is well-formed but fails semantic validation
-   * (missing required field, value out of range, enum mismatch,
-   * cross-field constraint, etc.).
-   *
+   * The `principalId` path value is not a valid principal id.
    */
   422: Error;
 };
