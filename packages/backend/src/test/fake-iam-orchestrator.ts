@@ -61,14 +61,15 @@ export class FakeIamOrchestrator implements IamMethods {
     this.record('removeMember', tenantId, userId);
     this.principalsOf(tenantId).delete(userId);
     for (const [bucketName, stored] of this.policiesOf(tenantId)) {
-      const statement = stored.policy.statement
-        .map((s) =>
-          s.principal === '*' ? s : { ...s, principal: s.principal.filter((p) => p !== userId) },
-        )
-        .filter((s) => s.principal === '*' || s.principal.length > 0);
+      const statement = stored.policy.Statement.map((s) =>
+        s.Principal === '*' ? s : { ...s, Principal: s.Principal.filter((p) => p !== userId) },
+      ).filter((s) => s.Principal === '*' || s.Principal.length > 0);
       if (statement.length === 0) this.policiesOf(tenantId).delete(bucketName);
       else
-        this.policiesOf(tenantId).set(bucketName, { policy: { statement }, etag: this.nextEtag() });
+        this.policiesOf(tenantId).set(bucketName, {
+          policy: { Statement: statement },
+          etag: this.nextEtag(),
+        });
     }
   }
 
@@ -88,9 +89,9 @@ export class FakeIamOrchestrator implements IamMethods {
     this.assertBucket(tenantId, bucketName);
     const current = this.policiesOf(tenantId).get(bucketName);
     this.assertPrecondition(bucketName, current, precondition);
-    for (const statement of policy.statement) {
-      if (statement.principal === '*') continue;
-      for (const principal of statement.principal) {
+    for (const statement of policy.Statement) {
+      if (statement.Principal === '*') continue;
+      for (const principal of statement.Principal) {
         if (!this.principalsOf(tenantId).has(principal)) {
           throw new PrincipalNotFoundError(principal);
         }
@@ -120,7 +121,7 @@ export class FakeIamOrchestrator implements IamMethods {
     if (!this.principalsOf(tenantId).has(userId)) throw new PrincipalNotFoundError(userId);
     return [...this.policiesOf(tenantId)]
       .filter(([, stored]) =>
-        stored.policy.statement.some((s) => s.principal === '*' || s.principal.includes(userId)),
+        stored.policy.Statement.some((s) => s.Principal === '*' || s.Principal.includes(userId)),
       )
       .map(([bucketName, stored]) => ({ bucketName, ...stored }));
   }

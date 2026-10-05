@@ -61,7 +61,7 @@ const s3Error = (code: string, message = code) =>
   `<?xml version="1.0" encoding="UTF-8"?><Error><Code>${code}</Code><Message>${message}</Message></Error>`;
 
 const policy: BucketPolicy = {
-  statement: [{ effect: 'allow', principal: ['alice'], action: ['s3:GetObject'] }],
+  Statement: [{ Effect: 'Allow', Principal: ['alice'], Action: ['s3:GetObject'] }],
 };
 
 const bodyOf = (request: CapturedRequest) =>
