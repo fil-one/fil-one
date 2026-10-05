@@ -134,11 +134,12 @@ union(Allow naming member) \ union(Deny naming member)
 to reason about here because the storage system has no other input: it evaluates
 principals against statements, and there is no role or ceiling for a Deny to
 outrank. The one action outside the arithmetic is bucket enumeration, which
-every principal holds and no Deny removes. A Deny naming an Owner takes that
-bucket away from them until it is edited out, which an Owner can always do,
-since the permission to edit a policy comes from their role and not from the
-policy. A Deny naming every member locks the whole org out of a bucket until an
-Owner removes it.
+every principal holds and no Deny removes. A Deny naming an Owner or Admin
+limits the keys bound to them; the console serves both roles without reading
+their access, so it still serves them on that bucket. An Owner can always edit
+the Deny out, since the permission to edit a policy comes from their role and
+not from the policy. A Deny naming every member locks every scoped member and
+every bound key out of a bucket until it is removed.
 
 Owners and Admins edit policies, through a new `buckets.policy_manage`
 permission, and mint service keys through a new `keys.create_service`. Those
@@ -158,8 +159,9 @@ rewrites that policy. Bucket creation stays where M1 puts it, as the org-level
 **Retention and legal hold are grantable through a policy.** M1 makes
 `PutObjectRetention` and `PutObjectLegalHold` Owner-only, and says M2's
 per-operation grant replaces that blanket rule. The bucket policy is that grant,
-and the check sits on the write: the console refuses a statement carrying either
-action unless an Owner is authoring it. Once written, the grant reaches whoever
+and the check sits on the write: unless an Owner is authoring it, the console
+refuses a document that grants either action to a principal the stored policy
+does not already grant it to. An Admin's edit keeps the grants an Owner wrote. Once written, the grant reaches whoever
 the statement names. The storage system enforces the statement without knowing
 that either action was privileged, which is why the rule has to hold at the
 console. On scoped-key regions the Owner-only cap stands, since no policy exists
@@ -259,7 +261,7 @@ The IAM arm is shaped after AWS IAM, minus its request bodies:
 | Method                                                     | Contract                                                                                                                                                                                                              |
 | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `syncMember(tenantId, userId)`                             | asserts the principal exists so a key can bind to it; carries no permissions; idempotent                                                                                                                              |
-| `removeMember(tenantId, userId)`                           | deletes the principal, its keys, and every statement naming it; idempotent                                                                                                                                            |
+| `removeMember(tenantId, userId)`                           | deletes the principal and its keys and removes it from every statement, dropping a statement left naming nobody; idempotent                                                                                           |
 | `getBucketPolicy`, `putBucketPolicy`, `deleteBucketPolicy` | bucket-addressed; the write carries the token the read returned                                                                                                                                                       |
 | `listBucketPoliciesForMember(tenantId, userId)`            | the member detail view                                                                                                                                                                                                |
 | `resolveMemberAccess(tenantId, userId)`                    | per-bucket permissions, for every route that acts for a scoped member                                                                                                                                                 |
@@ -354,11 +356,11 @@ authorized it.
 
 1. `removeMember` runs on every provisioned IAM region before the membership
    rows are deleted.
-2. It deletes the principal, every key bound to it, and every statement naming
-   it.
+2. It deletes the principal and every key bound to it, and removes it from
+   every statement naming it. A statement left naming nobody is dropped.
 3. The member's key rows for that region go in the membership transaction.
 
-Removal strips the statements because a re-invited member keeps the same console
+Removal strips the principal from the statements because a re-invited member keeps the same console
 user id, and leftover statements would restore their old access on the new
 invitation.
 
@@ -424,8 +426,8 @@ is the one existing path for pushing a change to a warm key.
    policy is the console's decision.
 4. **Keys bound to a principal**, issued with a name and expiry only, names
    unique per principal.
-5. **Per-request authority** computed from the bucket's policy alone, `Allow \
-Deny` for the calling principal, with an explicit Deny winning. A key's
+5. **Per-request authority** computed from the bucket's policy alone, `Allow \ Deny`
+   for the calling principal, with an explicit Deny winning. A key's
    permission set is derived, never stored: the flat permissions and buckets fields
    on today's key do not describe an IAM key. What the policies give the key's
    principal is materialized as the key's delegations, one per bucket and Forge
