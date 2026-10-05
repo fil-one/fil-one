@@ -25,8 +25,8 @@ const PRINCIPAL_B = '00000000-0000-4000-8000-00000000000b';
 const PRINCIPAL_C = '00000000-0000-4000-8000-00000000000c';
 
 const read: BucketPolicy = {
-  statement: [
-    { effect: 'allow', principal: [PRINCIPAL_A], action: ['s3:GetObject', 's3:ListBucket'] },
+  Statement: [
+    { Effect: 'Allow', Principal: [PRINCIPAL_A], Action: ['s3:GetObject', 's3:ListBucket'] },
   ],
 };
 
@@ -56,9 +56,9 @@ describe('the policy vocabulary', () => {
 describe('BucketPolicySchema', () => {
   it('accepts the shape the storage system stores', () => {
     const result = BucketPolicySchema.safeParse({
-      statement: [
-        { sid: 'owners', effect: 'allow', principal: [PRINCIPAL_A, PRINCIPAL_B], action: ['s3:*'] },
-        { effect: 'deny', principal: '*', action: ['s3:PutObjectRetention'] },
+      Statement: [
+        { Sid: 'owners', Effect: 'Allow', Principal: [PRINCIPAL_A, PRINCIPAL_B], Action: ['s3:*'] },
+        { Effect: 'Deny', Principal: '*', Action: ['s3:PutObjectRetention'] },
       ],
     });
     expect(result.success).toBe(true);
@@ -66,17 +66,17 @@ describe('BucketPolicySchema', () => {
 
   it('names each member once, in the order first given', () => {
     const parsed = BucketPolicySchema.parse({
-      statement: [
+      Statement: [
         {
-          effect: 'allow',
-          principal: [PRINCIPAL_B, PRINCIPAL_A, PRINCIPAL_B],
-          action: ['s3:GetObject'],
+          Effect: 'Allow',
+          Principal: [PRINCIPAL_B, PRINCIPAL_A, PRINCIPAL_B],
+          Action: ['s3:GetObject'],
         },
       ],
     });
     expect(parsed).toEqual({
-      statement: [
-        { effect: 'allow', principal: [PRINCIPAL_B, PRINCIPAL_A], action: ['s3:GetObject'] },
+      Statement: [
+        { Effect: 'Allow', Principal: [PRINCIPAL_B, PRINCIPAL_A], Action: ['s3:GetObject'] },
       ],
     });
   });
@@ -84,17 +84,17 @@ describe('BucketPolicySchema', () => {
   it('refuses a field it does not define, as the storage system does', () => {
     expect(
       BucketPolicySchema.safeParse({
-        statement: [
+        Statement: [
           {
-            effect: 'allow',
-            principal: [PRINCIPAL_A],
-            action: ['s3:GetObject'],
+            Effect: 'Allow',
+            Principal: [PRINCIPAL_A],
+            Action: ['s3:GetObject'],
             resource: 'photos',
           },
         ],
       }).success,
     ).toBe(false);
-    expect(BucketPolicySchema.safeParse({ statement: [], version: '2012-10-17' }).success).toBe(
+    expect(BucketPolicySchema.safeParse({ Statement: [], version: '2012-10-17' }).success).toBe(
       false,
     );
   });
@@ -102,12 +102,12 @@ describe('BucketPolicySchema', () => {
   it('spells the wildcard principal one way: the bare string, never inside a list', () => {
     expect(
       BucketPolicySchema.safeParse({
-        statement: [{ effect: 'allow', principal: ['*'], action: ['s3:GetObject'] }],
+        Statement: [{ Effect: 'Allow', Principal: ['*'], Action: ['s3:GetObject'] }],
       }).success,
     ).toBe(false);
     expect(
       BucketPolicySchema.safeParse({
-        statement: [{ effect: 'allow', principal: '*', action: ['s3:GetObject'] }],
+        Statement: [{ Effect: 'Allow', Principal: '*', Action: ['s3:GetObject'] }],
       }).success,
     ).toBe(true);
   });
@@ -115,7 +115,7 @@ describe('BucketPolicySchema', () => {
   it('names a member by the UUID the console mints as its user id', () => {
     const naming = (principal: string[]) =>
       BucketPolicySchema.safeParse({
-        statement: [{ effect: 'allow', principal, action: ['s3:GetObject'] }],
+        Statement: [{ Effect: 'Allow', Principal: principal, Action: ['s3:GetObject'] }],
       }).success;
     expect(naming([PRINCIPAL_A])).toBe(true);
     expect(naming(['alice'])).toBe(false);
@@ -123,28 +123,28 @@ describe('BucketPolicySchema', () => {
   });
 
   it('refuses an empty document, an empty principal list, and an empty action list', () => {
-    expect(BucketPolicySchema.safeParse({ statement: [] }).success).toBe(false);
+    expect(BucketPolicySchema.safeParse({ Statement: [] }).success).toBe(false);
     expect(
       BucketPolicySchema.safeParse({
-        statement: [{ effect: 'allow', principal: [], action: ['s3:GetObject'] }],
+        Statement: [{ Effect: 'Allow', Principal: [], Action: ['s3:GetObject'] }],
       }).success,
     ).toBe(false);
     expect(
       BucketPolicySchema.safeParse({
-        statement: [{ effect: 'allow', principal: [PRINCIPAL_A], action: [] }],
+        Statement: [{ Effect: 'Allow', Principal: [PRINCIPAL_A], Action: [] }],
       }).success,
     ).toBe(false);
   });
 
-  it('refuses an action outside the vocabulary and an effect outside allow/deny', () => {
+  it('refuses an action outside the vocabulary and an effect outside Allow/Deny', () => {
     expect(
       BucketPolicySchema.safeParse({
-        statement: [{ effect: 'allow', principal: [PRINCIPAL_A], action: ['s3:CreateBucket'] }],
+        Statement: [{ Effect: 'Allow', Principal: [PRINCIPAL_A], Action: ['s3:CreateBucket'] }],
       }).success,
     ).toBe(false);
     expect(
       BucketPolicySchema.safeParse({
-        statement: [{ effect: 'Allow', principal: [PRINCIPAL_A], action: ['s3:GetObject'] }],
+        Statement: [{ Effect: 'allow', Principal: [PRINCIPAL_A], Action: ['s3:GetObject'] }],
       }).success,
     ).toBe(false);
   });
@@ -161,14 +161,14 @@ describe('BucketPolicySchema', () => {
 describe('effectiveActions', () => {
   it('is the allow union minus the deny union, sorted, with deny winning', () => {
     const policy: BucketPolicy = {
-      statement: [
-        { effect: 'allow', principal: ['alice'], action: ['s3:*'] },
+      Statement: [
+        { Effect: 'Allow', Principal: ['alice'], Action: ['s3:*'] },
         {
-          effect: 'deny',
-          principal: '*',
-          action: ['s3:PutObjectRetention', 's3:PutObjectLegalHold'],
+          Effect: 'Deny',
+          Principal: '*',
+          Action: ['s3:PutObjectRetention', 's3:PutObjectLegalHold'],
         },
-        { effect: 'deny', principal: ['alice'], action: ['s3:DeleteObject'] },
+        { Effect: 'Deny', Principal: ['alice'], Action: ['s3:DeleteObject'] },
       ],
     };
     const actions = effectiveActions(policy, 'alice');
@@ -182,7 +182,7 @@ describe('effectiveActions', () => {
     expect(effectiveActions(read, 'bob')).toStrictEqual([]);
     expect(
       effectiveActions(
-        { statement: [{ effect: 'deny', principal: ['bob'], action: ['s3:GetObject'] }] },
+        { Statement: [{ Effect: 'Deny', Principal: ['bob'], Action: ['s3:GetObject'] }] },
         'bob',
       ),
     ).toStrictEqual([]);
@@ -191,7 +191,7 @@ describe('effectiveActions', () => {
   it('never treats the wildcard as a principal of its own', () => {
     expect(
       effectiveActions(
-        { statement: [{ effect: 'allow', principal: ['a'], action: ['s3:*'] }] },
+        { Statement: [{ Effect: 'Allow', Principal: ['a'], Action: ['s3:*'] }] },
         '*',
       ),
     ).toStrictEqual([]);
@@ -200,13 +200,13 @@ describe('effectiveActions', () => {
 
 describe('addsRetentionGrants', () => {
   const ownersAll: BucketPolicy = {
-    statement: [{ sid: ROSTER_OWNERS_SID, effect: 'allow', principal: ['o'], action: ['s3:*'] }],
+    Statement: [{ Sid: ROSTER_OWNERS_SID, Effect: 'Allow', Principal: ['o'], Action: ['s3:*'] }],
   };
 
   it('counts an allow of either retention write, or the wildcard action, as a grant', () => {
     expect(
       addsRetentionGrants(null, {
-        statement: [{ effect: 'allow', principal: ['a'], action: ['s3:PutObjectLegalHold'] }],
+        Statement: [{ Effect: 'Allow', Principal: ['a'], Action: ['s3:PutObjectLegalHold'] }],
       }),
     ).toBe(true);
     expect(addsRetentionGrants(null, ownersAll)).toBe(true);
@@ -215,7 +215,7 @@ describe('addsRetentionGrants', () => {
   it('does not count a deny of the pair, nor an allow without it', () => {
     expect(
       addsRetentionGrants(null, {
-        statement: [{ effect: 'deny', principal: '*', action: [...RETENTION_WRITE_ACTIONS] }],
+        Statement: [{ Effect: 'Deny', Principal: '*', Action: [...RETENTION_WRITE_ACTIONS] }],
       }),
     ).toBe(false);
     expect(addsRetentionGrants(null, read)).toBe(false);
@@ -223,22 +223,22 @@ describe('addsRetentionGrants', () => {
 
   it('ignores a grant the stored document already makes, so editing around it needs no Owner', () => {
     const edited: BucketPolicy = {
-      statement: [...ownersAll.statement, ...read.statement],
+      Statement: [...ownersAll.Statement, ...read.Statement],
     };
     expect(addsRetentionGrants(ownersAll, edited)).toBe(false);
   });
 
   it('catches a grant to a new principal, and treats a grant to everyone as covering all', () => {
     const widened: BucketPolicy = {
-      statement: [
-        ...ownersAll.statement,
-        { effect: 'allow', principal: ['b'], action: ['s3:PutObjectRetention'] },
+      Statement: [
+        ...ownersAll.Statement,
+        { Effect: 'Allow', Principal: ['b'], Action: ['s3:PutObjectRetention'] },
       ],
     };
     expect(addsRetentionGrants(ownersAll, widened)).toBe(true);
 
     const everyone: BucketPolicy = {
-      statement: [{ effect: 'allow', principal: '*', action: [...RETENTION_WRITE_ACTIONS] }],
+      Statement: [{ Effect: 'Allow', Principal: '*', Action: [...RETENTION_WRITE_ACTIONS] }],
     };
     expect(addsRetentionGrants(everyone, widened)).toBe(false);
     expect(addsRetentionGrants(ownersAll, everyone)).toBe(true);
@@ -248,24 +248,24 @@ describe('addsRetentionGrants', () => {
     // Deny wins at the storage system, so the allow grants nothing until the
     // deny goes; removing it is the grant.
     const allow: PolicyStatement = {
-      effect: 'allow',
-      principal: ['a'],
-      action: ['s3:PutObjectRetention'],
+      Effect: 'Allow',
+      Principal: ['a'],
+      Action: ['s3:PutObjectRetention'],
     };
     const masked: BucketPolicy = {
-      statement: [allow, { effect: 'deny', principal: ['a'], action: ['s3:PutObjectRetention'] }],
+      Statement: [allow, { Effect: 'Deny', Principal: ['a'], Action: ['s3:PutObjectRetention'] }],
     };
-    expect(addsRetentionGrants(masked, { statement: [allow] })).toBe(true);
+    expect(addsRetentionGrants(masked, { Statement: [allow] })).toBe(true);
   });
 
   it('reads a principal id containing a pipe whole, as Auth0 subs are spelled', () => {
     const everyone: BucketPolicy = {
-      statement: [{ effect: 'allow', principal: '*', action: ['s3:PutObjectRetention'] }],
+      Statement: [{ Effect: 'Allow', Principal: '*', Action: ['s3:PutObjectRetention'] }],
     };
     const redundant: BucketPolicy = {
-      statement: [
-        ...everyone.statement,
-        { effect: 'allow', principal: ['auth0|alice'], action: ['s3:PutObjectRetention'] },
+      Statement: [
+        ...everyone.Statement,
+        { Effect: 'Allow', Principal: ['auth0|alice'], Action: ['s3:PutObjectRetention'] },
       ],
     };
     expect(addsRetentionGrants(everyone, redundant)).toBe(false);
@@ -288,19 +288,19 @@ describe('the roster statements', () => {
       admins: [PRINCIPAL_B],
       creatorId: PRINCIPAL_C,
     });
-    expect(policy.statement).toStrictEqual([
-      { sid: ROSTER_OWNERS_SID, effect: 'allow', principal: [PRINCIPAL_A], action: ['s3:*'] },
+    expect(policy.Statement).toStrictEqual([
+      { Sid: ROSTER_OWNERS_SID, Effect: 'Allow', Principal: [PRINCIPAL_A], Action: ['s3:*'] },
       {
-        sid: ROSTER_ADMINS_SID,
-        effect: 'allow',
-        principal: [PRINCIPAL_B],
-        action: ROSTER_ADMIN_ACTIONS,
+        Sid: ROSTER_ADMINS_SID,
+        Effect: 'Allow',
+        Principal: [PRINCIPAL_B],
+        Action: ROSTER_ADMIN_ACTIONS,
       },
       {
-        sid: ROSTER_CREATOR_SID,
-        effect: 'allow',
-        principal: [PRINCIPAL_C],
-        action: ROSTER_ADMIN_ACTIONS,
+        Sid: ROSTER_CREATOR_SID,
+        Effect: 'Allow',
+        Principal: [PRINCIPAL_C],
+        Action: ROSTER_ADMIN_ACTIONS,
       },
     ]);
     expect(BucketPolicySchema.safeParse(policy).success).toBe(true);
@@ -308,15 +308,15 @@ describe('the roster statements', () => {
 
   it('gives an Owner or Admin creator no second statement, and drops a statement nobody would be in', () => {
     const owner = defaultBucketPolicy({ owners: ['o1'], admins: [], creatorId: 'o1' });
-    expect(owner.statement.map((s) => s.sid)).toStrictEqual([ROSTER_OWNERS_SID]);
+    expect(owner.Statement.map((s) => s.Sid)).toStrictEqual([ROSTER_OWNERS_SID]);
     const admin = defaultBucketPolicy({ owners: ['o1'], admins: ['a1'], creatorId: 'a1' });
-    expect(admin.statement.map((s) => s.sid)).toStrictEqual([ROSTER_OWNERS_SID, ROSTER_ADMINS_SID]);
+    expect(admin.Statement.map((s) => s.Sid)).toStrictEqual([ROSTER_OWNERS_SID, ROSTER_ADMINS_SID]);
   });
 
   it('keeps the creator statement when the roster is rewritten', () => {
     const created = defaultBucketPolicy({ owners: ['o1'], admins: [], creatorId: 'm1' });
     const next = withRosterStatements(created, { owners: ['o2'], admins: ['o1'] });
-    expect(next?.statement.map((s) => [s.sid, s.principal])).toStrictEqual([
+    expect(next?.Statement.map((s) => [s.Sid, s.Principal])).toStrictEqual([
       [ROSTER_OWNERS_SID, ['o2']],
       [ROSTER_ADMINS_SID, ['o1']],
       [ROSTER_CREATOR_SID, ['m1']],
@@ -325,18 +325,18 @@ describe('the roster statements', () => {
 
   it('replaces only the roster statements and keeps every other statement', () => {
     const existing: BucketPolicy = {
-      statement: [
-        { sid: ROSTER_OWNERS_SID, effect: 'allow', principal: ['old-owner'], action: ['s3:*'] },
-        { sid: 'team', effect: 'allow', principal: ['m1'], action: ['s3:GetObject'] },
+      Statement: [
+        { Sid: ROSTER_OWNERS_SID, Effect: 'Allow', Principal: ['old-owner'], Action: ['s3:*'] },
+        { Sid: 'team', Effect: 'Allow', Principal: ['m1'], Action: ['s3:GetObject'] },
       ],
     };
     const next = withRosterStatements(existing, { owners: ['new-owner'], admins: ['a1'] });
-    expect(next?.statement.map((s) => s.sid)).toStrictEqual([
+    expect(next?.Statement.map((s) => s.Sid)).toStrictEqual([
       ROSTER_OWNERS_SID,
       ROSTER_ADMINS_SID,
       'team',
     ]);
-    expect(next?.statement[0].principal).toStrictEqual(['new-owner']);
+    expect(next?.Statement[0].Principal).toStrictEqual(['new-owner']);
   });
 
   it('answers null when nothing would be left, which means delete the policy', () => {
@@ -344,8 +344,8 @@ describe('the roster statements', () => {
     expect(
       withRosterStatements(
         {
-          statement: [
-            { sid: ROSTER_OWNERS_SID, effect: 'allow', principal: ['o'], action: ['s3:*'] },
+          Statement: [
+            { Sid: ROSTER_OWNERS_SID, Effect: 'Allow', Principal: ['o'], Action: ['s3:*'] },
           ],
         },
         { owners: [], admins: [] },
