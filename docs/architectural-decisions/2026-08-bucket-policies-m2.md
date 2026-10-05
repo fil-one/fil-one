@@ -101,19 +101,20 @@ A bucket policy is the bucket's own policy document, held by the storage system
 and addressed by the bucket it belongs to:
 
 ```ts
-// Addressed {region}/{bucketName}.
+// Addressed {region}/{bucketName}. AWS's field names.
 type BucketPolicy = {
-  statements: {
-    effect: 'Allow' | 'Deny';
-    principals: string[]; // console user ids, or '*' for every member
-    actions: (AccessKeyPermission | GranularPermission)[];
+  Statement: {
+    Sid?: string; // a label; stored and returned, never evaluated
+    Effect: 'Allow' | 'Deny';
+    Principal: string[] | '*'; // console user ids, or '*' for every member
+    Action: string[]; // the s3 vocabulary below, or ['s3:*'] for all of it
   }[];
 };
 ```
 
 This is S3's shape: one policy per bucket, statements naming individual members,
-and both effects. A policy has no id or name of its own and dies with its
-bucket.
+and both effects, written and read with the S3 bucket-policy operations. A
+policy has no id or name of its own and dies with its bucket.
 
 The console keeps no copy of any policy, so there is no table to add and nothing
 to backfill. It stores orgs, memberships, roles, key attribution, and the audit
@@ -148,9 +149,10 @@ form's preview.
 
 A statement may carry thirteen of an access key's fifteen actions: read, write,
 list, delete, the two bucket-configuration reads, and the seven granular
-data-protection permissions. `CreateBucket` and `DeleteBucket` are excluded,
-because a key holding `CreateBucket` creates buckets outside the policy that
-granted it. Bucket creation stays where M1 puts it, as the org-level
+data-protection permissions. `CreateBucket`, `DeleteBucket`, and the three
+bucket-policy actions are excluded, because a key holding `CreateBucket` creates
+buckets outside the policy that granted it and one holding `PutBucketPolicy`
+rewrites that policy. Bucket creation stays where M1 puts it, as the org-level
 `buckets.create`.
 
 **Retention and legal hold are grantable through a policy.** M1 makes
@@ -254,15 +256,15 @@ unchanged.
 
 The IAM arm is shaped after AWS IAM, minus its request bodies:
 
-| Method                                                     | Contract                                                                                                       |
-| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `syncMember(tenantId, userId)`                             | asserts the principal exists so a key can bind to it; carries no permissions; idempotent                       |
-| `removeMember(tenantId, userId)`                           | deletes the principal, its keys, and every statement naming it; idempotent                                     |
-| `getBucketPolicy`, `putBucketPolicy`, `deleteBucketPolicy` | bucket-addressed; the write carries the token the read returned                                                |
-| `listBucketPoliciesForMember(tenantId, userId)`            | the member detail view                                                                                         |
-| `resolveMemberAccess(tenantId, userId)`                    | per-bucket permissions, for every route that acts for a scoped member                                          |
-| `issueAccessKey(tenantId, opts)`                           | on the core, either shape: a service key with permissions and buckets, or `principalId` with a name and expiry |
-| `listAccessKeys(tenantId, opts)`                           | identity fields plus each key's principal; access is read per principal                                        |
+| Method                                                     | Contract                                                                                                                                                                                                              |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `syncMember(tenantId, userId)`                             | asserts the principal exists so a key can bind to it; carries no permissions; idempotent                                                                                                                              |
+| `removeMember(tenantId, userId)`                           | deletes the principal, its keys, and every statement naming it; idempotent                                                                                                                                            |
+| `getBucketPolicy`, `putBucketPolicy`, `deleteBucketPolicy` | bucket-addressed; the write carries the token the read returned                                                                                                                                                       |
+| `listBucketPoliciesForMember(tenantId, userId)`            | the member detail view                                                                                                                                                                                                |
+| `resolveMemberAccess(tenantId, userId)`                    | per-bucket permissions, for every route that acts for a scoped member                                                                                                                                                 |
+| `issueAccessKey(tenantId, opts)`                           | on the core, either shape: a service key with permissions and buckets, or `principalId` with a name and expiry                                                                                                        |
+| `listAccessKeys(tenantId, opts)`                           | identity fields plus each key's `type`, `service` or `principal`, with the principal on a principal-bound key and the permissions and buckets on a service key; filterable by principal; access is read per principal |
 
 A vendor that grows principals and policies moves its region to `iam` by
 implementing that arm, with no console change.
@@ -334,19 +336,19 @@ authorized it.
 
 **A scoped member creates a bucket.**
 
-1. `POST /api/buckets` builds the bucket's first policy and sends it,
-   base64-encoded, in the `x-bucket-policy` header of the S3 create request,
-   signed with the tenant-wide credential along with the rest of the request.
-   The storage system validates the document, creates the bucket and stores the
-   policy in one transaction, and refuses the create when the document fails.
-   No bucket outlives a failed write of the policy its create carried.
+1. `POST /api/buckets` sends two S3 requests signed with the tenant-wide
+   credential: `CreateBucket`, then `PutBucketPolicy` with the bucket's first
+   policy, conditional on no policy existing. The console answers the member
+   after both complete. A failure between the two leaves a bucket that only
+   service keys reach and that the console lists with no policy; the console
+   finishes the policy write from a durable job.
 2. The policy names the org's current Owners in one Allow with every action,
-   and its Admins and the creator in another with every action but the two
-   retention writes. An Owner who creates the bucket is already in the first
-   statement.
-3. A bucket created by a generic S3 client holding a service key carries no
-   header and starts with no policy, so only service keys reach it until an
-   Owner or Admin writes one from the policy tab.
+   and its Admins and the creator each in their own with every action but the
+   two retention writes. An Owner who creates the bucket is already in the
+   first statement.
+3. A bucket created by a generic S3 client holding a service key starts with no
+   policy, so only service keys reach it until one is written, from that client
+   or from the policy tab.
 
 **Removal.**
 
@@ -376,18 +378,18 @@ sit outside the revocation pass.
 policies, and keys, and the deletion scrub already reads the whole org
 partition.
 
-**Deleting a bucket** removes its policy with it and revokes nothing. No
-delegation names a single bucket in this model, so there is nothing to revoke;
-the gateway drops the bucket from its registry on the same request and refuses
-any bucket it does not know, which retires the warm chains by itself.
+**Deleting a bucket** removes its policy with it and revokes every delegation
+over the bucket, service keys' and member keys' alike, in one revocation batch.
+The gateway also drops the bucket from its registry on the same request and
+refuses any bucket it does not know, which retires the warm chains by itself.
 
 ## The IAM contract for Forge
 
-These requirements are a revision of the management API contract, added as an
-optional capability set. A Forge region declares `iam` when its network serves
-that revision. Only Forge is asked to implement it. One Forge network serves one
-region, so a tenant id is unique per region and the contract carries no region
-qualifier.
+These requirements are a revision of the management API contract and of the S3
+operations the gateway forwards to it, added as an optional capability set. A
+Forge region declares `iam` when its network serves that revision. Only Forge is
+asked to implement it. One Forge network serves one region, so a tenant id is
+unique per region and the contract carries no region qualifier.
 
 **What Hilt has today.** Tenants, their access keys, and their buckets, plus the
 UCAN delegations behind them. A key is a flat row of permissions and bucket
@@ -405,19 +407,21 @@ is the one existing path for pushing a change to a warm key.
 
 **What we need.**
 
-1. **A tenant service credential** outside the principal model: the console's
-   own key, tenant-wide and unexpiring, minted at tenant setup before any
-   principal exists, and mintable on demand for a tenant that predates the
-   model. It is not a customer key and sits outside the key list, the key count,
-   and the revocation rules.
+1. **A tenant service key** outside the principal model: the console's own key,
+   an ordinary access key with no bucket list and no expiry, minted at tenant
+   setup before any principal exists. A tenant that predates the model keeps the
+   key the console already holds. It is never named in a policy and no policy is
+   evaluated for it; otherwise it is a key like any other, listed, counted, and
+   revoked on deletion.
 2. **Principals** per tenant, `(tenantId, userId)`, that a key can bind to and a
    statement can name. A principal carries no permissions, no role, and no
    all-buckets flag, so there is nothing on it to keep in step with the console.
-   A batched write for the provisioning sweep.
-3. **Bucket policies** addressed by bucket: a statement list carrying effect,
-   principals, and actions; an ETag the caller passes back to make an edit
-   conditional; and a query by principal. The management API carries no actor,
-   since who may edit a policy is the console's decision.
+3. **Bucket policies** addressed by bucket, read and written over S3 with the
+   service key (`GetBucketPolicy`, `PutBucketPolicy`, `DeleteBucketPolicy`): a
+   statement list carrying effect, principals, and actions; an ETag the caller
+   passes back to make an edit conditional; and a management-API query by
+   principal. A policy write carries no member identity, since who may edit a
+   policy is the console's decision.
 4. **Keys bound to a principal**, issued with a name and expiry only, names
    unique per principal.
 5. **Per-request authority** computed from the bucket's policy alone, `Allow \
@@ -444,7 +448,8 @@ Deny` for the calling principal, with an explicit Deny winning. A key's
 7. **The `s3:*` vocabulary** crosses the API through the existing mapping, and
    every principal holds `s3:ListAllMyBuckets`, which no statement grants and no
    Deny removes. The contract enum gains `s3:AbortMultipartUpload` and
-   `s3:ListMultipartUploadParts`, which Hilt already accepts.
+   `s3:ListMultipartUploadParts`, which Hilt already accepts, and the three
+   bucket-policy actions, which a service key holds and no statement may carry.
 
 A bucket lifecycle feed is a request, and the design does not depend on it.
 
@@ -466,13 +471,11 @@ depends on it.
    for a scoped member, both dark until a region declares `iam`.
 5. The per-network flip when a Hilt network ships the contract. The gateway
    ships before the management API, since it has to enforce the new action sets
-   before any key depends on them. The flip then retires every key on the
-   network, including the console's own credential, so the console mints a fresh
-   one per tenant, writes principals for existing members through the
-   provisioning sweep, writes a policy per bucket naming the org's Owners and
-   Admins, and changes the registry entry last. No key on the network works
-   between the management-API deploy and that entry, which is tolerable only
-   because Forge runs demo and dev today. `eu-central-3` and `us-east-9` flip on
+   before any key depends on them. Every existing key keeps working as a
+   service key through the flip, the console's own credential included. The
+   console writes principals for existing members through the provisioning
+   sweep, writes a policy per bucket naming the org's Owners and Admins, and
+   changes the registry entry last. `eu-central-3` and `us-east-9` flip on
    their own schedules. After the flip, Hilt availability gates membership
    writes for orgs with a tenant on that network.
 
