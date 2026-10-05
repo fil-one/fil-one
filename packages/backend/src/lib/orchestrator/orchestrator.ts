@@ -142,6 +142,7 @@ abstract class FilOneOrchestrator implements OrchestratorCore {
       id: config.id,
       stage: config.stage,
       region: config.region,
+      accessModel: config.accessModel,
     };
     this.tenantIdAttribute = `${config.id}TenantId`;
   }
