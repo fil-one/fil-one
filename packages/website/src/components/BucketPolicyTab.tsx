@@ -153,7 +153,7 @@ function usePolicyEditor(bucketName: string, region: S3Region) {
         toast.success('Policy removed');
         return;
       }
-      const document = { statement: draft.statements };
+      const document = { Statement: draft.statements };
       const written = await policy.save.mutateAsync({ policy: document, etag: draft.etag });
       draft.acceptSaved({ policy: document, etag: written.etag });
       toast.success('Policy saved');
@@ -223,7 +223,7 @@ function PolicyBody({
         <div className="flex flex-col gap-3">
           {draft.statements.map((statement, index) => (
             <PolicyStatementCard
-              key={`${statement.sid ?? 'statement'}-${index}`}
+              key={`${statement.Sid ?? 'statement'}-${index}`}
               statement={statement}
               index={index}
               memberName={memberName}
