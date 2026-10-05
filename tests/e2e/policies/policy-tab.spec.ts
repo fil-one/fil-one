@@ -169,9 +169,9 @@ test('U4. editing a statement widens the grant', async ({ page }) => {
   await submitStatement(page);
   await savePolicy(page);
 
-  expect((await owner.readPolicy(bucket)).policy.Statement[1]).toEqual(
-    allow([memberId], ['s3:ListBucket', 's3:PutObject'], 'member-read'),
-  );
+  expect(
+    (await owner.readPolicy(bucket)).policy.Statement.find((st) => st.Sid === 'member-read'),
+  ).toEqual(allow([memberId], ['s3:ListBucket', 's3:PutObject'], 'member-read'));
   expect(await outcome(putObject(await freshS3(member), bucket, 'member-write.txt'))).toBe('ok');
 });
 
@@ -203,9 +203,9 @@ test('U6. a deny for everyone warns, locks the owner out, and can be undone', as
   await expect(page.getByTestId('policy-denies-everyone')).toBeVisible();
   await savePolicy(page);
 
-  expect((await owner.readPolicy(bucket)).policy.Statement.at(-1)).toEqual(
-    deny('*', ['s3:*'], 'lockdown'),
-  );
+  expect(
+    (await owner.readPolicy(bucket)).policy.Statement.find((st) => st.Sid === 'lockdown'),
+  ).toEqual(deny('*', ['s3:*'], 'lockdown'));
   expect(await outcome(listObjects(await freshS3(owner), bucket))).toBe('404 NoSuchBucket');
 
   await chooseStatementAction(page, 'lockdown', 'remove');
@@ -224,9 +224,9 @@ test('U7. a statement may take a name starting with filone-', async ({ page }) =
   await submitStatement(page);
   await savePolicy(page);
 
-  expect((await owner.readPolicy(bucket)).policy.Statement.at(-1)).toEqual(
-    allow([memberId], ['s3:ListBucket'], 'filone-x'),
-  );
+  expect(
+    (await owner.readPolicy(bucket)).policy.Statement.find((st) => st.Sid === 'filone-x'),
+  ).toEqual(allow([memberId], ['s3:ListBucket'], 'filone-x'));
 });
 
 test('U8. a statement needs a principal and an action', async ({ page }) => {
@@ -293,7 +293,9 @@ test('U11. a save that lost to another writer shows the conflict and reloads', a
   await submitStatement(page);
   await page.locator('#policy-save-button').click();
   await expect(page.getByTestId('policy-conflict')).toBeVisible();
-  expect((await owner.readPolicy(bucket)).policy).toEqual({ Statement: theirs });
+  expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
+    canonical({ Statement: theirs }),
+  );
 
   await page.locator('#policy-reload-button').click();
   await expect(page.getByTestId('policy-conflict')).toBeHidden();
