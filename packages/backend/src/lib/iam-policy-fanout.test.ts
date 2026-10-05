@@ -40,7 +40,7 @@ const orgProfile = { pk: { S: `ORG#${ORG_ID}` } };
 const roster = { owners: ['owner-1'], admins: ['admin-1'] };
 
 const team: BucketPolicy = {
-  statement: [{ sid: 'team', effect: 'allow', principal: ['member-1'], action: ['s3:GetObject'] }],
+  Statement: [{ Sid: 'team', Effect: 'Allow', Principal: ['member-1'], Action: ['s3:GetObject'] }],
 };
 
 beforeEach(() => {
@@ -86,14 +86,14 @@ describe('syncRosterStatements', () => {
       { region: S3Region.UsEast9, bucketsReached: 2, bucketsFailed: [] },
     ]);
     const photos = iam.policies.get(TENANT)!.get('photos')!.policy;
-    expect(photos.statement.map((s) => s.sid)).toStrictEqual([
+    expect(photos.Statement.map((s) => s.Sid)).toStrictEqual([
       ROSTER_OWNERS_SID,
       ROSTER_ADMINS_SID,
       'team',
     ]);
-    expect(photos.statement[0]!.principal).toStrictEqual(['owner-1']);
+    expect(photos.Statement[0]!.Principal).toStrictEqual(['owner-1']);
     // A bucket with no policy gets one holding the roster alone.
-    expect(iam.policies.get(TENANT)!.get('backups')!.policy.statement).toHaveLength(2);
+    expect(iam.policies.get(TENANT)!.get('backups')!.policy.Statement).toHaveLength(2);
     // The members the statements name were synced first.
     expect(iam.principals.get(TENANT)!.has('owner-1')).toBe(true);
   });
@@ -111,8 +111,8 @@ describe('syncRosterStatements', () => {
 
   it('deletes a policy the roster emptied and reports a bucket a write could not reach', async () => {
     iam.seedPolicy(TENANT, 'photos', {
-      statement: [
-        { sid: ROSTER_OWNERS_SID, effect: 'allow', principal: ['owner-1'], action: ['s3:*'] },
+      Statement: [
+        { Sid: ROSTER_OWNERS_SID, Effect: 'Allow', Principal: ['owner-1'], Action: ['s3:*'] },
       ],
     });
     iam.failNext('getBucketPolicy', new Error('vendor down'));
