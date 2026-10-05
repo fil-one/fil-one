@@ -96,7 +96,7 @@ const ACCESS_KEY = {
 /** Route each of the page's reads by its path; the object listing is stubbed out. */
 const POLICY = {
   policy: {
-    statement: [{ sid: 'team', effect: 'allow', principal: ['user-1'], action: ['s3:*'] }],
+    Statement: [{ Sid: 'team', Effect: 'Allow', Principal: ['user-1'], Action: ['s3:*'] }],
   },
   etag: '"v1"',
 };

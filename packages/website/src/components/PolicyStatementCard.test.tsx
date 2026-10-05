@@ -38,9 +38,9 @@ describe('PolicyStatementCard', () => {
 
   it('colours action groups by risk', () => {
     renderCard({
-      effect: 'allow',
-      principal: ['a'],
-      action: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
+      Effect: 'Allow',
+      Principal: ['a'],
+      Action: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
     });
 
     expect(screen.getByTestId('policy-actions-read').className).toContain('brand');
