@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { PrincipalNotFoundError } from '../lib/errors.ts';
+import { PolicyValidationError, PrincipalNotFoundError } from '../lib/errors.ts';
 import { FakeIamOrchestrator } from './fake-iam-orchestrator.ts';
 
 describe('FakeIamOrchestrator principal reads', () => {
@@ -36,5 +36,15 @@ describe('FakeIamOrchestrator policy writes', () => {
     } as never);
     await fake.removeMember('t1', 'u1');
     expect((await fake.getBucketPolicy('t1', 'photos'))?.etag).toBe(etag);
+  });
+
+  it('refuses a policy naming an unknown principal as a malformed policy, as Hilt does', async () => {
+    const fake = new FakeIamOrchestrator();
+    const policy = {
+      Statement: [{ Effect: 'Allow', Principal: ['ghost'], Action: ['s3:GetObject'] }],
+    } as never;
+    await expect(
+      fake.putBucketPolicy('t1', 'photos', policy, { ifNoneMatch: '*' }),
+    ).rejects.toBeInstanceOf(PolicyValidationError);
   });
 });
