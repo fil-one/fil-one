@@ -15,7 +15,7 @@ vi.mock('sst', () => ({
   },
 }));
 
-import { updateCustomerMetadata } from './stripe-client.js';
+import { updateCustomerMetadata } from './stripe-client.ts';
 
 describe('updateCustomerMetadata', () => {
   beforeEach(() => {

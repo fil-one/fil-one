@@ -1,4 +1,4 @@
-import { instrumentApiClient, type InstrumentableClient } from '../api-client-metrics.js';
+import { instrumentApiClient, type InstrumentableClient } from '../api-client-metrics.ts';
 
 export type AuroraApiName = 'aurora-portal' | 'aurora-backoffice';
 

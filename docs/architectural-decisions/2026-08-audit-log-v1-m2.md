@@ -423,6 +423,16 @@ record of an export nobody received. Treating response delivery as an external s
 effect and giving the type the two-phase shape would close that gap. Nothing acts
 on the distinction, so the type stays single-phase.
 
+### Addendum, 2026-09-14: `key.rotated`
+
+Key rotation (FIL-1018) adds `key.rotated`, two-phase like `key.created` and for
+the same reason: the replacement is minted at the vendor before anything local is
+written. It is its own type rather than a second `key.created` so the log says a
+key was rotated, instead of leaving the reader to pair a create with a revoke a
+second apart. The intent carries `replacedKeyIdSuffix` and the completion
+`keyIdSuffix`; the key being replaced is then revoked under its own `key.deleted`
+with reason `rotation`, so a rotation is that pair plus that one.
+
 ## 10. Lifecycle
 
 Account deletion destroys the org's audit partition. `deletion-scrub.ts` gains

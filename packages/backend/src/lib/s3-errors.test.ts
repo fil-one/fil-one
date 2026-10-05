@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { NoSuchBucket } from '@aws-sdk/client-s3';
-import { isNoSuchBucketError } from './s3-errors.js';
+import { isNoSuchBucketError } from './s3-errors.ts';
 
 describe('isNoSuchBucketError', () => {
   it('returns true for a NoSuchBucket error from the SDK', () => {

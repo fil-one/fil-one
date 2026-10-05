@@ -1,11 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { TransactionCanceledException } from '@aws-sdk/client-dynamodb';
 import { OrgRole } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
-import { OrgKeys } from './org-membership.js';
+import { OrgKeys } from './org-membership.ts';
 import {
   cancelledLabels,
   creatorRoleStillMintsCheck,
@@ -15,7 +15,7 @@ import {
   ownerCountDeltaFor,
   ownerCountItem,
   roleChangeItems,
-} from './membership-changes.js';
+} from './membership-changes.ts';
 
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
 const USER_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';

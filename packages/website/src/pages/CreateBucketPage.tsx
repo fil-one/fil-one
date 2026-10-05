@@ -15,7 +15,12 @@ import {
   DOCS_URL,
   getRegionLabel,
 } from '@filone/shared';
-import type { CreateBucketResponse, RetentionMode, RetentionDurationType } from '@filone/shared';
+import type {
+  CreateBucketResponse,
+  RetentionMode,
+  RetentionDurationType,
+  S3Region,
+} from '@filone/shared';
 import { apiRequest, createAccessKey } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
 
@@ -48,7 +53,7 @@ export function CreateBucketPage() {
 
   // Bucket fields
   const [bucketName, setBucketName] = useState('');
-  const [region, setRegion] = useState(S3_REGION);
+  const [region, setRegion] = useState<S3Region>(S3_REGION);
 
   // Object settings
   const [versioning, setVersioning] = useState(false);

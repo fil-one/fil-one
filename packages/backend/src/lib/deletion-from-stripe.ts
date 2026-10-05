@@ -1,7 +1,7 @@
-import { invokeAccountDeletionWorker } from './account-deletion-invoke.js';
-import { resolveOrgIdFromSubscription } from './billing-org-lookup.js';
-import { commitStripeTriggeredDeletion } from './deletion-confirm-transaction.js';
-import { customerSuperseded } from './billing-identity.js';
+import { invokeAccountDeletionWorker } from './account-deletion-invoke.ts';
+import { resolveOrgIdFromSubscription } from './billing-org-lookup.ts';
+import { commitStripeTriggeredDeletion } from './deletion-confirm-transaction.ts';
+import { customerSuperseded } from './billing-identity.ts';
 
 const LOG = '[deletion-from-stripe]';
 

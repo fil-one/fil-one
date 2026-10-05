@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildZip } from './test-fixtures.js';
-import { readZip } from './zip.js';
+import { buildZip } from './test-fixtures.ts';
+import { readZip } from './zip.ts';
 
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 

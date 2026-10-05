@@ -9,11 +9,11 @@ import type {
   OrgRole,
 } from '@filone/shared';
 import { Resource } from 'sst';
-import { readAccessKeyMintSeq } from './access-key-mint-seq.js';
-import type { KeyMintFence } from './access-key-mint-seq.js';
-import { getDynamoClient } from './ddb-client.js';
-import { AccessKeyKeys } from './dynamo-records.js';
-import type { AccessKeyRecord } from './dynamo-records.js';
+import { readAccessKeyMintSeq } from './access-key-mint-seq.ts';
+import type { KeyMintFence } from './access-key-mint-seq.ts';
+import { getDynamoClient } from './ddb-client.ts';
+import { AccessKeyKeys, DEFAULT_ACCESS_KEY_REGION } from './dynamo-records.ts';
+import type { AccessKeyRecord } from './dynamo-records.ts';
 
 /**
  * An org's access-key rows, and which of them a member could still mint.
@@ -195,9 +195,7 @@ function toMemberAccessKey(record: Partial<AccessKeyRecord>): MemberAccessKey {
   return {
     id: sk.slice(AccessKeyKeys.keySkPrefix().length),
     keyName: record.keyName ?? '',
-    // Rows written before multi-region routing carry no region. Those predate
-    // FTH, so they belong to Aurora.
-    region: record.region ?? S3Region.EuWest1,
+    region: record.region ?? DEFAULT_ACCESS_KEY_REGION,
     createdAt: record.createdAt ?? '',
     ...(record.accessKeyId ? { accessKeyId: record.accessKeyId } : {}),
     ...(record.createdBy ? { createdBy: record.createdBy } : {}),

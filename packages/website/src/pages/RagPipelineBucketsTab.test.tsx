@@ -33,7 +33,7 @@ function bucket(over: Partial<RagBucket> = {}): RagBucket {
   };
 }
 
-function renderTab(buckets: RagBucket[], role = OrgRole.Owner) {
+function renderTab(buckets: RagBucket[], role: OrgRole = OrgRole.Owner) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   // Index / Stop-indexing are gated on the bucket permissions, so the caller's
   // role has to be in the cache before the rows render.

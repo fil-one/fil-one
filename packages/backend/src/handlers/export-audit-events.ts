@@ -3,17 +3,17 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ApiErrorCode, AUDIT_EXPORT_MAX_BYTES, AUDIT_EXPORT_MAX_ROWS } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
-import { auditEvent, AuditSubjects, appendAuditEvent, userActor } from '../lib/audit.js';
-import { reportAuditQuery } from '../lib/audit-metrics.js';
-import { auditEventsToCsv } from '../lib/audit-csv.js';
-import { queryAllAuditEvents } from '../lib/audit-query.js';
-import { AuditFilterError, parseAuditRequest } from '../lib/audit-request.js';
-import { csvResponse, ResponseBuilder } from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+import { auditEvent, AuditSubjects, appendAuditEvent, userActor } from '../lib/audit.ts';
+import { reportAuditQuery } from '../lib/audit-metrics.ts';
+import { auditEventsToCsv } from '../lib/audit-csv.ts';
+import { queryAllAuditEvents } from '../lib/audit-query.ts';
+import { AuditFilterError, parseAuditRequest } from '../lib/audit-request.ts';
+import { csvResponse, ResponseBuilder } from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 
 /**
  * GET /api/audit/export — the same filters as the viewer, as a CSV.

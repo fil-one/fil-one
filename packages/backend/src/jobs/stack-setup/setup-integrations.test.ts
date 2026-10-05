@@ -44,7 +44,7 @@ const mockFetch =
   vi.fn<(url: string, init?: Omit<RequestInit, 'body'> & { body?: string }) => Promise<Response>>();
 vi.stubGlobal('fetch', mockFetch);
 
-import { handler } from './setup-integrations.js';
+import { handler } from './setup-integrations.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -27,8 +27,8 @@ import {
   finalizeJob,
   getBulkDeleteJob,
   toApiJob,
-} from './bulk-delete-jobs.js';
-import type { BulkDeleteJobRecord } from './dynamo-records.js';
+} from './bulk-delete-jobs.ts';
+import type { BulkDeleteJobRecord } from './dynamo-records.ts';
 
 const ddbMock = mockClient(DynamoDBClient);
 

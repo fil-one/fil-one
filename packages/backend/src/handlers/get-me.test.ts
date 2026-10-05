@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, GetItemCommand, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 import { OrgRole, ROLE_PERMISSIONS } from '@filone/shared';
-import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.ts';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -11,7 +12,7 @@ import { sstResourceMock } from '../test/sst-resource-mock.js';
 
 vi.mock('sst', () => sstResourceMock());
 
-vi.mock('../lib/auth-secrets.js', () => ({
+vi.mock('../lib/auth-secrets.ts', () => ({
   getAuthSecrets: () => ({
     AUTH0_CLIENT_ID: 'test-client-id',
     AUTH0_CLIENT_SECRET: 'test-client-secret',
@@ -20,7 +21,7 @@ vi.mock('../lib/auth-secrets.js', () => ({
 
 const mockGetMfaEnrollments = vi.fn();
 const mockGetPasskeyAuthenticators = vi.fn();
-vi.mock('../lib/auth0-management.js', async (importOriginal) => {
+vi.mock('../lib/auth0-management.ts', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
@@ -41,14 +42,15 @@ const ddbMock = mockClient(DynamoDBClient);
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
-import { handler } from './get-me.js';
+import { handler } from './get-me.ts';
 import {
   buildEvent,
   buildContext,
   stubAbsentMembershipRead,
   stubMembershipList,
   stubMembershipRead,
-} from '../test/lambda-test-utilities.js';
+  STUB_JOINED_AT,
+} from '../test/lambda-test-utilities.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -68,7 +70,11 @@ function authenticatedEvent(queryStringParameters?: Record<string, string>) {
 }
 
 /** The `ORG#{orgId}/PROFILE` row `/me` names the org from. */
-function profileResolves(orgId: string = MOCK_ORG_ID, name = 'Example Corp') {
+function profileResolves(
+  orgId: string = MOCK_ORG_ID,
+  name = 'Example Corp',
+  extra: Record<string, AttributeValue> = {},
+) {
   ddbMock
     .on(GetItemCommand, {
       TableName: 'UserInfoTable',
@@ -80,6 +86,7 @@ function profileResolves(orgId: string = MOCK_ORG_ID, name = 'Example Corp') {
         sk: { S: 'PROFILE' },
         name: { S: name },
         auroraSetupStatus: { S: FINAL_SETUP_STATUS },
+        ...extra,
       },
     });
 }
@@ -90,8 +97,9 @@ function ownerTail(orgName: string) {
     userId: MOCK_USER_ID,
     role: OrgRole.Owner,
     permissions: [...ROLE_PERMISSIONS[OrgRole.Owner]],
-    memberships: [{ orgId: MOCK_ORG_ID, orgName, role: OrgRole.Owner }],
+    memberships: [{ orgId: MOCK_ORG_ID, orgName, role: OrgRole.Owner, joinedAt: STUB_JOINED_AT }],
     orgsBeta: false,
+    billingActive: true,
   };
 }
 
@@ -160,6 +168,13 @@ describe('GET /api/me handler', () => {
       .on(GetItemCommand, { TableName: 'UserInfoTable', Key: { sk: { S: 'ORGS_BETA' } } })
       .resolves({ Item: undefined });
 
+    // Default: the org has an active subscription, so `billingActive` does not
+    // become the thing every unrelated test in this file has to reason about.
+    // The `billingActive` describe block below overrides this per case.
+    ddbMock
+      .on(GetItemCommand, { TableName: 'BillingTable' })
+      .resolves({ Item: { subscriptionStatus: { S: 'active' } } });
+
     // Default membership: sole Owner of the one org, as every account is today.
     stubMembershipRead(ddbMock, {
       orgId: MOCK_ORG_ID,
@@ -182,6 +197,7 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
+        nameConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         mfaEnrollments: [],
@@ -190,6 +206,65 @@ describe('GET /api/me handler', () => {
         ...ownerTail('Example Corp'),
       }),
     });
+  });
+
+  // A database account's picture is Gravatar with Auth0's placeholder behind it.
+  it('shows no picture that is neither our upload nor its provider’s photo', async () => {
+    profileResolves();
+    mockJwtVerify.mockResolvedValue({
+      payload: {
+        sub: MOCK_SUB,
+        email: MOCK_EMAIL,
+        email_verified: true,
+        picture: 'https://s.gravatar.com/avatar/abc',
+      },
+    });
+
+    const result = await handler(authenticatedEvent(), buildContext());
+
+    expect(JSON.parse((result as { body: string }).body)).not.toHaveProperty('picture');
+  });
+
+  it('reads the active org profile consistently, so a just-created org is never named empty', async () => {
+    profileResolves();
+
+    await handler(authenticatedEvent(), buildContext());
+
+    // Other code paths (e.g. the deletion fence) read this same row without
+    // consistency, on purpose — so this checks that at least one read of it
+    // was consistent, the one `/me` itself makes to name the org, rather than
+    // asserting every read of the key was.
+    const profileReads = ddbMock
+      .commandCalls(GetItemCommand)
+      .filter(
+        (call) =>
+          call.args[0].input.TableName === 'UserInfoTable' &&
+          call.args[0].input.Key?.pk?.S === `ORG#${MOCK_ORG_ID}` &&
+          call.args[0].input.Key?.sk?.S === 'PROFILE',
+      );
+    expect(profileReads.some((call) => call.args[0].input.ConsistentRead === true)).toBe(true);
+  });
+
+  it('says when the active org is a floor org', async () => {
+    profileResolves(MOCK_ORG_ID, 'Example Corp', {
+      nameConfirmed: { BOOL: false },
+      floorOrg: { BOOL: true },
+    });
+
+    const result = await handler(authenticatedEvent(), buildContext());
+
+    expect(JSON.parse((result as { body: string }).body)).toMatchObject({
+      nameConfirmed: false,
+      floorOrg: true,
+    });
+  });
+
+  it('leaves floorOrg off for any other org', async () => {
+    profileResolves();
+
+    const result = await handler(authenticatedEvent(), buildContext());
+
+    expect(JSON.parse((result as { body: string }).body)).not.toHaveProperty('floorOrg');
   });
 
   it('returns 200 with emailVerified false for unverified users (verified-email gate opt-out)', async () => {
@@ -205,6 +280,7 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
+        nameConfirmed: true,
         emailVerified: false,
         email: MOCK_EMAIL,
         mfaEnrollments: [],
@@ -230,6 +306,7 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: '',
+        nameConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         mfaEnrollments: [],
@@ -273,6 +350,7 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
+        nameConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         mfaEnrollments: [
@@ -310,6 +388,7 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
+        nameConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         mfaEnrollments: [],
@@ -357,6 +436,7 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
+        nameConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         mfaEnrollments: [],
@@ -433,7 +513,12 @@ describe('GET /api/me handler', () => {
         userId: string;
         role: OrgRole;
         permissions: string[];
-        memberships: Array<{ orgId: string; orgName: string; role: OrgRole }>;
+        memberships: Array<{
+          orgId: string;
+          orgName: string;
+          role: OrgRole;
+          joinedAt?: string;
+        }>;
       };
     }
 
@@ -455,7 +540,12 @@ describe('GET /api/me handler', () => {
       expect(body.role).toBe(OrgRole.ReadOnly);
       expect(body.permissions).toStrictEqual([...ROLE_PERMISSIONS[OrgRole.ReadOnly]]);
       expect(body.memberships).toStrictEqual([
-        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', role: OrgRole.ReadOnly },
+        {
+          orgId: MOCK_ORG_ID,
+          orgName: 'Example Corp',
+          role: OrgRole.ReadOnly,
+          joinedAt: STUB_JOINED_AT,
+        },
       ]);
     });
 
@@ -474,8 +564,18 @@ describe('GET /api/me handler', () => {
       const body = parseBody(await handler(authenticatedEvent(), buildContext()));
 
       expect(body.memberships).toStrictEqual([
-        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', role: OrgRole.Owner },
-        { orgId: secondOrgId, orgName: 'Second Corp', role: OrgRole.Member },
+        {
+          orgId: MOCK_ORG_ID,
+          orgName: 'Example Corp',
+          role: OrgRole.Owner,
+          joinedAt: STUB_JOINED_AT,
+        },
+        {
+          orgId: secondOrgId,
+          orgName: 'Second Corp',
+          role: OrgRole.Member,
+          joinedAt: STUB_JOINED_AT,
+        },
       ]);
     });
 
@@ -516,8 +616,18 @@ describe('GET /api/me handler', () => {
 
       expect((result as { statusCode: number }).statusCode).toBe(200);
       expect(parseBody(result).memberships).toStrictEqual([
-        { orgId: MOCK_ORG_ID, orgName: 'Example Corp', role: OrgRole.Owner },
-        { orgId: secondOrgId, orgName: '', role: OrgRole.Member },
+        {
+          orgId: MOCK_ORG_ID,
+          orgName: 'Example Corp',
+          role: OrgRole.Owner,
+          joinedAt: STUB_JOINED_AT,
+        },
+        {
+          orgId: secondOrgId,
+          orgName: '',
+          role: OrgRole.Member,
+          joinedAt: STUB_JOINED_AT,
+        },
       ]);
       consoleError.mockRestore();
     });
@@ -648,6 +758,90 @@ describe('GET /api/me handler', () => {
       const result = await handler(authenticatedEvent(), buildContext());
 
       expect(parseBody(result).orgsBeta).toBe(true);
+    });
+  });
+
+  describe('billingActive', () => {
+    function parseBody(result: unknown): { billingActive: boolean } {
+      return JSON.parse((result as { body: string }).body) as { billingActive: boolean };
+    }
+
+    // The gate re-reads `/me` right after an activation; a stale replica would
+    // answer `false` and keep an entitled caller blocked.
+    it('reads the subscription consistently', async () => {
+      profileResolves();
+
+      await handler(authenticatedEvent(), buildContext());
+
+      const billingReads = ddbMock
+        .commandCalls(GetItemCommand)
+        .filter((call) => call.args[0].input.TableName === 'BillingTable');
+      expect(billingReads.length).toBeGreaterThan(0);
+      expect(billingReads.every((call) => call.args[0].input.ConsistentRead === true)).toBe(true);
+    });
+
+    it('is true for an active subscription (the suite default)', async () => {
+      profileResolves();
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).billingActive).toBe(true);
+    });
+
+    it('is true while trialing', async () => {
+      profileResolves();
+      ddbMock
+        .on(GetItemCommand, { TableName: 'BillingTable' })
+        .resolves({ Item: { subscriptionStatus: { S: 'trialing' } } });
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).billingActive).toBe(true);
+    });
+
+    it('is false when the org has never had a plan', async () => {
+      profileResolves();
+      ddbMock.on(GetItemCommand, { TableName: 'BillingTable' }).resolves({});
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).billingActive).toBe(false);
+    });
+
+    it('is false for a record with no subscription status yet', async () => {
+      // The customer-mapping-only row `create-setup-intent` leaves behind when
+      // somebody opens the payment modal and closes it.
+      profileResolves();
+      ddbMock
+        .on(GetItemCommand, { TableName: 'BillingTable' })
+        .resolves({ Item: { stripeCustomerId: { S: 'cus_123' } } });
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).billingActive).toBe(false);
+    });
+
+    it('is false for a record explicitly marked inactive', async () => {
+      profileResolves();
+      ddbMock
+        .on(GetItemCommand, { TableName: 'BillingTable' })
+        .resolves({ Item: { subscriptionStatus: { S: 'inactive' } } });
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).billingActive).toBe(false);
+    });
+
+    it('does not attempt to claim a trial — a plain read, not a write', async () => {
+      // `/me` runs before any page has had the chance to make its own billing
+      // call, on every navigation. Claiming here too would spend a Stripe round
+      // trip on every caller of `/me`, not just the gate page that needs it.
+      profileResolves();
+      ddbMock.on(GetItemCommand, { TableName: 'BillingTable' }).resolves({});
+
+      await handler(authenticatedEvent(), buildContext());
+
+      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
     });
   });
 });

@@ -1,9 +1,9 @@
 import { SubscriptionStatus } from '@filone/shared';
-import { reportMetric } from '../lib/metrics.js';
-import { getOrgProfile, isOrgDeletedOrDeleting, type OrgProfileItem } from '../lib/org-profile.js';
-import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.js';
-import type { ServiceOrchestrator } from '../lib/service-orchestrator.js';
-import { scanSubscriptions } from '../lib/subscription-store.js';
+import { reportMetric } from '../lib/metrics.ts';
+import { getOrgProfile, isOrgDeletedOrDeleting, type OrgProfileItem } from '../lib/org-profile.ts';
+import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.ts';
+import type { ServiceOrchestrator } from '../lib/service-orchestrator.ts';
+import { scanSubscriptions } from '../lib/subscription-store.ts';
 
 interface ActiveCandidate {
   pk: string;

@@ -212,6 +212,12 @@ function setupMetricStreamPipeline(grafanaPrometheusAuth: sst.Secret) {
     roleArn: metricStreamRole.arn,
     firehoseArn: firehose.arn,
     outputFormat: 'opentelemetry1.0',
+    // fil-forge/infra-central deploys into these same accounts and relies on
+    // AWS/Lambda and AWS/DynamoDB staying in this list: its own metric stream
+    // deliberately omits them to avoid shipping every sample twice. Remove or
+    // narrow either namespace here only together with a change there. See
+    // infra-central's docs/decisions/2026-09-grafana-telemetry.md and
+    // terraform/modules/telemetry.
     includeFilters: [
       { namespace: 'AWS/Lambda', metricNames: [] },
       { namespace: 'AWS/ApiGateway', metricNames: [] },

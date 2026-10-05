@@ -1,19 +1,19 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { ApiErrorCode, S3_REGION } from '@filone/shared';
+import { ApiErrorCode, isSupportedRegion, S3_REGION } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
-import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
-import { BucketNotEmptyError } from '../lib/errors.js';
-import { getOrgProfile } from '../lib/org-profile.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { csrfMiddleware } from '../middleware/csrf.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import { BucketNotEmptyError } from '../lib/errors.ts';
+import { getOrgProfile } from '../lib/org-profile.ts';
+import { ResponseBuilder, unsupportedRegionResponse } from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { csrfMiddleware } from '../middleware/csrf.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
+import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
 
 export async function baseHandler(
   event: AuthenticatedEvent,
@@ -28,7 +28,15 @@ export async function baseHandler(
 
   const { orgId } = getUserInfo(event);
 
-  const orchestrator = getOrchestratorForRegion(S3_REGION);
+  // The bucket's own region, as every other bucket-addressed route reads it.
+  // Hardcoding the default sent every delete to Aurora: a bucket in another
+  // region answered `Forbidden` there, and an org with no Aurora tenant was
+  // told its setup was incomplete for a region it had not asked about.
+  const region = event.queryStringParameters?.region ?? S3_REGION;
+  if (!isSupportedRegion(region, process.env.FILONE_STAGE!)) {
+    return unsupportedRegionResponse(region);
+  }
+  const orchestrator = getOrchestratorForRegion(region);
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) {
     return new ResponseBuilder()

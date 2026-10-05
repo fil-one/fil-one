@@ -26,7 +26,7 @@ vi.mock('@filone/aurora-portal-client', () => ({
   deleteS3AccessKey: (options: Record<string, unknown>) => mockDeleteAccessKey(options),
 }));
 
-vi.mock('./aurora-api-metrics.js', () => ({
+vi.mock('./aurora-api-metrics.ts', () => ({
   instrumentClient: vi.fn(),
 }));
 
@@ -40,13 +40,14 @@ import {
   createAuroraAccessKey,
   createAuroraBucket,
   createPortalClient,
+  deleteAuroraAccessKey,
   deleteAuroraBucket,
   findAuroraAccessKeyByName,
   getAuroraPortalApiKey,
   _resetSsmCacheForTesting,
-} from './aurora-portal.js';
-import { instrumentClient } from './aurora-api-metrics.js';
-import { AccessKeyAlreadyExistsError, BucketNotEmptyError } from '../errors.js';
+} from './aurora-portal.ts';
+import { instrumentClient } from './aurora-api-metrics.ts';
+import { AccessKeyAlreadyExistsError, BucketNotEmptyError } from '../errors.ts';
 import { ACCESS_KEY_PERMISSIONS } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
@@ -785,4 +786,156 @@ describe('findAuroraAccessKeyByName', () => {
       findAuroraAccessKeyByName({ tenantId: 'tenant-1', keyName: 'my-key' }),
     ).rejects.toThrow('Failed to get Aurora access key "key-2" for tenant tenant-1');
   });
+});
+
+describe('signal forwarding', () => {
+  // The caller's deadline. Never aborted here: these tests check it reaches the
+  // portal request, not what happens when it fires.
+  const signal = new AbortController().signal;
+  const accessKeyDetail = {
+    id: 'key-1',
+    accessKeyId: 'AKIA',
+    accessKeySecret: 'secret',
+    createdAt: '2026-01-01T00:00:00Z',
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ssmMock.reset();
+    _resetSsmCacheForTesting();
+    setupSsmMock();
+  });
+
+  const cases: Array<{
+    name: string;
+    run: () => Promise<unknown>;
+    mocks: Array<{ mock: { calls: unknown[][] } }>;
+  }> = [
+    {
+      name: 'createAuroraBucket',
+      run: () => {
+        mockPostBucket.mockResolvedValue({ error: undefined });
+        return createAuroraBucket({ tenantId: 't', bucketName: 'b', signal });
+      },
+      mocks: [mockPostBucket],
+    },
+    {
+      name: 'createAuroraAccessKey',
+      run: () => {
+        mockPostAccessKeys.mockResolvedValue({
+          data: { accessKey: accessKeyDetail },
+          error: undefined,
+        });
+        return createAuroraAccessKey({
+          tenantId: 't',
+          keyName: 'k',
+          permissions: ['read'],
+          signal,
+        });
+      },
+      mocks: [mockPostAccessKeys],
+    },
+    {
+      name: 'findAuroraAccessKeyByName',
+      run: () => {
+        mockGetAccessKeys.mockResolvedValue({
+          data: { items: [{ id: 'key-1', name: 'k' }] },
+          error: undefined,
+        });
+        mockGetAccessKeyById.mockResolvedValue({
+          data: { accessKey: accessKeyDetail },
+          error: undefined,
+        });
+        return findAuroraAccessKeyByName({ tenantId: 't', keyName: 'k', signal });
+      },
+      mocks: [mockGetAccessKeys, mockGetAccessKeyById],
+    },
+    {
+      name: 'deleteAuroraAccessKey',
+      run: () => {
+        mockDeleteAccessKey.mockResolvedValue({ error: undefined });
+        return deleteAuroraAccessKey({ tenantId: 't', auroraKeyId: 'key-1', signal });
+      },
+      mocks: [mockDeleteAccessKey],
+    },
+    {
+      name: 'deleteAuroraBucket',
+      run: () => {
+        mockDeleteBucket.mockResolvedValue({ error: undefined });
+        return deleteAuroraBucket({ tenantId: 't', bucketName: 'b', signal });
+      },
+      mocks: [mockDeleteBucket],
+    },
+  ];
+
+  for (const { name, run, mocks } of cases) {
+    it(`${name} passes the caller's signal to every portal request`, async () => {
+      await run();
+
+      const firstArgs = mocks.map((m) => m.mock.calls[0]?.[0]);
+      expect(firstArgs).toEqual(mocks.map(() => expect.objectContaining({ signal })));
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Portal API-key lookup cancellation
+// ---------------------------------------------------------------------------
+
+describe('portal wrappers signal forwarding', () => {
+  const signal = new AbortController().signal;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ssmMock.reset();
+    _resetSsmCacheForTesting();
+    setupSsmMock();
+    mockPostBucket.mockResolvedValue({});
+    mockDeleteBucket.mockResolvedValue({});
+    mockDeleteAccessKey.mockResolvedValue({});
+    mockGetAccessKeys.mockResolvedValue({ data: { items: [] } });
+    mockPostAccessKeys.mockResolvedValue({
+      data: {
+        accessKey: {
+          id: 'k',
+          accessKeyId: 'AK',
+          accessKeySecret: 'secret',
+          createdAt: '2026-01-01T00:00:00Z',
+        },
+      },
+    });
+  });
+
+  // aws-sdk-client-mock types `args` as the one-element `[command]` tuple,
+  // but the recorded sinon call carries every argument `send` received.
+  const sentOptions = () =>
+    (ssmMock.commandCalls(GetParameterCommand)[0] as unknown as { args: unknown[] }).args[1];
+
+  // The API key comes from SSM before any portal request goes out, so a cold
+  // cache must not outlive the caller's deadline either.
+  const cases: Record<string, () => Promise<unknown>> = {
+    createAuroraBucket: () =>
+      createAuroraBucket({ tenantId: 'tenant-1', bucketName: 'my-bucket', signal }),
+    createAuroraAccessKey: () =>
+      createAuroraAccessKey({
+        tenantId: 'tenant-1',
+        keyName: 'my-key',
+        permissions: [...ACCESS_KEY_PERMISSIONS],
+        signal,
+      }),
+    findAuroraAccessKeyByName: () =>
+      findAuroraAccessKeyByName({ tenantId: 'tenant-1', keyName: 'my-key', signal }),
+    deleteAuroraAccessKey: () =>
+      deleteAuroraAccessKey({ tenantId: 'tenant-1', auroraKeyId: 'k', signal }),
+    deleteAuroraBucket: () =>
+      deleteAuroraBucket({ tenantId: 'tenant-1', bucketName: 'my-bucket', signal }),
+  };
+
+  for (const [name, run] of Object.entries(cases)) {
+    it(`${name} forwards the signal to the SSM key lookup`, async () => {
+      await run();
+
+      expect(sentOptions()).toEqual({ abortSignal: signal });
+    });
+  }
 });

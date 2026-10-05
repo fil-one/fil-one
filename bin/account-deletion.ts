@@ -58,19 +58,15 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
+import {
+  BLOCKED_ATTEMPTS,
+  DELETION_STATUS,
+  DELETION_TRIGGER,
+} from '@filone/backend/src/lib/deletion-record.ts';
 import { execFileSync } from 'node:child_process';
 
 const USAGE =
   'Usage: node bin/account-deletion.ts <status|restart|start> <orgId> --stage <stage> [--dry-run] [--yes]';
-
-// Inlined from packages/backend/src/lib/deletion-record.ts — bin scripts must
-// not import from the backend or @filone/shared. Keep in sync.
-const DELETION_STATUS = { pending: 'PENDING', done: 'DONE' } as const;
-const OPERATOR_TRIGGER = 'OPERATOR';
-
-// Passes beyond which a teardown is not retrying but blocked — BLOCKED_ATTEMPTS
-// in packages/backend/src/jobs/account-deletion-sweeper.ts. Keep in sync.
-const BLOCKED_ATTEMPTS = 10;
 
 const command = process.argv[2];
 const orgId = process.argv[3];
@@ -177,7 +173,7 @@ async function runStart(): Promise<void> {
   const now = new Date().toISOString();
   const plan = [
     `PUT ORG#${orgId}/DELETION status=${DELETION_STATUS.pending} ` +
-      `trigger=${OPERATOR_TRIGGER} requestedAt=${now} attempts=0`,
+      `trigger=${DELETION_TRIGGER.operator} requestedAt=${now} attempts=0`,
     `SET ORG#${orgId}/PROFILE deleting=true updatedAt=${now}`,
   ];
 
@@ -210,7 +206,7 @@ async function commitDeletion(now: string): Promise<void> {
                 pk: `ORG#${orgId}`,
                 sk: 'DELETION',
                 status: DELETION_STATUS.pending,
-                trigger: OPERATOR_TRIGGER,
+                trigger: DELETION_TRIGGER.operator,
                 requestedAt: now,
                 attempts: 0,
                 updatedAt: now,

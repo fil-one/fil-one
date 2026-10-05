@@ -1,16 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { OrgRole } from './api/org.js';
+import { OrgRole } from './api/org.ts';
 import {
   ACCESS_KEY_PERMISSIONS,
   GRANULAR_PERMISSIONS,
   GRANULAR_PERMISSION_MAP,
-} from './api/access-keys.js';
+} from './api/access-keys.ts';
 import {
   ACCESS_KEY_PERMISSION_REQUIREMENT,
   GRANULAR_PERMISSION_REQUIREMENT,
   excessKeyPermissions,
   canRetainAccessKey,
-} from './access-key-permissions.js';
+} from './access-key-permissions.ts';
 
 /** The two granulars a key may carry only with `privileged.grant`. */
 const ELEVATED = ['PutObjectRetention', 'PutObjectLegalHold'];

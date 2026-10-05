@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { CreateBucketSchema, listBucketsUnavailableMessage } from './buckets.js';
-import { S3Region } from '../constants.js';
+import { CreateBucketSchema, listBucketsUnavailableMessage } from './buckets.ts';
+import { S3Region } from '../constants.ts';
 
 const validRetention = (
   overrides: Partial<{

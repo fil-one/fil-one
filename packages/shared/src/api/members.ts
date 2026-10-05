@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { OrgRole } from './org.js';
-import { InvitedRoleSchema } from './invitations.js';
-import type { OrgMembershipSource } from './org.js';
-import type { S3Region } from '../constants.js';
-import type { AccessKeyRevocationReason } from '../access-key-permissions.js';
+import { OrgRole } from './org.ts';
+import { InvitedRoleSchema } from './invitations.ts';
+import type { OrgMembershipSource } from './org.ts';
+import type { S3Region } from '../constants.ts';
+import type { AccessKeyRevocationReason } from '../access-key-permissions.ts';
 
 /**
  * Member management: the org's roster, the role each member holds, removal, and

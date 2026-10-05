@@ -1,10 +1,10 @@
 import { formatRegion } from '@filone/shared';
 import type { OrgRole, AccessKeySummary } from '@filone/shared';
 import validator from 'validator';
-import { sendMail } from './mailer.js';
-import type { OrgProfileItem } from './org-profile.js';
-import { readUserProfile } from './user-profile.js';
-import { withFallback } from './with-fallback.js';
+import { sendMail } from './mailer.ts';
+import type { OrgProfileItem } from './org-profile.ts';
+import { readUserProfile } from './user-profile.ts';
+import { withFallback } from './with-fallback.ts';
 
 /**
  * Tell a member which of their access keys stopped working.

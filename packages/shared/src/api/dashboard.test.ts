@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { ACTIVITY_ACTION_LABELS, getActivityActionLabel } from './dashboard.js';
+import { ACTIVITY_ACTION_LABELS, getActivityActionLabel } from './dashboard.ts';
 
 describe('getActivityActionLabel', () => {
   it('returns the mapped label for a known action', () => {

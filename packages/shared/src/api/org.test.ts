@@ -5,7 +5,7 @@ import {
   isOrgRole,
   ORG_NAME_MIN_LENGTH,
   ORG_NAME_MAX_LENGTH,
-} from './org.js';
+} from './org.ts';
 
 describe('isOrgRole', () => {
   it.each(Object.values(OrgRole))('accepts the stored value %s', (role) => {

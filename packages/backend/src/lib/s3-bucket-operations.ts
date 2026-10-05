@@ -13,20 +13,41 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import type { RetentionDurationType, RetentionMode, S3Object } from '@filone/shared';
-import { BucketAlreadyExistsError, BucketNotEmptyError } from './errors.js';
+import { BucketAlreadyExistsError, BucketNotEmptyError } from './errors.ts';
+
+/**
+ * Per-call options a caller passes to bound one S3 operation. The caller owns
+ * the budget: a deadline signal makes a hung S3 endpoint fail the call instead
+ * of holding the Lambda open until its own timeout.
+ */
+export interface S3RequestOptions {
+  /** Aborts the S3 request. */
+  signal?: AbortSignal;
+}
+
+// The SDK spells the signal `abortSignal`. Omit the options object entirely
+// when the caller passed no signal; the SDK treats a missing second argument
+// and `undefined` the same way.
+const toSendOptions = (requestOptions?: S3RequestOptions) =>
+  requestOptions?.signal ? { abortSignal: requestOptions.signal } : undefined;
 
 export interface CreateBucketOptions {
   bucketName: string;
   objectLockEnabled?: boolean;
 }
 
-export async function createBucket(s3: S3Client, options: CreateBucketOptions): Promise<void> {
+export async function createBucket(
+  s3: S3Client,
+  options: CreateBucketOptions,
+  requestOptions?: S3RequestOptions,
+): Promise<void> {
   try {
     await s3.send(
       new CreateBucketCommand({
         Bucket: options.bucketName,
         ...(options.objectLockEnabled && { ObjectLockEnabledForBucket: true }),
       }),
+      toSendOptions(requestOptions),
     );
   } catch (err) {
     const name = (err as { name?: string }).name;
@@ -41,8 +62,11 @@ export interface ListBucketsResult {
   buckets: Array<{ name: string; createdAt: string }>;
 }
 
-export async function listBuckets(s3: S3Client): Promise<ListBucketsResult> {
-  const result = await s3.send(new ListBucketsCommand({}));
+export async function listBuckets(
+  s3: S3Client,
+  requestOptions?: S3RequestOptions,
+): Promise<ListBucketsResult> {
+  const result = await s3.send(new ListBucketsCommand({}), toSendOptions(requestOptions));
   return {
     buckets: (result.Buckets ?? []).map((b) => ({
       name: b.Name!,
@@ -63,12 +87,14 @@ export async function setBucketVersioning(
   s3: S3Client,
   bucketName: string,
   enabled = true,
+  requestOptions?: S3RequestOptions,
 ): Promise<void> {
   await s3.send(
     new PutBucketVersioningCommand({
       Bucket: bucketName,
       VersioningConfiguration: { Status: enabled ? 'Enabled' : 'Suspended' },
     }),
+    toSendOptions(requestOptions),
   );
 }
 
@@ -82,6 +108,7 @@ export interface PutObjectLockConfigurationOptions {
 export async function putObjectLockConfiguration(
   s3: S3Client,
   options: PutObjectLockConfigurationOptions,
+  requestOptions?: S3RequestOptions,
 ): Promise<void> {
   await s3.send(
     new PutObjectLockConfigurationCommand({
@@ -98,6 +125,7 @@ export async function putObjectLockConfiguration(
         },
       },
     }),
+    toSendOptions(requestOptions),
   );
 }
 
@@ -114,14 +142,22 @@ export type BucketVersioningStatus = 'Enabled' | 'Suspended' | 'Never';
 export async function getBucketVersioningStatus(
   s3: S3Client,
   bucketName: string,
+  requestOptions?: S3RequestOptions,
 ): Promise<BucketVersioningStatus> {
-  const result = await s3.send(new GetBucketVersioningCommand({ Bucket: bucketName }));
+  const result = await s3.send(
+    new GetBucketVersioningCommand({ Bucket: bucketName }),
+    toSendOptions(requestOptions),
+  );
   if (result.Status === 'Enabled' || result.Status === 'Suspended') return result.Status;
   return 'Never';
 }
 
-export async function getBucketVersioning(s3: S3Client, bucketName: string): Promise<boolean> {
-  return (await getBucketVersioningStatus(s3, bucketName)) === 'Enabled';
+export async function getBucketVersioning(
+  s3: S3Client,
+  bucketName: string,
+  requestOptions?: S3RequestOptions,
+): Promise<boolean> {
+  return (await getBucketVersioningStatus(s3, bucketName, requestOptions)) === 'Enabled';
 }
 
 export interface BucketObjectLockState {
@@ -134,9 +170,13 @@ export interface BucketObjectLockState {
 export async function getBucketObjectLock(
   s3: S3Client,
   bucketName: string,
+  requestOptions?: S3RequestOptions,
 ): Promise<BucketObjectLockState | null> {
   try {
-    const result = await s3.send(new GetObjectLockConfigurationCommand({ Bucket: bucketName }));
+    const result = await s3.send(
+      new GetObjectLockConfigurationCommand({ Bucket: bucketName }),
+      toSendOptions(requestOptions),
+    );
     const cfg = result.ObjectLockConfiguration;
     const defaultRetention = cfg?.Rule?.DefaultRetention;
     return {
@@ -159,7 +199,7 @@ export async function getBucketObjectLock(
   }
 }
 
-export interface ListObjectsOptions {
+export interface ListObjectsOptions extends S3RequestOptions {
   s3: S3Client;
   bucket: string;
   prefix?: string;
@@ -175,7 +215,7 @@ export interface ListObjectsResult {
 }
 
 export async function listObjects(options: ListObjectsOptions): Promise<ListObjectsResult> {
-  const { s3, bucket, prefix, delimiter, maxKeys, continuationToken } = options;
+  const { s3, bucket, prefix, delimiter, maxKeys, continuationToken, signal } = options;
 
   const result = await s3.send(
     new ListObjectsV2Command({
@@ -185,6 +225,7 @@ export async function listObjects(options: ListObjectsOptions): Promise<ListObje
       ...(maxKeys && { MaxKeys: maxKeys }),
       ...(continuationToken && { ContinuationToken: continuationToken }),
     }),
+    toSendOptions({ signal }),
   );
 
   const objects: S3Object[] = (result.Contents ?? []).map((item) => ({
@@ -217,8 +258,12 @@ export async function getObjectBytes(
   s3: S3Client,
   bucket: string,
   key: string,
+  requestOptions?: S3RequestOptions,
 ): Promise<GetObjectBytesResult> {
-  const result = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  const result = await s3.send(
+    new GetObjectCommand({ Bucket: bucket, Key: key }),
+    toSendOptions(requestOptions),
+  );
   if (!result.Body) {
     throw new Error(`Object "${key}" in bucket "${bucket}" returned an empty body`);
   }
@@ -229,12 +274,17 @@ export async function getObjectBytes(
   };
 }
 
-export async function deleteBucket(s3: S3Client, bucketName: string): Promise<void> {
+export async function deleteBucket(
+  s3: S3Client,
+  bucketName: string,
+  requestOptions?: S3RequestOptions,
+): Promise<void> {
   try {
     await s3.send(
       new DeleteBucketCommand({
         Bucket: bucketName,
       }),
+      toSendOptions(requestOptions),
     );
   } catch (err) {
     const name = (err as { name?: string }).name;

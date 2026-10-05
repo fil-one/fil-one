@@ -65,7 +65,7 @@ function InvitationsHarness() {
 }
 
 function renderSection(
-  role = OrgRole.Owner,
+  role: OrgRole = OrgRole.Owner,
   invitations: InvitationSummary[] = [],
   me: Partial<MeResponse> = {},
 ) {

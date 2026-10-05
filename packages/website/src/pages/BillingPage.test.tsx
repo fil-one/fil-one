@@ -123,7 +123,7 @@ function renderWithRouter(ui: () => React.JSX.Element) {
   return render(<RouterProvider router={router} />);
 }
 
-function renderPage(role = OrgRole.Owner) {
+function renderPage(role: OrgRole = OrgRole.Owner) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   // The page is gated on `billing.view` and its controls on `billing.manage`.
   seedPermissions(client, role);
@@ -193,6 +193,31 @@ describe('BillingPage — inactive subscription', () => {
     const cta = container.querySelector('#billing-plan-cta-button');
     expect(cta).toHaveTextContent('Upgrade');
     expect(mockGetInvoices).not.toHaveBeenCalled();
+  });
+
+  it('has no payment card while trialing — nobody has one on file yet by design', async () => {
+    mockGetBilling.mockResolvedValue(trialingBilling());
+    renderPage();
+
+    await screen.findByText('Free trial');
+    expect(screen.queryByText('Payment method')).not.toBeInTheDocument();
+    expect(screen.queryByText('No card on file')).not.toBeInTheDocument();
+  });
+
+  it('reads the plan card status as Active, not Trial, while trialing', async () => {
+    mockGetBilling.mockResolvedValue(trialingBilling());
+    renderPage();
+
+    await screen.findByText('Free trial');
+    expect(screen.getByText('Active')).toBeInTheDocument();
+    expect(screen.queryByText('Trial')).not.toBeInTheDocument();
+  });
+
+  it('states the trial deadline with no rate and no "Trial" subject', async () => {
+    mockGetBilling.mockResolvedValue(trialingBilling());
+    renderPage();
+
+    expect(await screen.findByTestId('plan-meta')).toHaveTextContent(/^Ends in \d+ days?$/);
   });
 });
 

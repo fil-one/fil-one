@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { S3Region } from '../constants.js';
-import { CreateRagApiKeySchema, RAG_KEY_MAX_BUCKETS } from './rag-api-keys.js';
+import { S3Region } from '../constants.ts';
+import { CreateRagApiKeySchema, RAG_KEY_MAX_BUCKETS } from './rag-api-keys.ts';
 
 const BUCKET = { region: S3Region.EuWest1, name: 'my-bucket' };
 

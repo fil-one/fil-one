@@ -7,13 +7,13 @@ import {
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { OrgRole, INVITE_EXPIRY_DAYS } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { OrgKeys } from './org-membership.js';
+import { OrgKeys } from './org-membership.ts';
 import {
   hashInviteToken,
   invitationRows,
@@ -33,8 +33,8 @@ import {
   readInvitation,
   resolveInvitationByToken,
   retireInvitationItems,
-} from './invitations.js';
-import type { InvitationRecord } from './invitations.js';
+} from './invitations.ts';
+import type { InvitationRecord } from './invitations.ts';
 
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
 const OTHER_ORG_ID = '99999999-8888-7777-6666-555555555555';

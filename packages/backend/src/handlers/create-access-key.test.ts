@@ -10,8 +10,8 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
-import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
+import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -35,7 +35,7 @@ const mockOrchestrator = {
   deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
 };
 
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (region: string) => {
     mockGetOrchestratorForRegion(region);
     return mockOrchestrator;
@@ -49,22 +49,22 @@ const ddbMock = mockClient(DynamoDBClient);
 // Importing the handler module builds its Middy chain, so the middleware that
 // chain installs is stubbed to a pass-through. The tests below call
 // `baseHandler` directly.
-vi.mock('../middleware/csrf.js', () => ({
+vi.mock('../middleware/csrf.ts', () => ({
   csrfMiddleware: () => ({ before: () => undefined }),
 }));
-vi.mock('../middleware/subscription-guard.js', () => ({
+vi.mock('../middleware/subscription-guard.ts', () => ({
   AccessLevel: { Read: 'read', Write: 'write' },
   subscriptionGuardMiddleware: () => ({ before: () => undefined }),
 }));
 
-import { baseHandler } from './create-access-key.js';
-import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.js';
+import { baseHandler } from './create-access-key.ts';
+import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
 import {
   buildEvent,
   membershipFor,
   stubAbsentMembershipRead,
   stubMembershipRead,
-} from '../test/lambda-test-utilities.js';
+} from '../test/lambda-test-utilities.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -178,6 +178,9 @@ describe('create-access-key baseHandler', () => {
     ddbMock.reset();
     // The org-deleting fence pre-check; no `deleting` attribute by default.
     ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+    // The duplicate-name pre-check reads the org's key rows; the org holds none
+    // unless a test says otherwise.
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
     mockEnsureTenantReady.mockResolvedValue('aurora-t-1');
   });
 
@@ -650,18 +653,24 @@ describe('create-access-key baseHandler', () => {
     expect(keyRow().createdAt).toStrictEqual({ S: '2026-03-10T00:00:00Z' });
   });
 
-  it('closes the correlation as failed on a plain duplicate name', async () => {
+  it('closes the correlation as failed when the name was taken mid-mint', async () => {
+    // The pre-check is not a lock. Another request can land a row under this
+    // name between that read and the vendor's refusal, and then there is
+    // nothing to recover — but the intent is already written and has to close.
     mockIssueAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
-    ddbMock.on(QueryCommand).resolves({
-      Items: [
-        {
-          pk: { S: 'ORG#org-1' },
-          sk: { S: 'ACCESSKEY#aurora-key-1' },
-          keyName: { S: 'My Key' },
-          region: { S: 'eu-west-1' },
-        },
-      ],
-    });
+    ddbMock
+      .on(QueryCommand)
+      .resolvesOnce({ Items: [] })
+      .resolves({
+        Items: [
+          {
+            pk: { S: 'ORG#org-1' },
+            sk: { S: 'ACCESSKEY#aurora-key-1' },
+            keyName: { S: 'My Key' },
+            region: { S: 'eu-west-1' },
+          },
+        ],
+      });
     stubWrites();
 
     const result = await baseHandler(
@@ -1179,7 +1188,46 @@ describe('create-access-key baseHandler', () => {
       );
 
       expect(result.statusCode).toBe(409);
-      expect(vi.mocked(console.error).mock.calls[0]?.[0]).toContain('creator was demoted');
+      expect(vi.mocked(console.error).mock.calls[0]?.[0]).toContain('minter was demoted');
+    });
+  });
+
+  describe('a name the org already shows', () => {
+    // The vendor's own uniqueness check stopped being enough when rotation
+    // shipped: a rotated key is minted under a suffixed vendor name, so the
+    // console name is free at the vendor while a row still shows it.
+    it('refuses before the vendor is called at all', async () => {
+      ddbMock.on(QueryCommand).resolves({
+        Items: [{ keyName: { S: 'My Key' }, region: { S: 'eu-west-1' } }],
+      });
+
+      const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(409);
+      expect(JSON.parse(result.body ?? '{}').message).toContain('already exists');
+      expect(mockIssueAccessKey).not.toHaveBeenCalled();
+      // Consistently: a rotation that just landed has freed the name at the
+      // vendor, and a stale read here is the one way a second key takes it.
+      expect(ddbMock.commandCalls(QueryCommand)[0].args[0].input.ConsistentRead).toBe(true);
+      // No intent either: nothing started, so there is no mint to read.
+      expect(standaloneEvents()).toHaveLength(0);
+    });
+
+    it('allows the same name in another region', async () => {
+      ddbMock.on(QueryCommand).resolves({
+        Items: [{ keyName: { S: 'My Key' }, region: { S: 'us-east-1' } }],
+      });
+      stubWrites();
+      mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+
+      const event = buildEvent({
+        body: validBody({ keyName: 'My Key', region: 'eu-west-1' }),
+        userInfo: USER_INFO,
+      });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(201);
     });
   });
 });

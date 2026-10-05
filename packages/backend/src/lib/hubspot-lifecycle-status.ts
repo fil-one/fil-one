@@ -7,18 +7,20 @@ import { SubscriptionStatus } from '@filone/shared';
  * data-deletion warning?". The deletion sequence enrols only on `trialing` and
  * `lapsed`, so every other value is an exit.
  */
-export enum HubSpotLifecycleStatus {
+export const HubSpotLifecycleStatus = {
   /** Card charged; the deletion sequence excludes this value. */
-  Paying = 'paying',
+  Paying: 'paying',
   /** Free trial, no payment taken yet. */
-  Trialing = 'trialing',
+  Trialing: 'trialing',
   /** Card declining but Stripe is still retrying — they are trying to pay. */
-  PaymentFailing = 'payment_failing',
+  PaymentFailing: 'payment_failing',
   /** Subscription gone; the countdown to data deletion has started. */
-  Lapsed = 'lapsed',
+  Lapsed: 'lapsed',
   /** Unrecognised state; excluded from the sequence, so it fails safe. */
-  Unknown = 'unknown',
-}
+  Unknown: 'unknown',
+} as const;
+export type HubSpotLifecycleStatus =
+  (typeof HubSpotLifecycleStatus)[keyof typeof HubSpotLifecycleStatus];
 
 /**
  * Maps our internal `SubscriptionStatus` to the HubSpot lifecycle vocabulary.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { S3Region } from '../constants.js';
+import { S3Region } from '../constants.ts';
 import {
   ACCESS_KEY_PERMISSIONS,
   BUCKET_INFO_PERMISSIONS,
@@ -9,7 +9,7 @@ import {
   isBucketInfoPermission,
   isBucketPermission,
   isObjectPermission,
-} from './access-keys.js';
+} from './access-keys.ts';
 
 describe('BUCKET_PERMISSIONS', () => {
   it('contains the configurable bucket-management actions', () => {

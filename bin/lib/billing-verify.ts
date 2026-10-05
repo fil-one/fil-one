@@ -17,8 +17,8 @@
 // `--verify` re-reads the same table the backfill does and decides from the same
 // classification — no second query language, no table names typed by hand.
 
+import { SubscriptionKeys } from '@filone/backend/src/lib/subscription-store.ts';
 import {
-  BillingKeys,
   COMPARED_ATTRIBUTES,
   isKeyable,
   summarizeBillingPlans,
@@ -95,7 +95,7 @@ export function verifyBillingRekey({
       name: 'No org still has a row to copy',
       pass: pending.length === 0,
       detail: `${counts.firstCopies} orgs would be copied for the first time, ${counts.deltas} re-copied after a source change`,
-      offenders: pending.map((plan) => BillingKeys.orgPk(plan.orgId)),
+      offenders: pending.map((plan) => SubscriptionKeys.orgPk(plan.orgId)),
     },
     {
       name: 'Every legacy row that names an org has an org twin',
@@ -103,7 +103,7 @@ export function verifyBillingRekey({
       detail: `${scan.legacyRows} legacy rows, of which ${scan.orglessRows} name no org; ${missingTwin.length} orgs have a legacy row and no twin`,
       offenders: missingTwin.map(
         (state) =>
-          `${BillingKeys.orgPk(state.orgId)} — ${state.legacyRows.map((row) => row.pk).join(', ')}`,
+          `${SubscriptionKeys.orgPk(state.orgId)} — ${state.legacyRows.map((row) => row.pk).join(', ')}`,
       ),
     },
     {
@@ -118,7 +118,7 @@ export function verifyBillingRekey({
       detail: `${scan.orgRows} org rows; ${mismatchedOrgId.length} carry an orgId that is missing or not their own`,
       offenders: mismatchedOrgId.map(
         (state) =>
-          `${BillingKeys.orgPk(state.orgId)} carries orgId=${state.orgRow?.orgId ?? '(none)'}`,
+          `${SubscriptionKeys.orgPk(state.orgId)} carries orgId=${state.orgRow?.orgId ?? '(none)'}`,
       ),
     },
     {
@@ -138,7 +138,7 @@ export function verifyBillingRekey({
       pass: anomalies.length === 0,
       detail: `${anomalies.length} orgs are anomalies of ${counts.orgs} scanned`,
       offenders: anomalies.map(
-        (plan) => `${BillingKeys.orgPk(plan.orgId)} [${plan.reason}] ${plan.detail}`,
+        (plan) => `${SubscriptionKeys.orgPk(plan.orgId)} [${plan.reason}] ${plan.detail}`,
       ),
     },
     orglessCheck(scan, orgless),
@@ -200,7 +200,7 @@ function describeDivergence(state: OrgBillingState): string[] {
   const source = state.legacyRows.find((row) => row.pk === orgRow.rekeyedFrom);
   if (!source) {
     return [
-      `${BillingKeys.orgPk(state.orgId)} — copied from ${orgRow.rekeyedFrom}, which no longer exists`,
+      `${SubscriptionKeys.orgPk(state.orgId)} — copied from ${orgRow.rekeyedFrom}, which no longer exists`,
     ];
   }
 
@@ -210,7 +210,7 @@ function describeDivergence(state: OrgBillingState): string[] {
   const described = divergences
     .map((d) => `${d.attribute}: source=${d.source} copy=${d.copy}`)
     .join('; ');
-  return [`${BillingKeys.orgPk(state.orgId)} — copied from ${source.pk}; ${described}`];
+  return [`${SubscriptionKeys.orgPk(state.orgId)} — copied from ${source.pk}; ${described}`];
 }
 
 function compareRows(source: SubscriptionRow, copy: SubscriptionRow): Divergence[] {

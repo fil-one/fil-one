@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { UpdatePreferencesSchema } from './preferences.js';
+import { UpdatePreferencesSchema } from './preferences.ts';
 
 describe('UpdatePreferencesSchema', () => {
   it('accepts marketingEmailsOptedIn: true', () => {

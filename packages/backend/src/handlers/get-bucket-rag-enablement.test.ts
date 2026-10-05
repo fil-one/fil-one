@@ -14,18 +14,18 @@ const mockGetOrchestratorForRegion = vi.fn();
 
 let orch: FakeOrchestrator;
 
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (...args: unknown[]) => mockGetOrchestratorForRegion(...args),
 }));
 
-vi.mock('../lib/org-profile.js', () => ({
+vi.mock('../lib/org-profile.ts', () => ({
   getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
 }));
 
 const mockGetEnablement = vi.fn();
-vi.mock('../lib/bucket-rag-enablement.js', async () => {
-  const actual = await vi.importActual<typeof import('../lib/bucket-rag-enablement.js')>(
-    '../lib/bucket-rag-enablement.js',
+vi.mock('../lib/bucket-rag-enablement.ts', async () => {
+  const actual = await vi.importActual<typeof import('../lib/bucket-rag-enablement.ts')>(
+    '../lib/bucket-rag-enablement.ts',
   );
   return {
     ...actual,
@@ -35,12 +35,12 @@ vi.mock('../lib/bucket-rag-enablement.js', async () => {
 
 process.env.FILONE_STAGE = 'test';
 
-import { baseHandler } from './get-bucket-rag-enablement.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
-import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.js';
+import { baseHandler } from './get-bucket-rag-enablement.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
+import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.ts';
 import { S3_REGION, S3Region } from '@filone/shared';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import type { BucketRAGEnablementRecord } from '../lib/dynamo-records.js';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import type { BucketRAGEnablementRecord } from '../lib/dynamo-records.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

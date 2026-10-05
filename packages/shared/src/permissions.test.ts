@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { OrgRole } from './api/org.js';
+import { OrgRole } from './api/org.ts';
 import {
   PERMISSIONS,
   ROLE_PERMISSIONS,
@@ -8,8 +8,8 @@ import {
   canManageTargetRole,
   permissionsForRole,
   roleHasPermission,
-} from './permissions.js';
-import type { Permission } from './permissions.js';
+} from './permissions.ts';
+import type { Permission } from './permissions.ts';
 
 /**
  * The capability matrix, transcribed from the ADR as a table rather than as

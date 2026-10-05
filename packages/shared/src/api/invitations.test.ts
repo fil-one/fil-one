@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { OrgRole } from './org.js';
+import { OrgRole } from './org.ts';
 import {
   AcceptInvitationSchema,
   CreateInvitationSchema,
   INVITE_EXPIRY_DAYS,
   INVITE_TOKEN_MIN_LENGTH,
   MAX_PENDING_INVITATIONS_PER_ORG,
-} from './invitations.js';
+} from './invitations.ts';
 
 describe('CreateInvitationSchema', () => {
   it.each(Object.values(OrgRole))('accepts an invitation to %s', (role) => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { extractText } from './extractor.js';
-import { buildDocx, buildPdf, buildPptx, docxParagraph, pptxParagraph } from './test-fixtures.js';
+import { extractText } from './extractor.ts';
+import { buildDocx, buildPdf, buildPptx, docxParagraph, pptxParagraph } from './test-fixtures.ts';
 
 function encode(text: string): Uint8Array {
   return new TextEncoder().encode(text);

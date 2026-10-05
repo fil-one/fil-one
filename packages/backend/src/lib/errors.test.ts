@@ -3,7 +3,7 @@ import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
   BucketAlreadyExistsError,
-} from './errors.js';
+} from './errors.ts';
 
 describe('error classes', () => {
   describe('BucketAlreadyExistsError', () => {

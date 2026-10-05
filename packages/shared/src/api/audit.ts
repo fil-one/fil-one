@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { AUDIT_EVENT_TYPES } from '../audit.js';
-import type { AuditEvent } from '../audit.js';
+import { AUDIT_EVENT_TYPES } from '../audit.ts';
+import type { AuditEvent } from '../audit.ts';
 
 /**
  * The audit log read API: what the viewer asks for and what it gets back.

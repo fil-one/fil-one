@@ -18,7 +18,8 @@
 // the same classification — no second query language, no table names typed by
 // hand.
 
-import { membershipPairKey, OrgKeys, summarizePlans } from './org-conversion.ts';
+import { OrgKeys } from '@filone/backend/src/lib/org-membership.ts';
+import { membershipPairKey, summarizePlans } from './org-conversion.ts';
 import type {
   AnomalyPlan,
   DeletingPlan,

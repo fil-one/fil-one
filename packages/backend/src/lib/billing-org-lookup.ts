@@ -1,8 +1,8 @@
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import type Stripe from 'stripe';
 import { Resource } from 'sst';
-import { getDynamoClient } from './ddb-client.js';
-import { SubscriptionKeys } from './subscription-store.js';
+import { getDynamoClient } from './ddb-client.ts';
+import { SubscriptionKeys } from './subscription-store.ts';
 
 /**
  * The org a Stripe object belongs to, from the metadata it carries.

@@ -68,12 +68,11 @@ import {
   CONVERSION_SOURCE,
   CONVERTED_ROLE,
   LEGACY_ROLE,
-  OrgKeys,
-  parseMemberSk,
   parseOrgPk,
   willRevert,
 } from './lib/org-conversion.ts';
 import type { ConvertedMembership } from './lib/org-conversion.ts';
+import { OrgKeys } from '@filone/backend/src/lib/org-membership.ts';
 
 /** Pause between transactions, matching the conversion's pacing. */
 const WRITE_DELAY_MS = 50;
@@ -136,7 +135,7 @@ async function scanConvertedMemberships(): Promise<ConvertedMembership[]> {
   for await (const item of items) {
     const row = decodeRow<MembershipRow>(item);
     const orgId = parseOrgPk(text(row.pk) ?? '');
-    const userId = parseMemberSk(text(row.sk) ?? '');
+    const userId = OrgKeys.parseMemberSk(text(row.sk));
     if (!orgId || !userId) continue;
 
     const joinedAt = text(row.joinedAt);

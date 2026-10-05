@@ -8,14 +8,14 @@ import type {
 } from '@aws-sdk/client-dynamodb';
 import type { AwsStub } from 'aws-sdk-client-mock';
 import { OrgRole } from '@filone/shared';
-import { OrgKeys } from '../lib/org-membership.js';
-import type { OrgMembership } from '../lib/org-membership.js';
-import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.js';
+import { OrgKeys } from '../lib/org-membership.ts';
+import type { OrgMembership } from '../lib/org-membership.ts';
+import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.ts';
 
 /** What `mockClient(DynamoDBClient)` returns. */
 type DynamoMock = AwsStub<ServiceInputTypes, ServiceOutputTypes, DynamoDBClientResolvedConfig>;
 
-const STUB_JOINED_AT = '2026-01-01T00:00:00.000Z';
+export const STUB_JOINED_AT = '2026-01-01T00:00:00.000Z';
 
 // The `sst` resource mock lives in ./sst-resource-mock.js, which imports
 // nothing: a `vi.mock('sst', …)` factory reaching this module would read a

@@ -3,7 +3,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { ArrowLeftIcon } from '@phosphor-icons/react/dist/ssr';
 
 import type { CreateAccessKeyResponse } from '@filone/shared';
-import { S3_REGION } from '@filone/shared';
+import { S3_REGION, type S3Region } from '@filone/shared';
 import { Heading } from '../components/Heading/Heading';
 import { AccessKeyFormFields } from '../components/AccessKeyFormFields.js';
 import { Button } from '../components/Button.js';
@@ -22,7 +22,7 @@ export function CreateApiKeyPage() {
     accessKeyId: string;
     secretAccessKey: string;
   } | null>(null);
-  const [region, setRegion] = useState(S3_REGION);
+  const [region, setRegion] = useState<S3Region>(S3_REGION);
 
   const form = useAccessKeyForm({
     region,

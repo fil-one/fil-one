@@ -11,12 +11,12 @@
 // So the eligibility test and the claim live here, and the two callers differ
 // only in what they do with the outcome.
 
-import { listMemberships } from './org-membership.js';
-import type { SubscriptionRecord } from './dynamo-records.js';
-import { emitTrialClaimBlockedByLegacyRow } from './stripe-webhook-metrics.js';
-import { legacyRowExists, readSubscription } from './subscription-store.js';
-import { ensureTrialEntitlement } from './trial-entitlement.js';
-import type { UserInfo } from './user-context.js';
+import { listMemberships } from './org-membership.ts';
+import type { SubscriptionRecord } from './dynamo-records.ts';
+import { emitTrialClaimBlockedByLegacyRow } from './stripe-webhook-metrics.ts';
+import { legacyRowExists, readSubscription } from './subscription-store.ts';
+import { ensureTrialEntitlement } from './trial-entitlement.ts';
+import type { UserInfo } from './user-context.ts';
 
 export type TrialClaimOutcome =
   /** A trial now exists for this org. */
@@ -113,14 +113,40 @@ export async function claimTrialIfEligible(userInfo: UserInfo): Promise<TrialCla
     orgId,
     email: email ?? null,
     emailVerified,
+    membershipSource: userInfo.membership?.source,
   });
   return entitled ? 'claimed' : 'not-entitled';
 }
 
+/**
+ * Every refusal logs, so a `not-own-org` outcome can be told apart from an
+ * upstream bug that resolved `userInfo.membership` wrongly for this request.
+ */
 async function isSoloPersonalOrg({ userId, orgId, membership }: UserInfo): Promise<boolean> {
-  if (!membership || membership.orgId !== orgId) return false;
-  if (membership.source === 'invitation') return false;
+  if (!membership || membership.orgId !== orgId) {
+    console.warn('[trial-claim] No membership row for the active org — refusing the claim', {
+      userId,
+      orgId,
+      membershipOrgId: membership?.orgId,
+    });
+    return false;
+  }
+  if (membership.source === 'invitation') {
+    console.warn('[trial-claim] Membership arrived by invitation — refusing the claim', {
+      userId,
+      orgId,
+    });
+    return false;
+  }
 
   const memberships = await listMemberships(userId);
-  return memberships.length === 1 && memberships[0]?.orgId === orgId;
+  if (memberships.length !== 1 || memberships[0]?.orgId !== orgId) {
+    console.warn('[trial-claim] Caller belongs to more than this one org — refusing the claim', {
+      userId,
+      orgId,
+      membershipCount: memberships.length,
+    });
+    return false;
+  }
+  return true;
 }

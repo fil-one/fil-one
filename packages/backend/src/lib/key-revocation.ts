@@ -2,9 +2,9 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import { auditKeyIdSuffix } from '@filone/shared';
 import type { AuditActor, RevocationTrigger, S3Region } from '@filone/shared';
 import { Resource } from 'sst';
-import { AuditSubjects, twoPhaseAudit } from './audit.js';
-import { AccessKeyKeys } from './dynamo-records.js';
-import type { ServiceOrchestrator } from './service-orchestrator.js';
+import { AuditSubjects, twoPhaseAudit } from './audit.ts';
+import { AccessKeyKeys } from './dynamo-records.ts';
+import type { ServiceOrchestrator } from './service-orchestrator.ts';
 
 export interface RevokeAccessKeyArgs {
   orgId: string;
@@ -31,12 +31,11 @@ export interface RevokeAccessKeyArgs {
  * credential that no longer exists, until somebody deletes it.
  */
 export class RevocationNotRecordedError extends Error {
-  constructor(
-    readonly keyId: string,
-    options?: { cause?: unknown },
-  ) {
+  readonly keyId: string;
+  constructor(keyId: string, options?: { cause?: unknown }) {
     super(`Access key ${keyId} was deleted at the vendor, but the record did not land.`, options);
     this.name = 'RevocationNotRecordedError';
+    this.keyId = keyId;
   }
 }
 
@@ -108,5 +107,39 @@ export async function revokeAccessKey({
     });
   } catch (err) {
     throw new RevocationNotRecordedError(keyId, { cause: err });
+  }
+}
+
+/**
+ * Revoke a key and say whether it went, instead of raising when it did not.
+ *
+ * For the caller who is holding something the failure must not cost. A rotation
+ * has already minted the replacement and its secret exists only in that
+ * request's response, so throwing here would take a credential nobody can
+ * recover to save the caller from a key they can delete from the list
+ * themselves. The answer is reported and the request completes.
+ *
+ * {@link RevocationNotRecordedError} is the other way round: the credential is
+ * dead and its row survives. It is revoked, so the answer is yes, and the stale
+ * row is the operator's to clear.
+ */
+export async function revokeAndReport(args: RevokeAccessKeyArgs): Promise<boolean> {
+  try {
+    await revokeAccessKey(args);
+    return true;
+  } catch (err) {
+    const notRecorded = err instanceof RevocationNotRecordedError;
+    console.error(
+      notRecorded
+        ? '[key-revocation] Revoked a key, but its row survives'
+        : '[key-revocation] Could not revoke a key',
+      {
+        orgId: args.orgId,
+        reason: args.reason,
+        ...(args.accessKeyId ? { keyIdSuffix: auditKeyIdSuffix('s3', args.accessKeyId) } : {}),
+        error: err,
+      },
+    );
+    return notRecorded;
   }
 }

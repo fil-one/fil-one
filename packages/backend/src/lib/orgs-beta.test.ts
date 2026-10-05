@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { hasOrgsBetaAccess } from './orgs-beta.js';
+import { hasOrgsBetaAccess } from './orgs-beta.ts';
 
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
 const EMAIL = 'Inviter@Example.com';

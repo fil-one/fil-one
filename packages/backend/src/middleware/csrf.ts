@@ -8,9 +8,9 @@ import type {
 import type { Request } from '@middy/core';
 import { CSRF_COOKIE_NAME } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
-import { ResponseBuilder } from '../lib/response-builder.js';
-import { parseCookies } from '../lib/cookies.js';
-import { withRefreshedCookies } from './auth.js';
+import { ResponseBuilder } from '../lib/response-builder.ts';
+import { parseCookies } from '../lib/cookies.ts';
+import { withRefreshedCookies } from './auth.ts';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
@@ -21,7 +21,7 @@ export function csrfMiddleware() {
     const method = request.event.requestContext.http.method;
     if (SAFE_METHODS.has(method)) return;
 
-    const cookies = parseCookies(request.event.cookies);
+    const cookies = parseCookies(request.event);
     const cookieToken = cookies[CSRF_COOKIE_NAME];
     const headerToken = request.event.headers['x-csrf-token'];
 

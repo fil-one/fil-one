@@ -20,22 +20,22 @@ import {
   failJob,
   putBulkDeleteJob,
   toApiJob,
-} from '../lib/bulk-delete-jobs.js';
-import { enqueueBulkDeleteJob } from '../lib/bulk-delete-queue.js';
-import { getOrgProfile } from '../lib/org-profile.js';
+} from '../lib/bulk-delete-jobs.ts';
+import { enqueueBulkDeleteJob } from '../lib/bulk-delete-queue.ts';
+import { getOrgProfile } from '../lib/org-profile.ts';
 import {
   ResponseBuilder,
   tenantNotReadyResponse,
   unsupportedRegionResponse,
-} from '../lib/response-builder.js';
-import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { csrfMiddleware } from '../middleware/csrf.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
+} from '../lib/response-builder.ts';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { csrfMiddleware } from '../middleware/csrf.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
+import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
 
 export async function baseHandler(
   event: AuthenticatedEvent,

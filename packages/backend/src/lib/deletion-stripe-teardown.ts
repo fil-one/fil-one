@@ -2,13 +2,13 @@ import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import type Stripe from 'stripe';
-import { getDynamoClient } from './ddb-client.js';
-import type { DeletionMember } from './deletion-record.js';
-import { reportOrgUsage } from './org-usage-report.js';
-import { syncTenantStatusInProvisionedRegions } from './region-helpers.js';
-import { getStripeClient, isStripeResourceMissing } from './stripe-client.js';
-import { readSubscription, SubscriptionKeys } from './subscription-store.js';
-import type { SubscriptionRecord } from './dynamo-records.js';
+import { getDynamoClient } from './ddb-client.ts';
+import type { DeletionMember } from './deletion-record.ts';
+import { reportOrgUsage } from './org-usage-report.ts';
+import { syncTenantStatusInProvisionedRegions } from './region-helpers.ts';
+import { getStripeClient, isStripeResourceMissing } from './stripe-client.ts';
+import { readSubscription, SubscriptionKeys } from './subscription-store.ts';
+import type { SubscriptionRecord } from './dynamo-records.ts';
 
 const LOG = '[deletion-stripe]';
 

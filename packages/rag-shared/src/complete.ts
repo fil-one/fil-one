@@ -4,7 +4,7 @@ import {
   BEDROCK_ANTHROPIC_VERSION,
   COMPLETION_MAX_TOKENS,
   COMPLETION_MODEL_ID,
-} from './constants.js';
+} from './constants.ts';
 
 /**
  * Options accepted by {@link complete}.

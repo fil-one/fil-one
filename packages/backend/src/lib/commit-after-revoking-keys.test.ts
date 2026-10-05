@@ -10,22 +10,22 @@ import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { OrgRole, S3Region } from '@filone/shared';
 import type { AccessKeySummary } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
-import { auditItemIn } from '../test/audit-assertions.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
+import { auditItemIn } from '../test/audit-assertions.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
 const mockRevokeMemberKeys = vi.fn();
-vi.mock('./revoke-member-keys.js', () => ({
+vi.mock('./revoke-member-keys.ts', () => ({
   revokeMemberKeys: (...args: unknown[]) => mockRevokeMemberKeys(...args),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { accessKeyMintSeqUnchangedCheck } from './access-key-mint-seq.js';
-import { AuditSubjects, userActor } from './audit.js';
-import { commitAfterRevokingKeys } from './commit-after-revoking-keys.js';
-import type { AccessKeyToRevoke } from './member-keys.js';
+import { accessKeyMintSeqUnchangedCheck } from './access-key-mint-seq.ts';
+import { AuditSubjects, userActor } from './audit.ts';
+import { commitAfterRevokingKeys } from './commit-after-revoking-keys.ts';
+import type { AccessKeyToRevoke } from './member-keys.ts';
 
 const ORG_ID = 'org-1';
 const MEMBER_ID = 'member-1';

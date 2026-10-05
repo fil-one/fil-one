@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
+import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.ts';
 import {
   expectErrorResponse,
   expectRefreshedCookies,
   REFRESHED_TOKENS,
-} from '../test/assert-helpers.js';
+} from '../test/assert-helpers.ts';
 
 vi.mock('sst', () => ({
   Resource: {
@@ -16,7 +16,7 @@ vi.mock('sst', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { isAllowlisted, hasRagAccess, ragAccessMiddleware } from './rag-access.js';
+import { isAllowlisted, hasRagAccess, ragAccessMiddleware } from './rag-access.ts';
 
 describe('isAllowlisted', () => {
   beforeEach(() => {

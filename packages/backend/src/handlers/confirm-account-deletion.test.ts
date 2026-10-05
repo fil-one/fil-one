@@ -11,22 +11,22 @@ vi.mock('sst', () => ({
 }));
 
 const mockGetOrgProfile = vi.fn(async () => ({ name: { S: 'Acme Corp' } }));
-vi.mock('../lib/org-profile.js', async () => ({
-  ...(await vi.importActual<typeof import('../lib/org-profile.js')>('../lib/org-profile.js')),
+vi.mock('../lib/org-profile.ts', async () => ({
+  ...(await vi.importActual<typeof import('../lib/org-profile.ts')>('../lib/org-profile.ts')),
   getOrgProfile: () => mockGetOrgProfile(),
 }));
 
 const mockConfirm = vi.fn();
 const mockConsumeAttempt = vi.fn(async (_orgId: string) => undefined);
-vi.mock('../lib/deletion-confirm-transaction.js', () => ({
+vi.mock('../lib/deletion-confirm-transaction.ts', () => ({
   confirmAccountDeletion: (params: unknown) => mockConfirm(params),
   consumeVerifyAttempt: (orgId: string) => mockConsumeAttempt(orgId),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { baseHandler } from './confirm-account-deletion.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import { baseHandler } from './confirm-account-deletion.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1', emailVerified: true };
 

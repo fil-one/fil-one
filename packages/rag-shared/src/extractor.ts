@@ -1,6 +1,6 @@
-import { extractTextFromHtml } from './html-extractor.js';
-import { extractTextFromDocx, extractTextFromPptx } from './ooxml-extractor.js';
-import { extractTextFromPdf } from './pdf-extractor.js';
+import { extractTextFromHtml } from './html-extractor.ts';
+import { extractTextFromDocx, extractTextFromPptx } from './ooxml-extractor.ts';
+import { extractTextFromPdf } from './pdf-extractor.ts';
 
 /**
  * Content types understood by {@link extractText}. Any `text/*` type not listed

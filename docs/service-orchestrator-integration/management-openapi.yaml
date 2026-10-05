@@ -486,7 +486,7 @@ components:
           description: |
             Region identifier the tenant's data is provisioned in — the
             same region name used in the S3 Gateway hostname
-            (`https://{region}.s3.filonecontent.com`), e.g. `us-east-1`. A Service
+            (`https://s3.{region}.filonecontent.com`), e.g. `us-east-1`. A Service
             Orchestrator may manage more than one region; it must reject
             (422) region values it does not serve.
 

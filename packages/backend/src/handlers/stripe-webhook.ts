@@ -9,28 +9,28 @@ import {
   mapStripeStatus,
 } from '@filone/shared';
 import { Resource } from 'sst';
-import { getDynamoClient } from '../lib/ddb-client.js';
-import { resolveOrgId, resolveOrgIdFromSubscription } from '../lib/billing-org-lookup.js';
-import { startDeletionFromStripe } from '../lib/deletion-from-stripe.js';
+import { getDynamoClient } from '../lib/ddb-client.ts';
+import { resolveOrgId, resolveOrgIdFromSubscription } from '../lib/billing-org-lookup.ts';
+import { startDeletionFromStripe } from '../lib/deletion-from-stripe.ts';
 import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
   WEBHOOK_STATUS_SYNC_RETRY,
-} from '../lib/region-helpers.js';
+} from '../lib/region-helpers.ts';
 import {
   invoiceSubscriptionId,
   invoiceSubscriptionMetadata,
   subscriptionSuperseded,
-} from '../lib/billing-identity.js';
-import { getStripeClient, getWebhookSecret } from '../lib/stripe-client.js';
-import { updateSubscriptionByUser } from '../lib/subscription-store.js';
+} from '../lib/billing-identity.ts';
+import { getStripeClient, getWebhookSecret } from '../lib/stripe-client.ts';
+import { updateSubscriptionByUser } from '../lib/subscription-store.ts';
 import {
   emitBillingRowMissing,
   emitDunningEscalation,
   emitInvoiceFinalizationFailed,
   emitInvoiceFinalized,
   emitInvoicePaid,
-} from '../lib/stripe-webhook-metrics.js';
+} from '../lib/stripe-webhook-metrics.ts';
 
 const dynamo = getDynamoClient();
 

@@ -97,7 +97,7 @@ function respond(path: string) {
   });
 }
 
-function renderPage(role = OrgRole.Owner) {
+function renderPage(role: OrgRole = OrgRole.Owner) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   seedPermissions(client, role);
   const view = render(

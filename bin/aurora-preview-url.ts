@@ -54,15 +54,13 @@ import {
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { BLOCKED_ATTEMPTS, DELETION_STATUS } from '@filone/backend/src/lib/deletion-record.ts';
+import { getS3Endpoint, S3Region } from '@filone/shared';
 import { execFileSync } from 'node:child_process';
 
 const USAGE = 'Usage: node bin/aurora-preview-url.ts <auroraTenantId> <bucket> <objectKey>';
 
 const EXPIRES_IN_SECONDS = 24 * 60 * 60;
-
-// Passes beyond which a teardown is not retrying but blocked — BLOCKED_ATTEMPTS
-// in packages/backend/src/jobs/account-deletion-sweeper.ts. Keep in sync.
-const BLOCKED_ATTEMPTS = 10;
 
 const tenantId = process.argv[2];
 const bucketName = process.argv[3];
@@ -269,7 +267,7 @@ function printDeletionReport(
   profile: Record<string, unknown>,
 ): DeletionState {
   const summaryLine = describeDeletion(record, profile);
-  const teardownIncomplete = record !== undefined && record.status !== 'DONE';
+  const teardownIncomplete = record !== undefined && record.status !== DELETION_STATUS.done;
 
   console.error('');
   if (!record) {
@@ -298,11 +296,6 @@ function printDeletionReport(
   return { summaryLine, teardownIncomplete };
 }
 
-/**
- * The status values are inlined rather than imported — bin scripts must not
- * import from the backend or @filone/shared. Keep in sync with DELETION_STATUS
- * in packages/backend/src/lib/deletion-record.ts.
- */
 function describeDeletion(
   record: Record<string, unknown> | undefined,
   profile: Record<string, unknown>,
@@ -319,7 +312,7 @@ function describeDeletion(
       ? 'none requested'
       : `no DELETION record, but the account is marked deleted (${marks.join(', ')})`;
   }
-  if (record.status === 'DONE') return `complete (${formatValue(record.trigger)})`;
+  if (record.status === DELETION_STATUS.done) return `complete (${formatValue(record.trigger)})`;
 
   const attempts = typeof record.attempts === 'number' ? record.attempts : 0;
   const since = `requested ${formatValue(record.requestedAt)}`;
@@ -522,10 +515,7 @@ function formatBytes(bytes: unknown): string {
 }
 
 async function presignGetObject(): Promise<string> {
-  // Bin scripts must not import from @filone/shared, so the Aurora endpoints
-  // are inlined — keep them in sync with getS3Endpoint in
-  // packages/shared/src/constants.ts.
-  const endpoint = isProduction ? 'https://eu-west-1.s3.fil.one' : 'https://s3.dev.aur.lu';
+  const endpoint = getS3Endpoint(S3Region.EuWest1, stage);
   console.error('');
   console.error(`Endpoint: ${endpoint}`);
 

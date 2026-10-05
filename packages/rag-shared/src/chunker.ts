@@ -1,4 +1,4 @@
-import { DEFAULT_CHUNK_SIZE, DEFAULT_OVERLAP_SIZE } from './constants.js';
+import { DEFAULT_CHUNK_SIZE, DEFAULT_OVERLAP_SIZE } from './constants.ts';
 
 /**
  * Options accepted by {@link chunk}.

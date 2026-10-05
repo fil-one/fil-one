@@ -11,11 +11,15 @@ vi.mock('@aws-sdk/client-sqs', () => ({
     send = sendMock;
   },
   SendMessageCommand: class {
-    constructor(public input: Record<string, string>) {}
+    input: Record<string, string>;
+
+    constructor(input: Record<string, string>) {
+      this.input = input;
+    }
   },
 }));
 
-import { MAX_BULK_DELETE_DELIVERY_ATTEMPTS, enqueueBulkDeleteJob } from './bulk-delete-queue.js';
+import { MAX_BULK_DELETE_DELIVERY_ATTEMPTS, enqueueBulkDeleteJob } from './bulk-delete-queue.ts';
 
 const payload = { orgId: 'org-1', jobId: 'job-1' };
 

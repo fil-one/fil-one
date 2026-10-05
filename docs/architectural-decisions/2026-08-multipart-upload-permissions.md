@@ -41,7 +41,7 @@ The two paths send different idempotency keys for the create. Tenant setup sends
 
 `CreateAccessKeySchema` now rejects a customer key name starting with `filone-console`. Customer keys hang off the same storage user as the console key and FTH names are unique per tenant, so a customer key under that name would block the tenant's rotation, and the rotation script matching by name would delete a credential the customer is using. The reservation is case-insensitive and covers a future `-v3`. Keys created under that name before the reservation still exist: the rotation script cross-checks the DynamoDB access-key rows of the org and refuses to touch any key it finds there, reporting the tenant for a rotation by hand.
 
-The storage user's `userCode` stays `filone-console`. It is what `fthOrchestrator` looks the user up by, and the user itself is not being replaced.
+The storage user's `userCode` stays `filone-console`. It is what the FTH orchestrator looks the user up by, and the user itself is not being replaced.
 
 ### 4. The console-credentials cache has no TTL
 

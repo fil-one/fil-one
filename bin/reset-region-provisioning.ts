@@ -75,13 +75,17 @@ import {
   S3VectorsClient,
 } from '@aws-sdk/client-s3vectors';
 import { DeleteParametersCommand, SSMClient } from '@aws-sdk/client-ssm';
+import { AccessKeyKeys, RAGKeys } from '@filone/backend/src/lib/dynamo-records.ts';
+import { OrgSetupStatus } from '@filone/backend/src/lib/org-setup-status.ts';
+import {
+  ORCHESTRATOR_ID_BY_REGION,
+  orchestratorIdForRegion,
+} from '@filone/backend/src/lib/service-orchestrator-ids.ts';
 import { scanAll } from './lib/dynamo.ts';
 import {
   assertRegionAllowed,
   buildResetPlan,
   formatResetPlan,
-  FILONE_ORG_CREATED,
-  ORCHESTRATOR_ID_BY_REGION,
   type AccountPlan,
   type OrgRows,
   type RagBucketPlan,
@@ -117,7 +121,7 @@ try {
   process.exit(1);
 }
 
-const orchestratorId = ORCHESTRATOR_ID_BY_REGION[region]!;
+const orchestratorId = orchestratorIdForRegion(region)!;
 const tenantIdAttribute = `${orchestratorId}TenantId`;
 
 // Keep in sync with the RagVectorBucket name in sst.config.ts.
@@ -283,7 +287,7 @@ async function scanOrgRows(): Promise<Map<string, OrgRows>> {
     TableName: tables.userInfo,
     ConsistentRead: true,
     FilterExpression: 'begins_with(pk, :orgPrefix)',
-    ExpressionAttributeValues: { ':orgPrefix': { S: 'ORG#' } },
+    ExpressionAttributeValues: { ':orgPrefix': { S: AccessKeyKeys.orgPk('') } },
   })) {
     const pk = item.pk?.S;
     const sk = item.sk?.S;
@@ -296,7 +300,7 @@ async function scanOrgRows(): Promise<Map<string, OrgRows>> {
     }
 
     if (sk === 'PROFILE') rows.profile = item;
-    else if (sk.startsWith('ACCESSKEY#')) rows.accessKeys.push(item);
+    else if (sk.startsWith(AccessKeyKeys.keySkPrefix())) rows.accessKeys.push(item);
   }
 
   return result;
@@ -317,8 +321,8 @@ async function scanRagRows(): Promise<StoredRow[]> {
     ConsistentRead: true,
     FilterExpression: 'begins_with(pk, :bucketPrefix) OR begins_with(pk, :checkpointPrefix)',
     ExpressionAttributeValues: {
-      ':bucketPrefix': { S: 'BUCKET#' },
-      ':checkpointPrefix': { S: 'INDEXER_CHECKPOINT#' },
+      ':bucketPrefix': { S: RAGKeys.bucketPkPrefix() },
+      ':checkpointPrefix': { S: RAGKeys.checkpointPkPrefix() },
     },
   })) {
     rows.push(item);
@@ -382,8 +386,9 @@ async function confirm(): Promise<void> {
  *
  * A missing index comes back as NotFoundException rather than throwing the run
  * over, which is what makes a re-run — or a run interrupted between the index
- * and its rows — safe. Mirrors `S3VectorsStore.dropIndex` in
- * packages/rag-shared/src/s3-vectors-store.ts, which cannot be imported here.
+ * and its rows — safe. The same rule as `S3VectorsStore.dropIndex` in
+ * packages/rag-shared/src/s3-vectors-store.ts; this copy prints the outcome per
+ * bucket and counts it, which the store does not.
  */
 async function dropRagIndex(orgId: string, bucket: RagBucketPlan): Promise<number> {
   try {
@@ -477,7 +482,7 @@ async function clearTenantLink(account: AccountPlan): Promise<boolean> {
   if (orchestratorId === 'aurora') {
     setClauses.push('auroraSetupStatus = :initialStatus');
     removeClauses.push('auroraSetupFailureCount');
-    values[':initialStatus'] = { S: FILONE_ORG_CREATED };
+    values[':initialStatus'] = { S: OrgSetupStatus.FILONE_ORG_CREATED };
   }
 
   try {

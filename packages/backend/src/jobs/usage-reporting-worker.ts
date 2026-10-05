@@ -1,19 +1,24 @@
 import { PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
-import { getDynamoClient } from '../lib/ddb-client.js';
+import { getDynamoClient } from '../lib/ddb-client.ts';
 import { Resource } from 'sst';
-import { TRIAL_STORAGE_LIMIT, TRIAL_EGRESS_LIMIT, formatBytes, TenantStatus } from '@filone/shared';
+import {
+  TRIAL_STORAGE_LIMIT,
+  TRIAL_EGRESS_LIMIT,
+  formatBytes,
+  type TenantStatus,
+} from '@filone/shared';
 import {
   getCustomerExistence,
   isStripeResourceMissing,
   updateCustomerMetadata,
-} from '../lib/stripe-client.js';
-import { startDeletionFromStripe } from '../lib/deletion-from-stripe.js';
-import { emitStripeCustomersOutOfSync } from '../lib/usage-worker-metrics.js';
-import { STRIPE_METADATA_KEYS } from '../lib/stripe-metadata.js';
-import { reportOrgUsage, type AggregateUsage } from '../lib/org-usage-report.js';
-import { isOrgDeletedOrDeleting } from '../lib/org-profile.js';
-import { syncTenantStatusInProvisionedRegions } from '../lib/region-helpers.js';
+} from '../lib/stripe-client.ts';
+import { startDeletionFromStripe } from '../lib/deletion-from-stripe.ts';
+import { emitStripeCustomersOutOfSync } from '../lib/usage-worker-metrics.ts';
+import { STRIPE_METADATA_KEYS } from '../lib/stripe-metadata.ts';
+import { reportOrgUsage, type AggregateUsage } from '../lib/org-usage-report.ts';
+import { isOrgDeletedOrDeleting } from '../lib/org-profile.ts';
+import { syncTenantStatusInProvisionedRegions } from '../lib/region-helpers.ts';
 
 const dynamo = getDynamoClient();
 

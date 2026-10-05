@@ -168,7 +168,7 @@ function AuditFilters({ filters, members, onChange, onClear }: FiltersProps) {
       </label>
 
       {hasAuditFilters(filters) && (
-        <Button variant="ghost" size="sm" onClick={onClear}>
+        <Button variant="tertiary" size="sm" onClick={onClear}>
           Clear
         </Button>
       )}
@@ -206,7 +206,7 @@ function DateField({ label, value, min, max, onChange }: DateFieldProps) {
         min={min}
         max={max}
         onChange={(event) => onChange(event.target.value)}
-        className="h-8 rounded-md border border-(--input-border-color) bg-white px-2.5 text-[13px] text-(--color-text-base) transition-colors focus-visible:brand-outline"
+        className="h-8 rounded-md border border-(--input-border-color) bg-white px-2.5 text-ui text-(--color-text-base) transition-colors focus-visible:brand-outline"
       />
     </label>
   );

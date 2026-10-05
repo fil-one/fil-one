@@ -61,7 +61,7 @@ const DEGRADED: ListBucketsResponse = {
 
 const DEGRADED_MESSAGE = 'Cannot list buckets in the us-east-1 region. Please try again later.';
 
-function renderPage(role = OrgRole.Owner) {
+function renderPage(role: OrgRole = OrgRole.Owner) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   // Delete is gated on `buckets.delete`, so the caller's role has to be in the
   // cache before the rows render or the control is absent for the wrong reason.
@@ -82,7 +82,7 @@ function renderPage(role = OrgRole.Owner) {
 
 // Resolves once the bucket list has rendered and its action menu is open, so
 // the "Delete bucket" menu item is present.
-async function renderPageWithBucketMenuOpen(role = OrgRole.Owner) {
+async function renderPageWithBucketMenuOpen(role: OrgRole = OrgRole.Owner) {
   mockApiResponses();
   renderPage(role);
   fireEvent.click(await screen.findByRole('button', { name: 'Bucket actions' }));
@@ -120,7 +120,11 @@ describe('BucketsPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Delete bucket' }));
 
     await waitFor(() =>
-      expect(mockApiRequest).toHaveBeenCalledWith('/buckets/my-bucket', { method: 'DELETE' }),
+      // The bucket's own region, not the default: a delete routed to the wrong
+      // orchestrator reaches a region that has never heard of the bucket.
+      expect(mockApiRequest).toHaveBeenCalledWith('/buckets/my-bucket?region=eu-west-1', {
+        method: 'DELETE',
+      }),
     );
     expect(await screen.findByText('Bucket "my-bucket" deleted')).toBeInTheDocument();
   });

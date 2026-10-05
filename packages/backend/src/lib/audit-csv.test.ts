@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { AuditEvent } from '@filone/shared';
-import { AUDIT_CSV_COLUMNS, auditEventsToCsv, escapeCsvCell } from './audit-csv.js';
+import { AUDIT_CSV_COLUMNS, auditEventsToCsv, escapeCsvCell } from './audit-csv.ts';
 
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
 const USER_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';

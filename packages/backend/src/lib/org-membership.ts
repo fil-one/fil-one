@@ -4,8 +4,9 @@ import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import { OrgRole, isOrgRole } from '@filone/shared';
 import type { OrgMembershipSource, OrgMembershipSummary } from '@filone/shared';
-import { getDynamoClient } from './ddb-client.js';
-import { resolveOrgName } from './org-profile.js';
+import { getDynamoClient } from './ddb-client.ts';
+import { resolveOrgSummary } from './org-profile.ts';
+import type { OrgProfileSummary } from './org-profile.ts';
 
 /**
  * Organization membership, in OrgTable.
@@ -43,6 +44,12 @@ import { resolveOrgName } from './org-profile.js';
  * transactions that change an org's name and its membership span both tables.
  */
 
+/** The org partition prefix, shared by the builder and the scan filters in bin/. */
+const orgPkPrefix = (): string => 'ORG#';
+
+/** The user partition prefix, shared by the builder and the scan filters in bin/. */
+const userPkPrefix = (): string => 'USER#';
+
 /** The canonical membership sort-key prefix, shared by the builder and the parser. */
 const memberSkPrefix = (): string => 'MEMBER#';
 
@@ -61,7 +68,8 @@ const inviteSkPrefix = (): string => 'INVITE#';
 const inviteAddrSkPrefix = (): string => 'INVITEADDR#';
 
 export const OrgKeys = {
-  orgPk: (orgId: string): string => `ORG#${orgId}`,
+  orgPk: (orgId: string): string => `${orgPkPrefix()}${orgId}`,
+  orgPkPrefix,
   memberSk: (userId: string): string => `${memberSkPrefix()}${userId}`,
   memberSkPrefix,
   /**
@@ -83,7 +91,8 @@ export const OrgKeys = {
     return userId && !userId.includes('#') ? userId : undefined;
   },
   orgMetaSk: (): string => 'META',
-  userPk: (userId: string): string => `USER#${userId}`,
+  userPk: (userId: string): string => `${userPkPrefix()}${userId}`,
+  userPkPrefix,
   membershipSk: (orgId: string): string => `MEMBERSHIP#${orgId}`,
   membershipSkPrefix,
   /**
@@ -488,22 +497,22 @@ function toMembershipRecord(
  * between the two reads would otherwise have `role` and `memberships` name
  * two different roles for the org the caller is operating in.
  *
- * The active org's name is the read the caller is already making, passed in
- * rather than repeated; every other org costs one profile GetItem, which stays
- * cheap while a second membership can only arrive through an invitation. A
- * profile that cannot be read leaves that org unnamed rather than failing the
- * response.
+ * The active org's identity is the read the caller is already making, passed
+ * in rather than repeated; every other org costs one profile GetItem, which
+ * stays cheap while a second membership can only arrive through an
+ * invitation. A profile that cannot be read leaves that org unnamed rather
+ * than failing the response.
  */
 export async function summarizeMemberships({
   userId,
   activeOrgId,
   activeRole,
-  activeOrgName,
+  activeOrgSummary,
 }: {
   userId: string;
   activeOrgId: string;
   activeRole?: OrgRole;
-  activeOrgName: Promise<string>;
+  activeOrgSummary: Promise<OrgProfileSummary>;
 }): Promise<OrgMembershipSummary[]> {
   const memberships = await listMemberships(userId);
   let rows = memberships;
@@ -517,10 +526,16 @@ export async function summarizeMemberships({
   }
 
   return Promise.all(
-    rows.map(async (row) => ({
-      orgId: row.orgId,
-      orgName: row.orgId === activeOrgId ? await activeOrgName : await resolveOrgName(row.orgId),
-      role: row.role,
-    })),
+    rows.map(async (row) => {
+      const summary =
+        row.orgId === activeOrgId ? await activeOrgSummary : await resolveOrgSummary(row.orgId);
+      return {
+        orgId: row.orgId,
+        orgName: summary.name,
+        role: row.role,
+        ...(summary.logoUrl ? { logoUrl: summary.logoUrl } : {}),
+        ...(row.joinedAt ? { joinedAt: row.joinedAt } : {}),
+      };
+    }),
   );
 }

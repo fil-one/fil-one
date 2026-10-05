@@ -9,9 +9,9 @@ import {
 } from '@aws-sdk/client-s3vectors';
 import type { DocumentType } from '@smithy/types';
 
-import { EMBEDDING_DIMENSION, MAX_METADATA_BYTES } from './constants.js';
-import type { VectorQueryResult, VectorStoreChunk } from './schemas.js';
-import type { EnsureIndexOptions, QueryOptions, VectorStore } from './vector-store.js';
+import { EMBEDDING_DIMENSION, MAX_METADATA_BYTES } from './constants.ts';
+import type { VectorQueryResult, VectorStoreChunk } from './schemas.ts';
+import type { EnsureIndexOptions, QueryOptions, VectorStore } from './vector-store.ts';
 
 /**
  * Metadata key under which the chunk's `objectKey` is stored. It is left
@@ -32,7 +32,7 @@ const TEXT_METADATA = 'text';
  * at runtime via `Resource.RagVectorBucket.name`) hosts one *index* per
  * RAG-enabled bucket. Bucket names are globally namespaced and can be reused
  * across tenants, so each index is named from the `(orgId, region, bucketName)`
- * triple (see {@link #indexName}) — this is what keeps a reused bucket name from
+ * triple (see {@link ragIndexName}) — this is what keeps a reused bucket name from
  * resolving to another tenant's index (FIL-596).
  *
  * Uses the default AWS SDK credential chain (SigV4 via the Lambda execution
@@ -61,7 +61,7 @@ export class S3VectorsStore implements VectorStore {
       await this.#client.send(
         new CreateIndexCommand({
           vectorBucketName: this.#vectorBucketName,
-          indexName: this.#indexName(orgId, region, bucketName),
+          indexName: ragIndexName(orgId, region, bucketName),
           dataType: 'float32',
           dimension,
           // Distance metric is immutable once the index exists.
@@ -136,7 +136,7 @@ export class S3VectorsStore implements VectorStore {
     await this.#client.send(
       new PutVectorsCommand({
         vectorBucketName: this.#vectorBucketName,
-        indexName: this.#indexName(orgId, region, bucketName),
+        indexName: ragIndexName(orgId, region, bucketName),
         vectors,
       }),
     );
@@ -154,7 +154,7 @@ export class S3VectorsStore implements VectorStore {
     await this.#client.send(
       new DeleteVectorsCommand({
         vectorBucketName: this.#vectorBucketName,
-        indexName: this.#indexName(orgId, region, bucketName),
+        indexName: ragIndexName(orgId, region, bucketName),
         keys,
       }),
     );
@@ -170,7 +170,7 @@ export class S3VectorsStore implements VectorStore {
     const response = await this.#client.send(
       new QueryVectorsCommand({
         vectorBucketName: this.#vectorBucketName,
-        indexName: this.#indexName(orgId, region, bucketName),
+        indexName: ragIndexName(orgId, region, bucketName),
         topK: k,
         queryVector: { float32: embedding },
         returnMetadata: true,
@@ -204,7 +204,7 @@ export class S3VectorsStore implements VectorStore {
       await this.#client.send(
         new DeleteIndexCommand({
           vectorBucketName: this.#vectorBucketName,
-          indexName: this.#indexName(orgId, region, bucketName),
+          indexName: ragIndexName(orgId, region, bucketName),
         }),
       );
     } catch (error: unknown) {
@@ -222,29 +222,32 @@ export class S3VectorsStore implements VectorStore {
       throw error;
     }
   }
+}
 
-  /**
-   * Compose the S3 Vectors index name for a bucket's vectors, isolated per
-   * tenant. `orgId` is part of the identity so a bucket name reused across
-   * tenants never collides on one index (FIL-596).
-   *
-   * S3 Vectors index names are constrained to 3-63 chars from [a-z0-9-.], must
-   * begin and end with an alphanumeric, and must be unique within the vector
-   * bucket. The raw orgId/region/bucketName triple satisfies none of that (a
-   * 36-char UUID plus a 63-char bucket name blows the length cap), so we hash
-   * the triple into a fixed-width, charset-safe name. The parts are joined on
-   * '#' — the same delimiter used for our DynamoDB key values, and a character
-   * that cannot appear in any component (orgId is a UUID, region an enum, bucket
-   * names are [a-z0-9-]) — so the mapping is unambiguous. The delimiter lives
-   * inside the hashed input, not the final name, so the name's charset
-   * constraints do not apply to it. SHA-256 makes it deterministic and
-   * collision-resistant; 56 hex chars (224 bits) under a fixed `rag-` prefix is
-   * 60 chars total — within the cap and always valid.
-   */
-  #indexName(orgId: string, region: string, bucketName: string): string {
-    const digest = createHash('sha256').update([orgId, region, bucketName].join('#')).digest('hex');
-    return `rag-${digest.slice(0, 56)}`;
-  }
+/**
+ * The S3 Vectors index holding one bucket's vectors, isolated per tenant.
+ * `orgId` is part of the identity so a bucket name reused across tenants never
+ * collides on one index (FIL-596).
+ *
+ * S3 Vectors index names are constrained to 3-63 chars from [a-z0-9-.], must
+ * begin and end with an alphanumeric, and must be unique within the vector
+ * bucket. The raw orgId/region/bucketName triple satisfies none of that (a
+ * 36-char UUID plus a 63-char bucket name blows the length cap), so we hash the
+ * triple into a fixed-width, charset-safe name. The parts are joined on '#',
+ * the same delimiter used for our DynamoDB key values and a character that
+ * cannot appear in any component (orgId is a UUID, region an enum, bucket names
+ * are [a-z0-9-]), so the mapping is unambiguous. The delimiter lives inside the
+ * hashed input rather than the final name, so the name's charset constraints do
+ * not apply to it. SHA-256 makes it deterministic and collision-resistant; 56
+ * hex chars (224 bits) under a fixed `rag-` prefix is 60 chars total, within
+ * the cap and always valid.
+ *
+ * Exported so operator scripts can name the index a bucket's rows point at
+ * without constructing a store.
+ */
+export function ragIndexName(orgId: string, region: string, bucketName: string): string {
+  const digest = createHash('sha256').update([orgId, region, bucketName].join('#')).digest('hex');
+  return `rag-${digest.slice(0, 56)}`;
 }
 
 /**

@@ -1,8 +1,8 @@
 import { SubscriptionStatus } from '@filone/shared';
-import { isOrgDeleting, OrgDeletingError } from './org-profile.js';
-import { getStripeClient, getBillingSecrets } from './stripe-client.js';
-import { readSubscription, updateSubscription } from './subscription-store.js';
-import { TRIAL_DURATION_DAYS } from '@filone/shared/src/constants.js';
+import { isOrgDeleting, OrgDeletingError } from './org-profile.ts';
+import { getStripeClient, getBillingSecrets } from './stripe-client.ts';
+import { readSubscription, updateSubscription } from './subscription-store.ts';
+import { TRIAL_DURATION_DAYS } from '@filone/shared/src/constants.ts';
 
 export interface CreateBillingTrialParams {
   userId: string;

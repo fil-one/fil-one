@@ -14,8 +14,8 @@ import type { SQSEvent } from 'aws-lambda';
 
 import { isTerminalBulkDeleteStatus } from '@filone/shared';
 
-import { failJob, getBulkDeleteJob, putBulkDeleteJob } from '../lib/bulk-delete-jobs.js';
-import type { BulkDeleteWorkerPayload } from '../lib/bulk-delete-queue.js';
+import { failJob, getBulkDeleteJob, putBulkDeleteJob } from '../lib/bulk-delete-jobs.ts';
+import type { BulkDeleteWorkerPayload } from '../lib/bulk-delete-queue.ts';
 
 const LOG = '[bulk-delete-dlq-watchdog]';
 

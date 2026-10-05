@@ -8,7 +8,7 @@ import {
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { sendGuardedBillingUpdate } from './billing-guard.js';
+import { sendGuardedBillingUpdate } from './billing-guard.ts';
 
 const INPUT = {
   TableName: 'BillingTable',

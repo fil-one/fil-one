@@ -3,27 +3,27 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { BucketRagEnablementResponse, ErrorResponse } from '@filone/shared';
 import { S3_REGION, SetBucketRagEnabledSchema, isSupportedRegion } from '@filone/shared';
-import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
-import { getOrgProfile, isOrgDeleting } from '../lib/org-profile.js';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import { getOrgProfile, isOrgDeleting } from '../lib/org-profile.ts';
 import {
   accountDeletedResponse,
   ResponseBuilder,
   tenantNotReadyResponse,
   unsupportedRegionResponse,
-} from '../lib/response-builder.js';
+} from '../lib/response-builder.ts';
 import {
   getBucketRagEnablement,
   setBucketRagEnablement,
   toEnablementResponse,
-} from '../lib/bucket-rag-enablement.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { requireOrgMembershipMiddleware, requirePermission } from '../middleware/authorize.js';
-import { csrfMiddleware } from '../middleware/csrf.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { ragAccessMiddleware } from '../middleware/rag-access.js';
-import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
+} from '../lib/bucket-rag-enablement.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { requireOrgMembershipMiddleware, requirePermission } from '../middleware/authorize.ts';
+import { csrfMiddleware } from '../middleware/csrf.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
+import { ragAccessMiddleware } from '../middleware/rag-access.ts';
+import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
 
 /**
  * POST /api/buckets/{name}/rag/enabled — toggle a bucket's RAG indexing on/off

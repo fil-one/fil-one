@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { OrgRole } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -13,7 +13,7 @@ const mockDeleteGuardianEnrollment = vi.fn();
 const mockDeleteAuthenticationMethod = vi.fn();
 const mockDeleteRecoveryCode = vi.fn();
 const mockUpdateAuth0User = vi.fn();
-vi.mock('../lib/auth0-management.js', () => ({
+vi.mock('../lib/auth0-management.ts', () => ({
   getConnectionType: (sub: string) => sub.split('|')[0] ?? 'unknown',
   getMfaEnrollments: (...args: unknown[]) => mockGetMfaEnrollments(...args),
   deleteGuardianEnrollment: (...args: unknown[]) => mockDeleteGuardianEnrollment(...args),
@@ -24,7 +24,7 @@ vi.mock('../lib/auth0-management.js', () => ({
 
 vi.mock('sst', () => sstResourceMock());
 
-vi.mock('../lib/auth-secrets.js', () => ({
+vi.mock('../lib/auth-secrets.ts', () => ({
   getAuthSecrets: () => ({
     AUTH0_CLIENT_ID: 'test-client-id',
     AUTH0_CLIENT_SECRET: 'test-client-secret',
@@ -43,9 +43,9 @@ const ddbMock = mockClient(DynamoDBClient);
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
-import { handler } from './delete-mfa-enrollment.js';
-import { buildEvent, buildContext, stubMembershipRead } from '../test/lambda-test-utilities.js';
-import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
+import { handler } from './delete-mfa-enrollment.ts';
+import { buildEvent, buildContext, stubMembershipRead } from '../test/lambda-test-utilities.ts';
+import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

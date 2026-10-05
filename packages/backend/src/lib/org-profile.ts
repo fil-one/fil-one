@@ -6,7 +6,8 @@ import {
   type TransactWriteItem,
 } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
-import { getDynamoClient } from './ddb-client.js';
+import { getDynamoClient } from './ddb-client.ts';
+import { isOrgLogoUrl } from './org-logo-storage.ts';
 
 const dynamo = getDynamoClient();
 
@@ -105,9 +106,17 @@ export async function sendDeletionGuardedWrite(
  * TransactWriteItems. Must be item 0, since CancellationReasons is positional.
  */
 export function orgNotDeletingCheck(orgId: string): TransactWriteItem {
+  return orgNotDeletingCheckIn(Resource.UserInfoTable.name, orgId);
+}
+
+/**
+ * The same guard against a named UserInfoTable, for operator scripts that run
+ * outside `sst shell` and resolve the table name themselves.
+ */
+export function orgNotDeletingCheckIn(userInfoTableName: string, orgId: string): TransactWriteItem {
   return {
     ConditionCheck: {
-      TableName: Resource.UserInfoTable.name,
+      TableName: userInfoTableName,
       Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
       // A ConditionCheck on a missing item reads every attribute as absent, so
       // attribute_not_exists(deleting) alone would pass for an org that has no
@@ -136,6 +145,8 @@ export function isGuardRejection(err: unknown): boolean {
  * so the read failure is logged and swallowed here rather than raised.
  */
 export async function resolveOrgName(orgId: string): Promise<string> {
+  // Not through orgSummary: its logo check reads OrgLogoBucketName, which only
+  // some functions link.
   try {
     return (await getOrgProfile(orgId))?.name?.S ?? '';
   } catch (err) {
@@ -144,5 +155,37 @@ export async function resolveOrgName(orgId: string): Promise<string> {
       error: err,
     });
     return '';
+  }
+}
+
+/**
+ * An org's name and logo, for the org switcher and `/me`. `logoUrl` is absent
+ * when there is none, or when the stored one is not one of our logo uploads,
+ * and the console falls back to a generated monogram.
+ */
+export interface OrgProfileSummary {
+  name: string;
+  logoUrl?: string;
+}
+
+export function orgSummary(profile: OrgProfileItem | undefined): OrgProfileSummary {
+  return {
+    name: profile?.name?.S ?? '',
+    ...(profile?.logoUrl?.S && isOrgLogoUrl(profile.logoUrl.S)
+      ? { logoUrl: profile.logoUrl.S }
+      : {}),
+  };
+}
+
+/** {@link resolveOrgName} with the logo too, under the same failure contract. */
+export async function resolveOrgSummary(orgId: string): Promise<OrgProfileSummary> {
+  try {
+    return orgSummary(await getOrgProfile(orgId));
+  } catch (err) {
+    console.error('[org-profile] Org profile read failed — naming the org empty', {
+      orgId,
+      error: err,
+    });
+    return { name: '' };
   }
 }

@@ -5,23 +5,23 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { CreateRagApiKeySchema, auditKeyIdSuffix } from '@filone/shared';
 import type { CreateRagApiKeyResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
-import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.js';
-import { OrgDeletingError, isGuardRejection, orgNotDeletingCheck } from '../lib/org-profile.js';
+import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.ts';
+import { OrgDeletingError, isGuardRejection, orgNotDeletingCheck } from '../lib/org-profile.ts';
 import {
   RagApiKeyKeys,
   generateRagKeyToken,
   hashRagKeyToken,
   ragKeyDisplayPrefix,
-} from '../lib/rag-api-keys.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { csrfMiddleware } from '../middleware/csrf.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { ragAccessMiddleware } from '../middleware/rag-access.js';
-import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
+} from '../lib/rag-api-keys.ts';
+import { ResponseBuilder } from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { csrfMiddleware } from '../middleware/csrf.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
+import { ragAccessMiddleware } from '../middleware/rag-access.ts';
+import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
 
 /**
  * Create a RAG API key: a bearer token scoped to the RAG query endpoint.
