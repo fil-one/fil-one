@@ -5,7 +5,7 @@ vi.hoisted(() => {
   process.env.FILONE_STAGE = 'staging';
 });
 
-import { createForgeOrchestrator } from './forge-orchestrator.js';
+import { createForgeOrchestrator } from './forge-orchestrator.ts';
 
 const api = { baseUrl: 'https://forge.test', accessToken: 'fkid.fsecret' };
 

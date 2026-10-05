@@ -4,35 +4,35 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { AcceptInvitationSchema, ApiErrorCode, OrgRole } from '@filone/shared';
 import type { AcceptInvitationResponse, ErrorResponse } from '@filone/shared';
-import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.js';
+import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.ts';
 import {
   isInvitationUsable,
   normalizeInviteEmail,
   resolveInvitationByToken,
   retireInvitationItems,
-} from '../lib/invitations.js';
-import type { InvitationRecord } from '../lib/invitations.js';
+} from '../lib/invitations.ts';
+import type { InvitationRecord } from '../lib/invitations.ts';
 import {
   cancelledLabels,
   inviterAuthorityCheck,
   membershipRows,
   ownerCountItem,
-} from '../lib/membership-changes.js';
-import { resolveMembership } from '../lib/org-membership.js';
+} from '../lib/membership-changes.ts';
+import { resolveMembership } from '../lib/org-membership.ts';
 import {
   OrgDeletingError,
   isGuardRejection,
   orgNotDeletingCheck,
-  resolveOrgName,
-} from '../lib/org-profile.js';
-import { parseJsonBody } from '../lib/parse-json-body.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
-import { readUserProfile, rememberVerifiedEmail } from '../lib/user-profile.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { csrfMiddleware } from '../middleware/csrf.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+  resolveOrgSummary,
+} from '../lib/org-profile.ts';
+import { parseJsonBody } from '../lib/parse-json-body.ts';
+import { ResponseBuilder } from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
+import { readUserProfile, rememberVerifiedEmail } from '../lib/user-profile.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { csrfMiddleware } from '../middleware/csrf.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 
 /**
  * POST /api/invitations/accept — join the organization an invitation names.
@@ -333,13 +333,17 @@ async function acceptedResponse({
   role: OrgRole;
   alreadyMember: boolean;
 }): Promise<APIGatewayProxyStructuredResultV2> {
+  // The console sets the active org from this response and reloads, so it
+  // needs the name (and logo, for the accepted panel's avatar) it is
+  // switching to, as well as the id.
+  const { name: orgName, logoUrl } = await resolveOrgSummary(invitation.orgId);
+
   return new ResponseBuilder()
     .status(200)
     .body<AcceptInvitationResponse>({
       orgId: invitation.orgId,
-      // The console sets the active org from this response and reloads, so it
-      // needs the name it is switching to as well as the id.
-      orgName: await resolveOrgName(invitation.orgId),
+      orgName,
+      ...(logoUrl ? { logoUrl } : {}),
       // A member who was already in the org keeps the role they hold: the
       // invitation is marked accepted, and accepting an invitation is not a way
       // to give somebody a role change nobody authorized.

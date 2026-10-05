@@ -10,9 +10,9 @@ import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import { INVITATION_STATUSES, INVITE_EXPIRY_DAYS, isOrgRole } from '@filone/shared';
 import type { InvitationStatus, InvitationSummary, OrgRole } from '@filone/shared';
-import { TRANSACT_WRITE_ITEM_LIMIT } from './audit.js';
-import { getDynamoClient } from './ddb-client.js';
-import { OrgKeys } from './org-membership.js';
+import { TRANSACT_WRITE_ITEM_LIMIT } from './audit.ts';
+import { getDynamoClient } from './ddb-client.ts';
+import { OrgKeys } from './org-membership.ts';
 
 /**
  * The invitation record and its lifecycle: two OrgTable rows per invitation,

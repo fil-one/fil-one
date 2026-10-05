@@ -2,15 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { OrgRole } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
-import { buildEvent, membershipFor } from '../test/lambda-test-utilities.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { enforceIdentityProvider, resolveActiveOrg } from './org-context.js';
+import { enforceIdentityProvider, resolveActiveOrg } from './org-context.ts';
 
 const PERSONAL_ORG = '11111111-1111-1111-1111-111111111111';
 const OTHER_ORG = '22222222-2222-2222-2222-222222222222';

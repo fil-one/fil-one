@@ -1,9 +1,9 @@
 import type { AuditActor, AccessKeySummary, RevocationTrigger } from '@filone/shared';
-import { RevocationNotRecordedError, revokeAccessKey } from './key-revocation.js';
-import { summarizeAccessKey } from './member-keys.js';
-import type { AccessKeyToRevoke } from './member-keys.js';
-import type { OrgProfileItem } from './org-profile.js';
-import { getOrchestratorForRegion } from './service-orchestrator-registry.js';
+import { RevocationNotRecordedError, revokeAccessKey } from './key-revocation.ts';
+import { summarizeAccessKey } from './member-keys.ts';
+import type { AccessKeyToRevoke } from './member-keys.ts';
+import type { OrgProfileItem } from './org-profile.ts';
+import { getOrchestratorForRegion } from './service-orchestrator-registry.ts';
 
 /**
  * Revoke a member's keys, all at once, across whichever regions hold them.

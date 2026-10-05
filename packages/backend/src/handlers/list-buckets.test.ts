@@ -33,18 +33,18 @@ const fth: MockOrchestrator = {
 
 const availableOrchestrators = vi.fn<() => MockOrchestrator[]>();
 
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getAvailableOrchestrators: () => availableOrchestrators(),
 }));
 
-vi.mock('../lib/org-profile.js', () => ({
+vi.mock('../lib/org-profile.ts', () => ({
   getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
 }));
 
 process.env.FILONE_STAGE = 'test';
 
-import { baseHandler } from './list-buckets.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import { baseHandler } from './list-buckets.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
 import { S3_REGION, S3Region } from '@filone/shared';
 
 // ---------------------------------------------------------------------------

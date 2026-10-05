@@ -4,8 +4,8 @@ import { SubscriptionStatus } from '@filone/shared';
 import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
-} from './region-helpers.js';
-import { updateSubscription, type SubscriptionOwner } from './subscription-store.js';
+} from './region-helpers.ts';
+import { updateSubscription, type SubscriptionOwner } from './subscription-store.ts';
 
 export async function saveBillingRecord(
   owner: SubscriptionOwner,

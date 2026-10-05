@@ -3,13 +3,13 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { isOrgRole } from '@filone/shared';
 import type { RoleChangePreviewResponse } from '@filone/shared';
-import { requireManageableMember } from '../lib/manageable-member.js';
-import { reviewMemberAccessKeysForRole, summarizeAccessKey } from '../lib/member-keys.js';
-import { ResponseBuilder, badRequestResponse } from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+import { requireManageableMember } from '../lib/manageable-member.ts';
+import { reviewMemberAccessKeysForRole, summarizeAccessKey } from '../lib/member-keys.ts';
+import { ResponseBuilder, badRequestResponse } from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 
 /**
  * GET /api/org/members/{userId}/role-change-preview?role= — the keys the PATCH

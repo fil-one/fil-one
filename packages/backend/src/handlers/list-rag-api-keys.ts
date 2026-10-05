@@ -5,17 +5,17 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ListRagApiKeysResponse, RagApiKey, RagKeyBucketRef } from '@filone/shared';
 import { Resource } from 'sst';
-import { getDynamoClient } from '../lib/ddb-client.js';
-import { keyScope, withinScope } from '../lib/key-scope.js';
-import { RagApiKeyKeys } from '../lib/rag-api-keys.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { ragAccessMiddleware } from '../middleware/rag-access.js';
-import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
+import { getDynamoClient } from '../lib/ddb-client.ts';
+import { keyScope, withinScope } from '../lib/key-scope.ts';
+import { RagApiKeyKeys } from '../lib/rag-api-keys.ts';
+import { ResponseBuilder } from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
+import { ragAccessMiddleware } from '../middleware/rag-access.ts';
+import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
 
 export async function baseHandler(
   event: AuthenticatedEvent,

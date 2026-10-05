@@ -18,7 +18,7 @@ vi.mock('sst', () => ({
 
 const mockSubscriptionsRetrieve = vi.fn();
 
-vi.mock('../lib/stripe-client.js', () => ({
+vi.mock('../lib/stripe-client.ts', () => ({
   getStripeClient: () => ({
     subscriptions: { retrieve: mockSubscriptionsRetrieve },
   }),
@@ -34,13 +34,13 @@ const ddbMock = mockClient(DynamoDBClient);
 // endpoint owes is firing it on exactly the records that leave it open — no
 // guard sits in front of the route the dashboard calls first.
 const mockClaimTrialIfEligible = vi.fn();
-vi.mock('../lib/trial-claim.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../lib/trial-claim.js')>()),
+vi.mock('../lib/trial-claim.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/trial-claim.ts')>()),
   claimTrialIfEligible: (...args: unknown[]) => mockClaimTrialIfEligible(...args),
 }));
 
-import { baseHandler } from './get-billing.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import { baseHandler } from './get-billing.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -906,6 +906,23 @@ describe('get-billing baseHandler', () => {
     expect(body.subscription.planName).toBe('Business');
   });
 
+  it('does not surface the Stripe product name for the self-serve price', async () => {
+    ddbMock.on(GetItemCommand).resolves(activeRecordWith());
+    ddbMock.on(UpdateItemCommand).resolves({});
+    mockSubscriptionsRetrieve.mockResolvedValue(
+      stripeSubscription({
+        ...TIERED_PRICE,
+        id: 'price_test_fake',
+        product: { id: PRODUCT_ID, object: 'product', name: 'Fil ONE Storage (GB)', active: true },
+      }),
+    );
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const body = JSON.parse(String(result.body));
+    expect(body.subscription.planName).toBeUndefined();
+  });
+
   it('caches the product name, so an outage does not cost the customer their plan name', async () => {
     ddbMock.on(GetItemCommand).resolves(activeRecordWith());
     ddbMock.on(UpdateItemCommand).resolves({});
@@ -1115,19 +1132,22 @@ describe('get-billing baseHandler', () => {
       expect(body.subscription).toMatchObject({ status: SubscriptionStatus.Trialing });
     });
 
-    it('reports inactive, without writing, when the caller cannot claim', async () => {
-      ddbMock.on(GetItemCommand).resolves({});
-      mockClaimTrialIfEligible.mockResolvedValue('not-own-org');
+    it.each(['not-own-org', 'not-entitled', 'api-key-session'] as const)(
+      'reports inactive, without writing, when the claim answers %s',
+      async (outcome) => {
+        ddbMock.on(GetItemCommand).resolves({});
+        mockClaimTrialIfEligible.mockResolvedValue(outcome);
 
-      const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+        const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
 
-      const body = JSON.parse(String(result.body));
-      expect(body.subscription).toStrictEqual({
-        planId: PlanId.None,
-        status: SubscriptionStatus.Inactive,
-      });
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    });
+        const body = JSON.parse(String(result.body));
+        expect(body.subscription).toStrictEqual({
+          planId: PlanId.None,
+          status: SubscriptionStatus.Inactive,
+        });
+        expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      },
+    );
 
     it('says billing is unreadable when a pre-re-key CUSTOMER# row is still standing', async () => {
       // The backfill missed this account, so its billing lives on a key nothing

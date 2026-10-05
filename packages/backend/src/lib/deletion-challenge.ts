@@ -3,7 +3,7 @@ import { ConditionalCheckFailedException, UpdateItemCommand } from '@aws-sdk/cli
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { DELETION_CODE_LENGTH, DELETION_CODE_TTL_MINUTES } from '@filone/shared';
 import { Resource } from 'sst';
-import { getDynamoClient } from './ddb-client.js';
+import { getDynamoClient } from './ddb-client.ts';
 
 export const MAX_VERIFY_ATTEMPTS = 5;
 export const RESEND_COOLDOWN_SECONDS = 60;

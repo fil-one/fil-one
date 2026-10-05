@@ -8,14 +8,14 @@ import type {
   RevocationTrigger,
   TwoPhaseAuditEventType,
 } from '@filone/shared';
-import { accessKeyMintSeqUnchangedCheck } from './access-key-mint-seq.js';
-import type { KeyMintFence } from './access-key-mint-seq.js';
-import { auditEvent, commitAudited, twoPhaseAudit } from './audit.js';
-import type { AuditCorrelation } from './audit.js';
-import { cancelledLabels } from './membership-changes.js';
-import type { AccessKeyToRevoke } from './member-keys.js';
-import type { OrgProfileItem } from './org-profile.js';
-import { revokeMemberKeys } from './revoke-member-keys.js';
+import { accessKeyMintSeqUnchangedCheck } from './access-key-mint-seq.ts';
+import type { KeyMintFence } from './access-key-mint-seq.ts';
+import { auditEvent, commitAudited, twoPhaseAudit } from './audit.ts';
+import type { AuditCorrelation } from './audit.ts';
+import { cancelledLabels } from './membership-changes.ts';
+import type { AccessKeyToRevoke } from './member-keys.ts';
+import type { OrgProfileItem } from './org-profile.ts';
+import { revokeMemberKeys } from './revoke-member-keys.ts';
 
 type Response = APIGatewayProxyStructuredResultV2;
 

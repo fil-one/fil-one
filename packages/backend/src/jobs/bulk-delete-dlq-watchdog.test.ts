@@ -2,10 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import { BulkDeleteJobStatus, BulkDeleteScope, S3Region } from '@filone/shared';
 
-import type { BulkDeleteJobRecord } from '../lib/dynamo-records.js';
+import type { BulkDeleteJobRecord } from '../lib/dynamo-records.ts';
 
-vi.mock('../lib/bulk-delete-jobs.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../lib/bulk-delete-jobs.js')>();
+vi.mock('../lib/bulk-delete-jobs.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/bulk-delete-jobs.ts')>();
   return {
     ...actual,
     getBulkDeleteJob: vi.fn(),
@@ -13,8 +13,8 @@ vi.mock('../lib/bulk-delete-jobs.js', async (importOriginal) => {
   };
 });
 
-import { getBulkDeleteJob, putBulkDeleteJob } from '../lib/bulk-delete-jobs.js';
-import { handler } from './bulk-delete-dlq-watchdog.js';
+import { getBulkDeleteJob, putBulkDeleteJob } from '../lib/bulk-delete-jobs.ts';
+import { handler } from './bulk-delete-dlq-watchdog.ts';
 
 const mockGetJob = vi.mocked(getBulkDeleteJob);
 const mockPutJob = vi.mocked(putBulkDeleteJob);

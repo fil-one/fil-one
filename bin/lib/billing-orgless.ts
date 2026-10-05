@@ -14,7 +14,7 @@
 // the flip then takes that subscription away. So the token carries `updatedAt`
 // and the subscription the operator saw, and the check fails when either moved.
 
-import { BillingKeys } from './billing-rekey.ts';
+import { SubscriptionKeys } from '@filone/backend/src/lib/subscription-store.ts';
 import type { SubscriptionRow } from './billing-rekey.ts';
 
 /** What the token writes for an attribute the row does not carry. */
@@ -92,9 +92,9 @@ function parseOne(entry: string): OrglessAcceptance | undefined {
   if (key.length === 0 || updatedAt.length === 0 || subscriptionId.length === 0) return undefined;
 
   return {
-    pk: key.startsWith(BillingKeys.legacyPkPrefix())
+    pk: key.startsWith(SubscriptionKeys.legacyPkPrefix())
       ? key
-      : `${BillingKeys.legacyPkPrefix()}${key}`,
+      : `${SubscriptionKeys.legacyPkPrefix()}${key}`,
     updatedAt,
     subscriptionId,
   };

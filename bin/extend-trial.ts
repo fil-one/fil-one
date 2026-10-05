@@ -44,15 +44,7 @@ import { readFileSync } from 'node:fs';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import Stripe from 'stripe';
 import { createClient, setTenantStatus } from '@filone/aurora-backoffice-client';
-
-// BillingTable keys — mirror of `SubscriptionKeys` in
-// packages/backend/src/lib/subscription-store.ts, for the reason
-// ./lib/org-conversion.ts records: bin scripts run under Node's type stripping,
-// which resolves neither the backend's `./x.js` specifiers nor its enums.
-const BillingKeys = {
-  orgPk: (id: string): string => `ORG#${id}`,
-  subscriptionSk: (): string => 'SUBSCRIPTION',
-} as const;
+import { SubscriptionKeys } from '@filone/backend/src/lib/subscription-store.ts';
 
 const PROTECTED_STAGES = ['production'];
 
@@ -100,7 +92,7 @@ if (!auroraTenantId) {
 const subRes = await dynamo.send(
   new GetItemCommand({
     TableName: Resource.BillingTable.name,
-    Key: { pk: { S: BillingKeys.orgPk(orgId) }, sk: { S: BillingKeys.subscriptionSk() } },
+    Key: { pk: { S: SubscriptionKeys.orgPk(orgId) }, sk: { S: SubscriptionKeys.sk() } },
   }),
 );
 if (!subRes.Item) {
@@ -155,7 +147,7 @@ if (currentSub.status === 'canceled') {
 await dynamo.send(
   new UpdateItemCommand({
     TableName: Resource.BillingTable.name,
-    Key: { pk: { S: BillingKeys.orgPk(orgId) }, sk: { S: BillingKeys.subscriptionSk() } },
+    Key: { pk: { S: SubscriptionKeys.orgPk(orgId) }, sk: { S: SubscriptionKeys.sk() } },
     UpdateExpression:
       'SET subscriptionStatus = :status, subscriptionId = :subId, trialStartedAt = :start, trialEndsAt = :end, updatedAt = :now ' +
       'REMOVE gracePeriodEndsAt, canceledAt, lastPaymentFailedAt',

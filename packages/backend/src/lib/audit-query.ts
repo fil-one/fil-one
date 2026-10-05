@@ -4,9 +4,9 @@ import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import { AUDIT_RETENTION_DAYS } from '@filone/shared';
 import type { AuditEvent, AuditQueryFilters, AuditWindow } from '@filone/shared';
-import { AuditKeys } from './audit.js';
-import { getDynamoClient } from './ddb-client.js';
-import type { DynamoCursor } from './ddb-paging.js';
+import { AuditKeys } from './audit.ts';
+import { getDynamoClient } from './ddb-client.ts';
+import type { DynamoCursor } from './ddb-paging.ts';
 
 /**
  * The audit log read path: one org's history, over a date range, optionally

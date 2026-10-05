@@ -6,13 +6,13 @@ import type {
   Context,
 } from 'aws-lambda';
 import { ApiErrorCode, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
-import { ResponseBuilder } from '../lib/response-builder.js';
-import type { SubscriptionRecord } from '../lib/dynamo-records.js';
-import { readSubscription, updateSubscription } from '../lib/subscription-store.js';
-import { claimTrialIfEligible, isTrialClaimable } from '../lib/trial-claim.js';
-import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
-import { withRefreshedCookies } from './auth.js';
+import { ResponseBuilder } from '../lib/response-builder.ts';
+import type { SubscriptionRecord } from '../lib/dynamo-records.ts';
+import { readSubscription, updateSubscription } from '../lib/subscription-store.ts';
+import { claimTrialIfEligible, isTrialClaimable } from '../lib/trial-claim.ts';
+import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.ts';
+import { getUserInfo } from '../lib/user-context.ts';
+import { withRefreshedCookies } from './auth.ts';
 
 export const AccessLevel = {
   Read: 'read',

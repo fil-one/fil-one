@@ -11,7 +11,7 @@ import {
   ORG_NAME_MAX_LENGTH,
   ORG_NAME_MIN_LENGTH,
 } from '@filone/shared';
-import { PUBLIC_EMAIL_DOMAINS } from './email-normalization.js';
+import { PUBLIC_EMAIL_DOMAINS } from './email-normalization.ts';
 
 export { PUBLIC_EMAIL_DOMAINS };
 

@@ -1,16 +1,16 @@
 import { canChangeRole, canManageTargetRole } from '@filone/shared';
 import type { OrgRole } from '@filone/shared';
-import { resolveMembership } from './org-membership.js';
-import type { OrgMembership } from './org-membership.js';
+import { resolveMembership } from './org-membership.ts';
+import type { OrgMembership } from './org-membership.ts';
 import {
   badRequestResponse,
   beyondCeilingResponse,
   notAMemberResponse,
-} from './response-builder.js';
-import { proceed, refuse } from './result.js';
-import type { Result } from './result.js';
-import { getUserInfo } from './user-context.js';
-import type { AuthenticatedEvent } from './user-context.js';
+} from './response-builder.ts';
+import { proceed, refuse } from './result.ts';
+import type { Result } from './result.ts';
+import { getUserInfo } from './user-context.ts';
+import type { AuthenticatedEvent } from './user-context.ts';
 
 /**
  * What the caller means to do to the member.

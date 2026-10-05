@@ -36,8 +36,8 @@ import type {
   TwoPhaseAuditEvent,
   TwoPhaseAuditEventType,
 } from '@filone/shared';
-import { getDynamoClient } from './ddb-client.js';
-import { reportMetric } from './metrics.js';
+import { getDynamoClient } from './ddb-client.ts';
+import { reportMetric } from './metrics.ts';
 
 /**
  * The audit write path.

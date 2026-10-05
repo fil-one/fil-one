@@ -2,18 +2,18 @@ import { BatchGetItemCommand, type AttributeValue } from '@aws-sdk/client-dynamo
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import type { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
-import { getDynamoClient } from '../lib/ddb-client.js';
+import { getDynamoClient } from '../lib/ddb-client.ts';
 import {
   type ContactWriteOutcome,
   upsertContactSubscriptionStatus,
-} from '../lib/hubspot-client.js';
-import { fromInternalStatus } from '../lib/hubspot-lifecycle-status.js';
-import { type ContactSyncSummary, emitContactSyncSummary } from '../lib/hubspot-metrics.js';
+} from '../lib/hubspot-client.ts';
+import { fromInternalStatus } from '../lib/hubspot-lifecycle-status.ts';
+import { type ContactSyncSummary, emitContactSyncSummary } from '../lib/hubspot-metrics.ts';
 import {
   type ScannedSubscription,
   scanSubscriptions,
   updateSubscriptionByUser,
-} from '../lib/subscription-store.js';
+} from '../lib/subscription-store.ts';
 
 const JOB = 'hubspot-contact-sync';
 const LOG = `[${JOB}]`;

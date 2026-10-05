@@ -11,7 +11,7 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { OrgRole } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -21,7 +21,7 @@ vi.mock('sst', () => sstResourceMock());
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { handler } from './owner-count-drift-checker.js';
+import { handler } from './owner-count-drift-checker.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

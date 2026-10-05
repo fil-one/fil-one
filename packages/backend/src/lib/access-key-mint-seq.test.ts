@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
@@ -12,7 +12,7 @@ import {
   accessKeyMintSeqItem,
   accessKeyMintSeqUnchangedCheck,
   readAccessKeyMintSeq,
-} from './access-key-mint-seq.js';
+} from './access-key-mint-seq.ts';
 
 const MEMBER = { orgId: 'org-1', userId: 'user-1' };
 const KEY = { pk: { S: 'ORG#org-1' }, sk: { S: 'ACCESSKEY_MINT_SEQ#user-1' } };

@@ -160,7 +160,11 @@ Dimensions (all low-cardinality):
   `"POST /v1/tenants/{tenantId}/buckets"`. Derived from the Hey API SDK's
   URL template passed through `ResolvedRequestOptions.url`, so no manual
   endpoint map is needed.
-- `statusGroup`: `"2xx"`, `"3xx"`, `"4xx"`, `"5xx"`, or `"network_error"`.
+- `statusGroup`: `"2xx"`, `"3xx"`, `"4xx"`, `"5xx"`, `"timeout"` (a request
+  Fil One aborted at its own deadline before any response arrived), or
+  `"network_error"` (any other failure to get a response). A deadline that
+  fires after the response headers arrive, while the body is still being
+  read, is still counted under the status code the headers carried.
 
 The exact HTTP `statusCode` is included as a non-dimension property for
 log-level debugging.

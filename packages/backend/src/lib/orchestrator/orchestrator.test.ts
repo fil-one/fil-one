@@ -49,7 +49,7 @@ vi.mock('@filone/orchestrator-client', () => ({
     mockGetBucketMetrics(o),
 }));
 
-vi.mock('./metrics.js', () => ({
+vi.mock('./metrics.ts', () => ({
   instrumentClient: vi.fn(),
 }));
 
@@ -64,10 +64,11 @@ import {
   BucketConfigurationError,
   BucketNotEmptyError,
   BucketNotFoundError,
-} from '../errors.js';
-import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
-import { instrumentClient } from './metrics.js';
-import { createFilOneOrchestrator, type FilOneOrchestratorConfig } from './orchestrator.js';
+} from '../errors.ts';
+import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
+import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
+import { instrumentClient } from './metrics.ts';
+import { createFilOneOrchestrator, type FilOneOrchestratorConfig } from './orchestrator.ts';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 // tenantId === orgId for Management API orchestrators (client-supplied UUID).
@@ -897,5 +898,194 @@ describe('getBucketUsageMetrics', () => {
         to: '2026-01-02T00:00:00Z',
       }),
     ).rejects.toThrow('Failed to fetch usage metrics for bucket "bucket-a"');
+  });
+});
+
+describe('signal forwarding', () => {
+  // The caller's deadline. Never aborted here: these tests check it is forwarded,
+  // not what happens when it fires.
+  const signal = new AbortController().signal;
+  const range = { from: '2026-01-01T00:00:00Z', to: '2026-01-02T00:00:00Z' };
+
+  // aws-sdk-client-mock types `args` as the one-element `[command]` tuple,
+  // but the recorded sinon call carries every argument `send` received.
+  function sendOptionsOf(calls: Array<{ args: unknown[] }>): unknown {
+    return calls[0].args[1];
+  }
+
+  beforeEach(stubS3Credentials);
+
+  // Each case names the Management API mocks the method must reach; the test
+  // checks every one of them received the caller's signal in its options.
+  const managementCases: Array<{
+    name: string;
+    run: (requestOptions: OrchestratorRequestOptions) => Promise<unknown>;
+    mocks: Array<{ mock: { calls: unknown[][] } }>;
+  }> = [
+    {
+      name: 'updateTenantStatus',
+      run: (requestOptions) => {
+        mockSetStatus.mockResolvedValue(noContent());
+        return orchestrator.updateTenantStatus(tenantId, 'active', requestOptions);
+      },
+      mocks: [mockSetStatus],
+    },
+    {
+      name: 'deleteTenant',
+      run: (requestOptions) => {
+        mockSetStatus.mockResolvedValue(noContent());
+        mockDeleteTenant.mockResolvedValue(noContent());
+        return orchestrator.deleteTenant(tenantId, requestOptions);
+      },
+      mocks: [mockSetStatus, mockDeleteTenant],
+    },
+    {
+      name: 'getTenantStatus',
+      run: (requestOptions) => {
+        mockGetTenant.mockResolvedValue(ok({ status: 'active' }));
+        return orchestrator.getTenantStatus(tenantId, requestOptions);
+      },
+      mocks: [mockGetTenant],
+    },
+    {
+      name: 'issueAccessKey',
+      run: (requestOptions) => {
+        mockCreateAccessKey.mockResolvedValue(
+          ok({ accessKeyId: 'AK', secretAccessKey: 'SK', createdAt: '2026-01-01T00:00:00Z' }, 201),
+        );
+        return orchestrator.issueAccessKey(
+          tenantId,
+          { keyName: 'k', permissions: ['read'] },
+          requestOptions,
+        );
+      },
+      mocks: [mockCreateAccessKey],
+    },
+    {
+      name: 'findAccessKeyByName',
+      run: (requestOptions) => {
+        mockListAccessKeys.mockResolvedValue(ok({ items: [] }));
+        return orchestrator.findAccessKeyByName(tenantId, 'k', requestOptions);
+      },
+      mocks: [mockListAccessKeys],
+    },
+    {
+      name: 'deleteAccessKey',
+      run: (requestOptions) => {
+        mockDeleteAccessKey.mockResolvedValue(noContent());
+        return orchestrator.deleteAccessKey(tenantId, 'AK', requestOptions);
+      },
+      mocks: [mockDeleteAccessKey],
+    },
+    {
+      name: 'getTenantUsageMetrics',
+      run: (requestOptions) => {
+        mockGetTenantMetrics.mockResolvedValue(ok(emptyMetrics));
+        return orchestrator.getTenantUsageMetrics(tenantId, range, requestOptions);
+      },
+      mocks: [mockGetTenantMetrics],
+    },
+    {
+      name: 'getTenantInfo',
+      run: (requestOptions) => {
+        mockGetTenant.mockResolvedValue(ok({ status: 'active' }));
+        return orchestrator.getTenantInfo(tenantId, requestOptions);
+      },
+      mocks: [mockGetTenant],
+    },
+    {
+      name: 'getBucketUsageMetrics',
+      run: (requestOptions) => {
+        mockGetBucketMetrics.mockResolvedValue(ok(emptyMetrics));
+        return orchestrator.getBucketUsageMetrics(tenantId, 'b', range, requestOptions);
+      },
+      mocks: [mockGetBucketMetrics],
+    },
+  ];
+
+  for (const { name, run, mocks } of managementCases) {
+    it(`${name} passes the caller's signal to every Management API call`, async () => {
+      await run({ signal });
+
+      const firstArgs = mocks.map((m) => m.mock.calls[0]?.[0]);
+      expect(firstArgs).toEqual(mocks.map(() => expect.objectContaining({ signal })));
+    });
+  }
+
+  it('getS3ClientContext forwards the signal to the SSM credential read', async () => {
+    await orchestrator.getS3ClientContext(tenantId, { signal });
+
+    expect(sendOptionsOf(ssmMock.commandCalls(GetParameterCommand))).toEqual({
+      abortSignal: signal,
+    });
+  });
+
+  it('listBuckets forwards the signal to S3 ListBuckets', async () => {
+    s3Mock.on(ListBucketsCommand).resolves({ Buckets: [] });
+
+    await orchestrator.listBuckets(tenantId, { signal });
+
+    expect(sendOptionsOf(s3Mock.commandCalls(ListBucketsCommand))).toEqual({
+      abortSignal: signal,
+    });
+  });
+
+  it('deleteBucket forwards the signal to S3 DeleteBucket', async () => {
+    s3Mock.on(DeleteBucketCommand).resolves({});
+
+    await orchestrator.deleteBucket(tenantId, 'b', { signal });
+
+    expect(sendOptionsOf(s3Mock.commandCalls(DeleteBucketCommand))).toEqual({
+      abortSignal: signal,
+    });
+  });
+
+  it('getBucket forwards the signal to the list and both per-bucket reads', async () => {
+    s3Mock.on(ListBucketsCommand).resolves({
+      Buckets: [{ Name: 'b', CreationDate: new Date('2026-01-01T00:00:00Z') }],
+    });
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
+    s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
+
+    await orchestrator.getBucket(tenantId, 'b', { signal });
+
+    const sent = [
+      sendOptionsOf(s3Mock.commandCalls(ListBucketsCommand)),
+      sendOptionsOf(s3Mock.commandCalls(GetBucketVersioningCommand)),
+      sendOptionsOf(s3Mock.commandCalls(GetObjectLockConfigurationCommand)),
+    ];
+    expect(sent).toEqual([
+      { abortSignal: signal },
+      { abortSignal: signal },
+      { abortSignal: signal },
+    ]);
+  });
+
+  it('createBucket forwards the signal to CreateBucket and both configuration calls', async () => {
+    s3Mock.on(CreateBucketCommand).resolves({});
+    s3Mock.on(PutBucketVersioningCommand).resolves({});
+    s3Mock.on(PutObjectLockConfigurationCommand).resolves({});
+
+    await orchestrator.createBucket(
+      tenantId,
+      {
+        bucketName: 'b',
+        versioning: true,
+        lock: true,
+        retention: { enabled: true, mode: 'governance', duration: 1, durationType: 'd' },
+      },
+      { signal },
+    );
+
+    const sent = [
+      sendOptionsOf(s3Mock.commandCalls(CreateBucketCommand)),
+      sendOptionsOf(s3Mock.commandCalls(PutBucketVersioningCommand)),
+      sendOptionsOf(s3Mock.commandCalls(PutObjectLockConfigurationCommand)),
+    ];
+    expect(sent).toEqual([
+      { abortSignal: signal },
+      { abortSignal: signal },
+      { abortSignal: signal },
+    ]);
   });
 });

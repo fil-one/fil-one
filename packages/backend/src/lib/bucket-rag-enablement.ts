@@ -7,14 +7,14 @@ import {
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import type { BucketRagEnablementResponse, S3Region } from '@filone/shared';
-import { getDynamoClient } from './ddb-client.js';
-import { sendDeletionGuardedWrite } from './org-profile.js';
+import { getDynamoClient } from './ddb-client.ts';
+import { sendDeletionGuardedWrite } from './org-profile.ts';
 import {
   RAGKeys,
   type BucketRAGEnablementRecord,
   type BucketRAGStatus,
   type BucketRAGSyncState,
-} from './dynamo-records.js';
+} from './dynamo-records.ts';
 
 const dynamo = getDynamoClient();
 

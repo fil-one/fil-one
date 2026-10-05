@@ -14,15 +14,15 @@ import {
   clearCheckpoint,
   deleteManifestEntry,
   loadManifest,
-} from '../jobs/rag-indexer-manifest.js';
-import { AuditKeys } from './audit.js';
-import { getDynamoClient } from './ddb-client.js';
-import { collectPages } from './ddb-paging.js';
-import { RAGKeys } from './dynamo-records.js';
-import { OrgKeys } from './org-membership.js';
-import type { DeletionMember } from './deletion-record.js';
-import { RagApiKeyKeys } from './rag-api-keys.js';
-import { SubscriptionKeys } from './subscription-store.js';
+} from '../jobs/rag-indexer-manifest.ts';
+import { AuditKeys } from './audit.ts';
+import { getDynamoClient } from './ddb-client.ts';
+import { collectPages } from './ddb-paging.ts';
+import { RAGKeys } from './dynamo-records.ts';
+import { OrgKeys } from './org-membership.ts';
+import type { DeletionMember } from './deletion-record.ts';
+import { RagApiKeyKeys } from './rag-api-keys.ts';
+import { SubscriptionKeys } from './subscription-store.ts';
 
 type Item = Record<string, AttributeValue>;
 
@@ -240,6 +240,10 @@ async function scrubMembers(orgId: string, members: DeletionMember[]): Promise<v
     if (member.deleteIdentity) {
       await scrubRow({ key: { pk: `SUB#${member.sub}`, sk: 'IDENTITY' } });
       await scrubRow({ key: { pk: `USER#${member.userId}`, sk: 'PROFILE' } });
+      await deleteRow(Resource.UserInfoTable.name, {
+        pk: `USER#${member.userId}`,
+        sk: 'AVATAR_UPLOAD_RATE',
+      });
     } else {
       await repointHomeOrg(orgId, member);
     }
@@ -422,11 +426,11 @@ async function deleteInviteTokenLookups(orgRows: Item[]): Promise<void> {
   }
 }
 
-/** `name` is the org's only personal data. `deleting` stays, permanently. */
+/** `name` and `logoUrl` are the org's only personal data. `deleting` stays, permanently. */
 async function scrubOrgProfile(orgId: string): Promise<void> {
   await scrubRow({
     key: { pk: `ORG#${orgId}`, sk: 'PROFILE' },
-    remove: '#name',
+    remove: '#name, logoUrl',
     names: { '#name': 'name' },
   });
 }

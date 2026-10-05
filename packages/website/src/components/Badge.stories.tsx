@@ -49,9 +49,7 @@ export const Strength: Story = {
     <div className="flex flex-col gap-4">
       {(['subtle', 'strong'] as BadgeStrength[]).map((strength) => (
         <div key={strength} className="flex flex-col gap-2">
-          <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
-            {strength}
-          </p>
+          <p className="text-meta font-medium uppercase tracking-wider text-zinc-400">{strength}</p>
           <div className="flex flex-wrap items-center gap-2">
             {(['green', 'blue', 'red', 'grey', 'amber'] as BadgeColor[]).map((color) => (
               <Badge key={color} color={color} strength={strength}>
@@ -94,7 +92,7 @@ export const WithTooltip: Story = {
     size: 'sm',
     description: (
       <>
-        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+        <p className="mb-1 text-meta font-semibold uppercase tracking-wider text-zinc-400">
           Data protection
         </p>
         <ul className="flex flex-col gap-0.5">
@@ -117,12 +115,10 @@ export const AllVariants: Story = {
         ] as { label: string; variant: BadgeVariant; strength: BadgeStrength }[]
       ).map(({ label, variant, strength }) => (
         <div key={label} className="flex flex-col gap-4">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">
-            {label}
-          </p>
+          <p className="text-meta font-semibold uppercase tracking-wider text-zinc-600">{label}</p>
           {(['green', 'blue', 'red', 'amber', 'grey'] as BadgeColor[]).map((color) => (
             <div key={color} className="flex flex-col gap-2">
-              <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+              <p className="text-meta font-medium uppercase tracking-wider text-zinc-500">
                 {color}
               </p>
               <div className="flex flex-wrap items-center gap-2">
@@ -157,7 +153,7 @@ export const Solid: Story = {
     <div className="flex flex-col gap-6">
       {(['green', 'blue', 'red', 'amber', 'grey'] as BadgeColor[]).map((color) => (
         <div key={color} className="flex flex-col gap-2">
-          <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">{color}</p>
+          <p className="text-meta font-medium uppercase tracking-wider text-zinc-400">{color}</p>
           <div className="flex flex-wrap items-center gap-2">
             {(['sm', 'md', 'lg'] as BadgeSize[]).map((size) => (
               <Badge key={size} color={color} size={size} variant="solid">

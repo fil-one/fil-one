@@ -14,7 +14,7 @@ import {
 
 const mockCustomersCreate = vi.fn();
 const mockSetupIntentsCreate = vi.fn();
-vi.mock('../lib/stripe-client.js', () => ({
+vi.mock('../lib/stripe-client.ts', () => ({
   getStripeClient: () => ({
     customers: { create: mockCustomersCreate },
     setupIntents: { create: mockSetupIntentsCreate },
@@ -31,8 +31,8 @@ vi.mock('sst', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 import { ApiErrorCode } from '@filone/shared';
-import { baseHandler } from './create-setup-intent.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import { baseHandler } from './create-setup-intent.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
 
 const USER_ID = 'user-1';
 const ORG_ID = 'org-1';

@@ -14,9 +14,9 @@ import type {
   PresignResponse,
   PresignResponseItem,
 } from '@filone/shared';
-import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
-import { getOrgProfile } from '../lib/org-profile.js';
-import type { S3ClientContext } from '../lib/s3-client.js';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import { getOrgProfile } from '../lib/org-profile.ts';
+import type { S3ClientContext } from '../lib/s3-client.ts';
 import {
   getPresignedDeleteObjectUrl,
   getPresignedGetObjectRetentionUrl,
@@ -25,19 +25,19 @@ import {
   getPresignedListObjectVersionsUrl,
   getPresignedListObjectsUrl,
   getPresignedPutObjectUrl,
-} from '../lib/s3-presigner.js';
+} from '../lib/s3-presigner.ts';
 import {
   ResponseBuilder,
   tenantNotReadyResponse,
   unsupportedRegionResponse,
-} from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { requireOrgMembershipMiddleware, requirePermission } from '../middleware/authorize.js';
-import { csrfMiddleware } from '../middleware/csrf.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
+} from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { requireOrgMembershipMiddleware, requirePermission } from '../middleware/authorize.ts';
+import { csrfMiddleware } from '../middleware/csrf.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
+import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
 
 const PRESIGN_EXPIRY_SECONDS = 300;
 const MAX_GET_OBJECT_EXPIRY_SECONDS = 604800;
@@ -288,7 +288,10 @@ export async function baseHandler(
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) return tenantNotReadyResponse();
 
-  const ctx = await orchestrator.getS3ClientContext(tenantId);
+  const s3Ctx = await orchestrator.getS3ClientContext(tenantId);
+  const ctx = s3Ctx.presignEndpointUrl
+    ? { ...s3Ctx, endpointUrl: s3Ctx.presignEndpointUrl }
+    : s3Ctx;
 
   const items = await Promise.all(ops.map((op) => presignOp(op, ctx)));
 

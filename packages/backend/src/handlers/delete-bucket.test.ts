@@ -20,19 +20,23 @@ const mockOrchestrator = {
   deleteBucket: (...args: unknown[]) => mockOrchestratorDeleteBucket(...args),
 };
 
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
-  getOrchestratorForRegion: () => mockOrchestrator,
+// Records the region it was asked for: routing the delete to the wrong
+// orchestrator is the failure this file exists to catch.
+const mockGetOrchestratorForRegion = vi.fn((_region: string) => mockOrchestrator);
+
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
+  getOrchestratorForRegion: (region: string) => mockGetOrchestratorForRegion(region),
 }));
 
-vi.mock('../lib/org-profile.js', () => ({
+vi.mock('../lib/org-profile.ts', () => ({
   getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
 }));
 
 process.env.FILONE_STAGE = 'test';
 
-import { baseHandler } from './delete-bucket.js';
-import { BucketNotEmptyError } from '../lib/errors.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import { baseHandler } from './delete-bucket.ts';
+import { BucketNotEmptyError } from '../lib/errors.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -48,6 +52,42 @@ describe('delete-bucket baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockIsTenantReady.mockReturnValue('aurora-t-1');
+  });
+
+  it("routes the delete to the bucket's own region", async () => {
+    const event = buildEvent({
+      userInfo: USER_INFO,
+      queryStringParameters: { region: 'eu-central-3' },
+    });
+    event.pathParameters = { name: 'my-bucket' };
+
+    await baseHandler(event);
+
+    expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('eu-central-3');
+  });
+
+  it('falls back to the default region when the caller names none', async () => {
+    const event = buildEvent({ userInfo: USER_INFO });
+    event.pathParameters = { name: 'my-bucket' };
+
+    await baseHandler(event);
+
+    expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('eu-west-1');
+  });
+
+  it('refuses a region this stage does not serve', async () => {
+    const event = buildEvent({
+      userInfo: USER_INFO,
+      queryStringParameters: { region: 'ap-south-1' },
+    });
+    event.pathParameters = { name: 'my-bucket' };
+
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(400);
+    expect(result.body).toEqual(expect.stringContaining('ap-south-1'));
+    expect(mockGetOrchestratorForRegion).not.toHaveBeenCalled();
+    expect(mockOrchestratorDeleteBucket).not.toHaveBeenCalled();
   });
 
   it('returns 400 when bucket name is missing from path', async () => {

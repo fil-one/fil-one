@@ -14,9 +14,10 @@ import { format } from 'node:util';
 import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand, PutParameterCommand } from '@aws-sdk/client-ssm';
 import { Resource } from 'sst';
-import { getDynamoClient } from '../ddb-client.js';
-import { OrgDeletingError } from '../org-profile.js';
-import { resolveRefusedTenantWrite } from '../tenant-setup-fence.js';
+import { getDynamoClient } from '../ddb-client.ts';
+import { OrgDeletingError } from '../org-profile.ts';
+import { resolveRefusedTenantWrite } from '../tenant-setup-fence.ts';
+import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
 import {
   deleteTenantsByTenantId,
   deleteTenantsByTenantIdAccessKeysByAccessKeyId,
@@ -70,12 +71,16 @@ export interface TenantSetupDeps {
 // Returns the tenantId on success, or null on any setup failure so the
 // handler can return the standard 503 tenant-not-ready response. Setup
 // resumes from whatever step is next on the user's retry.
+// `requestOptions.signal` bounds every upstream call the setup makes: the
+// Management API calls (including the rollback delete) and the DynamoDB and
+// SSM reads and writes.
 export async function ensureTenantReady(
   deps: TenantSetupDeps,
   orgId: string,
+  requestOptions?: OrchestratorRequestOptions,
 ): Promise<string | null> {
   try {
-    return await processTenantSetup(deps, orgId);
+    return await processTenantSetup(deps, orgId, requestOptions);
   } catch (err) {
     // Not a setup failure: retrying will never succeed, so it must not become
     // a "try again in a moment".
@@ -91,7 +96,11 @@ export async function ensureTenantReady(
   }
 }
 
-async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise<string> {
+async function processTenantSetup(
+  deps: TenantSetupDeps,
+  orgId: string,
+  requestOptions?: OrchestratorRequestOptions,
+): Promise<string> {
   const { client, id, region } = deps;
   const tenantIdAttribute = `${id}TenantId`;
   const key = { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } };
@@ -102,6 +111,7 @@ async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise
       Key: key,
       ConsistentRead: true,
     }),
+    { abortSignal: requestOptions?.signal },
   );
   const existingTenantId = existing.Item?.[tenantIdAttribute]?.S;
   if (existingTenantId) {
@@ -120,12 +130,13 @@ async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise
     path: { tenantId: orgId },
     body: { region },
     throwOnError: false,
+    ...requestOptions,
   });
   if (putError) {
     throw new Error(`Failed to provision tenant ${orgId}`, { cause: putError });
   }
 
-  const consoleKey = await createConsoleAccessKey(deps, orgId);
+  const consoleKey = await createConsoleAccessKey(deps, orgId, requestOptions);
   if (consoleKey) {
     await ssm.send(
       new PutParameterCommand({
@@ -137,6 +148,7 @@ async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise
         Type: 'SecureString',
         Overwrite: true,
       }),
+      { abortSignal: requestOptions?.signal },
     );
   }
 
@@ -161,6 +173,7 @@ async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise
           ':now': { S: new Date().toISOString() },
         },
       }),
+      { abortSignal: requestOptions?.signal },
     );
   } catch (err) {
     await resolveRefusedTenantWrite({
@@ -173,6 +186,7 @@ async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise
           client,
           path: { tenantId: orgId },
           throwOnError: false,
+          ...requestOptions,
         });
         if (error) throw new Error(`Failed to delete tenant ${orgId}`, { cause: error });
       },
@@ -201,6 +215,7 @@ async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise
 async function createConsoleAccessKey(
   deps: TenantSetupDeps,
   orgId: string,
+  requestOptions?: OrchestratorRequestOptions,
 ): Promise<CreatedAccessKey | null> {
   const { client } = deps;
   const createArgs: CreateAccessKeyRequest = {
@@ -215,6 +230,7 @@ async function createConsoleAccessKey(
     path: { tenantId: orgId },
     body: createArgs,
     throwOnError: false,
+    ...requestOptions,
   });
   if (!created.error && created.data) {
     return created.data;
@@ -232,6 +248,7 @@ async function createConsoleAccessKey(
     client,
     path: { tenantId: orgId },
     throwOnError: false,
+    ...requestOptions,
   });
   if (listError) {
     throw new Error(`Failed to list access keys for tenant ${orgId} during console-key recovery`, {
@@ -248,7 +265,7 @@ async function createConsoleAccessKey(
     );
   }
 
-  const stashed = await readStashedAccessKeyId(deps, orgId);
+  const stashed = await readStashedAccessKeyId(deps, orgId, requestOptions);
   if (stashed === existing.accessKeyId) {
     // The previous run completed the SSM write; nothing left to stock.
     return null;
@@ -262,6 +279,7 @@ async function createConsoleAccessKey(
     client,
     path: { tenantId: orgId, accessKeyId: existing.accessKeyId },
     throwOnError: false,
+    ...requestOptions,
   });
   if (deleteError) {
     throw new Error(`Failed to delete stale console access key for tenant ${orgId}`, {
@@ -274,6 +292,7 @@ async function createConsoleAccessKey(
     path: { tenantId: orgId },
     body: createArgs,
     throwOnError: false,
+    ...requestOptions,
   });
   if (recreated.error || !recreated.data) {
     throw new Error(`Failed to re-create console access key for tenant ${orgId}`, {
@@ -286,10 +305,12 @@ async function createConsoleAccessKey(
 async function readStashedAccessKeyId(
   deps: TenantSetupDeps,
   orgId: string,
+  requestOptions?: OrchestratorRequestOptions,
 ): Promise<string | undefined> {
   try {
     const result = await ssm.send(
       new GetParameterCommand({ Name: consoleKeySsmPath(deps, orgId), WithDecryption: true }),
+      { abortSignal: requestOptions?.signal },
     );
     if (!result.Parameter?.Value) return undefined;
     const parsed: unknown = JSON.parse(result.Parameter.Value);

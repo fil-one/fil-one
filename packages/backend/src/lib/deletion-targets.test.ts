@@ -12,13 +12,13 @@ vi.mock('sst', () => ({
 }));
 
 const mockGetProvisionedRegions = vi.fn(async () => [] as unknown[]);
-vi.mock('./region-helpers.js', () => ({
+vi.mock('./region-helpers.ts', () => ({
   getProvisionedRegions: (...args: unknown[]) => mockGetProvisionedRegions(...(args as [])),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { resolveDeletionTargets } from './deletion-targets.js';
+import { resolveDeletionTargets } from './deletion-targets.ts';
 
 const ORG = 'org-1';
 const OTHER_ORG = 'org-2';

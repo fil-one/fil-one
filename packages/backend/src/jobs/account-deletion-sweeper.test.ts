@@ -2,19 +2,19 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, ScanCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
-import { reportMetric, type MetricEvent } from '../lib/metrics.js';
+import { reportMetric, type MetricEvent } from '../lib/metrics.ts';
 
 vi.mock('sst', () => ({ Resource: { UserInfoTable: { name: 'UserInfoTable' } } }));
-vi.mock('../lib/metrics.js', () => ({ reportMetric: vi.fn() }));
+vi.mock('../lib/metrics.ts', () => ({ reportMetric: vi.fn() }));
 
 const mockInvoke = vi.fn(async (_orgId: string) => undefined);
-vi.mock('../lib/account-deletion-invoke.js', () => ({
+vi.mock('../lib/account-deletion-invoke.ts', () => ({
   invokeAccountDeletionWorker: (orgId: string) => mockInvoke(orgId),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { handler } from './account-deletion-sweeper.js';
+import { handler } from './account-deletion-sweeper.ts';
 
 const reportMetricMock = vi.mocked(reportMetric);
 const metrics = (): MetricEvent[] => reportMetricMock.mock.calls.map(([e]) => e);

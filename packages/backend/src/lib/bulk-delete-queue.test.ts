@@ -19,7 +19,7 @@ vi.mock('@aws-sdk/client-sqs', () => ({
   },
 }));
 
-import { MAX_BULK_DELETE_DELIVERY_ATTEMPTS, enqueueBulkDeleteJob } from './bulk-delete-queue.js';
+import { MAX_BULK_DELETE_DELIVERY_ATTEMPTS, enqueueBulkDeleteJob } from './bulk-delete-queue.ts';
 
 const payload = { orgId: 'org-1', jobId: 'job-1' };
 

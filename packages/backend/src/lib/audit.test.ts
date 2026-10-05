@@ -14,7 +14,7 @@ import type {
   AuditEventType,
   TwoPhaseAuditEvent,
 } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
@@ -35,7 +35,7 @@ import {
   newCorrelationId,
   twoPhaseAudit,
   userActor,
-} from './audit.js';
+} from './audit.ts';
 
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
 const USER_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
@@ -47,6 +47,7 @@ const ACTOR = { kind: 'user', id: USER_ID, email: 'owner@example.com' } as const
 const DETAILS: { [T in AuditEventType]: AuditEventDetails[T] } = {
   'org.created': { orgName: 'Acme', source: 'signup' },
   'org.renamed': { name: 'Acme Two', previousName: 'Acme' },
+  'org.logo_updated': { logoUrl: 'https://cdn.example.com/logo.png' },
   'member.invited': { inviteId: 'inv-1', email: 'invitee@example.com', role: OrgRole.Member },
   'invite.revoked': { inviteId: 'inv-1', email: 'invitee@example.com' },
   'invite.accepted': { inviteId: 'inv-1', email: 'invitee@example.com', role: OrgRole.Member },
@@ -55,6 +56,13 @@ const DETAILS: { [T in AuditEventType]: AuditEventDetails[T] } = {
   'ownership.transferred': { fromUserId: USER_ID, toUserId: 'user-2' },
   'key.created': { keyKind: 's3', keyName: 'ci', region: 'eu-west-1', keyIdSuffix: 'AMPL' },
   'key.deleted': { keyKind: 's3', keyName: 'ci', region: 'eu-west-1' },
+  'key.rotated': {
+    keyKind: 's3',
+    keyName: 'ci',
+    region: 'eu-west-1',
+    replacedKeyIdSuffix: 'OLD1',
+    keyIdSuffix: 'AMPL',
+  },
   'audit.exported': {
     from: '2026-05-17T12:00:00.000Z',
     to: NOW,

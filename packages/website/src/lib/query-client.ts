@@ -1,5 +1,5 @@
 import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query';
-import { ApiErrorCode, type OrgRole, type S3Region } from '@filone/shared';
+import { ApiErrorCode, type OrgRole, type S3Region, type UsageTrendsPeriod } from '@filone/shared';
 
 export const ME_STALE_TIME = 10 * 60_000;
 
@@ -106,7 +106,7 @@ export const queryKeys = {
   activityRecent: (limit: number) => ['activity', 'recent', limit] as const,
   // Shares the ['usage'] prefix so invalidateQueries({ queryKey: queryKeys.usage })
   // also invalidates the trends charts.
-  usageTrends: (period: '7d' | '30d') => ['usage', 'trends', period] as const,
+  usageTrends: (period: UsageTrendsPeriod) => ['usage', 'trends', period] as const,
   buckets: ['buckets'] as const,
   // Shares the ['buckets'] prefix so deleting a bucket invalidates both the
   // unfiltered baseline and whatever filtered/sorted view is active.
@@ -149,6 +149,12 @@ export const queryKeys = {
     ['rag-bucket-enabled', bucketName, region] as const,
   // RAG API keys (query-endpoint bearer tokens) — distinct from `accessKeys`.
   ragApiKeys: ['rag-api-keys'] as const,
+  // Never fetched — only ever `setQueryData`'d by `switchToOrg` and read by
+  // `usePendingOrgSwitchTarget`. Deliberately its own key rather than a field
+  // folded into `['me']`: it carries only what the sidebar needs to paint the
+  // right name and logo the instant a switch starts, never permissions or
+  // anything else a stale value could make a security-relevant surface trust.
+  pendingOrgSwitch: ['pendingOrgSwitch'] as const,
 };
 
 /**

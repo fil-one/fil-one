@@ -46,10 +46,25 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
   day: 'numeric',
 });
 
+const dateShortFormatter = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+});
+
+const timeShortFormatter = new Intl.DateTimeFormat(undefined, {
+  hour: 'numeric',
+});
+
 const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
   year: 'numeric',
   month: 'short',
   day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+  timeZoneName: 'short',
+});
+
+const timeFormatter = new Intl.DateTimeFormat(undefined, {
   hour: 'numeric',
   minute: '2-digit',
   timeZoneName: 'short',
@@ -73,9 +88,35 @@ export function formatDate(isoString: string): string {
   return dateFormatter.format(new Date(isoString));
 }
 
+/**
+ * Locale-aware date without the year, e.g. "Mar 27".
+ *
+ * For chart axes, where every tick in a 7- or 30-day window repeats the same
+ * year and mostly the same month. Pair it with `formatDate` in the tooltip,
+ * which is where the unambiguous date belongs.
+ */
+export function formatDateShort(isoString: string): string {
+  return dateShortFormatter.format(new Date(isoString));
+}
+
+/**
+ * Locale-aware hour, e.g. "7 PM" or "19" depending on locale.
+ *
+ * For the 24-hour chart axis, where the date is the same on every tick and the
+ * hour is the only part that varies. The tooltip carries the full timestamp.
+ */
+export function formatTimeShort(isoString: string): string {
+  return timeShortFormatter.format(new Date(isoString));
+}
+
 /** Locale-aware date + time string, e.g. "Mar 27, 2026, 7:00 PM EDT". */
 export function formatDateTime(isoString: string): string {
   return dateTimeFormatter.format(new Date(isoString));
+}
+
+/** Locale-aware time alone, e.g. "7:00 PM EDT" — pairs with {@link formatDate} on its own line. */
+export function formatTime(isoString: string): string {
+  return timeFormatter.format(new Date(isoString));
 }
 
 // ---------------------------------------------------------------------------

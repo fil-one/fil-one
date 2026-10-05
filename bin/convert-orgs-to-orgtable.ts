@@ -90,15 +90,13 @@ import {
   deletionGuardFailed,
   formatPlanReport,
   legacyMemberKey,
-  OrgKeys,
-  parseMemberSk,
-  parseMembershipSk,
   parseOrgPk,
   parseUserPk,
   UNKNOWN_JOINED_AT,
   UserInfoKeys,
 } from './lib/org-conversion.ts';
 import type { ConvertPlan, OrgPlan, OrgState, ScanResult } from './lib/org-conversion.ts';
+import { OrgKeys } from '@filone/backend/src/lib/org-membership.ts';
 import { formatVerifyReport, parseAcceptedAnomalies, verifyConversion } from './lib/org-verify.ts';
 
 /** Pause between orgs that write, so a few thousand transactions stay polite to a shared table. */
@@ -261,7 +259,7 @@ function collectUserInfoRow(item: Record<string, AttributeValue>): void {
     return;
   }
 
-  const memberId = parseMemberSk(sk);
+  const memberId = OrgKeys.parseMemberSk(sk);
   if (!memberId) {
     scan.unparsedRows++;
     return;
@@ -315,7 +313,8 @@ async function scanOrgTable(): Promise<void> {
       // A sort key that does not parse is still an item that ought to pair with
       // a membership and cannot, so the org id it names is carried through as
       // stored — it can match no canonical row, and the report says which item.
-      const inverseOrgId = parseMembershipSk(sk) ?? sk.slice(OrgKeys.membershipSkPrefix().length);
+      const inverseOrgId =
+        OrgKeys.parseMembershipSk(sk) ?? sk.slice(OrgKeys.membershipSkPrefix().length);
       scan.membership.inverse.push({
         orgId: inverseOrgId,
         userId: inverseUserId,
@@ -333,7 +332,7 @@ async function scanOrgTable(): Promise<void> {
       continue;
     }
 
-    const userId = parseMemberSk(sk);
+    const userId = OrgKeys.parseMemberSk(sk);
     if (!userId) continue;
     scan.orgTableMemberRows++;
     orgState(orgId).orgTableMemberUserIds.push(userId);

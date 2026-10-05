@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole, S3Region } from '@filone/shared';
 import type { AccessKey } from '@filone/shared';
@@ -171,5 +171,93 @@ describe('ApiKeysPage — a disabled account', () => {
 
     expect(await screen.findByText('Failed to load access keys')).toBeInTheDocument();
     expect(screen.getByTestId('connection-details-tab')).toBeInTheDocument();
+  });
+});
+
+describe('ApiKeysPage — rotating a key', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetUsage.mockResolvedValue({ tenantStatus: 'active' });
+  });
+
+  /** The list, and a rotation that answers with new credentials. */
+  function stubRotation(previousKeyRevoked: boolean) {
+    mockApiRequest.mockImplementation((_path: string, init?: { method?: string }) =>
+      init?.method === 'POST'
+        ? Promise.resolve({
+            id: 'key-2',
+            keyName: 'my key',
+            accessKeyId: 'ACCESS_KEY_NEW999EXAMP',
+            secretAccessKey: 'the-new-secret',
+            createdAt: '2026-09-11T10:00:00Z',
+            previousKeyRevoked,
+          })
+        : Promise.resolve({ keys: [key()] }),
+    );
+  }
+
+  /** Open the row menu and press one of its items. */
+  async function openRowMenu() {
+    fireEvent.click(await screen.findByRole('button', { name: 'Key actions' }));
+  }
+
+  it('asks first, then shows the new secret once', async () => {
+    stubRotation(true);
+
+    renderPage(OrgRole.Owner);
+    await openRowMenu();
+    fireEvent.click(screen.getByRole('button', { name: 'Rotate' }));
+
+    // Nothing is rotated until the caller confirms: the credential they are
+    // using stops working the moment the replacement is issued.
+    expect(await screen.findByText('Rotate access key')).toBeInTheDocument();
+    expect(mockApiRequest).not.toHaveBeenCalledWith('/access-keys/key-1/rotate', {
+      method: 'POST',
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rotate key' }));
+
+    expect(await screen.findByTestId('save-credentials-modal')).toBeInTheDocument();
+    expect(screen.getByText('ACCESS_KEY_NEW999EXAMP')).toBeInTheDocument();
+    expect(mockApiRequest).toHaveBeenCalledWith('/access-keys/key-1/rotate', { method: 'POST' });
+  });
+
+  it('says so when the key it replaced is still live', async () => {
+    stubRotation(false);
+
+    renderPage(OrgRole.Owner);
+    await openRowMenu();
+    fireEvent.click(screen.getByRole('button', { name: 'Rotate' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Rotate key' }));
+
+    expect(await screen.findByText(/still active/)).toBeInTheDocument();
+  });
+
+  it('hides the action on a key the caller could no longer mint', async () => {
+    // `PutObjectRetention` needs `privileged.grant`, which only an Owner holds,
+    // so an Admin would be refused the replacement. Revoking it is still theirs.
+    mockApiRequest.mockResolvedValue({
+      keys: [key({ granularPermissions: ['PutObjectRetention'] })],
+    });
+
+    renderPage(OrgRole.Admin);
+    await openRowMenu();
+
+    expect(await screen.findByRole('button', { name: 'Delete' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Rotate' })).not.toBeInTheDocument();
+  });
+
+  it('offers no rotation to a role that cannot create keys', async () => {
+    // A Member may revoke their own key; rotating it mints a new one, and this
+    // key carries more than a Member can grant.
+    mockApiRequest.mockResolvedValue({
+      keys: [key({ permissions: ['read', 'list', 'DeleteBucket'] })],
+    });
+
+    renderPage(OrgRole.Member);
+    await openRowMenu();
+
+    expect(await screen.findByRole('button', { name: 'Delete' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Rotate' })).not.toBeInTheDocument();
   });
 });

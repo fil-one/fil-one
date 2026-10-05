@@ -29,7 +29,7 @@ import {
   updateSubscription,
   updateSubscriptionByUser,
   writeSubscription,
-} from './subscription-store.js';
+} from './subscription-store.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers

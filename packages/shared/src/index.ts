@@ -37,7 +37,7 @@ export {
   senderAddress,
 } from './constants.ts';
 export type { AccessModel, UsageLimits, StageLike, S3RegionLike } from './constants.ts';
-export { formatBytes, formatBytesShort } from './formatBytes.ts';
+export { formatBytes, formatBytesShort, bytesAxisFormatter } from './formatBytes.ts';
 export { UUID_PATTERN, isUuid } from './uuid.ts';
 export type {
   MeResponse,
@@ -46,10 +46,18 @@ export type {
   PasskeyEnrollment,
   UpdateProfileRequest,
   UpdateProfileResponse,
+  PresignAvatarRequest,
+  PresignAvatarResponse,
   RegenerateRecoveryCodeResponse,
   StepUpRequiredResponse,
 } from './api/me.ts';
-export { PASSKEY_PER_USER_LIMIT, UpdateProfileSchema } from './api/me.ts';
+export {
+  PASSKEY_PER_USER_LIMIT,
+  UpdateProfileSchema,
+  AVATAR_CONTENT_TYPES,
+  AVATAR_MAX_BYTES,
+  PresignAvatarSchema,
+} from './api/me.ts';
 
 export type { PreferencesResponse, UpdatePreferencesRequest } from './api/preferences.ts';
 export { UpdatePreferencesSchema } from './api/preferences.ts';
@@ -61,12 +69,25 @@ export {
   isOrgRole,
   OrgNameSchema,
   UpdateOrgSchema,
+  CreateOrgSchema,
+  PresignOrgLogoSchema,
   ORG_NAME_MIN_LENGTH,
   ORG_NAME_MAX_LENGTH,
   ORG_NAME_PATTERN,
   ORG_NAME_DISALLOWED_CHARS,
+  ORG_LOGO_CONTENT_TYPES,
+  ORG_LOGO_MAX_BYTES,
+  MAX_OWNED_ORGS,
 } from './api/org.ts';
-export type { OrgMembershipSource, UpdateOrgRequest, UpdateOrgResponse } from './api/org.ts';
+export type {
+  OrgMembershipSource,
+  UpdateOrgRequest,
+  UpdateOrgResponse,
+  CreateOrgRequest,
+  CreateOrgResponse,
+  PresignOrgLogoRequest,
+  PresignOrgLogoResponse,
+} from './api/org.ts';
 
 export {
   INVITATION_STATUSES,
@@ -325,6 +346,7 @@ export type {
   ListAccessKeysResponse,
   CreateAccessKeyRequest,
   CreateAccessKeyResponse,
+  RotateAccessKeyResponse,
   DeleteAccessKeyRequest,
 } from './api/access-keys.ts';
 
@@ -349,6 +371,7 @@ export { ACTIVITY_ACTION_LABELS, getActivityActionLabel } from './api/dashboard.
 
 export type {
   UsageDataPoint,
+  UsageTrendsPeriod,
   UsageTrendsRequest,
   UsageTrendsResponse,
   BucketActivity,

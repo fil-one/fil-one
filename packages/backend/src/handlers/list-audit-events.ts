@@ -3,15 +3,15 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { AUDIT_PAGE_SIZE } from '@filone/shared';
 import type { ErrorResponse, ListAuditEventsResponse } from '@filone/shared';
-import { queryAuditEvents } from '../lib/audit-query.js';
-import { reportAuditQuery } from '../lib/audit-metrics.js';
-import { AuditFilterError, parseAuditRequest } from '../lib/audit-request.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { authorize } from '../middleware/authorize.js';
-import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+import { queryAuditEvents } from '../lib/audit-query.ts';
+import { reportAuditQuery } from '../lib/audit-metrics.ts';
+import { AuditFilterError, parseAuditRequest } from '../lib/audit-request.ts';
+import { ResponseBuilder } from '../lib/response-builder.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo } from '../lib/user-context.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { authorize } from '../middleware/authorize.ts';
+import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 
 /**
  * GET /api/audit — the org's recorded history, newest first.

@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Context } from 'aws-lambda';
-import type { S3ClientContext } from '../lib/s3-client.js';
-import type { ProvisionedRegion } from '../lib/region-helpers.js';
-import { buildContext } from '../test/lambda-test-utilities.js';
+import type { S3ClientContext } from '../lib/s3-client.ts';
+import type { ProvisionedRegion } from '../lib/region-helpers.ts';
+import { buildContext } from '../test/lambda-test-utilities.ts';
 import { S3Region } from '@filone/shared';
-import { reportMetric, type MetricEvent } from '../lib/metrics.js';
-import type { RagIndexerWorkerPayload } from './rag-indexer-worker.js';
+import { reportMetric, type MetricEvent } from '../lib/metrics.ts';
+import type { RagIndexerWorkerPayload } from './rag-indexer-worker.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -38,27 +38,27 @@ const {
 
 const mockIsOrgDeletedOrDeleting = vi.fn(async (_orgId: string) => false);
 
-vi.mock('../lib/org-profile.js', () => ({
+vi.mock('../lib/org-profile.ts', () => ({
   isOrgDeletedOrDeleting: (orgId: string) => mockIsOrgDeletedOrDeleting(orgId),
 }));
 
-vi.mock('../lib/region-helpers.js', () => ({
+vi.mock('../lib/region-helpers.ts', () => ({
   getProvisionedRegions: mockGetProvisionedRegions,
 }));
 
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: mockGetOrchestratorForRegion,
 }));
 
-vi.mock('../lib/s3-client.js', () => ({
+vi.mock('../lib/s3-client.ts', () => ({
   createS3Client: mockCreateS3Client,
 }));
 
-vi.mock('../lib/bucket-rag-enablement.js', () => ({
+vi.mock('../lib/bucket-rag-enablement.ts', () => ({
   updateBucketTelemetry: mockUpdateBucketTelemetry,
 }));
 
-vi.mock('./rag-indexer-helpers.js', () => ({
+vi.mock('./rag-indexer-helpers.ts', () => ({
   indexBucket: mockIndexBucket,
 }));
 
@@ -66,9 +66,9 @@ vi.mock('@filone/rag-shared', () => ({
   S3VectorsStore: mockS3VectorsStore,
 }));
 
-vi.mock('../lib/metrics.js', () => ({ reportMetric: vi.fn() }));
+vi.mock('../lib/metrics.ts', () => ({ reportMetric: vi.fn() }));
 
-import { handler } from './rag-indexer-worker.js';
+import { handler } from './rag-indexer-worker.ts';
 
 const reportMetricMock = vi.mocked(reportMetric);
 

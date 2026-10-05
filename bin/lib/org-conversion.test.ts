@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AttributeValue, TransactWriteItem } from '@aws-sdk/client-dynamodb';
 
-// The canonical sources this file's mirror copies. A bin script cannot import
-// either at runtime (Node's type stripping resolves neither the backend's
-// `./x.js` specifiers nor the `OrgRole` enum), but vitest resolves both — so
-// the mirror is held to them here rather than by hand.
-import { OrgRole } from '@filone/shared';
-import { OrgKeys as BackendOrgKeys } from '@filone/backend/src/lib/org-membership.js';
+import { OrgKeys } from '@filone/backend/src/lib/org-membership.ts';
 
 import { classifyCancellation } from './dynamo.ts';
 import {
@@ -19,9 +14,6 @@ import {
   formatPlanReport,
   legacyMemberKey,
   LEGACY_ROLE,
-  OrgKeys,
-  parseMemberSk,
-  parseMembershipSk,
   parseOrgPk,
   parseUserPk,
   summarizePlans,
@@ -92,56 +84,16 @@ function deleteOf(item: TransactWriteItem | undefined) {
   return item!.Delete!;
 }
 
-describe('the mirrored definitions', () => {
-  // These four values are copied out of packages/ because a bin script cannot
-  // import them. If one of these fails, the copy in org-conversion.ts is stale
-  // and the conversion is writing something the backend does not read.
-  it('carries the same role values as @filone/shared', () => {
-    expect(CONVERTED_ROLE).toBe(OrgRole.Owner);
-    expect(LEGACY_ROLE).toBe(OrgRole.Admin);
-    expect(CONVERTED_ROLE).not.toBe(LEGACY_ROLE);
-  });
-
-  it('builds the same keys as the backend', () => {
-    expect(OrgKeys.orgPk(ORG_ID)).toBe(BackendOrgKeys.orgPk(ORG_ID));
-    expect(OrgKeys.memberSk(USER_ID)).toBe(BackendOrgKeys.memberSk(USER_ID));
-    expect(OrgKeys.memberSkPrefix()).toBe(BackendOrgKeys.memberSkPrefix());
-    expect(OrgKeys.orgMetaSk()).toBe(BackendOrgKeys.orgMetaSk());
-    expect(OrgKeys.userPk(USER_ID)).toBe(BackendOrgKeys.userPk(USER_ID));
-    expect(OrgKeys.membershipSk(ORG_ID)).toBe(BackendOrgKeys.membershipSk(ORG_ID));
-    expect(OrgKeys.membershipSkPrefix()).toBe(BackendOrgKeys.membershipSkPrefix());
-  });
-
-  it('writes an inverse item the backend can parse back', () => {
-    expect(BackendOrgKeys.parseMembershipSk(OrgKeys.membershipSk(ORG_ID))).toBe(ORG_ID);
-  });
-});
-
-describe('key builders', () => {
-  it('builds the row shapes the backend reads', () => {
-    expect(OrgKeys.orgPk(ORG_ID)).toBe(`ORG#${ORG_ID}`);
-    expect(OrgKeys.memberSk(USER_ID)).toBe(`MEMBER#${USER_ID}`);
-    expect(OrgKeys.memberSkPrefix()).toBe('MEMBER#');
-    expect(OrgKeys.orgMetaSk()).toBe('META');
-    expect(OrgKeys.userPk(USER_ID)).toBe(`USER#${USER_ID}`);
-    expect(OrgKeys.membershipSk(ORG_ID)).toBe(`MEMBERSHIP#${ORG_ID}`);
-  });
-
-  it('parses the keys it builds and rejects anything else', () => {
+describe('partition key parsers', () => {
+  it('parses the keys the backend builds and rejects anything else', () => {
     expect(parseOrgPk(OrgKeys.orgPk(ORG_ID))).toBe(ORG_ID);
     expect(parseUserPk(OrgKeys.userPk(USER_ID))).toBe(USER_ID);
-    expect(parseMemberSk(OrgKeys.memberSk(USER_ID))).toBe(USER_ID);
-    expect(parseMembershipSk(OrgKeys.membershipSk(ORG_ID))).toBe(ORG_ID);
 
     expect(parseOrgPk(`USER#${USER_ID}`)).toBeUndefined();
     expect(parseUserPk(`ORG#${ORG_ID}`)).toBeUndefined();
-    expect(parseMemberSk('MEMBERSHIP#x')).toBeUndefined();
-    expect(parseMembershipSk('MEMBER#x')).toBeUndefined();
     expect(parseOrgPk('ORG#')).toBeUndefined();
     // A key with a second `#` is not a plain id and must not be split into one.
     expect(parseOrgPk('ORG#a#b')).toBeUndefined();
-    expect(parseMemberSk('MEMBER#a#b')).toBeUndefined();
-    expect(parseMembershipSk('MEMBERSHIP#a#b')).toBeUndefined();
   });
 });
 
@@ -603,14 +555,14 @@ describe('the conversion round trip', () => {
     const legacyMembers = [...userInfo.values()]
       .filter((row) => row.pk?.S === OrgKeys.orgPk(ORG_ID) && row.sk?.S?.startsWith('MEMBER#'))
       .map((row) => ({
-        userId: parseMemberSk(row.sk!.S!)!,
+        userId: OrgKeys.parseMemberSk(row.sk!.S!)!,
         ...(row.role?.S ? { role: row.role.S } : {}),
         ...(row.joinedAt?.S ? { joinedAt: row.joinedAt.S } : {}),
       }));
 
     const orgTableMemberUserIds = [...orgTable.values()]
       .filter((row) => row.pk?.S === OrgKeys.orgPk(ORG_ID) && row.sk?.S?.startsWith('MEMBER#'))
-      .map((row) => parseMemberSk(row.sk!.S!)!);
+      .map((row) => OrgKeys.parseMemberSk(row.sk!.S!)!);
 
     return {
       orgId: ORG_ID,

@@ -24,9 +24,9 @@ import {
   setBucketRagEnablement,
   toEnablementResponse,
   updateBucketTelemetry,
-} from './bucket-rag-enablement.js';
-import type { BucketRAGEnablementRecord } from './dynamo-records.js';
-import { OrgDeletingError } from './org-profile.js';
+} from './bucket-rag-enablement.ts';
+import type { BucketRAGEnablementRecord } from './dynamo-records.ts';
+import { OrgDeletingError } from './org-profile.ts';
 import { S3Region } from '@filone/shared';
 
 function record(over: Partial<BucketRAGEnablementRecord> = {}): BucketRAGEnablementRecord {

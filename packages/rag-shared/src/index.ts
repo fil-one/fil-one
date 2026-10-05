@@ -21,7 +21,7 @@ export { extractText } from './extractor.ts';
 
 export { extractTextFromPdf } from './pdf-extractor.ts';
 
-export { S3VectorsStore } from './s3-vectors-store.ts';
+export { S3VectorsStore, ragIndexName } from './s3-vectors-store.ts';
 
 export type { EnsureIndexOptions, VectorStore } from './vector-store.ts';
 

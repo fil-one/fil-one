@@ -90,7 +90,8 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { decodeRow, scanAll, text, transactWithRetry } from './lib/dynamo.ts';
 import { acquireRunLock, BILLING_REKEY_LOCK_PK, forceUnlock } from './lib/run-lock.ts';
 import { assertStageResources, awsRegionForStage, resolveStageTables } from './lib/stage.ts';
-import { BillingKeys, buildRevertItem, parseOrgPk } from './lib/billing-rekey.ts';
+import { SubscriptionKeys } from '@filone/backend/src/lib/subscription-store.ts';
+import { buildRevertItem, parseOrgPk } from './lib/billing-rekey.ts';
 import { buildRevertScanInput } from './lib/billing-scan.ts';
 
 /** Pause between deletes, so a few thousand transactions stay polite to a shared table. */
@@ -191,7 +192,7 @@ try {
   console.log('');
 
   for (const copy of copies) {
-    const label = `${BillingKeys.orgPk(copy.orgId)} (copied from ${copy.rekeyedFrom})`;
+    const label = `${SubscriptionKeys.orgPk(copy.orgId)} (copied from ${copy.rekeyedFrom})`;
 
     if (!cli.execute) {
       console.log(`  [dry-run] DELETE ${label}`);

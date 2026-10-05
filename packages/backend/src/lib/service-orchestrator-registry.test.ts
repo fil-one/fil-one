@@ -1,11 +1,10 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { S3Region, Stage, getRegionAccessModel } from '@filone/shared';
 
-// fth-orchestrator builds its FTH management client at import time, so satisfy
-// both inputs createInstrumentedFthClient() touches before the registry import
-// runs: the baseUrl env var and the SST-linked API token. Forge is built lazily
-// (per-region, on first request), so each Forge network's env/secret only needs
-// to exist by the time a lookup for one of its regions happens.
+// The registry builds every non-Aurora orchestrator lazily, on the first lookup
+// for its region. The FTH client reads its baseUrl from the environment and its
+// API token from the SST-linked secret at that moment, and each Forge network
+// reads its own pair, so all of them are in place before any lookup runs.
 vi.hoisted(() => {
   process.env.FTH_MANAGEMENT_API_URL = 'https://api.fortilyx.test';
   process.env.FORGE_MANAGEMENT_API_URL = 'https://forge.test';
@@ -22,7 +21,8 @@ vi.mock('sst', () => ({
 import {
   getOrchestratorForRegion,
   getAvailableOrchestrators,
-} from './service-orchestrator-registry.js';
+} from './service-orchestrator-registry.ts';
+import { ORCHESTRATOR_ID_BY_REGION } from './service-orchestrator-ids.ts';
 
 afterEach(() => {
   delete process.env.FILONE_STAGE;
@@ -54,6 +54,15 @@ describe('service-orchestrator registry', () => {
     expect(orchestrator.id).toBe('forgeDev');
     expect(orchestrator.region).toBe(S3Region.UsEast9);
   });
+
+  // The ids map is the answer for code that cannot build an orchestrator, so
+  // it must agree with the orchestrators the registry does build.
+  for (const [region, id] of Object.entries(ORCHESTRATOR_ID_BY_REGION)) {
+    it(`builds the orchestrator named by ORCHESTRATOR_ID_BY_REGION for ${region}`, () => {
+      process.env.FILONE_STAGE = Stage.Staging;
+      expect(getOrchestratorForRegion(region as S3Region).id).toBe(id);
+    });
+  }
 });
 
 describe('getAvailableOrchestrators', () => {
@@ -66,7 +75,9 @@ describe('getAvailableOrchestrators', () => {
   it('includes both Forge orchestrators on non-production stages', () => {
     process.env.FILONE_STAGE = Stage.Staging;
     const orchestrators = getAvailableOrchestrators();
-    expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'fth', 'forge', 'forgeDev']);
+    // Order follows `getAvailableRegions`, which groups by continent
+    // (eu-west-1, eu-central-3, us-east-1, us-east-9) rather than by service.
+    expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'forge', 'fth', 'forgeDev']);
   });
 
   // Two answers to the same question: the console reads the region's model

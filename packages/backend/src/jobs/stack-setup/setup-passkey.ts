@@ -1,8 +1,8 @@
 // Auth0 passkey-on-primary-connection setup. Extracted from
 // setup-integrations.ts to keep that file under the max-lines lint cap.
 
-import { getAuth0ManagementToken } from './auth0-mgmt-token.js';
-import { throwIfNotOk } from '../../lib/auth0-management.js';
+import { getAuth0ManagementToken } from './auth0-mgmt-token.ts';
+import { throwIfNotOk } from '../../lib/auth0-management.ts';
 
 // Auth0's default database-connection name. If a tenant ever renames the
 // connection, the list-by-name lookup below will not find it and this setup

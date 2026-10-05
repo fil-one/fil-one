@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { PUBLIC_EMAIL_DOMAINS, deriveOrgName, suggestOrgNameByEmail } from './suggest-org-name.js';
+import { PUBLIC_EMAIL_DOMAINS, deriveOrgName, suggestOrgNameByEmail } from './suggest-org-name.ts';
 
 describe('suggestOrgNameByEmail', () => {
   describe('corporate emails — uses domain name', () => {

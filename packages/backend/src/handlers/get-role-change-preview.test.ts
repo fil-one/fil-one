@@ -4,20 +4,20 @@ import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
 import type { ErrorResponse, RoleChangePreviewResponse } from '@filone/shared';
-import { sstResourceMock } from '../test/sst-resource-mock.js';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { baseHandler } from './get-role-change-preview.js';
+import { baseHandler } from './get-role-change-preview.ts';
 import {
   buildEvent,
   membershipFor,
   stubAbsentMembershipRead,
   stubMembershipRead,
-} from '../test/lambda-test-utilities.js';
-import type { AuthenticatedEvent } from '../lib/user-context.js';
+} from '../test/lambda-test-utilities.ts';
+import type { AuthenticatedEvent } from '../lib/user-context.ts';
 
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
 const CALLER = 'caller-user-id';

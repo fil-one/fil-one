@@ -1,11 +1,12 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useRef, useState } from 'react';
 import {
   PlusIcon,
   DatabaseIcon,
   KeyIcon,
-  ArrowUpIcon,
+  CloudArrowUpIcon,
   XIcon,
   CheckIcon,
+  ClockCounterClockwiseIcon,
 } from '@phosphor-icons/react/dist/ssr';
 import { Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
@@ -18,6 +19,7 @@ import { Button } from '../components/Button';
 import { IconButton } from '../components/IconButton';
 import { Badge, type BadgeColor } from '../components/Badge';
 import { Card } from '../components/Card';
+import { EmptyStateCard } from '../components/EmptyStateCard';
 import { IconBox } from '../components/IconBox';
 import { ProgressBar } from '../components/ProgressBar';
 import { formatBytes } from '@filone/shared';
@@ -85,6 +87,17 @@ function DashboardSkeleton() {
 // eslint-disable-next-line max-lines-per-function, complexity/complexity
 export function DashboardPage() {
   const [trialBannerVisible, setTrialBannerVisible] = useState(true);
+  // A prompt toward pages the caller can always reach on their own (Buckets,
+  // API Keys), so dismissing it costs nothing. Like the trial banner above it,
+  // dismissal lasts until the next visit to the dashboard.
+  const [quickSetupVisible, setQuickSetupVisible] = useState(true);
+  // Dismissing either removes the button that held focus, so focus moves to
+  // the page heading rather than dropping to the document body.
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  function dismiss(hide: (visible: boolean) => void) {
+    hide(false);
+    headingRef.current?.focus();
+  }
 
   // Money is `billing.view`. A Member's dashboard used to sit on a skeleton
   // forever waiting for a request that returns 403, so the plan panels are now
@@ -173,20 +186,20 @@ export function DashboardPage() {
       done: usage.buckets.count > 0,
     },
     {
-      id: 'upload-object',
-      icon: ArrowUpIcon,
-      title: 'Upload an object',
-      subtitle: 'Store files on Fil One',
-      href: '/buckets',
-      done: usage.objects.count > 0,
-    },
-    {
       id: 'generate-key',
       icon: KeyIcon,
       title: 'Generate API key',
       subtitle: 'Connect via S3 API',
       href: '/api-keys',
       done: usage.accessKeys.count > 0,
+    },
+    {
+      id: 'upload-object',
+      icon: CloudArrowUpIcon,
+      title: 'Upload an object',
+      subtitle: 'Store files on Fil One',
+      href: '/buckets',
+      done: usage.objects.count > 0,
     },
   ];
 
@@ -197,6 +210,7 @@ export function DashboardPage() {
     <PageLayout
       title="Dashboard"
       headingId="dashboard-heading"
+      headingRef={headingRef}
       action={
         <RequirePermission permission="buckets.create">
           <Button
@@ -218,7 +232,7 @@ export function DashboardPage() {
             <Badge color="blue" size="sm" strength="strong" description={trialEndsLabel}>
               {trialDaysLeft !== null ? `${trialDaysLeft} days left` : 'TRIAL'}
             </Badge>
-            <p className="text-[13px]">
+            <p className="text-ui">
               <span className="font-medium text-zinc-900">Free trial</span>
               <span className="text-zinc-500">
                 {' '}
@@ -233,23 +247,33 @@ export function DashboardPage() {
             <IconButton
               icon={XIcon}
               aria-label="Dismiss trial banner"
-              onClick={() => setTrialBannerVisible(false)}
-              size="sm"
+              onClick={() => dismiss(setTrialBannerVisible)}
+              size="md"
+              className="rounded-md focus-visible:brand-outline"
             />
           </div>
         </div>
       )}
 
       {/* 3. Quick Setup */}
-      {showQuickSetup && (
+      {showQuickSetup && quickSetupVisible && (
         <Card className="mb-5">
           <div className="mb-4 flex items-center justify-between">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+            <span className="text-meta font-medium uppercase tracking-wider text-zinc-500">
               QUICK SETUP
             </span>
-            <span className="text-[11px] text-zinc-500">
-              {quickSetupDone} of {quickSetupTotal}
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-meta text-zinc-500">
+                {quickSetupDone} of {quickSetupTotal}
+              </span>
+              <IconButton
+                icon={XIcon}
+                aria-label="Dismiss quick setup"
+                onClick={() => dismiss(setQuickSetupVisible)}
+                size="md"
+                className="rounded-md focus-visible:brand-outline"
+              />
+            </div>
           </div>
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
             {quickSetupTasks.map(({ id, icon: Icon, title, subtitle, href, done }) => (
@@ -262,12 +286,10 @@ export function DashboardPage() {
               >
                 <IconBox icon={done ? CheckIcon : Icon} color={done ? 'green' : 'blue'} size="md" />
                 <div className="min-w-0">
-                  <p
-                    className={`text-[13px] font-medium ${done ? 'text-green-900' : 'text-zinc-900'}`}
-                  >
+                  <p className={`text-ui font-medium ${done ? 'text-green-900' : 'text-zinc-900'}`}>
                     {title}
                   </p>
-                  <p className={`text-[11px] ${done ? 'text-green-700' : 'text-zinc-500'}`}>
+                  <p className={`text-meta ${done ? 'text-green-700' : 'text-zinc-500'}`}>
                     {subtitle}
                   </p>
                 </div>
@@ -288,7 +310,7 @@ export function DashboardPage() {
           <Card className="flex flex-col justify-between sm:h-[157px]">
             <div>
               <div className="mb-1 flex items-center justify-between">
-                <span className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+                <span className="text-meta font-medium uppercase tracking-wider text-zinc-500">
                   PLAN
                 </span>
                 <span data-testid="subscription-status" data-status={billing.subscription.status}>
@@ -308,29 +330,29 @@ export function DashboardPage() {
                 {planTitle(billing.subscription)}
               </span>
               {isTrialing && (
-                <p className="mt-0.5 text-[11px] text-zinc-500">
+                <p className="mt-0.5 text-meta text-zinc-500">
                   {formatBytes(limits.storageLimitBytes)} storage ·{' '}
                   {formatBytes(limits.egressLimitBytes)} egress included
                 </p>
               )}
               {isInactive && (
-                <p className="mt-0.5 text-[11px] text-zinc-500">
+                <p className="mt-0.5 text-meta text-zinc-500">
                   Choose a plan to start storing data
                 </p>
               )}
               {isPayAsYouGo && billing && (
-                <p className="mt-0.5 text-[11px] text-zinc-500">
+                <p className="mt-0.5 text-meta text-zinc-500">
                   {pricingLine(billing.subscription)} · no egress fees
                 </p>
               )}
             </div>
             <div>
               {isTrialing || isInactive ? (
-                <AppLink href="/billing" className="text-[12px]">
+                <AppLink href="/billing" className="text-xs">
                   {isInactive ? 'Choose a plan' : 'Upgrade'}
                 </AppLink>
               ) : (
-                <AppLink href="/billing" className="text-[12px]">
+                <AppLink href="/billing" className="text-xs">
                   Manage plan
                 </AppLink>
               )}
@@ -341,14 +363,14 @@ export function DashboardPage() {
         {/* Storage card */}
         <Card className="flex flex-col justify-between sm:h-[157px]">
           <div>
-            <span className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+            <span className="mb-1 block text-meta font-medium uppercase tracking-wider text-zinc-500">
               STORAGE
             </span>
             <div className="flex items-baseline gap-1.5">
               <span className="text-xl font-medium text-zinc-900">
                 {formatBytes(usage.storage.usedBytes)}
               </span>
-              {isTrialing && <span className="text-[13px] text-zinc-500">/ 1 TB</span>}
+              {isTrialing && <span className="text-ui text-zinc-500">/ 1 TB</span>}
             </div>
           </div>
           {isTrialing && <ProgressBar value={storagePct} size="sm" label="Storage usage" />}
@@ -356,10 +378,8 @@ export function DashboardPage() {
               per-TB number, and the Billing tab is where that total lives. */}
           {cost?.kind === 'estimate' && (
             <div className="flex items-center justify-between border-t border-zinc-200 pt-3">
-              <span className="text-[11px] text-zinc-500">Est. monthly cost</span>
-              <span className="text-[13px] font-medium text-zinc-900">
-                {formatCents(cost.cents)}
-              </span>
+              <span className="text-meta text-zinc-500">Est. monthly cost</span>
+              <span className="text-ui font-medium text-zinc-900">{formatCents(cost.cents)}</span>
             </div>
           )}
         </Card>
@@ -367,20 +387,20 @@ export function DashboardPage() {
         {/* Egress card */}
         <Card className="flex flex-col justify-between sm:h-[157px]">
           <div>
-            <span className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+            <span className="mb-1 block text-meta font-medium uppercase tracking-wider text-zinc-500">
               EGRESS
             </span>
             <div className="flex items-baseline gap-1.5">
               <span className="text-xl font-medium text-zinc-900">
                 {formatBytes(usage.egress.usedBytes)}
               </span>
-              {isTrialing && <span className="text-[13px] text-zinc-500">/ 2 TB</span>}
+              {isTrialing && <span className="text-ui text-zinc-500">/ 2 TB</span>}
             </div>
           </div>
           {isTrialing && <ProgressBar value={egressPct} size="sm" label="Egress usage" />}
           {isPayAsYouGo && (
             <div className="flex items-center border-t border-zinc-200 pt-3">
-              <span className="text-[11px] text-zinc-500">No egress fees · unlimited</span>
+              <span className="text-meta text-zinc-500">No egress fees · unlimited</span>
             </div>
           )}
         </Card>
@@ -393,39 +413,39 @@ export function DashboardPage() {
       >
         <div className="px-5 py-4">
           <div className="mb-1.5 flex items-center justify-between">
-            <span className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+            <span className="text-meta font-medium uppercase tracking-wider text-zinc-500">
               BUCKETS
             </span>
-            <AppLink href="/buckets" className="text-[11px]">
+            <AppLink href="/buckets" className="text-meta">
               View all
             </AppLink>
           </div>
           <div className="flex items-baseline gap-1">
             <span className="text-xl font-medium text-zinc-900">{usage.buckets.count}</span>
-            <span className="text-[11px] text-zinc-500">total</span>
+            <span className="text-meta text-zinc-500">total</span>
           </div>
         </div>
         <div className="px-5 py-4">
-          <span className="mb-1.5 block text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+          <span className="mb-1.5 block text-meta font-medium uppercase tracking-wider text-zinc-500">
             OBJECTS
           </span>
           <div className="flex items-baseline gap-1">
             <span className="text-xl font-medium text-zinc-900">{usage.objects.count}</span>
-            <span className="text-[11px] text-zinc-500">total</span>
+            <span className="text-meta text-zinc-500">total</span>
           </div>
         </div>
         <div className="px-5 py-4">
           <div className="mb-1.5 flex items-center justify-between">
-            <span className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+            <span className="text-meta font-medium uppercase tracking-wider text-zinc-500">
               API KEYS
             </span>
-            <AppLink href="/api-keys" className="text-[11px]">
+            <AppLink href="/api-keys" className="text-meta">
               View all
             </AppLink>
           </div>
           <div className="flex items-baseline gap-1">
             <span className="text-xl font-medium text-zinc-900">{usage.accessKeys.count}</span>
-            <span className="text-[11px] text-zinc-500">total</span>
+            <span className="text-meta text-zinc-500">total</span>
           </div>
         </div>
       </Card>
@@ -448,11 +468,13 @@ export function DashboardPage() {
         </div>
 
         {activities.length === 0 ? (
-          <div className="flex flex-col items-center px-6 py-16 text-center">
-            <p className="mb-1 text-sm font-medium text-zinc-900">No activity yet</p>
-            <p className="mb-4 max-w-xs text-sm text-zinc-500">
-              Create a bucket to start storing objects
-            </p>
+          <EmptyStateCard
+            icon={ClockCounterClockwiseIcon}
+            iconColor="grey"
+            title="No activity yet"
+            description="Create a bucket to start storing objects"
+            bordered={false}
+          >
             <RequirePermission permission="buckets.create">
               <Button
                 id="dashboard-create-bucket-button"
@@ -463,25 +485,25 @@ export function DashboardPage() {
                 Create bucket
               </Button>
             </RequirePermission>
-          </div>
+          </EmptyStateCard>
         ) : (
           <div className="divide-y divide-zinc-100/50">
             {activities.map((activity) => (
               <div key={activity.id} className="flex items-center gap-4 rounded-lg px-2 py-2.5">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="truncate text-[13px] font-medium text-zinc-900">
+                    <span className="truncate text-ui font-medium text-zinc-900">
                       {activity.resourceName}
                     </span>
                     <Badge color={activity.resourceType === 'bucket' ? 'grey' : 'blue'} size="sm">
                       {activity.resourceType}
                     </Badge>
                   </div>
-                  <p className="mt-0.5 text-[11px] text-zinc-500">
+                  <p className="mt-0.5 text-meta text-zinc-500">
                     {getActivityActionLabel(activity.action)}
                   </p>
                 </div>
-                <span className="w-14 shrink-0 text-right text-[11px] text-zinc-500">
+                <span className="w-14 shrink-0 text-right text-meta text-zinc-500">
                   {timeAgo(activity.timestamp)}
                 </span>
               </div>
