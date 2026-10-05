@@ -742,7 +742,7 @@ describe('the caps routes apply on top of their declared permission', () => {
   describe('granting a retention write through a policy needs privileged.grant', () => {
     const policyWrite = (action: string): RouteRequest => ({
       body: JSON.stringify({
-        policy: { statement: [{ effect: 'allow', principal: [USER_ID], action: [action] }] },
+        policy: { Statement: [{ Effect: 'Allow', Principal: [USER_ID], Action: [action] }] },
       }),
       pathParameters: { name: 'photos' },
       queryStringParameters: { region: 'eu-west-1' },

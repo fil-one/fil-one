@@ -17,7 +17,7 @@ export const SCOPED_REGION = S3Region.EuWest1;
 export const BUCKET = 'photos';
 
 export const readPolicy: BucketPolicy = {
-  statement: [{ effect: 'allow', principal: [USER_ID], action: ['s3:GetObject'] }],
+  Statement: [{ Effect: 'Allow', Principal: [USER_ID], Action: ['s3:GetObject'] }],
 };
 
 export const iam = new FakeIamOrchestrator();
