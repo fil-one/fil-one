@@ -974,13 +974,17 @@ components:
 
     AccessKey:
       type: object
-      required: [accessKeyId, name, createdAt]
+      required: [accessKeyId, name, type, createdAt]
       properties:
         accessKeyId:
           type: string
           description: AWS-style access key ID, used by S3 clients.
         name:
           type: string
+        type:
+          type: string
+          enum: [service, principal]
+          description: A `service` key carries `permissions` and `buckets`; a `principal` key carries `principal`.
         principal:
           description: Set on a principal-bound key. Such a key carries no `permissions` or `buckets`.
           allOf:
