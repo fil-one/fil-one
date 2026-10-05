@@ -418,7 +418,9 @@ abstract class FilOneOrchestrator implements OrchestratorCore {
       );
     }
 
-    const principalId = data.principal ?? ('principalId' in body ? body.principalId : undefined);
+    const principalId =
+      data.type === 'principal' &&
+      (data.principal ?? ('principalId' in body ? body.principalId : undefined));
     return {
       // The contract has no identifier separate from the accessKeyId.
       id: data.accessKeyId,
