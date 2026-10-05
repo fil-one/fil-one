@@ -25,3 +25,16 @@ describe('FakeIamOrchestrator principal reads', () => {
     );
   });
 });
+
+describe('FakeIamOrchestrator policy writes', () => {
+  it('leaves a policy that never names the removed member untouched, as Hilt does', async () => {
+    const fake = new FakeIamOrchestrator();
+    await fake.syncMember('t1', 'u1');
+    await fake.syncMember('t1', 'u2');
+    const etag = fake.seedPolicy('t1', 'photos', {
+      Statement: [{ Effect: 'Allow', Principal: ['u2'], Action: ['s3:GetObject'] }],
+    } as never);
+    await fake.removeMember('t1', 'u1');
+    expect((await fake.getBucketPolicy('t1', 'photos'))?.etag).toBe(etag);
+  });
+});
