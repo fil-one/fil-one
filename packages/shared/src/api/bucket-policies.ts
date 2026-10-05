@@ -145,7 +145,7 @@ export const RETENTION_WRITE_ACTIONS = [
   's3:PutObjectLegalHold',
 ] as const satisfies readonly PolicyAction[];
 
-export const POLICY_EFFECTS = ['allow', 'deny'] as const;
+export const POLICY_EFFECTS = ['Allow', 'Deny'] as const;
 export type PolicyEffect = (typeof POLICY_EFFECTS)[number];
 
 /** Names every live principal of the tenant. The one spelling of the wildcard. */
@@ -171,9 +171,9 @@ const PrincipalIdSchema = z
 export const PolicyStatementSchema = z
   .object({
     /** An optional label. Stored and returned; nothing evaluates it. */
-    sid: z.string().min(1).max(POLICY_SID_MAX_LENGTH).optional(),
-    effect: z.enum(POLICY_EFFECTS),
-    principal: z.union([
+    Sid: z.string().min(1).max(POLICY_SID_MAX_LENGTH).optional(),
+    Effect: z.enum(POLICY_EFFECTS),
+    Principal: z.union([
       z.literal(POLICY_WILDCARD_PRINCIPAL),
       z
         .array(PrincipalIdSchema)
@@ -181,7 +181,7 @@ export const PolicyStatementSchema = z
         // A member named twice is still one member; keep the first mention.
         .transform((ids) => [...new Set(ids)]),
     ]),
-    action: z
+    Action: z
       .array(z.enum(POLICY_ACTIONS_WITH_WILDCARD))
       .min(1, 'A statement grants or denies at least one action'),
   })
@@ -195,7 +195,7 @@ export type PolicyStatement = z.infer<typeof PolicyStatementSchema>;
  */
 export const BucketPolicySchema = z
   .object({
-    statement: z.array(PolicyStatementSchema).min(1, 'A policy has at least one statement'),
+    Statement: z.array(PolicyStatementSchema).min(1, 'A policy has at least one statement'),
   })
   .strict();
 
@@ -204,7 +204,7 @@ export type BucketPolicy = z.infer<typeof BucketPolicySchema>;
 /** Whether a statement applies to a principal: it names them, or it names everyone. */
 export function statementNames(statement: PolicyStatement, principalId: string): boolean {
   return (
-    statement.principal === POLICY_WILDCARD_PRINCIPAL || statement.principal.includes(principalId)
+    statement.Principal === POLICY_WILDCARD_PRINCIPAL || statement.Principal.includes(principalId)
   );
 }
 
@@ -216,26 +216,26 @@ export function expandActions(actions: readonly PolicyActionOrWildcard[]): Polic
 }
 
 /**
- * What a principal may do on the bucket: the union of the `allow` statements
- * naming them minus the union of the `deny` statements naming them, sorted.
+ * What a principal may do on the bucket: the union of the `Allow` statements
+ * naming them minus the union of the `Deny` statements naming them, sorted.
  * The storage system computes the same thing on every request; this copy
  * serves previews and the in-memory fake, and must agree with it.
  */
 export function effectiveActions(policy: BucketPolicy, principalId: string): PolicyAction[] {
   const allowed = new Set<PolicyAction>();
   const denied = new Set<PolicyAction>();
-  for (const statement of policy.statement) {
+  for (const statement of policy.Statement) {
     if (!statementNames(statement, principalId)) continue;
-    const target = statement.effect === 'allow' ? allowed : denied;
-    for (const action of expandActions(statement.action)) target.add(action);
+    const target = statement.Effect === 'Allow' ? allowed : denied;
+    for (const action of expandActions(statement.Action)) target.add(action);
   }
   return [...allowed].filter((action) => !denied.has(action)).sort();
 }
 
 /** Every principal a document names outright. */
 function namedPrincipals(policy: BucketPolicy | null): string[] {
-  return (policy?.statement ?? []).flatMap((statement) =>
-    statement.principal === POLICY_WILDCARD_PRINCIPAL ? [] : statement.principal,
+  return (policy?.Statement ?? []).flatMap((statement) =>
+    statement.Principal === POLICY_WILDCARD_PRINCIPAL ? [] : statement.Principal,
   );
 }
 
@@ -284,7 +284,7 @@ export function isRosterSid(sid: string | undefined): boolean {
  * Every action but the two retention writes: what an Admin, and a Member who
  * created the bucket, receives. An Owner may still grant the pair to an Admin on
  * one bucket, which is why the roster statement lists actions rather than
- * pairing `s3:*` with a `deny`.
+ * pairing `s3:*` with a `Deny`.
  */
 export const ROSTER_ADMIN_ACTIONS: PolicyAction[] = POLICY_ACTIONS.filter(
   (action) => !(RETENTION_WRITE_ACTIONS as readonly PolicyAction[]).includes(action),
@@ -309,18 +309,18 @@ export function rosterStatements({
   const statements: PolicyStatement[] = [];
   if (ownerIds.length > 0) {
     statements.push({
-      sid: ROSTER_OWNERS_SID,
-      effect: 'allow',
-      principal: ownerIds,
-      action: [POLICY_ACTION_WILDCARD],
+      Sid: ROSTER_OWNERS_SID,
+      Effect: 'Allow',
+      Principal: ownerIds,
+      Action: [POLICY_ACTION_WILDCARD],
     });
   }
   if (adminIds.length > 0) {
     statements.push({
-      sid: ROSTER_ADMINS_SID,
-      effect: 'allow',
-      principal: adminIds,
-      action: [...ROSTER_ADMIN_ACTIONS],
+      Sid: ROSTER_ADMINS_SID,
+      Effect: 'Allow',
+      Principal: adminIds,
+      Action: [...ROSTER_ADMIN_ACTIONS],
     });
   }
   return statements;
@@ -346,13 +346,13 @@ export function defaultBucketPolicy({
   const statement = rosterStatements({ owners, admins });
   if (!owners.includes(creatorId) && !admins.includes(creatorId)) {
     statement.push({
-      sid: ROSTER_CREATOR_SID,
-      effect: 'allow',
-      principal: [creatorId],
-      action: [...ROSTER_ADMIN_ACTIONS],
+      Sid: ROSTER_CREATOR_SID,
+      Effect: 'Allow',
+      Principal: [creatorId],
+      Action: [...ROSTER_ADMIN_ACTIONS],
     });
   }
-  return { statement };
+  return { Statement: statement };
 }
 
 /**
@@ -365,11 +365,11 @@ export function withRosterStatements(
   policy: BucketPolicy | null,
   roster: { owners: readonly string[]; admins: readonly string[] },
 ): BucketPolicy | null {
-  const others = (policy?.statement ?? []).filter(
-    (statement) => statement.sid !== ROSTER_OWNERS_SID && statement.sid !== ROSTER_ADMINS_SID,
+  const others = (policy?.Statement ?? []).filter(
+    (statement) => statement.Sid !== ROSTER_OWNERS_SID && statement.Sid !== ROSTER_ADMINS_SID,
   );
   const statement = [...rosterStatements(roster), ...others];
-  return statement.length > 0 ? { statement } : null;
+  return statement.length > 0 ? { Statement: statement } : null;
 }
 
 // ── Console API shapes ────────────────────────────────────────────────
