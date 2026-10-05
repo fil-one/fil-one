@@ -4,6 +4,7 @@ import {
   BucketNotFoundError,
   PolicyNotFoundError,
   PolicyPreconditionFailedError,
+  PolicyValidationError,
   PrincipalNotFoundError,
 } from '../lib/errors.ts';
 import type {
@@ -96,7 +97,8 @@ export class FakeIamOrchestrator implements IamMethods {
       if (statement.Principal === '*') continue;
       for (const principal of statement.Principal) {
         if (!this.principalsOf(tenantId).has(principal)) {
-          throw new PrincipalNotFoundError(principal);
+          // The S3 write answers MalformedPolicy, which the console maps here.
+          throw new PolicyValidationError(`unknown principal "${principal}"`);
         }
       }
     }
