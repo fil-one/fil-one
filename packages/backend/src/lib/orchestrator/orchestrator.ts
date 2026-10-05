@@ -21,6 +21,7 @@ import {
   type TenantSetupDeps,
 } from './tenant-setup.ts';
 import { buildIssueAccessKeyRequestBody, describeAccessKeyBody } from './access-key-body.ts';
+import { putFirstBucketPolicy, withWriteRetry } from './policy-writes.ts';
 import { extractApiCode, extractApiMessage } from './api-message.ts';
 import {
   AccessKeyAlreadyExistsError,
@@ -82,7 +83,6 @@ import {
   resolvePrincipalAccess,
   syncPrincipal,
 } from './members.ts';
-import { withWriteRetry } from './policy-writes.ts';
 import { fetchBucketUsageMetrics, fetchTenantInfo, fetchTenantUsageMetrics } from './usage.ts';
 
 export interface FilOneOrchestratorConfig {
@@ -269,10 +269,11 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
       {
         bucketName: args.bucketName,
         objectLockEnabled: args.lock === true,
-        ...(args.policy ? { policy: args.policy } : {}),
       },
       requestOptions,
     );
+    // TODO: move this write to a durable job if bucket creation starts timing out.
+    if (args.policy) await putFirstBucketPolicy(s3, args.bucketName, args.policy);
 
     // The signal on the retry options stops retrying once the deadline has
     // passed, instead of burning the remaining attempts on instant aborts.

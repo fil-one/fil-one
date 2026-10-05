@@ -59,6 +59,7 @@ import { baseHandler } from './create-bucket.ts';
 import {
   BucketAlreadyExistsError,
   BucketConfigurationError,
+  PolicyPublishError,
   PolicyValidationError,
 } from '../lib/errors.ts';
 import { buildEvent } from '../test/lambda-test-utilities.ts';
@@ -360,7 +361,7 @@ describe('create-bucket baseHandler', () => {
       expect(events[1]).toMatchObject({ phase: 'completion', outcome: 'succeeded' });
     });
 
-    it('answers 400 when the storage system refuses the policy, since no bucket was created', async () => {
+    it('answers 400 when the storage system refuses the policy written after the create', async () => {
       mockListMembers.mockResolvedValue([{ userId: 'user-1', role: OrgRole.Owner }]);
       mockCreateBucket.mockRejectedValue(new PolicyValidationError('unknown principal'));
 
@@ -368,6 +369,21 @@ describe('create-bucket baseHandler', () => {
 
       expect(result.statusCode).toBe(400);
       expect(JSON.parse(result.body as string).message).toBe('unknown principal');
+    });
+
+    it('fails the policy write after the create as a 500 and records it as failed', async () => {
+      mockListMembers.mockResolvedValue([{ userId: 'user-1', role: OrgRole.Owner }]);
+      mockCreateBucket.mockRejectedValue(new PolicyPublishError());
+
+      // errorHandlerMiddleware renders what baseHandler throws as a 500.
+      await expect(
+        baseHandler(buildEvent({ body: iamBody(), userInfo: USER_INFO })),
+      ).rejects.toBeInstanceOf(PolicyPublishError);
+
+      const events = ddbMock
+        .commandCalls(PutItemCommand)
+        .map((call) => unmarshall(call.args[0].input.Item ?? {}));
+      expect(events[1]).toMatchObject({ phase: 'completion', outcome: 'failed' });
     });
   });
 
