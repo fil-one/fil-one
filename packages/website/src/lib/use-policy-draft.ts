@@ -28,7 +28,7 @@ type DraftAction =
 
 function seeded(snapshot: BucketPolicySnapshot | null | undefined): DraftState {
   return {
-    statements: snapshot?.policy.statement ?? [],
+    statements: snapshot?.policy.Statement ?? [],
     dirty: false,
     seededFrom: snapshot === undefined ? undefined : (snapshot?.etag ?? null),
   };

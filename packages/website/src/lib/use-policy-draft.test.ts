@@ -5,10 +5,10 @@ import type { PolicyStatement } from '@filone/shared';
 import { usePolicyDraft } from './use-policy-draft.js';
 import type { BucketPolicySnapshot } from './bucket-policy-api.js';
 
-const read: PolicyStatement = { effect: 'allow', principal: ['a'], action: ['s3:GetObject'] };
-const write: PolicyStatement = { effect: 'allow', principal: ['b'], action: ['s3:PutObject'] };
-const v1: BucketPolicySnapshot = { policy: { statement: [read] }, etag: '"v1"' };
-const v2: BucketPolicySnapshot = { policy: { statement: [read, write] }, etag: '"v2"' };
+const read: PolicyStatement = { Effect: 'Allow', Principal: ['a'], Action: ['s3:GetObject'] };
+const write: PolicyStatement = { Effect: 'Allow', Principal: ['b'], Action: ['s3:PutObject'] };
+const v1: BucketPolicySnapshot = { policy: { Statement: [read] }, etag: '"v1"' };
+const v2: BucketPolicySnapshot = { policy: { Statement: [read, write] }, etag: '"v2"' };
 
 describe('usePolicyDraft', () => {
   it('seeds from the server document and starts clean', () => {
@@ -24,8 +24,8 @@ describe('usePolicyDraft', () => {
     expect(result.current.statements).toStrictEqual([read, write]);
     expect(result.current.dirty).toBe(true);
 
-    act(() => result.current.updateStatement(0, { ...read, effect: 'deny' }));
-    expect(result.current.statements[0]!.effect).toBe('deny');
+    act(() => result.current.updateStatement(0, { ...read, Effect: 'Deny' }));
+    expect(result.current.statements[0]!.Effect).toBe('Deny');
 
     act(() => result.current.removeStatement(1));
     expect(result.current.statements).toHaveLength(1);
@@ -46,7 +46,7 @@ describe('usePolicyDraft', () => {
     expect(result.current.stale).toBe(false);
 
     act(() => result.current.removeStatement(1));
-    rerender({ snapshot: { policy: { statement: [] }, etag: '"v3"' } });
+    rerender({ snapshot: { policy: { Statement: [] }, etag: '"v3"' } });
     expect(result.current.statements).toStrictEqual([read]);
     expect(result.current.dirty).toBe(true);
     expect(result.current.stale).toBe(true);

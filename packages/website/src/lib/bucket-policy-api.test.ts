@@ -16,7 +16,7 @@ import {
 } from './bucket-policy-api.js';
 
 const policy: BucketPolicy = {
-  statement: [{ effect: 'allow', principal: ['user-1'], action: ['s3:GetObject'] }],
+  Statement: [{ Effect: 'Allow', Principal: ['user-1'], Action: ['s3:GetObject'] }],
 };
 const failure = (status: number, code?: string) =>
   Object.assign(new Error('refused'), { status, ...(code ? { code } : {}) });
