@@ -61,6 +61,9 @@ export class FakeIamOrchestrator implements IamMethods {
     this.record('removeMember', tenantId, userId);
     this.principalsOf(tenantId).delete(userId);
     for (const [bucketName, stored] of this.policiesOf(tenantId)) {
+      const names = (s: BucketPolicy['Statement'][number]) =>
+        s.Principal !== '*' && s.Principal.includes(userId);
+      if (!stored.policy.Statement.some(names)) continue;
       const statement = stored.policy.Statement.map((s) =>
         s.Principal === '*' ? s : { ...s, Principal: s.Principal.filter((p) => p !== userId) },
       ).filter((s) => s.Principal === '*' || s.Principal.length > 0);
