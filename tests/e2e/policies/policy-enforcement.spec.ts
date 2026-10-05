@@ -290,7 +290,7 @@ test.describe('C. policy writes', () => {
     const write = (sid: string) =>
       owner.putPolicy(bucket, {
         policy: {
-          statement: [ownersStatement(ownerId), allow([memberId], ['s3:ListBucket'], sid)],
+          Statement: [ownersStatement(ownerId), allow([memberId], ['s3:ListBucket'], sid)],
         },
         etag,
       });
@@ -313,7 +313,7 @@ test.describe('C. policy writes', () => {
     ]);
     expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
       canonical({
-        statement: [
+        Statement: [
           ownersStatement(ownerId),
           allow([memberId, ownerId], ['s3:ListBucket'], 'repeat'),
         ],
@@ -331,7 +331,7 @@ test.describe('C. policy writes', () => {
       allow(['not-a-uuid'], ['s3:GetObject']),
     ]) {
       const res = await owner.putPolicy(bucket, {
-        policy: { statement: [ownersStatement(ownerId), statement] },
+        policy: { Statement: [ownersStatement(ownerId), statement] },
         etag,
       });
       statuses.push(res.status());

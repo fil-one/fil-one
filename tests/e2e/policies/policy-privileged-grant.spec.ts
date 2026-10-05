@@ -54,10 +54,10 @@ test.afterAll(async () => {
   await admin.dispose();
 });
 
-const roster = () => rosterPolicy(ownerId, adminId).statement;
+const roster = () => rosterPolicy(ownerId, adminId).Statement;
 
 async function putAs(api: ConsoleApi, statement: PolicyStatement[], etag?: string) {
-  const res = await api.putPolicy(bucket, { policy: { statement }, etag });
+  const res = await api.putPolicy(bucket, { policy: { Statement: statement }, etag });
   return [res.status(), ((await res.json()) as { code?: string }).code];
 }
 
@@ -82,7 +82,9 @@ test.describe('through the API', () => {
     const { etag } = await admin.readPolicy(bucket);
     const statement = [...roster(), allow([memberId], ['s3:ListBucket'], 'team')];
     expect(await putAs(admin, statement, etag)).toEqual([200, undefined]);
-    expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(canonical({ statement }));
+    expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
+      canonical({ Statement: statement }),
+    );
   });
 
   test('P3. an owner grants the pair, and an admin may keep or drop it', async () => {
@@ -100,7 +102,7 @@ test.describe('through the API', () => {
       undefined,
     ]);
     expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
-      canonical({ statement: roster() }),
+      canonical({ Statement: roster() }),
     );
   });
 
@@ -181,7 +183,7 @@ test.describe('in the editor', () => {
       await expect(page.getByTestId('policy-save-bar')).toBeHidden();
 
       expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
-        canonical({ statement: [...roster(), allow([memberId], ['s3:PutObjectRetention'])] }),
+        canonical({ Statement: [...roster(), allow([memberId], ['s3:PutObjectRetention'])] }),
       );
     });
   });

@@ -62,7 +62,7 @@ async function newBucket(statements: PolicyStatement[] = []): Promise<string> {
   await owner.createBucket(bucket);
   buckets.push(bucket);
   if (statements.length > 0) {
-    await owner.setStatements(bucket, [...rosterPolicy(ownerId, adminId).statement, ...statements]);
+    await owner.setStatements(bucket, [...rosterPolicy(ownerId, adminId).Statement, ...statements]);
   }
   return bucket;
 }
@@ -107,13 +107,13 @@ test('B1. a promotion and a demotion rewrite the admins statement on every bucke
     const { policy } = await owner.readPolicy(bucket);
     expect(canonical(policy)).toEqual(
       canonical({
-        statement: [
+        Statement: [
           ownersStatement(ownerId),
           {
-            sid: 'filone-admins',
-            effect: 'allow',
-            principal: [adminId, memberId],
-            action: ROSTER_ADMIN_ACTIONS,
+            Sid: 'filone-admins',
+            Effect: 'Allow',
+            Principal: [adminId, memberId],
+            Action: ROSTER_ADMIN_ACTIONS,
           },
           team,
         ],
@@ -124,7 +124,7 @@ test('B1. a promotion and a demotion rewrite the admins statement on every bucke
     const demoted = await owner.setRole(memberId, 'member');
     expect(demoted.status(), await demoted.text()).toBe(200);
     expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
-      canonical({ statement: [ownersStatement(ownerId), adminsStatement(adminId), team] }),
+      canonical({ Statement: [ownersStatement(ownerId), adminsStatement(adminId), team] }),
     );
 
     expect(await outcome(listObjects(await freshS3(member), bucket))).toBe('404 NoSuchBucket');
@@ -159,7 +159,7 @@ test('B2. removing a member takes their keys and every statement naming them', a
     // A removed member is no longer a principal of the tenant.
     const { etag } = await owner.readPolicy(bucket);
     const named = await owner.putPolicy(bucket, {
-      policy: { statement: [ownersStatement(ownerId), allow([leaverId], ['s3:ListBucket'])] },
+      policy: { Statement: [ownersStatement(ownerId), allow([leaverId], ['s3:ListBucket'])] },
       etag,
     });
     expect(named.status()).toBe(400);

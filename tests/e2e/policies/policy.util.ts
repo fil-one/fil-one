@@ -123,7 +123,7 @@ export class ConsoleApi {
   /** Replace the policy with `statement`, reading the ETag first. */
   async setStatements(bucket: string, statement: PolicyStatement[]): Promise<string> {
     const { etag } = await this.readPolicy(bucket);
-    const res = await this.putPolicy(bucket, { policy: { statement }, etag });
+    const res = await this.putPolicy(bucket, { policy: { Statement: statement }, etag });
     expect(res.status(), await res.text()).toBe(200);
     return ((await res.json()) as { etag: string }).etag;
   }
@@ -221,37 +221,37 @@ export const deleteObject = (s3: S3Client, bucket: string, key: string) =>
   s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
 
 export function ownersStatement(ownerId: string): PolicyStatement {
-  return { sid: 'filone-owners', effect: 'allow', principal: [ownerId], action: ['s3:*'] };
+  return { Sid: 'filone-owners', Effect: 'Allow', Principal: [ownerId], Action: ['s3:*'] };
 }
 
 export function adminsStatement(adminId: string): PolicyStatement {
   return {
-    sid: 'filone-admins',
-    effect: 'allow',
-    principal: [adminId],
-    action: ROSTER_ADMIN_ACTIONS,
+    Sid: 'filone-admins',
+    Effect: 'Allow',
+    Principal: [adminId],
+    Action: ROSTER_ADMIN_ACTIONS,
   };
 }
 
 /** What a bucket the Owner or the Admin creates carries: the org's roster. */
 export function rosterPolicy(ownerId: string, adminId: string): BucketPolicy {
-  return { statement: [ownersStatement(ownerId), adminsStatement(adminId)] };
+  return { Statement: [ownersStatement(ownerId), adminsStatement(adminId)] };
 }
 
 export function allow(
-  principal: PolicyStatement['principal'],
-  action: PolicyStatement['action'],
+  principal: PolicyStatement['Principal'],
+  action: PolicyStatement['Action'],
   sid?: string,
 ): PolicyStatement {
-  return { ...(sid ? { sid } : {}), effect: 'allow', principal, action };
+  return { ...(sid ? { Sid: sid } : {}), Effect: 'Allow', Principal: principal, Action: action };
 }
 
 export function deny(
-  principal: PolicyStatement['principal'],
-  action: PolicyStatement['action'],
+  principal: PolicyStatement['Principal'],
+  action: PolicyStatement['Action'],
   sid?: string,
 ): PolicyStatement {
-  return { ...(sid ? { sid } : {}), effect: 'deny', principal, action };
+  return { ...(sid ? { Sid: sid } : {}), Effect: 'Deny', Principal: principal, Action: action };
 }
 
 /**
@@ -271,7 +271,7 @@ export async function removeBucket(
   ) {
     return; // Already gone.
   }
-  const policy: BucketPolicy = { statement: [ownersStatement(ownerId)] };
+  const policy: BucketPolicy = { Statement: [ownersStatement(ownerId)] };
   const etag = current.ok() ? ((await current.json()) as GetBucketPolicyResponse).etag : undefined;
   const put = await owner.putPolicy(bucket, { policy, etag });
   expect([200, 201], await put.text()).toContain(put.status());
@@ -306,13 +306,13 @@ export async function removeBucket(
  */
 export function canonical(policy: BucketPolicy): BucketPolicy {
   const set = (values: readonly string[]) => [...new Set(values)].sort();
-  const statement = policy.statement.map((st) => ({
+  const statement = policy.Statement.map((st) => ({
     ...st,
-    principal: Array.isArray(st.principal) ? set(st.principal) : st.principal,
-    action: set(st.action),
+    Principal: Array.isArray(st.Principal) ? set(st.Principal) : st.Principal,
+    Action: set(st.Action),
   }));
   statement.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
-  return { statement } as BucketPolicy;
+  return { Statement: statement } as BucketPolicy;
 }
 
 /**

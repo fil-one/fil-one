@@ -159,7 +159,7 @@ test('8. a write under a stale etag loses', async () => {
   await owner.setStatements(B1, [ownersStatement(ownerId), allow([memberId], ['s3:ListBucket'])]);
   const before = await owner.readPolicy(B1);
   const res = await owner.putPolicy(B1, {
-    policy: { statement: [ownersStatement(ownerId)] },
+    policy: { Statement: [ownersStatement(ownerId)] },
     etag: stale,
   });
   expect([res.status(), (await res.json()).code]).toEqual([409, 'POLICY_CONFLICT']);
@@ -167,7 +167,7 @@ test('8. a write under a stale etag loses', async () => {
 });
 
 test('9. creating a policy where one exists loses', async () => {
-  const res = await owner.putPolicy(B1, { policy: { statement: [ownersStatement(ownerId)] } });
+  const res = await owner.putPolicy(B1, { policy: { Statement: [ownersStatement(ownerId)] } });
   expect([res.status(), (await res.json()).code]).toEqual([409, 'POLICY_CONFLICT']);
 });
 
@@ -175,13 +175,13 @@ test('10. invalid documents are refused', async () => {
   const { etag } = await owner.readPolicy(B1);
   const statuses = [];
   for (const statement of [
-    [{ effect: 'allow', principal: [memberId], action: ['s3:Unknown'] }],
-    [{ effect: 'allow', principal: ['*'], action: ['s3:GetObject'] }],
+    [{ Effect: 'Allow', Principal: [memberId], Action: ['s3:Unknown'] }],
+    [{ Effect: 'Allow', Principal: ['*'], Action: ['s3:GetObject'] }],
     [],
     // A well-formed id nobody in the tenant holds.
     [ownersStatement(ownerId), allow([randomUUID()], ['s3:GetObject'])],
   ]) {
-    statuses.push((await owner.putPolicy(B1, { policy: { statement }, etag })).status());
+    statuses.push((await owner.putPolicy(B1, { policy: { Statement: statement }, etag })).status());
   }
   expect(statuses).toEqual([400, 400, 400, 400]);
 });
@@ -192,14 +192,16 @@ test('11. a policy may drop the roster statements and use any name', async () =>
     allow([memberId], ['s3:ListBucket'], 'team'),
   ];
   await owner.setStatements(B2, statement);
-  expect(canonical((await owner.readPolicy(B2)).policy)).toEqual(canonical({ statement }));
+  expect(canonical((await owner.readPolicy(B2)).policy)).toEqual(
+    canonical({ Statement: statement }),
+  );
   await owner.setStatements(B2, [ownersStatement(ownerId)]);
 });
 
 test('12. a member cannot read or write a policy', async () => {
   const statuses = [
     (await member.getPolicy(B1)).status(),
-    (await member.putPolicy(B1, { policy: { statement: [allow([memberId], ['s3:*'])] } })).status(),
+    (await member.putPolicy(B1, { policy: { Statement: [allow([memberId], ['s3:*'])] } })).status(),
   ];
   expect(statuses).toEqual([403, 403]);
 });
@@ -219,7 +221,7 @@ test('14. deleting the policy leaves the bucket to service keys alone', async ()
   expect([gone.status(), (await gone.json()).code]).toEqual([404, 'POLICY_NOT_FOUND']);
   expect(await outcome(listObjects(await freshS3(owner), B2))).toBe('404 NoSuchBucket');
 
-  const created = await owner.putPolicy(B2, { policy: { statement: [ownersStatement(ownerId)] } });
+  const created = await owner.putPolicy(B2, { policy: { Statement: [ownersStatement(ownerId)] } });
   expect([created.status(), await created.json()]).toEqual([
     201,
     { etag: expect.any(String), created: true },
@@ -263,13 +265,13 @@ test('17. a bucket a member creates also names its creator', async () => {
   await member.createBucket(B3);
   expect(canonical((await owner.readPolicy(B3)).policy)).toEqual(
     canonical({
-      statement: [
-        ...rosterPolicy(ownerId, adminId).statement,
+      Statement: [
+        ...rosterPolicy(ownerId, adminId).Statement,
         {
-          sid: 'filone-creator',
-          effect: 'allow',
-          principal: [memberId],
-          action: ROSTER_ADMIN_ACTIONS,
+          Sid: 'filone-creator',
+          Effect: 'Allow',
+          Principal: [memberId],
+          Action: ROSTER_ADMIN_ACTIONS,
         },
       ],
     }),

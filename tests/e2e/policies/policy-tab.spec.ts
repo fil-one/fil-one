@@ -131,7 +131,7 @@ test('U2. a roster statement keeps its name but can be removed', async ({ page }
   await expect(cards(page)).toHaveCount(1);
   await savePolicy(page);
   expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
-    canonical({ statement: [adminsStatement(adminId)] }),
+    canonical({ Statement: [adminsStatement(adminId)] }),
   );
 });
 
@@ -148,7 +148,7 @@ test('U3. an allow added in the tab grants the member', async ({ page }) => {
 
   expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
     canonical({
-      statement: [
+      Statement: [
         ownersStatement(ownerId),
         adminsStatement(adminId),
         allow([memberId], ['s3:ListBucket', 's3:GetObject'], 'member-read'),
@@ -169,7 +169,7 @@ test('U4. editing a statement widens the grant', async ({ page }) => {
   await submitStatement(page);
   await savePolicy(page);
 
-  expect((await owner.readPolicy(bucket)).policy.statement[1]).toEqual(
+  expect((await owner.readPolicy(bucket)).policy.Statement[1]).toEqual(
     allow([memberId], ['s3:ListBucket', 's3:PutObject'], 'member-read'),
   );
   expect(await outcome(putObject(await freshS3(member), bucket, 'member-write.txt'))).toBe('ok');
@@ -186,7 +186,7 @@ test('U5. removing a statement takes its grant away', async ({ page }) => {
   await savePolicy(page);
 
   expect((await owner.readPolicy(bucket)).policy).toEqual({
-    statement: [ownersStatement(ownerId)],
+    Statement: [ownersStatement(ownerId)],
   });
   expect(await outcome(listObjects(await freshS3(member), bucket))).toBe('404 NoSuchBucket');
 });
@@ -203,7 +203,7 @@ test('U6. a deny for everyone warns, locks the owner out, and can be undone', as
   await expect(page.getByTestId('policy-denies-everyone')).toBeVisible();
   await savePolicy(page);
 
-  expect((await owner.readPolicy(bucket)).policy.statement.at(-1)).toEqual(
+  expect((await owner.readPolicy(bucket)).policy.Statement.at(-1)).toEqual(
     deny('*', ['s3:*'], 'lockdown'),
   );
   expect(await outcome(listObjects(await freshS3(owner), bucket))).toBe('404 NoSuchBucket');
@@ -224,7 +224,7 @@ test('U7. a statement may take a name starting with filone-', async ({ page }) =
   await submitStatement(page);
   await savePolicy(page);
 
-  expect((await owner.readPolicy(bucket)).policy.statement.at(-1)).toEqual(
+  expect((await owner.readPolicy(bucket)).policy.Statement.at(-1)).toEqual(
     allow([memberId], ['s3:ListBucket'], 'filone-x'),
   );
 });
@@ -253,7 +253,7 @@ test('U9. all actions covers every action and saves as s3:*', async ({ page }) =
 
   // The stored order is the storage system's own; the new statement is the
   // unnamed one.
-  expect((await owner.readPolicy(bucket)).policy.statement.find((st) => !st.sid)).toEqual(
+  expect((await owner.readPolicy(bucket)).policy.Statement.find((st) => !st.Sid)).toEqual(
     allow([memberId], ['s3:*']),
   );
 });
@@ -293,7 +293,7 @@ test('U11. a save that lost to another writer shows the conflict and reloads', a
   await submitStatement(page);
   await page.locator('#policy-save-button').click();
   await expect(page.getByTestId('policy-conflict')).toBeVisible();
-  expect((await owner.readPolicy(bucket)).policy).toEqual({ statement: theirs });
+  expect((await owner.readPolicy(bucket)).policy).toEqual({ Statement: theirs });
 
   await page.locator('#policy-reload-button').click();
   await expect(page.getByTestId('policy-conflict')).toBeHidden();
@@ -324,6 +324,6 @@ test('U13. the first statement on a bucket with no policy creates one', async ({
   await savePolicy(page);
 
   expect((await owner.readPolicy(bucket)).policy).toEqual({
-    statement: [allow([ownerId], ['s3:*'])],
+    Statement: [allow([ownerId], ['s3:*'])],
   });
 });
