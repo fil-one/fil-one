@@ -43,19 +43,19 @@ describe('PolicyStatementModal', () => {
     fireEvent.click(submit);
 
     expect(onSubmit).toHaveBeenCalledWith({
-      effect: 'allow',
-      principal: '*',
-      action: ['s3:GetObject'],
+      Effect: 'Allow',
+      Principal: '*',
+      Action: ['s3:GetObject'],
     } satisfies PolicyStatement);
     expect(onClose).toHaveBeenCalled();
   });
 
   it('starts from the statement being edited and keeps its label', async () => {
     const initial: PolicyStatement = {
-      sid: 'team',
-      effect: 'deny',
-      principal: ['a'],
-      action: ['s3:DeleteObject'],
+      Sid: 'team',
+      Effect: 'Deny',
+      Principal: ['a'],
+      Action: ['s3:DeleteObject'],
     };
     const { onSubmit } = renderModal({ initial });
 
@@ -82,12 +82,12 @@ describe('PolicyStatementModal', () => {
 
     expect(onSubmit.mock.calls.flat()).toEqual([
       {
-        sid: 'Analytics team read',
-        effect: 'allow',
-        principal: '*',
-        action: ['s3:GetObject'],
+        Sid: 'Analytics team read',
+        Effect: 'Allow',
+        Principal: '*',
+        Action: ['s3:GetObject'],
       },
-      { effect: 'allow', principal: '*', action: ['s3:GetObject'] },
+      { Effect: 'Allow', Principal: '*', Action: ['s3:GetObject'] },
     ] satisfies PolicyStatement[]);
   });
 
@@ -123,10 +123,10 @@ describe('PolicyStatementModal', () => {
 
   it('shows a roster statement its label and will not let it be renamed', async () => {
     const initial: PolicyStatement = {
-      sid: ROSTER_OWNERS_SID,
-      effect: 'allow',
-      principal: ['a'],
-      action: ['s3:*'],
+      Sid: ROSTER_OWNERS_SID,
+      Effect: 'Allow',
+      Principal: ['a'],
+      Action: ['s3:*'],
     };
     const { onSubmit } = renderModal({ initial });
 
@@ -151,16 +151,16 @@ describe('PolicyStatementModal', () => {
 
   it('hands an Admin back only the actions it showed them, even saved at once', () => {
     const initial: PolicyStatement = {
-      effect: 'allow',
-      principal: ['a'],
-      action: ['s3:GetObject', 's3:PutObjectRetention'],
+      Effect: 'Allow',
+      Principal: ['a'],
+      Action: ['s3:GetObject', 's3:PutObjectRetention'],
     };
     const { onSubmit } = renderModal({ initial }, OrgRole.Admin);
 
     expect(screen.queryByTestId('policy-action-s3:PutObjectRetention')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Save statement' }));
 
-    expect(onSubmit).toHaveBeenCalledWith({ ...initial, action: ['s3:GetObject'] });
+    expect(onSubmit).toHaveBeenCalledWith({ ...initial, Action: ['s3:GetObject'] });
   });
 
   it('warns as soon as a deny names everyone', () => {
@@ -169,7 +169,7 @@ describe('PolicyStatementModal', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Everyone in this organization' }));
 
     expect(screen.getByText('This statement denies everyone')).toBeInTheDocument();
-    expect(deniesEveryone({ effect: 'deny', principal: '*' })).toBe(true);
-    expect(deniesEveryone({ effect: 'allow', principal: '*' })).toBe(false);
+    expect(deniesEveryone({ Effect: 'Deny', Principal: '*' })).toBe(true);
+    expect(deniesEveryone({ Effect: 'Allow', Principal: '*' })).toBe(false);
   });
 });

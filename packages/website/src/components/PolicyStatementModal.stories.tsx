@@ -20,29 +20,29 @@ export const Add: Story = {};
 export const Edit: Story = {
   args: {
     initial: {
-      sid: 'team',
-      effect: 'allow',
-      principal: ['user-1'],
-      action: ['s3:GetObject', 's3:ListBucket'],
+      Sid: 'team',
+      Effect: 'Allow',
+      Principal: ['user-1'],
+      Action: ['s3:GetObject', 's3:ListBucket'],
     },
   },
 };
 
 export const DenyEveryone: Story = {
   args: {
-    initial: { effect: 'deny', principal: '*', action: ['s3:DeleteObject'] },
+    initial: { Effect: 'Deny', Principal: '*', Action: ['s3:DeleteObject'] },
   },
 };
 
 export const AllActions: Story = {
   args: {
-    initial: { effect: 'allow', principal: '*', action: ['s3:*'] },
+    initial: { Effect: 'Allow', Principal: '*', Action: ['s3:*'] },
   },
 };
 
 export const RosterStatement: Story = {
   name: 'Roster statement, name locked',
   args: {
-    initial: { sid: 'filone-owners', effect: 'allow', principal: ['user-1'], action: ['s3:*'] },
+    initial: { Sid: 'filone-owners', Effect: 'Allow', Principal: ['user-1'], Action: ['s3:*'] },
   },
 };

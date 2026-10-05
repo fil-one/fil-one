@@ -4,7 +4,7 @@ import type { PolicyStatement } from '@filone/shared';
 
 import { PolicyPrincipalFields } from './PolicyPrincipalFields';
 
-function Controlled({ initial }: { initial: PolicyStatement['principal'] }) {
+function Controlled({ initial }: { initial: PolicyStatement['Principal'] }) {
   const [value, setValue] = useState(initial);
   return <PolicyPrincipalFields value={value} onChange={setValue} />;
 }

@@ -11,8 +11,8 @@ import { Icon } from './Icon.js';
 import { RadioOption } from './RadioOption.js';
 
 export type PolicyPrincipalFieldsProps = {
-  value: PolicyStatement['principal'];
-  onChange: (value: PolicyStatement['principal']) => void;
+  value: PolicyStatement['Principal'];
+  onChange: (value: PolicyStatement['Principal']) => void;
 };
 
 /**
