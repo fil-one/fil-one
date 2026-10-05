@@ -398,8 +398,8 @@ export const getTenantsByTenantIdPrincipalsByPrincipalIdPolicies = <
  * A principal's effective actions per bucket
  *
  * For every bucket whose policy gives the principal at least one
- * action, the sorted effective set: the union of the `allow`
- * statements naming them or `*`, minus the union of the `deny`
+ * action, the sorted effective set: the union of the `Allow`
+ * statements naming them or `*`, minus the union of the `Deny`
  * statements naming them or `*`. Buckets with an empty set are
  * omitted. Computed from the orchestrator's own tables on every
  * call, so the answer is consistent with its last write.
