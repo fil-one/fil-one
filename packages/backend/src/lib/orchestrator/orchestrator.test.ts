@@ -573,6 +573,7 @@ describe('issueAccessKey', () => {
     accessKeyId: 'AKIAFORGE',
     secretAccessKey: 'sk-secret',
     name: 'My Key',
+    type: 'service',
     permissions: [],
     buckets: [],
     createdAt: '2026-03-10T00:00:00Z',
@@ -715,10 +716,17 @@ describe('findAccessKeyByName', () => {
     mockListAccessKeys.mockResolvedValue(
       ok({
         items: [
-          { accessKeyId: 'AK1', name: 'other', createdAt: '2026-01-01T00:00:00Z', permissions: [] },
+          {
+            accessKeyId: 'AK1',
+            name: 'other',
+            type: 'service',
+            createdAt: '2026-01-01T00:00:00Z',
+            permissions: [],
+          },
           {
             accessKeyId: 'AK2',
             name: 'target',
+            type: 'service',
             createdAt: '2026-01-02T00:00:00Z',
             permissions: [],
           },
@@ -967,7 +975,15 @@ describe('signal forwarding', () => {
       name: 'issueAccessKey',
       run: (requestOptions) => {
         mockCreateAccessKey.mockResolvedValue(
-          ok({ accessKeyId: 'AK', secretAccessKey: 'SK', createdAt: '2026-01-01T00:00:00Z' }, 201),
+          ok(
+            {
+              accessKeyId: 'AK',
+              type: 'service',
+              secretAccessKey: 'SK',
+              createdAt: '2026-01-01T00:00:00Z',
+            },
+            201,
+          ),
         );
         return orchestrator.issueAccessKey(
           tenantId,
