@@ -27,10 +27,10 @@ type Story = StoryObj<typeof PolicyStatementCard>;
 export const Allow: Story = {
   args: {
     statement: {
-      sid: 'team',
-      effect: 'allow',
-      principal: ['m1', 'm2'],
-      action: ['s3:GetObject', 's3:ListBucket', 's3:PutObject', 's3:DeleteObject'],
+      Sid: 'team',
+      Effect: 'Allow',
+      Principal: ['m1', 'm2'],
+      Action: ['s3:GetObject', 's3:ListBucket', 's3:PutObject', 's3:DeleteObject'],
     },
   },
 };
@@ -38,9 +38,9 @@ export const Allow: Story = {
 export const Deny: Story = {
   args: {
     statement: {
-      effect: 'deny',
-      principal: ['m1'],
-      action: ['s3:PutObjectRetention', 's3:PutObjectLegalHold'],
+      Effect: 'Deny',
+      Principal: ['m1'],
+      Action: ['s3:PutObjectRetention', 's3:PutObjectLegalHold'],
     },
     index: 1,
   },
@@ -48,17 +48,17 @@ export const Deny: Story = {
 
 export const Everyone: Story = {
   args: {
-    statement: { effect: 'allow', principal: '*', action: ['s3:GetObject', 's3:ListBucket'] },
+    statement: { Effect: 'Allow', Principal: '*', Action: ['s3:GetObject', 's3:ListBucket'] },
   },
 };
 
 export const ManyMembersAllActions: Story = {
   args: {
     statement: {
-      sid: 'filone-owners',
-      effect: 'allow',
-      principal: ['owner', 'admin', 'm1', 'm2', 'm3', 'unknown-id'],
-      action: ['s3:*'],
+      Sid: 'filone-owners',
+      Effect: 'Allow',
+      Principal: ['owner', 'admin', 'm1', 'm2', 'm3', 'unknown-id'],
+      Action: ['s3:*'],
     },
   },
 };
@@ -66,7 +66,7 @@ export const ManyMembersAllActions: Story = {
 export const WithoutControls: Story = {
   name: 'Without edit and remove',
   args: {
-    statement: { effect: 'allow', principal: ['m1'], action: ['s3:GetObject'] },
+    statement: { Effect: 'Allow', Principal: ['m1'], Action: ['s3:GetObject'] },
     onEdit: undefined,
     onRemove: undefined,
   },
