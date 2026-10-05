@@ -84,7 +84,7 @@ test('S1. an owner service key reaches its bucket under any policy, and no other
   const outOfScope = await newBucket();
   // A deny naming everyone locks every principal out. A service key is not one.
   await api.owner.setStatements(inScope, [
-    ...rosterPolicy(ids.owner, ids.admin).statement,
+    ...rosterPolicy(ids.owner, ids.admin).Statement,
     deny('*', ['s3:*']),
   ]);
 

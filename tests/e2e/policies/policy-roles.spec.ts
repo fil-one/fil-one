@@ -148,7 +148,7 @@ test('R4. on a new bucket the roster reaches the owner and the admin, nobody els
 test('R5. the console lists a bucket to the roles that reach it', async () => {
   const bucket = await newBucket();
   await api.owner.setStatements(bucket, [
-    ...rosterPolicy(ids.owner, ids.admin).statement,
+    ...rosterPolicy(ids.owner, ids.admin).Statement,
     allow([ids.member], ['s3:ListBucket']),
   ]);
   const listed = [];
@@ -170,7 +170,7 @@ test('R6. readonly reads what a policy grants and no more than the role allows',
   await putObject(s3For(ownerKey), bucket, SEEDED_KEY);
   // Even a write grant does not let readonly write: the role caps the console.
   await api.owner.setStatements(bucket, [
-    ...rosterPolicy(ids.owner, ids.admin).statement,
+    ...rosterPolicy(ids.owner, ids.admin).Statement,
     allow([ids.readonly], ['s3:ListBucket', 's3:GetObject', 's3:PutObject']),
   ]);
 
@@ -195,7 +195,7 @@ test("R8. the first policy is the server's own, whatever a creator sends", async
   // The create request carries no policy; the server builds the roster from the
   // org's membership and sends it on the create itself, so a creator who asks
   // for more gets the default and nothing else.
-  const asked = { statement: [allow('*', ['s3:*'], 'mine')] };
+  const asked = { Statement: [allow('*', ['s3:*'], 'mine')] };
   const results = [];
   for (const role of ['admin', 'member'] as const) {
     const bucket = uniqueBucketName(`r8-${role}`);
@@ -213,13 +213,13 @@ test("R8. the first policy is the server's own, whatever a creator sends", async
       'member',
       201,
       canonical({
-        statement: [
-          ...rosterPolicy(ids.owner, ids.admin).statement,
+        Statement: [
+          ...rosterPolicy(ids.owner, ids.admin).Statement,
           {
-            sid: 'filone-creator',
-            effect: 'allow',
-            principal: [ids.member],
-            action: ROSTER_ADMIN_ACTIONS,
+            Sid: 'filone-creator',
+            Effect: 'Allow',
+            Principal: [ids.member],
+            Action: ROSTER_ADMIN_ACTIONS,
           },
         ],
       }),
@@ -232,7 +232,7 @@ test.describe('the Policy tab', () => {
   test.beforeAll(async () => {
     bucket = await newBucket();
     await api.owner.setStatements(bucket, [
-      ...rosterPolicy(ids.owner, ids.admin).statement,
+      ...rosterPolicy(ids.owner, ids.admin).Statement,
       allow([ids.member, ids.readonly], ['s3:ListBucket', 's3:GetObject']),
     ]);
   });
