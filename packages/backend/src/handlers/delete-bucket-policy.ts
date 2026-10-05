@@ -7,7 +7,7 @@ import {
   resolveIamWriteTarget,
   resolvePolicyRouteTarget,
 } from '../lib/bucket-policy-route.ts';
-import { badRequestResponse, ResponseBuilder } from '../lib/response-builder.ts';
+import { badRequestResponse } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -52,7 +52,7 @@ export async function baseHandler(
   try {
     await orchestrator.iam.deleteBucketPolicy(tenantId, bucketName, { ifMatch: etag });
     await audit.complete({ outcome: 'succeeded' });
-    return new ResponseBuilder().status(204).build();
+    return { statusCode: 204, body: '' };
   } catch (err) {
     const response = bucketPolicyErrorResponse(err);
     if (!response) throw err;

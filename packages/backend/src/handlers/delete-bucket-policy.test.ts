@@ -47,6 +47,7 @@ describe('delete-bucket-policy baseHandler', () => {
     const result = await baseHandler(request({ etag }));
 
     expect(result.statusCode).toBe(204);
+    expect(result.body).toBe('');
     expect(iam.policies.get(TENANT_ID)?.has(BUCKET)).toBe(false);
     const [intent, completion] = auditEvents();
     expect(intent).toMatchObject({ type: 'bucket_policy.deleted', phase: 'intent' });
