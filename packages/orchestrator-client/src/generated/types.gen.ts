@@ -251,6 +251,10 @@ export type AccessKey = {
   accessKeyId: string;
   name: string;
   /**
+   * A `service` key carries `permissions` and `buckets`; a `principal` key carries `principal`.
+   */
+  type: 'service' | 'principal';
+  /**
    * Set on a principal-bound key. Such a key carries no `permissions` or `buckets`.
    */
   principal?: PrincipalId;
