@@ -4,6 +4,7 @@ import {
   POLICY_SID_MAX_LENGTH,
   POLICY_WILDCARD_PRINCIPAL,
   ROSTER_SID_LABELS,
+  isRosterSid,
 } from '@filone/shared';
 
 import { Alert } from './Alert.js';
@@ -26,15 +27,12 @@ export type PolicyStatementModalProps = {
 const EMPTY: PolicyStatement = { Effect: 'Allow', Principal: [], Action: [] };
 
 /**
- * The sids the role-change fan-out finds its statements by. A person's
- * statement may not take one, or the next role change would replace it.
- * Spelled out here until `isRosterSid` arrives from `@filone/shared`.
+ * The refusal a typed name earns. A roster statement's own fixed name earns
+ * none; any other statement may not take a roster sid, or the next role change
+ * would replace it.
  */
-const ROSTER_SIDS = new Set(['filone-owners', 'filone-admins', 'filone-creator']);
-
-/** The refusal a typed name earns. A roster statement's own fixed name earns none. */
 function reservedNameError(statement: PolicyStatement, rosterLabel: string | undefined) {
-  if (rosterLabel || !ROSTER_SIDS.has(statement.Sid?.trim() ?? '')) return undefined;
+  if (rosterLabel || !isRosterSid(statement.Sid?.trim())) return undefined;
   return 'This name is reserved for a statement Fil One writes.';
 }
 
