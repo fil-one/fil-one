@@ -675,7 +675,7 @@ function iamOrchestratorReachingOnly(bucketName: string): FakeOrchestrator {
   const iam = new FakeIamOrchestrator();
   iam.seedPrincipal(tenantFor('forge', 'org-1'), 'user-1');
   iam.seedPolicy(tenantFor('forge', 'org-1'), bucketName, {
-    statement: [{ effect: 'allow', principal: ['user-1'], action: ['s3:GetObject'] }],
+    Statement: [{ Effect: 'Allow', Principal: ['user-1'], Action: ['s3:GetObject'] }],
   });
   const o = fakeOrchestrator('forge', { bucket: BUCKET, iam });
   o.getBucket.mockImplementation(
