@@ -44,7 +44,7 @@ vi.mock('@filone/aurora-backoffice-client', () => ({
   getTenantStorageMetrics: (options: Record<string, unknown>) => mockGetStorage(options),
   getTenantOperationMetrics: (options: Record<string, unknown>) => mockGetOperations(options),
   setupS3Component: (options: Record<string, unknown>) => mockSetupS3Component(options),
-  createTenantToken: (options: Record<string, unknown>) => mockPostTokens(options),
+  createTenantTokenV2: (options: Record<string, unknown>) => mockPostTokens(options),
   setTenantStatus: (options: Record<string, unknown>) => mockSetTenantStatus(options),
   getTenantV2: (options: Record<string, unknown>) => mockGetTenant(options),
   getBucketStorageMetrics: (options: Record<string, unknown>) =>
@@ -224,7 +224,7 @@ describe('createAuroraTenantApiKey', () => {
     vi.clearAllMocks();
   });
 
-  it('returns token and tokenId on success', async () => {
+  it('creates an S3-scoped token through the v2 endpoint', async () => {
     mockPostTokens.mockResolvedValue({
       data: { token: 'atp_secret123', id: 'token-id-1' },
       error: undefined,
@@ -240,7 +240,18 @@ describe('createAuroraTenantApiKey', () => {
     expect(mockPostTokens).toHaveBeenCalledWith({
       client: 'mock-aurora-client',
       path: { partnerId: 'test-partner', tenantId: 'tenant-1' },
-      body: { name: 'filone-org-1' },
+      body: {
+        name: 'filone-org-1',
+        permissions: [
+          'read:s3:access_keys',
+          'create:s3:access_keys',
+          'delete:s3:access_keys',
+          'read:s3:buckets',
+          'create:s3:buckets',
+          'update:s3:buckets',
+          'delete:s3:buckets',
+        ],
+      },
       throwOnError: false,
     });
   });
